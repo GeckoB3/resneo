@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import type { SetupStatus } from '@/lib/venue/compute-setup-status';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
@@ -20,11 +22,64 @@ type SetupStepKey = keyof Omit<
 >;
 
 interface Step {
-  key: SetupStepKey;
+  /**
+   * Unique id + React key. For required steps this matches a `SetupStatus` field
+   * name and completion is read from that flag. The post-onboarding prompts use
+   * ids that are not status fields; they complete once the user clicks through to
+   * the linked page (`completeOnClick`), tracked per browser in localStorage.
+   */
+  key: string;
   label: string;
   description: string;
   href: string;
   actionLabel: string;
+  /** Marks the step complete once its action button is clicked (see clicked-steps storage). */
+  completeOnClick?: boolean;
+}
+
+/** Extra prompts shown alongside the required steps once onboarding is complete. */
+const POST_ONBOARDING_SETUP_STEPS: Step[] = [
+  {
+    key: 'customise_booking_page',
+    label: 'Customise your booking page',
+    description:
+      'Add your branding, cover photo, and welcome text so your booking page reflects your business.',
+    href: '/dashboard/settings?tab=booking-page',
+    actionLabel: 'Booking page',
+    completeOnClick: true,
+  },
+  {
+    key: 'review_comms',
+    label: 'Review communications settings',
+    description:
+      'Check the emails and texts guests receive when they book, and tailor the wording to your business.',
+    href: '/dashboard/settings?tab=comms',
+    actionLabel: 'Communications',
+    completeOnClick: true,
+  },
+  {
+    key: 'import_bookings_customers',
+    label: 'Import your bookings and customers',
+    description:
+      'Bring your existing bookings and customer list into ResNeo so nothing is left behind.',
+    href: '/dashboard/settings',
+    actionLabel: 'Import data',
+    completeOnClick: true,
+  },
+];
+
+/**
+ * A required step is complete when its key maps to a truthy `SetupStatus` flag. A
+ * `completeOnClick` prompt is complete once the user has clicked through to it
+ * (its key is in `clickedStepKeys`).
+ */
+export function isStepComplete(
+  status: SetupStatus,
+  step: Step,
+  clickedStepKeys?: ReadonlySet<string>,
+): boolean {
+  if (step.completeOnClick) return Boolean(clickedStepKeys?.has(step.key));
+  return Boolean(status[step.key as SetupStepKey]);
 }
 
 function getAvailabilityStep(model: BookingModel, onboardingCompleted: boolean): Step {
@@ -88,18 +143,16 @@ function isSetupComplete(s: SetupStatus) {
   );
 }
 
-function getGuestBookingStep(model: BookingModel, onboardingCompleted: boolean): Step {
+function getGuestBookingStep(model: BookingModel): Step {
   switch (model) {
     case 'practitioner_appointment':
     case 'unified_scheduling':
       return {
         key: 'guest_booking_ready',
-        label: 'Public booking page',
-        description: onboardingCompleted
-          ? 'Your booking page needs at least one active service linked to a calendar. Check assignments under Appointment Services.'
-          : 'Guests need at least one calendar with an active service linked before they can book online.',
+        label: 'Create services',
+        description: 'Create at least one service to offer on your public booking page.',
         href: '/dashboard/appointment-services',
-        actionLabel: 'Review services',
+        actionLabel: 'Add services',
       };
     default:
       return {
@@ -172,6 +225,87 @@ function writeDismissedToStorage(venueId: string): void {
   }
 }
 
+/**
+ * Per-browser record of which `completeOnClick` prompts the user has clicked
+ * through. Stored as a JSON array of step keys. Client-only, like the dismiss
+ * fallback above; a soft nudge, so localStorage is sufficient.
+ */
+function clickedStepsStorageKey(venueId: string): string {
+  return `reserve_ni_setup_checklist_clicked_${venueId}`;
+}
+
+function readClickedStepsFromStorage(venueId: string): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(clickedStepsStorageKey(venueId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeClickedStepToStorage(venueId: string, stepKey: string): void {
+  try {
+    const next = new Set(readClickedStepsFromStorage(venueId));
+    next.add(stepKey);
+    localStorage.setItem(clickedStepsStorageKey(venueId), JSON.stringify([...next]));
+  } catch {
+    /* private mode or quota */
+  }
+}
+
+// Read the clicked-steps localStorage value through `useSyncExternalStore`, which
+// reads client-only storage without a setState-in-effect (and without a hydration
+// mismatch). Snapshots are cached per storage key + raw value so `getSnapshot`
+// returns a stable reference until the underlying string actually changes.
+const EMPTY_CLICKED_STEPS: ReadonlySet<string> = new Set();
+const clickedStepsListeners = new Set<() => void>();
+const clickedStepsSnapshotCache = new Map<string, { raw: string | null; value: ReadonlySet<string> }>();
+
+function notifyClickedStepsChanged(): void {
+  for (const listener of clickedStepsListeners) listener();
+}
+
+function subscribeClickedSteps(listener: () => void): () => void {
+  clickedStepsListeners.add(listener);
+  // A change in another tab fires the native `storage` event; reflect it too.
+  const onStorage = () => listener();
+  window.addEventListener('storage', onStorage);
+  return () => {
+    clickedStepsListeners.delete(listener);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+function getClickedStepsSnapshot(venueId: string): ReadonlySet<string> {
+  const key = clickedStepsStorageKey(venueId);
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    raw = null;
+  }
+  const cached = clickedStepsSnapshotCache.get(key);
+  if (cached && cached.raw === raw) return cached.value;
+  const value: ReadonlySet<string> = new Set(readClickedStepsFromStorage(venueId));
+  clickedStepsSnapshotCache.set(key, { raw, value });
+  return value;
+}
+
+function useClickedSteps(venueId: string): ReadonlySet<string> {
+  const getSnapshot = useCallback(() => getClickedStepsSnapshot(venueId), [venueId]);
+  const getServerSnapshot = useCallback(() => EMPTY_CLICKED_STEPS, []);
+  return useSyncExternalStore(subscribeClickedSteps, getSnapshot, getServerSnapshot);
+}
+
+/** Record a click-through prompt as done (localStorage) and re-render subscribers. */
+function markStepClicked(venueId: string, stepKey: string): void {
+  writeClickedStepToStorage(venueId, stepKey);
+  notifyClickedStepsChanged();
+}
+
 async function persistDismissToServer(): Promise<boolean> {
   try {
     const res = await fetch('/api/venue/setup-checklist-dismiss', { method: 'POST' });
@@ -182,7 +316,7 @@ async function persistDismissToServer(): Promise<boolean> {
   }
 }
 
-function getSteps(status: SetupStatus): Step[] {
+export function getSteps(status: SetupStatus): Step[] {
   const model = status.booking_model;
   const enabledModels = status.enabled_models;
   const onboardingDone = status.onboarding_completed;
@@ -200,7 +334,7 @@ function getSteps(status: SetupStatus): Step[] {
     getAvailabilityStep(model, onboardingDone),
   ];
   if (model === 'table_reservation' || isUnifiedSchedulingVenue(model)) {
-    base.push(getGuestBookingStep(model, onboardingDone));
+    base.push(getGuestBookingStep(model));
   }
   base.push(...getSecondaryCatalogSteps(enabledModels, onboardingDone));
   base.push(
@@ -220,6 +354,10 @@ function getSteps(status: SetupStatus): Step[] {
       actionLabel: 'Create booking',
     },
   );
+  // Post-onboarding "What's next" prompts, shown alongside the required steps.
+  if (onboardingDone) {
+    base.push(...POST_ONBOARDING_SETUP_STEPS);
+  }
   return base;
 }
 
@@ -295,9 +433,17 @@ export function SetupChecklist({
     return () => cancelAnimationFrame(id);
   }, [disableClientSetupFetch, setupStatusFromServer, venueId]);
 
+  const [confirmingDismiss, setConfirmingDismiss] = useState(false);
+
+  // `completeOnClick` prompts complete once the user clicks through to their page.
+  const clickedSteps = useClickedSteps(venueId);
+
   const steps = useMemo(() => (status ? getSteps(status) : []), [status]);
 
-  const incompleteSteps = useMemo(() => steps.filter((s) => !status?.[s.key]), [steps, status]);
+  const incompleteSteps = useMemo(
+    () => (status ? steps.filter((s) => !isStepComplete(status, s, clickedSteps)) : steps),
+    [steps, status, clickedSteps],
+  );
 
   function dismiss() {
     writeDismissedToStorage(venueId);
@@ -311,11 +457,11 @@ export function SetupChecklist({
 
   if (dismissed || !status) return null;
 
-  const completedCount = steps.filter((s) => status[s.key]).length;
+  const completedCount = steps.filter((s) => isStepComplete(status, s, clickedSteps)).length;
   const totalCount = steps.length;
-  if (completedCount === totalCount) return null;
+  if (totalCount > 0 && completedCount === totalCount) return null;
 
-  const progressPct = Math.round((completedCount / totalCount) * 100);
+  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   return (
     <div className="mb-6">
@@ -339,7 +485,7 @@ export function SetupChecklist({
               </Pill>
               <button
                 type="button"
-                onClick={dismiss}
+                onClick={() => setConfirmingDismiss(true)}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                 aria-label="Dismiss setup checklist"
               >
@@ -369,6 +515,7 @@ export function SetupChecklist({
                 </div>
                 <Link
                   href={step.href}
+                  onClick={step.completeOnClick ? () => markStepClicked(venueId, step.key) : undefined}
                   className="flex-shrink-0 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-800 shadow-sm transition-colors hover:bg-brand-100"
                 >
                   {step.actionLabel}
@@ -378,6 +525,38 @@ export function SetupChecklist({
           </ul>
         </SectionCard.Body>
       </SectionCard>
+
+      <Dialog
+        open={confirmingDismiss}
+        onOpenChange={(open) => {
+          if (!open) setConfirmingDismiss(false);
+        }}
+        title="Dismiss the setup steps?"
+        description="This hides the What's next checklist from your dashboard."
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="secondary" onClick={() => setConfirmingDismiss(false)}>
+              Keep showing
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => {
+                setConfirmingDismiss(false);
+                dismiss();
+              }}
+            >
+              Dismiss setup steps
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          Anything you have not set up yet is still available from the dashboard menu whenever you
+          are ready.
+        </p>
+      </Dialog>
     </div>
   );
 }

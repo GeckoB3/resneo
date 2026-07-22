@@ -60,7 +60,6 @@ import {
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
   syncedMinBookingMinutesFromSlot,
 } from '@/lib/booking/resource-booking-defaults';
-import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
 import { ONBOARDING_CARD_PADDING_CLASS } from '@/lib/onboarding/layout-constants';
 import { OnboardingShell } from '@/components/onboarding/OnboardingShell';
 
@@ -2400,7 +2399,6 @@ export default function OnboardingPage() {
               </Link>
               .
             </p>
-            <p className="mb-4 text-sm text-slate-600">{SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}</p>
             <p className="mb-4 text-sm text-slate-500">
               Optional: use <span className="font-medium text-slate-700">Continue</span> to skip for now and connect later in{' '}
               <Link href="/dashboard/settings?tab=payments" className="font-medium text-brand-600 underline hover:text-brand-700">

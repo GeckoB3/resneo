@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'Customer subscription terms governing your use of the ResNeo platform as a business customer, operated by JAR 26 LTD trading as ResNeo.',
 };
 
-const LAST_UPDATED = '18 May 2026';
+const LAST_UPDATED = '21 July 2026';
 
 export default function CustomerTermsPage() {
   return (
@@ -132,13 +132,14 @@ export default function CustomerTermsPage() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">5. Cancellation and termination</h2>
               <p>
-                You may cancel your subscription at any time. Unless we agree otherwise in writing, cancellation
-                requires 30 days&rsquo; written notice (email to{' '}
+                You may cancel your subscription at any time by emailing{' '}
                 <a href="mailto:hello@resneo.com" className="text-brand-600 hover:underline">
                   hello@resneo.com
-                </a>{' '}
-                is sufficient). Your access will remain active until the end of your notice period. We do not
-                provide pro-rata refunds for unused days in a billing period unless required by law.
+                </a>
+                . When you cancel, your subscription and access remain active until the end of your current billing
+                period, and you will not be charged again after that. If you cancel during a free trial, you will not
+                be charged at all. We do not provide pro-rata refunds for unused days in a billing period unless
+                required by law.
               </p>
               <p className="mt-3">
                 We may terminate or suspend your subscription immediately if you materially breach these Terms and,

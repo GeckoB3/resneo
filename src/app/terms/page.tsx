@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'Rules for using the ResNeo public website and general pages at www.resneo.com, operated by JAR 26 LTD trading as ResNeo.',
 };
 
-const LAST_UPDATED = '01 May 2026';
+const LAST_UPDATED = '21 July 2026';
 
 export default function TermsPage() {
   return (
@@ -108,9 +108,9 @@ export default function TermsPage() {
               </p>
               <p className="mt-3">
                 Where subscription cancellation is described as available, cancellation is subject to the cancellation
-                terms shown at sign-up or in your customer terms. Unless we agree otherwise in writing, you may cancel
-                by giving 30 days{'\u2019'} notice, and your subscription will remain active until the end of the notice
-                period.
+                terms shown at sign-up or in your customer terms. You may cancel at any time, and your subscription will
+                remain active until the end of your current billing period, with no further charges after that. If you
+                cancel during a free trial, you will not be charged at all.
               </p>
             </section>
 

@@ -835,8 +835,9 @@ function HostCatalogue({
 
 /**
  * The "choose what services to offer" view (plan §22). Lists each member venue's
- * bookable services; "Add" puts one on the combined page as an offering (seeded
- * with that venue's calendars). To offer the SAME service across venues you don't
+ * bookable services with a checkbox; tick any number, then "Add selected" puts
+ * them all on the combined page in one request (each becomes an offering seeded
+ * with its venue's calendars). To offer the SAME service across venues you don't
  * merge anything — you open the offering below and tick the other venues' calendars
  * (a service is created in a venue automatically if it doesn't have it). A service
  * whose name already matches an offering on the page shows "On page" so you manage
@@ -856,74 +857,208 @@ function VenueServicesPicker({
   // Offering names already on the page (active), for same-name de-duplication.
   // Plain trim+lowercase to match how a calendar's own service is matched when
   // assigning it (see CalendarRow.hasService) so the two views never disagree.
-  const onPageNames = new Set(
-    items.filter((i) => i.status === 'active').map((i) => i.name.trim().toLowerCase()),
+  const onPageNames = useMemo(
+    () =>
+      new Set(items.filter((i) => i.status === 'active').map((i) => i.name.trim().toLowerCase())),
+    [items],
   );
 
-  const addService = (
-    venueId: string,
-    svc: { id: string; name: string; durationMinutes: number | null; pricePence: number | null },
-  ) =>
-    // Just the name + which calendars provide it — price/duration/etc. live on each
-    // venue's own service (no collective-level defaults).
-    action({
-      action: 'create_item',
-      name: svc.name,
-      sourceServiceIds: [{ venueId, sourceServiceId: svc.id }],
+  // Every service that can still be added, flattened with its venue. Keyed by
+  // `${venueId}:${serviceId}` so selection survives across venues.
+  const addable = useMemo(() => {
+    const out: Array<{ key: string; venueId: string; id: string; name: string }> = [];
+    for (const ms of memberSources) {
+      for (const s of ms.services) {
+        if (onPageNames.has(s.name.trim().toLowerCase())) continue;
+        out.push({ key: `${ms.venueId}:${s.id}`, venueId: ms.venueId, id: s.id, name: s.name });
+      }
+    }
+    return out;
+  }, [memberSources, onPageNames]);
+
+  const addableByKey = useMemo(() => new Map(addable.map((a) => [a.key, a])), [addable]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Only count selections that are still addable (a reload may have moved some
+  // onto the page), so the button and counter never go stale.
+  const selectedKeys = useMemo(
+    () => [...selected].filter((k) => addableByKey.has(k)),
+    [selected, addableByKey],
+  );
+  const selectedCount = selectedKeys.length;
+
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
     });
+
+  const allSelected = addable.length > 0 && selectedCount === addable.length;
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(addable.map((a) => a.key)));
+
+  // Addable keys grouped by venue, so each venue gets its own select-all control.
+  const addableKeysByVenue = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const a of addable) {
+      const list = map.get(a.venueId);
+      if (list) list.push(a.key);
+      else map.set(a.venueId, [a.key]);
+    }
+    return map;
+  }, [addable]);
+
+  const toggleVenue = (keys: string[], allOn: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) {
+        if (allOn) next.delete(k);
+        else next.add(k);
+      }
+      return next;
+    });
+
+  const addSelected = async () => {
+    const services = selectedKeys
+      .map((k) => addableByKey.get(k))
+      .filter((a): a is NonNullable<typeof a> => Boolean(a))
+      // Just the name + which venue/service — price/duration/etc. live on each
+      // venue's own service (no collective-level defaults).
+      .map((a) => ({ name: a.name, venueId: a.venueId, sourceServiceId: a.id }));
+    if (services.length === 0) return;
+    const ok = await action({ action: 'create_items', services });
+    if (ok) setSelected(new Set());
+  };
 
   const anyServices = memberSources.some((m) => m.services.length > 0);
 
   return (
     <section className="space-y-3 rounded-xl border border-slate-200 p-4">
-      <p className="text-sm font-bold text-slate-900">Choose services to offer</p>
-      <p className="text-xs text-slate-500">
-        Add services from any venue to the combined page. To offer one at more than one venue, open
-        the offering below and tick that venue&apos;s calendars — the service is created there
-        automatically if it doesn&apos;t have it yet.
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-900">Choose services to offer</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Tick the services you want on the combined page, then add them together. To offer one at
+            more than one venue, open the offering below and tick that venue&apos;s calendars — the
+            service is created there automatically if it doesn&apos;t have it yet.
+          </p>
+        </div>
+        {addable.length > 0 ? (
+          <button
+            type="button"
+            className="shrink-0 text-xs font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50"
+            disabled={busy}
+            onClick={toggleAll}
+          >
+            {allSelected ? 'Clear all' : 'Select all'}
+          </button>
+        ) : null}
+      </div>
       {!anyServices ? (
         <p className="text-sm text-slate-500">No bookable services found in the member venues.</p>
       ) : (
-        memberSources.map((ms) => (
-          <div key={ms.venueId} className="space-y-1">
-            <p className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-              {ms.venueName}
-            </p>
-            {ms.services.length === 0 ? (
-              <p className="py-1 text-xs text-slate-400">No bookable services.</p>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {ms.services.map((s) => {
-                  const onPage = onPageNames.has(s.name.trim().toLowerCase());
-                  return (
-                    <li key={s.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                      <span className="min-w-0 text-slate-700">
-                        {s.name}
-                        <span className="ml-2 text-xs text-slate-500">
-                          {s.durationMinutes != null ? `${s.durationMinutes} min` : ''}
-                          {s.pricePence != null ? ` · £${(s.pricePence / 100).toFixed(2)}` : ''}
-                        </span>
+        <>
+          {memberSources.map((ms) => {
+            const venueKeys = addableKeysByVenue.get(ms.venueId) ?? [];
+            const venueAllSelected =
+              venueKeys.length > 0 && venueKeys.every((k) => selected.has(k));
+            return (
+            <div key={ms.venueId} className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                  {ms.venueName}
+                </p>
+                {venueKeys.length > 0 ? (
+                  <button
+                    type="button"
+                    className="shrink-0 text-[11px] font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => toggleVenue(venueKeys, venueAllSelected)}
+                  >
+                    {venueAllSelected ? 'Clear' : 'Select all'}
+                  </button>
+                ) : null}
+              </div>
+              {ms.services.length === 0 ? (
+                <p className="py-1 text-xs text-slate-400">No bookable services.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {ms.services.map((s) => {
+                    const onPage = onPageNames.has(s.name.trim().toLowerCase());
+                    const key = `${ms.venueId}:${s.id}`;
+                    const meta = (
+                      <span className="ml-2 text-xs text-slate-500">
+                        {s.durationMinutes != null ? `${s.durationMinutes} min` : ''}
+                        {s.pricePence != null ? ` · £${(s.pricePence / 100).toFixed(2)}` : ''}
                       </span>
-                      {onPage ? (
-                        <span className="shrink-0 text-xs font-medium text-slate-400">On page</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="shrink-0 text-xs font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50"
-                          disabled={busy}
-                          onClick={() => void addService(ms.venueId, s)}
+                    );
+                    if (onPage) {
+                      return (
+                        <li
+                          key={s.id}
+                          className="flex items-center justify-between gap-2 py-2 text-sm"
                         >
-                          Add
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        ))
+                          <span className="min-w-0 text-slate-700">
+                            {s.name}
+                            {meta}
+                          </span>
+                          <span className="shrink-0 text-xs font-medium text-slate-400">On page</span>
+                        </li>
+                      );
+                    }
+                    return (
+                      <li key={s.id}>
+                        <label className="flex cursor-pointer items-center gap-2 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            className="rounded border-slate-300"
+                            checked={selected.has(key)}
+                            disabled={busy}
+                            onChange={() => toggle(key)}
+                          />
+                          <span className="min-w-0 text-slate-700">
+                            {s.name}
+                            {meta}
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+            );
+          })}
+          {addable.length > 0 ? (
+            <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+              <span className="text-xs text-slate-500">
+                {selectedCount > 0 ? `${selectedCount} selected` : 'None selected'}
+              </span>
+              <div className="flex items-center gap-2">
+                {selectedCount > 0 ? (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => setSelected(new Set())}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  disabled={busy || selectedCount === 0}
+                  onClick={() => void addSelected()}
+                >
+                  {selectedCount > 0 ? `Add ${selectedCount} selected` : 'Add selected'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </>
       )}
     </section>
   );

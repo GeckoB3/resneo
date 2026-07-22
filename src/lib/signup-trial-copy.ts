@@ -45,6 +45,6 @@ export function publicPricingFooterDisclaimer(): string {
     `Included SMS applies during the trial; extra messages ${overagePence}p each. ` +
     `Not for upgrades or resubscribes. No per-booking fees or commission. ` +
     `Standard payment provider fees may apply. ` +
-    `Cancel with 30 days\u2019 notice. Your subscription stays active until the notice period ends.`
+    `Cancel anytime: your subscription stays active until the end of your current billing period, with no charge after that, and no charge at all if you cancel during the trial.`
   );
 }

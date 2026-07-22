@@ -12,6 +12,7 @@ import { loadCollectiveMemberImportSources } from '@/lib/linked-accounts/collect
 import { ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
 import { loadVenueLookup } from '@/lib/linked-accounts/queries';
 import { notifyCombinedProviderProposed } from '@/lib/linked-accounts/notifications';
+import { groupServicesForBulkAdd } from '@/lib/linked-accounts/group-services-for-bulk-add';
 
 /** Best-effort: notification failures must never fail a catalogue action. */
 async function safeNotify(p: Promise<unknown>): Promise<void> {
@@ -339,6 +340,51 @@ async function itemBelongsToCollective(
   return Boolean(data);
 }
 
+/**
+ * Create one offering and seed its providers from a set of source services (one
+ * provider per calendar that offers each source). Returns the member venues that
+ * were seeded from a venue other than the host, so the caller can ask them to
+ * approve the terms (plan D6). Used by the bulk `create_items` action.
+ */
+async function createOfferingSeeded(
+  admin: SupabaseClient,
+  collectiveId: string,
+  actingVenueId: string,
+  userId: string | null,
+  name: string,
+  sources: Array<{ venueId: string; sourceServiceId: string }>,
+): Promise<{ ok: true; seededMemberVenues: Set<string> } | { ok: false }> {
+  const { data: item, error } = await admin
+    .from('collective_service_items')
+    .insert({
+      collective_id: collectiveId,
+      name: name.trim(),
+      pricing_display: 'from',
+      allow_any_available: true,
+      display_order: 0,
+      status: 'active',
+    })
+    .select('id')
+    .single();
+  if (error || !item) return { ok: false };
+
+  const seededMemberVenues = new Set<string>();
+  for (const src of sources) {
+    const res = await addProvidersForSource(
+      admin,
+      collectiveId,
+      item.id as string,
+      src.venueId,
+      src.sourceServiceId,
+      null,
+      actingVenueId,
+      userId,
+    );
+    if (res.ok && res.added > 0 && src.venueId !== actingVenueId) seededMemberVenues.add(src.venueId);
+  }
+  return { ok: true, seededMemberVenues };
+}
+
 async function applyCatalogueAction(
   admin: SupabaseClient,
   collectiveId: string,
@@ -399,6 +445,62 @@ async function applyCatalogueAction(
                 ctx?.name ?? 'a venue collective',
                 host,
                 input.name!.trim(),
+                collectiveId,
+              ),
+            ),
+          ),
+        );
+      }
+      return { ok: true };
+    }
+
+    case 'create_items': {
+      if (!input.services || input.services.length === 0) {
+        return { ok: false, error: 'No services were selected.', status: 400 };
+      }
+      // Same-named services across venues merge into one offering (see helper).
+      const groups = groupServicesForBulkAdd(input.services);
+      if (groups.length === 0) {
+        return { ok: false, error: 'No services were selected.', status: 400 };
+      }
+
+      const proposals: Array<{ venueId: string; name: string }> = [];
+      let createdAny = false;
+      for (const group of groups) {
+        const created = await createOfferingSeeded(
+          admin,
+          collectiveId,
+          actingVenueId,
+          userId,
+          group.name,
+          group.sources,
+        );
+        if (!created.ok) continue; // Skip a single failure; keep adding the rest.
+        createdAny = true;
+        for (const venueId of created.seededMemberVenues) proposals.push({ venueId, name: group.name });
+      }
+      if (!createdAny) {
+        return { ok: false, error: 'Failed to add the selected services.', status: 500 };
+      }
+
+      // Ask each seeded member to approve the terms for its calendars (plan D6),
+      // one notification per proposed offering (matching the single-add flow).
+      if (proposals.length > 0) {
+        const venueIds = [...new Set(proposals.map((p) => p.venueId))];
+        const [ctx, lookup] = await Promise.all([
+          collectiveContext(admin, collectiveId),
+          loadVenueLookup(admin, [actingVenueId, ...venueIds]),
+        ]);
+        const host = lookup[actingVenueId]?.name ?? 'The host venue';
+        await Promise.allSettled(
+          proposals.map((p) =>
+            safeNotify(
+              notifyCombinedProviderProposed(
+                admin,
+                p.venueId,
+                ctx?.name ?? 'a venue collective',
+                host,
+                p.name,
                 collectiveId,
               ),
             ),

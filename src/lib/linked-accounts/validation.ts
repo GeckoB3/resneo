@@ -243,6 +243,7 @@ export const catalogueActionSchema = z.object({
     'archive_item',
     'add_provider',
     'remove_provider',
+    'set_providers',
   ]),
   // Item fields.
   itemId: z.string().uuid().optional(),
@@ -282,6 +283,25 @@ export const catalogueActionSchema = z.object({
   venueId: z.string().uuid().optional(),
   sourceServiceId: z.string().uuid().optional(),
   practitionerId: z.string().uuid().nullable().optional(),
+  /**
+   * Used by set_providers to apply every staged calendar-assignment change in one
+   * request (the "Save and close" flow). Each op either adds a calendar to an
+   * offering ('add', needs itemId + venueId + practitionerId) or removes a provider
+   * ('remove', needs providerId).
+   */
+  ops: z
+    .array(
+      z.object({
+        op: z.enum(['add', 'remove']),
+        itemId: z.string().uuid().optional(),
+        venueId: z.string().uuid().optional(),
+        practitionerId: z.string().uuid().optional(),
+        providerId: z.string().uuid().optional(),
+      }),
+    )
+    .min(1)
+    .max(200)
+    .optional(),
 });
 
 export type CatalogueActionInput = z.infer<typeof catalogueActionSchema>;

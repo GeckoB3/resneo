@@ -5,6 +5,8 @@ import Link from 'next/link';
 import type { SetupStatus } from '@/lib/venue/compute-setup-status';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Dialog } from '@/components/ui/primitives/Dialog';
+import { Button } from '@/components/ui/primitives/Button';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
@@ -20,11 +22,55 @@ type SetupStepKey = keyof Omit<
 >;
 
 interface Step {
-  key: SetupStepKey;
+  /** Unique id + React key. For trackable steps this is a `SetupStatus` field name. */
+  key: string;
   label: string;
   description: string;
   href: string;
   actionLabel: string;
+  /**
+   * Optional suggestion: always listed while the checklist is visible, and never
+   * auto-completed (there is no crisp "done" signal), so it does not count toward
+   * the progress total. Cleared only when the whole checklist is dismissed.
+   */
+  optional?: boolean;
+}
+
+/** Extra, post-onboarding prompts. Optional, so they never block the checklist reaching 100%. */
+const OPTIONAL_SETUP_SUGGESTIONS: Step[] = [
+  {
+    key: 'customise_booking_page',
+    label: 'Customise your booking page',
+    description:
+      'Add your branding, cover photo, and welcome text so your booking page reflects your business.',
+    href: '/dashboard/settings?tab=booking-page',
+    actionLabel: 'Booking page',
+    optional: true,
+  },
+  {
+    key: 'review_comms',
+    label: 'Review communications settings',
+    description:
+      'Check the emails and texts guests receive when they book, and tailor the wording to your business.',
+    href: '/dashboard/settings?tab=comms',
+    actionLabel: 'Communications',
+    optional: true,
+  },
+  {
+    key: 'import_bookings_customers',
+    label: 'Import your bookings and customers',
+    description:
+      'Bring your existing bookings and customer list into ResNeo so nothing is left behind.',
+    href: '/dashboard/settings',
+    actionLabel: 'Import data',
+    optional: true,
+  },
+];
+
+/** Trackable steps read a `SetupStatus` boolean; optional suggestions are never "done". */
+export function isStepComplete(status: SetupStatus, step: Step): boolean {
+  if (step.optional) return false;
+  return Boolean(status[step.key as SetupStepKey]);
 }
 
 function getAvailabilityStep(model: BookingModel, onboardingCompleted: boolean): Step {
@@ -182,7 +228,7 @@ async function persistDismissToServer(): Promise<boolean> {
   }
 }
 
-function getSteps(status: SetupStatus): Step[] {
+export function getSteps(status: SetupStatus): Step[] {
   const model = status.booking_model;
   const enabledModels = status.enabled_models;
   const onboardingDone = status.onboarding_completed;
@@ -220,6 +266,10 @@ function getSteps(status: SetupStatus): Step[] {
       actionLabel: 'Create booking',
     },
   );
+  // Post-onboarding "What's next" prompts. Optional, so they never block 100%.
+  if (onboardingDone) {
+    base.push(...OPTIONAL_SETUP_SUGGESTIONS);
+  }
   return base;
 }
 
@@ -295,9 +345,14 @@ export function SetupChecklist({
     return () => cancelAnimationFrame(id);
   }, [disableClientSetupFetch, setupStatusFromServer, venueId]);
 
+  const [confirmingDismiss, setConfirmingDismiss] = useState(false);
+
   const steps = useMemo(() => (status ? getSteps(status) : []), [status]);
 
-  const incompleteSteps = useMemo(() => steps.filter((s) => !status?.[s.key]), [steps, status]);
+  const incompleteSteps = useMemo(
+    () => (status ? steps.filter((s) => !isStepComplete(status, s)) : steps),
+    [steps, status],
+  );
 
   function dismiss() {
     writeDismissedToStorage(venueId);
@@ -311,11 +366,14 @@ export function SetupChecklist({
 
   if (dismissed || !status) return null;
 
-  const completedCount = steps.filter((s) => status[s.key]).length;
-  const totalCount = steps.length;
-  if (completedCount === totalCount) return null;
+  // Only required (non-optional) steps drive progress, so the bar can still reach
+  // 100% and auto-hide once real setup is done, regardless of the suggestions.
+  const trackableSteps = steps.filter((s) => !s.optional);
+  const completedCount = trackableSteps.filter((s) => status[s.key as SetupStepKey]).length;
+  const totalCount = trackableSteps.length;
+  if (totalCount > 0 && completedCount === totalCount) return null;
 
-  const progressPct = Math.round((completedCount / totalCount) * 100);
+  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   return (
     <div className="mb-6">
@@ -339,7 +397,7 @@ export function SetupChecklist({
               </Pill>
               <button
                 type="button"
-                onClick={dismiss}
+                onClick={() => setConfirmingDismiss(true)}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                 aria-label="Dismiss setup checklist"
               >
@@ -364,7 +422,14 @@ export function SetupChecklist({
                   <div className="h-2 w-2 rounded-full bg-slate-300" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-slate-900">{step.label}</p>
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
+                    {step.label}
+                    {step.optional ? (
+                      <Pill variant="neutral" size="sm">
+                        Optional
+                      </Pill>
+                    ) : null}
+                  </p>
                   <p className="mt-0.5 text-xs leading-relaxed text-slate-600">{step.description}</p>
                 </div>
                 <Link
@@ -378,6 +443,38 @@ export function SetupChecklist({
           </ul>
         </SectionCard.Body>
       </SectionCard>
+
+      <Dialog
+        open={confirmingDismiss}
+        onOpenChange={(open) => {
+          if (!open) setConfirmingDismiss(false);
+        }}
+        title="Dismiss the setup steps?"
+        description="This hides the What's next checklist from your dashboard."
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="secondary" onClick={() => setConfirmingDismiss(false)}>
+              Keep showing
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => {
+                setConfirmingDismiss(false);
+                dismiss();
+              }}
+            >
+              Dismiss setup steps
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          Anything you have not set up yet is still available from the dashboard menu whenever you
+          are ready.
+        </p>
+      </Dialog>
     </div>
   );
 }

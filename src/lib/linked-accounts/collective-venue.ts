@@ -56,10 +56,12 @@ export async function loadCollectiveVenuePublic(
   const col = await loadCollectiveRow(admin, collectiveId);
   if (!col || col.status !== 'active') return null;
 
-  // Inherit commercial/display defaults from the host venue.
+  // Inherit commercial/display defaults from the host venue. The combined page is
+  // designed to look like one venue, so the header's address, phone, and website
+  // come from the host too (matching the standard single-venue booking header).
   const { data: host } = await admin
     .from('venues')
-    .select('currency, deposit_config, booking_rules, terminology')
+    .select('currency, deposit_config, booking_rules, terminology, address, phone, website_url')
     .eq('id', col.host_venue_id)
     .maybeSingle();
 
@@ -99,9 +101,9 @@ export async function loadCollectiveVenuePublic(
     slug: col.slug,
     cover_photo_url: (config.cover_photo_url as string | null) ?? null,
     logo_url: branding.logo_url ?? null,
-    address: null,
-    phone: null,
-    website_url: null,
+    address: (host?.address as string | null) ?? null,
+    phone: (host?.phone as string | null) ?? null,
+    website_url: (host?.website_url as string | null) ?? null,
     booking_page_config: config,
     deposit_config: (host?.deposit_config as VenuePublic['deposit_config']) ?? null,
     booking_rules: (host?.booking_rules as VenuePublic['booking_rules']) ?? null,

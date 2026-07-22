@@ -23,49 +23,79 @@ function makeStatus(overrides: Partial<SetupStatus> = {}): SetupStatus {
   };
 }
 
-const SUGGESTION_HREFS = [
-  '/dashboard/settings?tab=booking-page',
-  '/dashboard/settings?tab=comms',
-  '/dashboard/settings',
-];
+const SUGGESTION_KEYS = ['customise_booking_page', 'review_comms', 'import_bookings_customers'];
 
-describe('getSteps optional suggestions', () => {
-  it('adds the three optional suggestions after onboarding is complete', () => {
+describe('getSteps post-onboarding prompts', () => {
+  it('adds the three prompts after onboarding is complete', () => {
     const steps = getSteps(makeStatus({ onboarding_completed: true }));
-    const optional = steps.filter((s) => s.optional);
-    expect(optional.map((s) => s.href)).toEqual(SUGGESTION_HREFS);
-    expect(optional.map((s) => s.label)).toEqual([
+    const suggestions = steps.filter((s) => SUGGESTION_KEYS.includes(s.key));
+    expect(suggestions.map((s) => s.label)).toEqual([
       'Customise your booking page',
       'Review communications settings',
       'Import your bookings and customers',
     ]);
+    expect(suggestions.map((s) => s.href)).toEqual([
+      '/dashboard/settings?tab=booking-page',
+      '/dashboard/settings?tab=comms',
+      '/dashboard/settings',
+    ]);
   });
 
-  it('omits the suggestions before onboarding is complete', () => {
+  it('omits the prompts before onboarding is complete', () => {
     const steps = getSteps(makeStatus({ onboarding_completed: false }));
-    expect(steps.some((s) => s.optional)).toBe(false);
+    expect(steps.some((s) => SUGGESTION_KEYS.includes(s.key))).toBe(false);
   });
 
-  it('lists the suggestions after the required steps', () => {
+  it('lists the prompts after the required steps', () => {
     const steps = getSteps(makeStatus());
-    const firstOptionalIndex = steps.findIndex((s) => s.optional);
-    const lastRequiredIndex = steps.reduce((acc, s, i) => (s.optional ? acc : i), -1);
-    expect(firstOptionalIndex).toBeGreaterThan(lastRequiredIndex);
+    const firstSuggestionIndex = steps.findIndex((s) => SUGGESTION_KEYS.includes(s.key));
+    const lastRequiredIndex = steps.reduce(
+      (acc, s, i) => (SUGGESTION_KEYS.includes(s.key) ? acc : i),
+      -1,
+    );
+    expect(firstSuggestionIndex).toBeGreaterThan(lastRequiredIndex);
+  });
+});
+
+describe('getGuestBookingStep wording', () => {
+  it('titles the appointment booking step "Create services" with the new copy', () => {
+    const steps = getSteps(makeStatus({ booking_model: 'unified_scheduling' }));
+    const step = steps.find((s) => s.key === 'guest_booking_ready');
+    expect(step?.label).toBe('Create services');
+    expect(step?.description).toBe(
+      'Create at least one service to offer on your public booking page.',
+    );
   });
 });
 
 describe('isStepComplete', () => {
-  it('never treats an optional suggestion as complete', () => {
-    const status = makeStatus();
-    const optional = getSteps(status).filter((s) => s.optional);
-    for (const step of optional) {
-      expect(isStepComplete(status, step)).toBe(false);
-    }
-  });
-
-  it('reads the matching SetupStatus flag for a trackable step', () => {
+  it('reads the matching SetupStatus flag for a required step', () => {
     const step = { key: 'stripe_connected', label: '', description: '', href: '', actionLabel: '' };
     expect(isStepComplete(makeStatus({ stripe_connected: true }), step)).toBe(true);
     expect(isStepComplete(makeStatus({ stripe_connected: false }), step)).toBe(false);
+  });
+
+  it('leaves the post-onboarding prompts incomplete until they are clicked through', () => {
+    const status = makeStatus();
+    const suggestions = getSteps(status).filter((s) => SUGGESTION_KEYS.includes(s.key));
+    // No clicks yet: all incomplete.
+    for (const step of suggestions) {
+      expect(isStepComplete(status, step)).toBe(false);
+      expect(isStepComplete(status, step, new Set())).toBe(false);
+    }
+    // Once a prompt's key is recorded as clicked, it is complete.
+    for (const step of suggestions) {
+      expect(isStepComplete(status, step, new Set([step.key]))).toBe(true);
+      // A different clicked key does not complete this prompt.
+      expect(isStepComplete(status, step, new Set(['some_other_key']))).toBe(false);
+    }
+  });
+
+  it('ignores click state for required steps (they come from SetupStatus)', () => {
+    const step = { key: 'stripe_connected', label: '', description: '', href: '', actionLabel: '' };
+    // Clicking is irrelevant to a required step; only the flag matters.
+    expect(isStepComplete(makeStatus({ stripe_connected: false }), step, new Set(['stripe_connected']))).toBe(
+      false,
+    );
   });
 });

@@ -15,8 +15,10 @@ export function collectiveSettingsToPreviewPublic(args: {
   coverUrl: string | null;
   timezone: string | null;
   draftConfig: BookingPageConfig;
+  /** The host venue's "Any available practitioner" setting, which the combined page follows. */
+  anyAvailablePractitioner: boolean;
 }): VenuePublic {
-  const { id, name, slug, logoUrl, coverUrl, timezone, draftConfig } = args;
+  const { id, name, slug, logoUrl, coverUrl, timezone, draftConfig, anyAvailablePractitioner } = args;
   return {
     id,
     name,
@@ -38,6 +40,6 @@ export function collectiveSettingsToPreviewPublic(args: {
     currency: 'GBP',
     booking_paused: false,
     is_collective: true,
-    feature_flags: { resolved: { any_available_practitioner: true } },
+    feature_flags: { resolved: { any_available_practitioner: anyAvailablePractitioner } },
   };
 }

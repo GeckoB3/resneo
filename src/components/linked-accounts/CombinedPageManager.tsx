@@ -462,6 +462,7 @@ export function CombinedPageManager({
           coverUrl,
           timezone: collective.timezone,
           draftConfig: draft,
+          anyAvailablePractitioner: collective.hostAnyAvailablePractitioner,
         }),
       preserveScroll: async (task) => task(),
       capabilities: {

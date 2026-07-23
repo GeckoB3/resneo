@@ -27,6 +27,9 @@ export type CommunicationLogMessageType =
   | 'card_hold_payment_reminder_email'
   | 'card_hold_payment_reminder_sms'
   | 'card_hold_charged_email'
+  // In-person payment receipt (§6.5), sent by the balance webhook rather than
+  // this resolver.
+  | 'payment_receipt_email'
   | 'pre_visit_reminder_email'
   | 'pre_visit_reminder_sms'
   | 'booking_modification_email'

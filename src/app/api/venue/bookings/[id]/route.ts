@@ -83,6 +83,7 @@ import { deleteCardHoldCustomersForBookings } from '@/lib/booking/card-hold-rele
 import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 import { cardHoldChargeWindowEndsAtForBooking } from '@/lib/booking/card-hold-window';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import { resolveBookingTotalPence } from '@/lib/booking/payment-summary';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
@@ -329,6 +330,17 @@ export async function GET(
         }
       : null;
 
+    // In-person payments (§6.6): the RESOLVED total (variant + add-ons when the
+    // stored column is empty, §5.7) and the outstanding balance. null balance =
+    // price unknown → the Take payment sheet requires a staff-entered amount.
+    const resolvedTotalPence = resolveBookingTotalPence({
+      booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
+      service_variant_price_pence,
+      addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
+    });
+    const amountPaidPence =
+      typeof booking.amount_paid_pence === 'number' ? booking.amount_paid_pence : 0;
+
     return NextResponse.json({
       ...booking,
       area_name,
@@ -347,6 +359,9 @@ export async function GET(
       refund_notice_hours,
       card_hold,
       service_payment_requirement,
+      booking_total_price_pence: resolvedTotalPence,
+      balance_due_pence:
+        resolvedTotalPence === null ? null : Math.max(0, resolvedTotalPence - amountPaidPence),
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);

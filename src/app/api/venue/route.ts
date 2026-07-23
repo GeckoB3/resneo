@@ -120,7 +120,7 @@ export async function GET(request: NextRequest) {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config, in_person_payments_enabled')
       .eq('id', staff.venue_id)
       .single();
 
@@ -173,6 +173,12 @@ export async function GET(request: NextRequest) {
         raw: featureFlagsRaw,
         resolved: resolveAppointmentsFeatureFlags(featureFlagsRaw),
       },
+      // In-person payments (§6.6): the per-venue flag plus the v1 readiness
+      // derivation. The connection-token 400 stays the authoritative gate for
+      // the real Stripe card-present capability.
+      in_person_payments_enabled: Boolean(v.in_person_payments_enabled),
+      card_present_ready:
+        Boolean(v.in_person_payments_enabled) && Boolean(v.stripe_connected_account_id),
     });
   } catch (err) {
     console.error('GET /api/venue failed:', err);

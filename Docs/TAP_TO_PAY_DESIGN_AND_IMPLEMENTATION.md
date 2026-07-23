@@ -4,7 +4,7 @@
 > **Canonical location:** this file (`resneo/Docs/TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md`). A pointer copy lives in `resneo-app/Docs/TAP_TO_PAY.md`.
 > **Verified against code:** 2026-06-24 — see §16 for the verification log and the adjustments it produced. Every new table, column, endpoint, file, and UI state is specified; code blocks are implementation sketches aligned to existing patterns (follow the cited reference files for exact house style).
 >
-> **Implementation status (as of 2026-07):** This is a design only. None of it is built yet: there are no tap-to-pay or Stripe Terminal payment routes, no `booking_payments` table, and no feature flag in the codebase. Treat everything below as a proposal, not a description of shipped behaviour.
+> **Implementation status (as of 2026-07-23):** The **resneo backend is implemented** per §15's backend list (migration, ledger, all three payment endpoints, webhook branches, receipt, GET/bootstrap extensions), with the §16 third-review adjustments; 49 dedicated tests plus the full suite pass. The **resneo-app mobile side is not built yet** — §7/§7A remain a design to implement.
 
 ---
 
@@ -472,7 +472,12 @@ if (meta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.APPOINTMENT_BALANCE) {
 **Abandoned-PI hygiene:** also handle `payment_intent.canceled` for `reserve_ni_purpose = APPOINTMENT_BALANCE`: flip the matching `pending` ledger row to `failed`. Otherwise rows for abandoned attempts (staff dismisses the sheet, §3.2) sit at `pending` forever — harmless to the recompute (which sums only `succeeded`) but noise in any future payments-history UI. No recompute needed since nothing succeeded.
 
 ### 6.5 Receipt
-Add `'payment_receipt'` to the `MessageType` union in `src/lib/communications/types.ts`, and add `sendPaymentReceiptEmail(booking, venue, venueId, { amountPaid, total, method })` in `src/lib/communications/send-templated.ts`, modelled on the **existing `sendDepositConfirmationEmail`** (which calls `sendPolicyMessage({ messageKey: 'payment_receipt', channel: 'email', mode: 'dedupe' })`). Reuse `venueRowToEmailData` (`src/lib/emails/venue-email-data.ts`). Email-first. This is the customer's record (direct-charge card-present has no Stripe-hosted email by default).
+Add `'payment_receipt'` to the `MessageType` union in `src/lib/communications/types.ts`, and add `sendPaymentReceiptEmail({ bookingId, venueId, amountPaidPence, paidAt })` in `src/lib/communications/send-templated.ts`, modelled on the **existing `sendCardHoldChargedReceipt`** (the other webhook-triggered receipt: id-based params, `enrichBookingEmailForComms`, a dedicated render template, `deliverEmailMessage`). Reuse `venueRowToEmailData` (`src/lib/emails/venue-email-data.ts`). Email-first. This is the customer's record (direct-charge card-present has no Stripe-hosted email by default).
+
+Three details locked in by the implementation (do not regress):
+- **Comm-log type is `payment_receipt_email`** (house `*_email` convention in `CommunicationLogMessageType`, `src/lib/communications/policy-resolver.ts`), and `communication_logs.message_type` carries a **DB CHECK constraint** that must be extended as a strict superset in the same migration as the ledger — without it every receipt insert fails silently at Postgres.
+- **Log mode is `upsert`, NOT `dedupe`**: a booking can carry several balance payments (equal-amount split payments, §6.3c) and each must send its own receipt; dedupe would swallow every receipt after the first. Webhook idempotency (the `webhook_events` claim) already prevents duplicate sends for the same payment. Known cosmetic trade-off: upsert reuses one comm-log row, so the staff timeline shows the latest receipt only.
+- Render template: `src/lib/emails/templates/payment-receipt.ts` (no em-dashes in customer copy).
 
 ### 6.6 Booking GET + venue bootstrap extensions
 - The booking detail GET (`/api/venue/bookings/[id]`) is assembled by `src/lib/booking/load-booking-detail-bundle.ts` (`StaffBookingDetailBundle`, which already loads `service_variant_price_pence`). Extend it to also return `amount_paid_pence`, `payment_state`, the **resolved** `booking_total_price_pence` (via `resolveBookingTotalPence`, §5.7) and a computed `balance_due_pence` (may be `null` when the price is unknown). The detail screen prefetches `/api/venue/bookings/[id]/summary` too — add the same fields there if `TakePaymentSheet`/the gate reads from it.
@@ -482,6 +487,8 @@ Add `'payment_receipt'` to the `MessageType` union in `src/lib/communications/ty
 
 ### 6.7 Feature flag
 `venues.in_person_payments_enabled` is the master switch (default false). Set it per pilot venue (superuser dashboard toggle or SQL). When false: the bootstrap returns `in_person_payments_enabled=false`, the app renders nothing, and all three endpoints refuse with 403/403/403. Frictionless off.
+
+**The kill switch is total: it gates refunds too.** Disabling the flag 403s the whole charge endpoint including `action: 'refund'` — no half-alive endpoint state. This is safe because the escape hatch fully reconciles: a refund issued from the **Stripe dashboard** flows back through the `charge.refunded` webhook, which is ledger-driven and NOT flag-gated, so the `booking_payments` row flips to `refunded` and the booking summary recomputes correctly even while the flag is off. If pilot feedback shows venues toggling the flag off while holding refundable payments, loosening the gate to admit refund-only is a deliberate two-line change, not a workaround.
 
 ---
 
@@ -945,3 +952,15 @@ Re-verified the §16 symbol references against `staging` (all still hold; featur
 | 16 | `refunded` vs `deposit_paid` precedence ambiguous when a balance refund coexists with a paid deposit | `refunded` only when a refunded row exists AND recomputed `amount_paid_pence` = 0 (§5.5) |
 
 Plus hygiene: `payment_intent.canceled` flips abandoned `pending` ledger rows to `failed` (§6.4). §11 tests extended to cover all of the above. Open items unchanged: the §13 capture-flow question and pinned-SDK verification (§7.1, §7A.4/§7A.5) remain deliberate build-time checks.
+
+### Third review (2026-07-23) — backend implemented
+
+The resneo backend landed as specified (all §15 backend files; 49 new vitest cases; full suite, tsc, and eslint clean). Three implementation adjustments, now reflected in the sections above:
+
+| # | Adjustment | Where |
+|---|---|---|
+| 17 | Receipt comm-log type is `payment_receipt_email` and the `communication_logs.message_type` DB CHECK constraint is extended in the ledger migration — the spec had missed the constraint, which would have silently failed every receipt insert | §6.5 |
+| 18 | Receipt log mode is `upsert`, not `dedupe` — dedupe would swallow the receipt for the second equal-split payment; webhook idempotency already prevents duplicates | §6.5 |
+| 19 | The venue flag 403-gates refunds too (kill switch is total); Stripe-dashboard refunds still reconcile via the flag-agnostic `charge.refunded` webhook | §6.7 |
+
+Also carried through from house patterns: cross-venue charge/refund writes are audited via `recordBookingWriteAudit` (§9 tenant-isolation posture), and the balance total is resolved via a `resolveBookingTotalPenceFromRow` helper that fetches the variant price from `service_variants` (the price is not on the bookings row). Deploy notes: apply the migration before the routes, and add **`payment_intent.canceled`** to the Stripe webhook endpoint's subscribed events.

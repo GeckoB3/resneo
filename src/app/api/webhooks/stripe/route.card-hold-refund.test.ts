@@ -216,6 +216,10 @@ describe('POST /api/webhooks/stripe charge.refunded on a mixed payment_with_setu
       if (call.table === 'booking_card_holds' && call.op === 'select') {
         return { data: rowsMatching(holds, call), error: null };
       }
+      // In-person balance ledger (§6.4): this PI is not a balance payment.
+      if (call.table === 'booking_payments' && call.op === 'select') {
+        return { data: [], error: null };
+      }
       if (call.table === 'bookings' && call.op === 'select') {
         return { data: rowsMatching(bookings, call), error: null };
       }
@@ -272,6 +276,10 @@ describe('POST /api/webhooks/stripe charge.refunded on a mixed payment_with_setu
     const { admin, calls } = makeAdmin((call) => {
       if (call.table === 'booking_card_holds' && call.op === 'select') {
         return { data: rowsMatching(holds, call), error: null };
+      }
+      // In-person balance ledger (§6.4): this PI is not a balance payment.
+      if (call.table === 'booking_payments' && call.op === 'select') {
+        return { data: [], error: null };
       }
       if (call.table === 'bookings' && call.op === 'select') {
         return { data: rowsMatching(bookings, call), error: null };

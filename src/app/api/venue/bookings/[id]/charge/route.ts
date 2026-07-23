@@ -9,6 +9,7 @@ import {
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
 import {
+  computeLiveAmountPaidPence,
   recomputeBookingPaymentSummary,
   resolveBookingTotalPenceFromRow,
 } from '@/lib/booking/payment-summary';
@@ -241,13 +242,22 @@ export async function POST(
   }
 
   // Amount (§5.7): known balance → default + clamp; unknown → staff-entered.
-  const amountPaidPence =
-    typeof booking.amount_paid_pence === 'number' ? booking.amount_paid_pence : 0;
-  const totalPence = await resolveBookingTotalPenceFromRow(staff.db, {
-    booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
-    service_variant_id: booking.service_variant_id ?? null,
-    addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
-  });
+  // The paid-so-far figure is derived LIVE (paid deposit + succeeded ledger),
+  // never from bookings.amount_paid_pence — that column only refreshes on
+  // in-person payment activity, so a deposit paid since the last recompute
+  // would be missing from it and the customer would be overcharged by it.
+  const [amountPaidPence, totalPence] = await Promise.all([
+    computeLiveAmountPaidPence(staff.db, id, {
+      deposit_status: booking.deposit_status ?? null,
+      deposit_amount_pence: booking.deposit_amount_pence ?? null,
+    }),
+    resolveBookingTotalPenceFromRow(staff.db, {
+      booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
+      service_variant_id: booking.service_variant_id ?? null,
+      addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
+      venue_id: scopeVenueId,
+    }),
+  ]);
   const balanceDuePence =
     totalPence === null ? null : Math.max(0, totalPence - amountPaidPence);
 
@@ -345,7 +355,21 @@ export async function POST(
     paymentIntentId = pi.id;
     clientSecret = pi.client_secret;
   } catch (piErr) {
-    // Most likely the connected account lacks the card-present capability.
+    // A reused attempt_id with different details (e.g. the amount changed
+    // between retries) trips Stripe's idempotency guard. Surface it distinctly
+    // so it is never mistaken for a capability problem.
+    const stripeErr = piErr as { type?: string; rawType?: string } | null;
+    if (stripeErr?.type === 'StripeIdempotencyError' || stripeErr?.rawType === 'idempotency_error') {
+      console.warn('[charge route] attempt_id reused with different details:', {
+        bookingId: id,
+        attemptId: input.attempt_id,
+      });
+      return NextResponse.json(
+        { error: 'This payment attempt has already started. Close the payment sheet and start a new one.' },
+        { status: 409 },
+      );
+    }
+    // Otherwise most likely the connected account lacks the card-present capability.
     console.error('[charge route] PI create failed:', piErr, { bookingId: id });
     return NextResponse.json(
       { error: "This venue isn't enabled for in-person card payments yet." },

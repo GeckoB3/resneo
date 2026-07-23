@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  computeLiveAmountPaidPence,
+  depositPaidContributionPence,
   deriveBookingPaymentState,
   recomputeBookingPaymentSummary,
   resolveBookingTotalPence,
@@ -147,6 +149,20 @@ describe('resolveBookingTotalPenceFromRow', () => {
     expect(calls[0]?.filters).toContainEqual(['eq', 'id', 'variant-1']);
   });
 
+  it('scopes the variant lookup to the owning venue when known', async () => {
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'service_variants') return { data: { price_pence: 4200 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      service_variant_id: 'variant-1',
+      addons_total_price_pence: 0,
+      venue_id: 'v9',
+    });
+    expect(calls[0]?.filters).toContainEqual(['eq', 'venue_id', 'v9']);
+  });
+
   it('degrades to unknown (null) when the variant lookup errors', async () => {
     const { admin } = makeAdmin(() => ({ data: null, error: { message: 'boom' } }));
     const total = await resolveBookingTotalPenceFromRow(admin, {
@@ -155,6 +171,40 @@ describe('resolveBookingTotalPenceFromRow', () => {
       addons_total_price_pence: 0,
     });
     expect(total).toBeNull();
+  });
+});
+
+describe('computeLiveAmountPaidPence (live paid-so-far, the overcharge-bug guard)', () => {
+  it('sums the paid deposit and succeeded ledger rows, ignoring pending/failed', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'booking_payments') {
+        return {
+          data: [
+            { amount_pence: 2000, tip_amount_pence: 0, status: 'succeeded' },
+            { amount_pence: 999, tip_amount_pence: 0, status: 'pending' },
+            { amount_pence: 777, tip_amount_pence: 0, status: 'failed' },
+          ],
+        };
+      }
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const paid = await computeLiveAmountPaidPence(admin, 'b1', {
+      deposit_status: 'Paid',
+      deposit_amount_pence: 1000,
+    });
+    expect(paid).toBe(3000);
+  });
+
+  it('a non-Paid deposit contributes nothing', async () => {
+    const { admin } = makeAdmin(() => ({ data: [] }));
+    expect(
+      await computeLiveAmountPaidPence(admin, 'b1', {
+        deposit_status: 'Refunded',
+        deposit_amount_pence: 1000,
+      }),
+    ).toBe(0);
+    expect(depositPaidContributionPence({ deposit_status: 'Waived', deposit_amount_pence: 500 })).toBe(0);
+    expect(depositPaidContributionPence({ deposit_status: 'Paid', deposit_amount_pence: 500 })).toBe(500);
   });
 });
 

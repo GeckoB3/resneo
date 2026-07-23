@@ -73,11 +73,14 @@ export async function resolveBookingTotalPenceFromRow(
 
   let variantPricePence: number | null = null;
   if (booking.service_variant_id) {
-    const { data: variant, error } = await admin
+    let query = admin
       .from('service_variants')
       .select('price_pence')
-      .eq('id', booking.service_variant_id)
-      .maybeSingle();
+      .eq('id', booking.service_variant_id);
+    // Defence in depth: scope to the owning venue when known, mirroring the
+    // detail-bundle RPC's `sv.venue_id = p_venue_id` filter.
+    if (booking.venue_id) query = query.eq('venue_id', booking.venue_id);
+    const { data: variant, error } = await query.maybeSingle();
     if (error) {
       // A missing variant price only widens the "unknown total" path (§5.7),
       // which is staff-confirmable — log and continue rather than failing.
@@ -94,6 +97,67 @@ export async function resolveBookingTotalPenceFromRow(
     service_variant_price_pence: variantPricePence,
     addons_total_price_pence: booking.addons_total_price_pence ?? null,
   });
+}
+
+/** §5.3/§5.6 — the paid deposit's contribution to amount_paid. Waived /
+ * Forfeited / Not Required / Refunded deposits contribute nothing. */
+export function depositPaidContributionPence(booking: {
+  deposit_status?: string | null;
+  deposit_amount_pence?: number | null;
+}): number {
+  return booking.deposit_status === 'Paid' ? Math.max(0, booking.deposit_amount_pence ?? 0) : 0;
+}
+
+export interface BookingLedgerSums {
+  balancePaidPence: number;
+  tipPaidPence: number;
+  hasRefundedRow: boolean;
+}
+
+/** Sum the booking's ledger: succeeded amounts/tips, plus the refunded marker. */
+export async function sumSucceededBookingPayments(
+  admin: SupabaseClient,
+  bookingId: string,
+): Promise<BookingLedgerSums> {
+  const { data, error } = await admin
+    .from('booking_payments')
+    .select('amount_pence, tip_amount_pence, status')
+    .eq('booking_id', bookingId);
+  if (error) {
+    console.error('[payment-summary] ledger load failed:', error.message, { bookingId });
+    throw error;
+  }
+  const sums: BookingLedgerSums = { balancePaidPence: 0, tipPaidPence: 0, hasRefundedRow: false };
+  for (const row of (data ?? []) as Array<{
+    amount_pence: number;
+    tip_amount_pence: number;
+    status: string;
+  }>) {
+    if (row.status === 'succeeded') {
+      sums.balancePaidPence += row.amount_pence;
+      sums.tipPaidPence += row.tip_amount_pence;
+    } else if (row.status === 'refunded') {
+      sums.hasRefundedRow = true;
+    }
+  }
+  return sums;
+}
+
+/**
+ * Live "paid so far" (paid deposit + succeeded ledger rows). Use this — NOT
+ * the denormalised `bookings.amount_paid_pence` — wherever a balance or charge
+ * amount is computed. The column only refreshes when an in-person payment
+ * event runs the recompute, so a deposit paid after the last recompute (or
+ * ever, for a booking with no in-person activity) is missing from it;
+ * trusting it overcharges the customer by the deposit.
+ */
+export async function computeLiveAmountPaidPence(
+  admin: SupabaseClient,
+  bookingId: string,
+  booking: { deposit_status?: string | null; deposit_amount_pence?: number | null },
+): Promise<number> {
+  const sums = await sumSucceededBookingPayments(admin, bookingId);
+  return depositPaidContributionPence(booking) + sums.balancePaidPence;
 }
 
 /** Pure state derivation (§5.5) — exported for the truth-table tests. */
@@ -143,6 +207,7 @@ export async function recomputeBookingPaymentSummary(
   }
   const booking = bookingData as
     | {
+        venue_id: string | null;
         booking_total_price_pence: number | null;
         service_variant_id: string | null;
         addons_total_price_pence: number | null;
@@ -155,51 +220,24 @@ export async function recomputeBookingPaymentSummary(
     return;
   }
 
-  const { data: ledgerData, error: ledgerErr } = await admin
-    .from('booking_payments')
-    .select('amount_pence, tip_amount_pence, status')
-    .eq('booking_id', bookingId);
-  if (ledgerErr) {
-    console.error('[payment-summary] ledger load failed:', ledgerErr.message, { bookingId });
-    throw ledgerErr;
-  }
-  const rows = (ledgerData ?? []) as Array<{
-    amount_pence: number;
-    tip_amount_pence: number;
-    status: string;
-  }>;
-
-  const totalPence = await resolveBookingTotalPenceFromRow(admin, booking);
-
-  // A paid deposit counts toward amount_paid (§5.3 backfill parity). Waived /
-  // Forfeited / Not Required deposits contribute nothing.
-  const depositPaidPence =
-    booking.deposit_status === 'Paid' ? Math.max(0, booking.deposit_amount_pence ?? 0) : 0;
-
-  let balancePaidPence = 0;
-  let tipPaidPence = 0;
-  let hasRefundedRow = false;
-  for (const row of rows) {
-    if (row.status === 'succeeded') {
-      balancePaidPence += row.amount_pence;
-      tipPaidPence += row.tip_amount_pence;
-    } else if (row.status === 'refunded') {
-      hasRefundedRow = true;
-    }
-  }
+  const [totalPence, sums] = await Promise.all([
+    resolveBookingTotalPenceFromRow(admin, booking),
+    sumSucceededBookingPayments(admin, bookingId),
+  ]);
+  const depositPaidPence = depositPaidContributionPence(booking);
 
   const paymentState = deriveBookingPaymentState({
     totalPence,
     depositPaidPence,
-    balancePaidPence,
-    hasRefundedRow,
+    balancePaidPence: sums.balancePaidPence,
+    hasRefundedRow: sums.hasRefundedRow,
   });
 
   const { error: updateErr } = await admin
     .from('bookings')
     .update({
-      amount_paid_pence: depositPaidPence + balancePaidPence,
-      tip_amount_pence: tipPaidPence,
+      amount_paid_pence: depositPaidPence + sums.balancePaidPence,
+      tip_amount_pence: sums.tipPaidPence,
       payment_state: paymentState,
       updated_at: new Date().toISOString(),
     })

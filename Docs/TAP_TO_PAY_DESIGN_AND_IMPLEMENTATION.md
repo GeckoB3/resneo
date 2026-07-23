@@ -193,6 +193,8 @@ UPDATE public.bookings
 
 **Do not overload `deposit_status`** — leave the deposit columns/flow untouched. `payment_state` is the new whole-booking state.
 
+**These denormalised columns are reporting caches, never charge inputs.** They refresh only when an in-person payment event runs the recompute — the deposit flows do not touch them, so a deposit paid after the last recompute is missing from `amount_paid_pence`. Every balance or charge amount MUST derive paid-so-far live via `computeLiveAmountPaidPence` (paid deposit + succeeded ledger rows, `src/lib/booking/payment-summary.ts`); the charge route and the booking GET/summary all do. Trusting the column would overcharge the customer by the deposit (§16 finding 20).
+
 ### 5.4 Venue capability columns
 ```sql
 ALTER TABLE public.venues
@@ -964,3 +966,15 @@ The resneo backend landed as specified (all §15 backend files; 49 new vitest ca
 | 19 | The venue flag 403-gates refunds too (kill switch is total); Stripe-dashboard refunds still reconcile via the flag-agnostic `charge.refunded` webhook | §6.7 |
 
 Also carried through from house patterns: cross-venue charge/refund writes are audited via `recordBookingWriteAudit` (§9 tenant-isolation posture), and the balance total is resolved via a `resolveBookingTotalPenceFromRow` helper that fetches the variant price from `service_variants` (the price is not on the bookings row). Deploy notes: apply the migration before the routes, and add **`payment_intent.canceled`** to the Stripe webhook endpoint's subscribed events.
+
+### Fourth review (2026-07-23) — post-implementation code review
+
+A dedicated bug-hunt over the landed backend found one critical spec-level gap and two minor items, all fixed:
+
+| # | Finding | Fix |
+|---|---|---|
+| 20 | **Critical overcharge:** balances derived from `bookings.amount_paid_pence`, but only the in-person paths run the recompute — a deposit paid via the deposit flows never lands in the column, so the charge route would bill the full price on top of the deposit (£10 deposit + £50 charge on a £50 appointment) and the GET/summary showed the wrong balance | Paid-so-far is now derived **live** everywhere (`computeLiveAmountPaidPence` = paid deposit + succeeded ledger rows); the GET/summary also return live `amount_paid_pence` / `payment_state`, and §5.3 now marks the denormalised columns as reporting caches only |
+| 21 | A reused `attempt_id` with different details hit Stripe's idempotency guard but surfaced as the misleading "not enabled for card payments" 400 | Distinct 409 branch ("This payment attempt has already started…") |
+| 22 | `resolveBookingTotalPenceFromRow` didn't venue-scope the `service_variants` lookup (the bundle RPC does) | Optional `venue_id` filter, passed by the charge route and recompute |
+
+Noted, no change needed: card refunds stay webhook-only (per §6.3a; brief paid-looking window until `charge.refunded` lands), and the deploy-order note from the third review covers the venue GET's extended select. Tests extended to 54 dedicated cases including a stale-column regression guard; full suite, tsc, and eslint clean.

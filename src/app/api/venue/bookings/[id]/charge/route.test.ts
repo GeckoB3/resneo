@@ -29,6 +29,7 @@ vi.mock('@/lib/stripe', () => ({
 
 vi.mock('@/lib/booking/payment-summary', () => ({
   resolveBookingTotalPenceFromRow: vi.fn(),
+  computeLiveAmountPaidPence: vi.fn(),
   recomputeBookingPaymentSummary: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -40,6 +41,7 @@ import { stripe } from '@/lib/stripe';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
 import {
+  computeLiveAmountPaidPence,
   recomputeBookingPaymentSummary,
   resolveBookingTotalPenceFromRow,
 } from '@/lib/booking/payment-summary';
@@ -50,6 +52,7 @@ const mockRefundCreate = vi.mocked(stripe.refunds.create);
 const mockGetVenueStaff = vi.mocked(getVenueStaff);
 const mockLoadBooking = vi.mocked(loadStaffAccessibleBooking);
 const mockResolveTotal = vi.mocked(resolveBookingTotalPenceFromRow);
+const mockLiveAmountPaid = vi.mocked(computeLiveAmountPaidPence);
 const mockRecompute = vi.mocked(recomputeBookingPaymentSummary);
 
 type Row = Record<string, unknown>;
@@ -108,7 +111,12 @@ const baseBooking = (): Row => ({
   booking_model: 'unified_scheduling',
   practitioner_id: null,
   appointment_service_id: null,
-  amount_paid_pence: 1000,
+  // Deliberately STALE (the live figure below is 1000): the route must derive
+  // paid-so-far from computeLiveAmountPaidPence, never from this column — a
+  // deposit paid after the last recompute is missing from it (overcharge bug).
+  amount_paid_pence: 0,
+  deposit_status: 'Paid',
+  deposit_amount_pence: 1000,
   booking_total_price_pence: null,
   service_variant_id: 'sv1',
   addons_total_price_pence: 0,
@@ -159,6 +167,8 @@ function setup(opts?: {
   } as unknown as Awaited<ReturnType<typeof loadStaffAccessibleBooking>>);
 
   mockResolveTotal.mockResolvedValue(opts?.totalPence === undefined ? 5000 : opts.totalPence);
+  // The LIVE paid-so-far figure (paid deposit + succeeded ledger rows).
+  mockLiveAmountPaid.mockResolvedValue(1000);
 
   mockPiCreate.mockResolvedValue({
     id: 'pi_new',
@@ -257,6 +267,30 @@ describe('charge route — card_present (§6.3c)', () => {
     const res = await post({ method: 'card_present', attempt_id: ATTEMPT });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe('Nothing left to pay.');
+  });
+
+  it('derives the balance from the LIVE paid amount, never the stale denormalised column', async () => {
+    // Fixture: bookings.amount_paid_pence = 0 (stale) but the live derivation
+    // returns 1000 (a deposit paid since the last recompute). Trusting the
+    // column would charge £50 instead of £40 — the overcharge bug.
+    setup();
+    const res = await post({ method: 'card_present', attempt_id: ATTEMPT });
+    expect(mockLiveAmountPaid).toHaveBeenCalledWith(
+      expect.anything(),
+      'b1',
+      expect.objectContaining({ deposit_status: 'Paid', deposit_amount_pence: 1000 }),
+    );
+    expect((await res.json()).amount_pence).toBe(4000); // 5000 − live 1000, not 5000 − stale 0
+  });
+
+  it('409s a reused attempt_id with different details instead of masking it as a capability error', async () => {
+    setup();
+    mockPiCreate.mockRejectedValue(
+      Object.assign(new Error('Keys for idempotent requests...'), { type: 'StripeIdempotencyError' }),
+    );
+    const res = await post({ method: 'card_present', attempt_id: ATTEMPT, amount_pence: 2000 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain('already started');
   });
 
   it('treats a 23505 on the ledger insert as an idempotent replay, not an error', async () => {

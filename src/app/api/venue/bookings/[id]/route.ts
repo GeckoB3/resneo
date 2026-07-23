@@ -83,7 +83,12 @@ import { deleteCardHoldCustomersForBookings } from '@/lib/booking/card-hold-rele
 import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 import { cardHoldChargeWindowEndsAtForBooking } from '@/lib/booking/card-hold-window';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
-import { resolveBookingTotalPence } from '@/lib/booking/payment-summary';
+import {
+  depositPaidContributionPence,
+  deriveBookingPaymentState,
+  resolveBookingTotalPence,
+  sumSucceededBookingPayments,
+} from '@/lib/booking/payment-summary';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
@@ -333,13 +338,26 @@ export async function GET(
     // In-person payments (§6.6): the RESOLVED total (variant + add-ons when the
     // stored column is empty, §5.7) and the outstanding balance. null balance =
     // price unknown → the Take payment sheet requires a staff-entered amount.
+    // amount_paid / payment_state are derived LIVE (paid deposit + ledger) —
+    // the denormalised columns only refresh on in-person payment activity, so
+    // a deposit paid since then would otherwise be missing from the balance.
     const resolvedTotalPence = resolveBookingTotalPence({
       booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
       service_variant_price_pence,
       addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
     });
-    const amountPaidPence =
-      typeof booking.amount_paid_pence === 'number' ? booking.amount_paid_pence : 0;
+    const ledgerSums = await sumSucceededBookingPayments(getSupabaseAdminClient(), id);
+    const depositPaidPence = depositPaidContributionPence({
+      deposit_status: booking.deposit_status ?? null,
+      deposit_amount_pence: booking.deposit_amount_pence ?? null,
+    });
+    const amountPaidPence = depositPaidPence + ledgerSums.balancePaidPence;
+    const livePaymentState = deriveBookingPaymentState({
+      totalPence: resolvedTotalPence,
+      depositPaidPence,
+      balancePaidPence: ledgerSums.balancePaidPence,
+      hasRefundedRow: ledgerSums.hasRefundedRow,
+    });
 
     return NextResponse.json({
       ...booking,
@@ -360,6 +378,8 @@ export async function GET(
       card_hold,
       service_payment_requirement,
       booking_total_price_pence: resolvedTotalPence,
+      amount_paid_pence: amountPaidPence,
+      payment_state: livePaymentState,
       balance_due_pence:
         resolvedTotalPence === null ? null : Math.max(0, resolvedTotalPence - amountPaidPence),
     });

@@ -59,6 +59,12 @@ const venueProfileSchema = z.object({
   public_booking_area_mode: z.enum(['auto', 'manual']).optional(),
   /** When true, public booking must complete magic-link login before checkout (see booking create). */
   require_account_login_for_bookings: z.boolean().optional(),
+  /**
+   * In-person card payments (Tap to Pay / Terminal) master switch, default false.
+   * Gates the mobile Take-payment surface and the connection-token + charge
+   * endpoints (Tap to Pay design doc §6.7). Admin-only, like every money setting.
+   */
+  in_person_payments_enabled: z.boolean().optional(),
   /** 6-digit hex (optional `#`) for embed iframe `?accent=` query param. Empty string clears. */
   embed_accent_colour: z.string().max(7).optional(),
   /** Public booking-page branding/content (Booking Site Studio); sanitised server-side. */
@@ -256,6 +262,9 @@ export async function PATCH(request: NextRequest) {
     }
     if (data.require_account_login_for_bookings !== undefined) {
       update.require_account_login_for_bookings = data.require_account_login_for_bookings;
+    }
+    if (data.in_person_payments_enabled !== undefined) {
+      update.in_person_payments_enabled = data.in_person_payments_enabled;
     }
     if (data.embed_accent_colour !== undefined) {
       const raw = typeof data.embed_accent_colour === 'string' ? data.embed_accent_colour : '';

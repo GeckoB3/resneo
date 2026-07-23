@@ -71,6 +71,11 @@ export interface VenueSettings {
    * See `venues.require_account_login_for_bookings`.
    */
   require_account_login_for_bookings?: boolean;
+  /**
+   * In-person card payments (Tap to Pay / Terminal) master switch, default false.
+   * See `venues.in_person_payments_enabled` and the Tap to Pay design doc §6.7.
+   */
+  in_person_payments_enabled?: boolean;
   /** Per-venue beta flags (appointments Phase 1a rollout). */
   feature_flags?: VenueFeatureFlags;
   /** Resolved flags (includes env overrides). */

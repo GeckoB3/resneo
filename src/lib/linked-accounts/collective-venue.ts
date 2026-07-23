@@ -17,6 +17,7 @@ import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import { loadPublicCombinedCatalogue, loadVenueCatalogueData } from './catalogue';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
@@ -61,9 +62,16 @@ export async function loadCollectiveVenuePublic(
   // come from the host too (matching the standard single-venue booking header).
   const { data: host } = await admin
     .from('venues')
-    .select('currency, deposit_config, booking_rules, terminology, address, phone, website_url')
+    .select('currency, deposit_config, booking_rules, terminology, address, phone, website_url, feature_flags')
     .eq('id', col.host_venue_id)
     .maybeSingle();
+
+  // The combined page works like one venue, so its "Any available" option follows
+  // the host venue's own "Any available practitioner" booking setting rather than
+  // being always on.
+  const hostAnyAvailablePractitioner = resolveAppointmentsFeatureFlags(
+    parseVenueFeatureFlags(host?.feature_flags),
+  ).any_available_practitioner;
 
   const branding = col.branding ?? {};
   const hostConfig = (col.booking_page_config ?? {}) as BookingPageConfig & { cover_photo_url?: string | null };
@@ -116,7 +124,7 @@ export async function loadCollectiveVenuePublic(
     currency: (host?.currency as string) ?? 'GBP',
     booking_paused: !bookable,
     is_collective: true,
-    feature_flags: { resolved: { any_available_practitioner: true } },
+    feature_flags: { resolved: { any_available_practitioner: hostAnyAvailablePractitioner } },
   };
 }
 

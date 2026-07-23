@@ -32,11 +32,38 @@ import type {
 const inputCls =
   'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500';
 
+/** Small spinner for the primary (brand-filled) action buttons. */
+function ButtonSpinner() {
+  return (
+    <span
+      className="mr-2 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+      aria-hidden
+    />
+  );
+}
+
+/**
+ * Local overlay for the calendar-assignment checkboxes: the host ticks/unticks
+ * calendars freely (no per-click server call), then "Save and close" applies every
+ * change in one request. `get` returns the staged desire for a calendar (undefined
+ * when it matches the server); `toggle` records or clears one change.
+ */
+type ProviderStaging = {
+  get: (itemId: string, calendarId: string) => boolean | undefined;
+  toggle: (
+    itemId: string,
+    venueId: string,
+    calendarId: string,
+    nextChecked: boolean,
+    serverChecked: boolean,
+  ) => void;
+};
+
 function fmtPrice(p: number | null): string {
-  return p == null ? '—' : `£${(p / 100).toFixed(2)}`;
+  return p == null ? '-' : `£${(p / 100).toFixed(2)}`;
 }
 function fmtDuration(m: number | null): string {
-  return m == null ? '—' : `${m} min`;
+  return m == null ? '-' : `${m} min`;
 }
 
 /** Editor team list: calendars actually providing on the combined page, venue-qualified on name clash. */
@@ -83,6 +110,13 @@ export function CombinedPageManager({
   const isHost = collective.isHost;
   const [tab, setTab] = useState<TabKey>('page');
 
+  // Staged calendar-assignment changes (Services & calendars tab), keyed by
+  // `${itemId}::${calendarId}`. Applied together by "Save and close".
+  const [pendingProviders, setPendingProviders] = useState<
+    Record<string, { itemId: string; venueId: string; calendarId: string; desired: boolean }>
+  >({});
+  const [savingProviders, setSavingProviders] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -123,6 +157,85 @@ export function CombinedPageManager({
     } finally {
       setBusy(false);
     }
+  };
+
+  // Read/record staged calendar-assignment changes. Toggling a calendar back to its
+  // server state clears the entry, so a tick-then-untick nets to nothing.
+  const providerStaging = useMemo<ProviderStaging>(
+    () => ({
+      get: (itemId, calendarId) => pendingProviders[`${itemId}::${calendarId}`]?.desired,
+      toggle: (itemId, venueId, calendarId, nextChecked, serverChecked) =>
+        setPendingProviders((prev) => {
+          const key = `${itemId}::${calendarId}`;
+          const next = { ...prev };
+          if (nextChecked === serverChecked) delete next[key];
+          else next[key] = { itemId, venueId, calendarId, desired: nextChecked };
+          return next;
+        }),
+    }),
+    [pendingProviders],
+  );
+
+  // The staged changes as server ops, recomputed against the current catalogue so a
+  // reload (e.g. after adding services) or an archived offering can never leave a
+  // stale op behind.
+  const providerOps = useMemo<
+    Array<
+      | { op: 'add'; itemId: string; venueId: string; practitionerId: string }
+      | { op: 'remove'; providerId: string }
+    >
+  >(() => {
+    if (!catalogue) return [];
+    const ops: Array<
+      | { op: 'add'; itemId: string; venueId: string; practitionerId: string }
+      | { op: 'remove'; providerId: string }
+    > = [];
+    for (const entry of Object.values(pendingProviders)) {
+      const item = catalogue.items.find((i) => i.id === entry.itemId && i.status === 'active');
+      if (!item) continue;
+      const provider = item.providers.find(
+        (p) => p.practitionerId === entry.calendarId && p.status !== 'removed',
+      );
+      if (entry.desired && !provider) {
+        ops.push({
+          op: 'add',
+          itemId: entry.itemId,
+          venueId: entry.venueId,
+          practitionerId: entry.calendarId,
+        });
+      } else if (!entry.desired && provider) {
+        ops.push({ op: 'remove', providerId: provider.id });
+      }
+    }
+    return ops;
+  }, [catalogue, pendingProviders]);
+
+  const pendingCount = providerOps.length;
+
+  /** Apply every staged calendar change in one request, then close on success. */
+  const saveAndClose = async (): Promise<void> => {
+    if (pendingCount === 0) {
+      onClose();
+      return;
+    }
+    setSavingProviders(true);
+    const ok = await action({ action: 'set_providers', ops: providerOps });
+    setSavingProviders(false);
+    if (ok) {
+      setPendingProviders({});
+      onClose();
+    }
+  };
+
+  /** Dismissal (overlay / Escape / Done): warn before discarding staged changes. */
+  const requestClose = (): void => {
+    if (
+      pendingCount > 0 &&
+      !window.confirm('You have unsaved calendar changes. Discard them and close?')
+    ) {
+      return;
+    }
+    onClose();
   };
 
   /** PATCH the collective settings (mode / address); refresh both views. */
@@ -186,7 +299,7 @@ export function CombinedPageManager({
     }
   };
 
-  // ── Shared booking-page editor (Page tab) — identical UI to a single venue ──
+  // ── Shared booking-page editor (Page tab), identical UI to a single venue ──
   const collectiveCover = (collective.bookingPageConfig as { cover_photo_url?: string | null } | null)
     ?.cover_photo_url;
   const [logoUrl, setLogoUrl] = useState<string | null>(
@@ -349,6 +462,7 @@ export function CombinedPageManager({
           coverUrl,
           timezone: collective.timezone,
           draftConfig: draft,
+          anyAvailablePractitioner: collective.hostAnyAvailablePractitioner,
         }),
       preserveScroll: async (task) => task(),
       capabilities: {
@@ -372,13 +486,13 @@ export function CombinedPageManager({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={requestClose}
       busy={busy}
       maxWidth="max-w-5xl"
-      title={`Combined booking page — ${collective.name}`}
+      title={`Combined booking page: ${collective.name}`}
       description={
         isHost
-          ? 'Your combined page works like a single venue. Set it up here — design, services & calendars, members.'
+          ? 'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.'
           : 'This combined page is managed by the host venue.'
       }
     >
@@ -448,7 +562,12 @@ export function CombinedPageManager({
               <div className="skeleton h-20 rounded-xl" />
             </div>
           ) : catalogue ? (
-            <HostCatalogue catalogue={catalogue} busy={busy} action={action} />
+            <HostCatalogue
+              catalogue={catalogue}
+              busy={busy}
+              action={action}
+              providerStaging={providerStaging}
+            />
           ) : null
         ) : null}
 
@@ -461,9 +580,20 @@ export function CombinedPageManager({
         ) : null}
       </div>
 
-      <div className="mt-5 flex justify-end">
-        <button type="button" className={btnSecondary} onClick={onClose} disabled={busy}>
-          Done
+      <div className="mt-5 flex items-center justify-end gap-3">
+        {pendingCount > 0 ? (
+          <span className="text-xs text-amber-600">
+            {pendingCount} unsaved calendar change{pendingCount === 1 ? '' : 's'}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className={pendingCount > 0 ? btnPrimary : btnSecondary}
+          onClick={() => (pendingCount > 0 ? void saveAndClose() : requestClose())}
+          disabled={busy}
+        >
+          {savingProviders ? <ButtonSpinner /> : null}
+          {pendingCount > 0 ? 'Save and close' : 'Done'}
         </button>
       </div>
     </Modal>
@@ -471,7 +601,7 @@ export function CombinedPageManager({
 }
 
 // ---------------------------------------------------------------------------
-// Booking page address (host) — the combined page works like one venue
+// Booking page address (host): the combined page works like one venue
 // ---------------------------------------------------------------------------
 
 function PageAddressSection({
@@ -488,7 +618,7 @@ function PageAddressSection({
     <section className="space-y-2 rounded-xl border border-slate-200 p-4">
       <p className="text-sm font-bold text-slate-900">Booking page address</p>
       <p className="text-xs text-slate-500">
-        Your combined page works like a single venue — one services menu and one team across all
+        Your combined page works like a single venue, with one services menu and one team across all
         members. Choose where customers reach it.
       </p>
       <label className="flex items-start gap-2 text-sm text-slate-700">
@@ -501,7 +631,7 @@ function PageAddressSection({
           onChange={() => void onSettings({ slugStrategy: 'dedicated' })}
         />
         <span>
-          Dedicated address — <code className="text-xs">/book/c/{collective.slug}</code>
+          Dedicated address: <code className="text-xs">/book/c/{collective.slug}</code>
         </span>
       </label>
       <label className="flex items-start gap-2 text-sm text-slate-700">
@@ -547,10 +677,10 @@ function PageAddressSection({
 }
 
 // ---------------------------------------------------------------------------
-// Page name (host) — collective name field used in the editor's address slot
+// Page name (host): collective name field used in the editor's address slot
 // ---------------------------------------------------------------------------
 
-/** Page name (collective-only — single venues edit their name under Profile). */
+/** Page name (collective-only; single venues edit their name under Profile). */
 function PageNameField({
   collective,
   busy,
@@ -572,7 +702,7 @@ function PageNameField({
           ) : save === 'saved' ? (
             <span className="text-emerald-600">Saved</span>
           ) : save === 'error' ? (
-            <span className="text-rose-600">Couldn&rsquo;t save — try again</span>
+            <span className="text-rose-600">Couldn&rsquo;t save, try again</span>
           ) : null}
         </span>
       </span>
@@ -601,7 +731,7 @@ function PageNameField({
 }
 
 // ---------------------------------------------------------------------------
-// Members (host) — folded in from the collective row + "Invite venue"
+// Members (host): folded in from the collective row + "Invite venue"
 // ---------------------------------------------------------------------------
 
 function MembersSection({
@@ -771,10 +901,12 @@ function HostCatalogue({
   catalogue,
   busy,
   action,
+  providerStaging,
 }: {
   catalogue: CatalogueManagementView;
   busy: boolean;
   action: (body: Record<string, unknown>) => Promise<boolean>;
+  providerStaging: ProviderStaging;
 }) {
   const [newItemName, setNewItemName] = useState('');
   const activeItems = catalogue.items.filter((i) => i.status === 'active');
@@ -805,6 +937,7 @@ function HostCatalogue({
               memberSources={catalogue.memberSources}
               busy={busy}
               action={action}
+              providerStaging={providerStaging}
             />
           ))
         )}
@@ -838,7 +971,7 @@ function HostCatalogue({
  * bookable services with a checkbox; tick any number, then "Add selected" puts
  * them all on the combined page in one request (each becomes an offering seeded
  * with its venue's calendars). To offer the SAME service across venues you don't
- * merge anything — you open the offering below and tick the other venues' calendars
+ * merge anything. You open the offering below and tick the other venues' calendars
  * (a service is created in a venue automatically if it doesn't have it). A service
  * whose name already matches an offering on the page shows "On page" so you manage
  * it there instead of creating a duplicate.
@@ -920,15 +1053,18 @@ function VenueServicesPicker({
       return next;
     });
 
+  const [adding, setAdding] = useState(false);
   const addSelected = async () => {
     const services = selectedKeys
       .map((k) => addableByKey.get(k))
       .filter((a): a is NonNullable<typeof a> => Boolean(a))
-      // Just the name + which venue/service — price/duration/etc. live on each
+      // Just the name + which venue/service; price/duration/etc. live on each
       // venue's own service (no collective-level defaults).
       .map((a) => ({ name: a.name, venueId: a.venueId, sourceServiceId: a.id }));
     if (services.length === 0) return;
+    setAdding(true);
     const ok = await action({ action: 'create_items', services });
+    setAdding(false);
     if (ok) setSelected(new Set());
   };
 
@@ -941,7 +1077,7 @@ function VenueServicesPicker({
           <p className="text-sm font-bold text-slate-900">Choose services to offer</p>
           <p className="mt-1 text-xs text-slate-500">
             Tick the services you want on the combined page, then add them together. To offer one at
-            more than one venue, open the offering below and tick that venue&apos;s calendars — the
+            more than one venue, open the offering below and tick that venue&apos;s calendars. The
             service is created there automatically if it doesn&apos;t have it yet.
           </p>
         </div>
@@ -1053,6 +1189,7 @@ function VenueServicesPicker({
                   disabled={busy || selectedCount === 0}
                   onClick={() => void addSelected()}
                 >
+                  {adding ? <ButtonSpinner /> : null}
                   {selectedCount > 0 ? `Add ${selectedCount} selected` : 'Add selected'}
                 </button>
               </div>
@@ -1069,11 +1206,13 @@ function ItemCard({
   memberSources,
   busy,
   action,
+  providerStaging,
 }: {
   item: CatalogueItemView;
   memberSources: CatalogueMemberSource[];
   busy: boolean;
   action: (body: Record<string, unknown>) => Promise<boolean>;
+  providerStaging: ProviderStaging;
 }) {
   const [name, setName] = useState(item.name);
 
@@ -1114,14 +1253,19 @@ function ItemCard({
         service settings (Dashboard → Services). Here you only choose which calendars offer it.
       </p>
 
-      <CalendarAssignment item={item} memberSources={memberSources} busy={busy} action={action} />
+      <CalendarAssignment
+        item={item}
+        memberSources={memberSources}
+        busy={busy}
+        providerStaging={providerStaging}
+      />
     </div>
   );
 }
 
 /**
  * Calendar-centric provider assignment (plan §23 / R1 + D1). Lists EVERY member
- * venue's calendars; tick which provide this offering — from any venue. A calendar
+ * venue's calendars; tick which provide this offering, from any venue. A calendar
  * whose venue already has a same-named service is mapped to it; otherwise ticking
  * the box DUPLICATES the service into that venue (a real, same-named service it can
  * book and manage) so both venues can offer it.
@@ -1130,12 +1274,12 @@ function CalendarAssignment({
   item,
   memberSources,
   busy,
-  action,
+  providerStaging,
 }: {
   item: CatalogueItemView;
   memberSources: CatalogueMemberSource[];
   busy: boolean;
-  action: (body: Record<string, unknown>) => Promise<boolean>;
+  providerStaging: ProviderStaging;
 }) {
   const providerByCalendar = new Map<string, CatalogueProviderView>();
   for (const p of item.providers) {
@@ -1166,7 +1310,7 @@ function CalendarAssignment({
                   cal={cal}
                   provider={providerByCalendar.get(cal.id) ?? null}
                   busy={busy}
-                  action={action}
+                  providerStaging={providerStaging}
                 />
               ))
             )}
@@ -1184,7 +1328,7 @@ function CalendarRow({
   cal,
   provider,
   busy,
-  action,
+  providerStaging,
 }: {
   item: CatalogueItemView;
   venueId: string;
@@ -1192,15 +1336,18 @@ function CalendarRow({
   cal: { id: string; name: string; services: { id: string; name: string }[] };
   provider: CatalogueProviderView | null;
   busy: boolean;
-  action: (body: Record<string, unknown>) => Promise<boolean>;
+  providerStaging: ProviderStaging;
 }) {
-  const checked = Boolean(provider);
+  // Server truth vs the staged (unsaved) desire. `checked` drives the box; a change
+  // is only applied when the host clicks "Save and close".
+  const serverChecked = Boolean(provider);
+  const desired = providerStaging.get(item.id, cal.id);
+  const checked = desired ?? serverChecked;
   // Whether this calendar's venue already offers the service. If not, ticking the box
   // duplicates the service into that venue (a real, same-named service it can book + manage).
   const hasService = cal.services.some(
     (s) => s.name.trim().toLowerCase() === item.name.trim().toLowerCase(),
   );
-  const willDuplicate = !checked && !hasService;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-sm">
@@ -1210,13 +1357,9 @@ function CalendarRow({
           className="rounded border-slate-300"
           checked={checked}
           disabled={busy}
-          onChange={(e) => {
-            if (!e.target.checked) {
-              if (provider) void action({ action: 'remove_provider', providerId: provider.id });
-              return;
-            }
-            void action({ action: 'add_provider', itemId: item.id, venueId, practitionerId: cal.id });
-          }}
+          onChange={(e) =>
+            providerStaging.toggle(item.id, venueId, cal.id, e.target.checked, serverChecked)
+          }
         />
         <span className="truncate text-slate-800">{cal.name}</span>
       </label>
@@ -1230,8 +1373,18 @@ function CalendarRow({
             <span className="font-medium text-amber-600">suspended</span>
           ) : null}
         </span>
-      ) : willDuplicate ? (
-        <span className="shrink-0 text-xs text-brand-600">adds “{item.name}” to {venueName}</span>
+      ) : checked && !provider ? (
+        // Staged add: on save this ticks the calendar (duplicating the service into
+        // its venue when that venue does not already offer it).
+        <span className="flex shrink-0 items-center gap-2 text-xs">
+          {!hasService ? (
+            <span className="text-brand-600">adds “{item.name}” to {venueName}</span>
+          ) : null}
+          <span className="font-medium text-amber-600">unsaved</span>
+        </span>
+      ) : !checked && provider ? (
+        // Staged remove: the calendar currently offers this but was unticked.
+        <span className="shrink-0 text-xs font-medium text-amber-600">unsaved, will remove</span>
       ) : null}
     </div>
   );

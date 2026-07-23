@@ -3,6 +3,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAcceptedLinkBetween } from './queries';
 import { evaluateLinkEligibility } from './eligibility';
+import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -115,6 +116,12 @@ export interface CollectiveView {
   branding: CollectiveBranding;
   serviceGrouping: ServiceGrouping;
   allowAnyPractitioner: boolean;
+  /**
+   * The host venue's resolved "Any available practitioner" booking setting. The
+   * combined page follows this (it works like one venue), so the editor preview can
+   * mirror whether the live page shows the "Any available" option.
+   */
+  hostAnyAvailablePractitioner: boolean;
   /** Combined booking page (plan §1.3). */
   pageMode: PageMode;
   slugStrategy: SlugStrategy;
@@ -265,15 +272,24 @@ export async function loadCollectiveViewsForVenue(
     .in('collective_id', [...collectiveIds])
     .in('status', ['invited', 'active']);
 
-  const memberVenueIds = new Set<string>();
-  for (const m of allMembers ?? []) memberVenueIds.add(m.venue_id as string);
+  const venueIdsToLoad = new Set<string>();
+  for (const m of allMembers ?? []) venueIdsToLoad.add(m.venue_id as string);
+  // Host venues too, so we can resolve each collective's host "Any available
+  // practitioner" setting (the combined page follows it).
+  for (const c of collectives ?? []) venueIdsToLoad.add((c as VenueCollectiveRow).host_venue_id);
   const venueNames: Record<string, string> = {};
-  if (memberVenueIds.size > 0) {
+  const venueAnyAvailable: Record<string, boolean> = {};
+  if (venueIdsToLoad.size > 0) {
     const { data: venues } = await admin
       .from('venues')
-      .select('id, name')
-      .in('id', [...memberVenueIds]);
-    for (const v of venues ?? []) venueNames[v.id as string] = (v.name as string) ?? 'Venue';
+      .select('id, name, feature_flags')
+      .in('id', [...venueIdsToLoad]);
+    for (const v of venues ?? []) {
+      venueNames[v.id as string] = (v.name as string) ?? 'Venue';
+      venueAnyAvailable[v.id as string] = resolveAppointmentsFeatureFlags(
+        parseVenueFeatureFlags((v as { feature_flags?: unknown }).feature_flags),
+      ).any_available_practitioner;
+    }
   }
 
   return (collectives ?? []).map((c) => {
@@ -300,6 +316,7 @@ export async function loadCollectiveViewsForVenue(
       branding: row.branding ?? {},
       serviceGrouping: row.service_grouping,
       allowAnyPractitioner: row.allow_any_practitioner,
+      hostAnyAvailablePractitioner: venueAnyAvailable[row.host_venue_id] ?? false,
       pageMode: (row.page_mode as PageMode) ?? 'directory',
       slugStrategy: (row.slug_strategy as SlugStrategy) ?? 'dedicated',
       adoptedVenueId: row.adopted_venue_id ?? null,

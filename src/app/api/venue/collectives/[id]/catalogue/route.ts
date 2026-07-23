@@ -601,6 +601,78 @@ async function applyCatalogueAction(
       return { ok: true };
     }
 
+    case 'set_providers': {
+      const ops = input.ops ?? [];
+      if (ops.length === 0) return { ok: false, error: 'No changes to save.', status: 400 };
+
+      // One approval notification per (member venue, offering), even when several
+      // of that venue's calendars are added to the same offering in this batch.
+      const proposals = new Map<string, { venueId: string; name: string }>();
+      let applied = 0;
+
+      for (const op of ops) {
+        if (op.op === 'remove') {
+          if (!op.providerId) continue;
+          const provider = await loadProviderInCollective(admin, collectiveId, op.providerId);
+          if (!provider) continue;
+          await admin
+            .from('collective_service_providers')
+            .update({ status: 'removed' })
+            .eq('id', provider.id);
+          applied += 1;
+          continue;
+        }
+        // op.op === 'add' — tick a calendar (duplicates the service into its venue if needed).
+        if (!op.itemId || !op.venueId || !op.practitionerId) continue;
+        if (!(await itemBelongsToCollective(admin, collectiveId, op.itemId))) continue;
+        const res = await addCalendarToOffering(
+          admin,
+          collectiveId,
+          op.itemId,
+          op.venueId,
+          op.practitionerId,
+          actingVenueId,
+          userId,
+        );
+        if (!res.ok) continue; // Skip a single failure; apply the rest.
+        applied += 1;
+        if (op.venueId !== actingVenueId && res.added > 0) {
+          const name = await offeringName(admin, op.itemId);
+          proposals.set(`${op.venueId}:${op.itemId}`, { venueId: op.venueId, name });
+        }
+      }
+
+      if (applied === 0) {
+        return { ok: false, error: 'None of the changes could be applied.', status: 400 };
+      }
+
+      // Ask each seeded member to approve the terms for its calendars (plan D6).
+      const proposalList = [...proposals.values()];
+      if (proposalList.length > 0) {
+        const venueIds = [...new Set(proposalList.map((p) => p.venueId))];
+        const [ctx, lookup] = await Promise.all([
+          collectiveContext(admin, collectiveId),
+          loadVenueLookup(admin, [actingVenueId, ...venueIds]),
+        ]);
+        const host = lookup[actingVenueId]?.name ?? 'The host venue';
+        await Promise.allSettled(
+          proposalList.map((p) =>
+            safeNotify(
+              notifyCombinedProviderProposed(
+                admin,
+                p.venueId,
+                ctx?.name ?? 'a venue collective',
+                host,
+                p.name,
+                collectiveId,
+              ),
+            ),
+          ),
+        );
+      }
+      return { ok: true };
+    }
+
     default:
       return { ok: false, error: 'Unknown action.', status: 400 };
   }

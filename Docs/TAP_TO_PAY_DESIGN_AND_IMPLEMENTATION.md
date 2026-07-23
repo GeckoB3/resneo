@@ -16,6 +16,8 @@ Clients book appointments online and pay **nothing or a deposit**. There is curr
 ### 1.2 Solution
 Add **Stripe Tap to Pay on iPhone & Android** (contactless, **no hardware reader** — the staff phone's NFC is the reader) to the **resneo-app** staff app. A staff member opens an appointment, taps **Take payment**, and the client taps their card or phone to settle the balance.
 
+**§7A additionally specifies an optional physical Stripe Terminal reader** (Bluetooth-paired, e.g. BBPOS WisePad 3) as a second card method for venues that prefer a dedicated reader. It reuses the same connection-token, Terminal Location, charge route, webhook, ledger, and receipt end to end — the only additions are mobile-side (a `bluetoothScan` discovery path and reader-management UX). The Tap to Pay design below (§1-§7) stands unchanged.
+
 Payment is collected via **Stripe Connect direct charges**: the money lands **directly in the venue's Stripe account, with 0% taken by Resneo** (the platform sets no `application_fee` anywhere today, and this feature keeps it that way). Resneo never holds the funds — preserving the existing "platform is not a payment institution" posture.
 
 ### 1.3 The frictionless principle (hard requirement)
@@ -34,6 +36,7 @@ Section 3 specifies exactly how this optionality is enforced.
 - **No forced/required payment** of any kind.
 - **No saved-card off-session charging** for balances (card is physically present; not needed).
 - **Appointments only** in v1 (classes/events are typically pre-paid online; restaurant tables rarely settle a balance this way).
+- **No internet/smart countertop readers** (Stripe Reader S700, BBPOS WisePOS E, Verifone P400) in v1. The two card methods are **Tap to Pay** (§1-§7) and a **Bluetooth handheld reader** (§7A) — both paired to the practitioner's own device, matching Resneo's mobile per-practitioner model. A fixed till shared across staff (the internet/smart-reader shape) is a different workflow, needs its own onboarding (registration-code + reader-to-account association, `internet` discovery), and is deferred to §14.
 
 ---
 
@@ -42,7 +45,7 @@ Section 3 specifies exactly how this optionality is enforced.
 | Dimension | v1 decision |
 |---|---|
 | Payment captured | **Outstanding balance only** (no tip prompt) |
-| Methods | **Tap to Pay card** + **cash/external recording** + **refunds** — all written to an audit ledger |
+| Methods | **Tap to Pay card** (phone NFC) + **physical Bluetooth reader** (§7A) + **cash/external recording** + **refunds** — all written to an audit ledger |
 | Booking models | **Appointments only** (`booking_model ∈ {practitioner_appointment, unified_scheduling}`) |
 | Rollout | Behind a **venue feature flag** (default off), pilot → widen |
 | Money flow | Connect **direct charge**, **0% platform fee** |
@@ -578,6 +581,169 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 
 ---
 
+## 7A. Physical Bluetooth card reader (Stripe Terminal reader) — additive to §7
+
+This section adds a **third in-person method alongside Tap to Pay**: a physical Stripe Terminal card reader that pairs to the staff device over **Bluetooth** (Stripe's `bluetoothScan` discovery). It is purely additive. Everything in §5, §6, §9 (backend, data model, security) and the whole webhook/ledger/receipt pipeline is **reused unchanged**; the new work is almost entirely mobile (a second discovery/connection path plus reader-management UX) with **one optional, non-breaking backend touch**.
+
+The same frictionless principle (§3) applies: a physical reader is just another way to run the same `card_present` collection. Nothing about it is required, and a venue that never pairs a reader never sees any of it.
+
+### 7A.1 What is reused vs. what is new
+
+| Layer | Tap to Pay (§1-§7) | Physical Bluetooth reader (this section) |
+|---|---|---|
+| Connection token (`POST /api/payments/connection-token`) | reused | **reused, byte-for-byte** |
+| Terminal Location (`ensureTerminalLocation`, §6.1) | reused | **reused** (Bluetooth readers also attach to a Location at connect time) |
+| Charge route (`POST …/charge`), PaymentIntent (`card_present`), ledger, webhook, receipt | reused | **reused, byte-for-byte** (same `payment_method_types: ['card_present']`) |
+| Venue flag / capability (`in_person_payments_enabled`, `card_present_ready`) | reused | **reused** (same `card_present` capability, same derivation §6.6) |
+| Data model (`booking_payments`, summary cols, enums) | reused | **reused** (`method` stays `'card_present'`; reader kind is optional `metadata`, §7A.6) |
+| SDK discovery method | `discoveryMethod: 'tapToPay'` | **`discoveryMethod: 'bluetoothScan'`** |
+| Reader lifecycle | phone NFC, no pairing | **pair / reconnect / battery / firmware update UX (new)** |
+| iOS entitlement | proximity-reader entitlement **required** | **none required** (Bluetooth readers need no Apple entitlement) |
+| Device eligibility | iPhone XS+/iOS 16.4+, NFC Android 11+ certified | **any Bluetooth-capable iOS/Android device** (much wider) |
+
+**Consequence:** the entire backend delivered in §12 Phase 1 already supports physical readers with zero change (or one optional metadata field). The reader work is a self-contained mobile add-on that can ship in the same release or a fast follow.
+
+### 7A.2 Reader hardware (UK / GBP)
+
+- **Recommended reader for Resneo's market: BBPOS WisePad 3** — Stripe's Bluetooth reader for the **UK/EU**, supporting **chip + contactless + on-reader PIN**. (The Stripe Reader M2 is a US/CA/AU/etc. device and is **not** the right model for GBP venues.)
+- **This directly mitigates the §13 UK SCA risk.** High-value or PIN-required cards that would make Tap to Pay fall back to a payment link can simply be **chip-inserted with the PIN entered on the reader keypad**. So the physical reader is not only an alternative, it closes the one Tap-to-Pay gap in §13.
+- **Wider device support:** because collection happens on the reader (not the phone NFC), there is **no NFC requirement and no iPhone XS+ / Android 11+ / certified-device constraint**. Older and cheaper staff devices work.
+
+### 7A.3 Capability & gating (delta only)
+
+No new venue column and no new backend gate. The physical reader is enabled by the **same** `venues.in_person_payments_enabled` flag and needs the **same** `card_present` capability + Terminal Location already required for Tap to Pay. What changes is only how the **client decides which options to show**:
+
+- `supportsTapToPay` — a **device** check from the SDK (`Terminal.supportsReadersOfType({ deviceType: 'tapToPay' })` or the SDK's tap-to-pay support helper). True on eligible NFC phones only.
+- `readerConnected` — whether a Bluetooth reader is currently paired/connected (client state).
+
+`TakePaymentSheet` (§7A.6) shows **Tap to Pay** only when `supportsTapToPay`, and shows **Use card reader** whenever `in_person_payments_enabled` (offering pairing if none is connected yet). A venue with only physical readers on non-NFC devices therefore gets a fully working "Take payment" surface even though Tap to Pay is unavailable.
+
+> Optional future nicety (not v1): a per-venue `preferred_in_person_method` to pin one method as default. v1 keeps it purely client-driven + "remember last used" (§7A.6) to stay frictionless.
+
+### 7A.4 Native config deltas — `app.json` / permissions
+
+The `@stripe/stripe-terminal-react-native` plugin already covers Bluetooth on Android (it injects the Bluetooth + location permissions and, on Android 12+, `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`). Extend the **plugin config** (§7.2) so iOS advertises Bluetooth and, optionally, background reconnection:
+
+```json
+[
+  "@stripe/stripe-terminal-react-native",
+  {
+    "tapToPayCheck": true,
+    "appDelegate": true,
+    "locationWhenInUsePermission": "Location is required to accept in-person card payments.",
+    "bluetoothAlwaysUsagePermission": "Bluetooth is used to connect to your card reader.",
+    "bluetoothPeripheralUsagePermission": "Bluetooth is used to connect to your card reader.",
+    "bluetoothBackgroundMode": true
+  }
+]
+```
+- iOS adds `NSBluetoothAlwaysUsageDescription` (and, for older OS targets, `NSBluetoothPeripheralUsageDescription`). **Verify the exact plugin prop names against the pinned SDK version's config-plugin schema** — like the discover/connect API (§7.1), these have drifted across betas. Keep all usage strings **free of em-dashes** (they become user-facing per project copy rules).
+- **iOS entitlement:** the Bluetooth path needs **no** `com.apple.developer.proximity-reader.payment.acceptance` entitlement. A build that ships **only** the reader path can skip the Apple entitlement entirely, removing §12's "longest pole". A build that ships **both** methods keeps the entitlement (for Tap to Pay) and simply adds the Bluetooth usage strings above.
+- Bundle/`package` unchanged (`com.resneo.app`).
+
+### 7A.5 Discovery & connection — `lib/payments/bluetoothReader.ts` + `useBluetoothReader()`
+
+Sibling to `useTapToPayReader` (§7.6), same **lazy** philosophy (never initialise on launch). Reuses the same `initialize()` and the same `locationId` from the connection-token response.
+
+```ts
+// useBluetoothReader():
+// 1. initialize() once (shared with the tapToPay path).
+// 2. Request Bluetooth (+ location) permissions.
+// 3. discoverReaders({ discoveryMethod: 'bluetoothScan', simulated: __DEV__ }).
+//    onUpdateDiscoveredReaders → a LIST (a busy salon may see several readers).
+// 4. connectReader({ discoveryMethod: 'bluetoothScan', reader, locationId }).
+//    (Beta churn, per §7.1: older betas used connectBluetoothReader({ reader, locationId }).
+//     Re-read the pinned version's reference before coding.)
+// 5. Persist the connected reader's serial (AsyncStorage). On next open, auto-scan and
+//    reconnect to that serial without a picker.
+// Status: 'idle' | 'scanning' | 'found' | 'connecting' | 'updating' | 'ready'
+//         | 'disconnected' | 'error'.
+```
+
+**Firmware updates are a first-class state, not an afterthought.** Bluetooth readers require mandatory software updates on first pairing and periodically thereafter, and these **block collection** for anywhere from tens of seconds to several minutes:
+- Handle `onDidStartInstallingUpdate` / `onDidReportReaderSoftwareUpdateProgress` / `onDidFinishInstallingUpdate` (and `onDidReportAvailableUpdate` for optional updates).
+- While `status === 'updating'`, the sheet shows a determinate progress UI and **disables** the Tap/Insert step. Copy (em-dash free): `"Updating your reader. Keep it nearby and switched on. This can take a few minutes."`
+
+Also handle: `onDidDisconnect` (unexpected drop → attempt one silent reconnect to the remembered serial, then surface `"Reader disconnected. Trying to reconnect."`), battery level via the reader's `batteryLevel` / `onDidReportBatteryLevel` (warn under ~15%: `"Reader battery low. Charge it soon."`), and low-signal/no-reader-found timeouts.
+
+**Provider wiring:** extend `TerminalProvider` (§7.5) so that when the venue is enabled it registers the Bluetooth lifecycle listeners too. On `ownerVenueId` change (linked-venue switch), disconnect the reader and clear the remembered serial for that scope, exactly as the tapToPay path re-mints its token.
+
+### 7A.6 Taking payment with a reader — `TakePaymentSheet` delta
+
+The collection flow is **identical from `useTakePayment`'s point of view** — same `POST …/charge` returning a `client_secret`, same `retrievePaymentIntent → collectPaymentMethod → confirmPaymentIntent`. The **only** difference is which reader is connected when `collectPaymentMethod` runs. So `useTakePayment` (§7.7) is reused as-is; no new mutation hook is required for the happy path.
+
+Method selection inside the existing sheet:
+```tsx
+// Primary options, shown by availability (§7A.3):
+//   [Tap to Pay on this phone]  — only if supportsTapToPay
+//   [Use card reader]           — always (if in_person_payments_enabled); if no reader
+//                                 is connected, tapping it opens the pairing flow first
+// Secondary: [Record cash / other]   Admin: [Refund]     Always: [Close]
+// Persist the last-used method (AsyncStorage) so staff aren't re-asked each time.
+```
+- Card-reader capture state machine mirrors §7.8 with two extra states surfaced from `useBluetoothReader`: `connecting` (discover/connect) and `updating` (firmware). Prompt copy for the tap step becomes reader-aware: `"Hold the card to the reader, or insert the chip."`
+- **On-reader PIN:** when the reader requests a PIN for a high-value/SCA card, the customer enters it on the reader keypad and `confirmPaymentIntent` resolves normally. The **Send payment link** fallback (§7.8 / §8-D) stays as the last resort for a declined or unreachable-reader case, but is needed far less often than on Tap to Pay.
+- **Reader management entry point:** add a **"Card reader"** row in the manage/settings area (sibling to the existing `components/manage/SessionSettingsSheet.tsx`) that opens `ReaderSettingsSheet` (§7A.7) to pair, view battery/firmware, and forget a reader outside of a live payment.
+
+### 7A.7 Reader management UX — `components/bookings/ReaderSettingsSheet.tsx`
+
+Model on `DepositSheet.tsx` (same `Sheet`/`Button`/`Text`/`spacing`/haptics primitives). Responsibilities:
+- **Pair:** scan → list discovered readers by name/serial → connect → remember. Shows the `updating` progress UI if a mandatory update runs on first connect.
+- **Status:** connected reader name, **battery level**, firmware/update state, and a **Forget reader** action (clears the remembered serial).
+- Reachable both from the settings row (§7A.6) and inline from `TakePaymentSheet` when a staff member taps **Use card reader** with nothing paired yet.
+
+Strict TS, no `any`, beginner comments, and **all UI strings free of em-dashes** (project copy rule).
+
+### 7A.8 Backend deltas — minimal and optional
+
+- **No new route. No schema migration. No enum change.** The reader charge is the exact same `card_present` PaymentIntent produced by `POST …/charge` (§6.3), confirmed by the same webhook (§6.4), written to the same `booking_payments` ledger.
+- **Optional (recommended for reporting):** let the charge schema accept `reader_type?: 'tap_to_pay' | 'bluetooth'` and write it into `booking_payments.metadata` (and PI `metadata`). This distinguishes the two card-present channels in revenue reporting **without** touching the `booking_payment_method` enum (which stays `'card_present'`). Backwards compatible — absent field defaults to unknown/tap-to-pay.
+- `card_present_ready` derivation (§6.6) is unchanged; the connection-token 400 remains the authoritative capability gate for **both** methods.
+
+### 7A.9 End-to-end flow (physical reader)
+
+Open appointment with a balance → **Take payment** → **Use card reader** → (first time: pair; if needed, firmware update with progress) → reader `ready` → **collect** (customer taps contactless or inserts chip + PIN on the reader) → **confirm** → Stripe sends `payment_intent.succeeded` (purpose = `appointment_balance`) → the **same** webhook writes the ledger `succeeded` + recompute → `payment_state='paid'` → app invalidates, refetch shows Paid → guest gets the receipt. (Identical to flow §8-A from the webhook onward.)
+
+### 7A.10 Testing additions (on top of §11)
+
+- **Simulated reader first:** `discoverReaders({ discoveryMethod: 'bluetoothScan', simulated: true })` yields a simulated Bluetooth reader in `__DEV__` — full discover/connect/collect/confirm with **no hardware**, so most of the path is testable before a WisePad 3 arrives.
+- **Jest / RTL:** `useBluetoothReader` state machine including the **`updating`** and **`disconnected`/reconnect-by-serial** paths; method-selection gate (Tap to Pay hidden when `!supportsTapToPay`; **Use card reader** shown and opening pairing when no reader connected); "remember last method/serial".
+- **Manual (real WisePad 3):** first-pair firmware update; low battery warning; disconnect **mid-collection** then reconnect; **on-reader PIN** on a high-value card completing without a payment link; contactless tap on the reader.
+- Reuses the same connected **test-mode** account (card-present capability + Terminal Location) as §11.
+
+### 7A.11 Rollout & risks (delta)
+
+- **Faster pilot path:** because the Bluetooth path needs **no Apple entitlement** (§7A.4), a reader-only pilot can go live **without waiting on Apple's 1-2 week publishing entitlement** — useful if the pilot venue prefers a physical reader.
+- **New risks & mitigations:**
+  - *Firmware update time* → determinate progress UI, "keep reader powered/nearby" copy, never block silently (§7A.5).
+  - *Reader supply / correct model per region* → standardise on **WisePad 3** for UK; document ordering in the pilot runbook.
+  - *Multiple readers in one salon* → discovery returns a list; label readers by name/serial in `ReaderSettingsSheet`; remember per device.
+  - *Keeping readers charged* → surface battery level + low-battery warning.
+  - *Bluetooth pairing/permission friction on iOS* → clear usage strings + a permission-denied recovery state in the sheet.
+
+### 7A.12 Estimate delta
+
+**~+2.5 to +4 eng-days** on top of the §12 total, essentially all mobile (discovery/connect, firmware-update UX, reader-management sheet, method selection, tests). Backend is **~0.25d** for the optional `reader_type` metadata, or **0** if deferred. Calendar-independent of Apple. Slots in as an extension of §12 Phase 4-5, or as a fast follow after the Tap-to-Pay pilot.
+
+### 7A.13 File-by-file (additive to §15)
+
+**resneo-app (mobile) — new**
+- `lib/payments/bluetoothReader.ts` + `useBluetoothReader` (discover/connect/update/battery/reconnect).
+- `components/bookings/ReaderSettingsSheet.tsx` (pair / status / forget).
+
+**resneo-app (mobile) — modified**
+- `providers/TerminalProvider.tsx` — register Bluetooth lifecycle listeners when enabled.
+- `components/bookings/TakePaymentSheet.tsx` — method selection (Tap to Pay vs card reader) + reader-aware states.
+- `components/bookings/BookingDetailContent.tsx` — unchanged gate; the button now leads to either method.
+- `app.json` — Bluetooth plugin props + iOS Bluetooth usage strings (§7A.4).
+- manage/settings screen — a "Card reader" row that opens `ReaderSettingsSheet`.
+- `types/booking-detail.ts` / reader status types — add reader connection/update state.
+
+**resneo (backend) — modified (optional)**
+- `src/app/api/venue/bookings/[id]/charge/route.ts` — accept optional `reader_type` and persist to `booking_payments.metadata` (no enum/schema change).
+
+---
+
 ## 8. End-to-end flows
 
 **A. Card Tap to Pay (happy path):** open appointment with deposit paid → **Take payment** → sheet shows balance → **Tap to Pay** → reader connects → client taps → confirm → Stripe sends `payment_intent.succeeded` (purpose=`appointment_balance`) → webhook writes ledger `succeeded` + recompute → `payment_state='paid'` → app invalidates, refetch shows Paid → guest gets receipt.
@@ -666,6 +832,7 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 - **Saved-card off-session** — charge a stored card for no-shows/remote balances (infra exists: `venue_customer_stripe`).
 - **Card-present capability auto-sync** — listen to `account.updated` to keep `card_present_ready` exact.
 - **Populate `booking_total_price_pence` at creation** — make balances/reporting authoritative across all flows.
+- **Internet/smart countertop readers** (Stripe Reader S700, BBPOS WisePOS E, Verifone P400) — a shared fixed till rather than a device-paired reader. **Revisit only if the pilot surfaces demand from larger front-desk / reception-style venues**; it is not a coverage gap (Tap to Pay + Bluetooth already cover every device class and card-present interaction) but a different deployment shape. Clean bolt-on when needed: `internet` discovery + registration-code onboarding + reader-to-account association, reusing the same connection-token, charge route, webhook, and ledger. The method-selection UI (§7A.6) is additive, so no rework to the existing two methods.
 
 ---
 
@@ -693,6 +860,7 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 - `lib/payments/terminal.ts` + `useTapToPayReader`.
 - `lib/queries/useTakePayment.ts` (+ `useRecordExternalPayment`, `useRefundPayment`).
 - `components/bookings/TakePaymentSheet.tsx`.
+- *(Physical Bluetooth reader, §7A.13)* `lib/payments/bluetoothReader.ts` + `useBluetoothReader`; `components/bookings/ReaderSettingsSheet.tsx`.
 
 ### resneo-app (mobile) — modified
 - `package.json` — pinned `@stripe/stripe-terminal-react-native`.

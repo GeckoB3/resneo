@@ -46,20 +46,11 @@ async function loadLinkedResourceHostByResourceId(
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
 
-  const [{ data: resourceRows }, { data: calendarResourceRows }] = await Promise.all([
-    admin.from('venue_resources').select('id, display_on_calendar_id').eq('venue_id', venueId),
-    admin
-      .from('unified_calendars')
-      .select('id, display_on_calendar_id')
-      .eq('venue_id', venueId)
-      .eq('calendar_type', 'resource'),
-  ]);
-
-  for (const row of resourceRows ?? []) {
-    const host = (row as { display_on_calendar_id?: string | null }).display_on_calendar_id;
-    const id = (row as { id: string }).id;
-    if (host && columnIds.has(host)) out.set(id, host);
-  }
+  const { data: calendarResourceRows } = await admin
+    .from('unified_calendars')
+    .select('id, display_on_calendar_id')
+    .eq('venue_id', venueId)
+    .eq('calendar_type', 'resource');
 
   for (const row of calendarResourceRows ?? []) {
     const host = (row as { display_on_calendar_id?: string | null }).display_on_calendar_id;
@@ -73,51 +64,15 @@ async function loadLinkedResourceHostByResourceId(
 async function loadLinkedResourcesForCalendar(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   venueId: string,
-  usesUnified: boolean,
   columnIds: ReadonlySet<string>,
 ): Promise<LinkedResource[]> {
-  if (usesUnified) {
-    const { data: rows } = await admin
-      .from('unified_calendars')
-      .select(
-        'id, name, is_active, display_on_calendar_id, min_booking_minutes, max_booking_minutes, slot_interval_minutes, working_hours, availability_exceptions',
-      )
-      .eq('venue_id', venueId)
-      .eq('calendar_type', 'resource')
-      .order('sort_order', { ascending: true });
-    return (rows ?? [])
-      .map((row) => {
-        const host = (row as { display_on_calendar_id?: string | null }).display_on_calendar_id;
-        if (!host || !columnIds.has(host)) return null;
-        return {
-          id: (row as { id: string }).id,
-          name: ((row as { name?: string | null }).name ?? 'Resource').trim() || 'Resource',
-          displayOnCalendarId: host,
-          minBookingMinutes:
-            (row as { min_booking_minutes?: number | null }).min_booking_minutes ??
-            DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
-          maxBookingMinutes: (row as { max_booking_minutes?: number | null }).max_booking_minutes ?? 180,
-          slotIntervalMinutes:
-            (row as { slot_interval_minutes?: number | null }).slot_interval_minutes ??
-            DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
-          isActive: (row as { is_active?: boolean | null }).is_active ?? true,
-          availabilityHours: linkedWorkingHoursFromDb(
-            (row as { working_hours?: unknown }).working_hours,
-          ),
-          availabilityExceptions:
-            ((row as { availability_exceptions?: LinkedResource['availabilityExceptions'] })
-              .availability_exceptions ?? undefined),
-        } as LinkedResource;
-      })
-      .filter((r): r is LinkedResource => r != null);
-  }
-
   const { data: rows } = await admin
-    .from('venue_resources')
+    .from('unified_calendars')
     .select(
-      'id, name, is_active, display_on_calendar_id, min_booking_minutes, max_booking_minutes, slot_interval_minutes, availability_hours, availability_exceptions',
+      'id, name, is_active, display_on_calendar_id, min_booking_minutes, max_booking_minutes, slot_interval_minutes, working_hours, availability_exceptions',
     )
     .eq('venue_id', venueId)
+    .eq('calendar_type', 'resource')
     .order('sort_order', { ascending: true });
 
   return (rows ?? [])
@@ -137,7 +92,7 @@ async function loadLinkedResourcesForCalendar(
           DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
         isActive: (row as { is_active?: boolean | null }).is_active ?? true,
         availabilityHours: linkedWorkingHoursFromDb(
-          (row as { availability_hours?: unknown }).availability_hours,
+          (row as { working_hours?: unknown }).working_hours,
         ),
         availabilityExceptions:
           ((row as { availability_exceptions?: LinkedResource['availabilityExceptions'] })
@@ -368,12 +323,7 @@ export async function GET(request: NextRequest) {
         access.venueId,
         columnIds,
       );
-      const resources = await loadLinkedResourcesForCalendar(
-        admin,
-        access.venueId,
-        usesUnified,
-        columnIds,
-      );
+      const resources = await loadLinkedResourcesForCalendar(admin, access.venueId, columnIds);
 
       const { eventCalendarByEventId, classCalendarByInstanceId } = await loadLinkedCdeColumnMaps(
         admin,

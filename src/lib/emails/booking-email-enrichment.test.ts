@@ -181,7 +181,7 @@ describe('enrichBookingEmailForComms', () => {
         },
       },
       {
-        table: 'venue_resources',
+        table: 'unified_calendars',
         data: {
           name: 'Court 2',
           display_on_calendar_id: 'host-cal-uuid',
@@ -194,7 +194,7 @@ describe('enrichBookingEmailForComms', () => {
         data: { name: 'Reception' },
       },
       {
-        table: 'venue_resources',
+        table: 'unified_calendars',
         data: {
           name: 'Court 2',
           display_on_calendar_id: 'host-cal-uuid',

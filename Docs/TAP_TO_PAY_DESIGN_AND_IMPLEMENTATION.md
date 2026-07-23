@@ -212,6 +212,8 @@ Computed by `recomputeBookingPaymentSummary` from `SUM(booking_payments WHERE st
 | `amount_paid_pence = 0` | `unpaid` |
 | every succeeded payment refunded | `refunded` |
 
+**Precedence when refunds and a paid deposit coexist:** `refunded` applies only when at least one ledger row is `refunded` **and** the recomputed `amount_paid_pence` is 0. If the balance payment was refunded but the deposit is still paid, the recompute lands back on `deposit_paid` (the deposit was never refunded; the deposit flow owns its own refund, §5.3). The rows above are evaluated on the recomputed sums, so this falls out naturally — state it in the `recomputeBookingPaymentSummary` tests.
+
 `unpaid` / `deposit_paid` / `partially_paid` are **normal, acceptable terminal states** (Section 3).
 
 ### 5.6 Summary helper
@@ -343,7 +345,8 @@ const MAX_IN_PERSON_PENCE = 100_000; // £1,000 cap when the price is unknown
 const schema = z.object({
   method: z.enum(['card_present', 'cash', 'external']).optional(),
   action: z.literal('refund').optional(),       // admin-only
-  amount_pence: z.number().int().min(1).max(MAX_IN_PERSON_PENCE).optional(), // omit = full balance
+  amount_pence: z.number().int().min(1).max(MAX_IN_PERSON_PENCE).optional(), // charges only; refunds are always full (v1)
+  attempt_id: z.string().uuid().optional(),     // REQUIRED for card_present: client-generated per payment attempt (idempotency)
   payment_id: z.string().uuid().optional(),     // for refund: which ledger row
   note: z.string().max(500).optional(),
 });
@@ -355,16 +358,32 @@ Handler steps:
 4. **Amount (see §5.7):** resolve `total = resolveBookingTotalPence(...)` (use the booking-detail bundle so `service_variant_price_pence`/`addons_total_price_pence` are available) and `balanceDue = total === null ? null : max(0, total − amount_paid_pence)`. For card/cash/external: if `balanceDue` known → default `amount_pence` to `balanceDue` and clamp to `[1, balanceDue]`; if `balanceDue` unknown → `amount_pence` is **required**, accepted in `[1, MAX_IN_PERSON_PENCE]`. Reject `amount_pence <= 0`. If `balanceDue === 0` (fully paid) and not a refund → `400 'Nothing left to pay.'`.
 5. Branch by intent:
 
-**(a) `action: 'refund'`** (gate with `requireAdmin(staff)`):
+**(a) `action: 'refund'`** (gate with `requireAdmin(staff)`). **v1 refunds are always the FULL amount of the chosen ledger row** — never pass a partial `amount` (the row status is binary, so a partial refund would corrupt the recompute; partial refunds are a §14 item needing `refunded_amount_pence`). Two sub-branches by the row's method:
 ```ts
 const { data: pay } = await staff.db.from('booking_payments')
   .select('*').eq('id', parsed.data.payment_id).eq('booking_id', id).single();
-await stripe.refunds.create(
-  { payment_intent: pay.stripe_payment_intent_id, amount: parsed.data.amount_pence ?? pay.amount_pence },
-  { stripeAccount: pay.stripe_connected_account_id, idempotencyKey: `refund:${pay.stripe_payment_intent_id}` },
-);
-// Mark refunded + recompute happens in the charge.refunded webhook branch (6.4).
+if (!pay || pay.status !== 'succeeded')
+  return NextResponse.json({ error: 'This payment cannot be refunded.' }, { status: 409 });
+
+if (pay.method === 'card_present') {
+  // Stripe refund; ledger flip + recompute happen in the charge.refunded webhook (§6.4).
+  // Mirror the deposit route: treat 'charge_already_refunded' as success so our
+  // state converges with Stripe's.
+  await stripe.refunds.create(
+    { payment_intent: pay.stripe_payment_intent_id },   // full refund — no amount
+    { stripeAccount: pay.stripe_connected_account_id, idempotencyKey: `refund:${pay.stripe_payment_intent_id}` },
+  );
+} else {
+  // cash/external: no Stripe leg exists — write the reversal directly. This is
+  // also the fix-up path for a mis-recorded cash payment (fat-fingered amount).
+  await staff.db.from('booking_payments')
+    .update({ status: 'refunded', note: parsed.data.note ?? pay.note, updated_at: new Date().toISOString() })
+    .eq('id', pay.id);
+  await recomputeBookingPaymentSummary(staff.db, id);
+}
+return NextResponse.json({ success: true });
 ```
+> The deposit route's refund precedent is Stripe-only (it 400s without a PI) — but unlike deposits, cash rows here live in the ledger, so a no-Stripe reversal is trivial and fully audited (`status='refunded'`, admin `staff_id` in place, optional note).
 
 **(b) `method: 'cash' | 'external'`** (no Stripe):
 ```ts
@@ -397,15 +416,28 @@ const pi = await stripe.paymentIntents.create(
     // NO application_fee_amount — preserves 0% platform cut.
   },
   { stripeAccount: venue.stripe_connected_account_id,
-    idempotencyKey: `balance:${id}:${chargePence}` },  // double-tap safe
+    // Key on the client-generated attempt_id, NOT the amount. An amount-based key
+    // (`balance:${id}:${pence}`) collides on legitimate equal-amount split payments
+    // (two guests paying £20 each on one booking): Stripe would return the FIRST,
+    // already-succeeded PI and the ledger insert would hit the unique index → 500.
+    // attempt_id is minted once per user-initiated attempt (§7.7), so an accidental
+    // double-POST of the same attempt reuses the key (double-tap safe) while a
+    // genuinely new payment gets a fresh key.
+    idempotencyKey: `balance:${id}:${parsed.data.attempt_id}` },
 );
+// (Reject card_present requests without attempt_id → 400.)
 
-await staff.db.from('booking_payments').insert({
+const { error: insertErr } = await staff.db.from('booking_payments').insert({
   booking_id: id, venue_id: scopeVenueId,
   stripe_connected_account_id: venue.stripe_connected_account_id,
   stripe_payment_intent_id: pi.id, method: 'card_present', status: 'pending',
   amount_pence: chargePence, staff_id: staff.id,
-});  // unique PI index makes the webhook update idempotent
+});
+// An idempotent replay of the same attempt returns the same PI, whose row already
+// exists — treat the unique-index violation (23505) as success, not a 500.
+// (Note: upsert onConflict can't be used here — booking_payments_pi_uq is a
+// PARTIAL unique index, which PostgREST's conflict target cannot infer.)
+if (insertErr && insertErr.code !== '23505') throw insertErr;
 
 return NextResponse.json({ payment_intent_id: pi.id, client_secret: pi.client_secret, amount_pence: chargePence });
 ```
@@ -435,7 +467,9 @@ if (meta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.APPOINTMENT_BALANCE) {
 3. Optionally insert a booking `events` row (`event_type='balance_payment_taken'`) — the detail screen already renders `events`.
 4. Send the receipt via `after(...)` — the route already imports `after` from `next/server` and uses it for deposit-paid comms (§6.5).
 
-**Refund webhook:** extend the existing `charge.refunded` / `charge.refund.updated` branch to also flip the matching `booking_payments` row to `refunded` and `recomputeBookingPaymentSummary` (→ `payment_state='refunded'` when fully refunded).
+**Refund webhook:** extend the existing `charge.refunded` / `charge.refund.updated` branch to also flip the matching `booking_payments` row to `refunded` and `recomputeBookingPaymentSummary` (→ `payment_state='refunded'` per the §5.5 precedence rule).
+
+**Abandoned-PI hygiene:** also handle `payment_intent.canceled` for `reserve_ni_purpose = APPOINTMENT_BALANCE`: flip the matching `pending` ledger row to `failed`. Otherwise rows for abandoned attempts (staff dismisses the sheet, §3.2) sit at `pending` forever — harmless to the recompute (which sums only `succeeded`) but noise in any future payments-history UI. No recompute needed since nothing succeeded.
 
 ### 6.5 Receipt
 Add `'payment_receipt'` to the `MessageType` union in `src/lib/communications/types.ts`, and add `sendPaymentReceiptEmail(booking, venue, venueId, { amountPaid, total, method })` in `src/lib/communications/send-templated.ts`, modelled on the **existing `sendDepositConfirmationEmail`** (which calls `sendPolicyMessage({ messageKey: 'payment_receipt', channel: 'email', mode: 'dedupe' })`). Reuse `venueRowToEmailData` (`src/lib/emails/venue-email-data.ts`). Email-first. This is the customer's record (direct-charge card-present has no Stripe-hosted email by default).
@@ -530,9 +564,13 @@ Model on `useBookingDeposit` (`lib/queries/useBookingMutations.ts`); use `invali
 ```ts
 // useTakePayment(bookingId): card flow
 //   mutationFn({ amountPence? }):
+//     0. const attempt_id = Crypto.randomUUID();   // ONE per user-initiated attempt —
+//        minted when the staff member taps the pay button, NOT per network call, so a
+//        double-fired mutation reuses it (idempotent) while "take another payment"
+//        later mints a fresh one (§6.3c).
 //     1. const { payment_intent_id, client_secret } =
 //          await apiFetch('/api/venue/bookings/${bookingId}/charge',
-//            { accessToken, method:'POST', body: JSON.stringify({ method:'card_present', amount_pence }) });
+//            { accessToken, method:'POST', body: JSON.stringify({ method:'card_present', amount_pence, attempt_id }) });
 //     2. await retrievePaymentIntent(client_secret);
 //     3. await collectPaymentMethod({ paymentIntent });   // staff prompts the tap here
 //     4. await confirmPaymentIntent({ paymentIntent });
@@ -540,7 +578,7 @@ Model on `useBookingDeposit` (`lib/queries/useBookingMutations.ts`); use `invali
 //   errors: cancel → cancelCollectPaymentMethod; decline/SCA → surface + allow retry/fallback
 
 // useRecordExternalPayment(bookingId): POST /charge { method:'cash'|'external', amount_pence, note }
-// useRefundPayment(bookingId):        POST /charge { action:'refund', payment_id, amount_pence? }
+// useRefundPayment(bookingId):        POST /charge { action:'refund', payment_id }   // always full (v1, §6.3a)
 ```
 > The mobile success handler never marks paid from the client result. It invalidates caches; the booking GET (reflecting the webhook's write) is the truth.
 
@@ -784,7 +822,7 @@ Open appointment with a balance → **Take payment** → **Use card reader** →
 
 **Backend (no mobile build needed):**
 - `vitest` on `resolveBookingTotalPence`: column wins when set; else `variant + addons`; else `null`. And `recomputeBookingPaymentSummary` truth table (§5.5), including the resolved-total path.
-- `vitest` on the `charge` route: card creates a `card_present` PI on the connected account with the correct amount and **no `application_fee`**; cash/external insert a `succeeded` ledger row + recompute; refund (admin-gated; non-admin → 403); **appointment guard** (`booking_model` not in the allowed set → 400); **known-balance clamp** and **unknown-balance staff-entered amount** (cap enforced; missing amount → 400); double-tap idempotency (same `idempotencyKey`/PI → one ledger row).
+- `vitest` on the `charge` route: card creates a `card_present` PI on the connected account with the correct amount and **no `application_fee`**; cash/external insert a `succeeded` ledger row + recompute; refund (admin-gated; non-admin → 403; **card row → Stripe full refund; cash/external row → direct ledger reversal, no Stripe call**; non-succeeded row → 409); **appointment guard** (`booking_model` not in the allowed set → 400); **known-balance clamp** and **unknown-balance staff-entered amount** (cap enforced; missing amount → 400); **idempotency:** same `attempt_id` replayed → same PI, one ledger row (23505 tolerated); **two equal-amount payments with distinct `attempt_id`s → two PIs, two rows** (the split-payment case); card_present without `attempt_id` → 400.
 - Webhook: feed `payment_intent.succeeded` with `reserve_ni_purpose: APPOINTMENT_BALANCE` (Stripe CLI or crafted event) → ledger flips `succeeded`, summary recomputes, receipt sent. Re-deliver same event → no double-credit. `charge.refunded` → `refunded` + recompute. Confirm a balance PI does **not** trigger the deposit-confirmation path.
 - Stripe **test mode** with a connected test account that has card-present capability + a Terminal Location.
 
@@ -828,6 +866,7 @@ Open appointment with a balance → **Take payment** → **Use card reader** →
 
 ## 14. Future (post-v1)
 - **Tips** — surface the reserved `tip_amount_pence` column with a tip selector + include in the charge amount.
+- **Partial refunds** — v1 refunds are full-per-payment only (§6.3a). Partial needs a `refunded_amount_pence` column on `booking_payments` (the binary `status` can't represent it) + recompute over `amount_pence − refunded_amount_pence` + webhook handling of partial `charge.refund.updated` amounts.
 - **Other booking models** — extend the gate beyond appointments where a balance concept applies.
 - **Saved-card off-session** — charge a stored card for no-shows/remote balances (infra exists: `venue_customer_stripe`).
 - **Card-present capability auto-sync** — listen to `account.updated` to keep `card_present_ready` exact.
@@ -893,3 +932,16 @@ Each design assumption was checked against the actual code. Outcome and the adju
 | 12 | Terminal `capture_method: 'automatic'` works for Tap to Pay confirm | ❓ unverified | explicit Phase 1/4 verify item + manual-capture fallback (§13) |
 
 **Net:** one critical issue (#6, appointment price) — resolved by the price resolver + staff-confirmable amount, with no change to the overall architecture. Everything else was confirmed or required only a precise reference. The design is implementable end-to-end as written.
+
+### Second review (2026-07-23)
+
+Re-verified the §16 symbol references against `staging` (all still hold; feature still unbuilt — no migration, no payment routes). Pressure-testing the money-flow edges surfaced four correctness gaps, all fixed in place, none architectural:
+
+| # | Finding | Fix |
+|---|---|---|
+| 13 | Amount-based idempotency key (`balance:${id}:${pence}`) collides on legitimate equal-amount split payments → replayed PI → unique-index 500 | Client-minted `attempt_id` per payment attempt keys the PI create; ledger insert tolerates 23505 (§6.3c, §7.7) |
+| 14 | Partial refunds corrupt the recompute (binary row status vs partial amount) | v1 refunds are full-per-payment only; partial deferred to §14 with `refunded_amount_pence` |
+| 15 | Cash/external rows unrefundable (refund sketch assumed a PI; deposit-route precedent is Stripe-only) and no way to void a mis-recorded cash payment | Refund on a cash/external row skips Stripe and writes the ledger reversal directly, admin-gated (§6.3a) |
+| 16 | `refunded` vs `deposit_paid` precedence ambiguous when a balance refund coexists with a paid deposit | `refunded` only when a refunded row exists AND recomputed `amount_paid_pence` = 0 (§5.5) |
+
+Plus hygiene: `payment_intent.canceled` flips abandoned `pending` ledger rows to `failed` (§6.4). §11 tests extended to cover all of the above. Open items unchanged: the §13 capture-flow question and pinned-SDK verification (§7.1, §7A.4/§7A.5) remain deliberate build-time checks.

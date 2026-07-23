@@ -120,7 +120,7 @@ describe('resolveCdeBookingContext', () => {
   it('adds resource duration derived from start/end wall-clock', async () => {
     const ctx = await resolveCdeBookingContext(
       makeClient({
-        single: { venue_resources: { name: 'Court 1', display_on_calendar_id: null } },
+        single: { unified_calendars: { name: 'Court 1', display_on_calendar_id: null } },
       }),
       { resource_id: 'r-1', booking_time: '10:00', booking_end_time: '11:30' },
     );
@@ -132,7 +132,7 @@ describe('resolveCdeBookingContext', () => {
   it('omits resource duration when the end time is missing', async () => {
     const ctx = await resolveCdeBookingContext(
       makeClient({
-        single: { venue_resources: { name: 'Studio', display_on_calendar_id: null } },
+        single: { unified_calendars: { name: 'Studio', display_on_calendar_id: null } },
       }),
       { resource_id: 'r-2', booking_time: '10:00' },
     );

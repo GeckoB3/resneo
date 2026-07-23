@@ -150,7 +150,12 @@ export function ProfileClient({
     });
     const body = (await res.json().catch(() => ({}))) as { device?: Device; error?: string };
     if (res.ok && body.device) {
-      setKnownDevices((rows) => [body.device!, ...rows]);
+      // Re-registering an existing device returns the refreshed row, so replace it
+      // in place rather than adding a second entry for the same device.
+      setKnownDevices((rows) => [
+        body.device!,
+        ...rows.filter((d) => d.id !== body.device!.id),
+      ]);
       setMessage('This browser has been registered.');
       return;
     }

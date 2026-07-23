@@ -564,7 +564,7 @@ export async function enrichBookingEmailForSecondaryModels(
       r.resource_id,
     );
     const { data: vr } = await supabase
-      .from('venue_resources')
+      .from('unified_calendars')
       .select('price_per_slot_pence, slot_interval_minutes')
       .eq('id', r.resource_id)
       .maybeSingle();

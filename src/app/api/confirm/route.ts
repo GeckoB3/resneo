@@ -186,7 +186,7 @@ export async function GET(request: NextRequest) {
     }
     if (bookingRow.resource_id) {
       const { data: vr } = await supabase
-        .from("venue_resources")
+        .from("unified_calendars")
         .select("name")
         .eq("id", bookingRow.resource_id)
         .maybeSingle();

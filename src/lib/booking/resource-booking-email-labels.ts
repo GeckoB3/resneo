@@ -9,7 +9,7 @@ export async function getResourceBookingEmailLabels(
   resourceId: string,
 ): Promise<{ resourceName: string | null; hostCalendarName: string | null }> {
   const { data: vr } = await supabase
-    .from('venue_resources')
+    .from('unified_calendars')
     .select('name, display_on_calendar_id')
     .eq('id', resourceId)
     .maybeSingle();

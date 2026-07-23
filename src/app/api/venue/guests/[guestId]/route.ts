@@ -235,7 +235,7 @@ export async function GET(
       }
     }
     if (resourceIds.length > 0) {
-      const { data: vrs } = await staff.db.from('venue_resources').select('id, name').in('id', resourceIds);
+      const { data: vrs } = await staff.db.from('unified_calendars').select('id, name').in('id', resourceIds);
       for (const v of vrs ?? []) {
         resMap.set((v as { id: string }).id, (v as { name: string }).name);
       }

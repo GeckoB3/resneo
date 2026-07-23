@@ -135,40 +135,31 @@ async function handleGet(request: NextRequest) {
   }
 
   // ---- 1b. Advance lapse warnings (§6.7) -------------------------------
-  // Email every venue linked to one whose subscription is foreseeably lapsing
-  // ~7 days out: a scheduled cancellation, or a Light free period ending
-  // without conversion. The 24h window means the daily cron warns exactly once.
+  // Email every venue linked to one with a scheduled cancellation ~7 days out.
+  // The 24h window means the daily cron warns exactly once.
+  //
+  // Light free periods were dropped in 20260627000000_pricing_plus_restructure.sql
+  // (along with venues.light_plan_free_period_ends_at), so there is no second
+  // lapse source any more.
   try {
     const now = Date.now();
     const windowStart = new Date(now + 6 * 24 * 60 * 60 * 1000).toISOString();
     const windowEnd = new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: cancelling } = await admin
+    const { data: cancelling, error: cancellingError } = await admin
       .from('venues')
       .select('id, name, subscription_current_period_end')
       .eq('plan_status', 'cancelling')
       .gte('subscription_current_period_end', windowStart)
       .lt('subscription_current_period_end', windowEnd);
 
-    const { data: lightLapsing } = await admin
-      .from('venues')
-      .select('id, name, light_plan_free_period_ends_at')
-      .is('light_plan_converted_at', null)
-      .gte('light_plan_free_period_ends_at', windowStart)
-      .lt('light_plan_free_period_ends_at', windowEnd);
+    if (cancellingError) throw cancellingError;
 
     const lapsing = new Map<string, { name: string; effectiveDate: string }>();
     for (const v of cancelling ?? []) {
       lapsing.set(v.id as string, {
         name: (v.name as string) ?? 'A linked venue',
         effectiveDate: (v.subscription_current_period_end as string) ?? '',
-      });
-    }
-    for (const v of lightLapsing ?? []) {
-      if (lapsing.has(v.id as string)) continue;
-      lapsing.set(v.id as string, {
-        name: (v.name as string) ?? 'A linked venue',
-        effectiveDate: (v.light_plan_free_period_ends_at as string) ?? '',
       });
     }
 

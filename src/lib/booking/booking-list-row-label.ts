@@ -131,7 +131,7 @@ export async function resolveBookingListRowLabels(db: Db, rows: BookingListRowFo
 
   const resource = new Map<string, string>();
   if (rIds.size > 0) {
-    const { data } = await db.from('venue_resources').select('id, name').in('id', [...rIds]);
+    const { data } = await db.from('unified_calendars').select('id, name').in('id', [...rIds]);
     for (const row of data ?? []) {
       const id = (row as { id: string }).id;
       const name = (row as { name?: string }).name?.trim();

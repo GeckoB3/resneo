@@ -141,29 +141,58 @@ async function insertGuestLog(
   return row?.id ?? null;
 }
 
+/**
+ * Insert-then-update rather than `.upsert({ onConflict })`. The uniqueness rule is
+ * `communication_logs_booking_message_lane_uidx`, a *partial* index (WHERE booking_id
+ * IS NOT NULL) so guest-anchored CRM rows never collide. PostgREST's `onConflict` only
+ * sends column names, never the index predicate, so Postgres cannot infer a partial
+ * index as the arbiter and raises 42P10 on every call.
+ */
 async function upsertPending(
   ctx: CommunicationDeliveryContext,
   channel: 'email' | 'sms',
-): Promise<void> {
+): Promise<string | null> {
   if (!ctx.bookingId) {
     throw new Error('[upsertPending] bookingId required');
   }
   const admin = getSupabaseAdminClient();
-  await admin.from('communication_logs').upsert(
-    {
+  const pendingState = {
+    channel,
+    recipient: ctx.recipient,
+    status: 'pending' as const,
+    sent_at: null,
+    error_message: null,
+    external_id: null,
+  };
+
+  const { data: inserted, error: insertError } = await admin
+    .from('communication_logs')
+    .insert({
       venue_id: ctx.venueId,
       booking_id: ctx.bookingId,
       communication_lane: ctx.lane,
       message_type: ctx.messageType,
-      channel,
-      recipient: ctx.recipient,
-      status: 'pending',
-      sent_at: null,
-      error_message: null,
-      external_id: null,
-    },
-    { onConflict: 'booking_id,message_type,communication_lane' },
-  );
+      ...pendingState,
+    })
+    .select('id')
+    .maybeSingle();
+
+  if (!insertError) return (inserted as { id: string } | null)?.id ?? null;
+  if (insertError.code !== '23505') throw insertError;
+
+  // Row already exists for this (booking, message_type, lane) — reset it to pending
+  // so the resend is recorded against the same log entry.
+  const { data: updated, error: updateError } = await admin
+    .from('communication_logs')
+    .update(pendingState)
+    .eq('booking_id', ctx.bookingId)
+    .eq('message_type', ctx.messageType)
+    .eq('communication_lane', ctx.lane)
+    .select('id')
+    .maybeSingle();
+
+  if (updateError) throw updateError;
+  return (updated as { id: string } | null)?.id ?? null;
 }
 
 async function finalizeStatus(
@@ -216,8 +245,8 @@ async function prepareLog(
   if (mode === 'dedupe') {
     return prepareDedupeLog(ctx, channel);
   }
-  await upsertPending(ctx, channel);
-  return { ok: true };
+  const logRowId = await upsertPending(ctx, channel);
+  return { ok: true, logRowId: logRowId ?? undefined };
 }
 
 export async function deliverEmailMessage(

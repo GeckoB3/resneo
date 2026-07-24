@@ -347,6 +347,17 @@ export async function GET(
       addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
     });
     const ledgerSums = await sumSucceededBookingPayments(getSupabaseAdminClient(), id);
+    // The in-person ledger rows themselves (booking_payments is service-role
+    // only, so this authenticated staff GET is the app's read path, §9). The
+    // refund action needs a row id; the sheet also lists what was collected.
+    const { data: paymentRowsData, error: paymentRowsErr } = await getSupabaseAdminClient()
+      .from('booking_payments')
+      .select('id, method, status, amount_pence, note, created_at')
+      .eq('booking_id', id)
+      .order('created_at', { ascending: false });
+    if (paymentRowsErr) {
+      console.error('GET /api/venue/bookings/[id] payments load failed:', paymentRowsErr.message);
+    }
     const depositPaidPence = depositPaidContributionPence({
       deposit_status: booking.deposit_status ?? null,
       deposit_amount_pence: booking.deposit_amount_pence ?? null,
@@ -382,6 +393,7 @@ export async function GET(
       payment_state: livePaymentState,
       balance_due_pence:
         resolvedTotalPence === null ? null : Math.max(0, resolvedTotalPence - amountPaidPence),
+      payments: paymentRowsData ?? [],
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);

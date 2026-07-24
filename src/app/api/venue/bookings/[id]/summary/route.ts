@@ -6,12 +6,7 @@ import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
 import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
 import { resolveBookingServicePaymentRequirement } from '@/lib/booking/booking-service-payment-requirement';
-import {
-  depositPaidContributionPence,
-  deriveBookingPaymentState,
-  resolveBookingTotalPence,
-  sumSucceededBookingPayments,
-} from '@/lib/booking/payment-summary';
+import { loadVisitPaymentPicture } from '@/lib/booking/payment-summary';
 import type { BookingModel } from '@/types/booking-models';
 
 /**
@@ -81,29 +76,24 @@ export async function GET(
 
     const addons = detailBundle.addons;
 
-    // In-person payments (§6.6): the RESOLVED total (variant + add-ons when the
-    // stored column is empty, §5.7) and the outstanding balance. null balance =
-    // price unknown → the Take payment sheet requires a staff-entered amount.
-    // amount_paid / payment_state are derived LIVE (paid deposit + ledger) —
-    // the denormalised columns only refresh on in-person payment activity, so
-    // a deposit paid since then would otherwise be missing from the balance.
-    const resolvedTotalPence = resolveBookingTotalPence({
-      booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
-      service_variant_price_pence,
-      addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
-    });
-    const ledgerSums = await sumSucceededBookingPayments(staff.db, id);
-    const depositPaidPence = depositPaidContributionPence({
-      deposit_status: booking.deposit_status ?? null,
-      deposit_amount_pence: booking.deposit_amount_pence ?? null,
-    });
-    const amountPaidPence = depositPaidPence + ledgerSums.balancePaidPence;
-    const livePaymentState = deriveBookingPaymentState({
-      totalPence: resolvedTotalPence,
-      depositPaidPence,
-      balancePaidPence: ledgerSums.balancePaidPence,
-      hasRefundedRow: ledgerSums.hasRefundedRow,
-    });
+    // In-person payments (§6.6): everything derived LIVE (paid deposits +
+    // ledger), never from the denormalised columns. VISIT-scoped (§5.7) —
+    // Take payment settles every row sharing group_booking_id, so the balance
+    // covers the whole visit; `booking_total_price_pence` stays this row's.
+    const visit = await loadVisitPaymentPicture(
+      staff.db,
+      {
+        id,
+        venue_id: scopeVenueId,
+        group_booking_id: (booking.group_booking_id as string | null) ?? null,
+        booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
+        service_variant_id: booking.service_variant_id ?? null,
+        addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
+        deposit_status: booking.deposit_status ?? null,
+        deposit_amount_pence: booking.deposit_amount_pence ?? null,
+      },
+      { venueId: scopeVenueId, anchorServiceVariantPricePence: service_variant_price_pence },
+    );
 
     return NextResponse.json({
       ...booking,
@@ -120,11 +110,17 @@ export async function GET(
       service_variant_price_pence,
       addons,
       service_payment_requirement,
-      booking_total_price_pence: resolvedTotalPence,
-      amount_paid_pence: amountPaidPence,
-      payment_state: livePaymentState,
-      balance_due_pence:
-        resolvedTotalPence === null ? null : Math.max(0, resolvedTotalPence - amountPaidPence),
+      booking_total_price_pence: visit.anchorTotalPence,
+      amount_paid_pence: visit.amountPaidPence,
+      payment_state: visit.paymentState,
+      balance_due_pence: visit.balanceDuePence,
+      visit_payment: {
+        booking_count: visit.bookingIds.length,
+        booking_ids: visit.bookingIds,
+        total_pence: visit.totalPence,
+        amount_paid_pence: visit.amountPaidPence,
+        balance_due_pence: visit.balanceDuePence,
+      },
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id]/summary failed:', err);

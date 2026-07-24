@@ -28,8 +28,7 @@ vi.mock('@/lib/stripe', () => ({
 }));
 
 vi.mock('@/lib/booking/payment-summary', () => ({
-  resolveBookingTotalPenceFromRow: vi.fn(),
-  computeLiveAmountPaidPence: vi.fn(),
+  loadVisitPaymentPicture: vi.fn(),
   recomputeBookingPaymentSummary: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -41,9 +40,8 @@ import { stripe } from '@/lib/stripe';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
 import {
-  computeLiveAmountPaidPence,
+  loadVisitPaymentPicture,
   recomputeBookingPaymentSummary,
-  resolveBookingTotalPenceFromRow,
 } from '@/lib/booking/payment-summary';
 import { POST } from './route';
 
@@ -51,8 +49,7 @@ const mockPiCreate = vi.mocked(stripe.paymentIntents.create);
 const mockRefundCreate = vi.mocked(stripe.refunds.create);
 const mockGetVenueStaff = vi.mocked(getVenueStaff);
 const mockLoadBooking = vi.mocked(loadStaffAccessibleBooking);
-const mockResolveTotal = vi.mocked(resolveBookingTotalPenceFromRow);
-const mockLiveAmountPaid = vi.mocked(computeLiveAmountPaidPence);
+const mockVisit = vi.mocked(loadVisitPaymentPicture);
 const mockRecompute = vi.mocked(recomputeBookingPaymentSummary);
 
 type Row = Record<string, unknown>;
@@ -117,6 +114,7 @@ const baseBooking = (): Row => ({
   amount_paid_pence: 0,
   deposit_status: 'Paid',
   deposit_amount_pence: 1000,
+  group_booking_id: 'grp-1',
   booking_total_price_pence: null,
   service_variant_id: 'sv1',
   addons_total_price_pence: 0,
@@ -130,6 +128,7 @@ function setup(opts?: {
   paymentRow?: Row | null;
   paymentInsertError?: { code: string; message: string } | null;
   role?: 'admin' | 'staff';
+  visitBookingIds?: string[];
 }) {
   const venueRow =
     opts?.venueRow === undefined
@@ -166,9 +165,22 @@ function setup(opts?: {
     },
   } as unknown as Awaited<ReturnType<typeof loadStaffAccessibleBooking>>);
 
-  mockResolveTotal.mockResolvedValue(opts?.totalPence === undefined ? 5000 : opts.totalPence);
-  // The LIVE paid-so-far figure (paid deposit + succeeded ledger rows).
-  mockLiveAmountPaid.mockResolvedValue(1000);
+  // The visit picture: LIVE totals across every row sharing group_booking_id.
+  // Paid-so-far is 1000 (a paid deposit) while the booking row's denormalised
+  // amount_paid_pence is deliberately stale-zero.
+  const totalPence = opts?.totalPence === undefined ? 5000 : opts.totalPence;
+  const bookingIds = opts?.visitBookingIds ?? ['b1'];
+  mockVisit.mockResolvedValue({
+    rows: bookingIds.map((bid) => ({ id: bid })),
+    bookingIds,
+    anchorTotalPence: totalPence,
+    totalPence,
+    amountPaidPence: 1000,
+    balanceDuePence: totalPence === null ? null : Math.max(0, totalPence - 1000),
+    paymentState: 'deposit_paid',
+    ledger: { balancePaidPence: 0, tipPaidPence: 0, hasRefundedRow: false, perBooking: new Map() },
+    depositPaidByBooking: new Map(bookingIds.map((bid) => [bid, bid === 'b1' ? 1000 : 0])),
+  } as unknown as Awaited<ReturnType<typeof loadVisitPaymentPicture>>);
 
   mockPiCreate.mockResolvedValue({
     id: 'pi_new',
@@ -269,16 +281,16 @@ describe('charge route — card_present (§6.3c)', () => {
     expect((await res.json()).error).toBe('Nothing left to pay.');
   });
 
-  it('derives the balance from the LIVE paid amount, never the stale denormalised column', async () => {
-    // Fixture: bookings.amount_paid_pence = 0 (stale) but the live derivation
-    // returns 1000 (a deposit paid since the last recompute). Trusting the
-    // column would charge £50 instead of £40 — the overcharge bug.
+  it('derives the balance from the LIVE visit picture, never the stale denormalised column', async () => {
+    // Fixture: bookings.amount_paid_pence = 0 (stale) but the live visit
+    // picture reports 1000 paid (a deposit paid since the last recompute).
+    // Trusting the column would charge £50 instead of £40 — the overcharge bug.
     setup();
     const res = await post({ method: 'card_present', attempt_id: ATTEMPT });
-    expect(mockLiveAmountPaid).toHaveBeenCalledWith(
+    expect(mockVisit).toHaveBeenCalledWith(
       expect.anything(),
-      'b1',
-      expect.objectContaining({ deposit_status: 'Paid', deposit_amount_pence: 1000 }),
+      expect.objectContaining({ id: 'b1', deposit_status: 'Paid', deposit_amount_pence: 1000 }),
+      expect.objectContaining({ venueId: 'v1' }),
     );
     expect((await res.json()).amount_pence).toBe(4000); // 5000 − live 1000, not 5000 − stale 0
   });
@@ -307,6 +319,47 @@ describe('charge route — card_present (§6.3c)', () => {
     expect(mockPiCreate).toHaveBeenCalledTimes(2);
     const keys = mockPiCreate.mock.calls.map((c) => (c[1] as { idempotencyKey: string }).idempotencyKey);
     expect(keys).toEqual([`balance:b1:${ATTEMPT}`, `balance:b1:${otherAttempt}`]);
+  });
+});
+
+describe('charge route — visit-scoped settlement (§5.7)', () => {
+  it('settles the WHOLE visit: the balance spans every row sharing group_booking_id', async () => {
+    // A cut + colour visit: the visit picture reports the visit total (9000),
+    // so one collection settles the visit rather than the opened line.
+    setup({ totalPence: 9000, visitBookingIds: ['b1', 'b2'] });
+    const res = await post({ method: 'card_present', attempt_id: ATTEMPT });
+    expect(res.status).toBe(200);
+    expect((await res.json()).amount_pence).toBe(8000); // visit 9000 − paid 1000
+    expect(mockVisit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ group_booking_id: 'grp-1' }),
+      expect.objectContaining({ venueId: 'v1' }),
+    );
+  });
+
+  it('records visit provenance on the ledger row and the PaymentIntent', async () => {
+    const { calls } = setup({ totalPence: 9000, visitBookingIds: ['b1', 'b2'] });
+    await post({ method: 'card_present', attempt_id: ATTEMPT });
+
+    const insert = calls.find((c) => c.table === 'booking_payments' && c.op === 'insert');
+    expect(insert?.payload).toMatchObject({
+      booking_id: 'b1', // anchored to the opened row
+      metadata: expect.objectContaining({
+        group_booking_id: 'grp-1',
+        visit_booking_ids: ['b1', 'b2'],
+      }),
+    });
+    const [params] = mockPiCreate.mock.calls[0]!;
+    expect((params as { metadata: Record<string, string> }).metadata).toMatchObject({
+      group_booking_id: 'grp-1',
+    });
+  });
+
+  it('a standalone booking carries no visit metadata', async () => {
+    const { calls } = setup({ booking: { ...baseBooking(), group_booking_id: null } });
+    await post({ method: 'cash' });
+    const insert = calls.find((c) => c.table === 'booking_payments' && c.op === 'insert');
+    expect(insert?.payload).toMatchObject({ metadata: {} });
   });
 });
 

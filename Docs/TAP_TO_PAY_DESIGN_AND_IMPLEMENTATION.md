@@ -252,7 +252,17 @@ export function resolveBookingTotalPence(b: {
   return computed > 0 ? computed : null;   // null = unknown (free or un-priced)
 }
 ```
-- `service_variant_price_pence` is already loaded by `src/lib/booking/load-booking-detail-bundle.ts` (`StaffBookingDetailBundle`). Add-on totals come from the booking. For **group appointments**, sum the per-appointment subtotals (the existing group logic in `booking-confirmation-pricing.ts` / the detail bundle).
+- `service_variant_price_pence` is already loaded by `src/lib/booking/load-booking-detail-bundle.ts` (`StaffBookingDetailBundle`). Add-on totals come from the booking.
+
+> **Payment is VISIT-scoped: Take payment settles the whole visit.** A multi-service visit or group booking (`create-multi-service` / `create-group`) writes **one `bookings` row per service/person**, each carrying its **own** `service_variant_id`, `addons_total_price_pence` and `deposit_amount_pence`. A cut + colour visit is **one collection**, not two: `loadVisitPaymentPicture` (`src/lib/booking/payment-summary.ts`) sums every row sharing `group_booking_id` and every payment across them. Rules:
+> - **Visit total** = the sum of each row's resolved total. If **any** line is unresolvable the whole visit total is `null` (unknown) → staff enter the amount. Treating an unresolvable line as £0 would silently understate the visit, and the clamp would then block staff from collecting the rest.
+> - **Cancelled lines are excluded** (nothing is owed for them), except the anchor row itself.
+> - **Siblings are venue-scoped** — a `group_booking_id` can never reach across venues.
+> - **Ledger anchor:** one payment writes **one** ledger row, anchored to the booking the staff opened, with `metadata.group_booking_id` + `visit_booking_ids` for provenance (the PI carries `group_booking_id` too).
+> - **Cache semantics after recompute** (§5.6): `amount_paid_pence` / `tip_amount_pence` stay **per row** (its own deposit + the ledger rows anchored to it) so summing them for revenue never double-counts a visit payment, while `payment_state` is the **visit** state on every row, because the visit settles as one unit.
+> - **API:** the booking GET and `/summary` return visit-scoped `balance_due_pence` / `amount_paid_pence` / `payment_state` (what Take payment acts on), keep `booking_total_price_pence` as **this row's** resolved price, and add a `visit_payment` object (`booking_count`, `booking_ids`, `total_pence`, `amount_paid_pence`, `balance_due_pence`). `payments[]` covers the whole visit, so a visit payment is visible and refundable from any line.
+>
+> Note: the spec's earlier pointer to group logic in `booking-confirmation-pricing.ts` refers to **email display** helpers (it lives in `src/lib/communications/` and sums formatted price strings), which are not a usable source for a charge amount.
 - `balanceDuePence = total === null ? null : Math.max(0, total - amount_paid_pence)`.
 
 **Staff-confirmable amount (removes the hard dependency).** Because the total may be unknown, the amount is always **staff-confirmable**, never rigidly derived:
@@ -875,6 +885,7 @@ Open appointment with a balance → **Take payment** → **Use card reader** →
 
 ## 14. Future (post-v1)
 - **Tips** — surface the reserved `tip_amount_pence` column with a tip selector + include in the charge amount.
+- **Per-line settlement within a visit** — v1 settles the whole visit in one collection (§5.7). Splitting a visit across payers (one guest pays for their own line) would need a line-selection UI and a per-row allocation on the ledger row; the `visit_payment.booking_ids` payload already gives the app the data to build it.
 - **Partial refunds** — v1 refunds are full-per-payment only (§6.3a). Partial needs a `refunded_amount_pence` column on `booking_payments` (the binary `status` can't represent it) + recompute over `amount_pence − refunded_amount_pence` + webhook handling of partial `charge.refund.updated` amounts.
 - **Other booking models** — extend the gate beyond appointments where a balance concept applies.
 - **Saved-card off-session** — charge a stored card for no-shows/remote balances (infra exists: `venue_customer_stripe`).
@@ -977,4 +988,16 @@ A dedicated bug-hunt over the landed backend found one critical spec-level gap a
 | 21 | A reused `attempt_id` with different details hit Stripe's idempotency guard but surfaced as the misleading "not enabled for card payments" 400 | Distinct 409 branch ("This payment attempt has already started…") |
 | 22 | `resolveBookingTotalPenceFromRow` didn't venue-scope the `service_variants` lookup (the bundle RPC does) | Optional `venue_id` filter, passed by the charge route and recompute |
 
-Noted, no change needed: card refunds stay webhook-only (per §6.3a; brief paid-looking window until `charge.refunded` lands), and the deploy-order note from the third review covers the venue GET's extended select. Tests extended to 54 dedicated cases including a stale-column regression guard; full suite, tsc, and eslint clean.
+Noted, no change needed: card refunds stay webhook-only (per §6.3a; brief paid-looking window until `charge.refunded` lands), and the deploy-order note from the third review covers the venue GET's extended select.
+
+### Fifth review (2026-07-23) — completeness audit vs this spec
+
+A section-by-section audit of the spec against the landed backend. All §15 backend files exist; §3.4's frictionless guarantees verified in code (no status-transition path reads `payment_state`; no `application_fee` anywhere; both endpoints gate on the venue flag). Findings:
+
+| # | Finding | Status |
+|---|---|---|
+| 23 | **Group/multi-service appointments settled per row, not per visit** — the only unimplemented §5.7 requirement. Not a money-correctness bug (each row's arithmetic was right and the clamp prevented over-collection), but a whole visit could not be settled in one tap | **Resolved — visit-scoped settlement implemented.** Product decision: Take payment settles the whole visit. New `loadVisitPaymentPicture` is the single source for total / paid / balance / state across `group_booking_id`; the charge route, booking GET, `/summary` and the recompute fan-out all use it. Rules and API shape in §5.7 |
+| 24 | §11 required "confirm a balance PI does **not** trigger the deposit-confirmation path" — proven only by unit tests on the helper, never at the routing level | Fixed: new `route.balance-payment.test.ts` (9 cases) drives the **real** webhook and asserts branch isolation for succeeded / failed / canceled / refunded, both directions |
+| 25 | The venue bootstrap's degraded `basicVenue` fallback select omitted `in_person_payments_enabled`, silently forcing the feature off if the primary select ever failed | Fixed: column added to the fallback select |
+
+Deviation accepted (no change): §6.6 says to extend `load-booking-detail-bundle.ts`; the resolved total / balance / live payment state are instead computed in the GET and summary routes, because the values depend on the ledger and deposit rather than the bundle RPC's satellite rows. Behaviour matches the spec's contract. Tests extended to 54 dedicated cases including a stale-column regression guard; full suite, tsc, and eslint clean.

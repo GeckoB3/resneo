@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  computeLiveAmountPaidPence,
   depositPaidContributionPence,
   deriveBookingPaymentState,
+  loadVisitPaymentPicture,
   recomputeBookingPaymentSummary,
   resolveBookingTotalPence,
   resolveBookingTotalPenceFromRow,
@@ -174,36 +174,141 @@ describe('resolveBookingTotalPenceFromRow', () => {
   });
 });
 
-describe('computeLiveAmountPaidPence (live paid-so-far, the overcharge-bug guard)', () => {
-  it('sums the paid deposit and succeeded ledger rows, ignoring pending/failed', async () => {
+describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
+  const anchor = {
+    id: 'b1',
+    venue_id: 'v1',
+    group_booking_id: null as string | null,
+    booking_total_price_pence: null,
+    service_variant_id: 'sv1',
+    addons_total_price_pence: 0,
+    deposit_status: 'Paid',
+    deposit_amount_pence: 1000,
+  };
+
+  it('a standalone booking: paid deposit + succeeded ledger, no sibling query', async () => {
+    const tables: string[] = [];
     const { admin } = makeAdmin((call) => {
+      tables.push(call.table);
+      if (call.table === 'service_variants') return { data: [{ id: 'sv1', price_pence: 5000 }] };
       if (call.table === 'booking_payments') {
         return {
           data: [
-            { amount_pence: 2000, tip_amount_pence: 0, status: 'succeeded' },
-            { amount_pence: 999, tip_amount_pence: 0, status: 'pending' },
-            { amount_pence: 777, tip_amount_pence: 0, status: 'failed' },
+            { booking_id: 'b1', amount_pence: 2000, tip_amount_pence: 0, status: 'succeeded' },
+            { booking_id: 'b1', amount_pence: 999, tip_amount_pence: 0, status: 'pending' },
           ],
         };
       }
       throw new Error(`unexpected table ${call.table}`);
     });
-    const paid = await computeLiveAmountPaidPence(admin, 'b1', {
-      deposit_status: 'Paid',
-      deposit_amount_pence: 1000,
-    });
-    expect(paid).toBe(3000);
+    const visit = await loadVisitPaymentPicture(admin, anchor);
+    expect(tables).not.toContain('bookings'); // no sibling lookup without a group
+    expect(visit.bookingIds).toEqual(['b1']);
+    expect(visit.totalPence).toBe(5000);
+    expect(visit.amountPaidPence).toBe(3000); // deposit 1000 + succeeded 2000
+    expect(visit.balanceDuePence).toBe(2000);
+    expect(visit.paymentState).toBe('partially_paid');
   });
 
-  it('a non-Paid deposit contributes nothing', async () => {
-    const { admin } = makeAdmin(() => ({ data: [] }));
-    expect(
-      await computeLiveAmountPaidPence(admin, 'b1', {
-        deposit_status: 'Refunded',
-        deposit_amount_pence: 1000,
-      }),
-    ).toBe(0);
+  it('a visit sums every sibling row and every sibling payment', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1' },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv2',
+              addons_total_price_pence: 500,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      if (call.table === 'service_variants') {
+        return { data: [{ id: 'sv1', price_pence: 3000 }, { id: 'sv2', price_pence: 6000 }] };
+      }
+      if (call.table === 'booking_payments') {
+        return {
+          data: [{ booking_id: 'b2', amount_pence: 500, tip_amount_pence: 0, status: 'succeeded' }],
+        };
+      }
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, { ...anchor, group_booking_id: 'grp-1' });
+    expect(visit.bookingIds).toEqual(['b1', 'b2']);
+    // visit total = (3000) + (6000 + 500 addons) = 9500
+    expect(visit.totalPence).toBe(9500);
+    expect(visit.anchorTotalPence).toBe(3000); // this row only
+    expect(visit.amountPaidPence).toBe(1500); // deposit 1000 + sibling payment 500
+    expect(visit.balanceDuePence).toBe(8000);
+    // Per-row ledger attribution keeps revenue sums from double counting.
+    expect(visit.ledger.perBooking.get('b2')?.balancePaidPence).toBe(500);
+    expect(visit.ledger.perBooking.get('b1')?.balancePaidPence).toBe(0);
+  });
+
+  it('an unresolvable line makes the WHOLE visit total unknown (never silently understated)', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1' },
+            { id: 'b2', venue_id: 'v1', group_booking_id: 'grp-1', service_variant_id: null, addons_total_price_pence: 0 },
+          ],
+        };
+      }
+      if (call.table === 'service_variants') return { data: [{ id: 'sv1', price_pence: 3000 }] };
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, { ...anchor, group_booking_id: 'grp-1' });
+    expect(visit.totalPence).toBeNull();
+    expect(visit.balanceDuePence).toBeNull();
+  });
+
+  it('scopes siblings to the venue so a group id can never reach across venues', async () => {
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'bookings') return { data: [{ ...anchor, group_booking_id: 'grp-1' }] };
+      if (call.table === 'service_variants') return { data: [{ id: 'sv1', price_pence: 3000 }] };
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    await loadVisitPaymentPicture(admin, { ...anchor, group_booking_id: 'grp-1' }, { venueId: 'v9' });
+    const siblingCall = calls.find((c) => c.table === 'bookings');
+    expect(siblingCall?.filters).toContainEqual(['eq', 'venue_id', 'v9']);
+  });
+
+  it('a cancelled sibling is not owed for', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1', status: 'Confirmed' },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv2',
+              status: 'Cancelled',
+            },
+          ],
+        };
+      }
+      if (call.table === 'service_variants') return { data: [{ id: 'sv1', price_pence: 3000 }] };
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, { ...anchor, group_booking_id: 'grp-1' });
+    expect(visit.bookingIds).toEqual(['b1']);
+    expect(visit.totalPence).toBe(3000);
+  });
+
+  it('deposit contribution ignores non-Paid statuses', () => {
     expect(depositPaidContributionPence({ deposit_status: 'Waived', deposit_amount_pence: 500 })).toBe(0);
+    expect(depositPaidContributionPence({ deposit_status: 'Refunded', deposit_amount_pence: 500 })).toBe(0);
     expect(depositPaidContributionPence({ deposit_status: 'Paid', deposit_amount_pence: 500 })).toBe(500);
   });
 });
@@ -281,8 +386,12 @@ describe('recomputeBookingPaymentSummary (§5.6)', () => {
     const updates: RecordedCall[] = [];
     const { admin } = makeAdmin((call) => {
       if (call.table === 'bookings' && call.op === 'select') return { data: bookingRow };
-      if (call.table === 'booking_payments') return { data: ledger };
-      if (call.table === 'service_variants') return { data: { price_pence: variantPrice } };
+      if (call.table === 'booking_payments') {
+        return { data: ledger.map((r) => ({ booking_id: 'b1', ...r })) };
+      }
+      if (call.table === 'service_variants') {
+        return { data: [{ id: 'variant-1', price_pence: variantPrice }] };
+      }
       if (call.table === 'bookings' && call.op === 'update') {
         updates.push(call);
         return { data: null };
@@ -341,5 +450,53 @@ describe('recomputeBookingPaymentSummary (§5.6)', () => {
       throw new Error('should not query further');
     });
     await expect(recomputeBookingPaymentSummary(admin, 'gone')).resolves.toBeUndefined();
+  });
+
+  it('fans out across the visit: per-row amounts, visit-level state (§5.7)', async () => {
+    // A visit payment of 8000 is anchored to b1. Each row's amount_paid_pence
+    // stays its OWN (so revenue sums never double count), while payment_state
+    // is the visit's, because the visit is settled as one unit.
+    const siblings: Row[] = [
+      { ...bookingRow, group_booking_id: 'grp-1' },
+      {
+        id: 'b2',
+        venue_id: 'v1',
+        group_booking_id: 'grp-1',
+        service_variant_id: 'variant-2',
+        addons_total_price_pence: 0,
+        deposit_status: 'Not Required',
+        deposit_amount_pence: null,
+      },
+    ];
+    const updates: RecordedCall[] = [];
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: call.filters.some(([, k]) => k === 'group_booking_id') ? siblings : siblings[0] };
+      }
+      if (call.table === 'service_variants') {
+        return { data: [{ id: 'variant-1', price_pence: 4500 }, { id: 'variant-2', price_pence: 4000 }] };
+      }
+      if (call.table === 'booking_payments') {
+        return { data: [{ booking_id: 'b1', amount_pence: 8000, tip_amount_pence: 0, status: 'succeeded' }] };
+      }
+      if (call.table === 'bookings' && call.op === 'update') {
+        updates.push(call);
+        return { data: null };
+      }
+      throw new Error(`unexpected ${call.op} on ${call.table}`);
+    });
+
+    await recomputeBookingPaymentSummary(admin, 'b1');
+
+    // Both rows updated.
+    expect(updates).toHaveLength(2);
+    const byId = (bid: string) =>
+      updates.find((u) => u.filters.some(([, k, v]) => k === 'id' && v === bid))!.payload as Row;
+    // visit total = (4500 + 500) + 4000 = 9000; paid = deposit 1000 + 8000 = 9000 → paid.
+    expect(byId('b1').payment_state).toBe('paid');
+    expect(byId('b2').payment_state).toBe('paid');
+    // Per-row attribution: b1 holds its deposit + the anchored payment; b2 none.
+    expect(byId('b1').amount_paid_pence).toBe(9000);
+    expect(byId('b2').amount_paid_pence).toBe(0);
   });
 });

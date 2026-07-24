@@ -9,9 +9,8 @@ import {
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
 import {
-  computeLiveAmountPaidPence,
+  loadVisitPaymentPicture,
   recomputeBookingPaymentSummary,
-  resolveBookingTotalPenceFromRow,
 } from '@/lib/booking/payment-summary';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 
@@ -241,25 +240,32 @@ export async function POST(
     );
   }
 
-  // Amount (§5.7): known balance → default + clamp; unknown → staff-entered.
-  // The paid-so-far figure is derived LIVE (paid deposit + succeeded ledger),
-  // never from bookings.amount_paid_pence — that column only refreshes on
-  // in-person payment activity, so a deposit paid since the last recompute
-  // would be missing from it and the customer would be overcharged by it.
-  const [amountPaidPence, totalPence] = await Promise.all([
-    computeLiveAmountPaidPence(staff.db, id, {
-      deposit_status: booking.deposit_status ?? null,
-      deposit_amount_pence: booking.deposit_amount_pence ?? null,
-    }),
-    resolveBookingTotalPenceFromRow(staff.db, {
+  // Amount (§5.7): a payment settles the whole VISIT (every row sharing
+  // group_booking_id), not just the opened line — a cut + colour visit is one
+  // collection. Everything is derived LIVE (paid deposits + succeeded ledger
+  // rows) and never from bookings.amount_paid_pence, which only refreshes on
+  // in-person payment activity and would omit a deposit paid since.
+  const visit = await loadVisitPaymentPicture(
+    staff.db,
+    {
+      id,
+      venue_id: scopeVenueId,
+      group_booking_id: (booking.group_booking_id as string | null) ?? null,
       booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
       service_variant_id: booking.service_variant_id ?? null,
       addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
-      venue_id: scopeVenueId,
-    }),
-  ]);
-  const balanceDuePence =
-    totalPence === null ? null : Math.max(0, totalPence - amountPaidPence);
+      deposit_status: booking.deposit_status ?? null,
+      deposit_amount_pence: booking.deposit_amount_pence ?? null,
+    },
+    { venueId: scopeVenueId },
+  );
+  const balanceDuePence = visit.balanceDuePence;
+  const groupBookingId = (booking.group_booking_id as string | null) ?? null;
+  // Provenance: the ledger row is anchored to the opened booking, so record
+  // that it settled a whole visit (and which one) for reporting and support.
+  const visitMetadata: Record<string, unknown> = groupBookingId
+    ? { group_booking_id: groupBookingId, visit_booking_ids: visit.bookingIds }
+    : {};
 
   let chargePence: number;
   if (balanceDuePence !== null) {
@@ -291,6 +297,7 @@ export async function POST(
       amount_pence: chargePence,
       staff_id: staff.id,
       note: input.note ?? null,
+      metadata: visitMetadata,
     });
     if (insertErr) {
       console.error('[charge route] cash/external insert failed:', insertErr.message, {
@@ -340,6 +347,7 @@ export async function POST(
           venue_id: scopeVenueId,
           reserve_ni_purpose: RESERVE_NI_PI_PURPOSE.APPOINTMENT_BALANCE,
           staff_id: staff.id,
+          ...(groupBookingId ? { group_booking_id: groupBookingId } : {}),
           ...(input.reader_type ? { reader_type: input.reader_type } : {}),
         },
         // NO application_fee_amount — preserves the 0% platform cut (§9).
@@ -386,7 +394,10 @@ export async function POST(
     status: 'pending',
     amount_pence: chargePence,
     staff_id: staff.id,
-    ...(input.reader_type ? { metadata: { reader_type: input.reader_type } } : {}),
+    metadata: {
+      ...visitMetadata,
+      ...(input.reader_type ? { reader_type: input.reader_type } : {}),
+    },
   });
   // An idempotent replay of the same attempt returns the same PI, whose row
   // already exists — the unique-index violation is success, not an error.

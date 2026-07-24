@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour')
+        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, in_person_payments_enabled')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {

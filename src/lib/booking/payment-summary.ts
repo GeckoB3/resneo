@@ -114,50 +114,214 @@ export interface BookingLedgerSums {
   hasRefundedRow: boolean;
 }
 
-/** Sum the booking's ledger: succeeded amounts/tips, plus the refunded marker. */
+/** Sum ledger rows for one or more bookings, per booking id and in total. */
 export async function sumSucceededBookingPayments(
   admin: SupabaseClient,
-  bookingId: string,
-): Promise<BookingLedgerSums> {
+  bookingIds: string | string[],
+): Promise<BookingLedgerSums & { perBooking: Map<string, BookingLedgerSums> }> {
+  const ids = Array.isArray(bookingIds) ? bookingIds : [bookingIds];
+  const empty = (): BookingLedgerSums => ({
+    balancePaidPence: 0,
+    tipPaidPence: 0,
+    hasRefundedRow: false,
+  });
+  const totals = { ...empty(), perBooking: new Map<string, BookingLedgerSums>() };
+  if (ids.length === 0) return totals;
+
   const { data, error } = await admin
     .from('booking_payments')
-    .select('amount_pence, tip_amount_pence, status')
-    .eq('booking_id', bookingId);
+    .select('booking_id, amount_pence, tip_amount_pence, status')
+    .in('booking_id', ids);
   if (error) {
-    console.error('[payment-summary] ledger load failed:', error.message, { bookingId });
+    console.error('[payment-summary] ledger load failed:', error.message, { bookingIds: ids });
     throw error;
   }
-  const sums: BookingLedgerSums = { balancePaidPence: 0, tipPaidPence: 0, hasRefundedRow: false };
+
+  for (const id of ids) totals.perBooking.set(id, empty());
   for (const row of (data ?? []) as Array<{
+    booking_id: string;
     amount_pence: number;
     tip_amount_pence: number;
     status: string;
   }>) {
+    const per = totals.perBooking.get(row.booking_id) ?? empty();
     if (row.status === 'succeeded') {
-      sums.balancePaidPence += row.amount_pence;
-      sums.tipPaidPence += row.tip_amount_pence;
+      per.balancePaidPence += row.amount_pence;
+      per.tipPaidPence += row.tip_amount_pence;
+      totals.balancePaidPence += row.amount_pence;
+      totals.tipPaidPence += row.tip_amount_pence;
     } else if (row.status === 'refunded') {
-      sums.hasRefundedRow = true;
+      per.hasRefundedRow = true;
+      totals.hasRefundedRow = true;
     }
+    totals.perBooking.set(row.booking_id, per);
   }
-  return sums;
+  return totals;
+}
+
+/** The booking columns a visit picture needs from each row in the visit. */
+export interface VisitBookingRow {
+  id: string;
+  venue_id?: string | null;
+  group_booking_id?: string | null;
+  booking_total_price_pence?: number | null;
+  service_variant_id?: string | null;
+  addons_total_price_pence?: number | null;
+  deposit_status?: string | null;
+  deposit_amount_pence?: number | null;
 }
 
 /**
- * Live "paid so far" (paid deposit + succeeded ledger rows). Use this — NOT
- * the denormalised `bookings.amount_paid_pence` — wherever a balance or charge
- * amount is computed. The column only refreshes when an in-person payment
- * event runs the recompute, so a deposit paid after the last recompute (or
- * ever, for a booking with no in-person activity) is missing from it;
- * trusting it overcharges the customer by the deposit.
+ * The money picture for a whole **visit** — every `bookings` row sharing the
+ * anchor's `group_booking_id` (a multi-service visit or group booking), or
+ * just the anchor row when it has none.
+ *
+ * Taking payment settles the visit, not the opened line: a cut + colour visit
+ * is one collection. Amounts are always derived LIVE (paid deposits +
+ * succeeded ledger rows) — never from `bookings.amount_paid_pence`, which only
+ * refreshes on in-person payment activity and would omit a deposit paid since.
  */
-export async function computeLiveAmountPaidPence(
+export interface VisitPaymentPicture {
+  /** Every booking row in the visit (always includes the anchor). */
+  rows: VisitBookingRow[];
+  bookingIds: string[];
+  /** This row's own resolved price (unchanged single-booking meaning). */
+  anchorTotalPence: number | null;
+  /** Visit price. null when ANY row's price is unresolvable (§5.7). */
+  totalPence: number | null;
+  /** Visit paid: deposits across rows + all succeeded ledger rows. */
+  amountPaidPence: number;
+  /** null when the visit total is unknown. */
+  balanceDuePence: number | null;
+  paymentState: BookingPaymentState;
+  ledger: BookingLedgerSums & { perBooking: Map<string, BookingLedgerSums> };
+  depositPaidByBooking: Map<string, number>;
+}
+
+/**
+ * Build the visit picture for a booking. Pass the already-loaded anchor row
+ * (routes hold it from `loadStaffAccessibleBooking`) to avoid re-reading it.
+ *
+ * Cost: at most three queries (siblings, variant prices, ledger), and only one
+ * when the booking is a standalone appointment with a known price.
+ */
+export async function loadVisitPaymentPicture(
   admin: SupabaseClient,
-  bookingId: string,
-  booking: { deposit_status?: string | null; deposit_amount_pence?: number | null },
-): Promise<number> {
-  const sums = await sumSucceededBookingPayments(admin, bookingId);
-  return depositPaidContributionPence(booking) + sums.balancePaidPence;
+  anchor: VisitBookingRow,
+  opts?: {
+    /** Anchor's variant price when the caller already has it (detail bundle). */
+    anchorServiceVariantPricePence?: number | null;
+    /** Scope siblings to this venue; defaults to the anchor's own venue. */
+    venueId?: string | null;
+  },
+): Promise<VisitPaymentPicture> {
+  const venueId = opts?.venueId ?? anchor.venue_id ?? null;
+
+  let rows: VisitBookingRow[] = [anchor];
+  const groupId = anchor.group_booking_id ?? null;
+  if (groupId) {
+    let q = admin
+      .from('bookings')
+      .select(
+        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
+      )
+      .eq('group_booking_id', groupId);
+    // Never let a group id reach across venues.
+    if (venueId) q = q.eq('venue_id', venueId);
+    const { data, error } = await q;
+    if (error) {
+      console.error('[payment-summary] visit sibling load failed:', error.message, { groupId });
+      throw error;
+    }
+    const loaded = (data ?? []) as Array<VisitBookingRow & { status?: string | null }>;
+    // Cancelled lines are not owed for, so they never inflate the visit total.
+    const live = loaded.filter((r) => r.status !== 'Cancelled' || r.id === anchor.id);
+    if (live.length > 0) rows = live;
+  }
+
+  // Variant prices for rows that need one, in a single batched query.
+  const variantPrices = new Map<string, number>();
+  if (opts?.anchorServiceVariantPricePence != null && anchor.service_variant_id) {
+    variantPrices.set(anchor.service_variant_id, opts.anchorServiceVariantPricePence);
+  }
+  const needed = [
+    ...new Set(
+      rows
+        .filter(
+          (r) =>
+            !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0),
+        )
+        .map((r) => r.service_variant_id)
+        .filter((v): v is string => typeof v === 'string' && !variantPrices.has(v)),
+    ),
+  ];
+  if (needed.length > 0) {
+    let vq = admin.from('service_variants').select('id, price_pence').in('id', needed);
+    if (venueId) vq = vq.eq('venue_id', venueId);
+    const { data, error } = await vq;
+    if (error) {
+      // A missing variant price only widens the "unknown total" path (§5.7),
+      // which is staff-confirmable — log and continue rather than failing.
+      console.error('[payment-summary] visit variant price load failed:', error.message);
+    }
+    for (const v of (data ?? []) as Array<{ id: string; price_pence: number | null }>) {
+      if (typeof v.price_pence === 'number' && Number.isFinite(v.price_pence)) {
+        variantPrices.set(v.id, v.price_pence);
+      }
+    }
+  }
+
+  const rowTotal = (r: VisitBookingRow): number | null =>
+    resolveBookingTotalPence({
+      booking_total_price_pence: r.booking_total_price_pence ?? null,
+      service_variant_price_pence: r.service_variant_id
+        ? (variantPrices.get(r.service_variant_id) ?? null)
+        : null,
+      addons_total_price_pence: r.addons_total_price_pence ?? null,
+    });
+
+  // Visit total: the sum, but UNKNOWN if any line is unresolvable. Treating an
+  // unresolvable line as £0 would silently understate the visit and the clamp
+  // would then block staff from collecting the rest (§5.7 / §8-G: unknown means
+  // the staff enter the amount).
+  let totalPence: number | null = 0;
+  for (const r of rows) {
+    const t = rowTotal(r);
+    if (t === null) {
+      totalPence = null;
+      break;
+    }
+    totalPence += t;
+  }
+
+  const depositPaidByBooking = new Map<string, number>();
+  let depositPaidPence = 0;
+  for (const r of rows) {
+    const d = depositPaidContributionPence(r);
+    depositPaidByBooking.set(r.id, d);
+    depositPaidPence += d;
+  }
+
+  const bookingIds = rows.map((r) => r.id);
+  const ledger = await sumSucceededBookingPayments(admin, bookingIds);
+  const amountPaidPence = depositPaidPence + ledger.balancePaidPence;
+
+  return {
+    rows,
+    bookingIds,
+    anchorTotalPence: rowTotal(anchor),
+    totalPence,
+    amountPaidPence,
+    balanceDuePence: totalPence === null ? null : Math.max(0, totalPence - amountPaidPence),
+    paymentState: deriveBookingPaymentState({
+      totalPence,
+      depositPaidPence,
+      balancePaidPence: ledger.balancePaidPence,
+      hasRefundedRow: ledger.hasRefundedRow,
+    }),
+    ledger,
+    depositPaidByBooking,
+  };
 }
 
 /** Pure state derivation (§5.5) — exported for the truth-table tests. */
@@ -185,10 +349,19 @@ export function deriveBookingPaymentState(input: {
 }
 
 /**
- * §5.6 — recompute `bookings.{amount_paid_pence, tip_amount_pence,
- * payment_state}` from the ledger. Called by the balance webhook, the
- * cash/external handler, and the refund paths. Throws on DB errors so webhook
- * callers release their idempotency claim and Stripe redelivers.
+ * §5.6 — recompute the denormalised `bookings.{amount_paid_pence,
+ * tip_amount_pence, payment_state}` cache from the ledger, for **every row in
+ * the visit** (settlement is visit-scoped, §5.7). Called by the balance
+ * webhook, the cash/external handler, and the refund paths. Throws on DB
+ * errors so webhook callers release their idempotency claim and Stripe
+ * redelivers.
+ *
+ * Cache semantics, deliberately mixed so both readings stay correct:
+ * - `amount_paid_pence` / `tip_amount_pence` are **per row** (its own paid
+ *   deposit + the ledger rows anchored to it), so summing the column across
+ *   bookings for revenue reporting never double-counts a visit payment.
+ * - `payment_state` is the **visit** state, because a visit is settled as one
+ *   unit: every line of a paid visit reads `paid`.
  */
 export async function recomputeBookingPaymentSummary(
   admin: SupabaseClient,
@@ -197,7 +370,7 @@ export async function recomputeBookingPaymentSummary(
   const { data: bookingData, error: bookingErr } = await admin
     .from('bookings')
     .select(
-      'id, venue_id, booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
+      'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
     )
     .eq('id', bookingId)
     .maybeSingle();
@@ -205,45 +378,31 @@ export async function recomputeBookingPaymentSummary(
     console.error('[payment-summary] booking load failed:', bookingErr.message, { bookingId });
     throw bookingErr;
   }
-  const booking = bookingData as
-    | {
-        venue_id: string | null;
-        booking_total_price_pence: number | null;
-        service_variant_id: string | null;
-        addons_total_price_pence: number | null;
-        deposit_status: string | null;
-        deposit_amount_pence: number | null;
-      }
-    | null;
+  const booking = (bookingData ?? null) as VisitBookingRow | null;
   if (!booking) {
     console.warn('[payment-summary] booking not found, skipping recompute', { bookingId });
     return;
   }
 
-  const [totalPence, sums] = await Promise.all([
-    resolveBookingTotalPenceFromRow(admin, booking),
-    sumSucceededBookingPayments(admin, bookingId),
-  ]);
-  const depositPaidPence = depositPaidContributionPence(booking);
+  const visit = await loadVisitPaymentPicture(admin, booking);
 
-  const paymentState = deriveBookingPaymentState({
-    totalPence,
-    depositPaidPence,
-    balancePaidPence: sums.balancePaidPence,
-    hasRefundedRow: sums.hasRefundedRow,
-  });
-
-  const { error: updateErr } = await admin
-    .from('bookings')
-    .update({
-      amount_paid_pence: depositPaidPence + sums.balancePaidPence,
-      tip_amount_pence: sums.tipPaidPence,
-      payment_state: paymentState,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', bookingId);
-  if (updateErr) {
-    console.error('[payment-summary] summary update failed:', updateErr.message, { bookingId });
-    throw updateErr;
+  for (const row of visit.rows) {
+    const per = visit.ledger.perBooking.get(row.id);
+    const ownDeposit = visit.depositPaidByBooking.get(row.id) ?? 0;
+    const { error: updateErr } = await admin
+      .from('bookings')
+      .update({
+        amount_paid_pence: ownDeposit + (per?.balancePaidPence ?? 0),
+        tip_amount_pence: per?.tipPaidPence ?? 0,
+        payment_state: visit.paymentState,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
+    if (updateErr) {
+      console.error('[payment-summary] summary update failed:', updateErr.message, {
+        bookingId: row.id,
+      });
+      throw updateErr;
+    }
   }
 }

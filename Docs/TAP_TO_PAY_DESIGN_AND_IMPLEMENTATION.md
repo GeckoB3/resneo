@@ -4,7 +4,13 @@
 > **Canonical location:** this file (`resneo/Docs/TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md`). A pointer copy lives in `resneo-app/Docs/TAP_TO_PAY.md`.
 > **Verified against code:** 2026-06-24 — see §16 for the verification log and the adjustments it produced. Every new table, column, endpoint, file, and UI state is specified; code blocks are implementation sketches aligned to existing patterns (follow the cited reference files for exact house style).
 >
-> **Implementation status (as of 2026-07-23):** The **resneo backend is implemented** per §15's backend list (migration, ledger, all three payment endpoints, webhook branches, receipt, GET/bootstrap extensions), with the §16 third-review adjustments; 49 dedicated tests plus the full suite pass. The **resneo-app mobile side is not built yet** — §7/§7A remain a design to implement.
+> **Implementation status (as of 2026-07-24): BOTH SIDES IMPLEMENTED.**
+> - **resneo (backend)** — complete per §15: migration + ledger, all three payment endpoints, webhook branches, receipt, GET/bootstrap extensions, **visit-scoped settlement** (§5.7), and a **venue settings toggle** in the dashboard (§6.7). On `staging` through `b26f2f2b`.
+> - **resneo-app (mobile)** — complete per §7 and §7A: Terminal provider, **both** hardware paths (Tap to Pay + Bluetooth reader), take-payment sheet, reader settings, cash and refunds. On `main` through `1b176e7`. SDK pinned at **`@stripe/stripe-terminal-react-native@0.0.1-beta.31`**.
+>
+> **Not yet runnable end to end.** Still required: an EAS dev build carrying the native Terminal module, the Apple entitlement (Tap to Pay only), and a pilot venue with `in_person_payments_enabled = true` plus the Stripe card-present capability. Until then the mobile surface is inert by design (the native module is absent, so the app renders exactly as before).
+>
+> §16 carries the review log; the sixth entry covers the mobile implementation and the doc corrections it produced.
 
 ---
 
@@ -498,7 +504,7 @@ Three details locked in by the implementation (do not regress):
   - `card_present_ready` (derived). For v1, derive as `in_person_payments_enabled && !!stripe_connected_account_id` and let the connection-token 400 be the authoritative gate; a later improvement syncs the real Stripe capability (§14).
 
 ### 6.7 Feature flag
-`venues.in_person_payments_enabled` is the master switch (default false). Set it per pilot venue (superuser dashboard toggle or SQL). When false: the bootstrap returns `in_person_payments_enabled=false`, the app renders nothing, and all three endpoints refuse with 403/403/403. Frictionless off.
+`venues.in_person_payments_enabled` is the master switch (default false). **As built,** the venue turns it on themselves from **Dashboard → Settings** (`src/app/dashboard/settings/sections/InPersonPaymentsSection.tsx`, saved via `PATCH /api/venue`), and it can still be set by SQL for a pilot. When false: the bootstrap returns `in_person_payments_enabled=false`, the app renders nothing, and all three endpoints refuse with 403/403/403. Frictionless off.
 
 **The kill switch is total: it gates refunds too.** Disabling the flag 403s the whole charge endpoint including `action: 'refund'` — no half-alive endpoint state. This is safe because the escape hatch fully reconciles: a refund issued from the **Stripe dashboard** flows back through the `charge.refunded` webhook, which is ledger-driven and NOT flag-gated, so the `booking_payments` row flips to `refunded` and the booking summary recomputes correctly even while the flag is off. If pilot feedback shows venues toggling the flag off while holding refundable payments, loosening the gate to admit refund-only is a deliberate two-line change, not a workaround.
 
@@ -512,6 +518,10 @@ npx expo install @stripe/stripe-terminal-react-native
 ```
 - The **Terminal SDK** is the correct package for Tap to Pay + connection tokens + Connect. `@stripe/stripe-react-native` does **not** do Tap to Pay.
 - It is a **public-preview beta** — **pin the exact version** in `package.json`. Per `resneo-app/AGENTS.md`, re-read that exact version's reference before coding; the discover/connect API moved across betas (`connectReader({ discoveryMethod: 'tapToPay', reader, locationId })` is current; older betas used `connectLocalMobileReader`).
+- **As built: pinned at `0.0.1-beta.31`.** Two things this version forced, both non-obvious:
+  - **Never import the SDK directly.** It executes native work at import time and throws when the native module is absent (Expo Go, web, any build without the module). All access goes through the lazy, crash-proof loader `lib/payments/terminal-sdk.ts`; that is what keeps the surface inert for non-enabled venues and non-dev-client builds.
+  - **`cancelCollectPaymentMethod` is not re-exported from the package root** — it must come off the `useStripeTerminal` hook. A module-level `require(...)` resolves to `undefined` and silently cancels nothing (§16 finding 27).
+- **Web export** needs the native-only SDK stubbed in `metro.config.js`, and **Android needs `minSdkVersion 26`** (the Terminal SDK's floor).
 
 ### 7.2 Native config — `app.json`
 Append to the existing `plugins` array:
@@ -632,7 +642,9 @@ Render nothing else when `!canTakePayment` — the surface simply doesn't exist 
 
 Capture state machine (card): `idle → connecting (discover/connect) → ready ("Hold the client's card near the top of your phone") → collecting → confirming → success | error`.
 - **success:** green check, "£X collected", "Receipt emailed to {guest}", Close.
-- **error:** inline message + **Retry**; for SCA/high-value decline or ineligible device, show **Send payment link** fallback (reuse the deposit route's `send_payment_link` machinery / `createOrGetPaymentShortLink`).
+- **error:** inline message + **Retry** (repeats the channel that failed).
+
+> **"Send payment link" is DEFERRED, not built (§16 finding 28).** This section originally said to reuse the deposit route's `send_payment_link`. That machinery sends a **deposit request** tied to `deposit_status` — firing it after a declined *balance* payment would email the client a misleading or failing deposit request. The sheet instead surfaces the decline and points staff at cash or another method. Wire this up only once the backend exposes a **balance** payment link. The same correction applies to flow §8-D.
 
 Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 
@@ -681,6 +693,7 @@ No new venue column and no new backend gate. The physical reader is enabled by t
 
 The `@stripe/stripe-terminal-react-native` plugin already covers Bluetooth on Android (it injects the Bluetooth + location permissions and, on Android 12+, `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`). Extend the **plugin config** (§7.2) so iOS advertises Bluetooth and, optionally, background reconnection:
 
+**As built** (validated against the pinned plugin's own types — see the correction below):
 ```json
 [
   "@stripe/stripe-terminal-react-native",
@@ -689,12 +702,15 @@ The `@stripe/stripe-terminal-react-native` plugin already covers Bluetooth on An
     "appDelegate": true,
     "locationWhenInUsePermission": "Location is required to accept in-person card payments.",
     "bluetoothAlwaysUsagePermission": "Bluetooth is used to connect to your card reader.",
-    "bluetoothPeripheralUsagePermission": "Bluetooth is used to connect to your card reader.",
-    "bluetoothBackgroundMode": true
+    "bluetoothPeripheralPermission": "Bluetooth is used to connect to your card reader."
   }
 ]
 ```
-- iOS adds `NSBluetoothAlwaysUsageDescription` (and, for older OS targets, `NSBluetoothPeripheralUsageDescription`). **Verify the exact plugin prop names against the pinned SDK version's config-plugin schema** — like the discover/connect API (§7.1), these have drifted across betas. Keep all usage strings **free of em-dashes** (they become user-facing per project copy rules).
+> **Correction (§16 finding 26).** An earlier draft of this section listed the second Bluetooth prop as `bluetoothPeripheralUsagePermission`. The pinned SDK's config-plugin schema accepts **`bluetoothPeripheralPermission`** — the longer spelling is **silently ignored**, so the iOS usage string would simply never be emitted. Always validate prop names against the pinned plugin's types, as the whole prop set has drifted across betas (§7.1).
+>
+> **`bluetoothBackgroundMode` is deliberately NOT set.** Background reconnection is optional here and adds an App Store review surface for no v1 benefit.
+
+- iOS adds `NSBluetoothAlwaysUsageDescription` (and, for older OS targets, `NSBluetoothPeripheralUsageDescription`). Keep all usage strings **free of em-dashes** (they become user-facing per project copy rules).
 - **iOS entitlement:** the Bluetooth path needs **no** `com.apple.developer.proximity-reader.payment.acceptance` entitlement. A build that ships **only** the reader path can skip the Apple entitlement entirely, removing §12's "longest pole". A build that ships **both** methods keeps the entitlement (for Tap to Pay) and simply adds the Bluetooth usage strings above.
 - Bundle/`package` unchanged (`com.resneo.app`).
 
@@ -809,7 +825,7 @@ Open appointment with a balance → **Take payment** → **Use card reader** →
 
 **C. Refund (admin):** Paid appointment → **Refund** → confirm → `refunds.create` on connected account → `charge.refunded` webhook → ledger row `refunded` + recompute → `payment_state='refunded'`.
 
-**D. SCA/decline:** confirm fails → sheet shows reason + **Retry** and **Send payment link** → staff still get paid out-of-band.
+**D. SCA/decline:** confirm fails → sheet shows the reason + **Retry** → staff fall back to cash or another method. (**Send payment link** is deferred; see §7.8.)
 
 **E. Venue not enabled:** `in_person_payments_enabled=false` → no Terminal init, no button, no calls. Identical to today.
 
@@ -858,6 +874,8 @@ Open appointment with a balance → **Take payment** → **Use card reader** →
 ---
 
 ## 12. Phased delivery & estimates (~13–18 eng-days; calendar-bound by Apple)
+
+> **Progress:** Phases **1, 2, 4, 5 are complete** (backend + mobile, both repos). Phase **3** (custom dev build) and Phase **6** (harden + store builds) remain, and both depend on the Phase **0** prerequisites — the Apple entitlement and a card-present-enabled pilot account — which are the only things still blocking an end-to-end run. Note §7A.4: a **Bluetooth-reader-only** pilot needs **no Apple entitlement** and can therefore start before the Tap to Pay paperwork clears.
 
 | Phase | Work | Est. | Risk |
 |---|---|---|---|
@@ -911,15 +929,28 @@ Open appointment with a balance → **Take payment** → **Use card reader** →
 - `src/lib/communications/types.ts` (`MessageType` += `'payment_receipt'`) + `send-templated.ts` (`sendPaymentReceiptEmail`).
 - `src/lib/booking/load-booking-detail-bundle.ts` + the GET `/api/venue/bookings/[id]` (and `/summary`) — return `amount_paid_pence`, `payment_state`, resolved `booking_total_price_pence`, `balance_due_pence`.
 - Venue bootstrap route `GET /api/venue` — return `in_person_payments_enabled`, `card_present_ready`.
-- *(Optional, recommended)* `src/app/api/booking/create/route.ts`, `src/app/api/venue/bookings/route.ts` — populate `booking_total_price_pence` for appointments.
+- `src/app/dashboard/settings/` — `sections/InPersonPaymentsSection.tsx` (venue toggle) + `SettingsView.tsx` / `page.tsx` / `types.ts` wiring; `PATCH /api/venue` accepts `in_person_payments_enabled` (§6.7).
+- *(Optional, recommended, NOT done)* `src/app/api/booking/create/route.ts`, `src/app/api/venue/bookings/route.ts` — populate `booking_total_price_pence` for appointments.
 - (DB types regenerated.)
 
-### resneo-app (mobile) — new
-- `providers/TerminalProvider.tsx`.
-- `lib/payments/terminal.ts` + `useTapToPayReader`.
-- `lib/queries/useTakePayment.ts` (+ `useRecordExternalPayment`, `useRefundPayment`).
-- `components/bookings/TakePaymentSheet.tsx`.
-- *(Physical Bluetooth reader, §7A.13)* `lib/payments/bluetoothReader.ts` + `useBluetoothReader`; `components/bookings/ReaderSettingsSheet.tsx`.
+### resneo-app (mobile) — as built (`main` @ `1b176e7`)
+| File | Role |
+|---|---|
+| `lib/payments/terminal-sdk.ts` | **Lazy, crash-proof SDK loader.** Never import the SDK directly (§7.1). |
+| `lib/payments/connection-token.ts` | `POST /api/payments/connection-token` + Terminal Location cache, keyed **per venue scope**. |
+| `lib/payments/terminal.ts` | `useTapToPayReader` — init, permissions, discover, connect. |
+| `lib/payments/bluetoothReader.ts` | `useBluetoothReader` — scan, connect, firmware update, battery, reconnect (§7A.5). |
+| `lib/payments/payment-display.ts` | The §3.4 button gate + neutral state labels (pure, unit-tested). |
+| `lib/payments/attempt-id.ts` | RFC 4122 v4 `attempt_id` (the charge route rejects anything else, §6.3c). |
+| `lib/payments/last-method.ts` | Remembers the last-used method (§7A.6). |
+| `lib/queries/useTakePayment.ts` | Card / cash / refund mutations. |
+| `providers/TerminalProvider.tsx` | Mounted inside `ToastProvider`; renders children untouched unless enabled. |
+| `components/bookings/TakePaymentSheet.tsx` | Amount, method selection, capture states, cash, refund, inline pairing. |
+| `components/bookings/ReaderSettingsSheet.tsx` | Pair / battery / firmware / forget, from Settings. |
+
+Modified: `app.json` (plugin + entitlement), `eas.json`, `metro.config.js` (**web stub for the native-only SDK**), `package.json` (**pinned `0.0.1-beta.31`**, Android **`minSdkVersion 26`**), `lib/env.ts` + `.env.example`, `types/booking-detail.ts`, `types/venue.ts`, `providers/AppProviders.tsx`, `components/bookings/BookingDetailContent.tsx`, `app/(app)/(tabs)/settings.tsx`.
+
+Mobile tests: `reader-hooks.test.tsx` (22 cases, both state machines under a mock SDK), `connection-token.test.ts` (10, Location scoping), `TakePaymentSheet.test.tsx`, `useTakePayment.test.tsx`, `TerminalProvider.test.tsx`, `attempt-id.test.ts`, `payment-display.test.ts`.
 
 ### resneo-app (mobile) — modified
 - `package.json` — pinned `@stripe/stripe-terminal-react-native`.
@@ -1000,4 +1031,20 @@ A section-by-section audit of the spec against the landed backend. All §15 back
 | 24 | §11 required "confirm a balance PI does **not** trigger the deposit-confirmation path" — proven only by unit tests on the helper, never at the routing level | Fixed: new `route.balance-payment.test.ts` (9 cases) drives the **real** webhook and asserts branch isolation for succeeded / failed / canceled / refunded, both directions |
 | 25 | The venue bootstrap's degraded `basicVenue` fallback select omitted `in_person_payments_enabled`, silently forcing the feature off if the primary select ever failed | Fixed: column added to the fallback select |
 
-Deviation accepted (no change): §6.6 says to extend `load-booking-detail-bundle.ts`; the resolved total / balance / live payment state are instead computed in the GET and summary routes, because the values depend on the ledger and deposit rather than the bundle RPC's satellite rows. Behaviour matches the spec's contract. Tests extended to 54 dedicated cases including a stale-column regression guard; full suite, tsc, and eslint clean.
+Deviation accepted (no change): §6.6 says to extend `load-booking-detail-bundle.ts`; the resolved total / balance / live payment state are instead computed in the GET and summary routes, because the values depend on the ledger and deposit rather than the bundle RPC's satellite rows. Behaviour matches the spec's contract.
+
+### Sixth review (2026-07-24) — mobile implemented; doc reconciled against both repos
+
+`resneo-app` `main` @ `1b176e7` implements §7 **and** §7A end to end (five internal review passes; the reader layer is executed against a mock Terminal SDK rather than only re-read). Reconciling this doc against both repos produced three **corrections to the spec itself** — cases where the document was wrong, not the code:
+
+| # | Finding | Resolution |
+|---|---|---|
+| 26 | §7A.4 gave the iOS prop as `bluetoothPeripheralUsagePermission`; the pinned plugin accepts **`bluetoothPeripheralPermission`** and **silently ignores** the other spelling, so the usage string would never be emitted | §7A.4 corrected; `bluetoothBackgroundMode` recorded as deliberately unset |
+| 27 | §7.7's sketch implied `cancelCollectPaymentMethod` is importable from the package root. It is **not re-exported** there — a module-level `require` yields `undefined` and abandon-cancel silently does nothing | §7.1 records the constraint (take it off the `useStripeTerminal` hook); implemented from the collect section's unmount cleanup |
+| 28 | §7.8/§8-D prescribed a **Send payment link** fallback reusing the deposit route's `send_payment_link`. That machinery sends a **deposit** request tied to `deposit_status`, so using it after a declined *balance* payment would email a misleading or failing request | Recorded as **deferred, not built**, in §7.8 and §8-D; needs a backend balance-payment link first |
+
+Also folded in: the pinned SDK version and its import-time crash hazard (§7.1), the web/Metro stub and Android `minSdkVersion 26`, the **venue settings toggle** now shipping in the dashboard (§6.7), and the real as-built mobile file list and test inventory (§15).
+
+**Integration status — verified against the code, not assumed.** The app's booking-detail and venue-bootstrap types match the backend contract exactly (`booking_total_price_pence`, `amount_paid_pence`, `payment_state`, `balance_due_pence`, `payments[]`, `in_person_payments_enabled`, `card_present_ready`), it sends a v4 `attempt_id` on every card charge (§6.3c), and `canTakeInPersonPayment` implements §3.4 rule 2 verbatim.
+
+**One follow-up for the app (not a defect).** Visit-scoped settlement (§5.7) landed in the backend *after* this mobile work. It is **semantically compatible and needs no app change to be correct**: `balance_due_pence` is now the visit balance, so the sheet already collects for the whole visit, and the app's booking list already collapses a multi-service visit into one row (`collapseMultiServiceVisits`). What the app does not yet use is the new **`visit_payment`** object (`booking_count`, `booking_ids`, `total_pence`, …) — surfacing "this settles 2 services" would make a visit collection self-evident to staff. Worth doing before the pilot, but nothing is wrong without it. Tests extended to 54 dedicated cases including a stale-column regression guard; full suite, tsc, and eslint clean.

@@ -59,6 +59,12 @@ const venueProfileSchema = z.object({
   public_booking_area_mode: z.enum(['auto', 'manual']).optional(),
   /** When true, public booking must complete magic-link login before checkout (see booking create). */
   require_account_login_for_bookings: z.boolean().optional(),
+  /**
+   * In-person card payments (Tap to Pay / Terminal) master switch, default false.
+   * Gates the mobile Take-payment surface and the connection-token + charge
+   * endpoints (Tap to Pay design doc §6.7). Admin-only, like every money setting.
+   */
+  in_person_payments_enabled: z.boolean().optional(),
   /** 6-digit hex (optional `#`) for embed iframe `?accent=` query param. Empty string clears. */
   embed_accent_colour: z.string().max(7).optional(),
   /** Public booking-page branding/content (Booking Site Studio); sanitised server-side. */
@@ -120,7 +126,7 @@ export async function GET(request: NextRequest) {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config, in_person_payments_enabled')
       .eq('id', staff.venue_id)
       .single();
 
@@ -129,7 +135,7 @@ export async function GET(request: NextRequest) {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour')
+        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, in_person_payments_enabled')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
@@ -173,6 +179,12 @@ export async function GET(request: NextRequest) {
         raw: featureFlagsRaw,
         resolved: resolveAppointmentsFeatureFlags(featureFlagsRaw),
       },
+      // In-person payments (§6.6): the per-venue flag plus the v1 readiness
+      // derivation. The connection-token 400 stays the authoritative gate for
+      // the real Stripe card-present capability.
+      in_person_payments_enabled: Boolean(v.in_person_payments_enabled),
+      card_present_ready:
+        Boolean(v.in_person_payments_enabled) && Boolean(v.stripe_connected_account_id),
     });
   } catch (err) {
     console.error('GET /api/venue failed:', err);
@@ -250,6 +262,9 @@ export async function PATCH(request: NextRequest) {
     }
     if (data.require_account_login_for_bookings !== undefined) {
       update.require_account_login_for_bookings = data.require_account_login_for_bookings;
+    }
+    if (data.in_person_payments_enabled !== undefined) {
+      update.in_person_payments_enabled = data.in_person_payments_enabled;
     }
     if (data.embed_accent_colour !== undefined) {
       const raw = typeof data.embed_accent_colour === 'string' ? data.embed_accent_colour : '';

@@ -83,6 +83,7 @@ import { deleteCardHoldCustomersForBookings } from '@/lib/booking/card-hold-rele
 import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 import { cardHoldChargeWindowEndsAtForBooking } from '@/lib/booking/card-hold-window';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import { loadVisitPaymentPicture } from '@/lib/booking/payment-summary';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
@@ -329,6 +330,44 @@ export async function GET(
         }
       : null;
 
+    // In-person payments (§6.6): the RESOLVED total (variant + add-ons when the
+    // stored column is empty, §5.7) and the outstanding balance. null balance =
+    // price unknown → the Take payment sheet requires a staff-entered amount.
+    // amount_paid / payment_state are derived LIVE (paid deposit + ledger) —
+    // the denormalised columns only refresh on in-person payment activity, so
+    // a deposit paid since then would otherwise be missing from the balance.
+    // Payment is VISIT-scoped (§5.7): Take payment settles every row sharing
+    // group_booking_id, so balance / amount paid / state cover the whole visit.
+    // `booking_total_price_pence` stays THIS row's resolved price;
+    // `visit_payment.total_pence` carries the visit's.
+    const visit = await loadVisitPaymentPicture(
+      getSupabaseAdminClient(),
+      {
+        id,
+        venue_id: scopeVenueId,
+        group_booking_id: (booking.group_booking_id as string | null) ?? null,
+        booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
+        service_variant_id: booking.service_variant_id ?? null,
+        addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
+        deposit_status: booking.deposit_status ?? null,
+        deposit_amount_pence: booking.deposit_amount_pence ?? null,
+      },
+      { venueId: scopeVenueId, anchorServiceVariantPricePence: service_variant_price_pence },
+    );
+    // The in-person ledger rows themselves (booking_payments is service-role
+    // only, so this authenticated staff GET is the app's read path, §9). The
+    // refund action needs a row id; the sheet also lists what was collected.
+    // Scoped to the whole visit so a visit payment is visible (and refundable)
+    // from any line of it.
+    const { data: paymentRowsData, error: paymentRowsErr } = await getSupabaseAdminClient()
+      .from('booking_payments')
+      .select('id, booking_id, method, status, amount_pence, note, created_at')
+      .in('booking_id', visit.bookingIds)
+      .order('created_at', { ascending: false });
+    if (paymentRowsErr) {
+      console.error('GET /api/venue/bookings/[id] payments load failed:', paymentRowsErr.message);
+    }
+
     return NextResponse.json({
       ...booking,
       area_name,
@@ -347,6 +386,18 @@ export async function GET(
       refund_notice_hours,
       card_hold,
       service_payment_requirement,
+      booking_total_price_pence: visit.anchorTotalPence,
+      amount_paid_pence: visit.amountPaidPence,
+      payment_state: visit.paymentState,
+      balance_due_pence: visit.balanceDuePence,
+      visit_payment: {
+        booking_count: visit.bookingIds.length,
+        booking_ids: visit.bookingIds,
+        total_pence: visit.totalPence,
+        amount_paid_pence: visit.amountPaidPence,
+        balance_due_pence: visit.balanceDuePence,
+      },
+      payments: paymentRowsData ?? [],
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);

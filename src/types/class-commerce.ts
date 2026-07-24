@@ -13,6 +13,8 @@ export const RESERVE_NI_PI_PURPOSE = {
   CARD_HOLD_SETUP: 'card_hold_setup',
   /** Off-session no-show fee charge PI metadata. */
   CARD_HOLD_NO_SHOW_FEE: 'card_hold_no_show_fee',
+  /** In-person appointment balance PI (Tap to Pay / Terminal, §6.3). */
+  APPOINTMENT_BALANCE: 'appointment_balance',
 } as const;
 
 export const RESERVE_NI_SUBSCRIPTION_PURPOSE = {

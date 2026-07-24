@@ -25,6 +25,7 @@ import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
 import { BookingTypesSection } from './sections/BookingTypesSection';
+import { InPersonPaymentsSection } from './sections/InPersonPaymentsSection';
 import { RequireAccountLoginSection } from './sections/RequireAccountLoginSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { LinkedAccountsSection } from './sections/LinkedAccountsSection';
@@ -1539,6 +1540,19 @@ function SettingsViewInner({
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <RequireAccountLoginSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
           </SettingsProfileGroup>
+
+          {/* In-person card payments (Tap to Pay). Appointments-only in v1, so it
+              is hidden for venues whose product has no appointment balances. */}
+          {isAppointmentsProduct && isAdmin ? (
+            <SettingsProfileGroup
+              id="in-person-payments"
+              eyebrow="Payments"
+              title="Taking payment in person"
+              description="Collect an appointment's outstanding balance at your venue, straight from the ResNeo app."
+            >
+              <InPersonPaymentsSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            </SettingsProfileGroup>
+          ) : null}
 
           {isAppointmentsProduct && isAdmin ? (
             <FeatureFlagsSection

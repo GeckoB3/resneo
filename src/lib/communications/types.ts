@@ -16,6 +16,7 @@ export type MessageType =
   | 'booking_modification'
   | 'cancellation_confirmation'
   | 'no_show_notification'
+  | 'payment_receipt'
   | 'custom_message';
 
 export interface Recipient {

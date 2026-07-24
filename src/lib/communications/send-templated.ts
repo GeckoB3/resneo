@@ -4,6 +4,7 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ensureComplianceFormLinksForBooking } from '@/lib/compliance/auto-send';
 import { renderCardHoldChargedEmail } from '@/lib/emails/templates/card-hold-charged';
+import { renderPaymentReceiptEmail } from '@/lib/emails/templates/payment-receipt';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { BookingModel } from '@/types/booking-models';
@@ -473,5 +474,128 @@ export async function sendCardHoldChargedReceipt(params: {
     },
     rendered,
     'dedupe',
+  );
+}
+
+/**
+ * In-person payment receipt (§6.5), sent by the balance webhook on
+ * `payment_intent.succeeded`. Email is the customer's record: a direct-charge
+ * card-present payment has no Stripe-hosted email by default.
+ *
+ * Log mode is `upsert`, NOT `dedupe`: a booking can carry several balance
+ * payments (equal-amount split payments, §6.3c) and each must send its own
+ * receipt — dedupe would silently swallow every receipt after the first.
+ * Webhook idempotency (the `webhook_events` claim) already prevents duplicate
+ * sends for the same payment.
+ */
+export async function sendPaymentReceiptEmail(params: {
+  bookingId: string;
+  venueId: string;
+  amountPaidPence: number;
+  paidAt: string;
+}): Promise<SendResult> {
+  const { bookingId, venueId, amountPaidPence, paidAt } = params;
+  const admin = getSupabaseAdminClient();
+
+  const { data: bookingRow } = await admin
+    .from('bookings')
+    .select('id, guest_id, guest_email, booking_date, booking_time, party_size, booking_model')
+    .eq('id', bookingId)
+    .maybeSingle();
+  const b = bookingRow as
+    | {
+        guest_id: string | null;
+        guest_email: string | null;
+        booking_date: string;
+        booking_time: string | null;
+        party_size: number | null;
+        booking_model: string | null;
+      }
+    | null;
+  if (!b) return { sent: false, reason: 'booking_not_found' };
+
+  const { data: venueRow } = await admin
+    .from('venues')
+    .select('name, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model')
+    .eq('id', venueId)
+    .maybeSingle();
+  const v = venueRow as
+    | {
+        name?: string | null;
+        address?: string | null;
+        phone?: string | null;
+        email?: string | null;
+        reply_to_email?: string | null;
+        logo_url?: string | null;
+        website_url?: string | null;
+        timezone?: string | null;
+        booking_model?: string | null;
+      }
+    | null;
+  if (!v?.name) return { sent: false, reason: 'venue_not_found' };
+
+  type GuestNameRow = {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+  };
+  let guest: GuestNameRow | null = null;
+  if (b.guest_id) {
+    const { data: guestRow } = await admin
+      .from('guests')
+      .select('first_name, last_name, email')
+      .eq('id', b.guest_id)
+      .maybeSingle();
+    guest = (guestRow ?? null) as GuestNameRow | null;
+  }
+
+  const recipientEmail = guest?.email?.trim() || b.guest_email?.trim() || null;
+  if (!recipientEmail) return { sent: false, reason: 'no_email' };
+
+  const bookingModel = (b.booking_model ?? v.booking_model ?? null) as BookingModel | null;
+  const base: BookingEmailData = {
+    id: bookingId,
+    guest_name: formatGuestDisplayName(guest?.first_name, guest?.last_name),
+    guest_email: recipientEmail,
+    booking_date: b.booking_date,
+    booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00',
+    party_size: b.party_size ?? 1,
+    ...(bookingModel ? { booking_model: bookingModel } : {}),
+  };
+
+  // Enrichment fills the bookingLabel noun (appointment_service_name) and
+  // practitioner details for Model B and the secondary models.
+  let booking = base;
+  try {
+    booking = await enrichBookingEmailForComms(admin, bookingId, base);
+  } catch (err) {
+    console.error('[sendPaymentReceiptEmail] enrichment failed, sending plain', { bookingId, err });
+  }
+
+  const venueData = venueRowToEmailData({
+    name: v.name,
+    address: v.address ?? null,
+    phone: v.phone ?? null,
+    email: v.email ?? null,
+    reply_to_email: v.reply_to_email ?? null,
+    logo_url: v.logo_url ?? null,
+    website_url: v.website_url ?? null,
+    timezone: v.timezone ?? null,
+  });
+
+  const rendered = renderPaymentReceiptEmail(booking, venueData, { amountPaidPence, paidAt });
+
+  return deliverEmailMessage(
+    {
+      venueId,
+      bookingId,
+      lane: inferCommunicationLaneFromBookingModel(bookingModel),
+      messageType: 'payment_receipt_email',
+      recipient: recipientEmail,
+      emailFromDisplayName: venueData.name,
+      emailReplyTo: venueData.reply_to_email ?? null,
+    },
+    rendered,
+    'upsert',
   );
 }

@@ -4,7 +4,13 @@
 > **Canonical location:** this file (`resneo/Docs/TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md`). A pointer copy lives in `resneo-app/Docs/TAP_TO_PAY.md`.
 > **Verified against code:** 2026-06-24 — see §16 for the verification log and the adjustments it produced. Every new table, column, endpoint, file, and UI state is specified; code blocks are implementation sketches aligned to existing patterns (follow the cited reference files for exact house style).
 >
-> **Implementation status (as of 2026-07):** This is a design only. None of it is built yet: there are no tap-to-pay or Stripe Terminal payment routes, no `booking_payments` table, and no feature flag in the codebase. Treat everything below as a proposal, not a description of shipped behaviour.
+> **Implementation status (as of 2026-07-24): BOTH SIDES IMPLEMENTED.**
+> - **resneo (backend)** — complete per §15: migration + ledger, all three payment endpoints, webhook branches, receipt, GET/bootstrap extensions, **visit-scoped settlement** (§5.7), and a **venue settings toggle** in the dashboard (§6.7). On `staging` through `b26f2f2b`.
+> - **resneo-app (mobile)** — complete per §7 and §7A: Terminal provider, **both** hardware paths (Tap to Pay + Bluetooth reader), take-payment sheet, reader settings, cash and refunds. On `main` through `1b176e7`. SDK pinned at **`@stripe/stripe-terminal-react-native@0.0.1-beta.31`**.
+>
+> **Not yet runnable end to end.** Still required: an EAS dev build carrying the native Terminal module, the Apple entitlement (Tap to Pay only), and a pilot venue with `in_person_payments_enabled = true` plus the Stripe card-present capability. Until then the mobile surface is inert by design (the native module is absent, so the app renders exactly as before).
+>
+> §16 carries the review log; the sixth entry covers the mobile implementation and the doc corrections it produced.
 
 ---
 
@@ -15,6 +21,8 @@ Clients book appointments online and pay **nothing or a deposit**. There is curr
 
 ### 1.2 Solution
 Add **Stripe Tap to Pay on iPhone & Android** (contactless, **no hardware reader** — the staff phone's NFC is the reader) to the **resneo-app** staff app. A staff member opens an appointment, taps **Take payment**, and the client taps their card or phone to settle the balance.
+
+**§7A additionally specifies an optional physical Stripe Terminal reader** (Bluetooth-paired, e.g. BBPOS WisePad 3) as a second card method for venues that prefer a dedicated reader. It reuses the same connection-token, Terminal Location, charge route, webhook, ledger, and receipt end to end — the only additions are mobile-side (a `bluetoothScan` discovery path and reader-management UX). The Tap to Pay design below (§1-§7) stands unchanged.
 
 Payment is collected via **Stripe Connect direct charges**: the money lands **directly in the venue's Stripe account, with 0% taken by Resneo** (the platform sets no `application_fee` anywhere today, and this feature keeps it that way). Resneo never holds the funds — preserving the existing "platform is not a payment institution" posture.
 
@@ -34,6 +42,7 @@ Section 3 specifies exactly how this optionality is enforced.
 - **No forced/required payment** of any kind.
 - **No saved-card off-session charging** for balances (card is physically present; not needed).
 - **Appointments only** in v1 (classes/events are typically pre-paid online; restaurant tables rarely settle a balance this way).
+- **No internet/smart countertop readers** (Stripe Reader S700, BBPOS WisePOS E, Verifone P400) in v1. The two card methods are **Tap to Pay** (§1-§7) and a **Bluetooth handheld reader** (§7A) — both paired to the practitioner's own device, matching Resneo's mobile per-practitioner model. A fixed till shared across staff (the internet/smart-reader shape) is a different workflow, needs its own onboarding (registration-code + reader-to-account association, `internet` discovery), and is deferred to §14.
 
 ---
 
@@ -42,7 +51,7 @@ Section 3 specifies exactly how this optionality is enforced.
 | Dimension | v1 decision |
 |---|---|
 | Payment captured | **Outstanding balance only** (no tip prompt) |
-| Methods | **Tap to Pay card** + **cash/external recording** + **refunds** — all written to an audit ledger |
+| Methods | **Tap to Pay card** (phone NFC) + **physical Bluetooth reader** (§7A) + **cash/external recording** + **refunds** — all written to an audit ledger |
 | Booking models | **Appointments only** (`booking_model ∈ {practitioner_appointment, unified_scheduling}`) |
 | Rollout | Behind a **venue feature flag** (default off), pilot → widen |
 | Money flow | Connect **direct charge**, **0% platform fee** |
@@ -190,6 +199,8 @@ UPDATE public.bookings
 
 **Do not overload `deposit_status`** — leave the deposit columns/flow untouched. `payment_state` is the new whole-booking state.
 
+**These denormalised columns are reporting caches, never charge inputs.** They refresh only when an in-person payment event runs the recompute — the deposit flows do not touch them, so a deposit paid after the last recompute is missing from `amount_paid_pence`. Every balance or charge amount MUST derive paid-so-far live via `computeLiveAmountPaidPence` (paid deposit + succeeded ledger rows, `src/lib/booking/payment-summary.ts`); the charge route and the booking GET/summary all do. Trusting the column would overcharge the customer by the deposit (§16 finding 20).
+
 ### 5.4 Venue capability columns
 ```sql
 ALTER TABLE public.venues
@@ -208,6 +219,8 @@ Computed by `recomputeBookingPaymentSummary` from `SUM(booking_payments WHERE st
 | `0 < amount_paid_pence < total`, with a balance payment | `partially_paid` |
 | `amount_paid_pence = 0` | `unpaid` |
 | every succeeded payment refunded | `refunded` |
+
+**Precedence when refunds and a paid deposit coexist:** `refunded` applies only when at least one ledger row is `refunded` **and** the recomputed `amount_paid_pence` is 0. If the balance payment was refunded but the deposit is still paid, the recompute lands back on `deposit_paid` (the deposit was never refunded; the deposit flow owns its own refund, §5.3). The rows above are evaluated on the recomputed sums, so this falls out naturally — state it in the `recomputeBookingPaymentSummary` tests.
 
 `unpaid` / `deposit_paid` / `partially_paid` are **normal, acceptable terminal states** (Section 3).
 
@@ -245,7 +258,17 @@ export function resolveBookingTotalPence(b: {
   return computed > 0 ? computed : null;   // null = unknown (free or un-priced)
 }
 ```
-- `service_variant_price_pence` is already loaded by `src/lib/booking/load-booking-detail-bundle.ts` (`StaffBookingDetailBundle`). Add-on totals come from the booking. For **group appointments**, sum the per-appointment subtotals (the existing group logic in `booking-confirmation-pricing.ts` / the detail bundle).
+- `service_variant_price_pence` is already loaded by `src/lib/booking/load-booking-detail-bundle.ts` (`StaffBookingDetailBundle`). Add-on totals come from the booking.
+
+> **Payment is VISIT-scoped: Take payment settles the whole visit.** A multi-service visit or group booking (`create-multi-service` / `create-group`) writes **one `bookings` row per service/person**, each carrying its **own** `service_variant_id`, `addons_total_price_pence` and `deposit_amount_pence`. A cut + colour visit is **one collection**, not two: `loadVisitPaymentPicture` (`src/lib/booking/payment-summary.ts`) sums every row sharing `group_booking_id` and every payment across them. Rules:
+> - **Visit total** = the sum of each row's resolved total. If **any** line is unresolvable the whole visit total is `null` (unknown) → staff enter the amount. Treating an unresolvable line as £0 would silently understate the visit, and the clamp would then block staff from collecting the rest.
+> - **Cancelled lines are excluded** (nothing is owed for them), except the anchor row itself.
+> - **Siblings are venue-scoped** — a `group_booking_id` can never reach across venues.
+> - **Ledger anchor:** one payment writes **one** ledger row, anchored to the booking the staff opened, with `metadata.group_booking_id` + `visit_booking_ids` for provenance (the PI carries `group_booking_id` too).
+> - **Cache semantics after recompute** (§5.6): `amount_paid_pence` / `tip_amount_pence` stay **per row** (its own deposit + the ledger rows anchored to it) so summing them for revenue never double-counts a visit payment, while `payment_state` is the **visit** state on every row, because the visit settles as one unit.
+> - **API:** the booking GET and `/summary` return visit-scoped `balance_due_pence` / `amount_paid_pence` / `payment_state` (what Take payment acts on), keep `booking_total_price_pence` as **this row's** resolved price, and add a `visit_payment` object (`booking_count`, `booking_ids`, `total_pence`, `amount_paid_pence`, `balance_due_pence`). `payments[]` covers the whole visit, so a visit payment is visible and refundable from any line.
+>
+> Note: the spec's earlier pointer to group logic in `booking-confirmation-pricing.ts` refers to **email display** helpers (it lives in `src/lib/communications/` and sums formatted price strings), which are not a usable source for a charge amount.
 - `balanceDuePence = total === null ? null : Math.max(0, total - amount_paid_pence)`.
 
 **Staff-confirmable amount (removes the hard dependency).** Because the total may be unknown, the amount is always **staff-confirmable**, never rigidly derived:
@@ -340,7 +363,8 @@ const MAX_IN_PERSON_PENCE = 100_000; // £1,000 cap when the price is unknown
 const schema = z.object({
   method: z.enum(['card_present', 'cash', 'external']).optional(),
   action: z.literal('refund').optional(),       // admin-only
-  amount_pence: z.number().int().min(1).max(MAX_IN_PERSON_PENCE).optional(), // omit = full balance
+  amount_pence: z.number().int().min(1).max(MAX_IN_PERSON_PENCE).optional(), // charges only; refunds are always full (v1)
+  attempt_id: z.string().uuid().optional(),     // REQUIRED for card_present: client-generated per payment attempt (idempotency)
   payment_id: z.string().uuid().optional(),     // for refund: which ledger row
   note: z.string().max(500).optional(),
 });
@@ -352,16 +376,32 @@ Handler steps:
 4. **Amount (see §5.7):** resolve `total = resolveBookingTotalPence(...)` (use the booking-detail bundle so `service_variant_price_pence`/`addons_total_price_pence` are available) and `balanceDue = total === null ? null : max(0, total − amount_paid_pence)`. For card/cash/external: if `balanceDue` known → default `amount_pence` to `balanceDue` and clamp to `[1, balanceDue]`; if `balanceDue` unknown → `amount_pence` is **required**, accepted in `[1, MAX_IN_PERSON_PENCE]`. Reject `amount_pence <= 0`. If `balanceDue === 0` (fully paid) and not a refund → `400 'Nothing left to pay.'`.
 5. Branch by intent:
 
-**(a) `action: 'refund'`** (gate with `requireAdmin(staff)`):
+**(a) `action: 'refund'`** (gate with `requireAdmin(staff)`). **v1 refunds are always the FULL amount of the chosen ledger row** — never pass a partial `amount` (the row status is binary, so a partial refund would corrupt the recompute; partial refunds are a §14 item needing `refunded_amount_pence`). Two sub-branches by the row's method:
 ```ts
 const { data: pay } = await staff.db.from('booking_payments')
   .select('*').eq('id', parsed.data.payment_id).eq('booking_id', id).single();
-await stripe.refunds.create(
-  { payment_intent: pay.stripe_payment_intent_id, amount: parsed.data.amount_pence ?? pay.amount_pence },
-  { stripeAccount: pay.stripe_connected_account_id, idempotencyKey: `refund:${pay.stripe_payment_intent_id}` },
-);
-// Mark refunded + recompute happens in the charge.refunded webhook branch (6.4).
+if (!pay || pay.status !== 'succeeded')
+  return NextResponse.json({ error: 'This payment cannot be refunded.' }, { status: 409 });
+
+if (pay.method === 'card_present') {
+  // Stripe refund; ledger flip + recompute happen in the charge.refunded webhook (§6.4).
+  // Mirror the deposit route: treat 'charge_already_refunded' as success so our
+  // state converges with Stripe's.
+  await stripe.refunds.create(
+    { payment_intent: pay.stripe_payment_intent_id },   // full refund — no amount
+    { stripeAccount: pay.stripe_connected_account_id, idempotencyKey: `refund:${pay.stripe_payment_intent_id}` },
+  );
+} else {
+  // cash/external: no Stripe leg exists — write the reversal directly. This is
+  // also the fix-up path for a mis-recorded cash payment (fat-fingered amount).
+  await staff.db.from('booking_payments')
+    .update({ status: 'refunded', note: parsed.data.note ?? pay.note, updated_at: new Date().toISOString() })
+    .eq('id', pay.id);
+  await recomputeBookingPaymentSummary(staff.db, id);
+}
+return NextResponse.json({ success: true });
 ```
+> The deposit route's refund precedent is Stripe-only (it 400s without a PI) — but unlike deposits, cash rows here live in the ledger, so a no-Stripe reversal is trivial and fully audited (`status='refunded'`, admin `staff_id` in place, optional note).
 
 **(b) `method: 'cash' | 'external'`** (no Stripe):
 ```ts
@@ -394,15 +434,28 @@ const pi = await stripe.paymentIntents.create(
     // NO application_fee_amount — preserves 0% platform cut.
   },
   { stripeAccount: venue.stripe_connected_account_id,
-    idempotencyKey: `balance:${id}:${chargePence}` },  // double-tap safe
+    // Key on the client-generated attempt_id, NOT the amount. An amount-based key
+    // (`balance:${id}:${pence}`) collides on legitimate equal-amount split payments
+    // (two guests paying £20 each on one booking): Stripe would return the FIRST,
+    // already-succeeded PI and the ledger insert would hit the unique index → 500.
+    // attempt_id is minted once per user-initiated attempt (§7.7), so an accidental
+    // double-POST of the same attempt reuses the key (double-tap safe) while a
+    // genuinely new payment gets a fresh key.
+    idempotencyKey: `balance:${id}:${parsed.data.attempt_id}` },
 );
+// (Reject card_present requests without attempt_id → 400.)
 
-await staff.db.from('booking_payments').insert({
+const { error: insertErr } = await staff.db.from('booking_payments').insert({
   booking_id: id, venue_id: scopeVenueId,
   stripe_connected_account_id: venue.stripe_connected_account_id,
   stripe_payment_intent_id: pi.id, method: 'card_present', status: 'pending',
   amount_pence: chargePence, staff_id: staff.id,
-});  // unique PI index makes the webhook update idempotent
+});
+// An idempotent replay of the same attempt returns the same PI, whose row already
+// exists — treat the unique-index violation (23505) as success, not a 500.
+// (Note: upsert onConflict can't be used here — booking_payments_pi_uq is a
+// PARTIAL unique index, which PostgREST's conflict target cannot infer.)
+if (insertErr && insertErr.code !== '23505') throw insertErr;
 
 return NextResponse.json({ payment_intent_id: pi.id, client_secret: pi.client_secret, amount_pence: chargePence });
 ```
@@ -432,10 +485,17 @@ if (meta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.APPOINTMENT_BALANCE) {
 3. Optionally insert a booking `events` row (`event_type='balance_payment_taken'`) — the detail screen already renders `events`.
 4. Send the receipt via `after(...)` — the route already imports `after` from `next/server` and uses it for deposit-paid comms (§6.5).
 
-**Refund webhook:** extend the existing `charge.refunded` / `charge.refund.updated` branch to also flip the matching `booking_payments` row to `refunded` and `recomputeBookingPaymentSummary` (→ `payment_state='refunded'` when fully refunded).
+**Refund webhook:** extend the existing `charge.refunded` / `charge.refund.updated` branch to also flip the matching `booking_payments` row to `refunded` and `recomputeBookingPaymentSummary` (→ `payment_state='refunded'` per the §5.5 precedence rule).
+
+**Abandoned-PI hygiene:** also handle `payment_intent.canceled` for `reserve_ni_purpose = APPOINTMENT_BALANCE`: flip the matching `pending` ledger row to `failed`. Otherwise rows for abandoned attempts (staff dismisses the sheet, §3.2) sit at `pending` forever — harmless to the recompute (which sums only `succeeded`) but noise in any future payments-history UI. No recompute needed since nothing succeeded.
 
 ### 6.5 Receipt
-Add `'payment_receipt'` to the `MessageType` union in `src/lib/communications/types.ts`, and add `sendPaymentReceiptEmail(booking, venue, venueId, { amountPaid, total, method })` in `src/lib/communications/send-templated.ts`, modelled on the **existing `sendDepositConfirmationEmail`** (which calls `sendPolicyMessage({ messageKey: 'payment_receipt', channel: 'email', mode: 'dedupe' })`). Reuse `venueRowToEmailData` (`src/lib/emails/venue-email-data.ts`). Email-first. This is the customer's record (direct-charge card-present has no Stripe-hosted email by default).
+Add `'payment_receipt'` to the `MessageType` union in `src/lib/communications/types.ts`, and add `sendPaymentReceiptEmail({ bookingId, venueId, amountPaidPence, paidAt })` in `src/lib/communications/send-templated.ts`, modelled on the **existing `sendCardHoldChargedReceipt`** (the other webhook-triggered receipt: id-based params, `enrichBookingEmailForComms`, a dedicated render template, `deliverEmailMessage`). Reuse `venueRowToEmailData` (`src/lib/emails/venue-email-data.ts`). Email-first. This is the customer's record (direct-charge card-present has no Stripe-hosted email by default).
+
+Three details locked in by the implementation (do not regress):
+- **Comm-log type is `payment_receipt_email`** (house `*_email` convention in `CommunicationLogMessageType`, `src/lib/communications/policy-resolver.ts`), and `communication_logs.message_type` carries a **DB CHECK constraint** that must be extended as a strict superset in the same migration as the ledger — without it every receipt insert fails silently at Postgres.
+- **Log mode is `upsert`, NOT `dedupe`**: a booking can carry several balance payments (equal-amount split payments, §6.3c) and each must send its own receipt; dedupe would swallow every receipt after the first. Webhook idempotency (the `webhook_events` claim) already prevents duplicate sends for the same payment. Known cosmetic trade-off: upsert reuses one comm-log row, so the staff timeline shows the latest receipt only.
+- Render template: `src/lib/emails/templates/payment-receipt.ts` (no em-dashes in customer copy).
 
 ### 6.6 Booking GET + venue bootstrap extensions
 - The booking detail GET (`/api/venue/bookings/[id]`) is assembled by `src/lib/booking/load-booking-detail-bundle.ts` (`StaffBookingDetailBundle`, which already loads `service_variant_price_pence`). Extend it to also return `amount_paid_pence`, `payment_state`, the **resolved** `booking_total_price_pence` (via `resolveBookingTotalPence`, §5.7) and a computed `balance_due_pence` (may be `null` when the price is unknown). The detail screen prefetches `/api/venue/bookings/[id]/summary` too — add the same fields there if `TakePaymentSheet`/the gate reads from it.
@@ -444,7 +504,9 @@ Add `'payment_receipt'` to the `MessageType` union in `src/lib/communications/ty
   - `card_present_ready` (derived). For v1, derive as `in_person_payments_enabled && !!stripe_connected_account_id` and let the connection-token 400 be the authoritative gate; a later improvement syncs the real Stripe capability (§14).
 
 ### 6.7 Feature flag
-`venues.in_person_payments_enabled` is the master switch (default false). Set it per pilot venue (superuser dashboard toggle or SQL). When false: the bootstrap returns `in_person_payments_enabled=false`, the app renders nothing, and all three endpoints refuse with 403/403/403. Frictionless off.
+`venues.in_person_payments_enabled` is the master switch (default false). **As built,** the venue turns it on themselves from **Dashboard → Settings** (`src/app/dashboard/settings/sections/InPersonPaymentsSection.tsx`, saved via `PATCH /api/venue`), and it can still be set by SQL for a pilot. When false: the bootstrap returns `in_person_payments_enabled=false`, the app renders nothing, and all three endpoints refuse with 403/403/403. Frictionless off.
+
+**The kill switch is total: it gates refunds too.** Disabling the flag 403s the whole charge endpoint including `action: 'refund'` — no half-alive endpoint state. This is safe because the escape hatch fully reconciles: a refund issued from the **Stripe dashboard** flows back through the `charge.refunded` webhook, which is ledger-driven and NOT flag-gated, so the `booking_payments` row flips to `refunded` and the booking summary recomputes correctly even while the flag is off. If pilot feedback shows venues toggling the flag off while holding refundable payments, loosening the gate to admit refund-only is a deliberate two-line change, not a workaround.
 
 ---
 
@@ -456,6 +518,10 @@ npx expo install @stripe/stripe-terminal-react-native
 ```
 - The **Terminal SDK** is the correct package for Tap to Pay + connection tokens + Connect. `@stripe/stripe-react-native` does **not** do Tap to Pay.
 - It is a **public-preview beta** — **pin the exact version** in `package.json`. Per `resneo-app/AGENTS.md`, re-read that exact version's reference before coding; the discover/connect API moved across betas (`connectReader({ discoveryMethod: 'tapToPay', reader, locationId })` is current; older betas used `connectLocalMobileReader`).
+- **As built: pinned at `0.0.1-beta.31`.** Two things this version forced, both non-obvious:
+  - **Never import the SDK directly.** It executes native work at import time and throws when the native module is absent (Expo Go, web, any build without the module). All access goes through the lazy, crash-proof loader `lib/payments/terminal-sdk.ts`; that is what keeps the surface inert for non-enabled venues and non-dev-client builds.
+  - **`cancelCollectPaymentMethod` is not re-exported from the package root** — it must come off the `useStripeTerminal` hook. A module-level `require(...)` resolves to `undefined` and silently cancels nothing (§16 finding 27).
+- **Web export** needs the native-only SDK stubbed in `metro.config.js`, and **Android needs `minSdkVersion 26`** (the Terminal SDK's floor).
 
 ### 7.2 Native config — `app.json`
 Append to the existing `plugins` array:
@@ -527,9 +593,13 @@ Model on `useBookingDeposit` (`lib/queries/useBookingMutations.ts`); use `invali
 ```ts
 // useTakePayment(bookingId): card flow
 //   mutationFn({ amountPence? }):
+//     0. const attempt_id = Crypto.randomUUID();   // ONE per user-initiated attempt —
+//        minted when the staff member taps the pay button, NOT per network call, so a
+//        double-fired mutation reuses it (idempotent) while "take another payment"
+//        later mints a fresh one (§6.3c).
 //     1. const { payment_intent_id, client_secret } =
 //          await apiFetch('/api/venue/bookings/${bookingId}/charge',
-//            { accessToken, method:'POST', body: JSON.stringify({ method:'card_present', amount_pence }) });
+//            { accessToken, method:'POST', body: JSON.stringify({ method:'card_present', amount_pence, attempt_id }) });
 //     2. await retrievePaymentIntent(client_secret);
 //     3. await collectPaymentMethod({ paymentIntent });   // staff prompts the tap here
 //     4. await confirmPaymentIntent({ paymentIntent });
@@ -537,7 +607,7 @@ Model on `useBookingDeposit` (`lib/queries/useBookingMutations.ts`); use `invali
 //   errors: cancel → cancelCollectPaymentMethod; decline/SCA → surface + allow retry/fallback
 
 // useRecordExternalPayment(bookingId): POST /charge { method:'cash'|'external', amount_pence, note }
-// useRefundPayment(bookingId):        POST /charge { action:'refund', payment_id, amount_pence? }
+// useRefundPayment(bookingId):        POST /charge { action:'refund', payment_id }   // always full (v1, §6.3a)
 ```
 > The mobile success handler never marks paid from the client result. It invalidates caches; the booking GET (reflecting the webhook's write) is the truth.
 
@@ -572,9 +642,178 @@ Render nothing else when `!canTakePayment` — the surface simply doesn't exist 
 
 Capture state machine (card): `idle → connecting (discover/connect) → ready ("Hold the client's card near the top of your phone") → collecting → confirming → success | error`.
 - **success:** green check, "£X collected", "Receipt emailed to {guest}", Close.
-- **error:** inline message + **Retry**; for SCA/high-value decline or ineligible device, show **Send payment link** fallback (reuse the deposit route's `send_payment_link` machinery / `createOrGetPaymentShortLink`).
+- **error:** inline message + **Retry** (repeats the channel that failed).
+
+> **"Send payment link" is DEFERRED, not built (§16 finding 28).** This section originally said to reuse the deposit route's `send_payment_link`. That machinery sends a **deposit request** tied to `deposit_status` — firing it after a declined *balance* payment would email the client a misleading or failing deposit request. The sheet instead surfaces the decline and points staff at cash or another method. Wire this up only once the backend exposes a **balance** payment link. The same correction applies to flow §8-D.
 
 Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
+
+---
+
+## 7A. Physical Bluetooth card reader (Stripe Terminal reader) — additive to §7
+
+This section adds a **third in-person method alongside Tap to Pay**: a physical Stripe Terminal card reader that pairs to the staff device over **Bluetooth** (Stripe's `bluetoothScan` discovery). It is purely additive. Everything in §5, §6, §9 (backend, data model, security) and the whole webhook/ledger/receipt pipeline is **reused unchanged**; the new work is almost entirely mobile (a second discovery/connection path plus reader-management UX) with **one optional, non-breaking backend touch**.
+
+The same frictionless principle (§3) applies: a physical reader is just another way to run the same `card_present` collection. Nothing about it is required, and a venue that never pairs a reader never sees any of it.
+
+### 7A.1 What is reused vs. what is new
+
+| Layer | Tap to Pay (§1-§7) | Physical Bluetooth reader (this section) |
+|---|---|---|
+| Connection token (`POST /api/payments/connection-token`) | reused | **reused, byte-for-byte** |
+| Terminal Location (`ensureTerminalLocation`, §6.1) | reused | **reused** (Bluetooth readers also attach to a Location at connect time) |
+| Charge route (`POST …/charge`), PaymentIntent (`card_present`), ledger, webhook, receipt | reused | **reused, byte-for-byte** (same `payment_method_types: ['card_present']`) |
+| Venue flag / capability (`in_person_payments_enabled`, `card_present_ready`) | reused | **reused** (same `card_present` capability, same derivation §6.6) |
+| Data model (`booking_payments`, summary cols, enums) | reused | **reused** (`method` stays `'card_present'`; reader kind is optional `metadata`, §7A.6) |
+| SDK discovery method | `discoveryMethod: 'tapToPay'` | **`discoveryMethod: 'bluetoothScan'`** |
+| Reader lifecycle | phone NFC, no pairing | **pair / reconnect / battery / firmware update UX (new)** |
+| iOS entitlement | proximity-reader entitlement **required** | **none required** (Bluetooth readers need no Apple entitlement) |
+| Device eligibility | iPhone XS+/iOS 16.4+, NFC Android 11+ certified | **any Bluetooth-capable iOS/Android device** (much wider) |
+
+**Consequence:** the entire backend delivered in §12 Phase 1 already supports physical readers with zero change (or one optional metadata field). The reader work is a self-contained mobile add-on that can ship in the same release or a fast follow.
+
+### 7A.2 Reader hardware (UK / GBP)
+
+- **Recommended reader for Resneo's market: BBPOS WisePad 3** — Stripe's Bluetooth reader for the **UK/EU**, supporting **chip + contactless + on-reader PIN**. (The Stripe Reader M2 is a US/CA/AU/etc. device and is **not** the right model for GBP venues.)
+- **This directly mitigates the §13 UK SCA risk.** High-value or PIN-required cards that would make Tap to Pay fall back to a payment link can simply be **chip-inserted with the PIN entered on the reader keypad**. So the physical reader is not only an alternative, it closes the one Tap-to-Pay gap in §13.
+- **Wider device support:** because collection happens on the reader (not the phone NFC), there is **no NFC requirement and no iPhone XS+ / Android 11+ / certified-device constraint**. Older and cheaper staff devices work.
+
+### 7A.3 Capability & gating (delta only)
+
+No new venue column and no new backend gate. The physical reader is enabled by the **same** `venues.in_person_payments_enabled` flag and needs the **same** `card_present` capability + Terminal Location already required for Tap to Pay. What changes is only how the **client decides which options to show**:
+
+- `supportsTapToPay` — a **device** check from the SDK (`Terminal.supportsReadersOfType({ deviceType: 'tapToPay' })` or the SDK's tap-to-pay support helper). True on eligible NFC phones only.
+- `readerConnected` — whether a Bluetooth reader is currently paired/connected (client state).
+
+`TakePaymentSheet` (§7A.6) shows **Tap to Pay** only when `supportsTapToPay`, and shows **Use card reader** whenever `in_person_payments_enabled` (offering pairing if none is connected yet). A venue with only physical readers on non-NFC devices therefore gets a fully working "Take payment" surface even though Tap to Pay is unavailable.
+
+> Optional future nicety (not v1): a per-venue `preferred_in_person_method` to pin one method as default. v1 keeps it purely client-driven + "remember last used" (§7A.6) to stay frictionless.
+
+### 7A.4 Native config deltas — `app.json` / permissions
+
+The `@stripe/stripe-terminal-react-native` plugin already covers Bluetooth on Android (it injects the Bluetooth + location permissions and, on Android 12+, `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`). Extend the **plugin config** (§7.2) so iOS advertises Bluetooth and, optionally, background reconnection:
+
+**As built** (validated against the pinned plugin's own types — see the correction below):
+```json
+[
+  "@stripe/stripe-terminal-react-native",
+  {
+    "tapToPayCheck": true,
+    "appDelegate": true,
+    "locationWhenInUsePermission": "Location is required to accept in-person card payments.",
+    "bluetoothAlwaysUsagePermission": "Bluetooth is used to connect to your card reader.",
+    "bluetoothPeripheralPermission": "Bluetooth is used to connect to your card reader."
+  }
+]
+```
+> **Correction (§16 finding 26).** An earlier draft of this section listed the second Bluetooth prop as `bluetoothPeripheralUsagePermission`. The pinned SDK's config-plugin schema accepts **`bluetoothPeripheralPermission`** — the longer spelling is **silently ignored**, so the iOS usage string would simply never be emitted. Always validate prop names against the pinned plugin's types, as the whole prop set has drifted across betas (§7.1).
+>
+> **`bluetoothBackgroundMode` is deliberately NOT set.** Background reconnection is optional here and adds an App Store review surface for no v1 benefit.
+
+- iOS adds `NSBluetoothAlwaysUsageDescription` (and, for older OS targets, `NSBluetoothPeripheralUsageDescription`). Keep all usage strings **free of em-dashes** (they become user-facing per project copy rules).
+- **iOS entitlement:** the Bluetooth path needs **no** `com.apple.developer.proximity-reader.payment.acceptance` entitlement. A build that ships **only** the reader path can skip the Apple entitlement entirely, removing §12's "longest pole". A build that ships **both** methods keeps the entitlement (for Tap to Pay) and simply adds the Bluetooth usage strings above.
+- Bundle/`package` unchanged (`com.resneo.app`).
+
+### 7A.5 Discovery & connection — `lib/payments/bluetoothReader.ts` + `useBluetoothReader()`
+
+Sibling to `useTapToPayReader` (§7.6), same **lazy** philosophy (never initialise on launch). Reuses the same `initialize()` and the same `locationId` from the connection-token response.
+
+```ts
+// useBluetoothReader():
+// 1. initialize() once (shared with the tapToPay path).
+// 2. Request Bluetooth (+ location) permissions.
+// 3. discoverReaders({ discoveryMethod: 'bluetoothScan', simulated: __DEV__ }).
+//    onUpdateDiscoveredReaders → a LIST (a busy salon may see several readers).
+// 4. connectReader({ discoveryMethod: 'bluetoothScan', reader, locationId }).
+//    (Beta churn, per §7.1: older betas used connectBluetoothReader({ reader, locationId }).
+//     Re-read the pinned version's reference before coding.)
+// 5. Persist the connected reader's serial (AsyncStorage). On next open, auto-scan and
+//    reconnect to that serial without a picker.
+// Status: 'idle' | 'scanning' | 'found' | 'connecting' | 'updating' | 'ready'
+//         | 'disconnected' | 'error'.
+```
+
+**Firmware updates are a first-class state, not an afterthought.** Bluetooth readers require mandatory software updates on first pairing and periodically thereafter, and these **block collection** for anywhere from tens of seconds to several minutes:
+- Handle `onDidStartInstallingUpdate` / `onDidReportReaderSoftwareUpdateProgress` / `onDidFinishInstallingUpdate` (and `onDidReportAvailableUpdate` for optional updates).
+- While `status === 'updating'`, the sheet shows a determinate progress UI and **disables** the Tap/Insert step. Copy (em-dash free): `"Updating your reader. Keep it nearby and switched on. This can take a few minutes."`
+
+Also handle: `onDidDisconnect` (unexpected drop → attempt one silent reconnect to the remembered serial, then surface `"Reader disconnected. Trying to reconnect."`), battery level via the reader's `batteryLevel` / `onDidReportBatteryLevel` (warn under ~15%: `"Reader battery low. Charge it soon."`), and low-signal/no-reader-found timeouts.
+
+**Provider wiring:** extend `TerminalProvider` (§7.5) so that when the venue is enabled it registers the Bluetooth lifecycle listeners too. On `ownerVenueId` change (linked-venue switch), disconnect the reader and clear the remembered serial for that scope, exactly as the tapToPay path re-mints its token.
+
+### 7A.6 Taking payment with a reader — `TakePaymentSheet` delta
+
+The collection flow is **identical from `useTakePayment`'s point of view** — same `POST …/charge` returning a `client_secret`, same `retrievePaymentIntent → collectPaymentMethod → confirmPaymentIntent`. The **only** difference is which reader is connected when `collectPaymentMethod` runs. So `useTakePayment` (§7.7) is reused as-is; no new mutation hook is required for the happy path.
+
+Method selection inside the existing sheet:
+```tsx
+// Primary options, shown by availability (§7A.3):
+//   [Tap to Pay on this phone]  — only if supportsTapToPay
+//   [Use card reader]           — always (if in_person_payments_enabled); if no reader
+//                                 is connected, tapping it opens the pairing flow first
+// Secondary: [Record cash / other]   Admin: [Refund]     Always: [Close]
+// Persist the last-used method (AsyncStorage) so staff aren't re-asked each time.
+```
+- Card-reader capture state machine mirrors §7.8 with two extra states surfaced from `useBluetoothReader`: `connecting` (discover/connect) and `updating` (firmware). Prompt copy for the tap step becomes reader-aware: `"Hold the card to the reader, or insert the chip."`
+- **On-reader PIN:** when the reader requests a PIN for a high-value/SCA card, the customer enters it on the reader keypad and `confirmPaymentIntent` resolves normally. The **Send payment link** fallback (§7.8 / §8-D) stays as the last resort for a declined or unreachable-reader case, but is needed far less often than on Tap to Pay.
+- **Reader management entry point:** add a **"Card reader"** row in the manage/settings area (sibling to the existing `components/manage/SessionSettingsSheet.tsx`) that opens `ReaderSettingsSheet` (§7A.7) to pair, view battery/firmware, and forget a reader outside of a live payment.
+
+### 7A.7 Reader management UX — `components/bookings/ReaderSettingsSheet.tsx`
+
+Model on `DepositSheet.tsx` (same `Sheet`/`Button`/`Text`/`spacing`/haptics primitives). Responsibilities:
+- **Pair:** scan → list discovered readers by name/serial → connect → remember. Shows the `updating` progress UI if a mandatory update runs on first connect.
+- **Status:** connected reader name, **battery level**, firmware/update state, and a **Forget reader** action (clears the remembered serial).
+- Reachable both from the settings row (§7A.6) and inline from `TakePaymentSheet` when a staff member taps **Use card reader** with nothing paired yet.
+
+Strict TS, no `any`, beginner comments, and **all UI strings free of em-dashes** (project copy rule).
+
+### 7A.8 Backend deltas — minimal and optional
+
+- **No new route. No schema migration. No enum change.** The reader charge is the exact same `card_present` PaymentIntent produced by `POST …/charge` (§6.3), confirmed by the same webhook (§6.4), written to the same `booking_payments` ledger.
+- **Optional (recommended for reporting):** let the charge schema accept `reader_type?: 'tap_to_pay' | 'bluetooth'` and write it into `booking_payments.metadata` (and PI `metadata`). This distinguishes the two card-present channels in revenue reporting **without** touching the `booking_payment_method` enum (which stays `'card_present'`). Backwards compatible — absent field defaults to unknown/tap-to-pay.
+- `card_present_ready` derivation (§6.6) is unchanged; the connection-token 400 remains the authoritative capability gate for **both** methods.
+
+### 7A.9 End-to-end flow (physical reader)
+
+Open appointment with a balance → **Take payment** → **Use card reader** → (first time: pair; if needed, firmware update with progress) → reader `ready` → **collect** (customer taps contactless or inserts chip + PIN on the reader) → **confirm** → Stripe sends `payment_intent.succeeded` (purpose = `appointment_balance`) → the **same** webhook writes the ledger `succeeded` + recompute → `payment_state='paid'` → app invalidates, refetch shows Paid → guest gets the receipt. (Identical to flow §8-A from the webhook onward.)
+
+### 7A.10 Testing additions (on top of §11)
+
+- **Simulated reader first:** `discoverReaders({ discoveryMethod: 'bluetoothScan', simulated: true })` yields a simulated Bluetooth reader in `__DEV__` — full discover/connect/collect/confirm with **no hardware**, so most of the path is testable before a WisePad 3 arrives.
+- **Jest / RTL:** `useBluetoothReader` state machine including the **`updating`** and **`disconnected`/reconnect-by-serial** paths; method-selection gate (Tap to Pay hidden when `!supportsTapToPay`; **Use card reader** shown and opening pairing when no reader connected); "remember last method/serial".
+- **Manual (real WisePad 3):** first-pair firmware update; low battery warning; disconnect **mid-collection** then reconnect; **on-reader PIN** on a high-value card completing without a payment link; contactless tap on the reader.
+- Reuses the same connected **test-mode** account (card-present capability + Terminal Location) as §11.
+
+### 7A.11 Rollout & risks (delta)
+
+- **Faster pilot path:** because the Bluetooth path needs **no Apple entitlement** (§7A.4), a reader-only pilot can go live **without waiting on Apple's 1-2 week publishing entitlement** — useful if the pilot venue prefers a physical reader.
+- **New risks & mitigations:**
+  - *Firmware update time* → determinate progress UI, "keep reader powered/nearby" copy, never block silently (§7A.5).
+  - *Reader supply / correct model per region* → standardise on **WisePad 3** for UK; document ordering in the pilot runbook.
+  - *Multiple readers in one salon* → discovery returns a list; label readers by name/serial in `ReaderSettingsSheet`; remember per device.
+  - *Keeping readers charged* → surface battery level + low-battery warning.
+  - *Bluetooth pairing/permission friction on iOS* → clear usage strings + a permission-denied recovery state in the sheet.
+
+### 7A.12 Estimate delta
+
+**~+2.5 to +4 eng-days** on top of the §12 total, essentially all mobile (discovery/connect, firmware-update UX, reader-management sheet, method selection, tests). Backend is **~0.25d** for the optional `reader_type` metadata, or **0** if deferred. Calendar-independent of Apple. Slots in as an extension of §12 Phase 4-5, or as a fast follow after the Tap-to-Pay pilot.
+
+### 7A.13 File-by-file (additive to §15)
+
+**resneo-app (mobile) — new**
+- `lib/payments/bluetoothReader.ts` + `useBluetoothReader` (discover/connect/update/battery/reconnect).
+- `components/bookings/ReaderSettingsSheet.tsx` (pair / status / forget).
+
+**resneo-app (mobile) — modified**
+- `providers/TerminalProvider.tsx` — register Bluetooth lifecycle listeners when enabled.
+- `components/bookings/TakePaymentSheet.tsx` — method selection (Tap to Pay vs card reader) + reader-aware states.
+- `components/bookings/BookingDetailContent.tsx` — unchanged gate; the button now leads to either method.
+- `app.json` — Bluetooth plugin props + iOS Bluetooth usage strings (§7A.4).
+- manage/settings screen — a "Card reader" row that opens `ReaderSettingsSheet`.
+- `types/booking-detail.ts` / reader status types — add reader connection/update state.
+
+**resneo (backend) — modified (optional)**
+- `src/app/api/venue/bookings/[id]/charge/route.ts` — accept optional `reader_type` and persist to `booking_payments.metadata` (no enum/schema change).
 
 ---
 
@@ -586,7 +825,7 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 
 **C. Refund (admin):** Paid appointment → **Refund** → confirm → `refunds.create` on connected account → `charge.refunded` webhook → ledger row `refunded` + recompute → `payment_state='refunded'`.
 
-**D. SCA/decline:** confirm fails → sheet shows reason + **Retry** and **Send payment link** → staff still get paid out-of-band.
+**D. SCA/decline:** confirm fails → sheet shows the reason + **Retry** → staff fall back to cash or another method. (**Send payment link** is deferred; see §7.8.)
 
 **E. Venue not enabled:** `in_person_payments_enabled=false` → no Terminal init, no button, no calls. Identical to today.
 
@@ -618,7 +857,7 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 
 **Backend (no mobile build needed):**
 - `vitest` on `resolveBookingTotalPence`: column wins when set; else `variant + addons`; else `null`. And `recomputeBookingPaymentSummary` truth table (§5.5), including the resolved-total path.
-- `vitest` on the `charge` route: card creates a `card_present` PI on the connected account with the correct amount and **no `application_fee`**; cash/external insert a `succeeded` ledger row + recompute; refund (admin-gated; non-admin → 403); **appointment guard** (`booking_model` not in the allowed set → 400); **known-balance clamp** and **unknown-balance staff-entered amount** (cap enforced; missing amount → 400); double-tap idempotency (same `idempotencyKey`/PI → one ledger row).
+- `vitest` on the `charge` route: card creates a `card_present` PI on the connected account with the correct amount and **no `application_fee`**; cash/external insert a `succeeded` ledger row + recompute; refund (admin-gated; non-admin → 403; **card row → Stripe full refund; cash/external row → direct ledger reversal, no Stripe call**; non-succeeded row → 409); **appointment guard** (`booking_model` not in the allowed set → 400); **known-balance clamp** and **unknown-balance staff-entered amount** (cap enforced; missing amount → 400); **idempotency:** same `attempt_id` replayed → same PI, one ledger row (23505 tolerated); **two equal-amount payments with distinct `attempt_id`s → two PIs, two rows** (the split-payment case); card_present without `attempt_id` → 400.
 - Webhook: feed `payment_intent.succeeded` with `reserve_ni_purpose: APPOINTMENT_BALANCE` (Stripe CLI or crafted event) → ledger flips `succeeded`, summary recomputes, receipt sent. Re-deliver same event → no double-credit. `charge.refunded` → `refunded` + recompute. Confirm a balance PI does **not** trigger the deposit-confirmation path.
 - Stripe **test mode** with a connected test account that has card-present capability + a Terminal Location.
 
@@ -635,6 +874,8 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 ---
 
 ## 12. Phased delivery & estimates (~13–18 eng-days; calendar-bound by Apple)
+
+> **Progress:** Phases **1, 2, 4, 5 are complete** (backend + mobile, both repos). Phase **3** (custom dev build) and Phase **6** (harden + store builds) remain, and both depend on the Phase **0** prerequisites — the Apple entitlement and a card-present-enabled pilot account — which are the only things still blocking an end-to-end run. Note §7A.4: a **Bluetooth-reader-only** pilot needs **no Apple entitlement** and can therefore start before the Tap to Pay paperwork clears.
 
 | Phase | Work | Est. | Risk |
 |---|---|---|---|
@@ -662,10 +903,13 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 
 ## 14. Future (post-v1)
 - **Tips** — surface the reserved `tip_amount_pence` column with a tip selector + include in the charge amount.
+- **Per-line settlement within a visit** — v1 settles the whole visit in one collection (§5.7). Splitting a visit across payers (one guest pays for their own line) would need a line-selection UI and a per-row allocation on the ledger row; the `visit_payment.booking_ids` payload already gives the app the data to build it.
+- **Partial refunds** — v1 refunds are full-per-payment only (§6.3a). Partial needs a `refunded_amount_pence` column on `booking_payments` (the binary `status` can't represent it) + recompute over `amount_pence − refunded_amount_pence` + webhook handling of partial `charge.refund.updated` amounts.
 - **Other booking models** — extend the gate beyond appointments where a balance concept applies.
 - **Saved-card off-session** — charge a stored card for no-shows/remote balances (infra exists: `venue_customer_stripe`).
 - **Card-present capability auto-sync** — listen to `account.updated` to keep `card_present_ready` exact.
 - **Populate `booking_total_price_pence` at creation** — make balances/reporting authoritative across all flows.
+- **Internet/smart countertop readers** (Stripe Reader S700, BBPOS WisePOS E, Verifone P400) — a shared fixed till rather than a device-paired reader. **Revisit only if the pilot surfaces demand from larger front-desk / reception-style venues**; it is not a coverage gap (Tap to Pay + Bluetooth already cover every device class and card-present interaction) but a different deployment shape. Clean bolt-on when needed: `internet` discovery + registration-code onboarding + reader-to-account association, reusing the same connection-token, charge route, webhook, and ledger. The method-selection UI (§7A.6) is additive, so no rework to the existing two methods.
 
 ---
 
@@ -685,14 +929,28 @@ Strict TS, no `any`, comments for a beginner (house style per `.cursorrules`).
 - `src/lib/communications/types.ts` (`MessageType` += `'payment_receipt'`) + `send-templated.ts` (`sendPaymentReceiptEmail`).
 - `src/lib/booking/load-booking-detail-bundle.ts` + the GET `/api/venue/bookings/[id]` (and `/summary`) — return `amount_paid_pence`, `payment_state`, resolved `booking_total_price_pence`, `balance_due_pence`.
 - Venue bootstrap route `GET /api/venue` — return `in_person_payments_enabled`, `card_present_ready`.
-- *(Optional, recommended)* `src/app/api/booking/create/route.ts`, `src/app/api/venue/bookings/route.ts` — populate `booking_total_price_pence` for appointments.
+- `src/app/dashboard/settings/` — `sections/InPersonPaymentsSection.tsx` (venue toggle) + `SettingsView.tsx` / `page.tsx` / `types.ts` wiring; `PATCH /api/venue` accepts `in_person_payments_enabled` (§6.7).
+- *(Optional, recommended, NOT done)* `src/app/api/booking/create/route.ts`, `src/app/api/venue/bookings/route.ts` — populate `booking_total_price_pence` for appointments.
 - (DB types regenerated.)
 
-### resneo-app (mobile) — new
-- `providers/TerminalProvider.tsx`.
-- `lib/payments/terminal.ts` + `useTapToPayReader`.
-- `lib/queries/useTakePayment.ts` (+ `useRecordExternalPayment`, `useRefundPayment`).
-- `components/bookings/TakePaymentSheet.tsx`.
+### resneo-app (mobile) — as built (`main` @ `1b176e7`)
+| File | Role |
+|---|---|
+| `lib/payments/terminal-sdk.ts` | **Lazy, crash-proof SDK loader.** Never import the SDK directly (§7.1). |
+| `lib/payments/connection-token.ts` | `POST /api/payments/connection-token` + Terminal Location cache, keyed **per venue scope**. |
+| `lib/payments/terminal.ts` | `useTapToPayReader` — init, permissions, discover, connect. |
+| `lib/payments/bluetoothReader.ts` | `useBluetoothReader` — scan, connect, firmware update, battery, reconnect (§7A.5). |
+| `lib/payments/payment-display.ts` | The §3.4 button gate + neutral state labels (pure, unit-tested). |
+| `lib/payments/attempt-id.ts` | RFC 4122 v4 `attempt_id` (the charge route rejects anything else, §6.3c). |
+| `lib/payments/last-method.ts` | Remembers the last-used method (§7A.6). |
+| `lib/queries/useTakePayment.ts` | Card / cash / refund mutations. |
+| `providers/TerminalProvider.tsx` | Mounted inside `ToastProvider`; renders children untouched unless enabled. |
+| `components/bookings/TakePaymentSheet.tsx` | Amount, method selection, capture states, cash, refund, inline pairing. |
+| `components/bookings/ReaderSettingsSheet.tsx` | Pair / battery / firmware / forget, from Settings. |
+
+Modified: `app.json` (plugin + entitlement), `eas.json`, `metro.config.js` (**web stub for the native-only SDK**), `package.json` (**pinned `0.0.1-beta.31`**, Android **`minSdkVersion 26`**), `lib/env.ts` + `.env.example`, `types/booking-detail.ts`, `types/venue.ts`, `providers/AppProviders.tsx`, `components/bookings/BookingDetailContent.tsx`, `app/(app)/(tabs)/settings.tsx`.
+
+Mobile tests: `reader-hooks.test.tsx` (22 cases, both state machines under a mock SDK), `connection-token.test.ts` (10, Location scoping), `TakePaymentSheet.test.tsx`, `useTakePayment.test.tsx`, `TerminalProvider.test.tsx`, `attempt-id.test.ts`, `payment-display.test.ts`.
 
 ### resneo-app (mobile) — modified
 - `package.json` — pinned `@stripe/stripe-terminal-react-native`.
@@ -725,3 +983,73 @@ Each design assumption was checked against the actual code. Outcome and the adju
 | 12 | Terminal `capture_method: 'automatic'` works for Tap to Pay confirm | ❓ unverified | explicit Phase 1/4 verify item + manual-capture fallback (§13) |
 
 **Net:** one critical issue (#6, appointment price) — resolved by the price resolver + staff-confirmable amount, with no change to the overall architecture. Everything else was confirmed or required only a precise reference. The design is implementable end-to-end as written.
+
+### Second review (2026-07-23)
+
+Re-verified the §16 symbol references against `staging` (all still hold; feature still unbuilt — no migration, no payment routes). Pressure-testing the money-flow edges surfaced four correctness gaps, all fixed in place, none architectural:
+
+| # | Finding | Fix |
+|---|---|---|
+| 13 | Amount-based idempotency key (`balance:${id}:${pence}`) collides on legitimate equal-amount split payments → replayed PI → unique-index 500 | Client-minted `attempt_id` per payment attempt keys the PI create; ledger insert tolerates 23505 (§6.3c, §7.7) |
+| 14 | Partial refunds corrupt the recompute (binary row status vs partial amount) | v1 refunds are full-per-payment only; partial deferred to §14 with `refunded_amount_pence` |
+| 15 | Cash/external rows unrefundable (refund sketch assumed a PI; deposit-route precedent is Stripe-only) and no way to void a mis-recorded cash payment | Refund on a cash/external row skips Stripe and writes the ledger reversal directly, admin-gated (§6.3a) |
+| 16 | `refunded` vs `deposit_paid` precedence ambiguous when a balance refund coexists with a paid deposit | `refunded` only when a refunded row exists AND recomputed `amount_paid_pence` = 0 (§5.5) |
+
+Plus hygiene: `payment_intent.canceled` flips abandoned `pending` ledger rows to `failed` (§6.4). §11 tests extended to cover all of the above. Open items unchanged: the §13 capture-flow question and pinned-SDK verification (§7.1, §7A.4/§7A.5) remain deliberate build-time checks.
+
+### Third review (2026-07-23) — backend implemented
+
+The resneo backend landed as specified (all §15 backend files; 49 new vitest cases; full suite, tsc, and eslint clean). Three implementation adjustments, now reflected in the sections above:
+
+| # | Adjustment | Where |
+|---|---|---|
+| 17 | Receipt comm-log type is `payment_receipt_email` and the `communication_logs.message_type` DB CHECK constraint is extended in the ledger migration — the spec had missed the constraint, which would have silently failed every receipt insert | §6.5 |
+| 18 | Receipt log mode is `upsert`, not `dedupe` — dedupe would swallow the receipt for the second equal-split payment; webhook idempotency already prevents duplicates | §6.5 |
+| 19 | The venue flag 403-gates refunds too (kill switch is total); Stripe-dashboard refunds still reconcile via the flag-agnostic `charge.refunded` webhook | §6.7 |
+
+Also carried through from house patterns: cross-venue charge/refund writes are audited via `recordBookingWriteAudit` (§9 tenant-isolation posture), and the balance total is resolved via a `resolveBookingTotalPenceFromRow` helper that fetches the variant price from `service_variants` (the price is not on the bookings row). Deploy notes: apply the migration before the routes, and add **`payment_intent.canceled`** to the Stripe webhook endpoint's subscribed events.
+
+### Fourth review (2026-07-23) — post-implementation code review
+
+A dedicated bug-hunt over the landed backend found one critical spec-level gap and two minor items, all fixed:
+
+| # | Finding | Fix |
+|---|---|---|
+| 20 | **Critical overcharge:** balances derived from `bookings.amount_paid_pence`, but only the in-person paths run the recompute — a deposit paid via the deposit flows never lands in the column, so the charge route would bill the full price on top of the deposit (£10 deposit + £50 charge on a £50 appointment) and the GET/summary showed the wrong balance | Paid-so-far is now derived **live** everywhere (`computeLiveAmountPaidPence` = paid deposit + succeeded ledger rows); the GET/summary also return live `amount_paid_pence` / `payment_state`, and §5.3 now marks the denormalised columns as reporting caches only |
+| 21 | A reused `attempt_id` with different details hit Stripe's idempotency guard but surfaced as the misleading "not enabled for card payments" 400 | Distinct 409 branch ("This payment attempt has already started…") |
+| 22 | `resolveBookingTotalPenceFromRow` didn't venue-scope the `service_variants` lookup (the bundle RPC does) | Optional `venue_id` filter, passed by the charge route and recompute |
+
+Noted, no change needed: card refunds stay webhook-only (per §6.3a; brief paid-looking window until `charge.refunded` lands), and the deploy-order note from the third review covers the venue GET's extended select.
+
+### Fifth review (2026-07-23) — completeness audit vs this spec
+
+A section-by-section audit of the spec against the landed backend. All §15 backend files exist; §3.4's frictionless guarantees verified in code (no status-transition path reads `payment_state`; no `application_fee` anywhere; both endpoints gate on the venue flag). Findings:
+
+| # | Finding | Status |
+|---|---|---|
+| 23 | **Group/multi-service appointments settled per row, not per visit** — the only unimplemented §5.7 requirement. Not a money-correctness bug (each row's arithmetic was right and the clamp prevented over-collection), but a whole visit could not be settled in one tap | **Resolved — visit-scoped settlement implemented.** Product decision: Take payment settles the whole visit. New `loadVisitPaymentPicture` is the single source for total / paid / balance / state across `group_booking_id`; the charge route, booking GET, `/summary` and the recompute fan-out all use it. Rules and API shape in §5.7 |
+| 24 | §11 required "confirm a balance PI does **not** trigger the deposit-confirmation path" — proven only by unit tests on the helper, never at the routing level | Fixed: new `route.balance-payment.test.ts` (9 cases) drives the **real** webhook and asserts branch isolation for succeeded / failed / canceled / refunded, both directions |
+| 25 | The venue bootstrap's degraded `basicVenue` fallback select omitted `in_person_payments_enabled`, silently forcing the feature off if the primary select ever failed | Fixed: column added to the fallback select |
+
+Deviation accepted (no change): §6.6 says to extend `load-booking-detail-bundle.ts`; the resolved total / balance / live payment state are instead computed in the GET and summary routes, because the values depend on the ledger and deposit rather than the bundle RPC's satellite rows. Behaviour matches the spec's contract.
+
+### Sixth review (2026-07-24) — mobile implemented; doc reconciled against both repos
+
+`resneo-app` `main` @ `1b176e7` implements §7 **and** §7A end to end (five internal review passes; the reader layer is executed against a mock Terminal SDK rather than only re-read). Reconciling this doc against both repos produced three **corrections to the spec itself** — cases where the document was wrong, not the code:
+
+| # | Finding | Resolution |
+|---|---|---|
+| 26 | §7A.4 gave the iOS prop as `bluetoothPeripheralUsagePermission`; the pinned plugin accepts **`bluetoothPeripheralPermission`** and **silently ignores** the other spelling, so the usage string would never be emitted | §7A.4 corrected; `bluetoothBackgroundMode` recorded as deliberately unset |
+| 27 | §7.7's sketch implied `cancelCollectPaymentMethod` is importable from the package root. It is **not re-exported** there — a module-level `require` yields `undefined` and abandon-cancel silently does nothing | §7.1 records the constraint (take it off the `useStripeTerminal` hook); implemented from the collect section's unmount cleanup |
+| 28 | §7.8/§8-D prescribed a **Send payment link** fallback reusing the deposit route's `send_payment_link`. That machinery sends a **deposit** request tied to `deposit_status`, so using it after a declined *balance* payment would email a misleading or failing request | Recorded as **deferred, not built**, in §7.8 and §8-D; needs a backend balance-payment link first |
+
+Also folded in: the pinned SDK version and its import-time crash hazard (§7.1), the web/Metro stub and Android `minSdkVersion 26`, the **venue settings toggle** now shipping in the dashboard (§6.7), and the real as-built mobile file list and test inventory (§15).
+
+**Integration status — verified against the code, not assumed.** The app's booking-detail and venue-bootstrap types match the backend contract exactly (`booking_total_price_pence`, `amount_paid_pence`, `payment_state`, `balance_due_pence`, `payments[]`, `in_person_payments_enabled`, `card_present_ready`), it sends a v4 `attempt_id` on every card charge (§6.3c), and `canTakeInPersonPayment` implements §3.4 rule 2 verbatim.
+
+**Visit-scoped settlement in the app — done.** §5.7 landed in the backend *after* the mobile work and was already semantically compatible (`balance_due_pence` is the visit balance, so the sheet collected for the whole visit, and the list already collapses a multi-service visit into one row via `collapseMultiServiceVisits`). The remaining gap was that staff had no way to tell *why* the amount was bigger than the opened service. Now closed before the pilot:
+
+- `types/booking-detail.ts` — `VisitPayment` type + `visit_payment` field (optional, so older payloads still parse); `BookingPaymentRow.booking_id` added because `payments[]` is now visit-wide.
+- `lib/payments/payment-display.ts` — `visitPaymentNote()`, a pure helper returning "Covers all N services in this visit", or **null for a standalone appointment** so the common case stays uncluttered.
+- `TakePaymentSheet` header renders that note under the guest name; `BookingDetailContent` passes `visit_payment` into the sheet target.
+- Tests: 3 helper cases + 3 sheet cases (note shown for a visit, absent for a standalone, and one collection taking the full visit balance). App suite 113 files / 1018 tests pass; `tsc` clean; no new lint warnings. Tests extended to 54 dedicated cases including a stale-column regression guard; full suite, tsc, and eslint clean.

@@ -13,7 +13,12 @@ import {
   completeCardHoldChargeFromWebhook,
   recordCardHoldChargeFailure,
 } from '@/lib/booking/card-hold-charge';
-import { sendCardHoldChargedReceipt } from '@/lib/communications/send-templated';
+import { sendCardHoldChargedReceipt, sendPaymentReceiptEmail } from '@/lib/communications/send-templated';
+import {
+  applyBalancePaymentRefundFromWebhook,
+  confirmBalancePaymentFromPaymentIntent,
+  markBalancePaymentFailedForPaymentIntent,
+} from '@/lib/booking/confirm-balance-payment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import {
   claimStripeWebhookEvent,
@@ -139,7 +144,7 @@ async function restoreAndReleaseClassBookings(
 /**
  * Stripe webhook handler. Idempotent: process each event once (track by stripe_event_id).
  * Verifies signature. Handles: payment_intent.succeeded, payment_intent.payment_failed,
- * setup_intent.succeeded, setup_intent.setup_failed, charge.refunded.
+ * payment_intent.canceled, setup_intent.succeeded, setup_intent.setup_failed, charge.refunded.
  */
 export async function POST(request: NextRequest) {
   let event: Stripe.Event;
@@ -225,6 +230,37 @@ export async function POST(request: NextRequest) {
               await sendCardHoldChargedReceipt(receiptParams);
             } catch (emailErr) {
               console.error('[Stripe webhook] card-hold receipt email failed:', emailErr, receiptParams);
+            }
+          });
+        }
+        return NextResponse.json({ received: true });
+      }
+
+      // In-person appointment balance PI (§6.4): source-of-truth completion of
+      // the booking_payments ledger. MUST run before the generic deposit
+      // confirm path — the balance PI carries metadata.booking_id too.
+      if (meta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.APPOINTMENT_BALANCE) {
+        const result = await confirmBalancePaymentFromPaymentIntent(supabase, {
+          paymentIntentId: pi.id,
+          bookingId: meta.booking_id ?? null,
+          venueId: meta.venue_id ?? null,
+          amountReceivedPence: pi.amount_received ?? pi.amount,
+          connectedAccountId: connectedAccountId ?? null,
+        });
+        if (result?.applied) {
+          // Receipt after the response (§6.5). Failure only loses the email —
+          // the ledger and summary are already written.
+          const receiptParams = {
+            bookingId: result.bookingId,
+            venueId: result.venueId,
+            amountPaidPence: result.amountPence,
+            paidAt: new Date(event.created * 1000).toISOString(),
+          };
+          after(async () => {
+            try {
+              await sendPaymentReceiptEmail(receiptParams);
+            } catch (emailErr) {
+              console.error('[Stripe webhook] payment receipt email failed:', emailErr, receiptParams);
             }
           });
         }
@@ -345,6 +381,15 @@ export async function POST(request: NextRequest) {
       // the hold only; NEVER touch booking status for a fee PI. The generic
       // failure path below stays scoped to deposit-Pending rows.
       const failedMeta = pi.metadata ?? {};
+
+      // In-person balance PI (§6.4 hygiene): keep the ledger truthful — a
+      // declined tap flips its pending row to failed. A later retried collect
+      // on the same PI can still succeed (failed → succeeded is allowed).
+      if (failedMeta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.APPOINTMENT_BALANCE) {
+        await markBalancePaymentFailedForPaymentIntent(supabase, pi.id);
+        console.error('payment_intent.payment_failed (appointment balance)', pi.id, pi.last_payment_error?.message);
+        return NextResponse.json({ received: true });
+      }
       if (failedMeta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.CARD_HOLD_NO_SHOW_FEE) {
         await recordCardHoldChargeFailure(supabase, {
           paymentIntentId: pi.id,
@@ -432,6 +477,16 @@ export async function POST(request: NextRequest) {
         }
       }
       console.error('payment_intent.payment_failed', pi.id, pi.last_payment_error?.message);
+    } else if (event.type === 'payment_intent.canceled') {
+      // §6.4 hygiene: an abandoned in-person balance attempt (staff dismissed
+      // the sheet; the PI was cancelled client-side or expired) must not leave
+      // its ledger row at 'pending' forever. Only balance PIs are handled —
+      // other cancelled PIs keep their existing lifecycles.
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const canceledMeta = pi.metadata ?? {};
+      if (canceledMeta.reserve_ni_purpose === RESERVE_NI_PI_PURPOSE.APPOINTMENT_BALANCE) {
+        await markBalancePaymentFailedForPaymentIntent(supabase, pi.id);
+      }
     } else if (event.type === 'setup_intent.succeeded') {
       // Card-hold setup mode backup confirm (spec §8.6 item 4). The
       // confirm-payment route is the primary path; this covers 3DS redirects
@@ -640,6 +695,31 @@ export async function POST(request: NextRequest) {
             venueId: feeHold.venue_id,
             chargedPence: feeHold.charged_pence,
           });
+          return NextResponse.json({ received: true });
+        }
+
+        // In-person balance PI (§6.4): its id lives only in booking_payments,
+        // never in bookings.stripe_payment_intent_id, so resolve the ledger
+        // before the deposit lookup. v1 refunds are full-per-payment: a partial
+        // refund arriving from the Stripe dashboard leaves the row's state
+        // untouched (the operator completes the refund to finish it).
+        const { data: balanceRow, error: balanceRowErr } = await supabase
+          .from('booking_payments')
+          .select('id')
+          .eq('stripe_payment_intent_id', paymentIntentId)
+          .maybeSingle();
+        if (balanceRowErr) {
+          console.error('[Stripe webhook] balance ledger lookup failed:', balanceRowErr, { paymentIntentId });
+          throw balanceRowErr;
+        }
+        if (balanceRow) {
+          if (!chargeFullyRefunded) {
+            console.warn('[Stripe webhook] partial refund on balance PI; leaving ledger untouched', {
+              paymentIntentId,
+            });
+            return NextResponse.json({ received: true });
+          }
+          await applyBalancePaymentRefundFromWebhook(supabase, paymentIntentId);
           return NextResponse.json({ received: true });
         }
 

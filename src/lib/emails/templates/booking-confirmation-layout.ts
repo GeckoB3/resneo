@@ -186,8 +186,8 @@ function buildEventTicketDetailRows(
     const label = (t.label?.trim() || 'Ticket').replace(/:\s*$/, '');
     const qtyLine =
       t.quantity === 1
-        ? `1 ticket at ${unitFmt ?? '—'}`
-        : `${t.quantity} tickets at ${unitFmt ?? '—'} each`;
+        ? `1 ticket at ${unitFmt ?? '-'}`
+        : `${t.quantity} tickets at ${unitFmt ?? '-'} each`;
 
     const priceCell = subFmt
       ? `<td style="padding:14px 0;border-bottom:1px solid ${RULE};text-align:right;vertical-align:top;white-space:nowrap">` +
@@ -453,7 +453,7 @@ function buildOnlineLocationInner(opts: { joinUrl: string | null; info: string |
   return (
     `<p style="margin:0 0 14px;font-size:17px;font-weight:700;color:${TEXT_DARK};letter-spacing:-0.01em;font-family:${FONT}">Location</p>` +
     `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">Online</p>` +
-    `<p style="margin:5px 0 0;font-size:14px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">This service is delivered online — no need to travel.</p>` +
+    `<p style="margin:5px 0 0;font-size:14px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">This service is delivered online, so there is no need to travel.</p>` +
     infoBlock +
     joinButton
   );
@@ -703,6 +703,17 @@ function buildTransactionalDetailRows(opts: {
   if (opts.groupAppointments && opts.groupAppointments.length > 0) {
     const itemRows = opts.groupAppointments.map((g, idx) => {
       const isLast = idx === opts.groupAppointments!.length - 1 && !opts.priceDisplay;
+      // Per-person add-ons and (when they change the price) the person subtotal,
+      // so receipts and reminders itemise exactly what each person is having.
+      const addonLinesHtml = (g.addon_lines ?? [])
+        .map(
+          (line) =>
+            `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">+ ${escapeHtml(line)}</p>`,
+        )
+        .join('');
+      const subtotalHtml = g.subtotal_display?.trim()
+        ? `<p style="margin:4px 0 0;font-size:13px;font-weight:600;color:${TEXT_DARK};font-family:${FONT}">Subtotal: ${escapeHtml(g.subtotal_display.trim())}</p>`
+        : '';
       return (
         `<tr>` +
         `<td style="padding:14px 0;${isLast ? '' : `border-bottom:1px solid ${RULE};`}vertical-align:top">` +
@@ -712,6 +723,8 @@ function buildTransactionalDetailRows(opts: {
         `${escapeHtml(g.service_name)} with ${escapeHtml(g.practitioner_name)}` +
         (g.price_display?.trim() ? ` &middot; ${escapeHtml(g.price_display.trim())}` : '') +
         `</p>` +
+        addonLinesHtml +
+        subtotalHtml +
         `</td>` +
         `</tr>`
       );

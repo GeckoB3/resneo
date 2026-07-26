@@ -58,20 +58,40 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  /**
+   * Provisioning the Location and minting the token fail for completely
+   * different reasons, so they get their own branches. A single catch reported
+   * both as "not enabled for card payments", which sent staff (and us) hunting a
+   * Stripe capability problem when the real cause was a venue address missing
+   * its city — the failure took an afternoon to find precisely because the
+   * message pointed the wrong way.
+   */
+  let locationId: string;
   try {
-    const locationId = await ensureTerminalLocation(
+    locationId = await ensureTerminalLocation(
       staff.db,
       venueId,
       venue.stripe_connected_account_id,
     );
+  } catch (err) {
+    // Nearly always the venue address: Stripe requires city (and country) for a
+    // GB Location, and `venues.address` is free text that may not contain one.
+    console.error('[connection-token] location provisioning failed:', err, { venueId });
+    return NextResponse.json(
+      { error: 'Could not set this venue up for card readers. Check the venue address in Settings.' },
+      { status: 400 },
+    );
+  }
+
+  try {
     const token = await stripe.terminal.connectionTokens.create(
       {},
       { stripeAccount: venue.stripe_connected_account_id },
     );
     return NextResponse.json({ secret: token.secret, location_id: locationId });
   } catch (err) {
-    // The #1 runtime failure mode: the connected account lacks the
-    // card-present capability (or Terminal is otherwise not enabled on it).
+    // The #1 runtime failure mode here: the connected account lacks the
+    // card-present capability, or Terminal is otherwise not enabled on it.
     console.error('[connection-token] token mint failed:', err, { venueId });
     return NextResponse.json(
       { error: "This venue isn't enabled for in-person card payments yet." },

@@ -250,6 +250,94 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
     expect(visit.ledger.perBooking.get('b1')?.balancePaidPence).toBe(0);
   });
 
+  it('returns a named, priced line per service of a visit', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1' },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv2',
+              addons_total_price_pence: 500,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      if (call.table === 'service_variants') {
+        return {
+          data: [
+            { id: 'sv1', price_pence: 3000, name: 'Cut & finish' },
+            { id: 'sv2', price_pence: 6000, name: 'Colour' },
+          ],
+        };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, { ...anchor, group_booking_id: 'grp-1' });
+    expect(visit.lines).toEqual([
+      { booking_id: 'b1', name: 'Cut & finish', total_pence: 3000 },
+      // 6000 variant + 500 add-ons
+      { booking_id: 'b2', name: 'Colour', total_pence: 6500 },
+    ]);
+  });
+
+  it('keeps the single-query fast path for a standalone booking with a known price', async () => {
+    // Names only matter for a multi-line breakdown, and a standalone booking
+    // already carries `service_variant_name` on the detail payload. Fetching
+    // them here would cost an extra round trip for nothing.
+    const tables: string[] = [];
+    const { admin } = makeAdmin((call) => {
+      tables.push(call.table);
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, {
+      ...anchor,
+      booking_total_price_pence: 4500,
+    });
+    expect(tables).toEqual(['booking_payments']);
+    expect(visit.lines).toEqual([{ booking_id: 'b1', name: null, total_pence: 4500 }]);
+  });
+
+  it('does not let a fetched variant price override the caller-supplied anchor price', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1' },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv1',
+              addons_total_price_pence: 0,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      // Stale/other price for the same variant the caller already resolved.
+      if (call.table === 'service_variants') {
+        return { data: [{ id: 'sv1', price_pence: 9999, name: 'Cut & finish' }] };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(
+      admin,
+      { ...anchor, group_booking_id: 'grp-1' },
+      { anchorServiceVariantPricePence: 3000 },
+    );
+    expect(visit.lines.map((l) => l.total_pence)).toEqual([3000, 3000]);
+  });
+
   it('an unresolvable line makes the WHOLE visit total unknown (never silently understated)', async () => {
     const { admin } = makeAdmin((call) => {
       if (call.table === 'bookings') {

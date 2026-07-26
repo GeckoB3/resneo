@@ -181,10 +181,26 @@ export interface VisitBookingRow {
  * succeeded ledger rows) — never from `bookings.amount_paid_pence`, which only
  * refreshes on in-person payment activity and would omit a deposit paid since.
  */
+/**
+ * One priced line of a visit, so the app can show what each service costs
+ * instead of only the visit total. Names are resolved from `service_variants`
+ * and are only populated for a real multi-line visit (a standalone booking
+ * already carries `service_variant_name` on the detail payload).
+ */
+export interface VisitPaymentLine {
+  booking_id: string;
+  /** Service/option name when resolvable; null for an unnamed or non-variant line. */
+  name: string | null;
+  /** This line's resolved price; null when it cannot be determined (§5.7). */
+  total_pence: number | null;
+}
+
 export interface VisitPaymentPicture {
   /** Every booking row in the visit (always includes the anchor). */
   rows: VisitBookingRow[];
   bookingIds: string[];
+  /** Per-line names + prices, in the same order as `rows`. */
+  lines: VisitPaymentLine[];
   /** This row's own resolved price (unchanged single-booking meaning). */
   anchorTotalPence: number | null;
   /** Visit price. null when ANY row's price is unresolvable (§5.7). */
@@ -241,22 +257,29 @@ export async function loadVisitPaymentPicture(
 
   // Variant prices for rows that need one, in a single batched query.
   const variantPrices = new Map<string, number>();
+  const variantNames = new Map<string, string>();
   if (opts?.anchorServiceVariantPricePence != null && anchor.service_variant_id) {
     variantPrices.set(anchor.service_variant_id, opts.anchorServiceVariantPricePence);
   }
-  const needed = [
-    ...new Set(
-      rows
-        .filter(
-          (r) =>
-            !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0),
-        )
-        .map((r) => r.service_variant_id)
-        .filter((v): v is string => typeof v === 'string' && !variantPrices.has(v)),
-    ),
-  ];
+  const needPrice = rows
+    .filter(
+      (r) => !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0),
+    )
+    .map((r) => r.service_variant_id)
+    .filter((v): v is string => typeof v === 'string' && !variantPrices.has(v));
+  // Names label the per-line breakdown, which only exists for a real visit. A
+  // standalone booking already carries `service_variant_name` from the detail
+  // bundle, so asking for names there would cost a second query for nothing and
+  // lose this function's single-query fast path.
+  const needName =
+    rows.length > 1
+      ? rows
+          .map((r) => r.service_variant_id)
+          .filter((v): v is string => typeof v === 'string')
+      : [];
+  const needed = [...new Set([...needPrice, ...needName])];
   if (needed.length > 0) {
-    let vq = admin.from('service_variants').select('id, price_pence').in('id', needed);
+    let vq = admin.from('service_variants').select('id, price_pence, name').in('id', needed);
     if (venueId) vq = vq.eq('venue_id', venueId);
     const { data, error } = await vq;
     if (error) {
@@ -264,10 +287,20 @@ export async function loadVisitPaymentPicture(
       // which is staff-confirmable — log and continue rather than failing.
       console.error('[payment-summary] visit variant price load failed:', error.message);
     }
-    for (const v of (data ?? []) as Array<{ id: string; price_pence: number | null }>) {
-      if (typeof v.price_pence === 'number' && Number.isFinite(v.price_pence)) {
+    for (const v of (data ?? []) as Array<{
+      id: string;
+      price_pence: number | null;
+      name: string | null;
+    }>) {
+      // Never overwrite the caller's authoritative anchor price.
+      if (
+        typeof v.price_pence === 'number' &&
+        Number.isFinite(v.price_pence) &&
+        !variantPrices.has(v.id)
+      ) {
         variantPrices.set(v.id, v.price_pence);
       }
+      if (typeof v.name === 'string' && v.name.trim()) variantNames.set(v.id, v.name.trim());
     }
   }
 
@@ -309,6 +342,11 @@ export async function loadVisitPaymentPicture(
   return {
     rows,
     bookingIds,
+    lines: rows.map((r) => ({
+      booking_id: r.id,
+      name: r.service_variant_id ? (variantNames.get(r.service_variant_id) ?? null) : null,
+      total_pence: rowTotal(r),
+    })),
     anchorTotalPence: rowTotal(anchor),
     totalPence,
     amountPaidPence,

@@ -396,6 +396,11 @@ export async function GET(
         total_pence: visit.totalPence,
         amount_paid_pence: visit.amountPaidPence,
         balance_due_pence: visit.balanceDuePence,
+        // Per-service names + prices, so the app can break a visit down line by
+        // line instead of showing only the visit total. Populated for a real
+        // multi-line visit; a standalone booking already has its own service on
+        // the payload.
+        lines: visit.lines,
       },
       payments: paymentRowsData ?? [],
     });

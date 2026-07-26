@@ -161,7 +161,7 @@ describe('linkedBookingBarDetailLabel', () => {
         'time_only',
         'Partner Salon',
       ),
-    ).toBe('Partner Salon — busy');
+    ).toBe('Partner Salon: busy');
   });
 });
 

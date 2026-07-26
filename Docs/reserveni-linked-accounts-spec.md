@@ -524,6 +524,14 @@ Three orthogonal dimensions, set independently per direction on the link.
 | `false` | Even with `full_details`, `guests` rows (name, email, phone, notes) stay hidden. |
 | `true` | Full `guests` information visible. Only meaningful with `full_details`. |
 
+The client's *name* is PII wherever it is stored: the booking row's `guest_first_name`/
+`guest_last_name` snapshot columns count as the name and are hidden alongside the `guests`
+row when `pii = false` (enforced 2026-07-26 across the linked-calendar read, the booking
+detail GET, and the bookings-list/guest-history route). A client's home address on a booking
+(`client_address_*`, mobile appointments) is contact PII and is gated the same way.
+Booking-level operational notes (`special_requests`, `internal_notes`) are booking detail,
+not `guests`-row data, and remain visible to `full_details` viewers.
+
 ### 5.3 Action permissions (`link_action_level`)
 
 | Value | Meaning |
@@ -541,11 +549,15 @@ A new link request is pre-filled, mutually, with:
 
 - Calendar visibility: `full_details`
 - Client PII: `true`
-- Action: `edit_existing`
+- Action: `create_edit_cancel`
 
-This errs toward useful access while keeping create/cancel rights deliberate (accidentally
-cancelling another venue's booking is high-impact). The requester may adjust any dimension
-before sending; the recipient may adjust again on acceptance (§6.2).
+This errs toward useful access: the flagship personas (chair-rental, co-located
+practitioners) want full mutual booking management from day one, and a combined booking
+page (§7) requires `create_edit_cancel` in both directions anyway. The requester may
+adjust any dimension before sending; the recipient may adjust again on acceptance (§6.2),
+so create/cancel rights remain a reviewed, deliberate grant. *(Decision 2026-07-26:
+previously `edit_existing`; the shipped default was confirmed as intended and this
+section updated to match.)*
 
 ### 5.5 Constraint rules (enforced in UI **and** as DB CHECK constraints)
 
@@ -1324,6 +1336,11 @@ spec.
 | Collective branding | Host sets logo/colour (§7.1, §7.8) | **UI shipped 2026-06-04** — create + Edit-settings collect logo URL / brand colour / description (§16.2). |
 | Member visibility config | Per-member practitioner/service/order (§7.3) | **UI shipped 2026-06-04** — "Configure my listing" modal (show-all / choose-specific practitioners + services + display order); `myConfig` on `CollectiveView` prefills it (§16.2). |
 | GDPR notice | Short notice in acceptance modal (§10.2) | **Implemented** in review modal — but not shown in the "Accept with changes" sub-view (§19.2). |
+| Default preset action | Was `edit_existing` (§5.4, old text) | **Closed 2026-07-26** — `create_edit_cancel` confirmed as the intended default; §5.4 updated to match the code. |
+| No-PII name visibility | Name hidden when `pii=false` (§5.2) | **Closed 2026-07-26** — guest-name snapshots (and `client_address_*`) are now stripped for no-PII viewers on every cross-venue read route. |
+| time_only detail reads | time_only = busy blocks only (§5.1) | **Closed 2026-07-26** — the booking detail GET and bookings-list linked modes now require `full_details`; time_only viewers are limited to the anonymised calendar feed. |
+| Combined page group bookings | Not specified | Single bookings only: the group pipeline (`create-group`) has no collective routing, so the group option is hidden on a collective page until that ships. |
+| `allow_any_practitioner` column | §7.6 flag on `venue_collectives` | **Dropped 2026-07-26** (migration `20270101122000`) — it was never wired; the combined page follows the HOST venue's own flag, and per-offering pooling uses `collective_service_items.allow_any_available`. |
 
 When closing a deviation, update this table and the relevant normative section (§7 / §8 / §10).
 

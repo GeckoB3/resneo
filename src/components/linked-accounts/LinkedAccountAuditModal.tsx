@@ -54,7 +54,7 @@ function diffSummary(entry: AuditEntry): string | null {
     const before = entry.beforeState[k];
     const after = entry.afterState[k];
     if (before !== after) {
-      changes.push(`${k.replace(/_/g, ' ')}: ${String(before ?? '—')} → ${String(after ?? '—')}`);
+      changes.push(`${k.replace(/_/g, ' ')}: ${String(before ?? 'unset')} → ${String(after ?? 'unset')}`);
     }
   }
   return changes.length > 0 ? changes.join('; ') : null;
@@ -237,9 +237,9 @@ export function LinkedAccountAuditModal({
                     </td>
                     <td className="px-3 py-2 font-medium text-slate-900">{e.actionLabel}</td>
                     <td className="px-3 py-2 text-slate-700">{e.actingVenue}</td>
-                    <td className="px-3 py-2 text-slate-600">{e.actingUser ?? '—'}</td>
+                    <td className="px-3 py-2 text-slate-600">{e.actingUser ?? '-'}</td>
                     <td className="px-3 py-2 text-slate-600">
-                      {diff ?? (e.resourceType ? e.resourceType : '—')}
+                      {diff ?? (e.resourceType ? e.resourceType : '-')}
                     </td>
                   </tr>
                 );

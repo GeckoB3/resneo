@@ -163,6 +163,133 @@ describe('resolveBookingTotalPenceFromRow', () => {
     expect(calls[0]?.filters).toContainEqual(['eq', 'venue_id', 'v9']);
   });
 
+  it('falls back to the service price when the booking has no variant', async () => {
+    // A service only has variants when the venue defines options. A plain
+    // service (beard trim) is priced on the service row, and reading variant
+    // prices only made every such booking resolve to "unknown" — no price on
+    // screen and an empty amount box.
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      service_variant_id: null,
+      appointment_service_id: 'svc-1',
+      addons_total_price_pence: 0,
+    });
+    expect(total).toBe(1500);
+    expect(calls[0]?.table).toBe('appointment_services');
+  });
+
+  it('prefers the newer service_items price and adds add-ons', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'service_items') return { data: { price_pence: 2000 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      service_item_id: 'si-1',
+      addons_total_price_pence: 500,
+    });
+    expect(total).toBe(2500);
+  });
+
+  it("uses this practitioner's price override instead of the service list price", async () => {
+    // Precedence copied from mergeAppointmentServiceWithPractitionerLink
+    // (`custom_price_pence ?? base.price_pence`). Charging the base price where
+    // a practitioner charges their own quotes the client one figure and
+    // collects another.
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'practitioner_services') return { data: { custom_price_pence: 1800 } };
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      appointment_service_id: 'svc-1',
+      practitioner_id: 'p1',
+      addons_total_price_pence: 0,
+    });
+    expect(total).toBe(1800);
+  });
+
+  it('reads the override from calendar_service_assignments on the newer schema', async () => {
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'calendar_service_assignments') {
+        return { data: { custom_price_pence: 2200 } };
+      }
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      service_item_id: 'si-1',
+      calendar_id: 'cal-1',
+    });
+    expect(total).toBe(2200);
+    // The service list price is not queried once the override answered.
+    expect(calls.map((c) => c.table)).toEqual(['calendar_service_assignments']);
+  });
+
+  it('treats a null override as "no override" and falls through to the service', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'practitioner_services') return { data: { custom_price_pence: null } };
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      appointment_service_id: 'svc-1',
+      practitioner_id: 'p1',
+    });
+    expect(total).toBe(1500);
+  });
+
+  it('honours a zero override as a real price rather than a missing one', async () => {
+    // A practitioner offering the service free. 0 resolves to "unknown", which
+    // is the same staff-confirmable path as any unpriced service — but it must
+    // NOT silently fall back to charging the base price.
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'practitioner_services') return { data: { custom_price_pence: 0 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      appointment_service_id: 'svc-1',
+      practitioner_id: 'p1',
+    });
+    expect(total).toBeNull();
+  });
+
+  it('lets a priced variant win over the parent service price', async () => {
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'service_variants') return { data: { price_pence: 2500 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      service_variant_id: 'variant-1',
+      appointment_service_id: 'svc-1',
+      addons_total_price_pence: 0,
+    });
+    expect(total).toBe(2500);
+    // The service price is not even queried when the variant already priced it.
+    expect(calls.map((c) => c.table)).toEqual(['service_variants']);
+  });
+
+  it('scopes the service lookup to the owning venue', async () => {
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      appointment_service_id: 'svc-1',
+      venue_id: 'v9',
+    });
+    expect(calls[0]?.filters).toContainEqual(['eq', 'venue_id', 'v9']);
+  });
+
   it('degrades to unknown (null) when the variant lookup errors', async () => {
     const { admin } = makeAdmin(() => ({ data: null, error: { message: 'boom' } }));
     const total = await resolveBookingTotalPenceFromRow(admin, {
@@ -248,6 +375,185 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
     // Per-row ledger attribution keeps revenue sums from double counting.
     expect(visit.ledger.perBooking.get('b2')?.balancePaidPence).toBe(500);
     expect(visit.ledger.perBooking.get('b1')?.balancePaidPence).toBe(0);
+  });
+
+  it('prices a variant-less line from its service so the visit total stays known', async () => {
+    // One unresolvable line nulls the WHOLE visit total, so a single beard trim
+    // in a visit used to wipe out the balance for every line in it.
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1' },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: null,
+              appointment_service_id: 'svc-beard',
+              addons_total_price_pence: 0,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      if (call.table === 'service_variants') {
+        return { data: [{ id: 'sv1', price_pence: 3000, name: 'Cut & finish' }] };
+      }
+      if (call.table === 'appointment_services') {
+        return { data: [{ id: 'svc-beard', price_pence: 1500 }] };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+
+    const visit = await loadVisitPaymentPicture(admin, { ...anchor, group_booking_id: 'grp-1' });
+    expect(visit.totalPence).toBe(4500); // 3000 variant + 1500 service
+    expect(visit.lines.map((l) => l.total_pence)).toEqual([3000, 1500]);
+  });
+
+  it('applies a practitioner override to the right line only', async () => {
+    /**
+     * The batched override query is `.in(owner).in(service)`, which is a CROSS
+     * PRODUCT: it returns p1's override for the shared service alongside every
+     * other combination. Applying a row without re-matching the PAIR would price
+     * p2's line at p1's rate, so this pins that b2 keeps the list price.
+     */
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            {
+              ...anchor,
+              group_booking_id: 'grp-1',
+              service_variant_id: null,
+              appointment_service_id: 'svc-1',
+              practitioner_id: 'p1',
+            },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: null,
+              appointment_service_id: 'svc-1',
+              practitioner_id: 'p2',
+              addons_total_price_pence: 0,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      if (call.table === 'practitioner_services') {
+        // Only p1 overrides; the cross product still returns just this row.
+        return { data: [{ practitioner_id: 'p1', service_id: 'svc-1', custom_price_pence: 1800 }] };
+      }
+      if (call.table === 'appointment_services') {
+        return { data: [{ id: 'svc-1', price_pence: 1500 }] };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+
+    const visit = await loadVisitPaymentPicture(admin, {
+      ...anchor,
+      group_booking_id: 'grp-1',
+      service_variant_id: null,
+      appointment_service_id: 'svc-1',
+      practitioner_id: 'p1',
+    });
+
+    expect(visit.lines.map((l) => l.total_pence)).toEqual([1800, 1500]);
+    expect(visit.totalPence).toBe(3300);
+  });
+
+  it('returns a named, priced line per service of a visit', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1' },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv2',
+              addons_total_price_pence: 500,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      if (call.table === 'service_variants') {
+        return {
+          data: [
+            { id: 'sv1', price_pence: 3000, name: 'Cut & finish' },
+            { id: 'sv2', price_pence: 6000, name: 'Colour' },
+          ],
+        };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, { ...anchor, group_booking_id: 'grp-1' });
+    expect(visit.lines).toEqual([
+      { booking_id: 'b1', name: 'Cut & finish', total_pence: 3000 },
+      // 6000 variant + 500 add-ons
+      { booking_id: 'b2', name: 'Colour', total_pence: 6500 },
+    ]);
+  });
+
+  it('keeps the single-query fast path for a standalone booking with a known price', async () => {
+    // Names only matter for a multi-line breakdown, and a standalone booking
+    // already carries `service_variant_name` on the detail payload. Fetching
+    // them here would cost an extra round trip for nothing.
+    const tables: string[] = [];
+    const { admin } = makeAdmin((call) => {
+      tables.push(call.table);
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, {
+      ...anchor,
+      booking_total_price_pence: 4500,
+    });
+    expect(tables).toEqual(['booking_payments']);
+    expect(visit.lines).toEqual([{ booking_id: 'b1', name: null, total_pence: 4500 }]);
+  });
+
+  it('does not let a fetched variant price override the caller-supplied anchor price', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            { ...anchor, group_booking_id: 'grp-1' },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv1',
+              addons_total_price_pence: 0,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      // Stale/other price for the same variant the caller already resolved.
+      if (call.table === 'service_variants') {
+        return { data: [{ id: 'sv1', price_pence: 9999, name: 'Cut & finish' }] };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(
+      admin,
+      { ...anchor, group_booking_id: 'grp-1' },
+      { anchorServiceVariantPricePence: 3000 },
+    );
+    expect(visit.lines.map((l) => l.total_pence)).toEqual([3000, 3000]);
   });
 
   it('an unresolvable line makes the WHOLE visit total unknown (never silently understated)', async () => {

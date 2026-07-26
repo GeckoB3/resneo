@@ -165,9 +165,11 @@ export async function GET(request: NextRequest) {
         typeof tzRaw === 'string' && tzRaw.trim() !== '' ? tzRaw.trim() : 'Europe/London';
     }
 
-    const calendars: LinkedVenueCalendar[] = [];
-
-    for (const access of accessible) {
+    // Each linked venue's dataset is independent — load them in parallel so a
+    // many-link venue doesn't pay a serial per-venue round-trip cost on every
+    // calendar render. Output order matches `accessible` (stable for the UI).
+    const calendars: LinkedVenueCalendar[] = await Promise.all(
+      accessible.map(async (access): Promise<LinkedVenueCalendar> => {
       const fullDetails = access.grant.calendar === 'full_details';
       const canSeePii = fullDetails && access.grant.pii;
 
@@ -345,11 +347,15 @@ export async function GET(request: NextRequest) {
         const snapshotName = snapshotPresent
           ? formatGuestDisplayName(snapshotMerged.first, snapshotMerged.last)
           : null;
-        const guestLabel = fullDetails
-          ? canSeePii && guestId
-            ? guestNames[guestId] ?? snapshotName
-            : snapshotName
-          : null;
+        // §5.2 — the client's name is PII: without the PII grant no name is
+        // shown, not even the booking's guest-name snapshot. The card falls
+        // back to the service label.
+        const guestLabel =
+          fullDetails && canSeePii
+            ? guestId
+              ? guestNames[guestId] ?? snapshotName
+              : snapshotName
+            : null;
 
         const experienceEventId = b.experience_event_id as string | null;
         const classInstanceId = b.class_instance_id as string | null;
@@ -437,7 +443,19 @@ export async function GET(request: NextRequest) {
         ? bookings.filter((b) => b.practitionerId != null && columnIds.has(b.practitionerId))
         : bookings;
 
-      calendars.push({
+      // Record the cross-venue calendar view (debounced 5 minutes).
+      void recordReadAudit({
+        admin,
+        linkId: access.linkId,
+        actingVenueId: staff.venue_id,
+        actingUserId: user?.id ?? null,
+        owningVenueId: access.venueId,
+        actionType: 'viewed_calendar',
+        resourceType: 'practitioner',
+        resourceId: null,
+      });
+
+      return {
         venueId: access.venueId,
         venueName: venueNames[access.venueId] ?? 'Linked venue',
         venueTimezone: venueTimezones[access.venueId] ?? 'Europe/London',
@@ -450,20 +468,9 @@ export async function GET(request: NextRequest) {
         resources,
         bookings: scopedBookings,
         scheduleBlocks,
-      });
-
-      // Record the cross-venue calendar view (debounced 5 minutes).
-      void recordReadAudit({
-        admin,
-        linkId: access.linkId,
-        actingVenueId: staff.venue_id,
-        actingUserId: user?.id ?? null,
-        owningVenueId: access.venueId,
-        actionType: 'viewed_calendar',
-        resourceType: 'practitioner',
-        resourceId: null,
-      });
-    }
+      };
+      }),
+    );
 
     return NextResponse.json({ date, from: rangeFrom, to: rangeTo, venues: calendars });
   } catch (err) {

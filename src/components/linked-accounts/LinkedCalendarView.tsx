@@ -406,7 +406,7 @@ function LinkedBookingChip({
       <div className="min-w-0">
         <span className="font-medium text-slate-800">{timeLabel}</span>
         {timeOnly ? (
-          <span className="ml-1 text-slate-500">— {venueName} busy</span>
+          <span className="ml-1 text-slate-500">{venueName} busy</span>
         ) : (
           <span className="ml-1 truncate">
             {linkedBookingBarDetailLabel(booking, timeOnly ? 'time_only' : 'full_details', venueName)}
@@ -420,14 +420,14 @@ function LinkedBookingChip({
         {canView ? (
           <span
             className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400"
-            title={`View-only — ${venueName} granted calendar visibility without edit rights.`}
+            title={`View-only: ${venueName} granted calendar visibility without edit rights.`}
           >
             <ReadOnlyLockIcon />
             View
           </span>
         ) : !canEdit ? (
           <span
-            title={`View-only — ${venueName} shares busy/free times only, not booking detail.`}
+            title={`View-only: ${venueName} shares busy/free times only, not booking detail.`}
             aria-label={`Read-only: ${venueName} shares busy/free times only`}
             className="text-slate-400"
           >
@@ -634,8 +634,8 @@ export function LinkedBookingDetailModal({
       title={`Booking in ${venueName}`}
       description={
         timeOnly
-          ? 'Read-only — this link shows busy/free time blocks only.'
-          : 'Read-only — you can view this booking but cannot edit, reschedule or cancel it.'
+          ? 'Read-only: this link shows busy/free time blocks only.'
+          : 'Read-only: you can view this booking but cannot edit, reschedule or cancel it.'
       }
     >
       <div className="space-y-3">
@@ -660,7 +660,7 @@ export function LinkedBookingDetailModal({
             <>
               <div className="flex justify-between gap-3 px-3 py-2">
                 <dt className="font-medium text-slate-500">Client</dt>
-                <dd className="text-right text-slate-800">{booking.guestName ?? '—'}</dd>
+                <dd className="text-right text-slate-800">{booking.guestName ?? '-'}</dd>
               </div>
               {booking.guestEmail ? (
                 <div className="flex justify-between gap-3 px-3 py-2">
@@ -676,7 +676,7 @@ export function LinkedBookingDetailModal({
               ) : null}
               <div className="flex justify-between gap-3 px-3 py-2">
                 <dt className="font-medium text-slate-500">Service</dt>
-                <dd className="text-right text-slate-800">{booking.serviceName ?? '—'}</dd>
+                <dd className="text-right text-slate-800">{booking.serviceName ?? '-'}</dd>
               </div>
               {typeof booking.partySize === 'number' ? (
                 <div className="flex justify-between gap-3 px-3 py-2">
@@ -706,7 +706,7 @@ export function LinkedBookingDetailModal({
           </p>
         ) : (
           <p className="rounded-lg border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-900">
-            Linked read-only access — contact {venueName} or ask them to adjust link permissions
+            Linked read-only access. Contact {venueName} or ask them to adjust link permissions
             if you need to make changes.
           </p>
         )}

@@ -320,6 +320,9 @@ export async function POST(request: NextRequest) {
         booking_date: input.bookingDate,
         booking_time: input.bookingTime,
         booking_end_time: input.bookingEndTime ?? '',
+        // Staff-recorded, not an online self-booking: without this the RPC
+        // defaults to 'online' and reports misattribute cross-venue creates.
+        source: 'phone',
         party_size: input.partySize ?? 1,
         practitioner_id: ownerUsesUnified ? '' : input.practitionerId ?? '',
         calendar_id: ownerUsesUnified ? input.practitionerId ?? '' : '',

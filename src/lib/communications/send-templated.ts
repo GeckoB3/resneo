@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ensureComplianceFormLinksForBooking } from '@/lib/compliance/auto-send';
 import { renderCardHoldChargedEmail } from '@/lib/emails/templates/card-hold-charged';
 import { renderPaymentReceiptEmail } from '@/lib/emails/templates/payment-receipt';
+import { loadVisitPaymentPicture, type VisitBookingRow } from '@/lib/booking/payment-summary';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { BookingModel } from '@/types/booking-models';
@@ -493,24 +494,30 @@ export async function sendPaymentReceiptEmail(params: {
   venueId: string;
   amountPaidPence: number;
   paidAt: string;
+  /** Stripe PaymentIntent id: shown as the payment reference and used to resolve the ledger method. */
+  paymentIntentId?: string | null;
 }): Promise<SendResult> {
-  const { bookingId, venueId, amountPaidPence, paidAt } = params;
+  const { bookingId, venueId, amountPaidPence, paidAt, paymentIntentId } = params;
   const admin = getSupabaseAdminClient();
 
   const { data: bookingRow } = await admin
     .from('bookings')
-    .select('id, guest_id, guest_email, booking_date, booking_time, party_size, booking_model')
+    .select(
+      'id, guest_id, guest_email, booking_date, booking_time, party_size, booking_model, ' +
+        'group_booking_id, service_item_id, appointment_service_id, calendar_id, practitioner_id, ' +
+        'booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
+    )
     .eq('id', bookingId)
     .maybeSingle();
   const b = bookingRow as
-    | {
+    | ({
         guest_id: string | null;
         guest_email: string | null;
         booking_date: string;
         booking_time: string | null;
         party_size: number | null;
         booking_model: string | null;
-      }
+      } & VisitBookingRow)
     | null;
   if (!b) return { sent: false, reason: 'booking_not_found' };
 
@@ -583,7 +590,45 @@ export async function sendPaymentReceiptEmail(params: {
     timezone: v.timezone ?? null,
   });
 
-  const rendered = renderPaymentReceiptEmail(booking, venueData, { amountPaidPence, paidAt });
+  // Receipt money picture (best-effort): the visit total + remaining balance
+  // derive live from the ledger (this payment is already `succeeded` by the
+  // time the webhook sends the receipt), and the ledger row supplies the
+  // customer-facing payment method. A failure here only loses those rows.
+  let visitTotalPence: number | null = null;
+  let balanceDuePence: number | null = null;
+  try {
+    const visit = await loadVisitPaymentPicture(admin, { ...b, id: bookingId, venue_id: venueId });
+    visitTotalPence = visit.totalPence;
+    balanceDuePence = visit.balanceDuePence;
+  } catch (err) {
+    console.error('[sendPaymentReceiptEmail] visit picture failed, sending without totals', {
+      bookingId,
+      err,
+    });
+  }
+  let method: 'card_present' | 'cash' | 'external' | 'online' | null = null;
+  if (paymentIntentId) {
+    try {
+      const { data: ledgerRow } = await admin
+        .from('booking_payments')
+        .select('method')
+        .eq('stripe_payment_intent_id', paymentIntentId)
+        .maybeSingle();
+      method =
+        ((ledgerRow as { method?: string | null } | null)?.method as typeof method) ?? null;
+    } catch (err) {
+      console.error('[sendPaymentReceiptEmail] ledger method lookup failed', { bookingId, err });
+    }
+  }
+
+  const rendered = renderPaymentReceiptEmail(booking, venueData, {
+    amountPaidPence,
+    paidAt,
+    method,
+    paymentReference: paymentIntentId ?? null,
+    visitTotalPence,
+    balanceDuePence,
+  });
 
   return deliverEmailMessage(
     {

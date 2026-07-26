@@ -46,6 +46,8 @@ async function handleGet(request: NextRequest) {
   const results = {
     expired_requests: 0,
     lapse_warnings: 0,
+    /** §6.7 — warning flags cleared because the venue un-cancelled before lapsing. */
+    lapse_warnings_cleared: 0,
     suspended: 0,
     resumed: 0,
     expired_suspended: 0,
@@ -207,7 +209,7 @@ async function handleGet(request: NextRequest) {
   try {
     const { data: accepted } = await admin
       .from('account_links')
-      .select('id, venue_low_id, venue_high_id')
+      .select('id, venue_low_id, venue_high_id, lapse_warning_sent_at')
       .eq('status', 'accepted');
     for (const link of accepted ?? []) {
       try {
@@ -254,6 +256,23 @@ async function handleGet(request: NextRequest) {
             notifyLinkSuspended(admin, link.venue_high_id as string, lapsed.name),
           ]);
           results.suspended++;
+          continue;
+        }
+
+        // §6.7 / §16.1 #7 — both venues are healthy again. If a lapse warning was
+        // sent but the cancellation was withdrawn before the lapse (so the link
+        // never suspended), end that warning cycle here; otherwise a future
+        // cancellation would never re-warn.
+        if (
+          link.lapse_warning_sent_at &&
+          low.plan_status !== 'cancelling' &&
+          high.plan_status !== 'cancelling'
+        ) {
+          await admin
+            .from('account_links')
+            .update({ lapse_warning_sent_at: null })
+            .eq('id', link.id);
+          results.lapse_warnings_cleared++;
         }
       } catch (err) {
         console.error('[account-link-maintenance] suspend step failed:', link.id, err);
@@ -279,6 +298,29 @@ async function handleGet(request: NextRequest) {
         if (!low || !high) continue;
         const lowElig = evaluateLinkEligibility(low, nowMs);
         const highElig = evaluateLinkEligibility(high, nowMs);
+
+        // A venue moved to an ineligible product while the link was suspended —
+        // terminate now with the accurate reason (mirrors step 2) instead of
+        // waiting out the 30 days and recording it as subscription_lapsed.
+        if (!lowElig.feature || !highElig.feature) {
+          await admin
+            .from('account_links')
+            .update({
+              status: 'expired',
+              termination_reason: 'plan_ineligible',
+              terminated_at: new Date().toISOString(),
+              pending_change: null,
+            })
+            .eq('id', link.id);
+          collectiveAffectedVenueIds.add(link.venue_low_id as string);
+          collectiveAffectedVenueIds.add(link.venue_high_id as string);
+          await tallyEmails([
+            notifyLinkTerminatedIneligible(admin, link.venue_low_id as string, high.name),
+            notifyLinkTerminatedIneligible(admin, link.venue_high_id as string, low.name),
+          ]);
+          results.terminated_ineligible++;
+          continue;
+        }
 
         if (lowElig.canCreate && highElig.canCreate) {
           await admin

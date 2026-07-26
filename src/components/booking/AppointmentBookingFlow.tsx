@@ -635,8 +635,16 @@ export function AppointmentBookingFlow({
   const singleFlowSteps: Step[] = isLockedPractitionerFlow ? SINGLE_STEPS_LOCKED : SINGLE_STEPS;
 
   // Shared state
+  // A combined page (venue collective) skips the single/group mode choice: the
+  // group pipeline has no collective routing, so only single bookings are offered.
   const [step, setStep] = useState<Step>(() =>
-    editBooking || isLockedPractitionerFlow || isStaff || initialStep === 'service' ? 'service' : 'mode_choice',
+    editBooking ||
+    isLockedPractitionerFlow ||
+    isStaff ||
+    venue.is_collective ||
+    initialStep === 'service'
+      ? 'service'
+      : 'mode_choice',
   );
   const [date, setDate] = useState(() => editBooking?.booking_date ?? initialDate ?? todayStr());
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
@@ -835,13 +843,13 @@ export function AppointmentBookingFlow({
         setStep('service');
         setSelectedPractitionerId(lockedPractitioner.id);
       } else {
-        setStep(isStaff ? 'service' : 'mode_choice');
+        setStep(isStaff || venue.is_collective ? 'service' : 'mode_choice');
         setSelectedPractitionerId(null);
       }
     }
     window.addEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
     return () => window.removeEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
-  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff, isPublicGuest, accountGate.guestDetailsPrefill?.email]);
+  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff, venue.is_collective, isPublicGuest, accountGate.guestDetailsPrefill?.email]);
 
   // Build phantom bookings from already-selected group people
   const phantomBookings = useMemo(() => {
@@ -2718,7 +2726,7 @@ export function AppointmentBookingFlow({
       {/* ════════════════════════════════════════════════
           MODE CHOICE: Book for myself vs Group
           ════════════════════════════════════════════════ */}
-      {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && !isStaff && (
+      {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && (
         <div>
           <AppointmentStepHeader
             title="How would you like to book?"
@@ -2755,7 +2763,7 @@ export function AppointmentBookingFlow({
 
       {step === 'service' && (
         <div>
-          {!isLockedPractitionerFlow && !isEdit && !isStaff && initialStep !== 'service' && (
+          {!isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && initialStep !== 'service' && (
             isPublicGuest ? (
               <AppointmentBackLink onClick={() => setStep('mode_choice')} />
             ) : (

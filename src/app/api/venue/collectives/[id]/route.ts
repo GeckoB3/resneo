@@ -112,9 +112,6 @@ export async function PATCH(
     if (parsed.data.serviceGrouping !== undefined) {
       updates.service_grouping = parsed.data.serviceGrouping;
     }
-    if (parsed.data.allowAnyPractitioner !== undefined) {
-      updates.allow_any_practitioner = parsed.data.allowAnyPractitioner;
-    }
     // Single-venue-grade page customisation (plan §22 / P-phases) — host-curated.
     // Non-destructive merge: the editor's branding save omits `cover_photo_url` (a separate
     // slot), so the merge preserves it. Brand colour is mirrored into branding.primary_colour,

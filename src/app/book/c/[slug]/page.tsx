@@ -24,7 +24,7 @@ export async function generateMetadata({
   if (!known) return { title: 'Booking page not found' };
   if (known.status !== 'active') return { title: known.name };
   return {
-    title: `${known.name} — Book online`,
+    title: `${known.name}: Book online`,
     description:
       known.branding.description ?? `Book with the venues of the ${known.name} collective.`,
   };

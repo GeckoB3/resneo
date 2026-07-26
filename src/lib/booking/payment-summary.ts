@@ -53,6 +53,102 @@ export interface BookingRowForTotal {
   service_variant_id?: string | null;
   addons_total_price_pence?: number | null;
   venue_id?: string | null;
+  /** Newer unified-scheduling service. */
+  service_item_id?: string | null;
+  /** Legacy practitioner-appointment service. */
+  appointment_service_id?: string | null;
+  /** Who is delivering it — keys the per-practitioner price override. */
+  calendar_id?: string | null;
+  practitioner_id?: string | null;
+}
+
+/**
+ * The two live service schemas, and where each keeps its per-practitioner price
+ * override. Ordered newest first; a booking carries whichever ids apply.
+ */
+const SERVICE_PRICE_SOURCES = [
+  {
+    serviceTable: 'service_items',
+    overrideTable: 'calendar_service_assignments',
+    serviceCol: 'service_item_id',
+    ownerCol: 'calendar_id',
+    serviceIdOf: (b: BookingRowForTotal) => b.service_item_id ?? null,
+    ownerIdOf: (b: BookingRowForTotal) => b.calendar_id ?? null,
+  },
+  {
+    serviceTable: 'appointment_services',
+    overrideTable: 'practitioner_services',
+    serviceCol: 'service_id',
+    ownerCol: 'practitioner_id',
+    serviceIdOf: (b: BookingRowForTotal) => b.appointment_service_id ?? null,
+    ownerIdOf: (b: BookingRowForTotal) => b.practitioner_id ?? null,
+  },
+] as const;
+
+/**
+ * What this booking's SERVICE costs, for bookings with no priced variant.
+ *
+ * Services only have variants when the venue defines options ("short hair",
+ * "long hair"). A plain service like a beard trim is priced on the service row
+ * itself, and this resolver read variant prices ONLY, so every variant-less
+ * appointment came back with a null total. On screen that meant no price
+ * breakdown and an empty "Amount to charge" box, while an otherwise identical
+ * booking for a service WITH variants prefilled correctly.
+ *
+ * Precedence matches the rest of the app rather than being invented here:
+ * `mergeAppointmentServiceWithPractitionerLink` resolves a practitioner's price
+ * as `custom_price_pence ?? base.price_pence`, and the public booking flow then
+ * lets a chosen variant override that. So: variant (handled by the caller), else
+ * this practitioner's override, else the service's own price. Charging the base
+ * price where a practitioner charges their own would quote the client one figure
+ * and collect another.
+ *
+ * A `custom_price_pence` of 0 is a real override (a practitioner offering the
+ * service free), so only `null` counts as "no override".
+ */
+async function loadServicePricePence(
+  admin: SupabaseClient,
+  booking: BookingRowForTotal,
+): Promise<number | null> {
+  for (const src of SERVICE_PRICE_SOURCES) {
+    const serviceId = src.serviceIdOf(booking);
+    if (!serviceId) continue;
+
+    // Per-practitioner override first: it replaces the service's base price.
+    const ownerId = src.ownerIdOf(booking);
+    if (ownerId) {
+      const { data, error } = await admin
+        .from(src.overrideTable)
+        .select('custom_price_pence')
+        .eq(src.ownerCol, ownerId)
+        .eq(src.serviceCol, serviceId)
+        .maybeSingle();
+      if (error) {
+        console.error(`[payment-summary] ${src.overrideTable} load failed:`, error.message, {
+          ownerId,
+          serviceId,
+        });
+      }
+      const override = (data as { custom_price_pence?: number | null } | null)?.custom_price_pence;
+      if (typeof override === 'number' && Number.isFinite(override)) return override;
+    }
+
+    let query = admin.from(src.serviceTable).select('price_pence').eq('id', serviceId);
+    // Defence in depth, mirroring the variant lookup's venue scoping.
+    if (booking.venue_id) query = query.eq('venue_id', booking.venue_id);
+    const { data, error } = await query.maybeSingle();
+    if (error) {
+      // An unresolvable price only widens the "unknown total" path, which is
+      // staff-confirmable, so log and carry on rather than failing the request.
+      console.error(`[payment-summary] ${src.serviceTable} price load failed:`, error.message, {
+        serviceId,
+      });
+      continue;
+    }
+    const raw = (data as { price_pence?: number | null } | null)?.price_pence;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+  }
+  return null;
 }
 
 /**
@@ -92,9 +188,17 @@ export async function resolveBookingTotalPenceFromRow(
     variantPricePence = typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
   }
 
+  // No priced variant, usually because the service has no options at all. Fall
+  // back to the service's own price: without this a variant-less service like a
+  // beard trim resolved to "unknown" and staff had to type the amount in.
+  const basePricePence =
+    variantPricePence != null && variantPricePence > 0
+      ? variantPricePence
+      : await loadServicePricePence(admin, booking);
+
   return resolveBookingTotalPence({
     booking_total_price_pence: booking.booking_total_price_pence ?? null,
-    service_variant_price_pence: variantPricePence,
+    service_variant_price_pence: basePricePence,
     addons_total_price_pence: booking.addons_total_price_pence ?? null,
   });
 }
@@ -164,6 +268,12 @@ export interface VisitBookingRow {
   id: string;
   venue_id?: string | null;
   group_booking_id?: string | null;
+  /** Service ids, so a variant-less line can still resolve its own price. */
+  service_item_id?: string | null;
+  appointment_service_id?: string | null;
+  /** Who delivers it — keys the per-practitioner price override. */
+  calendar_id?: string | null;
+  practitioner_id?: string | null;
   booking_total_price_pence?: number | null;
   service_variant_id?: string | null;
   addons_total_price_pence?: number | null;
@@ -181,10 +291,26 @@ export interface VisitBookingRow {
  * succeeded ledger rows) — never from `bookings.amount_paid_pence`, which only
  * refreshes on in-person payment activity and would omit a deposit paid since.
  */
+/**
+ * One priced line of a visit, so the app can show what each service costs
+ * instead of only the visit total. Names are resolved from `service_variants`
+ * and are only populated for a real multi-line visit (a standalone booking
+ * already carries `service_variant_name` on the detail payload).
+ */
+export interface VisitPaymentLine {
+  booking_id: string;
+  /** Service/option name when resolvable; null for an unnamed or non-variant line. */
+  name: string | null;
+  /** This line's resolved price; null when it cannot be determined (§5.7). */
+  total_pence: number | null;
+}
+
 export interface VisitPaymentPicture {
   /** Every booking row in the visit (always includes the anchor). */
   rows: VisitBookingRow[];
   bookingIds: string[];
+  /** Per-line names + prices, in the same order as `rows`. */
+  lines: VisitPaymentLine[];
   /** This row's own resolved price (unchanged single-booking meaning). */
   anchorTotalPence: number | null;
   /** Visit price. null when ANY row's price is unresolvable (§5.7). */
@@ -223,7 +349,7 @@ export async function loadVisitPaymentPicture(
     let q = admin
       .from('bookings')
       .select(
-        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
+        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
       )
       .eq('group_booking_id', groupId);
     // Never let a group id reach across venues.
@@ -241,22 +367,29 @@ export async function loadVisitPaymentPicture(
 
   // Variant prices for rows that need one, in a single batched query.
   const variantPrices = new Map<string, number>();
+  const variantNames = new Map<string, string>();
   if (opts?.anchorServiceVariantPricePence != null && anchor.service_variant_id) {
     variantPrices.set(anchor.service_variant_id, opts.anchorServiceVariantPricePence);
   }
-  const needed = [
-    ...new Set(
-      rows
-        .filter(
-          (r) =>
-            !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0),
-        )
-        .map((r) => r.service_variant_id)
-        .filter((v): v is string => typeof v === 'string' && !variantPrices.has(v)),
-    ),
-  ];
+  const needPrice = rows
+    .filter(
+      (r) => !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0),
+    )
+    .map((r) => r.service_variant_id)
+    .filter((v): v is string => typeof v === 'string' && !variantPrices.has(v));
+  // Names label the per-line breakdown, which only exists for a real visit. A
+  // standalone booking already carries `service_variant_name` from the detail
+  // bundle, so asking for names there would cost a second query for nothing and
+  // lose this function's single-query fast path.
+  const needName =
+    rows.length > 1
+      ? rows
+          .map((r) => r.service_variant_id)
+          .filter((v): v is string => typeof v === 'string')
+      : [];
+  const needed = [...new Set([...needPrice, ...needName])];
   if (needed.length > 0) {
-    let vq = admin.from('service_variants').select('id, price_pence').in('id', needed);
+    let vq = admin.from('service_variants').select('id, price_pence, name').in('id', needed);
     if (venueId) vq = vq.eq('venue_id', venueId);
     const { data, error } = await vq;
     if (error) {
@@ -264,19 +397,102 @@ export async function loadVisitPaymentPicture(
       // which is staff-confirmable — log and continue rather than failing.
       console.error('[payment-summary] visit variant price load failed:', error.message);
     }
-    for (const v of (data ?? []) as Array<{ id: string; price_pence: number | null }>) {
-      if (typeof v.price_pence === 'number' && Number.isFinite(v.price_pence)) {
+    for (const v of (data ?? []) as Array<{
+      id: string;
+      price_pence: number | null;
+      name: string | null;
+    }>) {
+      // Never overwrite the caller's authoritative anchor price.
+      if (
+        typeof v.price_pence === 'number' &&
+        Number.isFinite(v.price_pence) &&
+        !variantPrices.has(v.id)
+      ) {
         variantPrices.set(v.id, v.price_pence);
+      }
+      if (typeof v.name === 'string' && v.name.trim()) variantNames.set(v.id, v.name.trim());
+    }
+  }
+
+  /**
+   * Service list prices for rows with no priced variant, batched by table. A
+   * variant-less service (a beard trim, say) is priced on the service row, and
+   * without this every such line resolved to "unknown" — which for a standalone
+   * booking meant no price on screen and an empty amount box, and for a visit
+   * made the WHOLE visit total unknown because one unresolvable line nulls it.
+   */
+  const servicePrices = new Map<string, number>();
+  /** Practitioner overrides, keyed `${ownerId}|${serviceId}`. */
+  const overridePrices = new Map<string, number>();
+  const unpricedRows = rows.filter(
+    (r) =>
+      !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0) &&
+      !(r.service_variant_id && (variantPrices.get(r.service_variant_id) ?? 0) > 0),
+  );
+  for (const src of SERVICE_PRICE_SOURCES) {
+    if (unpricedRows.length === 0) break;
+    const serviceIds = [
+      ...new Set(unpricedRows.map(src.serviceIdOf).filter((v): v is string => !!v)),
+    ];
+    if (serviceIds.length === 0) continue;
+
+    // Overrides for these services, restricted to the practitioners actually
+    // involved. The pair is re-matched below: `.in()` on two columns is a cross
+    // product, so a row here is only used when BOTH halves match a real line.
+    const ownerIds = [...new Set(unpricedRows.map(src.ownerIdOf).filter((v): v is string => !!v))];
+    if (ownerIds.length > 0) {
+      const { data, error } = await admin
+        .from(src.overrideTable)
+        .select(`${src.ownerCol}, ${src.serviceCol}, custom_price_pence`)
+        .in(src.ownerCol, ownerIds)
+        .in(src.serviceCol, serviceIds);
+      if (error) {
+        console.error(`[payment-summary] visit ${src.overrideTable} load failed:`, error.message);
+      }
+      for (const o of (data ?? []) as Array<Record<string, unknown>>) {
+        const price = o.custom_price_pence;
+        if (typeof price !== 'number' || !Number.isFinite(price)) continue;
+        overridePrices.set(`${String(o[src.ownerCol])}|${String(o[src.serviceCol])}`, price);
+      }
+    }
+
+    let q = admin.from(src.serviceTable).select('id, price_pence').in('id', serviceIds);
+    if (venueId) q = q.eq('venue_id', venueId);
+    const { data, error } = await q;
+    if (error) {
+      console.error(`[payment-summary] visit ${src.serviceTable} price load failed:`, error.message);
+      continue;
+    }
+    for (const s of (data ?? []) as Array<{ id: string; price_pence: number | null }>) {
+      if (typeof s.price_pence === 'number' && Number.isFinite(s.price_pence)) {
+        servicePrices.set(s.id, s.price_pence);
       }
     }
   }
 
+  /**
+   * This line's base price, in the app's own precedence: the chosen variant,
+   * else this practitioner's override, else the service's list price.
+   */
+  const basePrice = (r: VisitBookingRow): number | null => {
+    const variant = r.service_variant_id ? (variantPrices.get(r.service_variant_id) ?? null) : null;
+    if (variant != null && variant > 0) return variant;
+    for (const src of SERVICE_PRICE_SOURCES) {
+      const serviceId = src.serviceIdOf(r);
+      if (!serviceId) continue;
+      const ownerId = src.ownerIdOf(r);
+      const override = ownerId ? overridePrices.get(`${ownerId}|${serviceId}`) : undefined;
+      if (override != null) return override;
+      const own = servicePrices.get(serviceId);
+      if (own != null) return own;
+    }
+    return variant;
+  };
+
   const rowTotal = (r: VisitBookingRow): number | null =>
     resolveBookingTotalPence({
       booking_total_price_pence: r.booking_total_price_pence ?? null,
-      service_variant_price_pence: r.service_variant_id
-        ? (variantPrices.get(r.service_variant_id) ?? null)
-        : null,
+      service_variant_price_pence: basePrice(r),
       addons_total_price_pence: r.addons_total_price_pence ?? null,
     });
 
@@ -309,6 +525,11 @@ export async function loadVisitPaymentPicture(
   return {
     rows,
     bookingIds,
+    lines: rows.map((r) => ({
+      booking_id: r.id,
+      name: r.service_variant_id ? (variantNames.get(r.service_variant_id) ?? null) : null,
+      total_pence: rowTotal(r),
+    })),
     anchorTotalPence: rowTotal(anchor),
     totalPence,
     amountPaidPence,
@@ -370,7 +591,7 @@ export async function recomputeBookingPaymentSummary(
   const { data: bookingData, error: bookingErr } = await admin
     .from('bookings')
     .select(
-      'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
+      'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
     )
     .eq('id', bookingId)
     .maybeSingle();

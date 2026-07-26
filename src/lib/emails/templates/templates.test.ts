@@ -11,6 +11,7 @@ import { renderDayOfReminderSms } from "./day-of-reminder-sms";
 import { renderPostVisitEmail } from "./post-visit";
 import { renderAppointmentWaitlistOfferEmail } from "./appointment-waitlist-offer-email";
 import { renderAppointmentWaitlistOfferSms } from "./appointment-waitlist-offer-sms";
+import { renderPaymentReceiptEmail } from "./payment-receipt";
 import { formatDate, formatTime, formatDepositAmount } from "./base-template";
 import type { BookingEmailData, VenueEmailData } from "../types";
 
@@ -387,6 +388,102 @@ describe("renderAppointmentWaitlistOfferSms", () => {
     expect(result.body).toContain("The Golden Whisk");
     expect(result.body).not.toContain("028");
     expect(result.body).not.toContain("held");
+  });
+});
+
+describe("renderPaymentReceiptEmail", () => {
+  const APPT_BOOKING: BookingEmailData = {
+    ...SAMPLE_BOOKING,
+    id: "abcd1234-9999-4aaa-8bbb-ccccdddd0000",
+    email_variant: "appointment",
+    party_size: 1,
+    practitioner_name: "Sam Stylist",
+    appointment_service_name: "Full Head Colour",
+    appointment_price_display: "£65.00",
+  };
+  const VENUE_TZ: VenueEmailData = { ...SAMPLE_VENUE, timezone: "Europe/London" };
+
+  it("single service: names the service and shows the payment details", () => {
+    const result = renderPaymentReceiptEmail(APPT_BOOKING, VENUE_TZ, {
+      amountPaidPence: 6500,
+      paidAt: "2026-03-20T18:45:00Z",
+      method: "card_present",
+      paymentReference: "pi_3Abc123",
+      visitTotalPence: 6500,
+      balanceDuePence: 0,
+    });
+    expect(result.text).toContain("your Full Head Colour on");
+    expect(result.text).toContain("Amount paid: £65.00");
+    expect(result.text).toContain("Payment method: Card (in person)");
+    expect(result.text).toContain("Payment ref: pi_3Abc123");
+    expect(result.text).toContain("Balance: Paid in full");
+    // Payment date carries a clock time, not just the day.
+    expect(result.text).toMatch(/Payment date: .*at \d{1,2}:\d{2}\s?(am|pm)/);
+    expect(result.html).toContain("Payment details");
+    expect(result.html).toContain("Booking ref: ABCD1234");
+  });
+
+  it("group booking: says 'your booking' and itemises every person and service", () => {
+    const group: BookingEmailData = {
+      ...APPT_BOOKING,
+      group_appointments: [
+        {
+          person_label: "Jane",
+          booking_date: "2026-03-20",
+          booking_time: "19:30",
+          practitioner_name: "Sam Stylist",
+          service_name: "Full Head Colour",
+          price_display: "£65.00",
+        },
+        {
+          person_label: "Millie",
+          booking_date: "2026-03-20",
+          booking_time: "20:00",
+          practitioner_name: "Alex Barber",
+          service_name: "Cut & Blow Dry",
+          price_display: "£35.00",
+          addon_lines: ["Olaplex treatment (+£10.00, +15 min)"],
+          subtotal_display: "£45.00",
+        },
+      ],
+    };
+    const result = renderPaymentReceiptEmail(group, VENUE_TZ, {
+      amountPaidPence: 11000,
+      paidAt: "2026-03-20T18:45:00Z",
+      method: "card_present",
+      paymentReference: "pi_3Abc123",
+      visitTotalPence: 11000,
+      balanceDuePence: 0,
+    });
+    // The opening sentence must describe the booking, not the first service.
+    expect(result.text).toContain("This is your receipt for your booking on");
+    expect(result.text).not.toContain("your Full Head Colour on");
+    // Every line itemised with person, service and price, in text and HTML.
+    expect(result.text).toContain("Jane: Full Head Colour with Sam Stylist");
+    expect(result.text).toContain("(£65.00)");
+    expect(result.text).toContain("Millie: Cut & Blow Dry with Alex Barber");
+    expect(result.text).toContain("+ Olaplex treatment (+£10.00, +15 min)");
+    expect(result.text).toContain("Subtotal: £45.00");
+    expect(result.html).toContain("Full Head Colour");
+    expect(result.html).toContain("Cut &amp; Blow Dry");
+    expect(result.html).toContain("Olaplex treatment");
+    expect(result.html).toContain("Subtotal: £45.00");
+    // Visit total + payment record.
+    expect(result.text).toContain("Booking total: £110.00");
+    expect(result.text).toContain("Amount paid: £110.00");
+  });
+
+  it("shows the remaining balance for a part payment", () => {
+    const result = renderPaymentReceiptEmail(APPT_BOOKING, VENUE_TZ, {
+      amountPaidPence: 3000,
+      paidAt: "2026-03-20T18:45:00Z",
+      visitTotalPence: 6500,
+      balanceDuePence: 3500,
+    });
+    expect(result.text).toContain("Amount paid: £30.00");
+    expect(result.text).toContain("Booking total: £65.00");
+    expect(result.text).toContain("Remaining balance: £35.00");
+    expect(result.html).toContain("Remaining balance");
   });
 });
 

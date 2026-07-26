@@ -102,7 +102,6 @@ export const createCollectiveSchema = z.object({
   slug: collectiveSlugSchema,
   branding: collectiveBrandingSchema.optional(),
   serviceGrouping: z.enum(['by_practitioner', 'by_service_type']).optional(),
-  allowAnyPractitioner: z.boolean().optional(),
   inviteVenueIds: z.array(z.string().uuid()).min(1).max(20),
 });
 
@@ -188,7 +187,6 @@ export const updateCollectiveSchema = z.object({
   name: z.string().min(2).max(120).optional(),
   branding: collectiveBrandingSchema.optional(),
   serviceGrouping: z.enum(['by_practitioner', 'by_service_type']).optional(),
-  allowAnyPractitioner: z.boolean().optional(),
   /** Combined booking page address (plan D1). */
   slugStrategy: z.enum(['dedicated', 'adopt_member']).optional(),
   /** Required when slugStrategy = 'adopt_member': the member venue whose /book/{slug} hosts the page. */

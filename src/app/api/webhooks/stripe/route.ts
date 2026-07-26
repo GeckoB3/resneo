@@ -255,6 +255,7 @@ export async function POST(request: NextRequest) {
             venueId: result.venueId,
             amountPaidPence: result.amountPence,
             paidAt: new Date(event.created * 1000).toISOString(),
+            paymentIntentId: pi.id,
           };
           after(async () => {
             try {

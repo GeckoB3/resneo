@@ -9,7 +9,9 @@ import {
 import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import {
   notifyCollectiveDissolved,
+  notifyCollectiveHostTransferred,
   notifyCollectiveInvitation,
+  notifyCollectiveMemberLeft,
   notifyCollectiveRemoval,
 } from '@/lib/linked-accounts/notifications';
 
@@ -164,6 +166,7 @@ export async function PATCH(
         .from('venue_collectives')
         .update({ host_venue_id: input.venueId })
         .eq('id', collectiveId);
+      await notifyCollectiveHostTransferred(ctx.admin, input.venueId, collective.name, 'manual');
       return finish();
     }
 
@@ -249,6 +252,13 @@ export async function PATCH(
         .from('venue_collective_members')
         .update({ status: 'removed', left_at: new Date().toISOString() })
         .eq('id', myMembership.id);
+      await notifyCollectiveMemberLeft(
+        ctx.admin,
+        collective.host_venue_id,
+        collective.name,
+        ctx.venue.name,
+        'declined',
+      );
       return finish();
     }
 
@@ -266,6 +276,13 @@ export async function PATCH(
         .from('venue_collective_members')
         .update({ status: 'left', left_at: new Date().toISOString() })
         .eq('id', myMembership.id);
+      await notifyCollectiveMemberLeft(
+        ctx.admin,
+        collective.host_venue_id,
+        collective.name,
+        ctx.venue.name,
+        'left',
+      );
       const { dissolved } = await reconcileCollective(ctx.admin, collectiveId);
       if (dissolved) {
         const others = await ctx.admin

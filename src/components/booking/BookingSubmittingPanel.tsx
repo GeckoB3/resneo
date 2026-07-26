@@ -1,5 +1,7 @@
 'use client';
 
+import { BrandSpinner } from '@/components/ui/primitives';
+
 export type BookingSubmittingVariant = 'table' | 'appointment' | 'event' | 'class' | 'resource';
 
 const TITLES: Record<BookingSubmittingVariant, string> = {
@@ -28,10 +30,7 @@ export function BookingSubmittingPanel({ variant }: BookingSubmittingPanelProps)
       aria-busy={true}
       className="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border border-slate-200 bg-slate-50/80 px-6 py-16 text-center"
     >
-      <div
-        className="h-10 w-10 animate-spin rounded-full border-2 border-brand-600 border-t-transparent"
-        aria-hidden={true}
-      />
+      <BrandSpinner className="h-10 w-10" />
       <p className="mt-6 text-base font-semibold text-slate-900">{title}</p>
       <p className="mt-2 max-w-sm text-sm text-slate-500">This usually takes a few seconds.</p>
     </div>

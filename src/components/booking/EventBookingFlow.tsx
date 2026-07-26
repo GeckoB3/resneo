@@ -6,6 +6,7 @@ import { usePublicBookingAccountGateContext } from '@/components/booking/PublicB
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
+import { BrandSpinner } from '@/components/ui/primitives';
 import { PaymentStep } from './PaymentStep';
 import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
@@ -665,7 +666,7 @@ export function EventBookingFlow({
 
       {step === 'summary' && eventPrefillPending && (
         <div className="flex flex-col items-center justify-center gap-3 py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+          <BrandSpinner />
           <p className="text-sm text-slate-500">Loading tickets for this event…</p>
         </div>
       )}

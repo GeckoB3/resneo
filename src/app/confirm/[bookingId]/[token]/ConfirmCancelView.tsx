@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { bookingModelShortLabel } from "@/lib/booking/infer-booking-row-model";
 import type { BookingModel } from "@/types/booking-models";
+import { BrandSpinner } from "@/components/ui/primitives";
 
 interface BookingDetails {
   booking_id: string;
@@ -107,7 +108,7 @@ export function ConfirmCancelView({
     return (
       <div className="w-full max-w-md">
         <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+          <BrandSpinner className="mx-auto h-8 w-8" />
         </div>
       </div>
     );

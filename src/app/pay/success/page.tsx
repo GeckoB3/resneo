@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { BrandSpinner } from '@/components/ui/primitives';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -152,7 +153,7 @@ export default function PaySuccessPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+          <BrandSpinner />
         </div>
       }
     >

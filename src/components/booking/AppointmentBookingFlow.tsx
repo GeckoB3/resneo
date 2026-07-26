@@ -7,6 +7,7 @@ import { usePublicBookingAccountGateContext } from '@/components/booking/PublicB
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
 import { DetailsStep } from './DetailsStep';
 import BookingComplianceBlock from './BookingComplianceBlock';
+import { BrandSpinner } from '@/components/ui/primitives';
 import { clearBookingComplianceDrafts, type BookingComplianceState } from './BookingComplianceForms';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
@@ -2701,7 +2702,7 @@ export function AppointmentBookingFlow({
           aria-busy="true"
           aria-live="polite"
         >
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" aria-hidden />
+          <BrandSpinner className="h-10 w-10" />
           <p className="mt-3 text-sm font-medium text-slate-700">
             {catalogLoading ? 'Loading services…' : 'Opening date & time…'}
           </p>

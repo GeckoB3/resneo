@@ -2,6 +2,7 @@
 
 import { Suspense, type ComponentProps } from 'react';
 import { BookPublicBookingFlow } from '@/components/booking/BookPublicBookingFlow';
+import { BrandSpinner } from '@/components/ui/primitives';
 
 function BookPublicBookingFlowFallback() {
   return (
@@ -10,7 +11,7 @@ function BookPublicBookingFlowFallback() {
       aria-busy="true"
       aria-label="Loading booking form"
     >
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+      <BrandSpinner />
     </div>
   );
 }

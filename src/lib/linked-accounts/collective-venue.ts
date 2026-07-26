@@ -23,7 +23,12 @@ import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
-import type { AppointmentCatalogAddonGroup, ProcessingTimeBlock } from '@/types/booking-models';
+import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
+import type {
+  AppointmentCatalogAddonGroup,
+  ClassPaymentRequirement,
+  ProcessingTimeBlock,
+} from '@/types/booking-models';
 
 interface CollectiveRow {
   id: string;
@@ -141,12 +146,14 @@ export interface CollectiveCatalogService {
   buffer_minutes: number;
   price_pence: number | null;
   deposit_pence: number | null;
-  payment_requirement: 'none';
+  /** The source service's own payment mode (card_hold degraded per the owning venue's flag). */
+  payment_requirement: ClassPaymentRequirement;
   /**
    * Position of the offering in the combined catalogue (host display_order, then the
    * member venues' own service order); the booking flow picker sorts by this.
    */
   sort_order: number;
+  /** The source service's own deposit-refund notice window (owning venue's setting). */
   cancellation_notice_hours: number;
   /** This calendar's OWN source-service variants/add-ons (each venue keeps its own). */
   variants: AppointmentCatalogVariant[];
@@ -207,16 +214,35 @@ export async function loadCollectiveAppointmentCatalog(
       (sourceIdsByVenue[p.venueId] ??= new Set<string>()).add(p.sourceServiceId);
     }
   }
-  const { data: venueModelRows } = await admin.from('venues').select('id, booking_model').in('id', venueIds);
+  const { data: venueModelRows } = await admin
+    .from('venues')
+    .select('id, booking_model, feature_flags')
+    .in('id', venueIds);
   const venueIsUnified: Record<string, boolean> = {};
+  const venueCardHoldEnabled: Record<string, boolean> = {};
   for (const v of venueModelRows ?? []) {
     venueIsUnified[v.id as string] = isUnifiedSchedulingVenue((v.booking_model as string) ?? '');
+    venueCardHoldEnabled[v.id as string] = resolveAppointmentsFeatureFlags(
+      parseVenueFeatureFlags((v as { feature_flags?: unknown }).feature_flags),
+    ).card_hold_deposits;
   }
   type VariantMap = Awaited<ReturnType<typeof loadVariantsForServices>>;
   type AddonMap = Awaited<ReturnType<typeof loadAddonGroupsForServices>>;
   const variantsByVenue: Record<string, VariantMap> = {};
   const addonsByVenue: Record<string, AddonMap> = {};
-  const metaByVenue: Record<string, Map<string, { buffer: number; deposit: number | null; processing: ProcessingTimeBlock[] }>> = {};
+  const metaByVenue: Record<
+    string,
+    Map<
+      string,
+      {
+        buffer: number;
+        deposit: number | null;
+        processing: ProcessingTimeBlock[];
+        paymentRequirement: ClassPaymentRequirement;
+        cancellationNoticeHours: number;
+      }
+    >
+  > = {};
   await Promise.all(
     venueIds.map(async (venueId) => {
       const ids = [...(sourceIdsByVenue[venueId] ?? [])];
@@ -230,7 +256,9 @@ export async function loadCollectiveAppointmentCatalog(
         loadAddonGroupsForServices({ admin, venueId, schema, parentIds: ids, includeHidden: false, includeInactive: false }),
         admin
           .from(venueIsUnified[venueId] ? 'service_items' : 'appointment_services')
-          .select('id, buffer_minutes, deposit_pence, processing_time_blocks')
+          .select(
+            'id, buffer_minutes, deposit_pence, processing_time_blocks, payment_requirement, cancellation_notice_hours',
+          )
           .in('id', ids),
       ]);
       variantsByVenue[venueId] = variantMap;
@@ -240,6 +268,11 @@ export async function loadCollectiveAppointmentCatalog(
           buffer: (r.buffer_minutes as number) ?? 0,
           deposit: (r.deposit_pence as number | null) ?? null,
           processing: parseProcessingTimeBlocksFromDb(r.processing_time_blocks),
+          paymentRequirement:
+            ((r as { payment_requirement?: ClassPaymentRequirement | null })
+              .payment_requirement as ClassPaymentRequirement | null) ?? 'none',
+          cancellationNoticeHours: entityBookingWindowFromRow(r as Record<string, unknown>)
+            .cancellation_notice_hours,
         });
       }
     }),
@@ -282,6 +315,22 @@ export async function loadCollectiveAppointmentCatalog(
         const entry = ensure(calendarId, name, provider.venueId);
         if (entry.services.some((s) => s.id === item.id)) continue; // calendar already lists this offering
         const meta = metaByVenue[provider.venueId]?.get(provider.sourceServiceId);
+        // Mirror the single-venue catalog's card-hold passthrough: 'card_hold'
+        // reaches the guest only when the OWNING venue's flag is on and a positive
+        // fee exists (service or variant level); otherwise it degrades to 'none',
+        // matching what the create route will actually charge.
+        const rawPayReq = meta?.paymentRequirement ?? 'none';
+        const cardHoldFeeConfigured =
+          (meta?.deposit ?? 0) > 0 ||
+          activeVariants(provider.venueId, provider.sourceServiceId).some(
+            (v) => (v.deposit_pence ?? 0) > 0,
+          );
+        const paymentRequirement: ClassPaymentRequirement =
+          rawPayReq === 'card_hold'
+            ? venueCardHoldEnabled[provider.venueId] && cardHoldFeeConfigured
+              ? 'card_hold'
+              : 'none'
+            : rawPayReq;
         entry.services.push({
           id: item.id,
           name: item.name,
@@ -290,11 +339,12 @@ export async function loadCollectiveAppointmentCatalog(
           buffer_minutes: meta?.buffer ?? 0,
           price_pence: provider.pricePence,
           deposit_pence: meta?.deposit ?? null,
-          payment_requirement: 'none',
+          payment_requirement: paymentRequirement,
           // `catalogue.items` is already sorted (host display_order → member venue
           // service order → name), so the index is the display position.
           sort_order: itemIndex,
-          cancellation_notice_hours: DEFAULT_CANCELLATION_NOTICE_HOURS,
+          cancellation_notice_hours:
+            meta?.cancellationNoticeHours ?? DEFAULT_CANCELLATION_NOTICE_HOURS,
           variants: activeVariants(provider.venueId, provider.sourceServiceId).map(variantToCatalog),
           addon_groups: addonGroups(provider.venueId, provider.sourceServiceId),
           processing_time_blocks: meta?.processing ?? [],

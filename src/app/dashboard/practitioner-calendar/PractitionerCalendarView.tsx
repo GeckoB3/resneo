@@ -401,7 +401,7 @@ function ResourceAvailabilityMintBlock({ slot }: { slot: ResourceAvailabilityMin
     <div
       className="pointer-events-none absolute left-1 right-1 z-[5] overflow-hidden rounded-md border border-dashed border-emerald-300/90 bg-emerald-50/80 px-1 py-0.5"
       style={{ top: slot.top, height: slot.height }}
-      title={`${slot.resourceName} — available to book`}
+      title={`${slot.resourceName}: available to book`}
       aria-label={`${slot.resourceName} available to book`}
     >
       <span className="block truncate text-[10px] font-semibold leading-tight text-emerald-900">
@@ -1890,7 +1890,7 @@ function linkedBookingCardContent(
   const end = (b.bookingEndTime ?? b.estimatedEndTime ?? b.bookingTime).slice(0, 5);
   if (timeOnly) {
     return {
-      name: `${venueName} — busy`,
+      name: `${venueName}: busy`,
       service: null as string | null,
       phone: null as string | null,
       start,
@@ -1979,7 +1979,7 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
       {readOnly ? (
         <span
           className="pointer-events-none absolute right-1.5 top-1.5 z-[4] inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/75 text-slate-500 shadow-sm ring-1 ring-slate-900/5"
-          title={`View-only — ${venueName} hasn't granted edit rights for this booking.`}
+          title={`View-only: ${venueName} hasn't granted edit rights for this booking.`}
           aria-label={`Read-only linked booking from ${venueName}`}
         >
           <LinkedReadOnlyLockIcon />
@@ -6170,7 +6170,7 @@ export function PractitionerCalendarView({
                       <span className="truncate text-center text-sm font-semibold text-slate-900">
                         Events (unassigned)
                       </span>
-                      <span className="text-center text-[11px] leading-tight text-slate-500">—</span>
+                      <span className="text-center text-[11px] leading-tight text-slate-500">-</span>
                     </div>
                   ) : null}
                   {readOnlyLinkedColumns.map((col) => {

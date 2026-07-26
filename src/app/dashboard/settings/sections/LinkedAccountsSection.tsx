@@ -44,7 +44,7 @@ interface ApiData {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   try {
     return new Date(iso).toLocaleDateString('en-GB', {
       day: 'numeric',
@@ -199,7 +199,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
           return;
         }
         if (json.self) {
-          addToast('That’s your own invite link — share it with another venue.', 'info');
+          addToast('That’s your own invite link. Share it with another venue.', 'info');
           return;
         }
         if (!json.eligible) {
@@ -209,7 +209,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
         setActionError(null);
         setSendInitialSlug(json.venueSlug);
         setSendOpen(true);
-        addToast(`Invite from ${json.venueName} — review and send your request.`, 'info');
+        addToast(`Invite from ${json.venueName}. Review and send your request.`, 'info');
       } catch {
         addToast('Couldn’t open that invite link.', 'error');
       }
@@ -371,16 +371,16 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
           </h3>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
             Linking lets two venues see each other’s calendars and (if you choose) manage each
-            other’s bookings — ideal for chair-rental, co-located practitioners or a shared brand.
+            other’s bookings. Ideal for chair-rental, co-located practitioners or a shared brand.
           </p>
           <ul className="mt-3 space-y-1.5 text-sm text-slate-700">
             <li className="flex items-start gap-2">
               <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-              You stay the sole owner of your bookings and clients — linking shares access, never data.
+              You stay the sole owner of your bookings and clients: linking shares access, never data.
             </li>
             <li className="flex items-start gap-2">
               <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-              You choose, per direction, what each venue can see and do — down to specific calendars.
+              You choose, per direction, what each venue can see and do, down to specific calendars.
             </li>
             <li className="flex items-start gap-2">
               <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
@@ -411,7 +411,7 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
         <SectionCard.Header
           eyebrow="Linked accounts"
           title="Active links"
-          description="Venues your venue is currently linked with. Each venue keeps full ownership of its own bookings and clients — linking only shares access."
+          description="Venues your venue is currently linked with. Each venue keeps full ownership of its own bookings and clients: linking only shares access."
           right={
             <div className="flex flex-wrap gap-2">
               <button
@@ -843,7 +843,7 @@ function ActiveLinkRow({
 
       {suspended ? (
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Suspended — {link.otherVenue.name}&rsquo;s subscription is inactive. The link resumes
+          Suspended: {link.otherVenue.name}&rsquo;s subscription is inactive. The link resumes
           automatically if their subscription is restored within 30 days.
         </p>
       ) : null}
@@ -860,7 +860,7 @@ function ActiveLinkRow({
         <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/70 p-3">
           <p className="text-xs font-semibold text-sky-900">
             {link.pendingChange.proposedByMe
-              ? 'You proposed a permission change — awaiting their response.'
+              ? 'You proposed a permission change. Awaiting their response.'
               : `${link.otherVenue.name} proposed a permission change.`}
           </p>
           <div className="mt-2 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
@@ -1263,7 +1263,7 @@ function InviteLinkModal({ onClose }: { onClose: () => void }) {
       addToast('Invite link copied.', 'success');
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      addToast('Couldn’t copy automatically — select the link and copy it.', 'error');
+      addToast('Couldn’t copy automatically. Select the link and copy it.', 'error');
     }
   };
 
@@ -1272,7 +1272,7 @@ function InviteLinkModal({ onClose }: { onClose: () => void }) {
       open
       onClose={onClose}
       title="Invite a venue to link"
-      description="Share this link with a venue you know. When an admin there opens it, it pre-fills a request back to you — it grants nothing until you both confirm, and expires in 30 days."
+      description="Share this link with a venue you know. When an admin there opens it, it pre-fills a request back to you. It grants nothing until you both confirm, and expires in 30 days."
       maxWidth="max-w-md"
     >
       {loading ? (
@@ -1309,7 +1309,7 @@ function InviteLinkModal({ onClose }: { onClose: () => void }) {
           </div>
           <p className="text-xs text-slate-500">
             Expires {formatDate(data.expiresAt)}. Anyone with this link who signs in as a venue
-            admin can start a request back to you — you still approve every link.
+            admin can start a request back to you. You still approve every link.
           </p>
           <div className="flex justify-end">
             <button type="button" className={btnSecondary} onClick={onClose}>

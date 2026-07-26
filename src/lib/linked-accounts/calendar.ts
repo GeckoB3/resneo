@@ -270,7 +270,7 @@ export function linkedBookingBarDetailLabel(
   visibility: LinkedVenueCalendar['visibility'],
   venueName: string,
 ): string {
-  if (visibility === 'time_only') return `${venueName} — busy`;
+  if (visibility === 'time_only') return `${venueName}: busy`;
   const guest = booking.guestName?.trim();
   if (guest) return guest;
   const service = booking.serviceName?.trim();

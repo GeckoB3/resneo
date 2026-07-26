@@ -49,7 +49,6 @@ export interface VenueCollectiveRow {
   host_venue_id: string;
   branding: CollectiveBranding;
   service_grouping: ServiceGrouping;
-  allow_any_practitioner: boolean;
   status: CollectiveStatus;
   page_mode: PageMode;
   slug_strategy: SlugStrategy;
@@ -115,7 +114,6 @@ export interface CollectiveView {
   status: CollectiveStatus;
   branding: CollectiveBranding;
   serviceGrouping: ServiceGrouping;
-  allowAnyPractitioner: boolean;
   /**
    * The host venue's resolved "Any available practitioner" booking setting. The
    * combined page follows this (it works like one venue), so the editor preview can
@@ -155,7 +153,7 @@ export interface CollectiveView {
 }
 
 const COLLECTIVE_COLUMNS =
-  'id, slug, name, host_venue_id, branding, service_grouping, allow_any_practitioner, status, page_mode, slug_strategy, adopted_venue_id, timezone, booking_page_config, created_at, updated_at';
+  'id, slug, name, host_venue_id, branding, service_grouping, status, page_mode, slug_strategy, adopted_venue_id, timezone, booking_page_config, created_at, updated_at';
 
 /**
  * True when `venueId` holds an accepted link with full_details visibility in
@@ -315,7 +313,6 @@ export async function loadCollectiveViewsForVenue(
       status: row.status,
       branding: row.branding ?? {},
       serviceGrouping: row.service_grouping,
-      allowAnyPractitioner: row.allow_any_practitioner,
       hostAnyAvailablePractitioner: venueAnyAvailable[row.host_venue_id] ?? false,
       pageMode: (row.page_mode as PageMode) ?? 'directory',
       slugStrategy: (row.slug_strategy as SlugStrategy) ?? 'dedicated',
@@ -611,7 +608,6 @@ export interface PublicCollective {
   slug: string;
   branding: CollectiveBranding;
   serviceGrouping: ServiceGrouping;
-  allowAnyPractitioner: boolean;
   pageMode: PageMode;
   members: PublicCollectiveMember[];
 }
@@ -881,7 +877,6 @@ export async function loadPublicCollective(
     slug: collective.slug,
     branding: collective.branding ?? {},
     serviceGrouping: collective.service_grouping,
-    allowAnyPractitioner: collective.allow_any_practitioner,
     pageMode: collective.page_mode ?? 'directory',
     members,
   };

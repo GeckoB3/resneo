@@ -147,7 +147,6 @@ export async function POST(request: NextRequest) {
         host_venue_id: ctx.venueId,
         branding: parsed.data.branding ?? {},
         service_grouping: parsed.data.serviceGrouping ?? 'by_practitioner',
-        allow_any_practitioner: false,
         status: 'active',
         page_mode: 'unified_catalog',
         timezone: eligibility.timezone,

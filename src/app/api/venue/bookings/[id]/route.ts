@@ -74,6 +74,7 @@ import {
   linkedGrantAllowsCalendar,
   linkedGrantAllowsCancel,
   linkedGrantAllowsMutation,
+  linkedGrantHasFullDetails,
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
 import { validateResourceBookingModification } from '@/lib/booking/validate-resource-booking-modification';
@@ -154,6 +155,15 @@ export async function GET(
       return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
     const { booking, ownerVenueId: scopeVenueId, isOwnVenue, linkedGrant } = loaded.ctx;
+    // §5.1 — a time_only link shows anonymous busy blocks only. The full booking
+    // detail this route returns (guest, service, notes, timeline) is reserved for
+    // full_details links; the calendar list route serves time_only viewers.
+    if (!isOwnVenue && !linkedGrantHasFullDetails(linkedGrant, false)) {
+      return NextResponse.json(
+        { error: 'This link shows busy times only, not booking details.' },
+        { status: 403 },
+      );
+    }
     const scopeDb = isOwnVenue ? staff.db : getSupabaseAdminClient();
 
     const bookingTimeStr = typeof booking.booking_time === 'string'
@@ -224,36 +234,20 @@ export async function GET(
       tags?: string[] | null;
       customer_profile_notes?: string | null;
     } | null;
-    if (!isOwnVenue && linkedGrant && !linkedGrant.pii) {
-      if (guest) {
-        guest = {
-          ...guest,
-          email: null,
-          phone: null,
-          customer_profile_notes: null,
-          tags: [],
-        };
-      } else {
-        const snapFirst = normaliseGuestNamePart(
-          (booking as { guest_first_name?: string | null }).guest_first_name,
-        );
-        const snapLast = normaliseGuestNamePart(
-          (booking as { guest_last_name?: string | null }).guest_last_name,
-        );
-        if (snapFirst || snapLast) {
-          guest = {
-            id: booking.guest_id,
-            first_name: snapFirst,
-            last_name: snapLast,
-            email: null,
-            phone: null,
-            visit_count: null,
-            last_visit_date: null,
-            tags: [],
-            customer_profile_notes: null,
-          };
-        }
-      }
+    // §5.2 — without the PII grant the guests-row data stays hidden, including
+    // the client's name (the booking's guest-name snapshot counts as the name).
+    if (!isOwnVenue && linkedGrant && !linkedGrant.pii && guest) {
+      guest = {
+        ...guest,
+        first_name: null,
+        last_name: null,
+        email: null,
+        phone: null,
+        visit_count: null,
+        last_visit_date: null,
+        customer_profile_notes: null,
+        tags: [],
+      };
     }
     const events = detailBundle.events;
     const communications = detailBundle.communications;

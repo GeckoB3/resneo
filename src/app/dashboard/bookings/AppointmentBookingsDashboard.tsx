@@ -203,7 +203,7 @@ function linkedBookingToDashboardRow(
     source: lb.source ?? 'linked',
     deposit_status: lb.depositStatus ?? 'none',
     deposit_amount_pence: lb.depositAmountPence ?? null,
-    guest_name: timeOnly ? `${venue.venueName} — busy` : (lb.guestName ?? 'Guest'),
+    guest_name: timeOnly ? `${venue.venueName}: busy` : (lb.guestName ?? 'Guest'),
     guest_email: timeOnly ? null : (lb.guestEmail ?? null),
     guest_phone: timeOnly ? null : (lb.guestPhone ?? null),
     guest_visit_count: null,

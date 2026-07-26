@@ -106,15 +106,12 @@ export async function GET(request: NextRequest) {
     if (linkedOwnerVenueId && (guestHistoryMode || linkedSessionMode)) {
       const admin = getSupabaseAdminClient();
       const access = await resolveCallerGrantOverVenue(admin, staff.venue_id, linkedOwnerVenueId);
-      if (!access || access.grant.calendar === 'none') {
+      // §5.1 — both linked modes return per-booking detail rows (guest labels,
+      // notes, services), so they require full_details; a time_only link is
+      // limited to the anonymised busy blocks the calendar route serves.
+      if (!access || access.grant.calendar !== 'full_details') {
         return NextResponse.json(
-          { error: 'You do not have access to bookings for that venue.' },
-          { status: 403 },
-        );
-      }
-      if (linkedSessionMode && access.grant.calendar === 'time_only') {
-        return NextResponse.json(
-          { error: 'This link only shows busy time — session bookings are not available.' },
+          { error: 'You do not have access to booking details for that venue.' },
           { status: 403 },
         );
       }
@@ -343,9 +340,13 @@ export async function GET(request: NextRequest) {
       const snapshotPresent =
         Boolean(normaliseGuestNamePart(r.guest_first_name as string | null | undefined)) ||
         Boolean(normaliseGuestNamePart(r.guest_last_name as string | null | undefined));
-      const guestLabel =
-        guest || snapshotPresent ? formatGuestDisplayName(merged.first, merged.last) : '-';
       const canSeeLinkedPii = !linkedGuestHistoryGrant || linkedGuestHistoryGrant.pii;
+      // §5.2 — for a linked no-PII viewer the client's name (profile or booking
+      // snapshot) is hidden along with the other guests-row fields.
+      const guestLabel =
+        canSeeLinkedPii && (guest || snapshotPresent)
+          ? formatGuestDisplayName(merged.first, merged.last)
+          : '-';
       return {
         id: r.id,
         booking_date: r.booking_date,
@@ -368,10 +369,14 @@ export async function GET(request: NextRequest) {
         created_at: calendarView ? null : r.created_at,
         guest_id: r.guest_id,
         guest_name: guestLabel,
-        booking_guest_first_name: normaliseGuestNamePart(r.guest_first_name as string | null | undefined),
-        booking_guest_last_name: normaliseGuestNamePart(r.guest_last_name as string | null | undefined),
-        guest_first_name: merged.first,
-        guest_last_name: merged.last,
+        booking_guest_first_name: canSeeLinkedPii
+          ? normaliseGuestNamePart(r.guest_first_name as string | null | undefined)
+          : null,
+        booking_guest_last_name: canSeeLinkedPii
+          ? normaliseGuestNamePart(r.guest_last_name as string | null | undefined)
+          : null,
+        guest_first_name: canSeeLinkedPii ? merged.first : null,
+        guest_last_name: canSeeLinkedPii ? merged.last : null,
         guest_email: canSeeLinkedPii ? (guest?.email ?? null) : null,
         guest_phone: canSeeLinkedPii ? (guest?.phone ?? null) : null,
         guest_visit_count: canSeeLinkedPii ? (guest?.visit_count ?? null) : null,
@@ -396,10 +401,11 @@ export async function GET(request: NextRequest) {
         area_id: aid ?? null,
         area_name: aid ? areaNameById.get(aid) ?? null : null,
         location_type: r.location_type ?? null,
-        client_address_line1: r.client_address_line1 ?? null,
-        client_address_line2: r.client_address_line2 ?? null,
-        client_address_city: r.client_address_city ?? null,
-        client_address_postcode: r.client_address_postcode ?? null,
+        // A client's home address is contact PII: gated like email/phone (§5.2).
+        client_address_line1: canSeeLinkedPii ? (r.client_address_line1 ?? null) : null,
+        client_address_line2: canSeeLinkedPii ? (r.client_address_line2 ?? null) : null,
+        client_address_city: canSeeLinkedPii ? (r.client_address_city ?? null) : null,
+        client_address_postcode: canSeeLinkedPii ? (r.client_address_postcode ?? null) : null,
         addons_total_price_pence: (r.addons_total_price_pence as number | null) ?? 0,
         addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
         addons_count: addonCountByBooking.get(r.id as string) ?? 0,

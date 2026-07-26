@@ -209,7 +209,7 @@ export async function notifyLinkUnlinked(
     heading: 'Linked account ended',
     paragraphs: [
       `${otherVenueName} has ended the link with your venue.`,
-      'All cross-venue calendar and booking access has stopped immediately. Your bookings and client data are unchanged — breaking a link only removes access, never ownership.',
+      'All cross-venue calendar and booking access has stopped immediately. Your bookings and client data are unchanged. Breaking a link only removes access, never ownership.',
     ],
     ctaLabel: 'View linked accounts',
     ctaUrl: settingsUrl(),
@@ -230,7 +230,7 @@ export async function notifyLinkTerminatedIneligible(
     heading: 'Linked account ended',
     paragraphs: [
       `The link between your venue and ${otherVenueName} has ended because one of the venues is no longer on a ResNeo plan that supports linked accounts.`,
-      'All cross-venue calendar and booking access has stopped immediately. Your bookings and client data are unchanged — ending a link only removes access, never ownership. You can link again with a fresh request once both venues are on an eligible plan.',
+      'All cross-venue calendar and booking access has stopped immediately. Your bookings and client data are unchanged. Ending a link only removes access, never ownership. You can link again with a fresh request once both venues are on an eligible plan.',
     ],
     ctaLabel: 'View linked accounts',
     ctaUrl: settingsUrl(),
@@ -497,7 +497,7 @@ export async function notifyCombinedProviderProposed(
       heading: 'Added to the combined booking page',
       paragraphs: [
         `${hostVenueName} added your “${offeringName}” to the “${collectiveName}” combined booking page. It’s now bookable there at your own service’s price and duration.`,
-        'Manage that service — including its price, duration and availability — from your own Services settings.',
+        'Manage that service (including its price, duration and availability) from your own Services settings.',
       ],
       ctaLabel: 'Open settings',
       ctaUrl: settingsUrl(),
@@ -616,6 +616,7 @@ export async function notifyCollectiveHostTransferred(
   admin: SupabaseClient,
   newHostVenueId: string,
   collectiveName: string,
+  mode: 'auto' | 'manual' = 'auto',
 ): Promise<void> {
   await notifyVenue(
     admin,
@@ -624,8 +625,38 @@ export async function notifyCollectiveHostTransferred(
     {
       heading: 'You are now the collective host',
       paragraphs: [
-        `The previous host of the "${collectiveName}" venue collective is no longer a member, so hosting has transferred to your venue to keep the collective running.`,
+        mode === 'auto'
+          ? `The previous host of the "${collectiveName}" venue collective is no longer a member, so hosting has transferred to your venue to keep the collective running.`
+          : `The host of the "${collectiveName}" venue collective has transferred hosting to your venue.`,
         'As host you control the collective’s branding, membership and settings, and you can transfer hosting to another member or dissolve the collective from Linked Accounts settings.',
+      ],
+      ctaLabel: 'Manage collective',
+      ctaUrl: settingsUrl(),
+    },
+  );
+}
+
+/** A member left the collective (or declined its invitation) — tell the host. */
+export async function notifyCollectiveMemberLeft(
+  admin: SupabaseClient,
+  hostVenueId: string,
+  collectiveName: string,
+  memberVenueName: string,
+  kind: 'left' | 'declined',
+): Promise<void> {
+  await notifyVenue(
+    admin,
+    hostVenueId,
+    kind === 'left'
+      ? `${memberVenueName} left the ${collectiveName} collective`
+      : `${memberVenueName} declined your collective invitation`,
+    {
+      heading: kind === 'left' ? 'A member left your collective' : 'Invitation declined',
+      paragraphs: [
+        kind === 'left'
+          ? `${memberVenueName} has left the "${collectiveName}" venue collective. Their services no longer appear on the combined booking page.`
+          : `${memberVenueName} declined the invitation to join the "${collectiveName}" venue collective.`,
+        'You can review members and invite other linked venues from the combined page settings.',
       ],
       ctaLabel: 'Manage collective',
       ctaUrl: settingsUrl(),

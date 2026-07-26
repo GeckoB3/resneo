@@ -146,6 +146,21 @@ export async function PATCH(
         return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
       }
 
+      // Accepting activates new cross-venue access, so the accepting venue must
+      // itself be eligible right now (declining is always allowed). Without this
+      // a lapsed venue could accept and hold a live link until the daily cron
+      // suspends it.
+      if (!ctx.eligibility.canCreate) {
+        return NextResponse.json(
+          {
+            error:
+              ctx.eligibility.reason ??
+              'Your venue cannot accept new links while its subscription is inactive.',
+          },
+          { status: 403 },
+        );
+      }
+
       let updateColumns: Record<string, unknown> = {};
       let withChanges = false;
       if (action === 'accept_with_changes') {

@@ -471,8 +471,8 @@ function CreateCollectiveModal({
         </label>
 
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          Your combined page works like a single venue — one services menu and one team across all
-          members. After creating it, use <span className="font-medium">Manage combined page</span> to
+          Your combined page works like a single venue, with one services menu and one team across
+          all members. After creating it, use <span className="font-medium">Manage combined page</span> to
           choose which services to offer, assign calendars from any venue, and design the page.
         </p>
 

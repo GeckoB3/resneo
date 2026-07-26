@@ -282,6 +282,41 @@ export interface VisitBookingRow {
 }
 
 /**
+ * Build the anchor row {@link loadVisitPaymentPicture} needs from a full
+ * `bookings` row.
+ *
+ * The GET, `/summary` and charge routes each used to construct this by hand with
+ * an identical field list, so adding a column to {@link VisitBookingRow} silently
+ * missed all three. That is exactly how variant-less services kept resolving to
+ * "unknown" long after the resolver had learned to price them: the anchor never
+ * carried a service id to price from, and a single-service appointment has no
+ * sibling rows to fall back on.
+ *
+ * Use this instead of spelling the fields out again.
+ */
+export function visitAnchorFromBooking(
+  booking: Record<string, unknown>,
+  anchor: { id: string; venueId: string | null },
+): VisitBookingRow {
+  const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+  const num = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+  return {
+    id: anchor.id,
+    venue_id: anchor.venueId,
+    group_booking_id: str(booking.group_booking_id),
+    booking_total_price_pence: num(booking.booking_total_price_pence),
+    service_variant_id: str(booking.service_variant_id),
+    service_item_id: str(booking.service_item_id),
+    appointment_service_id: str(booking.appointment_service_id),
+    calendar_id: str(booking.calendar_id),
+    practitioner_id: str(booking.practitioner_id),
+    addons_total_price_pence: num(booking.addons_total_price_pence),
+    deposit_status: str(booking.deposit_status),
+    deposit_amount_pence: num(booking.deposit_amount_pence),
+  };
+}
+
+/**
  * The money picture for a whole **visit** — every `bookings` row sharing the
  * anchor's `group_booking_id` (a multi-service visit or group booking), or
  * just the anchor row when it has none.

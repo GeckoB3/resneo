@@ -84,7 +84,7 @@ import { deleteCardHoldCustomersForBookings } from '@/lib/booking/card-hold-rele
 import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 import { cardHoldChargeWindowEndsAtForBooking } from '@/lib/booking/card-hold-window';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
-import { loadVisitPaymentPicture } from '@/lib/booking/payment-summary';
+import { loadVisitPaymentPicture, visitAnchorFromBooking } from '@/lib/booking/payment-summary';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
@@ -336,16 +336,10 @@ export async function GET(
     // `visit_payment.total_pence` carries the visit's.
     const visit = await loadVisitPaymentPicture(
       getSupabaseAdminClient(),
-      {
+      visitAnchorFromBooking(booking as Record<string, unknown>, {
         id,
-        venue_id: scopeVenueId,
-        group_booking_id: (booking.group_booking_id as string | null) ?? null,
-        booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
-        service_variant_id: booking.service_variant_id ?? null,
-        addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
-        deposit_status: booking.deposit_status ?? null,
-        deposit_amount_pence: booking.deposit_amount_pence ?? null,
-      },
+        venueId: scopeVenueId,
+      }),
       { venueId: scopeVenueId, anchorServiceVariantPricePence: service_variant_price_pence },
     );
     // The in-person ledger rows themselves (booking_payments is service-role

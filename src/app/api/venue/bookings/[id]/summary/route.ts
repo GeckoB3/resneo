@@ -6,7 +6,7 @@ import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
 import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
 import { resolveBookingServicePaymentRequirement } from '@/lib/booking/booking-service-payment-requirement';
-import { loadVisitPaymentPicture } from '@/lib/booking/payment-summary';
+import { loadVisitPaymentPicture, visitAnchorFromBooking } from '@/lib/booking/payment-summary';
 import type { BookingModel } from '@/types/booking-models';
 
 /**
@@ -82,16 +82,10 @@ export async function GET(
     // covers the whole visit; `booking_total_price_pence` stays this row's.
     const visit = await loadVisitPaymentPicture(
       staff.db,
-      {
+      visitAnchorFromBooking(booking as Record<string, unknown>, {
         id,
-        venue_id: scopeVenueId,
-        group_booking_id: (booking.group_booking_id as string | null) ?? null,
-        booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
-        service_variant_id: booking.service_variant_id ?? null,
-        addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
-        deposit_status: booking.deposit_status ?? null,
-        deposit_amount_pence: booking.deposit_amount_pence ?? null,
-      },
+        venueId: scopeVenueId,
+      }),
       { venueId: scopeVenueId, anchorServiceVariantPricePence: service_variant_price_pence },
     );
 

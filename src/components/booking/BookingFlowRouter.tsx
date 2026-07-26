@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import type { VenuePublic } from './types';
 import type { BookingModel } from '@/types/booking-models';
+import { BrandSpinner } from '@/components/ui/primitives';
 
 const BookingFlow = dynamic(() => import('./BookingFlow').then((m) => ({ default: m.BookingFlow })), {
   loading: () => <BookingFlowRouteFallback />,
@@ -31,7 +32,7 @@ const ResourceBookingFlow = dynamic(
 function BookingFlowRouteFallback() {
   return (
     <div className="flex justify-center py-12" role="status" aria-label="Loading booking">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+      <BrandSpinner />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
 import {
   loadVisitPaymentPicture,
   recomputeBookingPaymentSummary,
+  visitAnchorFromBooking,
 } from '@/lib/booking/payment-summary';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 
@@ -247,16 +248,7 @@ export async function POST(
   // in-person payment activity and would omit a deposit paid since.
   const visit = await loadVisitPaymentPicture(
     staff.db,
-    {
-      id,
-      venue_id: scopeVenueId,
-      group_booking_id: (booking.group_booking_id as string | null) ?? null,
-      booking_total_price_pence: (booking.booking_total_price_pence as number | null) ?? null,
-      service_variant_id: booking.service_variant_id ?? null,
-      addons_total_price_pence: (booking.addons_total_price_pence as number | null) ?? null,
-      deposit_status: booking.deposit_status ?? null,
-      deposit_amount_pence: booking.deposit_amount_pence ?? null,
-    },
+    visitAnchorFromBooking(booking as Record<string, unknown>, { id, venueId: scopeVenueId }),
     { venueId: scopeVenueId },
   );
   const balanceDuePence = visit.balanceDuePence;

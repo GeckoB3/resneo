@@ -7,6 +7,7 @@ import {
   recomputeBookingPaymentSummary,
   resolveBookingTotalPence,
   resolveBookingTotalPenceFromRow,
+  visitAnchorFromBooking,
 } from './payment-summary';
 
 type Row = Record<string, unknown>;
@@ -375,6 +376,84 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
     // Per-row ledger attribution keeps revenue sums from double counting.
     expect(visit.ledger.perBooking.get('b2')?.balancePaidPence).toBe(500);
     expect(visit.ledger.perBooking.get('b1')?.balancePaidPence).toBe(0);
+  });
+
+  it('prices a SINGLE variant-less appointment via the shared anchor builder', async () => {
+    /**
+     * The regression test for the bug that survived the resolver fix. The GET,
+     * /summary and charge routes each hand-built the anchor row with an
+     * identical field list that omitted the service ids, so a single-service
+     * appointment had no service to price from and no siblings to fall back on:
+     * "Crew Cut" and "Beard Trim" kept showing no price and no prefill.
+     *
+     * Building the anchor the way the routes now do is the point of this test —
+     * the earlier cases passed the ids in by hand and so could not fail.
+     */
+    const { admin, calls } = makeAdmin((call) => {
+      // No per-practitioner override for this service, so the list price applies.
+      if (call.table === 'practitioner_services') return { data: [] };
+      if (call.table === 'appointment_services') return { data: [{ id: 'svc-beard', price_pence: 1500 }] };
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+
+    const bookingRow = {
+      id: 'b1',
+      group_booking_id: null,
+      booking_total_price_pence: null,
+      service_variant_id: null,
+      appointment_service_id: 'svc-beard',
+      practitioner_id: 'p1',
+      addons_total_price_pence: 0,
+      deposit_status: 'Not Required',
+      deposit_amount_pence: null,
+    };
+
+    const visit = await loadVisitPaymentPicture(
+      admin,
+      visitAnchorFromBooking(bookingRow, { id: 'b1', venueId: 'v1' }),
+      { venueId: 'v1' },
+    );
+
+    expect(visit.totalPence).toBe(1500);
+    expect(visit.balanceDuePence).toBe(1500);
+    expect(visit.anchorTotalPence).toBe(1500);
+    // No sibling lookup: a standalone booking has no group.
+    expect(calls.map((c) => c.table)).not.toContain('bookings');
+  });
+
+  it('carries every field loadVisitPaymentPicture prices from', () => {
+    // A field added to VisitBookingRow but missed here is invisible until a
+    // venue notices a missing price, which is how this broke the first time.
+    const anchor = visitAnchorFromBooking(
+      {
+        group_booking_id: 'grp-1',
+        booking_total_price_pence: 900,
+        service_variant_id: 'sv1',
+        service_item_id: 'si1',
+        appointment_service_id: 'as1',
+        calendar_id: 'cal1',
+        practitioner_id: 'p1',
+        addons_total_price_pence: 100,
+        deposit_status: 'Paid',
+        deposit_amount_pence: 200,
+      },
+      { id: 'b1', venueId: 'v1' },
+    );
+    expect(anchor).toEqual({
+      id: 'b1',
+      venue_id: 'v1',
+      group_booking_id: 'grp-1',
+      booking_total_price_pence: 900,
+      service_variant_id: 'sv1',
+      service_item_id: 'si1',
+      appointment_service_id: 'as1',
+      calendar_id: 'cal1',
+      practitioner_id: 'p1',
+      addons_total_price_pence: 100,
+      deposit_status: 'Paid',
+      deposit_amount_pence: 200,
+    });
   });
 
   it('prices a variant-less line from its service so the visit total stays known', async () => {

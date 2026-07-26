@@ -1,3 +1,4 @@
+export { BrandSpinner } from './BrandSpinner';
 export { Button, type ButtonProps, type ButtonVariant, type ButtonSize } from './Button';
 export { IconButton, type IconButtonProps } from './IconButton';
 export { Input, Textarea } from './Input';

@@ -27,7 +27,11 @@ vi.mock('@/lib/stripe', () => ({
   },
 }));
 
-vi.mock('@/lib/booking/payment-summary', () => ({
+vi.mock('@/lib/booking/payment-summary', async (importOriginal) => ({
+  // Spread the real module so a helper the route newly imports does not vanish
+  // from this mock. `visitAnchorFromBooking` is pure, so running the real one is
+  // also the correct behaviour here.
+  ...(await importOriginal<typeof import('@/lib/booking/payment-summary')>()),
   loadVisitPaymentPicture: vi.fn(),
   recomputeBookingPaymentSummary: vi.fn().mockResolvedValue(undefined),
 }));

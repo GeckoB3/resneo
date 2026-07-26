@@ -7,6 +7,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
 import type { VenuePublic } from '@/components/booking/types';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { BrandSpinner } from '@/components/ui/primitives';
 import { GuestResourceModifySlotPicker } from '@/components/booking/GuestResourceModifySlotPicker';
 import {
   GuestClassModifyInstancePicker,
@@ -223,7 +224,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
       <div className="w-full max-w-md">
         <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
           <div className="flex justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            <BrandSpinner />
           </div>
         </div>
       </div>

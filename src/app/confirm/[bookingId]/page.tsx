@@ -3,6 +3,7 @@
 import { use, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { ConfirmCancelView } from "./[token]/ConfirmCancelView";
+import { BrandSpinner } from "@/components/ui/primitives";
 
 function ConfirmContent({
   paramsPromise,
@@ -39,7 +40,7 @@ export default function ConfirmHmacPage({
         fallback={
           <div className="w-full max-w-md text-center">
             <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+              <BrandSpinner className="mx-auto h-8 w-8" />
             </div>
           </div>
         }

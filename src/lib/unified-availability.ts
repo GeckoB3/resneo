@@ -41,6 +41,18 @@ export interface CalendarGridBooking {
   client_arrived_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
   guest_attendance_confirmed_at?: string | null;
+  /**
+   * Whole-booking payment state, so the grid can badge a settled appointment and
+   * staff can see at a glance what still needs collecting.
+   *
+   * This is the DENORMALISED column, not the live figure the booking GET
+   * computes: deriving live paid state per row would mean a ledger and deposit
+   * read for every booking in the range. Safe for a badge, because the column
+   * only reaches 'paid' through a recompute — so it can lag behind reality (no
+   * badge on a booking that is in fact settled) but will not claim 'paid' for
+   * one that is not.
+   */
+  payment_state?: string | null;
 }
 
 export interface CalendarGridDay {
@@ -389,7 +401,7 @@ export async function getCalendarGrid(params: {
     supabase
       .from('bookings')
       .select(
-        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id, client_arrived_at, staff_attendance_confirmed_at, guest_attendance_confirmed_at',
+        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id, client_arrived_at, staff_attendance_confirmed_at, guest_attendance_confirmed_at, payment_state',
       )
       .eq('venue_id', venueId)
       .in('calendar_id', calendarIds)
@@ -476,6 +488,7 @@ export async function getCalendarGrid(params: {
       client_arrived_at?: string | null;
       staff_attendance_confirmed_at?: string | null;
       guest_attendance_confirmed_at?: string | null;
+      payment_state?: string | null;
     };
     const key = `${row.calendar_id}|${row.booking_date}`;
     const sid = row.service_item_id ?? row.appointment_service_id;
@@ -491,6 +504,7 @@ export async function getCalendarGrid(params: {
       client_arrived_at: row.client_arrived_at ?? null,
       staff_attendance_confirmed_at: row.staff_attendance_confirmed_at ?? null,
       guest_attendance_confirmed_at: row.guest_attendance_confirmed_at ?? null,
+      payment_state: row.payment_state ?? null,
     });
     bookingsByCalDate.set(key, list);
   }

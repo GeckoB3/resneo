@@ -22,6 +22,33 @@ const PUBLISHED_ISO = "2026-07-29";
 const LAST_UPDATED_ISO = "2026-07-29";
 const LAST_UPDATED_LABEL = "29 July 2026";
 
+/**
+ * Primary sources for the factual claims in this article. Cited inline in the body and
+ * mirrored into the Article schema's `citation` field, so search and AI answer engines can
+ * see the piece is grounded in HMRC and Supreme Court material rather than opinion.
+ *
+ * These are deliberately followed links (no rel="nofollow"): citing authoritative sources
+ * openly is the point. Re-check the URLs if the article is ever substantially revised.
+ */
+const SOURCES = {
+  employmentStatusManual: {
+    href: "https://www.gov.uk/hmrc-internal-manuals/employment-status-manual/esm0500",
+    name: "HMRC Employment Status Manual: guide to determining status (ESM0500)",
+  },
+  uberJudgment: {
+    href: "https://www.supremecourt.uk/cases/uksc-2019-0029",
+    name: "Uber BV and others v Aslam and others [2021] UKSC 5, UK Supreme Court",
+  },
+  penaltiesFactsheet: {
+    href: "https://www.gov.uk/government/publications/compliance-checks-penalties-for-inaccuracies-in-returns-or-documents-ccfs7a",
+    name: "HMRC compliance check factsheet CC/FS7A: penalties for inaccuracies in returns or documents",
+  },
+  cest: {
+    href: "https://www.gov.uk/guidance/check-employment-status-for-tax",
+    name: "HMRC: check employment status for tax (CEST)",
+  },
+} as const;
+
 export const metadata: Metadata = {
   title: "Salon Chair Rental & HMRC Employment Status | ResNeo",
   description:
@@ -192,6 +219,11 @@ const jsonLd = {
         { "@type": "Thing", name: "Employment status for tax" },
         { "@type": "Thing", name: "Salon chair rental" },
       ],
+      citation: Object.values(SOURCES).map((s) => ({
+        "@type": "CreativeWork",
+        name: s.name,
+        url: s.href,
+      })),
     },
     {
       "@type": "BreadcrumbList",
@@ -238,6 +270,22 @@ export default function ChairRentalEmploymentStatusPage() {
       <ClosingCta />
       <Footer />
     </div>
+  );
+}
+
+/* ── Shared bits ──────────────────────────────────────────────────────── */
+
+/** Inline citation link to an external source, opened in a new tab. */
+function SourceLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-semibold text-brand-600 underline decoration-brand-200 underline-offset-2 transition-colors hover:text-brand-700 hover:decoration-brand-400"
+    >
+      {children}
+    </a>
   );
 }
 
@@ -373,9 +421,11 @@ function ArticleBody() {
         </p>
         <p className="mt-4 text-base leading-relaxed text-slate-600">
           This is not a fringe concern. The current wave of scrutiny traces back to the Supreme
-          Court&rsquo;s February 2021 ruling in Uber BV v Aslam, which found that Uber drivers were
-          workers rather than genuinely self-employed contractors, largely because of how much
-          control Uber exercised over their day to day work. That case was about employment rights
+          Court&rsquo;s February 2021 ruling in{" "}
+          <SourceLink href={SOURCES.uberJudgment.href}>Uber BV v Aslam [2021] UKSC 5</SourceLink>,
+          which found that Uber drivers were workers rather than genuinely self-employed
+          contractors, largely because of how much control Uber exercised over their day to day
+          work. That case was about employment rights
           rather than tax, but it hardened a principle that runs through both: the reality of the
           working relationship outweighs the label on the contract. Employment status across the gig
           economy, hairdressing included, has drawn closer attention since.
@@ -386,8 +436,14 @@ function ArticleBody() {
           What HMRC actually checks
         </h2>
         <p className="mt-5 text-base leading-relaxed text-slate-600">
-          Going by HMRC&rsquo;s own tests and the way tribunals have applied them, the questions that
-          matter are about real working practices, not paperwork.
+          Going by{" "}
+          <SourceLink href={SOURCES.employmentStatusManual.href}>
+            HMRC&rsquo;s own guidance on determining employment status
+          </SourceLink>{" "}
+          and the way tribunals have applied it, the questions that matter are about real working
+          practices, not paperwork. HMRC weighs control, personal service and the right to send a
+          substitute, financial risk, and whether someone works exclusively for one place, then
+          steps back and looks at the overall picture.
         </p>
         <ol className="mt-8 space-y-4">
           {checks.map((c, i) => (
@@ -429,6 +485,14 @@ function ArticleBody() {
           ))}
         </div>
         <p className="mt-6 text-base leading-relaxed text-slate-600">
+          Those penalty bands are set out in{" "}
+          <SourceLink href={SOURCES.penaltiesFactsheet.href}>
+            HMRC&rsquo;s compliance check factsheet CC/FS7A
+          </SourceLink>
+          , which also explains how a penalty can be reduced if you tell HMRC about an error
+          yourself before it asks.
+        </p>
+        <p className="mt-4 text-base leading-relaxed text-slate-600">
           For a salon with several chair renters over several years, this adds up to a genuinely
           serious bill. In some reported cases it has been enough to threaten the business itself.
         </p>
@@ -578,6 +642,14 @@ function Disclaimer() {
             legal or tax advice, and every salon&rsquo;s arrangements are different. If you are
             unsure how your own setup would hold up, it is worth a conversation with a qualified UK
             employment or tax adviser who can look at your specific contracts and working practices.
+          </p>
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            To get a rough read first, HMRC&rsquo;s free{" "}
+            <SourceLink href={SOURCES.cest.href}>
+              Check Employment Status for Tax (CEST) tool
+            </SourceLink>{" "}
+            walks through the main questions. It only reflects the answers you give it, so treat the
+            result as a starting point rather than a verdict.
           </p>
         </div>
       </div>

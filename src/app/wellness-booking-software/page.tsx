@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { SocialLinks } from "@/components/marketing/SocialLinks";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
+import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import ContactForm from "@/components/ContactForm";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 import { APPOINTMENTS_LIGHT_PRICE } from "@/lib/pricing-constants";
 import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
+import { PUBLIC_SITE_ORIGIN as SITE_ORIGIN } from "@/lib/public-base-url";
 import {
   ArrowPathIcon,
   ArrowRightIcon,
@@ -277,9 +279,9 @@ const jsonLd = {
     {
       "@type": "BreadcrumbList",
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Home", item: "/" },
-        { "@type": "ListItem", position: 2, name: "Solutions", item: "/solutions" },
-        { "@type": "ListItem", position: 3, name: "Health & wellbeing", item: PAGE_PATH },
+        { "@type": "ListItem", position: 1, name: "Home", item: `${SITE_ORIGIN}/` },
+        { "@type": "ListItem", position: 2, name: "Solutions", item: `${SITE_ORIGIN}/solutions` },
+        { "@type": "ListItem", position: 3, name: "Health & wellbeing", item: `${SITE_ORIGIN}${PAGE_PATH}` },
       ],
     },
     {
@@ -301,7 +303,9 @@ export default function WellnessBookingSoftwarePage() {
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <Nav />
+      <MarketingNav
+        extraLink={{ href: "#intake", label: "Intake forms" }}
+      />
       <Hero />
       <TrustStrip />
       <IntakeSection />
@@ -314,33 +318,8 @@ export default function WellnessBookingSoftwarePage() {
       <CompareSection />
       <FaqSection />
       <ClosingCta />
-      <Footer />
+      <MarketingFooter />
     </div>
-  );
-}
-
-/* ── Nav ──────────────────────────────────────────────────────────────── */
-
-function Nav() {
-  return (
-    <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
-        </Link>
-        <div className="flex items-center gap-2 sm:gap-4">
-          <Link href="/solutions" className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex">
-            All solutions
-          </Link>
-          <a href="#contact" className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex">
-            Talk to us
-          </a>
-          <a href={SIGNUP} className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
-            Start free trial
-          </a>
-        </div>
-      </div>
-    </nav>
   );
 }
 
@@ -349,7 +328,7 @@ function Nav() {
 function Hero() {
   return (
     <section className="relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-accent-50/40" />
+      <div className="absolute inset-0 bg-gradient-to-b from-accent-50/80 via-white to-white" />
       <div
         className="absolute inset-0 opacity-60"
         style={{
@@ -377,7 +356,7 @@ function Hero() {
             Booking software for health &amp; wellbeing
           </h1>
           <p className="mt-5 text-xl font-semibold sm:text-2xl">
-            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-accent-dark bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-accent-800 via-accent-700 to-brand-700 bg-clip-text text-transparent">
               Fewer missed appointments. A fuller diary. The paperwork, sorted.
             </span>
           </p>
@@ -423,11 +402,11 @@ function Breadcrumb() {
     <nav aria-label="Breadcrumb" className="text-xs font-medium text-slate-500">
       <ol className="flex items-center gap-1.5">
         <li>
-          <Link href="/" className="hover:text-slate-800">Home</Link>
+          <Link href="/" className="inline-flex min-h-11 items-center rounded hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">Home</Link>
         </li>
         <li aria-hidden className="text-slate-300">/</li>
         <li>
-          <Link href="/solutions" className="hover:text-slate-800">Solutions</Link>
+          <Link href="/solutions" className="inline-flex min-h-11 items-center rounded hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">Solutions</Link>
         </li>
         <li aria-hidden className="text-slate-300">/</li>
         <li className="text-slate-700">Health &amp; wellbeing</li>
@@ -457,7 +436,7 @@ function HeroPhoneVisual() {
               <span className="inline-block h-2 w-2 rounded-full bg-accent" />
               Appointment confirmed
             </div>
-            <h3 className="mt-2 text-lg font-bold text-slate-900">Initial assessment · Align Physio</h3>
+            <p className="mt-2 text-lg font-bold text-slate-900">Initial assessment · Align Physio</p>
             <p className="mt-0.5 text-xs text-slate-500">Tom Bennett · with Dr Sara Hill</p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -565,11 +544,11 @@ const recordTone: Record<string, string> = {
 function IntakeSection() {
   return (
     <section id="intake" className="relative scroll-mt-16 overflow-hidden bg-white py-20 sm:py-28">
-      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-accent-50/40" />
+      <div className="absolute inset-0 bg-gradient-to-br from-white via-accent-50/60 to-brand-50/40" />
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            <span className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br from-accent-700 to-brand-700`} />
             Intake, questionnaires &amp; consent
           </span>
           <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
@@ -582,14 +561,14 @@ function IntakeSection() {
           </p>
         </div>
 
-        <div className="mt-14 grid items-start gap-10 lg:grid-cols-2 lg:gap-14">
+        <div className="mt-14 grid items-start gap-10 lg:grid-cols-[1.2fr_1fr] lg:gap-16">
           <div className="relative">
             <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-100/50 via-white/0 to-accent-200/50 blur-3xl" />
             <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-brand-900/5">
               <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+                <span className="h-2.5 w-2.5 rounded-full bg-accent-300" />
+                <span className="h-2.5 w-2.5 rounded-full bg-accent-300" />
+                <span className="h-2.5 w-2.5 rounded-full bg-accent-300" />
                 <span className="ml-3 inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400">
                   <LockIcon /> resneo.com/dashboard/compliance
                 </span>
@@ -664,7 +643,7 @@ function OutcomesSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Outcomes first</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            What every practice wants, and how ResNeo delivers it.
+            Prepared sessions, lighter admin, fuller clinics.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Each promise below maps to the exact ResNeo features that make it happen. No buzzwords, just the
@@ -791,7 +770,7 @@ function BookingFlowSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">The booking flow</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            A booking journey your clients will actually finish.
+            Booked and screened before the first session.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             From &ldquo;I need to see someone&rdquo; to a confirmed, prepared appointment: service,
@@ -856,8 +835,8 @@ function BookingFlowSection() {
               {i < bookingSteps.length - 1 ? (
                 <div className="absolute left-10 top-5 hidden h-0.5 w-full bg-gradient-to-r from-brand-200 to-transparent lg:block" />
               ) : null}
-              <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 text-sm font-extrabold text-white shadow-md shadow-brand-600/25">{s.step}</div>
-              <h4 className="mt-4 text-base font-bold text-slate-900">{s.title}</h4>
+              <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-accent-700 to-brand-700 text-sm font-extrabold text-white shadow-md shadow-brand-600/25">{s.step}</div>
+              <h3 className="mt-4 text-base font-bold text-slate-900">{s.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{s.description}</p>
             </div>
           ))}
@@ -936,7 +915,7 @@ function RecordsSection() {
 
           <div className="rounded-3xl border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-7">
             <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-600 to-brand-800 text-base font-bold text-white">TB</span>
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-accent-700 to-brand-700 text-base font-bold text-white">TB</span>
               <div>
                 <p className="text-base font-bold text-slate-900">Tom Bennett</p>
                 <p className="text-xs text-slate-500">Client since Jan 2025 · 9 sessions</p>
@@ -1015,7 +994,7 @@ function LinkedAccountsSection() {
                 <LinkIcon className="h-3.5 w-3.5" /> Associates, room renters &amp; clinics
               </span>
               <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-                Share a clinic. Keep separate books.
+                Work side by side. Never merge a caseload.
               </h2>
               <p className="mt-4 text-base leading-relaxed text-slate-600">
                 A multi-disciplinary clinic of self-employed associates, or rooms rented to visiting
@@ -1063,7 +1042,7 @@ function BusinessTypesSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Who it&rsquo;s for</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Made for every kind of practitioner.
+            Whatever you practise, it books the same way.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             A solo therapist or a multi-disciplinary clinic, seeing clients in person, online, or at home. If
@@ -1090,12 +1069,12 @@ function BusinessTypesSection() {
 
 function CompareSection() {
   return (
-    <section className="bg-white py-20 sm:py-28">
+    <section id="compare" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">ResNeo vs the rest</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Keep your clients. Keep your margin. Keep the records.
+            Keep the caseload you built.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Marketplace apps list you next to your competitors and take a cut. Generic schedulers leave intake
@@ -1134,11 +1113,11 @@ function CompareSection() {
 
 function FaqSection() {
   return (
-    <section className="bg-slate-50 py-20 sm:py-28">
+    <section id="faq" className="scroll-mt-16 bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Good to know</span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Questions, answered.</h2>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">What practitioners want to know.</h2>
         </div>
         <div className="mt-12 space-y-3">
           {faqs.map((f) => (
@@ -1164,7 +1143,7 @@ function ClosingCta() {
   return (
     <section id="contact" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-accent-900 via-brand-800 to-brand-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
           <div
             className="absolute inset-0 opacity-30"
             style={{
@@ -1175,7 +1154,7 @@ function ClosingCta() {
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
             <div className="min-w-0">
               <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
-                See more clients. Chase less paper. Start free today.
+                Start seeing clients through ResNeo.
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
                 Take bookings 24/7, cut missed appointments with deposits and reminders, and collect every
@@ -1212,25 +1191,3 @@ function ClosingCta() {
   );
 }
 
-/* ── Footer ───────────────────────────────────────────────────────────── */
-
-function Footer() {
-  return (
-    <footer className="border-t border-slate-100 bg-slate-50 py-10">
-      <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-        <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
-          <Link href="/" className="transition-colors hover:text-slate-900">Home</Link>
-          <Link href="/solutions" className="transition-colors hover:text-slate-900">Solutions</Link>
-          <Link href="/beauty-booking-software" className="transition-colors hover:text-slate-900">Beauty &amp; aesthetics</Link>
-          <a href={SIGNUP} className="transition-colors hover:text-slate-900">Sign up</a>
-          <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
-          <Link href="/privacy" className="transition-colors hover:text-slate-900">Privacy Policy</Link>
-          <SocialLinks />
-        </div>
-      </div>
-    </footer>
-  );
-}

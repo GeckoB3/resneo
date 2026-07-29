@@ -86,7 +86,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'Can my staff each have their own calendar and booking link?',
           answer:
-            'On Appointments Plus and Pro, yes (within your plan limits). Each team member can have their own calendar with individual working hours, breaks, and services, plus a personal booking link to share with clients. Appointments Light is built for sole traders: one bookable calendar and one venue login—upgrade to Plus or Pro when you need multiple staff with separate calendars.',
+            'On Appointments Plus and Pro, yes (within your plan limits). Each team member can have their own calendar with individual working hours, breaks, and services, plus a personal booking link to share with clients. Appointments Light is built for sole traders: one bookable calendar and one venue login. Upgrade to Plus or Pro when you need multiple staff with separate calendars.',
         },
         {
           question: 'I run a restaurant. How does ResNeo compare to other options?',
@@ -113,7 +113,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         },
         {
           question: 'Can I try ResNeo before committing?',
-          answer: `Yes. New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan when they sign up online. ${SIGNUP_TRIAL_CARD_NOTICE} You can also contact us for a free demo tailored to your business—we will walk you through how ResNeo fits your setup and answer questions before you sign up.`,
+          answer: `Yes. New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan when they sign up online. ${SIGNUP_TRIAL_CARD_NOTICE} You can also contact us for a free demo tailored to your business. We will walk you through how ResNeo fits your setup and answer questions before you sign up.`,
         },
       ],
     },

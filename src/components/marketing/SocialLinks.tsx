@@ -1,7 +1,7 @@
 /**
  * ResNeo's company social-media links, rendered as a row of brand-icon links.
  * Used in the marketing-site footers (home, solutions, about, the vertical pages).
- * The handles/URLs live here so they are maintained in a single place — update a
+ * The handles/URLs live here so they are maintained in a single place: update a
  * link once and every footer follows.
  */
 
@@ -49,7 +49,9 @@ const SOCIAL_LINKS = [
 /** A row of ResNeo's social-media brand icons, each linking out in a new tab. */
 export function SocialLinks({ className = "" }: { className?: string }) {
   return (
-    <div className={`flex items-center gap-4 ${className}`}>
+    // Negative inline margin keeps the icon row visually where it was while each
+    // link still presents a 44px touch target.
+    <div className={`-mx-2.5 flex items-center ${className}`}>
       {SOCIAL_LINKS.map(({ name, href, Icon }) => (
         <a
           key={name}
@@ -57,7 +59,7 @@ export function SocialLinks({ className = "" }: { className?: string }) {
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`ResNeo on ${name}`}
-          className="text-slate-400 transition-colors hover:text-slate-900"
+          className="grid h-11 w-11 place-items-center rounded-lg text-slate-400 transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
         >
           <Icon className="h-5 w-5" />
         </a>

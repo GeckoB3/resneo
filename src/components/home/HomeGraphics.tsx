@@ -3,8 +3,8 @@ import type { CSSProperties } from 'react';
 /* ────────────────────────────────────────────────────────────────────────
    Marketing product mockups (server components, no client JS).
    Adapted from the ResNeo marketing reel into the app's brand tokens so the
-   homepage shows the real product surfaces — calendar, booking flow, reminders,
-   deposits — as polished, dimensional graphics.
+   homepage shows the real product surfaces (calendar, booking flow, reminders,
+   deposits) as polished, dimensional graphics.
    ──────────────────────────────────────────────────────────────────────── */
 
 /** Subtle window chrome shared by the product mockups. */
@@ -31,25 +31,27 @@ function WindowChrome({ title, live }: { title: string; live?: boolean }) {
 type EventTone = 'sky' | 'emerald' | 'indigo' | 'amber';
 
 const EVENT_TONE: Record<EventTone, { wrap: string; stripe: string; sub: string }> = {
+  // Sub-line tones are solid -800 rather than -700/80: the 80% alpha over the
+  // tinted card put every one of these between 3.6:1 and 4.0:1.
   sky: {
     wrap: 'bg-gradient-to-b from-sky-50 to-sky-100/90 border-sky-300 text-sky-900',
     stripe: 'bg-sky-600',
-    sub: 'text-sky-700/80',
+    sub: 'text-sky-800',
   },
   emerald: {
     wrap: 'bg-gradient-to-b from-emerald-50 to-emerald-100/90 border-emerald-300 text-emerald-900',
     stripe: 'bg-emerald-600',
-    sub: 'text-emerald-700/80',
+    sub: 'text-emerald-800',
   },
   indigo: {
     wrap: 'bg-gradient-to-b from-indigo-50 to-indigo-100/90 border-indigo-300 text-indigo-900',
     stripe: 'bg-indigo-600',
-    sub: 'text-indigo-700/80',
+    sub: 'text-indigo-800',
   },
   amber: {
     wrap: 'bg-gradient-to-b from-amber-50 to-amber-100/90 border-amber-300 text-amber-900',
     stripe: 'bg-amber-500',
-    sub: 'text-amber-700/80',
+    sub: 'text-amber-800',
   },
 };
 
@@ -110,7 +112,7 @@ export function CalendarMock({ className }: { className?: string }) {
         {['Andrew', 'Dave', 'Priya'].map((n) => (
           <div key={n} className="border-b border-r border-slate-100 px-2 py-2 text-center last:border-r-0">
             <p className="truncate text-[11px] font-bold text-slate-800 sm:text-xs">{n}</p>
-            <p className="text-[9px] font-medium text-slate-400">09:00 – 18:00</p>
+            <p className="text-[9px] font-medium text-slate-500">09:00 – 18:00</p>
           </div>
         ))}
 
@@ -119,7 +121,7 @@ export function CalendarMock({ className }: { className?: string }) {
           {hours.map((h) => (
             <div
               key={h}
-              className="flex-1 border-r border-slate-100 pr-1.5 pt-1 text-right text-[9px] font-semibold text-slate-300"
+              className="flex-1 border-r border-slate-100 pr-1.5 pt-1 text-right text-[9px] font-semibold text-slate-500"
               style={{ minHeight: 40 }}
             >
               {h}
@@ -190,42 +192,42 @@ export function DepositCard({ className, style }: { className?: string; style?: 
 /** Three-step booking flow card for the bento grid. */
 export function BookingFlowMock({ className }: { className?: string }) {
   return (
-    <div className={`flex items-center gap-2 ${className ?? ''}`}>
+    <div className={`flex items-center gap-1.5 sm:gap-2 ${className ?? ''}`}>
       {/* Step 1 */}
-      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
         <div className="flex items-center gap-2">
           <span className="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">1</span>
           <p className="text-[11px] font-bold text-slate-800">Choose service</p>
         </div>
         <div className="mt-2 space-y-1">
           <p className="rounded-md bg-brand-50 px-2 py-1 text-[10px] font-semibold text-brand-700 ring-1 ring-brand-200">Colour · 2 hr</p>
-          <p className="rounded-md bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-400">Cut &amp; finish</p>
+          <p className="rounded-md bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-600">Cut &amp; finish</p>
         </div>
       </div>
       <Arrow />
       {/* Step 2 */}
-      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
         <div className="flex items-center gap-2">
           <span className="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">2</span>
           <p className="text-[11px] font-bold text-slate-800">Pick a time</p>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-1">
-          <span className="rounded-md bg-slate-50 py-1 text-center text-[10px] font-medium text-slate-400">10:00</span>
+          <span className="rounded-md bg-slate-50 py-1 text-center text-[10px] font-medium text-slate-600">10:00</span>
           <span className="rounded-md bg-brand-600 py-1 text-center text-[10px] font-bold text-white">11:30</span>
-          <span className="rounded-md bg-slate-50 py-1 text-center text-[10px] font-medium text-slate-400">14:00</span>
-          <span className="rounded-md bg-slate-50 py-1 text-center text-[10px] font-medium text-slate-400">15:30</span>
+          <span className="rounded-md bg-slate-50 py-1 text-center text-[10px] font-medium text-slate-600">14:00</span>
+          <span className="rounded-md bg-slate-50 py-1 text-center text-[10px] font-medium text-slate-600">15:30</span>
         </div>
       </div>
       <Arrow />
       {/* Step 3 */}
-      <div className="flex-1 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-center shadow-sm">
+      <div className="min-w-0 flex-1 rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-center shadow-sm sm:p-3">
         <span className="mx-auto grid h-8 w-8 place-items-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="m5 13 4 4L19 7" />
           </svg>
         </span>
         <p className="mt-1.5 text-[11px] font-bold text-emerald-800">Booked!</p>
-        <p className="text-[9px] font-medium text-emerald-700/70">Confirmation sent</p>
+        <p className="text-[9px] font-medium text-emerald-800">Confirmation sent</p>
       </div>
     </div>
   );
@@ -233,7 +235,7 @@ export function BookingFlowMock({ className }: { className?: string }) {
 
 function Arrow() {
   return (
-    <svg className="h-4 w-4 shrink-0 text-accent-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+    <svg className="h-4 w-4 shrink-0 text-accent-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
     </svg>
   );
@@ -247,7 +249,7 @@ export function ReminderMock({ className }: { className?: string }) {
         <p className="text-[11px] leading-snug text-slate-700 sm:text-xs">
           Hi Maria, a reminder for your <span className="font-semibold text-slate-900">Colour</span> with ResNeo Salon tomorrow at <span className="font-semibold text-slate-900">11:30</span>. Reply <span className="font-semibold">Y</span> to confirm or <span className="font-semibold">N</span> to cancel.
         </p>
-        <p className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Sent automatically · 24h before</p>
+        <p className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">Sent automatically · 24h before</p>
       </div>
       <div className="ml-auto flex max-w-[55%] items-center justify-end gap-1.5 rounded-2xl rounded-br-md bg-gradient-to-br from-brand-600 to-brand-700 px-3.5 py-2.5 text-white shadow-sm">
         <span className="text-xs font-bold">Y</span>

@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { SocialLinks } from '@/components/marketing/SocialLinks';
-import Image from 'next/image';
+import { MarketingNav } from '@/components/marketing/MarketingNav';
+import { MarketingFooter } from '@/components/marketing/MarketingFooter';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -102,28 +102,7 @@ const founders = [
 export default function AboutPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      {/* Nav */}
-      <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link href="/" className="flex-shrink-0">
-            <Image src="/Logo.png" alt="ResNeo" width={144} height={40} className="h-9 w-auto" priority />
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/#pricing"
-              className="hidden text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline"
-            >
-              Pricing
-            </Link>
-            <Link
-              href="/login"
-              className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700"
-            >
-              Log in
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <MarketingNav currentHref="/about" />
 
       {/* Hero */}
       <section className="relative overflow-hidden">
@@ -431,36 +410,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-100 bg-slate-50 py-10">
-        <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-          <p className="max-w-xl text-center leading-snug sm:text-left">
-            &copy; 2026 ResNeo &middot; JAR 26 LTD (NI740269) &middot; 100a Main Street, Bangor,
-            BT20 4AG, UK
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
-            <Link href="/" className="transition-colors hover:text-slate-900">
-              Home
-            </Link>
-            <Link href="/#pricing" className="transition-colors hover:text-slate-900">
-              Sign up
-            </Link>
-            <Link href="/login" className="transition-colors hover:text-slate-900">
-              Login
-            </Link>
-            <a href="mailto:hello@resneo.com" className="transition-colors hover:text-slate-900">
-              Contact
-            </a>
-            <Link href="/terms" className="transition-colors hover:text-slate-900">
-              Website Terms of Use
-            </Link>
-            <Link href="/privacy" className="transition-colors hover:text-slate-900">
-              Privacy Policy
-            </Link>
-            <SocialLinks />
-          </div>
-        </div>
-      </footer>
+      <MarketingFooter />
     </div>
   );
 }

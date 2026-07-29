@@ -2,7 +2,16 @@
  * Safe public site origin for customer-facing URLs (booking links, widgets, emails).
  * Hardens against malformed `NEXT_PUBLIC_BASE_URL` in .env (e.g. two lines merged without a newline).
  */
-const DEFAULT_PUBLIC_ORIGIN = 'https://www.resneo.com';
+/**
+ * The canonical public origin.
+ *
+ * Exported because JSON-LD needs it directly: `metadataBase` rewrites Next's own
+ * metadata but never a raw ld+json payload, so those scripts must build absolute
+ * URLs themselves rather than each page hardcoding the host.
+ */
+export const PUBLIC_SITE_ORIGIN = 'https://www.resneo.com';
+
+const DEFAULT_PUBLIC_ORIGIN = PUBLIC_SITE_ORIGIN;
 
 export function normalizePublicBaseUrl(raw: string | undefined): string {
   if (!raw || typeof raw !== 'string') return DEFAULT_PUBLIC_ORIGIN;

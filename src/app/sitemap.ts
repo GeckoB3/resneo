@@ -13,6 +13,11 @@ type ChangeFrequency = MetadataRoute.Sitemap[number]["changeFrequency"];
 const ROUTES: { path: string; changeFrequency: ChangeFrequency; priority: number }[] = [
   { path: "/", changeFrequency: "weekly", priority: 1 },
   { path: "/solutions", changeFrequency: "monthly", priority: 0.9 },
+  {
+    path: "/solutions/salon-chair-rental-hmrc-employment-status",
+    changeFrequency: "monthly",
+    priority: 0.7,
+  },
   { path: "/salon-booking-software", changeFrequency: "monthly", priority: 0.8 },
   { path: "/beauty-booking-software", changeFrequency: "monthly", priority: 0.8 },
   { path: "/wellness-booking-software", changeFrequency: "monthly", priority: 0.8 },

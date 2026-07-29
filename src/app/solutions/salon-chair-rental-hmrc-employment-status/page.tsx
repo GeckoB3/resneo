@@ -23,29 +23,45 @@ const LAST_UPDATED_ISO = "2026-07-29";
 const LAST_UPDATED_LABEL = "29 July 2026";
 
 /**
- * Primary sources for the factual claims in this article. Cited inline in the body and
- * mirrored into the Article schema's `citation` field, so search and AI answer engines can
- * see the piece is grounded in HMRC and Supreme Court material rather than opinion.
+ * Primary sources for the factual claims in this article. Each one is cited inline in the
+ * body, listed again in the Sources section at the foot of the page, and mirrored into the
+ * Article schema's `citation` field, so search and AI answer engines can see the piece is
+ * grounded in HMRC and Supreme Court material rather than opinion.
  *
  * These are deliberately followed links (no rel="nofollow"): citing authoritative sources
  * openly is the point. Re-check the URLs if the article is ever substantially revised.
+ *
+ * `supports` says which claim the source backs, so a future edit can tell at a glance when a
+ * source no longer matches the copy it is standing behind.
  */
 const SOURCES = {
   employmentStatusManual: {
     href: "https://www.gov.uk/hmrc-internal-manuals/employment-status-manual/esm0500",
-    name: "HMRC Employment Status Manual: guide to determining status (ESM0500)",
+    name: "Employment Status Manual: guide to determining status (ESM0500)",
+    publisher: "HMRC",
+    supports:
+      "The factors HMRC weighs when deciding status: control, personal service and the right of substitution, financial risk, exclusivity, and the overall picture.",
   },
   uberJudgment: {
     href: "https://www.supremecourt.uk/cases/uksc-2019-0029",
-    name: "Uber BV and others v Aslam and others [2021] UKSC 5, UK Supreme Court",
+    name: "Uber BV and others v Aslam and others [2021] UKSC 5",
+    publisher: "UK Supreme Court",
+    supports:
+      "The February 2021 ruling that Uber drivers were workers rather than self-employed contractors, decided on the reality of the working relationship rather than the contract wording.",
   },
   penaltiesFactsheet: {
     href: "https://www.gov.uk/government/publications/compliance-checks-penalties-for-inaccuracies-in-returns-or-documents-ccfs7a",
-    name: "HMRC compliance check factsheet CC/FS7A: penalties for inaccuracies in returns or documents",
+    name: "Compliance checks: penalties for inaccuracies in returns or documents (CC/FS7A)",
+    publisher: "HMRC",
+    supports:
+      "The penalty bands quoted in this article, and the reductions available when you tell HMRC about an error before it asks.",
   },
   cest: {
     href: "https://www.gov.uk/guidance/check-employment-status-for-tax",
-    name: "HMRC: check employment status for tax (CEST)",
+    name: "Check employment status for tax (CEST)",
+    publisher: "HMRC",
+    supports:
+      "HMRC's free tool for getting its view of a worker's employment status, based on the answers you give it.",
   },
 } as const;
 
@@ -223,6 +239,7 @@ const jsonLd = {
         "@type": "CreativeWork",
         name: s.name,
         url: s.href,
+        publisher: { "@type": "Organization", name: s.publisher },
       })),
     },
     {
@@ -266,6 +283,7 @@ export default function ChairRentalEmploymentStatusPage() {
       <ArticleBody />
       <LinkBreakSection />
       <FaqSection />
+      <SourcesSection />
       <Disclaimer />
       <ClosingCta />
       <Footer />
@@ -624,6 +642,50 @@ function FaqSection() {
             </details>
           ))}
         </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Sources ──────────────────────────────────────────────────────────── */
+
+function SourcesSection() {
+  return (
+    <section id="sources" className="scroll-mt-16 bg-white pb-4 pt-16 sm:pt-20">
+      <div className="mx-auto max-w-3xl px-6">
+        <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Sources</span>
+        <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+          Where this article&rsquo;s facts come from
+        </h2>
+        <p className="mt-4 text-base leading-relaxed text-slate-600">
+          Everything above is drawn from HMRC&rsquo;s published guidance and the official record of
+          the case law. Checked on{" "}
+          <time dateTime={LAST_UPDATED_ISO}>{LAST_UPDATED_LABEL}</time>.
+        </p>
+
+        <ol className="mt-8 space-y-4">
+          {Object.values(SOURCES).map((s, i) => (
+            <li
+              key={s.href}
+              className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 transition-colors hover:border-brand-200"
+            >
+              <div className="flex items-start gap-4">
+                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white text-xs font-bold text-brand-700 ring-1 ring-brand-100">
+                  {i + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    {s.publisher}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold leading-snug">
+                    <SourceLink href={s.href}>{s.name}</SourceLink>
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-600">{s.supports}</p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   );

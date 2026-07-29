@@ -124,6 +124,17 @@ const capabilities: {
   },
 ];
 
+/** Longer-form guides that live under the solutions hub. */
+const guides: { name: string; blurb: string; href: string; meta: string }[] = [
+  {
+    name: "Is your salon accidentally employing your chair renters?",
+    blurb:
+      "What HMRC actually checks in a chair rental arrangement, what reclassification costs, and why your booking system is part of the picture.",
+    href: "/solutions/salon-chair-rental-hmrc-employment-status",
+    meta: "Salons & barbers · 6 min read",
+  },
+];
+
 const comparisons: { name: string; href?: string; status: "live" | "soon" }[] = [
   { name: "ResNeo vs marketplace booking apps", href: "/salon-booking-software#compare", status: "live" },
   { name: "ResNeo vs spreadsheets & paper diaries", status: "soon" },
@@ -378,6 +389,37 @@ export default function SolutionsHubPage() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Guides */}
+      <section id="guides" className="scroll-mt-16 bg-white py-16 sm:py-20">
+        <div className="mx-auto max-w-4xl px-6">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-accent-700">Guides</h2>
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-slate-600">
+            Longer reads on the things that actually keep salon owners up at night.
+          </p>
+          <div className="mt-8 space-y-4">
+            {guides.map((g) => (
+              <Link
+                key={g.href}
+                href={g.href}
+                className="group block rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
+              >
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{g.meta}</p>
+                <h3 className="mt-2 text-lg font-bold text-slate-900 group-hover:text-brand-700">
+                  {g.name}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">{g.blurb}</p>
+                <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600">
+                  Read the guide
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                  </svg>
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
       </section>

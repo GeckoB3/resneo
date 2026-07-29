@@ -1144,6 +1144,16 @@ function LinkedAccountsSection() {
                 </div>
               </div>
               <p className="mt-4 text-sm leading-relaxed text-slate-600">{LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE}</p>
+              <p className="mt-3 text-sm leading-relaxed text-slate-600">
+                Renting chairs to self-employed stylists? Read our guide to{" "}
+                <Link
+                  href="/solutions/salon-chair-rental-hmrc-employment-status"
+                  className="font-semibold text-brand-600 underline decoration-brand-200 underline-offset-2 transition-colors hover:text-brand-700"
+                >
+                  chair rental and HMRC employment status
+                </Link>
+                .
+              </p>
             </div>
             <div className="flex flex-col gap-3">
               <a

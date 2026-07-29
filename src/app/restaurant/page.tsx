@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
+import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import {
   RESNEO_DEPOSIT_FLOWS_MARKETING_FOLLOW_ON,
   RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD,
@@ -10,16 +12,35 @@ import { SMS_INCLUDED_RESTAURANT } from "@/lib/billing/sms-allowance";
 import { RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
+import { PUBLIC_SITE_ORIGIN as SITE_ORIGIN } from "@/lib/public-base-url";
+
+const PAGE_PATH = "/restaurant";
 
 export const metadata: Metadata = {
-  title: "ResNeo for Restaurants | Table Booking & Deposit Protection",
+  title: "Restaurant Booking Software | Table Reservations & Deposits | ResNeo",
   description:
-    "Fill more covers with 24/7 online booking, deposits that reduce no-shows, and staff tools built for service: day sheet, table grid, and live floor plan.",
+    "Fill more covers with 24/7 online table booking, deposits that reduce no-shows, and staff tools built for service: day sheet, table grid, and live floor plan. One flat subscription, with no commission per cover.",
+  keywords: [
+    "restaurant booking software",
+    "table reservation system",
+    "restaurant reservation software UK",
+    "table booking system for restaurants",
+    "restaurant no-show deposits",
+    "floor plan booking software",
+  ],
+  alternates: { canonical: PAGE_PATH },
   openGraph: {
-    title: "ResNeo for Restaurants",
+    title: "Restaurant Booking Software | ResNeo",
     description:
       "Take table bookings 24/7, protect revenue with deposits, and run service with day sheet, table grid, and floor plan.",
+    url: PAGE_PATH,
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Restaurant Booking Software | ResNeo",
+    description:
+      "Take table bookings 24/7, protect revenue with deposits, and run service with day sheet, table grid, and floor plan.",
   },
 };
 
@@ -234,10 +255,61 @@ const faqs = [
   },
 ];
 
+/**
+ * Structured data. Mirrors the other vertical pages so the restaurant page is
+ * eligible for the same rich results: the product itself, its place in the
+ * solutions hierarchy, and the FAQ block rendered further down.
+ */
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      name: "ResNeo: Restaurant Booking Software",
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "Web",
+      description:
+        "Table reservation software for restaurants, bistros, gastropubs and cafes: 24/7 online booking, deposits, automated reminders, day sheet, table grid and live floor plan.",
+      offers: {
+        "@type": "Offer",
+        price: String(RESTAURANT_PRICE),
+        priceCurrency: "GBP",
+      },
+    },
+    {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Home", item: `${SITE_ORIGIN}/` },
+        { "@type": "ListItem", position: 2, name: "Solutions", item: `${SITE_ORIGIN}/solutions` },
+        { "@type": "ListItem", position: 3, name: "Restaurant Booking Software", item: `${SITE_ORIGIN}${PAGE_PATH}` },
+      ],
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: faqs.map((f) => ({
+        "@type": "Question",
+        name: f.q,
+        acceptedAnswer: { "@type": "Answer", text: f.a },
+      })),
+    },
+  ],
+};
+
 export default function RestaurantPlanPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      <Nav />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      {/* This page sells one plan, so the nav CTA goes to that plan's signup
+          rather than the homepage table, which leads with Appointments tiers. */}
+      <MarketingNav
+        extraLink={{ href: "#how", label: "How it works" }}
+        ctaHref={SIGNUP_RESTAURANT}
+        ctaLabel="Start Restaurant plan"
+        ctaShortLabel="Get started"
+      />
       <Hero />
       <BookingChannelsSection />
       <ProblemSection />
@@ -251,33 +323,34 @@ export default function RestaurantPlanPage() {
       <FeaturesSection />
       <FaqSection />
       <ClosingCta />
-      <Footer />
+      <MarketingFooter />
     </div>
   );
 }
 
-function Nav() {
+/** Matches the BreadcrumbList in the JSON-LD above, and the other vertical pages. */
+function Breadcrumb() {
   return (
-    <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
-        </Link>
-        <div className="flex items-center gap-2 sm:gap-4">
-          <a
-            href="#contact"
-            className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex"
-          >
-            Talk to us
-          </a>
-          <Link
-            href={SIGNUP_RESTAURANT}
-            className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-          >
-            Start Restaurant plan
+    <nav aria-label="Breadcrumb" className="text-xs font-medium text-slate-500">
+      <ol className="flex items-center gap-1.5">
+        <li>
+          <Link href="/" className="inline-flex min-h-11 items-center rounded hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+            Home
           </Link>
-        </div>
-      </div>
+        </li>
+        <li aria-hidden className="text-slate-300">
+          /
+        </li>
+        <li>
+          <Link href="/solutions" className="inline-flex min-h-11 items-center rounded hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+            Solutions
+          </Link>
+        </li>
+        <li aria-hidden className="text-slate-300">
+          /
+        </li>
+        <li className="text-slate-700">Restaurants</li>
+      </ol>
     </nav>
   );
 }
@@ -304,8 +377,9 @@ function Hero() {
 
       <div className="relative mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-5 lg:gap-10 lg:py-28">
         <div className="lg:col-span-3 lg:pt-6">
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
+          <Breadcrumb />
+          <span className="mt-5 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
+            <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-br from-brand-700 to-brand-900" />
             Built for hospitality teams
           </span>
           <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
@@ -399,7 +473,7 @@ function HeroRestaurantVisual() {
               <span className="inline-block h-2 w-2 rounded-full bg-brand-500" />
               Table reservation confirmed
             </div>
-            <h3 className="mt-2 text-lg font-bold text-slate-900">Saturday dinner · Bistro Quay</h3>
+            <p className="mt-2 text-lg font-bold text-slate-900">Saturday dinner · Bistro Quay</p>
             <p className="mt-0.5 text-xs text-slate-500">Emma O&apos;Neill · Anniversary</p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -624,7 +698,7 @@ function RestaurantDashboardMock() {
       <div className="grid gap-0 lg:grid-cols-[210px_1fr_268px]">
         <aside className="hidden border-r border-slate-100 bg-slate-50/60 p-4 lg:block">
           <div className="flex items-center gap-2 px-2 pb-4">
-            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800" />
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-brand-700 to-brand-900" />
             <span className="text-sm font-bold text-slate-900">Bistro Quay</span>
           </div>
           <nav className="space-y-1 text-sm">
@@ -691,13 +765,13 @@ function RestaurantDashboardMock() {
         </div>
 
         <aside className="border-t border-slate-100 bg-slate-50/50 p-5 lg:border-l lg:border-t-0 lg:p-6">
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tonight</h4>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tonight</p>
           <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-1">
             <StatCard label="Reservations" value="58" trend="+17 vs last Sat" />
             <StatCard label="No-show risk" value="Low" trend="deposit + SMS" />
             <StatCard label="Prep spend" value="£3.9k" trend="card + cash est." />
           </div>
-          <h4 className="mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500">Outbound comms</h4>
+          <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500">Outbound comms</p>
           <div className="mt-3 space-y-2">
             <MessageRow type="SMS" text="Confirm: Byrne party, 20:00" />
             <MessageRow type="Email" text="Menu preview · O'Neill" />
@@ -912,7 +986,7 @@ function HowItWorksSection() {
               {i < howItWorks.length - 1 ? (
                 <div className="absolute left-14 top-7 hidden h-0.5 w-full bg-gradient-to-r from-brand-200 to-transparent md:block" />
               ) : null}
-              <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 text-xl font-extrabold text-white shadow-lg shadow-brand-600/25">
+              <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-700 to-brand-900 text-xl font-extrabold text-white shadow-lg shadow-brand-600/25">
                 {s.step}
               </div>
               <h3 className="mt-5 text-xl font-bold text-slate-900">{s.title}</h3>
@@ -1175,7 +1249,7 @@ function FeaturesSection() {
 
 function FaqSection() {
   return (
-    <section className="bg-slate-50 py-20 sm:py-28">
+    <section id="faq" className="scroll-mt-16 bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Still curious?</span>
@@ -1204,7 +1278,7 @@ function ClosingCta() {
   return (
     <section id="contact" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-bl from-slate-900 via-brand-900 to-brand-700 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
           <div
             className="absolute inset-0 opacity-30"
             style={{
@@ -1294,41 +1368,6 @@ function ClosingCta() {
         </div>
       </div>
     </section>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="border-t border-slate-100 bg-slate-50 py-10">
-      <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-        <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
-          <Link href="/" className="transition-colors hover:text-slate-900">
-            Home
-          </Link>
-          <Link href="/appointments-plan" className="transition-colors hover:text-slate-900">
-            Appointments plan
-          </Link>
-          <Link href="/#pricing" className="transition-colors hover:text-slate-900">
-            Sign up
-          </Link>
-          <Link href="/login" className="transition-colors hover:text-slate-900">
-            Login
-          </Link>
-          <a href="mailto:hello@resneo.com" className="transition-colors hover:text-slate-900">
-            Contact
-          </a>
-          <Link href="/terms" className="transition-colors hover:text-slate-900">
-            Website Terms of Use
-          </Link>
-          <Link href="/privacy" className="transition-colors hover:text-slate-900">
-            Privacy Policy
-          </Link>
-        </div>
-      </div>
-    </footer>
   );
 }
 

@@ -58,6 +58,9 @@ const eslintConfig = defineConfig([
     ".next/**",
     // Parallel preview dev server build output (NEXT_DIST_DIR=.next-preview) — generated, never lint it.
     ".next-preview/**",
+    // Same, for the isolated preview config (NEXT_DIST_DIR=.next-preview-iso).
+    // Both dirs are gitignored; without this, running that server makes lint:ci fail.
+    ".next-preview-iso/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

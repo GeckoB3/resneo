@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SocialLinks } from "@/components/marketing/SocialLinks";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
+import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import ContactForm from "@/components/ContactForm";
 import { SMS_INCLUDED_LIGHT } from "@/lib/billing/sms-allowance";
 import { SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
@@ -248,7 +249,7 @@ const faqs = [
 export default function AppointmentsPlanPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      <Nav />
+      <MarketingNav extraLink={{ href: "#how", label: "How it works" }} />
       <Hero />
       <BookingChannelsSection />
       <ProblemSection />
@@ -262,34 +263,8 @@ export default function AppointmentsPlanPage() {
       <FeaturesSection />
       <FaqSection />
       <ClosingCta />
-      <Footer />
+      <MarketingFooter />
     </div>
-  );
-}
-
-function Nav() {
-  return (
-    <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
-        </Link>
-        <div className="flex items-center gap-2 sm:gap-4">
-          <a
-            href="#contact"
-            className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex"
-          >
-            Talk to us
-          </a>
-          <Link
-            href="/#pricing"
-            className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-          >
-            Get Started Now
-          </Link>
-        </div>
-      </div>
-    </nav>
   );
 }
 
@@ -420,9 +395,11 @@ function HeroVisual() {
               <span className="inline-block h-2 w-2 rounded-full bg-brand-500" />
               Booking confirmed
             </div>
-            <h3 className="mt-2 text-lg font-bold text-slate-900">
+            {/* Decorative mockup label, not a document heading: as an h3 it sat
+                directly under the h1 and skipped a level. */}
+            <p className="mt-2 text-lg font-bold text-slate-900">
               Men&apos;s cut &amp; beard trim
-            </h3>
+            </p>
             <p className="mt-0.5 text-xs text-slate-500">with Aaron at Grove Street Barber</p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -1372,39 +1349,6 @@ function ClosingCta() {
         </div>
       </div>
     </section>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="border-t border-slate-100 bg-slate-50 py-10">
-      <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-        <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
-          <Link href="/" className="transition-colors hover:text-slate-900">
-            Home
-          </Link>
-          <Link href="/#pricing" className="transition-colors hover:text-slate-900">
-            Sign up
-          </Link>
-          <Link href="/login" className="transition-colors hover:text-slate-900">
-            Login
-          </Link>
-          <a href="mailto:hello@resneo.com" className="transition-colors hover:text-slate-900">
-            Contact
-          </a>
-          <Link href="/terms" className="transition-colors hover:text-slate-900">
-            Website Terms of Use
-          </Link>
-          <Link href="/privacy" className="transition-colors hover:text-slate-900">
-            Privacy Policy
-          </Link>
-          <SocialLinks />
-        </div>
-      </div>
-    </footer>
   );
 }
 

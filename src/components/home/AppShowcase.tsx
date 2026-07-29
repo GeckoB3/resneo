@@ -125,7 +125,7 @@ export function AppShowcase() {
               aria-hidden
             />
 
-            {/* Back phone — the booking command centre */}
+            {/* Back phone: the booking command centre */}
             <div className="relative hidden sm:block" style={{ marginRight: -52, marginTop: 52 }}>
               <PhoneFrame
                 src="/app/03-booking-detail.png"
@@ -135,7 +135,7 @@ export function AppShowcase() {
               />
             </div>
 
-            {/* Front phone — the daily calendar */}
+            {/* Front phone: the daily calendar */}
             <div className="relative z-10" style={{ transform: 'rotate(3deg)' }}>
               <PhoneFrame
                 src="/app/01-calendar.png"

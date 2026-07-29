@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SocialLinks } from "@/components/marketing/SocialLinks";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
+import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import {
   ArrowRightIcon,
   LinkIcon,
@@ -9,6 +10,7 @@ import {
   TickIcon,
 } from "@/components/marketing/marketing-icons";
 import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
+import { PUBLIC_SITE_ORIGIN as SITE_ORIGIN } from "@/lib/public-base-url";
 
 const PAGE_PATH = "/solutions/salon-chair-rental-hmrc-employment-status";
 const SIGNUP = "/#pricing";
@@ -245,13 +247,13 @@ const jsonLd = {
     {
       "@type": "BreadcrumbList",
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Home", item: "/" },
-        { "@type": "ListItem", position: 2, name: "Solutions", item: "/solutions" },
+        { "@type": "ListItem", position: 1, name: "Home", item: `${SITE_ORIGIN}/` },
+        { "@type": "ListItem", position: 2, name: "Solutions", item: `${SITE_ORIGIN}/solutions` },
         {
           "@type": "ListItem",
           position: 3,
           name: "Salon chair rental and HMRC employment status",
-          item: PAGE_PATH,
+          item: `${SITE_ORIGIN}${PAGE_PATH}`,
         },
       ],
     },
@@ -277,7 +279,7 @@ export default function ChairRentalEmploymentStatusPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <Nav />
+      <MarketingNav sectionHref="/solutions" />
       <Hero />
       <QuickAnswer />
       <ArticleBody />
@@ -286,7 +288,7 @@ export default function ChairRentalEmploymentStatusPage() {
       <SourcesSection />
       <Disclaimer />
       <ClosingCta />
-      <Footer />
+      <MarketingFooter />
     </div>
   );
 }
@@ -304,40 +306,6 @@ function SourceLink({ href, children }: { href: string; children: React.ReactNod
     >
       {children}
     </a>
-  );
-}
-
-/* ── Nav ──────────────────────────────────────────────────────────────── */
-
-function Nav() {
-  return (
-    <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
-        </Link>
-        <div className="flex items-center gap-2 sm:gap-4">
-          <Link
-            href="/solutions"
-            className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex"
-          >
-            Solutions
-          </Link>
-          <Link
-            href="/salon-booking-software"
-            className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex"
-          >
-            Salons &amp; barbers
-          </Link>
-          <a
-            href={SIGNUP}
-            className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-          >
-            Start free trial
-          </a>
-        </div>
-      </div>
-    </nav>
   );
 }
 
@@ -359,13 +327,13 @@ function Hero() {
         <nav aria-label="Breadcrumb" className="text-sm text-slate-500">
           <ol className="flex flex-wrap items-center gap-x-2">
             <li>
-              <Link href="/" className="transition-colors hover:text-slate-900">
+              <Link href="/" className="inline-flex min-h-11 items-center rounded transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
                 Home
               </Link>
             </li>
             <li aria-hidden="true">/</li>
             <li>
-              <Link href="/solutions" className="transition-colors hover:text-slate-900">
+              <Link href="/solutions" className="inline-flex min-h-11 items-center rounded transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
                 Solutions
               </Link>
             </li>
@@ -751,43 +719,3 @@ function ClosingCta() {
   );
 }
 
-/* ── Footer ───────────────────────────────────────────────────────────── */
-
-function Footer() {
-  return (
-    <footer className="border-t border-slate-100 bg-slate-50 py-10">
-      <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-        <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
-          <Link href="/" className="transition-colors hover:text-slate-900">
-            Home
-          </Link>
-          <Link href="/solutions" className="transition-colors hover:text-slate-900">
-            Solutions
-          </Link>
-          <Link href="/salon-booking-software" className="transition-colors hover:text-slate-900">
-            Salons &amp; barbers
-          </Link>
-          <Link href="/about" className="transition-colors hover:text-slate-900">
-            About
-          </Link>
-          <a href={SIGNUP} className="transition-colors hover:text-slate-900">
-            Sign up
-          </a>
-          <Link href="/login" className="transition-colors hover:text-slate-900">
-            Login
-          </Link>
-          <Link href="/terms" className="transition-colors hover:text-slate-900">
-            Website Terms of Use
-          </Link>
-          <Link href="/privacy" className="transition-colors hover:text-slate-900">
-            Privacy Policy
-          </Link>
-          <SocialLinks />
-        </div>
-      </div>
-    </footer>
-  );
-}

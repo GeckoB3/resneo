@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { SocialLinks } from "@/components/marketing/SocialLinks";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
+import { MarketingFooter } from "@/components/marketing/MarketingFooter";
 import ContactForm from "@/components/ContactForm";
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from "@/lib/booking-funds-copy";
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from "@/lib/payment-provider-fees-notice";
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from "@/lib/subscription-cancellation-copy";
 import { APPOINTMENTS_LIGHT_PRICE } from "@/lib/pricing-constants";
 import { LINKED_ACCOUNTS_SEPARATE_BOOKS_NOTE } from "@/lib/linked-accounts-marketing-copy";
+import { PUBLIC_SITE_ORIGIN as SITE_ORIGIN } from "@/lib/public-base-url";
 import {
   ArrowPathIcon,
   ArrowRightIcon,
@@ -294,9 +296,9 @@ const jsonLd = {
     {
       "@type": "BreadcrumbList",
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Home", item: "/" },
-        { "@type": "ListItem", position: 2, name: "Solutions", item: "/solutions" },
-        { "@type": "ListItem", position: 3, name: "Studios & classes", item: PAGE_PATH },
+        { "@type": "ListItem", position: 1, name: "Home", item: `${SITE_ORIGIN}/` },
+        { "@type": "ListItem", position: 2, name: "Solutions", item: `${SITE_ORIGIN}/solutions` },
+        { "@type": "ListItem", position: 3, name: "Studios & classes", item: `${SITE_ORIGIN}${PAGE_PATH}` },
       ],
     },
     {
@@ -318,7 +320,9 @@ export default function ClassBookingSoftwarePage() {
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <Nav />
+      <MarketingNav
+        extraLink={{ href: "#timetable", label: "Timetable" }}
+      />
       <Hero />
       <TrustStrip />
       <TimetableSection />
@@ -331,42 +335,8 @@ export default function ClassBookingSoftwarePage() {
       <CompareSection />
       <FaqSection />
       <ClosingCta />
-      <Footer />
+      <MarketingFooter />
     </div>
-  );
-}
-
-/* ── Nav ──────────────────────────────────────────────────────────────── */
-
-function Nav() {
-  return (
-    <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex-shrink-0">
-          <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto" />
-        </Link>
-        <div className="flex items-center gap-2 sm:gap-4">
-          <Link
-            href="/solutions"
-            className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex"
-          >
-            All solutions
-          </Link>
-          <a
-            href="#contact"
-            className="hidden rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 sm:inline-flex"
-          >
-            Talk to us
-          </a>
-          <a
-            href={SIGNUP}
-            className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-          >
-            Start free trial
-          </a>
-        </div>
-      </div>
-    </nav>
   );
 }
 
@@ -375,7 +345,7 @@ function Nav() {
 function Hero() {
   return (
     <section className="relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-accent-50/40" />
+      <div className="absolute inset-0 bg-gradient-to-tr from-brand-50 via-white to-accent-50/60" />
       <div
         className="absolute inset-0 opacity-60"
         style={{
@@ -396,14 +366,14 @@ function Hero() {
         <div className="lg:col-span-3 lg:pt-6">
           <Breadcrumb />
           <span className="mt-5 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            <span className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br from-brand-600 to-accent-700`} />
             Built for studios &amp; classes
           </span>
           <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
             Class booking software for studios, gyms &amp; clubs
           </h1>
           <p className="mt-5 text-xl font-semibold sm:text-2xl">
-            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-accent-dark bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-accent-700 bg-clip-text text-transparent">
               Full classes. Recurring revenue. Less admin.
             </span>
           </p>
@@ -454,7 +424,7 @@ function Breadcrumb() {
     <nav aria-label="Breadcrumb" className="text-xs font-medium text-slate-500">
       <ol className="flex items-center gap-1.5">
         <li>
-          <Link href="/" className="hover:text-slate-800">
+          <Link href="/" className="inline-flex min-h-11 items-center rounded hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
             Home
           </Link>
         </li>
@@ -462,7 +432,7 @@ function Breadcrumb() {
           /
         </li>
         <li>
-          <Link href="/solutions" className="hover:text-slate-800">
+          <Link href="/solutions" className="inline-flex min-h-11 items-center rounded hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
             Solutions
           </Link>
         </li>
@@ -496,7 +466,7 @@ function HeroPhoneVisual() {
               <span className="inline-block h-2 w-2 rounded-full bg-accent" />
               Class confirmed
             </div>
-            <h3 className="mt-2 text-lg font-bold text-slate-900">Vinyasa Flow · Studio One</h3>
+            <p className="mt-2 text-lg font-bold text-slate-900">Vinyasa Flow · Studio One</p>
             <p className="mt-0.5 text-xs text-slate-500">Amara Hughes · Thu 18:00</p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -609,11 +579,11 @@ const recordTone: Record<string, string> = {
 function TimetableSection() {
   return (
     <section id="timetable" className="relative scroll-mt-16 overflow-hidden bg-white py-20 sm:py-28">
-      <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-accent-50/40" />
+      <div className="absolute inset-0 bg-gradient-to-b from-slate-50 via-white to-accent-50/40" />
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            <span className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br from-brand-600 to-accent-700`} />
             Timetable, memberships &amp; packs
           </span>
           <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
@@ -626,15 +596,15 @@ function TimetableSection() {
           </p>
         </div>
 
-        <div className="mt-14 grid items-start gap-10 lg:grid-cols-2 lg:gap-14">
+        <div className="mt-14 grid items-start gap-10 lg:grid-cols-[1fr_1.35fr] lg:gap-12">
           {/* Mock: live timetable */}
           <div className="relative">
             <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-100/50 via-white/0 to-accent-200/50 blur-3xl" />
             <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-brand-900/5">
               <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+                <span className="h-2.5 w-2.5 rounded-full bg-accent-200" />
+                <span className="h-2.5 w-2.5 rounded-full bg-accent-200" />
+                <span className="h-2.5 w-2.5 rounded-full bg-accent-200" />
                 <span className="ml-3 inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400">
                   <LockIcon /> resneo.com/timetable
                 </span>
@@ -770,7 +740,7 @@ function BookingFlowSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">The booking flow</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            A booking journey your clients will actually finish.
+            Timetable to booked mat, without a message thread.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             From &ldquo;I fancy a class&rdquo; to a confirmed spot: class, time, payment by pass or membership, and a
@@ -825,10 +795,10 @@ function BookingFlowSection() {
               {i < bookingSteps.length - 1 ? (
                 <div className="absolute left-10 top-5 hidden h-0.5 w-full bg-gradient-to-r from-brand-200 to-transparent lg:block" />
               ) : null}
-              <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 text-sm font-extrabold text-white shadow-md shadow-brand-600/25">
+              <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-accent-700 text-sm font-extrabold text-white shadow-md shadow-brand-600/25">
                 {s.step}
               </div>
-              <h4 className="mt-4 text-base font-bold text-slate-900">{s.title}</h4>
+              <h3 className="mt-4 text-base font-bold text-slate-900">{s.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{s.description}</p>
             </div>
           ))}
@@ -969,7 +939,7 @@ function RostersSection() {
 
           <div className="rounded-3xl border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-7">
             <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-600 to-brand-800 text-white">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-600 to-accent-700 text-white">
                 <UserCardIcon />
               </span>
               <div>
@@ -1042,7 +1012,7 @@ function LinkedAccountsSection() {
                 <LinkIcon className="h-3.5 w-3.5" /> Freelance instructors &amp; rent-a-space
               </span>
               <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-                Share a studio. Keep separate books.
+                Freelance instructors, one timetable, separate takings.
               </h2>
               <p className="mt-4 text-base leading-relaxed text-slate-600">
                 Freelance instructors teaching across your studios, or renting your space for their own classes? Each
@@ -1089,7 +1059,7 @@ function BusinessTypesSection() {
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Who it&rsquo;s for</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Made for every kind of class.
+            Yoga, spin, pottery, martial arts: all just classes.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             A solo instructor or a multi-room studio, a weekly drop-in or a multi-week course. If you teach groups
@@ -1116,12 +1086,12 @@ function BusinessTypesSection() {
 
 function CompareSection() {
   return (
-    <section className="bg-white py-20 sm:py-28">
+    <section id="compare" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">ResNeo vs the rest</span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Keep your members. Keep your margin.
+            Marketplaces rent you members. ResNeo hands you the list.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
             Marketplace class apps list you next to every other studio and take a cut. Generic schedulers cannot sell
@@ -1160,11 +1130,11 @@ function CompareSection() {
 
 function FaqSection() {
   return (
-    <section className="bg-slate-50 py-20 sm:py-28">
+    <section id="faq" className="scroll-mt-16 bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Good to know</span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Questions, answered.</h2>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Studio owners ask us these.</h2>
         </div>
         <div className="mt-12 space-y-3">
           {faqs.map((f) => (
@@ -1190,7 +1160,7 @@ function ClosingCta() {
   return (
     <section id="contact" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-700 to-accent-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
           <div
             className="absolute inset-0 opacity-30"
             style={{
@@ -1201,7 +1171,7 @@ function ClosingCta() {
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
             <div className="min-w-0">
               <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
-                Fill your timetable. Start free today.
+                Put your timetable online.
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
                 Take class bookings 24/7, sell memberships and packs that renew themselves, and run waitlists and
@@ -1238,25 +1208,3 @@ function ClosingCta() {
   );
 }
 
-/* ── Footer ───────────────────────────────────────────────────────────── */
-
-function Footer() {
-  return (
-    <footer className="border-t border-slate-100 bg-slate-50 py-10">
-      <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
-        <p className="max-w-xl text-center leading-snug sm:text-left">
-          &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
-          <Link href="/" className="transition-colors hover:text-slate-900">Home</Link>
-          <Link href="/solutions" className="transition-colors hover:text-slate-900">Solutions</Link>
-          <Link href="/facility-booking-software" className="transition-colors hover:text-slate-900">Courts &amp; venues</Link>
-          <a href={SIGNUP} className="transition-colors hover:text-slate-900">Sign up</a>
-          <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
-          <Link href="/privacy" className="transition-colors hover:text-slate-900">Privacy Policy</Link>
-          <SocialLinks />
-        </div>
-      </div>
-    </footer>
-  );
-}

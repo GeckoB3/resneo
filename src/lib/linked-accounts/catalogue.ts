@@ -58,7 +58,13 @@ export async function loadVenueCatalogueData(
 ): Promise<VenueCatalogueData> {
   let practitioners: Awaited<ReturnType<typeof fetchAppointmentCatalog>>['practitioners'] = [];
   try {
-    ({ practitioners } = await fetchAppointmentCatalog(admin, venueId));
+    // Calendars with no services yet MUST be included: the combined-page builder
+    // lists them so the host can assign an offering to a calendar in a venue that
+    // has no services (e.g. a freshly onboarded member), which duplicates the
+    // service into that venue. Guest booking keeps its own (filtered) catalog.
+    ({ practitioners } = await fetchAppointmentCatalog(admin, venueId, {
+      includeCalendarsWithoutServices: true,
+    }));
   } catch {
     practitioners = [];
   }

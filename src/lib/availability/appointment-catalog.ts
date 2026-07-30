@@ -100,6 +100,19 @@ function resolveCatalogPaymentRequirement(params: {
   return 'none';
 }
 
+export interface AppointmentCatalogOptions {
+  practitionerSlug?: string;
+  includeHiddenAddons?: boolean;
+  /**
+   * Include active calendars that offer no services (empty `services` array).
+   * Guest booking surfaces must keep these hidden (nothing is bookable), but the
+   * combined-page builder needs them listed so the host can assign an offering to
+   * a calendar in a venue that has no services yet (the assignment duplicates the
+   * service into that venue).
+   */
+  includeCalendarsWithoutServices?: boolean;
+}
+
 export function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
   return {
     id: v.id,
@@ -147,7 +160,7 @@ async function fetchUnifiedAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
   cardHoldDepositsEnabled: boolean,
-  options?: { practitionerSlug?: string; includeHiddenAddons?: boolean },
+  options?: AppointmentCatalogOptions,
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const calQuery = supabase
     .from('unified_calendars')
@@ -228,7 +241,7 @@ async function fetchUnifiedAppointmentCatalog(
   for (const practitioner of practitioners) {
     if (!practitioner.is_active) continue;
     const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
-    if (offeredServices.length === 0) continue;
+    if (offeredServices.length === 0 && !options?.includeCalendarsWithoutServices) continue;
 
     result.push({
       id: practitioner.id,
@@ -266,7 +279,7 @@ async function fetchUnifiedAppointmentCatalog(
 export async function fetchAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
-  options?: { practitionerSlug?: string; includeHiddenAddons?: boolean },
+  options?: AppointmentCatalogOptions,
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const { data: venueRow } = await supabase
     .from('venues')
@@ -337,7 +350,7 @@ export async function fetchAppointmentCatalog(
   for (const practitioner of practitioners) {
     if (!practitioner.is_active) continue;
     const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
-    if (offeredServices.length === 0) continue;
+    if (offeredServices.length === 0 && !options?.includeCalendarsWithoutServices) continue;
 
     result.push({
       id: practitioner.id,

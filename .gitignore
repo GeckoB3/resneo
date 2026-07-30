@@ -68,3 +68,6 @@ eslint2.txt
 
 # local log exports (may contain PII — never commit)
 Docs/supabase-*-logs-*.csv*
+
+# generated marketing assets (video renders, thumbnails), not source
+/marketing/

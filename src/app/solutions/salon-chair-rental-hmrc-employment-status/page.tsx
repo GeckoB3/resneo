@@ -51,6 +51,13 @@ const SOURCES = {
     supports:
       "The February 2021 ruling that Uber drivers were workers rather than self-employed contractors, decided on the reality of the working relationship rather than the contract wording.",
   },
+  hairAndBeautyGuidance: {
+    href: "https://www.gov.uk/guidance/check-employment-status-if-you-work-in-hair-and-beauty",
+    name: "Check employment status if you work in hair and beauty",
+    publisher: "HMRC",
+    supports:
+      "HMRC's sector-specific guidance, published in May 2025 with input from the hair and beauty trade bodies, setting out in plain terms which working arrangements point to self-employment and which point to employment.",
+  },
   penaltiesFactsheet: {
     href: "https://www.gov.uk/government/publications/compliance-checks-penalties-for-inaccuracies-in-returns-or-documents-ccfs7a",
     name: "Compliance checks: penalties for inaccuracies in returns or documents (CC/FS7A)",
@@ -415,6 +422,16 @@ function ArticleBody() {
           rather than tax, but it hardened a principle that runs through both: the reality of the
           working relationship outweighs the label on the contract. Employment status across the gig
           economy, hairdressing included, has drawn closer attention since.
+        </p>
+        <p className="mt-4 text-base leading-relaxed text-slate-600">
+          HMRC has since published guidance specifically for this industry. Its{" "}
+          <SourceLink href={SOURCES.hairAndBeautyGuidance.href}>
+            hair and beauty tax guidance
+          </SourceLink>
+          , developed with the British Beauty Council and the National Hair &amp; Beauty Federation,
+          sets out the same test in plain terms: you are probably self-employed if you decide your
+          own hours, find your own clients, set your own prices, and take your own payments, and
+          probably employed if the salon does those things for you.
         </p>
 
         {/* What HMRC actually checks */}

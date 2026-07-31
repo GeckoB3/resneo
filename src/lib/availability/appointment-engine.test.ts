@@ -6,6 +6,7 @@ import {
   computeAppointmentAvailability,
   getOfferedAppointmentServicesForPractitioner,
   validateAppointmentCustomInterval,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
   type AppointmentEngineInput,
   type AppointmentBooking,
 } from './appointment-engine';
@@ -401,6 +402,55 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
       existingBookings: existing,
     };
   }
+
+  /**
+   * Reported from the app: dragging a booking shorter than 15 minutes was
+   * refused with "End time must be at least 15 minutes after start", even
+   * though `appointment_services.duration_minutes` has always accepted 5. The
+   * two floors have to agree or a short service is configurable but unbookable.
+   */
+  describe('minimum core duration', () => {
+    it('accepts a booking at the shortest configurable service duration', () => {
+      const input = processingInput([]);
+      const res = validateAppointmentCustomInterval(input, 'p1', 's15', '10:00', '10:05', undefined, {
+        processingTimeBlocks: [],
+      });
+      expect(res.ok).toBe(true);
+    });
+
+    it('accepts the durations between the old floor and the new one', () => {
+      for (const end of ['10:05', '10:10', '10:14', '10:15']) {
+        const res = validateAppointmentCustomInterval(input0(), 'p1', 's15', '10:00', end, undefined, {
+          processingTimeBlocks: [],
+        });
+        expect(res.ok, `expected 10:00-${end} to be allowed`).toBe(true);
+      }
+    });
+
+    it('still rejects a booking below the floor, naming the real minimum', () => {
+      const res = validateAppointmentCustomInterval(input0(), 'p1', 's15', '10:00', '10:04', undefined, {
+        processingTimeBlocks: [],
+      });
+      expect(res.ok).toBe(false);
+      expect(res.ok === false && res.reason).toBe(
+        `End time must be at least ${MIN_APPOINTMENT_CORE_DURATION_MINUTES} minutes after start`,
+      );
+    });
+
+    it('still rejects a zero-length or inverted range', () => {
+      for (const end of ['10:00', '09:50']) {
+        expect(
+          validateAppointmentCustomInterval(input0(), 'p1', 's15', '10:00', end, undefined, {
+            processingTimeBlocks: [],
+          }).ok,
+        ).toBe(false);
+      }
+    });
+
+    function input0() {
+      return processingInput([]);
+    }
+  });
 
   it('allows a short booking fully inside another appointment’s processing gap', () => {
     const existing: AppointmentBooking[] = [

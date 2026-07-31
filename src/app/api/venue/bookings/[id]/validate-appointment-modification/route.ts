@@ -8,6 +8,7 @@ import {
   linkedGrantAllowsMutation,
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
+import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appointment-engine';
 
 const bodySchema = z.object({
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -15,7 +16,7 @@ const bodySchema = z.object({
   practitioner_id: z.string().uuid(),
   appointment_service_id: z.string().uuid().optional().nullable(),
   service_item_id: z.string().uuid().optional().nullable(),
-  duration_minutes: z.number().int().min(15).max(14 * 60).optional().nullable(),
+  duration_minutes: z.number().int().min(MIN_APPOINTMENT_CORE_DURATION_MINUTES).max(14 * 60).optional().nullable(),
   booking_end_time: z.string().optional().nullable(),
   service_variant_id: z.string().uuid().optional().nullable(),
   allow_manual_overlap: z.boolean().optional(),

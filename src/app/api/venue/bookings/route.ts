@@ -23,6 +23,7 @@ import {
   fetchAppointmentInput,
   computeAppointmentAvailability,
   validateAppointmentCustomInterval,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -112,7 +113,7 @@ const phoneBookingSchema = z.object({
   source: z.enum(['phone', 'walk-in']).optional(),
   area_id: z.string().uuid().optional(),
   /** One-off duration override for staff-created table or appointment bookings. */
-  duration_minutes: z.number().int().min(15).max(14 * 60).optional(),
+  duration_minutes: z.number().int().min(MIN_APPOINTMENT_CORE_DURATION_MINUTES).max(14 * 60).optional(),
   /** Wall-clock ms from staff opening the booking form to submit (P0.6 baseline). */
   staff_booking_duration_ms: z.number().int().min(500).max(30 * 60 * 1000).optional(),
   /** Client already existed at this venue before this booking (P0.6 returning-client time-to-book). */
@@ -172,7 +173,13 @@ export async function POST(request: NextRequest) {
       !parsed.data.experience_event_id &&
       !parsed.data.class_instance_id &&
       !parsed.data.resource_id;
-    if (parsed.data.duration_minutes != null && isTableCreateRequest && parsed.data.duration_minutes > 300) {
+    // Tables keep the 15-300 sitting range. The schema floor above is the
+    // APPOINTMENT floor (5), which a sitting has no reason to follow.
+    if (
+      parsed.data.duration_minutes != null &&
+      isTableCreateRequest &&
+      (parsed.data.duration_minutes < 15 || parsed.data.duration_minutes > 300)
+    ) {
       return NextResponse.json(
         { error: 'duration_minutes must be an integer between 15 and 300' },
         { status: 400 },

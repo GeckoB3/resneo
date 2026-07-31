@@ -725,6 +725,17 @@ export function validateExactAppointmentStart(
 }
 
 const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
+/**
+ * Shortest bookable appointment, in minutes.
+ *
+ * Matches the floor `appointment_services.duration_minutes` has always allowed
+ * (`z.number().int().min(5)`). It was 15 here, which made a service between 5
+ * and 14 minutes configurable but unbookable and unresizable — a fringe trim or
+ * a blood-pressure check could be set up and then refused with "End time must be
+ * at least 15 minutes after start". The two limits have to agree; 5 is the one
+ * services already promise, and it matches the calendar's 5-minute drag snap.
+ */
+export const MIN_APPOINTMENT_CORE_DURATION_MINUTES = 5;
 
 /**
  * Staff reschedule / calendar resize: validate [start, endCore) plus service buffer + processing
@@ -807,8 +818,11 @@ export function validateAppointmentCustomInterval(
 
   const t = timeToMinutes(startTimeHHmm.slice(0, 5));
   const coreDuration = minutesBetweenStartAndEnd(startTimeHHmm.slice(0, 5), endCoreHHmm.slice(0, 5));
-  if (!(coreDuration >= 15)) {
-    return { ok: false, reason: 'End time must be at least 15 minutes after start' };
+  if (!(coreDuration >= MIN_APPOINTMENT_CORE_DURATION_MINUTES)) {
+    return {
+      ok: false,
+      reason: `End time must be at least ${MIN_APPOINTMENT_CORE_DURATION_MINUTES} minutes after start`,
+    };
   }
   if (coreDuration > MAX_APPOINTMENT_CORE_DURATION_MINUTES) {
     return { ok: false, reason: 'Appointment duration is too long' };
@@ -1110,7 +1124,11 @@ export async function fetchAppointmentInput(params: {
     if (rawBet != null && String(rawBet).trim() !== '') {
       const endMin = timeToMinutes(String(rawBet).slice(0, 5));
       const d = endMin - startMin;
-      if (d >= 15) coreDuration = d;
+      // Trust the row's OWN end time down to the same floor a booking may be
+      // created at. Pinned at 15 this silently replaced a shorter booking's real
+      // span with the service's default duration, so a 10-minute appointment
+      // would hold 30 minutes of the calendar against every conflict check.
+      if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
     }
     const variantBl = row.service_variant_id
       ? variantBlocksById.get(row.service_variant_id)
@@ -1426,7 +1444,11 @@ export async function fetchCalendarAppointmentInput(params: {
     if (rawBet != null && String(rawBet).trim() !== '') {
       const endMin = timeToMinutes(String(rawBet).slice(0, 5));
       const d = endMin - startMin;
-      if (d >= 15) coreDuration = d;
+      // Trust the row's OWN end time down to the same floor a booking may be
+      // created at. Pinned at 15 this silently replaced a shorter booking's real
+      // span with the service's default duration, so a 10-minute appointment
+      // would hold 30 minutes of the calendar against every conflict check.
+      if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
     }
     const variantBl = row.service_variant_id ? calVariantBlocksById.get(row.service_variant_id) : undefined;
     const processingBlocks = resolveEngineBookingProcessingBlocks({

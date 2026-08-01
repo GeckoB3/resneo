@@ -60,4 +60,25 @@ export const legacyCustomWorkingHoursSchema = z.record(z.string(), z.array(timeR
 
 export const serviceCustomScheduleStoredSchema = z.union([serviceCustomScheduleV2Schema, legacyCustomWorkingHoursSchema]);
 
-export const customWorkingHoursRequestSchema = serviceCustomScheduleStoredSchema.nullable();
+/**
+ * `custom_working_hours` as it arrives on a create/update REQUEST.
+ *
+ * OPTIONAL as well as nullable, and the two mean different things:
+ *   - omitted   → "I am not touching the schedule", leave the stored one alone
+ *   - `null`    → "clear it"
+ *
+ * It was nullable but NOT optional, which made it a REQUIRED key: every request
+ * that left the availability section alone failed the whole parse with
+ * `custom_working_hours: Invalid input`, taking the rest of the edit down with
+ * it. The dashboard never saw it because its payload builder always assigns the
+ * key for an admin — but a non-admin save there, and the mobile app (which
+ * deliberately omits the field unless the schedule changed, since sending null
+ * would wipe an existing one), both hit it on every save.
+ *
+ * The route already reads it as optional: `assertPatchCustomAvailabilityCoherent`
+ * branches on `!== undefined` to fall back to the current row, and the staff
+ * permission gate tests `hasOwnProperty`. Only the schema disagreed.
+ */
+export const customWorkingHoursRequestSchema = serviceCustomScheduleStoredSchema
+  .nullable()
+  .optional();

@@ -182,3 +182,98 @@ export function describeClosureBookingConflict(
   }
   return `${who} already has ${countPhrase} on ${bookingDate} (the earliest starts at ${bookingTime}). Move or cancel ${them} before marking the calendar unavailable.`;
 }
+
+export interface VenueClosureBookingConflicts {
+  /** Total active bookings the proposed closure would sit on top of. */
+  totalConflicts: number;
+  /** Date of the earliest conflicting booking (YYYY-MM-DD). */
+  earliestDate: string;
+  /** Start time of the earliest conflicting booking (HH:mm). */
+  earliestTime: string;
+}
+
+/**
+ * Active bookings anywhere in the venue that a proposed venue-wide closure covers.
+ *
+ * Deliberately NOT scoped to calendar columns, unlike {@link findClosureBookingConflicts}:
+ * a venue closure applies to the whole business, including bookings that sit on no
+ * calendar column at all (table reservations), which a column-scoped check would miss.
+ *
+ * Venue closures are *warned about*, not blocked. Creating one never cancels or notifies
+ * anything, so an owner closing for a family emergency would otherwise have clients turn
+ * up to a locked door. Blocking the closure instead would be worse: you could not mark
+ * Christmas Day closed while a single booking existed. So the caller confirms and proceeds.
+ *
+ * Throws if the bookings lookup fails, so callers fail loudly rather than silently
+ * reporting "no conflicts".
+ */
+export async function findVenueClosureBookingConflicts(
+  admin: SupabaseClient,
+  params: {
+    venueId: string;
+    startDate: string;
+    endDate: string;
+    startTime?: string | null;
+    endTime?: string | null;
+  },
+): Promise<VenueClosureBookingConflicts | null> {
+  const { venueId, startDate, endDate, startTime, endTime } = params;
+
+  const isPartial = Boolean(startTime && endTime);
+  const closure = isPartial
+    ? { startMinute: hhmmToMinutes(startTime!), endMinute: hhmmToMinutes(endTime!) }
+    : { startMinute: null, endMinute: null };
+
+  const { data: bookings, error } = await admin
+    .from('bookings')
+    .select('id, booking_date, booking_time, booking_end_time, estimated_end_time, status')
+    .eq('venue_id', venueId)
+    .gte('booking_date', startDate)
+    .lte('booking_date', endDate)
+    .in('status', [...BOOKING_ACTIVE_STATUSES]);
+
+  if (error) {
+    throw new Error(`Could not verify existing bookings: ${error.message}`);
+  }
+
+  const hits: Array<{ bookingDate: string; bookingTime: string }> = [];
+  for (const raw of bookings ?? []) {
+    const r = raw as Record<string, unknown>;
+    const bookingTime = typeof r.booking_time === 'string' ? r.booking_time : null;
+    if (!bookingTime) continue;
+    const overlaps = bookingConflictsWithClosure(
+      {
+        booking_time: bookingTime,
+        booking_end_time: r.booking_end_time as string | null | undefined,
+        estimated_end_time: r.estimated_end_time as string | null | undefined,
+      },
+      closure,
+    );
+    if (!overlaps) continue;
+    hits.push({ bookingDate: String(r.booking_date), bookingTime: bookingTime.slice(0, 5) });
+  }
+
+  if (hits.length === 0) return null;
+  hits.sort((a, b) =>
+    a.bookingDate === b.bookingDate
+      ? a.bookingTime.localeCompare(b.bookingTime)
+      : a.bookingDate.localeCompare(b.bookingDate),
+  );
+  const first = hits[0]!;
+  return {
+    totalConflicts: hits.length,
+    earliestDate: first.bookingDate,
+    earliestTime: first.bookingTime,
+  };
+}
+
+/** Warning text for the "close anyway?" confirmation. Nothing is cancelled automatically. */
+export function describeVenueClosureConflicts(c: VenueClosureBookingConflicts): string {
+  const countPhrase = c.totalConflicts === 1 ? '1 booking' : `${c.totalConflicts} bookings`;
+  const them = c.totalConflicts === 1 ? 'it' : 'them';
+  return (
+    `You already have ${countPhrase} in that period (the earliest is on ${c.earliestDate} at ${c.earliestTime}). ` +
+    `Closing does not cancel anything and nobody is told, so those clients will still turn up. ` +
+    `Move or cancel ${them} yourself afterwards.`
+  );
+}

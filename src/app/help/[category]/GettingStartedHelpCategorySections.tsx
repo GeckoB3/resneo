@@ -23,7 +23,7 @@ const SECTION_META: Record<(typeof SECTION_ORDER)[number], { title: string; subt
   },
   'gs-grow': {
     title: 'Communicate and grow',
-    subtitle: 'Messaging, reports, importing your data, and refer and earn.',
+    subtitle: 'Messaging, reports, importing your data, linking with other venues, and refer and earn.',
   },
 };
 

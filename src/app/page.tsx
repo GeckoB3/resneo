@@ -94,13 +94,13 @@ export default function Home() {
           <Link href="/" className="flex min-h-11 flex-shrink-0 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
             <img src="/Logo.png" alt="ResNeo" className="h-8 w-auto" />
           </Link>
-          {/* Four links so the bar still fits at 768px. FAQ and About stay
-              reachable from the mobile menu and the footer. */}
+          {/* Four links so the bar still fits at 768px. Link & break, FAQ and
+              About stay reachable from the mobile menu and the footer. */}
           <div className="hidden items-center gap-6 md:flex lg:gap-8">
             <a href="#features" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Features</a>
-            <a href="#link-break" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Link &amp; break</a>
             <Link href="/solutions" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Solutions</Link>
             <a href="#pricing" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Pricing</a>
+            <Link href="/help" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Help</Link>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <Link href="/login" className="hidden min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-slate-700 transition-colors hover:text-slate-900 sm:inline-flex">

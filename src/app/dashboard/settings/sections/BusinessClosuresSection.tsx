@@ -330,12 +330,48 @@ function UnifiedBlocksEditor({
       const payload = draftToPayload(draft);
       const method = editingId ? 'PATCH' : 'POST';
       const body = editingId ? { id: editingId, ...payload } : payload;
-      const res = await fetch('/api/venue/availability-blocks', {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await readResponseJson<{ error?: string; block?: Block }>(res);
+
+      // Closing over existing bookings is allowed, but confirmed first: nothing is
+      // cancelled and nobody is notified, so those clients would otherwise turn up.
+      const send = async (acknowledge: boolean) =>
+        fetch(
+          acknowledge
+            ? '/api/venue/availability-blocks?acknowledge_affected_bookings=true'
+            : '/api/venue/availability-blocks',
+          {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          },
+        );
+
+      let res = await send(false);
+      let data = await readResponseJson<{
+        error?: string;
+        block?: Block;
+        requires_confirmation?: boolean;
+        message?: string;
+      }>(res);
+
+      if (res.status === 409 && data.requires_confirmation) {
+        const proceed =
+          typeof window !== 'undefined' &&
+          window.confirm(
+            `${data.message ?? 'You already have bookings in that period.'}\n\nAdd this closure anyway?`,
+          );
+        if (!proceed) {
+          setSaving(false);
+          return;
+        }
+        res = await send(true);
+        data = await readResponseJson<{
+          error?: string;
+          block?: Block;
+          requires_confirmation?: boolean;
+          message?: string;
+        }>(res);
+      }
+
       if (!res.ok) {
         throw new Error(data.error || 'Failed to save');
       }
@@ -485,6 +521,18 @@ function UnifiedBlocksEditor({
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                   />
                 </div>
+                {/* Part-day closures are honoured for classes, events and resources
+                    (venue-wide-business-hours) but the appointment engine converts any
+                    'closed' block to a full-day closure (venue-exceptions-adapter), so
+                    appointment venues must be told these times will not narrow the day. */}
+                {!isRestaurant && (
+                  <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    For appointments, a <span className="font-medium">Closure</span> always removes
+                    the whole day, even with times set here. To close early or open late for one
+                    day, choose <span className="font-medium">Amended Hours</span> instead and enter
+                    the hours you are actually working.
+                  </p>
+                )}
               </>
             )}
 

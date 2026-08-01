@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   bookingConflictsWithClosure,
   describeClosureBookingConflict,
+  describeVenueClosureConflicts,
+  findVenueClosureBookingConflicts,
 } from '@/lib/calendar/closure-booking-conflicts';
 
 describe('bookingConflictsWithClosure', () => {
@@ -49,5 +51,94 @@ describe('describeClosureBookingConflict', () => {
     expect(msg).toContain('Andrew');
     expect(msg).toContain('3 bookings');
     expect(msg.toLowerCase()).toContain('unavailable');
+  });
+});
+
+/**
+ * Venue-wide closures: warned about, not blocked. Regression cover for closures
+ * being created silently over bookings that nobody is told about.
+ */
+function stubAdmin(rows: Array<Record<string, unknown>>, error: { message: string } | null = null) {
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    gte: () => chain,
+    lte: () => chain,
+    in: async () => ({ data: rows, error }),
+  };
+  return { from: () => chain } as never;
+}
+
+describe('findVenueClosureBookingConflicts', () => {
+  const rows = [
+    { id: 'b2', booking_date: '2026-12-24', booking_time: '15:30', booking_end_time: '16:00', status: 'Booked' },
+    { id: 'b1', booking_date: '2026-12-24', booking_time: '09:00', booking_end_time: '09:45', status: 'Confirmed' },
+  ];
+
+  it('reports every booking in the range and the earliest one', async () => {
+    const out = await findVenueClosureBookingConflicts(stubAdmin(rows), {
+      venueId: 'v1',
+      startDate: '2026-12-24',
+      endDate: '2026-12-24',
+    });
+    expect(out).not.toBeNull();
+    expect(out!.totalConflicts).toBe(2);
+    expect(out!.earliestTime).toBe('09:00');
+    expect(out!.earliestDate).toBe('2026-12-24');
+  });
+
+  it('counts only bookings overlapping a part-day window', async () => {
+    const out = await findVenueClosureBookingConflicts(stubAdmin(rows), {
+      venueId: 'v1',
+      startDate: '2026-12-24',
+      endDate: '2026-12-24',
+      startTime: '15:00',
+      endTime: '18:00',
+    });
+    expect(out!.totalConflicts).toBe(1);
+    expect(out!.earliestTime).toBe('15:30');
+  });
+
+  it('returns null when nothing is booked, so the closure saves without a prompt', async () => {
+    const out = await findVenueClosureBookingConflicts(stubAdmin([]), {
+      venueId: 'v1',
+      startDate: '2026-12-24',
+      endDate: '2026-12-24',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('throws rather than reporting a false all-clear when the lookup fails', async () => {
+    await expect(
+      findVenueClosureBookingConflicts(stubAdmin([], { message: 'boom' }), {
+        venueId: 'v1',
+        startDate: '2026-12-24',
+        endDate: '2026-12-24',
+      }),
+    ).rejects.toThrow(/Could not verify existing bookings/);
+  });
+});
+
+describe('describeVenueClosureConflicts', () => {
+  it('says nothing is cancelled and nobody is told', () => {
+    const msg = describeVenueClosureConflicts({
+      totalConflicts: 3,
+      earliestDate: '2026-12-24',
+      earliestTime: '09:00',
+    });
+    expect(msg).toContain('3 bookings');
+    expect(msg).toContain('2026-12-24');
+    expect(msg.toLowerCase()).toContain('does not cancel');
+    expect(msg.toLowerCase()).toContain('nobody is told');
+  });
+
+  it('uses the singular for one booking', () => {
+    const msg = describeVenueClosureConflicts({
+      totalConflicts: 1,
+      earliestDate: '2026-12-24',
+      earliestTime: '09:00',
+    });
+    expect(msg).toContain('1 booking ');
+    expect(msg).not.toContain('1 bookings');
   });
 });

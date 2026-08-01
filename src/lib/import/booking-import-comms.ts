@@ -8,7 +8,13 @@ import {
 import type { CommunicationLogMessageType } from '@/lib/communications/policy-resolver';
 import type { BookingModel } from '@/types/booking-models';
 
-/** Stored on `import_sessions.session_settings`. Default: true (send due reminders). */
+/**
+ * Stored on `import_sessions.session_settings`. Default: FALSE (send nothing).
+ *
+ * An import can carry a year of future bookings, so defaulting this on meant one
+ * unnoticed checkbox could text hundreds of clients and burn a monthly SMS
+ * allowance. Sending is now opt-in: only an explicit `true` sends.
+ */
 export const SEND_IMPORT_REMINDERS_SESSION_KEY = 'send_import_reminders';
 
 const SCHEDULED_REMINDER_KEYS: CommunicationMessageKey[] = [
@@ -34,9 +40,8 @@ export const IMPORT_SKIP_LOG_REASON = 'import_skip:reminder_window_passed_at_imp
 export function parseSendImportRemindersFromSession(
   sessionSettings: Record<string, unknown> | null | undefined,
 ): boolean {
-  const raw = sessionSettings?.[SEND_IMPORT_REMINDERS_SESSION_KEY];
-  if (raw === false) return false;
-  return true;
+  // Opt-in: anything other than an explicit `true` (unset, null, false) sends nothing.
+  return sessionSettings?.[SEND_IMPORT_REMINDERS_SESSION_KEY] === true;
 }
 
 /** True when the configured reminder window has already ended at import time. */

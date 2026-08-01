@@ -197,7 +197,7 @@ function CalendarStatusSvg() {
       viewBox="0 0 620 320"
       className="h-auto w-full"
       role="img"
-      aria-label="A left-to-right flow of booking statuses: Pending leads to Booked via Confirm, Booked to Started via Start, Started to Completed via Complete. A faint dashed back-arrow shows Undo start from Started, and Reopen from Completed. Off to the side, Cancelled and No Show are shown as grey terminal end states."
+      aria-label="A left-to-right flow of booking statuses: Pending leads to Booked via Confirm, Booked to Started via Start, Started to Completed via Complete. A faint dashed back-arrow shows Undo start from Started, and Reopen from Completed. Off to the side, Cancelled and No Show are shown in grey: Cancelled is final, while a No Show can be put back."
     >
       <text x="28" y="34" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">BOOKING LIFECYCLE</text>
       <text x="28" y="56" fill="#0f172a" fontSize="16" fontWeight="700">The status flow</text>
@@ -245,7 +245,7 @@ function CalendarStatusSvg() {
       <rect x={28 + boxW + 40} y={262} width={boxW} height={boxH} rx="12" fill="#f1f5f9" stroke="#cbd5e1" />
       <text x={28 + boxW + 40 + boxW / 2} y={262 + boxH / 2 + 4} textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">No Show</text>
 
-      <text x={28 + 2 * boxW + 92} y={262 + boxH / 2 + 4} fill="#64748b" fontSize="10">Reached from any active status; the booking stops here.</text>
+      <text x={28 + 2 * boxW + 92} y={262 + boxH / 2 + 4} fill="#64748b" fontSize="10">Cancelled is final. A No Show can be put back with Undo No-Show.</text>
     </svg>
   );
 }
@@ -582,7 +582,7 @@ function NewbookingGuestSvg() {
       <rect x="12" y="12" width="536" height="446" rx="14" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
 
       {/* Title */}
-      <text x="36" y="56" fill="#0f172a" fontSize="16" fontWeight="700">Guest details</text>
+      <text x="36" y="56" fill="#0f172a" fontSize="16" fontWeight="700">Your appointment</text>
 
       {/* First name field (active) */}
       <text x="36" y="96" fill="#64748b" fontSize="11" fontWeight="600">First name (optional)</text>
@@ -703,16 +703,16 @@ function ContactsDetailSvg() {
       <text x="570" y="34" textAnchor="end" fill="#64748b" fontSize="13">▾</text>
 
       <rect x="26" y="66" width="174" height="60" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="42" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">VISITS</text>
-      <text x="42" y="114" fill="#0f172a" fontSize="20" fontWeight="700">12</text>
+      <text x="42" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">FIRST NAME</text>
+      <text x="42" y="114" fill="#0f172a" fontSize="15" fontWeight="700">Dara</text>
 
       <rect x="213" y="66" width="174" height="60" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="229" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">LAST VISIT</text>
-      <text x="229" y="114" fill="#0f172a" fontSize="16" fontWeight="700">14 Jun</text>
+      <text x="229" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">SURNAME</text>
+      <text x="229" y="114" fill="#0f172a" fontSize="15" fontWeight="700">Mulligan</text>
 
       <rect x="400" y="66" width="174" height="60" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="416" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">NEXT VISIT</text>
-      <text x="416" y="113" fill="#64748b" fontSize="12" fontWeight="600">None scheduled</text>
+      <text x="416" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">LAST VISIT</text>
+      <text x="416" y="113" fill="#0f172a" fontSize="15" fontWeight="700">14 Jun</text>
 
       <rect x="26" y="142" width="548" height="120" rx="12" fill="#ffffff" stroke="#e2e8f0" />
       <text x="42" y="164" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">CONTACT DETAILS</text>
@@ -1084,12 +1084,12 @@ function ComplianceDashboardSvg() {
       viewBox="0 0 560 532"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Compliance page stacks four cards: Check-in today with Complete now and Send link buttons; Missing for upcoming bookings with a status pill and Send link; Expiring soon with an amber Expiring pill and Send renewal; and Awaiting client submission with a Pending pill."
+      aria-label="The Compliance page stacks four cards: Today's check-ins with Complete now and Send link buttons; Missing for upcoming bookings with a status pill and Send link; Expiring soon with an amber Expiring pill and Send renewal; and Awaiting client submission with a Pending pill."
     >
-      {/* Card 1 - Check-in today */}
+      {/* Card 1 - Today's check-ins */}
       <rect x="10" y="10" width="540" height="118" rx="14" fill="#ffffff" stroke="#e2e8f0" />
       <text x="30" y="36" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">TODAY</text>
-      <text x="30" y="58" fill="#0f172a" fontSize="15" fontWeight="700">Check-in today</text>
+      <text x="30" y="58" fill="#0f172a" fontSize="15" fontWeight="700">Today&apos;s check-ins</text>
       <text x="30" y="76" fill="#64748b" fontSize="11">Review forms due before today&apos;s appointments.</text>
       {/* sample row */}
       <rect x="30" y="86" width="500" height="30" rx="9" fill="#f8fafc" stroke="#e2e8f0" />
@@ -1151,11 +1151,11 @@ function ComplianceDashboardSvg() {
 export const RUN_FIGURES: Record<string, { title: string; caption: string; node: ReactNode }> = {
   "calendar-grid": { title: "The day view", caption: "The calendar day view: a toolbar above a time grid with one column per calendar and coloured booking cards.", node: <CalendarGridSvg /> },
   "calendar-card": { title: "A booking card", caption: "A single booking card showing the guest details, a status pill, and the quick action buttons.", node: <CalendarCardSvg /> },
-  "calendar-status": { title: "The status flow", caption: "How a booking moves from Pending through to Completed, with Cancelled and No Show as end states.", node: <CalendarStatusSvg /> },
+  "calendar-status": { title: "The status flow", caption: "How a booking moves from Pending through to Completed. Cancelled is final; a No Show can be put back.", node: <CalendarStatusSvg /> },
   "bookings-row": { title: "A booking row in the list", caption: "One row in the Bookings list, showing the selection checkbox, the guest, the time, the service, the staff member, and a status pill.", node: <BookingsRowSvg /> },
   "bookings-filters": { title: "The list toolbar and filters", caption: "The toolbar across the top of the list with view, search, and filter, the filter panel below it, and the floating selection tray's bulk actions.", node: <BookingsFiltersSvg /> },
   "newbooking-form": { title: "New Booking, Appointment tab", caption: "A combined illustration of the Appointment booking steps: the booking-type tabs, the Select a service list, choosing a staff member, then the Date and time step with a month picker and grouped time slots.", node: <NewbookingFormSvg /> },
-  "newbooking-guest": { title: "Guest details with saved-contact search", caption: "Typing into the guest fields searches your saved contacts and shows matches in a dropdown.", node: <NewbookingGuestSvg /> },
+  "newbooking-guest": { title: "Client details with saved-contact search", caption: "Typing into the client fields searches your saved contacts and shows matches in a dropdown.", node: <NewbookingGuestSvg /> },
   "contacts-row": { title: "A contact row in the Directory", caption: "One row in the Contacts directory showing avatar, name, contact details, visit count and tags.", node: <ContactsRowSvg /> },
   "contacts-detail": { title: "The expanded contact detail panel", caption: "The contact detail panel with visit stats, tags, Guest bookings history and the New booking and Send actions.", node: <ContactsDetailSvg /> },
   "waitlist-lifecycle": { title: "Waitlist entry lifecycle", caption: "How a waitlist entry moves from waiting to offered to complete, with expired and cancelled as side outcomes.", node: <WaitlistLifecycleSvg /> },

@@ -6,9 +6,8 @@
  * vertical page). Kept in a plain module with no React so both the server nav
  * and the client mobile panel can import it.
  *
- * Three of the four are homepage sections, hence the leading "/": a vertical
- * page has no #features of its own, and a bare "#features" there would scroll
- * nowhere.
+ * The homepage sections among them carry a leading "/": a vertical page has no
+ * #features of its own, and a bare "#features" there would scroll nowhere.
  */
 export type MarketingNavItem = {
   href: string;
@@ -19,9 +18,9 @@ export type MarketingNavItem = {
 
 export const MARKETING_NAV_ITEMS: MarketingNavItem[] = [
   { href: "/#features", label: "Features" },
-  { href: "/#link-break", label: "Link & break" },
   { href: "/solutions", label: "Solutions", route: true },
   { href: "/#pricing", label: "Pricing" },
+  { href: "/help", label: "Help", route: true },
 ];
 
 /** Where "Start free trial" points. The homepage pricing table is the sign-up entry. */
@@ -29,6 +28,7 @@ export const MARKETING_SIGNUP_HREF = "/#pricing";
 
 /** Secondary destinations that only need to appear in the mobile panel. */
 export const MARKETING_NAV_SECONDARY: MarketingNavItem[] = [
+  { href: "/#link-break", label: "Link & break" },
   { href: "/about", label: "About", route: true },
   { href: "/login", label: "Log in", route: true },
 ];

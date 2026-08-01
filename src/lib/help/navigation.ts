@@ -6,10 +6,15 @@ import { appointmentsCategory } from './articles/appointments';
 import { settingsCategory } from './articles/settings';
 import { troubleshootingCategory } from './articles/troubleshooting';
 
+/**
+ * Drives the order of the help home cards and the sidebar. Appointments leads
+ * the two plan categories: it is the primary product, so Restaurant sits below
+ * it rather than above.
+ */
 export const HELP_CATEGORIES: HelpCategory[] = [
   gettingStartedCategory,
-  restaurantCategory,
   appointmentsCategory,
+  restaurantCategory,
   settingsCategory,
   troubleshootingCategory,
 ];

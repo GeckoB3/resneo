@@ -24,7 +24,7 @@ export const appointmentsCategory: HelpCategory = {
       content: `
 # Welcome to your Appointments plan
 
-You run **unified scheduling**: one place to manage **bookable calendars** (often one column per person or room), your **service catalogue**, **availability**, and—when you turn them on—**classes**, **ticketed events**, and **bookable resources**. The articles below walk you through each area in plain language.
+You run **unified scheduling**: one place to manage **bookable calendars** (often one column per person or room), your **service catalogue**, **availability**, and (when you turn them on) **classes**, **ticketed events**, and **bookable resources**. The articles below walk you through each area in plain language.
 
 **What this covers:** how tiers differ, how the left menu adapts to your venue, and where to turn booking models on or off.
 
@@ -40,7 +40,7 @@ You run **unified scheduling**: one place to manage **bookable calendars** (ofte
 | **SMS bundle** | **${SMS_INCLUDED_LIGHT}** included per month | **${SMS_INCLUDED_PLUS}** included per month | **${SMS_INCLUDED_APPOINTMENTS}** included per month |
 | **After your SMS bundle** | Overage billed at about **${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p** per message | Same overage rate | Same overage rate |
 
-Exact prices and SMS wording appear in **Settings → Plan**. If **Add calendar** or **invite staff** disappears, you have reached your tier cap—either deactivate something you no longer need or upgrade.
+Exact prices and SMS wording appear in **Settings → Plan**. If **Add calendar** or **invite staff** disappears, you have reached your tier cap: either deactivate something you no longer need or upgrade.
 
 ## What “unified scheduling” means day to day
 
@@ -60,7 +60,7 @@ If you also enable **classes**, **events**, or **resources**, guests see matchin
 
 ## Turning booking types on or off
 
-Admins: open **Settings → Profile** and find **Booking models** (which booking types appear on your public page and in the sidebar). Enable only what you sell (**Appointments & services**, **Classes**, **Ticketed events**, **Resources**). Save, then check the sidebar and public tabs—you can come back any time you launch a new line of business.
+Admins: open **Settings → Profile** and find **Booking models** (which booking types appear on your public page and in the sidebar). Enable only what you sell (**Appointments & services**, **Classes**, **Ticketed events**, **Resources**). Save, then check the sidebar and public tabs. You can come back any time you launch a new line of business.
 
 :::help-figure booking-models
 
@@ -106,7 +106,7 @@ Each active calendar becomes a **column** on the **Appointment Calendar** and a 
 
 - One calendar per practitioner.
 - One calendar per room or chair bank.
-- A blend of people and rooms—whatever matches how you operate.
+- A blend of people and rooms, whatever matches how you operate.
 
 :::help-figure calendar-columns
 
@@ -115,7 +115,7 @@ Each active calendar becomes a **column** on the **Appointment Calendar** and a 
 Still on **Calendars**, attach:
 
 - **Appointment services** guests can pick online or staff can pick on the phone.
-- **Class types**, **experience events**, or **resources** when those models are enabled—so generated sessions inherit the correct column.
+- **Class types**, **experience events**, or **resources** when those models are enabled, so generated sessions inherit the correct column.
 
 If something should not appear online yet, fix it here before publishing changes.
 
@@ -139,7 +139,7 @@ Each calendar row can also show:
 
 ## Staff experience
 
-Linked staff members may open **Calendar Availability** directly on **Availability** for their own template. They cannot add venue-wide calendars unless they are admins—if someone is blocked, promote them or perform the change yourself.
+Linked staff members may open **Calendar Availability** directly on **Availability** for their own template. They cannot add venue-wide calendars unless they are admins. If someone is blocked, promote them or perform the change yourself.
 `.trim(),
     },
     {
@@ -158,6 +158,8 @@ Open **Services** (\`/dashboard/appointment-services\`). This catalogue powers t
 
 :::help-figure service-row
 
+:::help-video services-setup
+
 ## Core fields everyone should set
 
 - **Name & description** – guest-facing clarity beats clever marketing jargon.
@@ -170,7 +172,7 @@ Open **Services** (\`/dashboard/appointment-services\`). This catalogue powers t
 
 ## Booking windows (per service)
 
-Fine-tune **how far ahead** guests may book, **minimum notice**, **cancellation notice**, and whether **same-day** bookings are allowed. Heavy services can require more notice than quick add-ons—set each service the way you run the diary in real life.
+Fine-tune **how far ahead** guests may book, **minimum notice**, **cancellation notice**, and whether **same-day** bookings are allowed. Heavy services can require more notice than quick add-ons. Set each service the way you run the diary in real life.
 
 ## Variants (sub-options)
 
@@ -190,7 +192,7 @@ Allow selected team members to advertise their own duration, price, or descripti
 
 ## Stripe Connect
 
-Online payments require a completed **Stripe Connect** onboarding (**Settings → Payments**). If Connect is incomplete, the product warns you when a service expects card payments—finish Connect before promoting those services online.
+Online payments require a completed **Stripe Connect** onboarding (**Settings → Payments**). If Connect is incomplete, the product warns you when a service expects card payments. Finish Connect before promoting those services online.
 
 ## Hygiene tips
 
@@ -241,7 +243,7 @@ Under **Settings → Business hours** you set the venue’s advertised opening f
 
 ## After you save
 
-Give the public booking page a quick try whenever you change hours—small mistakes (AM/PM, timezone) are easier to catch before guests do.
+Give the public booking page a quick try whenever you change hours. Small mistakes (AM/PM, timezone) are easier to catch before guests do.
 
 ## Roles
 
@@ -258,7 +260,7 @@ Any staff linked to a calendar can maintain their own availability if you grant 
       content: `
 # The Appointment Calendar in practice
 
-Open **Appointment Calendar** (\`/dashboard/calendar\`) whenever your venue is **schedule-calendar eligible** (appointments, classes, events, or resources are active). Pure table venues without those models use other tools—this article assumes you see the grid.
+Open **Appointment Calendar** (\`/dashboard/calendar\`) whenever your venue is **schedule-calendar eligible** (appointments, classes, events, or resources are active). Pure table venues without those models use other tools. This article assumes you see the grid.
 
 **What this covers:** views and filters, creating bookings, when drag-and-drop is allowed, and how the detail sheet keeps payments and messages in one place.
 
@@ -274,12 +276,12 @@ Use the **View** dropdown in the toolbar to switch between these modes. The date
 
 ## Columns and filters
 
-Each **bookable calendar** is a column. Use the **column filter** to hide rooms you do not need right now. **Mine** shortcuts appear when the signed-in user manages specific calendars—perfect on a tablet at reception.
+Each **bookable calendar** is a column. Use the **column filter** to hide rooms you do not need right now. **Mine** shortcuts appear when the signed-in user manages specific calendars, perfect on a tablet at reception.
 
 ## Create or move work
 
 - Click a slot to launch the **staff booking** flow for walk-ins or phone bookings.
-- **Drag and drop** when your role allows it; the app validates each move. If something is rejected, read the inline message—it usually means the destination violates buffers, closures, or double-booking rules.
+- **Drag and drop** when your role allows it; the app validates each move. If something is rejected, read the inline message. It usually means the destination violates buffers, closures, or double-booking rules.
 
 ## Detail sheets
 
@@ -287,11 +289,11 @@ Selecting an item opens its detail sheet: payments, messages, attendance (for cl
 
 ## Relationship to the list
 
-Use **Appointments** / **Bookings** when you need filters, CSV export, or bulk messaging; use the **Appointment Calendar** when spatial context matters. Both stay in sync via live updates—watch the connection indicator and tap **refresh** if you lose sync on flaky Wi-Fi.
+Use **Appointments** / **Bookings** when you need filters, CSV export, or bulk messaging; use the **Appointment Calendar** when spatial context matters. Both stay in sync via live updates. Watch the connection indicator and tap **refresh** if you lose sync on flaky Wi-Fi.
 
 ## Roles
 
-Every staff member who can see the grid should know your internal rules for dragging bookings that already paid online—when in doubt, edit from the detail sheet so financial records stay tidy.
+Every staff member who can see the grid should know your internal rules for dragging bookings that already paid online. When in doubt, edit from the detail sheet so financial records stay tidy.
 `.trim(),
     },
     {
@@ -345,7 +347,7 @@ Select multiple rows to send **email**, **SMS**, or **both**. The tool automatic
 
 ## Live updates and polling
 
-The toolbar shows whether you are **live** via realtime sync. If the banner indicates reconnecting, pause destructive edits until you are synced or press **refresh**—two colleagues editing blindly can cause clashes.
+The toolbar shows whether you are **live** via realtime sync. If the banner indicates reconnecting, pause destructive edits until you are synced or press **refresh**. Two colleagues editing blindly can cause clashes.
 
 ## Contacts integration
 
@@ -394,7 +396,7 @@ Browse generated sessions to:
 
 ## Check-in, attendance, and CSV
 
-Mark attendance for operational confidence and export rosters to CSV when partners need a headcount. If payments are due online, watch for Stripe warnings on unpaid rows—handle them before guests arrive when your policy requires prepayment.
+Mark attendance for operational confidence and export rosters to CSV when partners need a headcount. If payments are due online, watch for Stripe warnings on unpaid rows. Handle them before guests arrive when your policy requires prepayment.
 
 ## Calendar entitlements
 
@@ -415,18 +417,18 @@ Each class type must reference a **bookable calendar** your plan still allows. I
       content: `
 # Selling class packs
 
-**Class credits** let guests pre-pay for a fixed number of classes — for example, a 5-class intro offer or a 10-class pass. When they redeem a credit at booking, no card charge is needed.
+**Class credits** let guests pre-pay for a fixed number of classes, for example a 5-class intro offer or a 10-class pass. When they redeem a credit at booking, no card charge is needed.
 
 **Where:** Classes → **Class products** → **Credits** tab. The "Class products" button only appears when **Class packs, courses & memberships** is on under **Settings → Booking settings → Optional Booking features**.
 
 ## What a pack contains
 
-- **Name and description** — what guests see on your public booking page and in their account.
-- **Credits count** — how many classes the pack buys (1 credit = 1 spot in a class).
-- **Price** — total price for the pack, in £.
-- **Validity (days)** — credits expire this many days after purchase. Leave blank for no expiry.
-- **Eligible classes** — restrict the pack to specific class types, or leave empty to allow all classes.
-- **Active** — toggle off to stop selling it without losing history.
+- **Name and description**: what guests see on your public booking page and in their account.
+- **Credits count**: how many classes the pack buys (1 credit = 1 spot in a class).
+- **Price**: total price for the pack, in £.
+- **Validity (days)**: credits expire this many days after purchase. Leave blank for no expiry.
+- **Eligible classes**: restrict the pack to specific class types, or leave empty to allow all classes.
+- **Active**: toggle off to stop selling it without losing history.
 
 Use the **Intro 5 pack** and **10 class pass** quick templates to prefill sensible defaults.
 
@@ -442,7 +444,7 @@ Use the **Intro 5 pack** and **10 class pass** quick templates to prefill sensib
 
 When a guest books a class on your public page and the class requires payment, they can tick **Pay with class credits** instead. The system spends from the **oldest expiring** batch first (FIFO) and only from packs eligible for that class type. If they don't have enough, the line falls back to card payment.
 
-If a credit-paid booking is cancelled within your cancellation window, **the credit is restored** to the same batch and a **Class credits restored** email goes out — automatic and idempotent.
+If a credit-paid booking is cancelled within your cancellation window, **the credit is restored** to the same batch and a **Class credits restored** email goes out, automatic and idempotent.
 
 ## Expiry and reminders
 
@@ -451,12 +453,12 @@ A nightly cron expires balances on their expiry date. **7 days before expiry**, 
 ## Archive vs delete
 
 - **Archive** when you stop offering a pack but want to keep its purchase history. Guests who already own credits from it can still spend them; new buyers can't see it.
-- **Delete** only when no guest has ever bought from it. The dashboard blocks deletion otherwise — archive instead.
+- **Delete** only when no guest has ever bought from it. The dashboard blocks deletion otherwise. Archive instead.
 
 ## Tips
 
 - Set **validity_days** to nudge guests into a habit (30–90 days work well).
-- Restrict an introductory pack to your beginner class type only — guests then upgrade to a "10 class pass" once they've found their level.
+- Restrict an introductory pack to your beginner class type only. Guests then upgrade to a "10 class pass" once they've found their level.
 `.trim(),
     },
     {
@@ -469,7 +471,7 @@ A nightly cron expires balances on their expiry date. **7 days before expiry**, 
       content: `
 # Building a class course
 
-A **course** is a fixed-session programme — six weeks of beginners Pilates, a four-session yoga immersion — sold as one price. Guests enrol once and the system holds a spot for them in every linked session.
+A **course** is a fixed-session programme (six weeks of beginners Pilates, a four-session yoga immersion) sold as one price. Guests enrol once and the system holds a spot for them in every linked session.
 
 **Where:** Classes → **Class products** → **Courses** tab.
 
@@ -477,12 +479,12 @@ A **course** is a fixed-session programme — six weeks of beginners Pilates, a 
 
 1. First, generate the class instances that will make up the course (the **Classes** page does this from your weekly timetable).
 2. Create the course product with:
-   - **Name and description** — your marketing copy.
-   - **Price** — total price in £. Free courses (£0) skip Stripe entirely.
-   - **Max enrolments** — optional cap; the form blocks new enrolments once it's hit.
-   - **Enrolment opens / closes** — optional window where guests can sign up.
-   - **Included sessions** — pick the instances that make up the course. Use the **class type** dropdown and **date range** filters to narrow the list, then tick each session you want included.
-   - **Cancellation window (days)** — how many days before the first session a guest can self-cancel for a full refund. Leave blank for non-refundable.
+   - **Name and description**: your marketing copy.
+   - **Price**: total price in £. Free courses (£0) skip Stripe entirely.
+   - **Max enrolments**: optional cap; the form blocks new enrolments once it's hit.
+   - **Enrolment opens / closes**: optional window where guests can sign up.
+   - **Included sessions**: pick the instances that make up the course. Use the **class type** dropdown and **date range** filters to narrow the list, then tick each session you want included.
+   - **Cancellation window (days)**: how many days before the first session a guest can self-cancel for a full refund. Leave blank for non-refundable.
 
 Active courses must have at least one session selected.
 
@@ -496,8 +498,8 @@ Active courses must have at least one session selected.
 
 Inside the configured window:
 
-- **Guests** can cancel themselves from **Account → Courses** — Stripe issues a full refund automatically, all linked session enrolments are cancelled, and the guest gets a **Course refund** email.
-- **Staff** can cancel any enrolment from **Class products → Courses → View enrollments** (same refund behaviour) or **Force-cancel** past the window if needed (no automatic refund — handle manually with the guest).
+- **Guests** can cancel themselves from **Account → Courses**. Stripe issues a full refund automatically, all linked session enrolments are cancelled, and the guest gets a **Course refund** email.
+- **Staff** can cancel any enrolment from **Class products → Courses → View enrollments** (same refund behaviour) or **Force-cancel** past the window if needed (no automatic refund, handle manually with the guest).
 
 ## Per-session attendance
 
@@ -507,7 +509,7 @@ After a session runs, mark each enrolled guest as **Attended** or **No show** fr
 
 - **Limit max enrolments** to your room's capacity so a sold-out course doesn't accidentally over-fill a session.
 - Set **opens_at** ahead of your first session so the marketing window matches your social posts.
-- A 7-day **cancellation_window_days** is a good default — guests have time to commit, but you have enough notice to refill the spot.
+- A 7-day **cancellation_window_days** is a good default: guests have time to commit, but you have enough notice to refill the spot.
 `.trim(),
     },
     {
@@ -515,31 +517,31 @@ After a session runs, mark each enrolled guest as **Attended** or **No show** fr
       helpSection: 'operations',
       title: 'Selling memberships',
       description:
-        'Subscription class plans — unlimited or allowance-based — with rollover, member discounts, and Stripe Connect billing.',
+        'Subscription class plans (unlimited or allowance-based) with rollover, member discounts, and Stripe Connect billing.',
       tags: ['classes', 'memberships', 'commerce', 'subscriptions'],
       content: `
 # Selling memberships
 
-A **membership** is a Stripe-billed subscription that gives the member ongoing class access — either unlimited classes or a fixed allowance per billing period. Memberships bill on **each venue's own Stripe Connect account**.
+A **membership** is a Stripe-billed subscription that gives the member ongoing class access, either unlimited classes or a fixed allowance per billing period. Memberships bill on **each venue's own Stripe Connect account**.
 
 **Where:** Classes → **Class products** → **Memberships** tab.
 
 ## Plan rules
 
-- **Unlimited** — the simplest model. Any class covered by the plan is free for the member.
-- **Allowance per period** — N classes per billing period (weekly / monthly / yearly).
-   - **Rollover** — unused allowance carries into the next period.
-   - **Rollover limit** — cap the carry-over (otherwise it accumulates indefinitely).
-- **Member discount %** — applies to paid classes that aren't already covered by allowance or unlimited (e.g. workshops outside the plan).
-- **Eligible class types** — restrict the plan to specific class types, or leave empty for all classes.
-- **Allow recurring booking** — must be enabled for guests on this plan to set up recurring auto-bookings.
+- **Unlimited**: the simplest model. Any class covered by the plan is free for the member.
+- **Allowance per period**: N classes per billing period (weekly / monthly / yearly).
+   - **Rollover**: unused allowance carries into the next period.
+   - **Rollover limit**: cap the carry-over (otherwise it accumulates indefinitely).
+- **Member discount %**: applies to paid classes that aren't already covered by allowance or unlimited (e.g. workshops outside the plan).
+- **Eligible class types**: restrict the plan to specific class types, or leave empty for all classes.
+- **Allow recurring booking**: must be enabled for guests on this plan to set up recurring auto-bookings.
 
 ## Stripe Connect setup
 
 Two ways to attach a Stripe price:
 
-1. **Recurring price + interval** (recommended) — ResNeo creates a Stripe Product and a recurring Price on your connected account when you save the plan. Change the price or interval later and a new Price is generated; the old one is archived automatically.
-2. **Paste an existing Stripe Price ID** — useful if you already manage subscriptions externally.
+1. **Recurring price + interval** (recommended): ResNeo creates a Stripe Product and a recurring Price on your connected account when you save the plan. Change the price or interval later and a new Price is generated; the old one is archived automatically.
+2. **Paste an existing Stripe Price ID**: useful if you already manage subscriptions externally.
 
 Active plans must have a Stripe price attached so guests can subscribe.
 
@@ -563,14 +565,14 @@ When a guest books a class with a paid line and they hold a membership covering 
 
 1. **Pay with class credits** if the guest has a credit balance and ticked the box.
 2. **Course coverage** if the class is part of a course they're enrolled in.
-3. **Membership unlimited** — line is free.
-4. **Membership allowance** — line is free, allowance ledger debits.
-5. **Member discount** — the line is paid but reduced by the best discount on any membership covering the class type.
+3. **Membership unlimited**: line is free.
+4. **Membership allowance**: line is free, allowance ledger debits.
+5. **Member discount**: the line is paid but reduced by the best discount on any membership covering the class type.
 6. Otherwise, full price.
 
 ## Archiving
 
-When you archive a membership product, ResNeo automatically archives the Stripe Product and Price on the connected account. Existing members keep their subscription until they cancel — the plan just stops being offered to new buyers.
+When you archive a membership product, ResNeo automatically archives the Stripe Product and Price on the connected account. Existing members keep their subscription until they cancel. The plan just stops being offered to new buyers.
 
 ## Tips
 
@@ -601,7 +603,7 @@ Start with an **experience event**: marketing description, hero imagery (when yo
 
 ## Ticket types (tiers)
 
-Add one or more **ticket types** with independent prices and optional per-tier capacities—perfect for “General admission” vs “VIP”, or adult vs child pricing.
+Add one or more **ticket types** with independent prices and optional per-tier capacities, perfect for “General admission” vs “VIP”, or adult vs child pricing.
 
 ## Scheduling modes
 
@@ -660,7 +662,7 @@ Guests choose a **resource**, browse a **month**, pick a **duration**, then sele
 
 ## Maintenance mode
 
-**Deactivate** a resource to remove it from public lists immediately—useful during refurbishments or when equipment is out for repair. Existing bookings remain visible historically; handle them according to your policy.
+**Deactivate** a resource to remove it from public lists immediately, useful during refurbishments or when equipment is out for repair. Existing bookings remain visible historically; handle them according to your policy.
 
 ## Calendar columns
 
@@ -693,17 +695,17 @@ Admins manage people under **Settings → Staff**. Staff without admin rights st
 2. Enter **email**, **name**, and **role** (**admin** or **staff**).
 3. Link the person to the **bookable calendars** they should manage. Those links control “mine” filters and availability shortcuts.
 
-Invites expire like any email link—use **Resend** if someone loses it.
+Invites expire like any email link. Use **Resend** if someone loses it.
 
 ## Plan caps
 
-**Light** allows **one** staff login, **Plus** allows **up to five**, **Pro** is unlimited. When you reach the cap the **Add** button disappears—upgrade or remove inactive accounts.
+**Light** allows **one** staff login, **Plus** allows **up to five**, **Pro** is unlimited. When you reach the cap the **Add** button disappears. Upgrade or remove inactive accounts.
 
 ## Day-two operations
 
 - **Promote / demote** roles when someone changes jobs.
 - **Reset passwords** for colleagues who are locked out (admins only).
-- **Remove** users who leave—calendar assignments clean up automatically.
+- **Remove** users who leave. Calendar assignments clean up automatically.
 
 ## Session timeout
 
@@ -711,7 +713,7 @@ Configure **venue session timeout** under **Settings** for tablets at reception 
 
 ## What staff cannot see
 
-Non-admins do **not** get **Reports**, **Data import**, or full venue **Settings** tabs—they manage bookings and personal account details only. If someone needs billing access, promote them thoughtfully.
+Non-admins do **not** get **Reports**, **Data import**, or full venue **Settings** tabs. They manage bookings and personal account details only. If someone needs billing access, promote them thoughtfully.
 
 ## Support
 
@@ -818,16 +820,18 @@ Open **Settings → Communications** as an admin. You will see **policy** switch
 
 :::help-figure comms-lanes
 
+:::help-video communications-setup
+
 ## Pick the correct lane
 
-- **Appointments & other** covers appointments, classes, events, and resources—the bulk of Appointments-plan venues live here.
+- **Appointments & other** covers appointments, classes, events, and resources. The bulk of Appointments-plan venues live here.
 - **Table bookings** only appears when your venue also runs **table reservations**. Keep table wording separate so merge fields stay accurate.
 
 ## Message types you will touch most
 
 Typical automated types include **confirmation**, **deposit request**, **confirm or cancel**, **pre-visit reminder**, **modification**, **cancellation**, **auto-cancel**, **no-show**, **post-visit thank you**, plus **custom** broadcasts for campaigns.
 
-Toggle **email** and **SMS** per message when the controls allow it—some regulatory templates require both channels to stay on.
+Toggle **email** and **SMS** per message when the controls allow it. Some regulatory templates require both channels to stay on.
 
 ## SMS allowances
 
@@ -835,11 +839,11 @@ Toggle **email** and **SMS** per message when the controls allow it—some regul
 
 ## Previews
 
-Use **preview** with sample merge data to catch awkward phrasing before guests see it. Remember previews are static—always send a real test booking if you changed something critical.
+Use **preview** with sample merge data to catch awkward phrasing before guests see it. Remember previews are static. Always send a real test booking if you changed something critical.
 
 ## Manual and bulk sends
 
-Operational teams can still send **one-off** or **bulk** messages from booking screens when policy and contact details allow—automation does not replace human judgement for VIPs or incidents.
+Operational teams can still send **one-off** or **bulk** messages from booking screens when policy and contact details allow. Automation does not replace human judgement for VIPs or incidents.
 
 ## Related reading
 
@@ -876,15 +880,15 @@ Pick a **start** and **end** date, then **Apply**. Most charts and tables respec
 
 ## Full exports
 
-Use **Export bookings** and **Export guests** sections for spreadsheet backups or data science projects. These respect your permissions and can be large—run them off-peak if your browser feels sluggish.
+Use **Export bookings** and **Export guests** sections for spreadsheet backups or data science projects. These respect your permissions and can be large. Run them off-peak if your browser feels sluggish.
 
 ## Clients tab and Contacts
 
-Inside Reports, the **Clients** tab summarises guest value. For deep profile edits, tags, or cross-model history, jump to **Contacts** (\`/dashboard/contacts\`)—the CRM view stays in sync with the same guest records.
+Inside Reports, the **Clients** tab summarises guest value. For deep profile edits, tags, or cross-model history, jump to **Contacts** (\`/dashboard/contacts\`). The CRM view stays in sync with the same guest records.
 
 ## Hygiene
 
-Exports contain personal data—store them securely and delete local copies when finished. Admins should rotate who can download full history as staff change roles.
+Exports contain personal data. Store them securely and delete local copies when finished. Admins should rotate who can download full history as staff change roles.
 `.trim(),
     },
     {
@@ -907,13 +911,13 @@ Exports contain personal data—store them securely and delete local copies when
 
 1. Open **Settings** (\`/dashboard/settings\`).
 2. Choose the **Data import** tab.
-3. Click **Open Data Import**—this jumps to \`/dashboard/import\` with the right permissions.
+3. Click **Open Data Import**. This jumps to \`/dashboard/import\` with the right permissions.
 
 ## Step-by-step flow
 
 1. **Start** a new import session.
 2. **Upload** the CSV export from your previous system (any platform is fine as long as columns are consistent).
-3. **Map** columns to ResNeo fields—save mapping presets when you expect repeat uploads.
+3. **Map** columns to ResNeo fields. Save mapping presets when you expect repeat uploads.
 4. **Validate** to catch missing emails, impossible dates, or duplicates.
 5. **Review** counts: new clients, new bookings, skipped rows, updates to existing profiles.
 6. **Execute** when you are confident.
@@ -921,14 +925,14 @@ Exports contain personal data—store them securely and delete local copies when
 ## After import completes
 
 - Download the **report CSV** for audit trails.
-- Use **Undo** within **24 hours** if something looks wrong—this actually rolls back imported rows.
+- Use **Undo** within **24 hours** if something looks wrong. This actually rolls back imported rows.
 - **Deleting** a session from the hub **does not** remove committed rows; only **Undo** (inside the window) does.
 
 ## Hygiene tips
 
 - Deduplicate guests in your source file when possible.
 - Run a small pilot file before importing tens of thousands of lines.
-- Communicate downtime to staff if you import during business hours—realtime views may flicker briefly.
+- Communicate downtime to staff if you import during business hours. Realtime views may flicker briefly.
 
 ## Need help?
 
@@ -949,11 +953,13 @@ You have three related surfaces:
 
 1. **Hosted booking page** at \`/book/{your-venue-slug}\` (responsive, great for social links).
 2. **Embeddable widget** at \`/embed/{your-venue-slug}\` for iframes inside your own website.
-3. **QR codes** for posters—usually pointing at the hosted page so guests get the full layout.
+3. **QR codes** for posters, usually pointing at the hosted page so guests get the full layout.
 
 **What this covers:** where to copy the embed snippet, useful URL parameters, and how widget bookings show up in reports.
 
 :::help-figure embed-vs-book
+
+:::help-video booking-page-setup
 
 :::help-figure widget-settings
 
@@ -977,7 +983,7 @@ Legacy menu entries redirect here automatically.
 
 ## QR codes
 
-The QR generator points at the **hosted** booking page so printed collateral benefits from responsive layout. If you intentionally want embed mode, swap the URL manually—but test on a real phone first.
+The QR generator points at the **hosted** booking page so printed collateral benefits from responsive layout. If you intentionally want embed mode, swap the URL manually, but test on a real phone first.
 
 ## Analytics
 

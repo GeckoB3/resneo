@@ -2,7 +2,62 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  describeVenueClosureConflicts,
+  findVenueClosureBookingConflicts,
+} from '@/lib/calendar/closure-booking-conflicts';
 import { z } from 'zod';
+
+/** Block types that make the venue unavailable, so existing bookings are stranded. */
+const CLOSING_BLOCK_TYPES = new Set(['closed', 'special_event']);
+
+/**
+ * Returns a 409 asking the admin to confirm when a proposed closure covers bookings
+ * that already exist, or `null` to proceed. Mirrors the opening-hours flow: warn once,
+ * then honour `?acknowledge_affected_bookings=true` on the retry.
+ */
+async function guardVenueClosureConflicts(
+  request: NextRequest,
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  block: {
+    block_type?: string;
+    date_start?: string;
+    date_end?: string;
+    time_start?: string | null;
+    time_end?: string | null;
+  },
+): Promise<NextResponse | null> {
+  if (!block.block_type || !CLOSING_BLOCK_TYPES.has(block.block_type)) return null;
+  if (!block.date_start || !block.date_end) return null;
+  if (request.nextUrl.searchParams.get('acknowledge_affected_bookings') === 'true') return null;
+
+  try {
+    const conflicts = await findVenueClosureBookingConflicts(admin, {
+      venueId,
+      startDate: block.date_start,
+      endDate: block.date_end,
+      startTime: block.time_start,
+      endTime: block.time_end,
+    });
+    if (!conflicts) return null;
+    return NextResponse.json(
+      {
+        requires_confirmation: true,
+        affected_count: conflicts.totalConflicts,
+        message: describeVenueClosureConflicts(conflicts),
+      },
+      { status: 409 },
+    );
+  } catch (e) {
+    // Fail loudly rather than closing over bookings without a word.
+    console.error('[availability-blocks] closure conflict check:', e);
+    return NextResponse.json(
+      { error: 'Could not verify existing bookings. Please try again.' },
+      { status: 500 },
+    );
+  }
+}
 
 const yieldOverridesSchema = z
   .object({
@@ -101,6 +156,20 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+
+    // Closing a date never cancels or notifies the people already booked on it, so
+    // without this an owner closes for an emergency and clients still turn up.
+    // Non-blocking (you must be able to close Christmas Day with a booking on it):
+    // surface the conflict once, then proceed when the admin acknowledges it.
+    const conflictCheck = await guardVenueClosureConflicts(request, admin, staff.venue_id, {
+      block_type: parsed.data.block_type,
+      date_start: parsed.data.date_start,
+      date_end: parsed.data.date_end,
+      time_start: parsed.data.time_start ?? null,
+      time_end: parsed.data.time_end ?? null,
+    });
+    if (conflictCheck) return conflictCheck;
+
     const { data, error } = await admin
       .from('availability_blocks')
       .insert({ venue_id: staff.venue_id, ...parsed.data })
@@ -135,6 +204,27 @@ export async function PATCH(request: NextRequest) {
 
     const { id, ...fields } = parsed.data;
     const admin = getSupabaseAdminClient();
+
+    // Editing can widen a closure over bookings just as easily as creating one, so
+    // merge the patch onto the stored row and run the same check.
+    const { data: existing } = await admin
+      .from('availability_blocks')
+      .select('block_type, date_start, date_end, time_start, time_end')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+    if (existing) {
+      const merged = { ...(existing as Record<string, unknown>), ...fields } as {
+        block_type?: string;
+        date_start?: string;
+        date_end?: string;
+        time_start?: string | null;
+        time_end?: string | null;
+      };
+      const conflictCheck = await guardVenueClosureConflicts(request, admin, staff.venue_id, merged);
+      if (conflictCheck) return conflictCheck;
+    }
+
     const { data, error } = await admin
       .from('availability_blocks')
       .update(fields)

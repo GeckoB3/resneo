@@ -56,7 +56,7 @@ export function VenueSlugField({ venue, onUpdate, isAdmin, reporter }: VenueSlug
   const {
     register,
     control,
-    formState: { errors },
+    formState: { errors, isDirty },
     watch,
     getValues,
     reset,
@@ -177,7 +177,22 @@ export function VenueSlugField({ venue, onUpdate, isAdmin, reporter }: VenueSlug
     if (!isAdmin) return;
     const timer = window.setTimeout(() => {
       const parsed = bookingPageSchema.safeParse(getValues());
-      if (!parsed.success) return;
+      if (!parsed.success) {
+        // Surface why nothing is saving. The format check above only resets the
+        // hint to 'idle', and the resolver never runs on its own (autosave, not
+        // submit), so without this an address with spaces or capitals silently
+        // never saves and the field says nothing at all.
+        // Only nag once the user has edited: a venue arriving with no slug yet
+        // should not be greeted with a red "required" message on load.
+        if (isDirty) {
+          const message =
+            parsed.error.issues.find((i) => i.path[0] === 'slug')?.message ??
+            'Booking page address is not valid';
+          setError('slug', { type: 'validation', message });
+          report({ status: 'error', message: `Not saved. ${message}` });
+        }
+        return;
+      }
       const normSlug = parsed.data.slug.trim().toLowerCase();
       const savedSlug = (venue.slug ?? '').trim().toLowerCase();
       if (normSlug !== savedSlug && slugHint === 'taken') {
@@ -208,7 +223,7 @@ export function VenueSlugField({ venue, onUpdate, isAdmin, reporter }: VenueSlug
       })();
     }, 850);
     return () => window.clearTimeout(timer);
-  }, [watched, isAdmin, persistSlug, report, getValues, setError, slugHint, venue.slug]);
+  }, [watched, isAdmin, persistSlug, report, getValues, setError, slugHint, venue.slug, isDirty]);
 
   return (
     <form

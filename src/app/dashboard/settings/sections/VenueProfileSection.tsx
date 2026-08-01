@@ -45,6 +45,26 @@ const profileSchema = z.object({
 
 type ProfileForm = z.infer<typeof profileSchema>;
 
+const PROFILE_FIELDS = Object.keys(profileSchema.shape) as (keyof ProfileForm)[];
+
+/**
+ * First message per field from a failed parse. The card autosaves rather than
+ * submitting, so the zod resolver never runs on its own (mode is 'onSubmit' and
+ * `handleSubmit` is never called) and `formState.errors` would otherwise stay
+ * empty forever. We map issues onto the form manually so the inline messages
+ * beside each input can render.
+ */
+function firstIssuePerField(issues: z.ZodIssue[]): Map<keyof ProfileForm, string> {
+  const byField = new Map<keyof ProfileForm, string>();
+  for (const issue of issues) {
+    const field = issue.path[0];
+    if (typeof field !== 'string') continue;
+    const key = field as keyof ProfileForm;
+    if (!byField.has(key)) byField.set(key, issue.message);
+  }
+  return byField;
+}
+
 interface VenueProfileSectionProps {
   venue: VenueSettings;
   onUpdate: (patch: Partial<VenueSettings>) => void;
@@ -94,13 +114,16 @@ export function VenueProfileSection({
   const lastSavedFingerprint = useRef<string | null>(null);
   const venueIdRef = useRef<string | null>(null);
   const saveInFlight = useRef(false);
+  /** Tracks whether we currently have validation errors on the form, so we only
+   *  clear them (and pay the re-render) when there is something to clear. */
+  const hasValidationErrors = useRef(false);
 
   const parsedAddr = parseAddress(venue.address);
 
   const {
     register,
     control,
-    formState: { errors },
+    formState: { errors, isDirty },
     watch,
     getValues,
     reset,
@@ -228,11 +251,46 @@ export function VenueProfileSection({
   // order responses can't persist stale data. When a save finishes we re-check
   // the live form against what we just sent; if the user typed more during the
   // request, we save again — so the final typed/deleted state always wins.
+  /**
+   * Show why the card stopped saving. Without this the autosave bails silently:
+   * one bad field freezes saving for the WHOLE card while the indicator stays
+   * idle, so the user believes their edits were stored when they were not.
+   */
+  const surfaceValidationErrors = useCallback(
+    (issues: z.ZodIssue[]) => {
+      const byField = firstIssuePerField(issues);
+      for (const field of PROFILE_FIELDS) {
+        const message = byField.get(field);
+        if (message) {
+          setError(field, { type: 'validation', message });
+        } else if (hasValidationErrors.current) {
+          // A field the user has since fixed: drop its stale message.
+          clearErrors(field);
+        }
+      }
+      hasValidationErrors.current = byField.size > 0;
+      report({ status: 'error', message: 'Not saved. Check the highlighted fields.' });
+    },
+    [setError, clearErrors, report],
+  );
+
+  const clearValidationErrors = useCallback(() => {
+    if (!hasValidationErrors.current) return;
+    clearErrors();
+    hasValidationErrors.current = false;
+  }, [clearErrors]);
+
   const trySave = useCallback(async () => {
     if (!isAdmin) return;
     if (saveInFlight.current) return; // in-flight save will re-check on completion
     const parsed = profileSchema.safeParse(getValues());
-    if (!parsed.success) return;
+    if (!parsed.success) {
+      // Only nag once the user has actually edited something: a venue whose
+      // stored data is already invalid should not be greeted with red on load.
+      if (isDirty) surfaceValidationErrors(parsed.error.issues);
+      return;
+    }
+    clearValidationErrors();
     if (payloadFingerprint(parsed.data) === lastSavedFingerprint.current) return;
     saveInFlight.current = true;
     report({ status: 'saving', message: null });
@@ -258,7 +316,15 @@ export function VenueProfileSection({
     if (after.success && payloadFingerprint(after.data) !== lastSavedFingerprint.current) {
       void trySave();
     }
-  }, [isAdmin, getValues, persistProfile, report]);
+  }, [
+    isAdmin,
+    getValues,
+    persistProfile,
+    report,
+    isDirty,
+    surfaceValidationErrors,
+    clearValidationErrors,
+  ]);
 
   useEffect(() => {
     if (!isAdmin) return;

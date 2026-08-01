@@ -23,6 +23,7 @@ const ITEMS: { href: string; label: string; internal?: boolean }[] = [
   { href: '#link-break', label: 'Link & break' },
   { href: '/solutions', label: 'Solutions', internal: true },
   { href: '#pricing', label: 'Pricing' },
+  { href: '/help', label: 'Help', internal: true },
   { href: '#faq', label: 'FAQ' },
   { href: '/about', label: 'About', internal: true },
 ];

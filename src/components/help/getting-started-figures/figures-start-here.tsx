@@ -57,7 +57,7 @@ function WelcomeWhatSvg() {
 
 function WelcomeStepsSvg() {
   return (
-    <svg viewBox="0 0 720 150" className="h-auto w-full" role="img" aria-label="Five steps to your first booking: add services, set hours, add details, take payments, and share your booking page.">
+    <svg viewBox="0 0 720 150" className="h-auto w-full" role="img" aria-label="Five steps to your first booking: check details, set hours, build services, take payments, and share your booking page.">
       <defs>
         <marker id="welStepArrow" markerWidth="8" markerHeight="8" refX="5" refY="4" orient="auto">
           <path d="M0 0 L8 4 L0 8 Z" fill="#94a3b8" />
@@ -66,8 +66,8 @@ function WelcomeStepsSvg() {
       <rect x="18" y="34" width="120" height="84" rx="12" fill="#ffffff" stroke="#e2e8f0" />
       <circle cx="42" cy="58" r="13" fill="#00305C" />
       <text x="42" y="62" textAnchor="middle" fill="#ffffff" fontSize="12" fontWeight="700">1</text>
-      <text x="78" y="62" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Add</text>
-      <text x="78" y="92" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">services</text>
+      <text x="78" y="62" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Check</text>
+      <text x="78" y="92" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">details</text>
 
       <line x1="142" y1="76" x2="154" y2="76" stroke="#94a3b8" strokeWidth="2" markerEnd="url(#welStepArrow)" />
 
@@ -82,8 +82,8 @@ function WelcomeStepsSvg() {
       <rect x="298" y="34" width="120" height="84" rx="12" fill="#ffffff" stroke="#e2e8f0" />
       <circle cx="322" cy="58" r="13" fill="#00305C" />
       <text x="322" y="62" textAnchor="middle" fill="#ffffff" fontSize="12" fontWeight="700">3</text>
-      <text x="358" y="62" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Add</text>
-      <text x="358" y="92" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">details</text>
+      <text x="358" y="62" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Build</text>
+      <text x="358" y="92" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">services</text>
 
       <line x1="422" y1="76" x2="434" y2="76" stroke="#94a3b8" strokeWidth="2" markerEnd="url(#welStepArrow)" />
 
@@ -177,13 +177,15 @@ function DashboardSidebarSvg() {
 }
 
 function DashboardRolesSvg() {
-  const rows = ['Home', 'Appointments', 'Appointment Calendar', 'Contacts', 'Services'];
+  // Both roles get these: ADMIN_ONLY_HREFS in DashboardSidebar is only /dashboard/settings,
+  // which staff still see, relabelled Account. Keep this list in step with the article prose.
+  const rows = ['Home', 'Appointments', 'Appointment Calendar', 'New Appointment', 'Contacts', 'Services'];
   return (
     <svg
       viewBox="0 0 600 400"
       className="h-auto w-full"
       role="img"
-      aria-label="Two sidebar columns compared. Both the Admin and Staff sidebars list the same rows: Home, Appointments, Appointment Calendar, Contacts and Services. The Admin column has a brand-coloured Settings cog at the bottom that opens the full venue console, while the Staff column has a neutral grey Account cog that opens their own details only."
+      aria-label="Two sidebar columns compared. Both the Admin and Staff sidebars list the same rows: Home, Appointments, Appointment Calendar, New Appointment, Contacts and Services. The Admin column has a brand-coloured Settings cog at the bottom that opens the full venue console, while the Staff column has a neutral grey Account cog that opens their own details only."
     >
       <rect x="20" y="14" width="270" height="328" rx="14" fill="#ffffff" stroke="#e2e8f0" />
       <text x="40" y="40" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">ROLE</text>
@@ -192,7 +194,7 @@ function DashboardRolesSvg() {
       <text x="235" y="56" textAnchor="middle" fill="#00305C" fontSize="9" fontWeight="700">Full access</text>
 
       {rows.map((l, i) => {
-        const y = 78 + i * 32;
+        const y = 78 + i * 28;   // pitch 28 keeps six rows clear of the divider at y=250
         return (
           <g key={l}>
             <rect x="36" y={y} width="238" height="26" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
@@ -217,7 +219,7 @@ function DashboardRolesSvg() {
       <text x="529" y="56" textAnchor="middle" fill="#64748b" fontSize="9" fontWeight="700">Own work</text>
 
       {rows.map((l, i) => {
-        const y = 78 + i * 32;
+        const y = 78 + i * 28;   // pitch 28 keeps six rows clear of the divider at y=250
         return (
           <g key={l}>
             <rect x="326" y={y} width="238" height="26" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
@@ -246,11 +248,17 @@ function DashboardRolesSvg() {
   );
 }
 
+/*
+ * Mirrors the real post-onboarding card in src/app/dashboard/SetupChecklist.tsx.
+ * The dashboard layout redirects venues with onboarding_completed = false to
+ * /onboarding, so the card on Home is ALWAYS the "What's next" branch: labels and
+ * button text here must track that branch, not the pre-onboarding one.
+ */
 function ChecklistCardSvg() {
   const rows = [
-    { title: 'Business profile', desc: 'Venue name, address & contact', btn: 'Complete profile', w: 124 },
-    { title: 'Team & services', desc: 'Add calendars & bookable services', btn: 'Appointment services', w: 142 },
-    { title: 'Public booking page', desc: 'Check what guests can book', btn: 'Review services', w: 118 },
+    { title: 'Business profile', desc: 'Review logo, contact details & venue settings', btn: 'Venue settings', w: 112 },
+    { title: 'Services & calendars', desc: 'Adjust services per calendar, or add more', btn: 'Appointment services', w: 142 },
+    { title: 'Create services', desc: 'At least one service for your booking page', btn: 'Add services', w: 100 },
     { title: 'Stripe payments', desc: 'Take deposits & card payments', btn: 'Connect Stripe', w: 118 },
     { title: 'First test booking', desc: 'Try the flow end to end', btn: 'Create booking', w: 118 },
   ];
@@ -259,26 +267,27 @@ function ChecklistCardSvg() {
       viewBox="0 0 560 414"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Home Get your venue ready setup card showing a 60 percent progress pill, a progress bar, and five task rows each with a dashed status marker, a title, a description, and a brand action button."
+      aria-label="The Home What's next setup card showing a 38 percent progress pill, a progress bar, and the five outstanding task rows, each with a dashed status marker, a title, a description, and a brand action button."
     >
       {/* Card */}
       <rect x="10" y="10" width="540" height="394" rx="14" fill="#ffffff" stroke="#e2e8f0" />
 
       {/* Header: eyebrow + title (left) */}
       <text x="30" y="40" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">SETUP</text>
-      <text x="30" y="62" fill="#0f172a" fontSize="16" fontWeight="700">Get your venue ready (3/5)</text>
+      {/* 3 of 8 done leaves the 5 incomplete rows below: only outstanding steps render. */}
+      <text x="30" y="62" fill="#0f172a" fontSize="16" fontWeight="700">What&rsquo;s next (3/8)</text>
 
-      {/* Header right: 60% pill + dismiss X */}
+      {/* Header right: 38% pill + dismiss X */}
       <rect x="436" y="28" width="56" height="24" rx="12" fill="#00305C" />
-      <text x="464" y="44" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="700">60%</text>
+      <text x="464" y="44" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="700">38%</text>
       <g stroke="#64748b" strokeWidth="1.6" strokeLinecap="round">
         <line x1="508" y1="33" x2="520" y2="45" />
         <line x1="520" y1="33" x2="508" y2="45" />
       </g>
 
-      {/* Progress bar ~60% */}
+      {/* Progress bar: 3 of 8 = 37.5%, so 188 of 500 */}
       <rect x="30" y="78" width="500" height="8" rx="4" fill="#f1f5f9" />
-      <rect x="30" y="78" width="300" height="8" rx="4" fill="#00A0A4" />
+      <rect x="30" y="78" width="188" height="8" rx="4" fill="#00A0A4" />
 
       {/* Rows */}
       {rows.map((row, i) => {
@@ -306,19 +315,21 @@ function ChecklistCardSvg() {
 }
 
 function ChecklistFlowSvg() {
-  const steps = ['Business profile', 'Team & services', 'Public booking page', 'Stripe payments', 'First test booking'];
+  const steps = ['Business profile', 'Services & calendars', 'Create services', 'Stripe payments', 'First test booking'];
   const boxW = 116;
   const boxH = 64;
   const gap = 22;
   const startX = 16;
   const rowY = 44;
   const x = (i: number) => startX + i * (boxW + gap);
+  // Six boxes at pitch 138 from startX 16: the last spans 706 to 822, so the
+  // viewBox must clear 822 plus a right margin or the final box is clipped.
   return (
     <svg
-      viewBox="0 0 712 168"
+      viewBox="0 0 838 168"
       className="h-auto w-full"
       role="img"
-      aria-label="A left-to-right path of five setup steps (Business profile, Team and services, Public booking page, Stripe payments, First test booking), each with a completed tick, leading into a final highlighted box reading Open for bookings."
+      aria-label="A left-to-right path of five setup steps (Business profile, Services and calendars, Create services, Stripe payments, First test booking), each with a completed tick, leading into a final highlighted box reading Open for bookings."
     >
       <text x="16" y="24" fill="#0f172a" fontSize="13" fontWeight="700">Your path to go live</text>
 
@@ -346,7 +357,7 @@ function ChecklistFlowSvg() {
             <text x={bx + boxW / 2} y={rowY + 46} textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">
               {label.includes('&') ? (
                 <>
-                  Team <tspan>&amp;</tspan> services
+                  Services <tspan>&amp;</tspan> calendars
                 </>
               ) : (
                 label
@@ -377,6 +388,6 @@ export const START_HERE_FIGURES: Record<string, { title: string; caption: string
   "welcome-steps": { title: "Your path to your first booking", caption: "Five steps from a blank account to taking bookings online.", node: <WelcomeStepsSvg /> },
   "dashboard-sidebar": { title: "The appointments sidebar", caption: "The left sidebar links an appointments venue sees, in order, with the venue card in the footer.", node: <DashboardSidebarSvg /> },
   "dashboard-roles": { title: "Admin versus staff", caption: "The day to day links match for both roles; admins get the full Settings console while staff get an Account link to their own details.", node: <DashboardRolesSvg /> },
-  "checklist-card": { title: "Home: Get your venue ready card", caption: "The admin-only setup card on Home, with a progress pill and one row per outstanding task.", node: <ChecklistCardSvg /> },
+  "checklist-card": { title: "Home: What's next setup card", caption: "The admin-only setup card on Home, with a progress pill and one row per outstanding task.", node: <ChecklistCardSvg /> },
   "checklist-flow": { title: "The path to go live", caption: "A simple left-to-right path through the core setup steps, ending when you are open for bookings.", node: <ChecklistFlowSvg /> },
 };

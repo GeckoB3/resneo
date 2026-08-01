@@ -1,19 +1,25 @@
 export type HelpContentSegment =
   | { kind: 'markdown'; text: string }
-  | { kind: 'figure'; id: string };
+  | { kind: 'figure'; id: string }
+  | { kind: 'video'; id: string };
 
-/** Removes `:::help-figure id` lines for search indexing and plain previews. */
+/** Matches a whole-line block marker, e.g. `:::help-figure tier-compare`. */
+const MARKER = /^:::help-(figure|video)\s+([\w-]+)\s*$/;
+
+/** Removes `:::help-figure id` and `:::help-video id` lines for search indexing and plain previews. */
 export function stripHelpFigureMarkers(markdown: string): string {
   return markdown
     .split('\n')
-    .filter((line) => !/^:::help-figure\s+[\w-]+\s*$/.test(line.trim()))
+    .filter((line) => !MARKER.test(line.trim()))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
 /**
- * Splits markdown on single-line figure markers: `:::help-figure some-id`
+ * Splits markdown on single-line block markers:
+ *   `:::help-figure some-id`  hand-built SVG schematic
+ *   `:::help-video some-id`   embedded walkthrough video
  * Markers must occupy the full line (trimmed).
  */
 export function splitMarkdownFigures(markdown: string): HelpContentSegment[] {
@@ -29,10 +35,10 @@ export function splitMarkdownFigures(markdown: string): HelpContentSegment[] {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const m = trimmed.match(/^:::help-figure\s+([\w-]+)\s*$/);
+    const m = trimmed.match(MARKER);
     if (m) {
       flushMd();
-      segments.push({ kind: 'figure', id: m[1] });
+      segments.push({ kind: m[1] === 'video' ? 'video' : 'figure', id: m[2] });
     } else {
       buf.push(line);
     }

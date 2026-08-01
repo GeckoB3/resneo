@@ -89,6 +89,12 @@ export function HelpLayoutShell({
             <HelpSearch className="max-w-xl" searchDocs={searchDocs} />
           </div>
           <Link
+            href="/"
+            className="hidden shrink-0 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:inline-flex"
+          >
+            Home
+          </Link>
+          <Link
             href="/dashboard"
             className="shrink-0 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900"
           >
@@ -150,12 +156,30 @@ export function HelpLayoutShell({
               <div className="flex-1 overflow-y-auto px-4 py-4">
                 <HelpSidebar categories={visibleCategories} onNavigate={() => setMobileNavOpen(false)} />
               </div>
+              <div className="border-t border-slate-100 px-4 py-3">
+                <Link
+                  href="/"
+                  className="block rounded-lg px-2 py-2 text-sm font-semibold text-brand-700 hover:bg-slate-50 hover:text-brand-900"
+                  onClick={() => setMobileNavOpen(false)}
+                >
+                  Back to resneo.com
+                </Link>
+              </div>
             </div>
           </div>
         ) : null}
 
         <main className="min-w-0 flex-1 px-4 py-8 sm:px-8 sm:py-10">{children}</main>
       </div>
+
+      <footer className="border-t border-slate-200/80 bg-white">
+        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3 px-4 py-6 sm:px-6">
+          <p className="text-sm text-slate-500">ResNeo help centre</p>
+          <Link href="/" className="text-sm font-semibold text-brand-700 hover:text-brand-900 hover:underline">
+            Back to resneo.com
+          </Link>
+        </div>
+      </footer>
     </div>
   );
 }

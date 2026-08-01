@@ -37,7 +37,7 @@ export function presentHelpCategoriesForNav(
       ...cat,
       title: 'Schedule & other booking types',
       description:
-        'Classes, events, resources, and unified calendars alongside your restaurant tools—the same guides as the Appointments plan where those features overlap.',
+        'Classes, events, resources, and unified calendars alongside your restaurant tools. These are the same guides as the Appointments plan where those features overlap.',
     };
   });
 }

@@ -152,12 +152,34 @@ function bookingScheduleStripClass(status: string): string {
   return 'bg-slate-400';
 }
 
+/**
+ * Base used when parsing stored hours ({@link weekHoursFromJSON}), which overwrites
+ * `enabled` for every day it sees. Kept weekday-only for the rare row with no stored
+ * hours at all; new resources use {@link newResourceWeekHours} instead.
+ */
 function defaultWeekHours(): WeekHours {
   const h: WeekHours = {};
   for (const d of DAY_LABELS) {
     h[d.key] = d.key === '0' || d.key === '6'
       ? { enabled: false, ranges: [{ start: '09:00', end: '17:00' }] }
       : { enabled: true, ranges: [{ start: '09:00', end: '17:00' }] };
+  }
+  return h;
+}
+
+/**
+ * Weekly hours a brand new resource starts on: every day, 09:00 to 22:00.
+ *
+ * Deliberately wide, matching `defaultNewUnifiedCalendarWorkingHours` for calendar
+ * columns: a resource is only bookable where its own hours overlap the venue's opening
+ * hours AND its host calendar's hours, so starting wide lets those narrow it correctly.
+ * The previous weekday-only default silently cost Saturday-trading businesses every
+ * weekend booking, because the days looked already filled in and were never revisited.
+ */
+function newResourceWeekHours(): WeekHours {
+  const h: WeekHours = {};
+  for (const d of DAY_LABELS) {
+    h[d.key] = { enabled: true, ranges: [{ start: '09:00', end: '22:00' }] };
   }
   return h;
 }
@@ -691,7 +713,7 @@ export function ResourceTimelineView({
     setFormPaymentReq('none');
     setFormDeposit('');
     setFormActive(true);
-    setFormHours(defaultWeekHours());
+    setFormHours(newResourceWeekHours());
     setFormMatchCalendarHours(false);
     setFormExceptions({});
     const n = new Date();

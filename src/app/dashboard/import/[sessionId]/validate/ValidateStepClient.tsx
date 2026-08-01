@@ -111,7 +111,8 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
   const [preview, setPreview] = useState<{ fileId: string; row: number; filename: string } | null>(null);
   const [patchingId, setPatchingId] = useState<string | null>(null);
   const [hasBookingFile, setHasBookingFile] = useState(false);
-  const [sendImportReminders, setSendImportReminders] = useState(true);
+  // Opt-in: see parseSendImportRemindersFromSession. Must match the server default.
+  const [sendImportReminders, setSendImportReminders] = useState(false);
   const [savingImportCommsPref, setSavingImportCommsPref] = useState(false);
   const [plan, setPlan] = useState<{ headline: string; narrative: string } | null>(null);
   const [showApprove, setShowApprove] = useState(false);
@@ -142,7 +143,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
     setSummary(s ?? null);
     setHasBookingFile(Boolean(data.session?.has_booking_file));
     const rawReminders = data.session?.session_settings?.[SEND_IMPORT_REMINDERS_SESSION_KEY];
-    setSendImportReminders(rawReminders !== false);
+    setSendImportReminders(rawReminders === true);
     const map: Record<string, string> = {};
     for (const f of data.files ?? []) {
       map[f.id] = f.filename;
@@ -735,10 +736,10 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             <span>
               <span className="font-medium text-slate-900">Send upcoming reminders for imported bookings</span>
               <span className="mt-1 block text-xs text-slate-600">
-                On by default. Booking confirmations are not resent for imported bookings, but scheduled reminders
+                Off by default. Booking confirmations are not resent for imported bookings, but scheduled reminders
                 (for example 24 hours and 2 hours before the appointment, per your Communications settings) will run for
                 future bookings when their send time is still ahead. Reminders whose window has already passed at import
-                are not sent.
+                are not sent. Only tick this if you want your imported clients contacted.
               </span>
               {savingImportCommsPref && (
                 <span className="mt-1 block text-xs text-slate-500">Saving…</span>

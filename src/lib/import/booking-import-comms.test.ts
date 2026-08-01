@@ -8,12 +8,16 @@ import {
 import { CRON_COMMS_TOLERANCE_MS } from '@/lib/cron/comms-timing';
 
 describe('parseSendImportRemindersFromSession', () => {
-  it('defaults to true when unset', () => {
-    expect(parseSendImportRemindersFromSession({})).toBe(true);
-    expect(parseSendImportRemindersFromSession(null)).toBe(true);
+  it('defaults to false when unset, so an import sends nothing by accident', () => {
+    expect(parseSendImportRemindersFromSession({})).toBe(false);
+    expect(parseSendImportRemindersFromSession(null)).toBe(false);
+    expect(parseSendImportRemindersFromSession(undefined)).toBe(false);
   });
 
-  it('returns false only when explicitly false', () => {
+  it('returns true only when explicitly true', () => {
+    expect(
+      parseSendImportRemindersFromSession({ [SEND_IMPORT_REMINDERS_SESSION_KEY]: true }),
+    ).toBe(true);
     expect(
       parseSendImportRemindersFromSession({ [SEND_IMPORT_REMINDERS_SESSION_KEY]: false }),
     ).toBe(false);

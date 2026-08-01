@@ -2,6 +2,11 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  cancelBookingAfterPaymentFailure,
+  CARD_HOLD_SETUP_FAILED_NOTE,
+  PAYMENT_SETUP_FAILED_NOTE,
+} from '@/lib/booking/cancel-booking-after-payment-failure';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import {
@@ -595,7 +600,7 @@ export async function POST(request: NextRequest) {
           .eq('id', booking.id);
       } catch (stripeErr) {
         console.error('PaymentIntent create failed:', stripeErr);
-        await supabase.from('bookings').delete().eq('id', booking.id);
+        await cancelBookingAfterPaymentFailure(supabase, booking.id, PAYMENT_SETUP_FAILED_NOTE);
         return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
       }
     } else if (captureMode === 'setup' && cardHoldFeePence != null && venue.stripe_connected_account_id) {
@@ -635,7 +640,7 @@ export async function POST(request: NextRequest) {
         client_secret = setupIntent.client_secret;
       } catch (stripeErr) {
         console.error('Card hold setup failed:', stripeErr);
-        await supabase.from('bookings').delete().eq('id', booking.id);
+        await cancelBookingAfterPaymentFailure(supabase, booking.id, CARD_HOLD_SETUP_FAILED_NOTE);
         if (cardHoldCustomerId) {
           try {
             await stripe.customers.del(cardHoldCustomerId, {
@@ -1912,7 +1917,7 @@ async function handleNonTableBooking(
         .eq('id', booking.id);
     } catch (stripeErr) {
       console.error('PaymentIntent create failed:', stripeErr);
-      await supabase.from('bookings').delete().eq('id', booking.id);
+      await cancelBookingAfterPaymentFailure(supabase, booking.id, PAYMENT_SETUP_FAILED_NOTE);
       return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
     }
   } else if (
@@ -1959,7 +1964,7 @@ async function handleNonTableBooking(
       client_secret = setupIntent.client_secret;
     } catch (stripeErr) {
       console.error('Card hold setup failed:', stripeErr);
-      await supabase.from('bookings').delete().eq('id', booking.id);
+      await cancelBookingAfterPaymentFailure(supabase, booking.id, CARD_HOLD_SETUP_FAILED_NOTE);
       // Best-effort Stripe cleanup: cancel the SetupIntent (when created)
       // before deleting the customer so neither lingers on the account.
       if (cardHoldSetupIntentId) {

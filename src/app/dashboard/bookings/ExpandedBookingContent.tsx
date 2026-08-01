@@ -12,6 +12,13 @@ import {
 } from '@/lib/table-management/booking-status';
 import { StaffExpandedBookingModifyModal } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
+import { BookingPaymentDetails } from '@/components/booking/BookingPaymentDetails';
+import {
+  formatPence,
+  type BookingPaymentRow,
+  type VisitPayment,
+} from '@/lib/booking/payment-display';
+import type { BookingPaymentState } from '@/lib/booking/payment-summary';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
@@ -244,6 +251,20 @@ export interface BookingDetailLite {
   }>;
   addons_total_price_pence?: number | null;
   addons_total_duration_minutes?: number | null;
+  /**
+   * In-person payments, all returned by GET /api/venue/bookings/[id]. The web
+   * cannot collect one (that is Tap to Pay / a card reader in the app) but must
+   * show what was collected, otherwise a booking settled in the chair still
+   * reads as unpaid here. Payment figures are VISIT-scoped: one collection
+   * settles every booking sharing a group_booking_id.
+   */
+  service_variant_price_pence?: number | null;
+  booking_total_price_pence?: number | null;
+  amount_paid_pence?: number | null;
+  payment_state?: BookingPaymentState | null;
+  balance_due_pence?: number | null;
+  visit_payment?: VisitPayment | null;
+  payments?: BookingPaymentRow[];
 }
 
 function formatRelative(value: string | null | undefined): string {
@@ -667,6 +688,30 @@ export function ExpandedBookingContent({
     [booking, detail, detailCache],
   );
   const detailHydrating = detailLoading && !detail && !detailCache?.peekVenueBookingDetail(booking.id);
+
+  /**
+   * The money view's inputs. Deposit fields come from the row (so an optimistic
+   * deposit action is reflected straight away); everything else is only on the
+   * full detail payload, and is simply absent until it hydrates.
+   */
+  const paymentDisplayBooking = useMemo(
+    () => ({
+      id: booking.id,
+      deposit_status: effectiveBooking.deposit_status,
+      deposit_amount_pence: effectiveBooking.deposit_amount_pence,
+      service_variant_name: activeDetail?.service_variant_name ?? null,
+      service_variant_price_pence: activeDetail?.service_variant_price_pence ?? null,
+      booking_total_price_pence: activeDetail?.booking_total_price_pence ?? null,
+      addons: activeDetail?.addons,
+      addons_total_price_pence: activeDetail?.addons_total_price_pence ?? null,
+      amount_paid_pence: activeDetail?.amount_paid_pence ?? null,
+      payment_state: activeDetail?.payment_state ?? null,
+      balance_due_pence: activeDetail?.balance_due_pence ?? null,
+      visit_payment: activeDetail?.visit_payment ?? null,
+      payments: activeDetail?.payments,
+    }),
+    [booking.id, effectiveBooking.deposit_status, effectiveBooking.deposit_amount_pence, activeDetail],
+  );
 
   const guestHistoryInitialRows = useMemo(() => {
     const guestIdForHistory = activeDetail?.guest?.id ?? booking.guest_id ?? null;
@@ -1902,12 +1947,24 @@ export function ExpandedBookingContent({
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
           <span><span className="sm:hidden">Payments</span><span className="hidden sm:inline">Payments and confirmation</span></span>
-          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">{cardHoldState?.pill?.label ?? effectiveBooking.deposit_status}</span>
+          {/* The outstanding balance is the most useful money fact, so it shows
+              on the collapsed header rather than only inside (app parity). */}
+          <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
+            {cardHoldState?.pill?.label ??
+              (activeDetail?.balance_due_pence != null && activeDetail.balance_due_pence > 0
+                ? `${formatPence(activeDetail.balance_due_pence)} due`
+                : effectiveBooking.deposit_status)}
+          </span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </summary>
         <div className={`${bookingExpandAccordionBodyClass} space-y-2`}>
+          {/* What the visit costs, what has been paid (including anything taken
+              in person on the app), and the ledger. Read-only on the web: it
+              renders above the actions, and for linked view-only grants too,
+              because it is information rather than an action. */}
+          {activeDetail ? <BookingPaymentDetails booking={paymentDisplayBooking} /> : null}
           {!linkedViewOnly ? (
           <>
           {cardHoldState ? (

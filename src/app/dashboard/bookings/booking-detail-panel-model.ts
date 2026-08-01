@@ -2,6 +2,8 @@ import type { BookingModel } from '@/types/booking-models';
 import type { CardHoldSummary } from '@/components/booking/card-hold-ui-state';
 import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
 import type { BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/booking-detail-panel-snapshot';
+import type { BookingPaymentRow, VisitPayment } from '@/lib/booking/payment-display';
+import type { BookingPaymentState } from '@/lib/booking/payment-summary';
 
 export interface BookingDetailGuest {
   id: string;
@@ -90,6 +92,19 @@ export interface BookingDetail {
   }>;
   addons_total_price_pence?: number | null;
   addons_total_duration_minutes?: number | null;
+  /**
+   * In-person payments, returned by GET /api/venue/bookings/[id]. These were
+   * always in the payload but undeclared here, so the panel could not pass them
+   * on and the money block fell back to the list-row seed: a service name with
+   * "Price not set" and nothing else, even on a booking paid in the app.
+   */
+  service_variant_price_pence?: number | null;
+  booking_total_price_pence?: number | null;
+  amount_paid_pence?: number | null;
+  payment_state?: BookingPaymentState | null;
+  balance_due_pence?: number | null;
+  visit_payment?: VisitPayment | null;
+  payments?: BookingPaymentRow[];
   group_booking_id?: string | null;
   person_label?: string | null;
   guest_attendance_confirmed_at?: string | null;

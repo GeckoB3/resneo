@@ -16,6 +16,7 @@ import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEdit
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { ExpandedBookingContent } from './ExpandedBookingContent';
+import { toPaymentDisplayBooking } from '@/lib/booking/payment-display';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
@@ -896,6 +897,15 @@ export function BookingDetailPanel({
                 person_label: d.person_label ?? null,
               }}
               detail={undefined}
+              /* The full GET payload is already loaded here, so hand the money
+                 fields straight over rather than relying on the optional detail
+                 cache, which is absent outside its provider. */
+              paymentDetail={toPaymentDisplayBooking({
+                id: d.id,
+                depositStatus: d.deposit_status,
+                depositAmountPence: d.deposit_amount_pence,
+                source: d,
+              })}
               detailLoading={!isHydrated}
               tableManagementEnabled={tableManagementEnabled}
               venueId={d.venue_id || venueId || ''}

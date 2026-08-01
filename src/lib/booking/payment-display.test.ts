@@ -8,6 +8,7 @@ import {
   pendingCardPayments,
   pendingCardState,
   pendingCardTotalPence,
+  toPaymentDisplayBooking,
   PENDING_CARD_STALE_MS,
   type BookingPaymentRow,
   type PaymentDisplayBooking,
@@ -338,5 +339,77 @@ describe('pendingCardState', () => {
 
   it('assumes in flight when the row has no readable timestamp', () => {
     expect(pendingCardState({ payments: [at('not-a-date')], nowMs: NOW }).verdict).toBe('in_flight');
+  });
+});
+
+/**
+ * Regression cover for the bug that shipped: the booking detail reached the
+ * money block as a hand-built SUBSET (buildDetailForExpanded) or a list-row
+ * seed, both of which carry `service_variant_name` but no prices, no balance and
+ * no ledger. The panel then rendered "Short Hair / Price not set" and nothing
+ * else on a booking that had already been paid in the app.
+ */
+describe('toPaymentDisplayBooking', () => {
+  const FULL = {
+    service_variant_name: 'Short Hair',
+    service_variant_price_pence: 2500,
+    booking_total_price_pence: 2500,
+    amount_paid_pence: 2500,
+    payment_state: 'paid' as const,
+    balance_due_pence: 0,
+    payments: [
+      {
+        id: 'p1',
+        booking_id: 'bk-1',
+        method: 'card_present' as const,
+        status: 'succeeded' as const,
+        amount_pence: 2500,
+        note: null,
+        created_at: '2026-08-01T10:00:00Z',
+      },
+    ],
+  };
+
+  it('carries every money field through from the full detail payload', () => {
+    const out = toPaymentDisplayBooking({ id: 'bk-1', source: FULL });
+    expect(out.service_variant_price_pence).toBe(2500);
+    expect(out.amount_paid_pence).toBe(2500);
+    expect(out.payment_state).toBe('paid');
+    expect(out.balance_due_pence).toBe(0);
+    expect(out.payments).toHaveLength(1);
+
+    // And the summary reads as a paid booking, not an unpriced one.
+    const rows = buildPriceSummary(out);
+    expect(rows.map((r) => r.label)).toEqual(['Short Hair', 'Paid so far', 'Outstanding']);
+    expect(buildPaymentHistory(out.payments, 'bk-1')).toHaveLength(1);
+  });
+
+  it('reproduces the shipped bug when handed a name-only subset', () => {
+    // This is what buildDetailForExpanded and the list-row seed used to supply.
+    const out = toPaymentDisplayBooking({
+      id: 'bk-1',
+      source: { service_variant_name: 'Short Hair' },
+    });
+    const rows = buildPriceSummary(out);
+    expect(rows.map((r) => [r.label, r.note ?? null])).toEqual([['Short Hair', 'Price not set']]);
+    expect(buildPaymentHistory(out.payments, 'bk-1')).toEqual([]);
+  });
+
+  it('takes the deposit from the row so an optimistic action shows at once', () => {
+    const out = toPaymentDisplayBooking({
+      id: 'bk-1',
+      depositStatus: 'Paid',
+      depositAmountPence: 1000,
+      source: { service_variant_name: 'Cut', service_variant_price_pence: 4000, balance_due_pence: 3000, amount_paid_pence: 1000 },
+    });
+    expect(buildPriceSummary(out).map((r) => r.label)).toEqual([
+      'Cut',
+      'Deposit paid',
+      'Outstanding',
+    ]);
+  });
+
+  it('tolerates a missing source entirely', () => {
+    expect(buildPriceSummary(toPaymentDisplayBooking({ id: 'bk-1' }))).toEqual([]);
   });
 });

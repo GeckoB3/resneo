@@ -15,7 +15,9 @@ import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEdit
 import { BookingPaymentDetails } from '@/components/booking/BookingPaymentDetails';
 import {
   formatPence,
+  toPaymentDisplayBooking,
   type BookingPaymentRow,
+  type PaymentDisplayBooking,
   type VisitPayment,
 } from '@/lib/booking/payment-display';
 import type { BookingPaymentState } from '@/lib/booking/payment-summary';
@@ -332,9 +334,18 @@ export function ExpandedBookingContent({
   venueStaffEnabledBookingModels,
   linkedAct,
   initialGroupVisitBookings,
+  paymentDetail,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
+  /**
+   * Money fields for the read-only payments block, when the caller already
+   * holds the full booking payload. BookingDetailPanel passes `detail` as
+   * undefined and relies on the OPTIONAL detail cache, which is absent outside
+   * its provider and whose mutations the `activeDetail` memo cannot observe.
+   * Without this the payments block silently fell back to the list-row seed.
+   */
+  paymentDetail?: PaymentDisplayBooking;
   detailLoading: boolean;
   tableManagementEnabled: boolean;
   venueId: string;
@@ -695,22 +706,22 @@ export function ExpandedBookingContent({
    * full detail payload, and is simply absent until it hydrates.
    */
   const paymentDisplayBooking = useMemo(
-    () => ({
-      id: booking.id,
-      deposit_status: effectiveBooking.deposit_status,
-      deposit_amount_pence: effectiveBooking.deposit_amount_pence,
-      service_variant_name: activeDetail?.service_variant_name ?? null,
-      service_variant_price_pence: activeDetail?.service_variant_price_pence ?? null,
-      booking_total_price_pence: activeDetail?.booking_total_price_pence ?? null,
-      addons: activeDetail?.addons,
-      addons_total_price_pence: activeDetail?.addons_total_price_pence ?? null,
-      amount_paid_pence: activeDetail?.amount_paid_pence ?? null,
-      payment_state: activeDetail?.payment_state ?? null,
-      balance_due_pence: activeDetail?.balance_due_pence ?? null,
-      visit_payment: activeDetail?.visit_payment ?? null,
-      payments: activeDetail?.payments,
-    }),
-    [booking.id, effectiveBooking.deposit_status, effectiveBooking.deposit_amount_pence, activeDetail],
+    () =>
+      toPaymentDisplayBooking({
+        id: booking.id,
+        depositStatus: effectiveBooking.deposit_status,
+        depositAmountPence: effectiveBooking.deposit_amount_pence,
+        // A caller holding the full payload wins outright: `activeDetail` may be
+        // the list-row seed, which has a service name but no money fields.
+        source: paymentDetail ?? activeDetail,
+      }),
+    [
+      booking.id,
+      effectiveBooking.deposit_status,
+      effectiveBooking.deposit_amount_pence,
+      activeDetail,
+      paymentDetail,
+    ],
   );
 
   const guestHistoryInitialRows = useMemo(() => {
@@ -1951,8 +1962,9 @@ export function ExpandedBookingContent({
               on the collapsed header rather than only inside (app parity). */}
           <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
             {cardHoldState?.pill?.label ??
-              (activeDetail?.balance_due_pence != null && activeDetail.balance_due_pence > 0
-                ? `${formatPence(activeDetail.balance_due_pence)} due`
+              (paymentDisplayBooking.balance_due_pence != null &&
+              paymentDisplayBooking.balance_due_pence > 0
+                ? `${formatPence(paymentDisplayBooking.balance_due_pence)} due`
                 : effectiveBooking.deposit_status)}
           </span>
           <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -1964,7 +1976,7 @@ export function ExpandedBookingContent({
               in person on the app), and the ledger. Read-only on the web: it
               renders above the actions, and for linked view-only grants too,
               because it is information rather than an action. */}
-          {activeDetail ? <BookingPaymentDetails booking={paymentDisplayBooking} /> : null}
+          <BookingPaymentDetails booking={paymentDisplayBooking} />
           {!linkedViewOnly ? (
           <>
           {cardHoldState ? (

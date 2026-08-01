@@ -75,6 +75,43 @@ export interface PaymentDisplayBooking {
   payments?: BookingPaymentRow[];
 }
 
+/**
+ * Build the money view's input from a booking row plus whichever detail payload
+ * the caller has.
+ *
+ * `source` must be the FULL booking detail (the `GET /api/venue/bookings/[id]`
+ * body). Passing a list-row seed instead is the mistake that shipped once: the
+ * seed carries `service_variant_name` but no prices, no ledger and no balance,
+ * so a booking already paid in the app rendered as its service name and
+ * "Price not set" with nothing else.
+ *
+ * Deposit fields come from the row rather than `source` so an optimistic deposit
+ * action is reflected immediately.
+ */
+export function toPaymentDisplayBooking(args: {
+  id: string;
+  depositStatus?: string | null;
+  depositAmountPence?: number | null;
+  source?: Partial<PaymentDisplayBooking> | null;
+}): PaymentDisplayBooking {
+  const s = args.source ?? null;
+  return {
+    id: args.id,
+    deposit_status: args.depositStatus ?? null,
+    deposit_amount_pence: args.depositAmountPence ?? null,
+    service_variant_name: s?.service_variant_name ?? null,
+    service_variant_price_pence: s?.service_variant_price_pence ?? null,
+    booking_total_price_pence: s?.booking_total_price_pence ?? null,
+    addons: s?.addons,
+    addons_total_price_pence: s?.addons_total_price_pence ?? null,
+    amount_paid_pence: s?.amount_paid_pence ?? null,
+    payment_state: s?.payment_state ?? null,
+    balance_due_pence: s?.balance_due_pence ?? null,
+    visit_payment: s?.visit_payment ?? null,
+    payments: s?.payments,
+  };
+}
+
 /** Money for display. Falls back to a plain string if Intl is unavailable. */
 export function formatPence(pence: number | null | undefined): string | null {
   if (pence == null) return null;

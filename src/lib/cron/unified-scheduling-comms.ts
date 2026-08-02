@@ -13,6 +13,11 @@ import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import {
+  markReviewRequestSent,
+  shouldIncludeReviewRequest,
+  venueWithoutReviewRequest,
+} from '@/lib/reviews/review-request-eligibility';
+import {
   CRON_COMMS_TOLERANCE_MS,
   bookingCivilDatesForPostVisitWindow,
   bookingCivilDatesForReminderWindow,
@@ -354,15 +359,27 @@ async function runLanePostVisit(opts: {
       });
       booking = await enrichBookingEmailForComms(opts.supabase, row.id, booking);
 
+      // The six-month cap suppresses the review block, never the email itself.
+      const askForReview = await shouldIncludeReviewRequest(opts.supabase, {
+        venue: venueData,
+        guestId: row.guest_id ?? null,
+        nowMs,
+      });
+
       const email = await sendPolicyMessage({
         venueId: opts.venue.id,
         booking,
-        venue: venueData,
+        venue: askForReview ? venueData : venueWithoutReviewRequest(venueData),
         messageKey: 'post_visit_thankyou',
         channel: 'email',
         mode: 'dedupe',
         rebookLink: venueData.booking_page_url ?? null,
       });
+      // Stamp only on a send that actually carried the ask, so a deduped or failed send does not
+      // start the guest's six-month clock.
+      if (email.sent && askForReview && row.guest_id) {
+        await markReviewRequestSent(opts.supabase, row.guest_id);
+      }
       if (email.sent) {
         (
           opts.results as unknown as Record<'unified_post_visit' | 'cde_post_visit', number>

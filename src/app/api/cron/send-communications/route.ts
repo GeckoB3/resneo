@@ -11,6 +11,11 @@ import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/lib/cron/unified-scheduling-comms';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import {
+  markReviewRequestSent,
+  shouldIncludeReviewRequest,
+  venueWithoutReviewRequest,
+} from '@/lib/reviews/review-request-eligibility';
+import {
   getVenueCommunicationPolicies,
   inferCommunicationLaneFromBookingModel,
   type VenueCommunicationPolicies,
@@ -479,15 +484,25 @@ async function sendPostVisitThankYous(results: {
           });
           booking = await enrichBookingEmailForComms(supabase, bookingRow.id, booking);
 
+          // Six-month cap, suppressing the review block rather than the email.
+          const askForReview = await shouldIncludeReviewRequest(supabase, {
+            venue: venueData,
+            guestId: bookingRow.guest_id ?? null,
+            nowMs,
+          });
+
           const email = await sendPolicyMessage({
             venueId: venue.id,
             booking,
-            venue: venueData,
+            venue: askForReview ? venueData : venueWithoutReviewRequest(venueData),
             messageKey: 'post_visit_thankyou',
             channel: 'email',
             mode: 'dedupe',
             rebookLink: venueData.booking_page_url ?? null,
           });
+          if (email.sent && askForReview && bookingRow.guest_id) {
+            await markReviewRequestSent(supabase, bookingRow.guest_id);
+          }
           if (email.sent) results.post_visit++;
         } catch (error) {
           console.error('[post-visit] booking failed:', bookingRow.id, error);

@@ -13,6 +13,9 @@ export interface VenueRowForGuestEmail {
   timezone?: string | null;
   reply_to_email?: string | null;
   email?: string | null;
+  /** Google review request (post-visit thank-you only); both required for the block to render. */
+  google_review_url?: string | null;
+  review_request_enabled?: boolean | null;
 }
 
 function normalisedReplyTo(row: VenueRowForGuestEmail): string | null {
@@ -39,5 +42,7 @@ export function venueRowToEmailData(row: VenueRowForGuestEmail): VenueEmailData 
     booking_page_url: row.booking_page_url ?? undefined,
     timezone: row.timezone ?? undefined,
     reply_to_email: normalisedReplyTo(row),
+    google_review_url: row.google_review_url ?? null,
+    review_request_enabled: Boolean(row.review_request_enabled),
   };
 }

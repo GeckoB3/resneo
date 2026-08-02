@@ -11,6 +11,12 @@ export interface VenueEmailData {
   timezone?: string;
   /** Business inbox for Reply-To on guest emails; from Profile / venues.reply_to_email. */
   reply_to_email?: string | null;
+  /**
+   * Canonical Google write-a-review link, and whether the venue has asked for it to appear on the
+   * post-visit email. Both must be set for the review block to render.
+   */
+  google_review_url?: string | null;
+  review_request_enabled?: boolean | null;
 }
 
 /**

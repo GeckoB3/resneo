@@ -814,12 +814,6 @@ export function CommunicationTemplatesSection({
                 Test this link
               </a>
             ) : null}
-            {/* Venues ask for this constantly, so answer it before they build the wrong thing. */}
-            <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
-              There is no star picker in the email on purpose. Google does not let a rating be set
-              in advance, and showing the review link only to customers who rate you highly first
-              is against Google&apos;s review policies.
-            </p>
           </div>
         </div>
       </div>

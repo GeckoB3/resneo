@@ -3389,8 +3389,9 @@ export function AppointmentBookingFlow({
                       : 'Pick any';
                 return (
                   <fieldset key={grp.group.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <legend className="px-1 text-sm font-semibold text-slate-800">{label}</legend>
-                    <p className="mt-0.5 text-xs text-slate-500">{optHint}</p>
+                    {/* float+clear keeps the legend inside the card instead of straddling the top border */}
+                    <legend className="float-left w-full text-sm font-semibold text-slate-800">{label}</legend>
+                    <p className="mt-0.5 clear-both text-xs text-slate-500">{optHint}</p>
                     <ul className="mt-3 space-y-2">
                       {grp.addons.map((a) => {
                         const checked = selectedIds.has(a.id);
@@ -4727,8 +4728,9 @@ export function AppointmentBookingFlow({
                       : 'Pick any';
                 return (
                   <fieldset key={grp.group.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <legend className="px-1 text-sm font-semibold text-slate-800">{label}</legend>
-                    <p className="mt-0.5 text-xs text-slate-500">{optHint}</p>
+                    {/* float+clear keeps the legend inside the card instead of straddling the top border */}
+                    <legend className="float-left w-full text-sm font-semibold text-slate-800">{label}</legend>
+                    <p className="mt-0.5 clear-both text-xs text-slate-500">{optHint}</p>
                     <ul className="mt-3 space-y-2">
                       {grp.addons.map((a) => {
                         const checked = selectedIds.has(a.id);

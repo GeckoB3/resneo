@@ -556,10 +556,11 @@ export function DetailsStep({
 
         {collectClientAddress && (
           <fieldset className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-            <legend className="px-1 text-sm font-semibold text-slate-800">
+            {/* float+clear keeps the legend inside the card instead of straddling the top border */}
+            <legend className="float-left mb-1 w-full text-sm font-semibold text-slate-800">
               {audience === 'public' ? 'Your address' : "Client's address"}
             </legend>
-            <p className="-mt-2 text-xs text-slate-500">
+            <p className="clear-both text-xs text-slate-500">
               {audience === 'public'
                 ? 'This service takes place at your address, so we need to know where to come.'
                 : 'This service takes place at the client’s address.'}

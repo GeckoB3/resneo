@@ -116,6 +116,13 @@ export interface BookingDetail {
   client_address_line2?: string | null;
   client_address_city?: string | null;
   client_address_postcode?: string | null;
+  /**
+   * Online joining details, resolved live from the service by GET /api/venue/bookings/[id] and
+   * only for `location_type === 'online'`. Live rather than snapshotted so a corrected link
+   * reaches the team, matching what the reminder emails send the client.
+   */
+  online_meeting_url?: string | null;
+  online_meeting_info?: string | null;
 }
 
 export interface AssignmentSuggestion {

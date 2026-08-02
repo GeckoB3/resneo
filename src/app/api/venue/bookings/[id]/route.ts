@@ -56,6 +56,7 @@ import { offerAppointmentWaitlistOnCancel } from '@/lib/booking/offer-appointmen
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
+import { resolveServiceLocation } from '@/lib/booking/service-location';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
 import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
 import { buildAddonSnapshots, totalsFromSnapshots } from '@/lib/addons/snapshot-addons';
@@ -173,7 +174,7 @@ export async function GET(
     const inferredForRefund = inferBookingRowModel(
       booking as Parameters<typeof inferBookingRowModel>[0],
     );
-    const [detailBundle, cde_context, practitioner_name, refund_notice_hours, holdRes, service_payment_requirement] = await Promise.all([
+    const [detailBundle, cde_context, practitioner_name, refund_notice_hours, holdRes, service_payment_requirement, onlineLocation] = await Promise.all([
       loadStaffBookingDetailBundle(scopeDb, id, scopeVenueId, { includeTimeline: true }),
       resolveCdeBookingContext(scopeDb, booking as Parameters<typeof resolveCdeBookingContext>[1]),
       resolveBookingStaffName(
@@ -213,6 +214,16 @@ export async function GET(
         scopeDb,
         booking as { appointment_service_id?: string | null; service_item_id?: string | null },
       ),
+      // Online joining details for the staff location callout. Read live from the service (the
+      // same rule the emails follow) so a corrected link reaches the team, and only queried for
+      // online bookings so every other booking keeps its current query count.
+      (booking as { location_type?: string | null }).location_type === 'online'
+        ? resolveServiceLocation(scopeDb, scopeVenueId, {
+            serviceItemId: (booking as { service_item_id?: string | null }).service_item_id ?? null,
+            appointmentServiceId:
+              (booking as { appointment_service_id?: string | null }).appointment_service_id ?? null,
+          })
+        : Promise.resolve(null),
     ]);
 
     if (!detailBundle) {
@@ -374,6 +385,8 @@ export async function GET(
       refund_notice_hours,
       card_hold,
       service_payment_requirement,
+      online_meeting_url: onlineLocation?.onlineMeetingUrl ?? null,
+      online_meeting_info: onlineLocation?.onlineMeetingInfo ?? null,
       booking_total_price_pence: visit.anchorTotalPence,
       amount_paid_pence: visit.amountPaidPence,
       payment_state: visit.paymentState,

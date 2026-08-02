@@ -1,4 +1,5 @@
 import { isServiceCustomScheduleEmpty } from '@/lib/service-custom-availability';
+import { sanitizeBookingStartTimes } from '@/lib/appointments/booking-interval';
 import type { AppointmentServiceFormValues } from '@/components/dashboard/appointment-services/appointment-service-form-values';
 
 /** Parse a pounds string ("12.50") to integer pence, or null when empty/invalid. */
@@ -133,6 +134,8 @@ export function appointmentServiceFormToPayload(
     return { ok: false, error: 'Select at least one calendar column to offer this service on.' };
   }
 
+  const cleanedStartTimes = sanitizeBookingStartTimes(form.booking_start_times ?? []);
+
   const usesVariantsPayload = isAdmin && form.variants.length > 0;
   const primaryForParent =
     usesVariantsPayload && form.variants.length > 0
@@ -169,6 +172,8 @@ export function appointmentServiceFormToPayload(
     allow_same_day_booking: form.allow_same_day_booking,
     booking_interval_minutes: form.booking_interval_minutes,
     booking_minute_marks: form.booking_minute_marks,
+    // Blank rows and repeats are an editing artefact, and an empty result means "use the interval".
+    booking_start_times: cleanedStartTimes.length > 0 ? cleanedStartTimes : null,
   };
   if (isAdmin) {
     payload.staff_may_customize_name = form.staffMay.name;

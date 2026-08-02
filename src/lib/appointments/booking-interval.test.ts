@@ -5,7 +5,6 @@ import {
   candidateStartMinutes,
   describeBookingStartOffsets,
   describeBookingStartTimes,
-  effectiveBookingStartOffsets,
   normalizeBookingIntervalMinutes,
   normalizeBookingStartForStorage,
   sanitizeBookingMinuteMarks,
@@ -48,43 +47,6 @@ describe('sanitizeBookingMinuteMarks', () => {
 
   it('returns [] for non-arrays', () => {
     expect(sanitizeBookingMinuteMarks(null, 5)).toEqual([]);
-  });
-});
-
-describe('effectiveBookingStartOffsets', () => {
-  it('uses the full grid when no marks restrict it', () => {
-    expect(effectiveBookingStartOffsets({ interval_minutes: 15, minute_marks: null }).offsets).toEqual([
-      0, 15, 30, 45,
-    ]);
-  });
-
-  it('example 1: every 5 minutes for the first half of the hour', () => {
-    const { offsets } = effectiveBookingStartOffsets({
-      interval_minutes: 5,
-      minute_marks: [0, 5, 10, 15, 20, 25],
-    });
-    expect(offsets).toEqual([0, 5, 10, 15, 20, 25]);
-  });
-
-  it('example 2: on the hour and quarter past only', () => {
-    const { offsets } = effectiveBookingStartOffsets({
-      interval_minutes: 15,
-      minute_marks: [0, 15],
-    });
-    expect(offsets).toEqual([0, 15]);
-  });
-
-  it('falls back to the grid when marks cover everything or nothing', () => {
-    expect(effectiveBookingStartOffsets({ interval_minutes: 15, minute_marks: [0, 15, 30, 45] }).offsets).toEqual(
-      [0, 15, 30, 45],
-    );
-    expect(effectiveBookingStartOffsets({ interval_minutes: 15, minute_marks: [] }).offsets).toEqual([
-      0, 15, 30, 45,
-    ]);
-  });
-
-  it('defaults to a 15-minute grid for legacy rows with no settings', () => {
-    expect(effectiveBookingStartOffsets({}).offsets).toEqual([0, 15, 30, 45]);
   });
 });
 

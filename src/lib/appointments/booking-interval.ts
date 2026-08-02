@@ -50,28 +50,6 @@ export function sanitizeBookingMinuteMarks(raw: unknown, intervalMinutes: number
   ].sort((a, b) => a - b);
 }
 
-/**
- * Resolve the effective set of allowed start-minute offsets for a service.
- * Returns the explicit marks when they genuinely restrict the grid; otherwise the full interval grid.
- *
- * Describes the interval grid only. A service using fixed start times ignores the grid entirely, so
- * do not use this to decide when a service is bookable: use {@link candidateStartMinutes}.
- */
-export function effectiveBookingStartOffsets(params: {
-  interval_minutes?: number | null;
-  minute_marks?: number[] | null;
-}): { intervalMinutes: number; offsets: number[] } {
-  const intervalMinutes = normalizeBookingIntervalMinutes(
-    params.interval_minutes ?? DEFAULT_BOOKING_INTERVAL_MINUTES,
-  );
-  const grid = bookingIntervalGrid(intervalMinutes);
-  const marks = sanitizeBookingMinuteMarks(params.minute_marks ?? null, intervalMinutes);
-  if (marks.length > 0 && marks.length < grid.length) {
-    return { intervalMinutes, offsets: marks };
-  }
-  return { intervalMinutes, offsets: grid };
-}
-
 /** `HH:MM` on a 24-hour clock. */
 const START_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 

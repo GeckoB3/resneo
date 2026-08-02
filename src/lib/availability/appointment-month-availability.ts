@@ -138,7 +138,8 @@ function venueOpeningExceptionsForDate(
   return parseVenueOpeningExceptions(venueClockRow.venue_opening_exceptions);
 }
 
-function mapServiceItemToAppointmentService(raw: Record<string, unknown>, venueId: string): AppointmentService {
+/** Exported for tests: the month view and the day view must map service rows identically. */
+export function mapServiceItemToAppointmentService(raw: Record<string, unknown>, venueId: string): AppointmentService {
   return {
     id: raw.id as string,
     venue_id: venueId,
@@ -155,6 +156,11 @@ function mapServiceItemToAppointmentService(raw: Record<string, unknown>, venueI
     is_active: raw.is_active !== false,
     sort_order: (raw.sort_order as number) ?? 0,
     created_at: (raw.created_at as string) ?? new Date().toISOString(),
+    // Candidate start times must match the day view exactly, or a date shows a green dot and then
+    // offers no slots (or hides a date that is genuinely bookable).
+    booking_interval_minutes: (raw.booking_interval_minutes as number | undefined) ?? undefined,
+    booking_minute_marks: (raw.booking_minute_marks as number[] | null | undefined) ?? null,
+    booking_start_times: (raw.booking_start_times as string[] | null | undefined) ?? null,
     custom_availability_enabled: Boolean(raw.custom_availability_enabled),
     custom_working_hours: parseCustomWorkingHoursFromDb(raw.custom_working_hours),
   };

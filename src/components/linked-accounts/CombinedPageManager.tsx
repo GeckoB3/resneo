@@ -1249,8 +1249,9 @@ function ItemCard({
       </div>
 
       <p className="mt-1 px-1 text-xs text-slate-500">
-        Price, duration, description, photo, variants and add-ons all come from each venue&apos;s own
-        service settings (Dashboard → Services). Here you only choose which calendars offer it.
+        Price, duration, description, variants and add-ons all come from each venue&apos;s own service
+        settings (Dashboard → Services). Here you choose which calendars offer it. The photo for this
+        shared page is yours to set, on the Page tab.
       </p>
 
       <CalendarAssignment

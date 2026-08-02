@@ -2680,6 +2680,13 @@ export function AppointmentBookingFlow({
   const choiceCardClass = isPublicGuest
     ? 'ap-choice-card w-full text-left'
     : 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
+  // Cards that carry a description split the visual shell (border, padding, hover) from the click
+  // target, so an expand toggle can sit inside the card without nesting a button inside a button.
+  // Padding stays on the shell so the toggle lines up with the text above it.
+  const choiceCardShellClass = isPublicGuest
+    ? 'ap-choice-card'
+    : 'rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
+  const choiceCardTargetClass = 'w-full text-left';
   const publicDetailsFieldProps = isPublicGuest
     ? { submitClassName: APPOINTMENT_DETAILS_SUBMIT_CLASS, fieldClassName: APPOINTMENT_DETAILS_INPUT_CLASS }
     : {};
@@ -2852,11 +2859,11 @@ export function AppointmentBookingFlow({
 
                 if (!isStaff) {
                   return (
+                    <div key={svc.id} className={choiceCardShellClass}>
                     <button
-                      key={svc.id}
                       type="button"
                       onClick={navigateFromServiceRow}
-                      className={choiceCardClass}
+                      className={choiceCardTargetClass}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -2884,6 +2891,7 @@ export function AppointmentBookingFlow({
                         </div>
                       </div>
                     </button>
+                    </div>
                   );
                 }
 
@@ -3021,8 +3029,8 @@ export function AppointmentBookingFlow({
 
               if (!isStaff) {
                 return (
+                  <div key={variant.id} className={choiceCardShellClass}>
                   <button
-                    key={variant.id}
                     type="button"
                     onClick={() => {
                       setSelectedVariantId(variant.id);
@@ -3066,7 +3074,7 @@ export function AppointmentBookingFlow({
                       }
                       setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
                     }}
-                    className={choiceCardClass}
+                    className={choiceCardTargetClass}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -3085,6 +3093,7 @@ export function AppointmentBookingFlow({
                       </svg>
                     </div>
                   </button>
+                  </div>
                 );
               }
 
@@ -3976,13 +3985,13 @@ export function AppointmentBookingFlow({
               {variants.map((variant) => {
                 const variantBusy = appendingVariantId === variant.id;
                 return (
+                  <div key={variant.id} className={choiceCardShellClass}>
                   <button
-                    key={variant.id}
                     type="button"
                     disabled={appendingVariantId != null}
                     aria-busy={variantBusy}
                     onClick={() => void pickVariant(variant.id)}
-                    className={`${choiceCardClass} disabled:cursor-not-allowed disabled:opacity-60`}
+                    className={`${choiceCardTargetClass} disabled:cursor-not-allowed disabled:opacity-60`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -4005,6 +4014,7 @@ export function AppointmentBookingFlow({
                       )}
                     </div>
                   </button>
+                  </div>
                 );
               })}
             </div>
@@ -4514,8 +4524,8 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {servicesWithFromPrice.map((svc) => (
+                <div key={svc.id} className={choiceCardShellClass}>
                 <button
-                  key={svc.id}
                   type="button"
                   onClick={() => {
                     queuePrefetchForServicePractitioners(svc.id);
@@ -4528,7 +4538,7 @@ export function AppointmentBookingFlow({
                       hasVariants ? 'group_variant' : hasAddons ? 'group_addons' : 'group_practitioner',
                     );
                   }}
-                  className={choiceCardClass}
+                  className={choiceCardTargetClass}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -4544,6 +4554,7 @@ export function AppointmentBookingFlow({
                     </div>
                   </div>
                 </button>
+                </div>
               ))}
             </div>
           )}

@@ -911,10 +911,10 @@ export async function POST(request: NextRequest) {
         cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
         allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
         ...normalizeBookingStartForStorage(
-        parsed.data.booking_interval_minutes,
-        parsed.data.booking_minute_marks,
-        parsed.data.booking_start_times,
-      ),
+          parsed.data.booking_interval_minutes,
+          parsed.data.booking_minute_marks,
+          parsed.data.booking_start_times,
+        ),
         ...locationInsertFields(parsed.data),
         ...(staff.role === 'admin'
           ? {

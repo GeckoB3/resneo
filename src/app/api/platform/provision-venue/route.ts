@@ -129,6 +129,7 @@ export async function POST(request: Request) {
       onboarding_step: 0,
       onboarding_completed: false,
       appointments_onboarding_unified_flow: isAppointmentPlanTier(body.plan),
+      appointments_onboarding_lean_flow: true,
       email: ownerEmail,
       enabled_models: enabledModels,
       daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,

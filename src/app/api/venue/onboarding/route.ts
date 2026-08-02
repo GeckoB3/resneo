@@ -36,6 +36,10 @@ export async function PATCH(request: Request) {
       updates.appointments_onboarding_unified_flow = body.appointments_onboarding_unified_flow;
     }
 
+    if (typeof body.appointments_onboarding_lean_flow === 'boolean') {
+      updates.appointments_onboarding_lean_flow = body.appointments_onboarding_lean_flow;
+    }
+
     if (typeof body.onboarding_completed === 'boolean') {
       updates.onboarding_completed = body.onboarding_completed;
     }
@@ -209,12 +213,20 @@ export async function GET() {
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .select(
-        'id, name, slug, address, phone, email, website_url, booking_model, enabled_models, active_booking_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, appointments_onboarding_unified_flow, currency, stripe_connected_account_id'
+        'id, name, slug, address, phone, email, website_url, booking_model, enabled_models, active_booking_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, appointments_onboarding_unified_flow, appointments_onboarding_lean_flow, currency, stripe_connected_account_id'
       )
       .eq('id', staff.venue_id)
       .single();
 
     if (venueError || !venue) {
+      // A select failure here (most likely a column missing on an unmigrated database)
+      // is indistinguishable from a genuinely absent venue in the response, and it takes
+      // the whole onboarding wizard down. Log the cause so it is not mistaken for one.
+      if (venueError) {
+        console.error('[GET /api/venue/onboarding] venue select failed:', venueError.message, {
+          venueId: staff.venue_id,
+        });
+      }
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 

@@ -7,9 +7,18 @@ import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
-import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 import { slugFromBusinessNameOrFallback } from '@/lib/venue/slug-from-business-name';
+import { resolvePreviewCatalogState } from '@/lib/venue/onboarding-preview-catalog';
+import {
+  type AppointmentPlanModel,
+  type OnboardingStepDef,
+  buildAppointmentsPlanModelSteps,
+  buildCatalogueAppointmentsPlanSteps,
+  buildLegacyAppointmentsPlanModelSteps,
+  isAppointmentPlanModel,
+  migrateOnboardingStepToCurrentLayout,
+} from '@/lib/venue/onboarding-steps';
 import { defaultCalendarWorkingHoursFromOpeningHours } from '@/lib/availability/opening-hours-to-working-hours';
 import {
   defaultPractitionerWorkingHours,
@@ -100,6 +109,8 @@ interface VenueOnboarding {
   onboarding_completed: boolean;
   /** When true, `onboarding_step` uses the unified appointments wizard (Stripe near the end). */
   appointments_onboarding_unified_flow?: boolean;
+  /** When true, `onboarding_step` uses the lean wizard (no catalogue or Stripe steps). */
+  appointments_onboarding_lean_flow?: boolean;
   currency: Currency;
   stripe_connected_account_id: string | null;
   /** True when the signed-in user is a venue admin (only admins can run Stripe Connect). */
@@ -407,17 +418,12 @@ function createEmptyResourceDraft(hostCalendarId: string): ResourceDraft {
   };
 }
 
-type AppointmentPlanModel = 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking';
 const APPOINTMENTS_MODEL_LABEL: Record<AppointmentPlanModel, string> = {
   unified_scheduling: 'Appointments',
   class_session: 'Classes',
   event_ticket: 'Events',
   resource_booking: 'Bookable resources',
 };
-
-function isAppointmentPlanModel(model: BookingModel): model is AppointmentPlanModel {
-  return APPOINTMENTS_ACTIVE_MODEL_ORDER.includes(model as AppointmentPlanModel);
-}
 
 /** Plan §8.2 Step 2: heading adapts to terminology (team / calendars). */
 function unifiedTeamStepLabel(terms: { staff: string }): string {
@@ -443,8 +449,6 @@ function onboardingRosterFromPractitioners(
     .filter((p) => (p.calendar_type ?? 'practitioner') !== 'resource')
     .map((p) => ({ id: p.id, name: p.name }));
 }
-
-type OnboardingStepDef = { key: string; label: string };
 
 /**
  * Legacy layout used for Appointments Plus before unified flow: profile → Stripe → model steps → preview.
@@ -479,118 +483,6 @@ function buildLegacyGenericNonRestaurantOnboardingSteps(
   }
   steps.push({ key: 'preview', label: 'Preview & Go Live' });
   return steps;
-}
-
-/**
- * Every Appointments-plan booking model uses team calendar columns (`unified_calendars`) for at least one flow
- * (appointments, classes, events, resources), so per-calendar working hours belong in onboarding whenever any
- * model is enabled, not only when `unified_scheduling` is selected.
- */
-function appointmentsPlanNeedsCalendarAvailabilityStep(activeModels: AppointmentPlanModel[]): boolean {
-  return activeModels.length > 0;
-}
-
-/** Appointments plan: calendars → calendar hours → optional staff invites → model setup → Stripe → review. */
-function buildAppointmentsPlanModelSteps(
-  activeModels: AppointmentPlanModel[],
-  options?: { omitOtherUsersStep?: boolean },
-): OnboardingStepDef[] {
-  const steps: OnboardingStepDef[] = [
-    { key: 'welcome', label: 'Welcome' },
-    { key: 'profile', label: 'Business Details' },
-    { key: 'opening_hours', label: 'Opening Hours' },
-    { key: 'team', label: 'Calendars' },
-  ];
-  if (appointmentsPlanNeedsCalendarAvailabilityStep(activeModels)) {
-    steps.push({ key: 'hours', label: 'Calendar Availability' });
-  }
-  if (!options?.omitOtherUsersStep) {
-    steps.push({ key: 'users', label: 'Invite Your Team' });
-  }
-  for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
-    if (!activeModels.includes(model)) continue;
-    if (model === 'unified_scheduling') {
-      steps.push({ key: 'services', label: 'Appointments Setup' });
-    }
-    if (model === 'class_session') {
-      steps.push({ key: 'classes', label: 'Classes Setup' });
-    }
-    if (model === 'event_ticket') {
-      steps.push({ key: 'first_event', label: 'Events Setup' });
-    }
-    if (model === 'resource_booking') {
-      steps.push({ key: 'resources', label: 'Resources Setup' });
-    }
-  }
-  steps.push({ key: 'dashboard', label: 'Your Dashboard' });
-  steps.push({ key: 'stripe_onboarding', label: 'Payments (Stripe)' });
-  steps.push({ key: 'preview', label: 'Review & Go Live' });
-  return steps;
-}
-
-/**
- * Previous appointments step order (Stripe before staff; appointments setup before calendar hours).
- * Used only to remap stored `onboarding_step` indices for users mid-flow when the flow order changes.
- */
-function buildLegacyAppointmentsPlanModelSteps(activeModels: AppointmentPlanModel[]): OnboardingStepDef[] {
-  const steps: OnboardingStepDef[] = [
-    { key: 'welcome', label: 'Welcome' },
-    { key: 'profile', label: 'Business Details' },
-    { key: 'opening_hours', label: 'Opening Hours' },
-    { key: 'team', label: 'Calendars' },
-    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
-    { key: 'users', label: 'Other Users' },
-  ];
-  for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
-    if (!activeModels.includes(model)) continue;
-    if (model === 'unified_scheduling') {
-      steps.push({ key: 'services', label: 'Appointments Setup' });
-      steps.push({ key: 'hours', label: 'Calendar Availability' });
-    }
-    if (model === 'class_session') {
-      steps.push({ key: 'classes', label: 'Classes Setup' });
-    }
-    if (model === 'event_ticket') {
-      steps.push({ key: 'first_event', label: 'Events Setup' });
-    }
-    if (model === 'resource_booking') {
-      steps.push({ key: 'resources', label: 'Resources Setup' });
-    }
-  }
-  steps.push({ key: 'preview', label: 'Review & Go Live' });
-  return steps;
-}
-
-function migrateOnboardingStepToCurrentLayout(
-  storedIndex: number,
-  legacySteps: OnboardingStepDef[],
-  currentSteps: OnboardingStepDef[],
-): number {
-  const legacyKey = legacySteps[storedIndex]?.key;
-  if (!legacyKey) {
-    return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
-  }
-  let idx = currentSteps.findIndex((s) => s.key === legacyKey);
-  if (idx < 0 && legacyKey === 'users') {
-    const priority: Array<OnboardingStepDef['key']> = [
-      'services',
-      'classes',
-      'first_event',
-      'resources',
-      'dashboard',
-      'stripe_onboarding',
-      'preview',
-    ];
-    for (const key of priority) {
-      const j = currentSteps.findIndex((s) => s.key === key);
-      if (j >= 0) {
-        idx = j;
-        break;
-      }
-    }
-  }
-  if (idx >= 0) return idx;
-  return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
 }
 
 /** Restaurant plan onboarding (current layout: one step for services + capacity + duration + rules). */
@@ -982,18 +874,30 @@ export default function OnboardingPage() {
               omitOtherUsersStep: v.pricing_tier === 'light',
             });
             const unifiedFlow = Boolean(v.appointments_onboarding_unified_flow);
+            const leanFlow = Boolean(v.appointments_onboarding_lean_flow);
 
-            if (!unifiedFlow) {
-              const legacySteps = isPlusPlanTier(v.pricing_tier)
-                ? buildLegacyGenericNonRestaurantOnboardingSteps(v.booking_model, v.terminology)
-                : buildLegacyAppointmentsPlanModelSteps(active);
+            // Two one-shot remaps, each gated by its own marker column. `!unifiedFlow`
+            // covers venues still on the pre-unified layout; `!leanFlow` covers venues
+            // mid-flow when the catalogue and Stripe steps were dropped. A venue needing
+            // the first also gets the second for free, since the target is already lean.
+            if (!unifiedFlow || !leanFlow) {
+              const legacySteps = !unifiedFlow
+                ? isPlusPlanTier(v.pricing_tier)
+                  ? buildLegacyGenericNonRestaurantOnboardingSteps(v.booking_model, v.terminology)
+                  : buildLegacyAppointmentsPlanModelSteps(active)
+                : buildCatalogueAppointmentsPlanSteps(active, {
+                    omitOtherUsersStep: v.pricing_tier === 'light',
+                  });
               initialStep = migrateOnboardingStepToCurrentLayout(
                 v.onboarding_step,
                 legacySteps,
                 currentSteps,
               );
               initialMaxStep = initialStep;
-              const patch: Record<string, unknown> = { appointments_onboarding_unified_flow: true };
+              const patch: Record<string, unknown> = {
+                appointments_onboarding_unified_flow: true,
+                appointments_onboarding_lean_flow: true,
+              };
               if (initialStep !== v.onboarding_step) {
                 patch.onboarding_step = initialStep;
               }
@@ -1112,6 +1016,17 @@ export default function OnboardingPage() {
     [venue?.active_booking_models],
   );
 
+  /**
+   * Whether guests can actually book anything, read on the final step only. Null while
+   * loading or if the call fails, in which case the copy stays neutral rather than
+   * claiming a catalogue that may not exist. `booking_model` comes from the same
+   * response so it matches the model the flag was computed for.
+   */
+  const [previewStatus, setPreviewStatus] = useState<{
+    bookingReady: boolean;
+    bookingModel: BookingModel;
+  } | null>(null);
+
   /** Normalised secondaries (e.g. restaurant + events). Primary flow is unchanged; checklist on dashboard covers catalogue for each enabled add-on. */
   const enabledSecondaryModels = useMemo(
     () =>
@@ -1162,6 +1077,47 @@ export default function OnboardingPage() {
 
   const currentStepKey = modelSteps[step]?.key ?? 'profile';
   const totalSteps = modelSteps.length;
+
+  /**
+   * The final screen used to assert that services were set and hand over the booking
+   * link regardless. Read the same `guest_booking_ready` flag the dashboard checklist
+   * uses so the copy matches what a guest would actually find on the page.
+   *
+   * Fetched from the `dashboard` step onwards (two steps ahead of `preview`) so the
+   * final screen does not visibly flip from "You're all set!" to the corrected
+   * heading once the answer arrives. Flows without a `dashboard` step just resolve on
+   * arrival. The previous value is deliberately kept while refetching, for the same reason.
+   */
+  useEffect(() => {
+    if (currentStepKey !== 'preview' && currentStepKey !== 'dashboard') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/venue/setup-status');
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as {
+          guest_booking_ready?: boolean;
+          booking_model?: BookingModel;
+        };
+        if (cancelled || !body.booking_model) return;
+        setPreviewStatus({
+          bookingReady: body.guest_booking_ready === true,
+          bookingModel: body.booking_model,
+        });
+      } catch {
+        /* non-blocking: status stays null and the copy stays neutral */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStepKey]);
+
+  const previewCatalog = resolvePreviewCatalogState(previewStatus);
+  /** Non-null only once we know nothing is bookable yet, and what is missing. */
+  const previewMissing = previewCatalog.kind === 'missing' ? previewCatalog : null;
+  /** Only claim a catalogue exists when the server confirmed it. */
+  const previewCatalogConfirmed = previewCatalog.kind === 'ready';
 
   useEffect(() => {
     if (handledStripeReturnRef.current) return;
@@ -2653,7 +2609,7 @@ export default function OnboardingPage() {
               </p>
             ) : isPlusPlanTier(venue.pricing_tier) ? (
               <p className="mb-4 text-sm text-slate-500">
-                Add a <strong>calendar column</strong> for each lane on your schedule — your Appointments
+                Add a <strong>calendar column</strong> for each lane on your schedule. Your Appointments
                 Plus plan includes up to <strong>5 calendar columns</strong>. You can add or remove columns
                 any time from{' '}
                 <Link
@@ -3991,7 +3947,7 @@ export default function OnboardingPage() {
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     />
                     <p className="mt-1 text-[11px] text-slate-500">
-                      Optional. Quick picks (tap to fill — you can still edit the text):
+                      Optional. Quick picks (tap to fill, you can still edit the text):
                     </p>
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {RESOURCE_TYPE_SUGGESTIONS.map((s) => (
@@ -4035,7 +3991,7 @@ export default function OnboardingPage() {
                       only if their weekly hours do not overlap (e.g. 9–1 vs 3–6).
                       {venue.is_admin && (
                         <span className="mt-1 block text-slate-600">
-                          Staff can only manage resources tied to calendars they control — choose the column accordingly.
+                          Staff can only manage resources tied to calendars they control, so choose the column accordingly.
                         </span>
                       )}
                     </p>
@@ -4386,21 +4342,40 @@ export default function OnboardingPage() {
         {currentStepKey === 'preview' && (
           <div className="text-center">
             <div className="mb-4 flex justify-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-50">
+              <div
+                className={`flex h-16 w-16 items-center justify-center rounded-full ${
+                  previewMissing ? 'bg-amber-50' : 'bg-brand-50'
+                }`}
+              >
                 <svg
-                  className="h-8 w-8 text-brand-600"
+                  className={`h-8 w-8 ${previewMissing ? 'text-amber-600' : 'text-brand-600'}`}
                   fill="none"
                   viewBox="0 0 24 24"
                   strokeWidth={2}
                   stroke="currentColor"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                  {previewMissing ? (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                    />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                  )}
                 </svg>
               </div>
             </div>
-            <h2 className="mb-2 text-lg font-bold text-slate-900">You&apos;re all set!</h2>
+            <h2 className="mb-2 text-lg font-bold text-slate-900">
+              {previewMissing ? 'Your calendars are ready' : "You're all set!"}
+            </h2>
             <p className="mb-4 text-sm text-slate-500">
-              {venue.booking_model === 'table_reservation' ? (
+              {previewMissing ? (
+                <>
+                  Your business details, opening hours, and calendars are saved. There is one thing left
+                  before guests can book.
+                </>
+              ) : venue.booking_model === 'table_reservation' ? (
                 <>
                   Your restaurant is ready. Share your booking link below and guests can start making reservations
                   straight away. Refine settings any time from the Availability dashboard.
@@ -4447,17 +4422,31 @@ export default function OnboardingPage() {
                 </p>
               </div>
             )}
-            {(isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model)) && (
+            {/* `previewMissing` also opens this block for models outside the appointments plan,
+                so a venue with an empty catalogue is always told what is left. */}
+            {(isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model) || previewMissing) && (
               <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
-                  Before you go live
+                  {previewMissing ? 'One more thing before guests can book' : 'Before you go live'}
                 </p>
                 <p className="mb-3 text-sm text-slate-700">
-                  {!isAppointmentsPlanVenue || activeAppointmentsModels.includes('unified_scheduling')
-                    ? 'You have already set services, opening hours, and working hours. Before taking paid bookings, finish Stripe Connect and any advanced availability rules in the dashboard:'
-                    : 'You have already set opening hours and calendar availability for your team columns. Before taking paid bookings, finish Stripe Connect and refine availability in the dashboard:'}
+                  {previewMissing
+                    ? `Add at least one ${previewMissing.noun} and your booking page goes live straight away. Your dashboard has a short checklist with everything that is left:`
+                    : previewCatalogConfirmed &&
+                        (!isAppointmentsPlanVenue ||
+                          activeAppointmentsModels.includes('unified_scheduling'))
+                      ? 'You have already set services, opening hours, and working hours. Before taking paid bookings, finish Stripe Connect and any advanced availability rules in the dashboard:'
+                      : 'You have already set opening hours and calendar availability for your team columns. Before taking paid bookings, finish Stripe Connect and refine availability in the dashboard:'}
                 </p>
                 <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
+                  {previewMissing && (
+                    <li>
+                      <Link href={previewMissing.href} className="font-medium text-brand-600 underline hover:text-brand-700">
+                        {previewMissing.linkLabel}
+                      </Link>
+                      : add your first {previewMissing.noun}
+                    </li>
+                  )}
                   <li>
                     <Link href="/dashboard/settings" className="font-medium text-brand-600 underline hover:text-brand-700">
                       Settings
@@ -4509,11 +4498,18 @@ export default function OnboardingPage() {
             )}
             {venue.slug && (
               <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-medium text-slate-400 mb-1">Your booking page</p>
+                <p className="text-xs font-medium text-slate-400 mb-1">
+                  {previewMissing ? 'Your booking page address' : 'Your booking page'}
+                </p>
                 <p className="text-sm font-medium text-brand-600 break-all">
                   {typeof window !== 'undefined' ? window.location.origin : ''}/book/
                   {venue.slug}
                 </p>
+                {previewMissing && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Guests will see an empty page until you add your first {previewMissing.noun}.
+                  </p>
+                )}
               </div>
             )}
           </div>

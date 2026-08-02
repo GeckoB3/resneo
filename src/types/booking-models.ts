@@ -193,6 +193,11 @@ export interface AppointmentService {
    */
   booking_minute_marks?: number[] | null;
   /**
+   * Optional fixed start times of day (`HH:MM`). When set, these replace the interval grid entirely,
+   * e.g. ["09:20","11:30","13:45","15:30"]. `null`/omitted = use the interval and minute marks.
+   */
+  booking_start_times?: string[] | null;
+  /**
    * When true, guest bookable slots for this service are the intersection of
    * venue + calendar hours with `custom_working_hours` for each calendar day.
    */

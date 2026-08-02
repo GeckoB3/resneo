@@ -419,12 +419,14 @@ export interface WebhookEndpointCheck {
   /** Which account's events this endpoint must receive, per its spec. */
   expected_scope: 'connected_accounts' | 'platform';
   /**
-   * What Stripe reports: true = Connect-scoped, false = platform-only, null =
-   * Stripe did not say. `connect` is a documented CREATE parameter but is not a
-   * documented attribute of the returned object, so it is read defensively and a
-   * null is surfaced as "verify by hand" rather than silently passing.
+   * True when Stripe reports this endpoint as Connect-scoped, derived from the
+   * `application` attribute (see the note at the read site — `connect` is
+   * create-only and never comes back). Null only when there is no endpoint to
+   * inspect.
    */
   connect_scope: boolean | null;
+  /** The Connect application id backing `connect_scope`, for the audit trail. */
+  connect_application: string | null;
   secret_env_present: boolean;
   missing_required_events: string[];
   missing_recommended_events: string[];
@@ -476,6 +478,7 @@ export async function checkWebhookEndpoints(
         livemode: null,
         expected_scope: spec.scope,
         connect_scope: null,
+        connect_application: null,
         secret_env_present,
         missing_required_events: spec.requiredEvents,
         missing_recommended_events: spec.recommendedEvents,
@@ -503,6 +506,7 @@ export async function checkWebhookEndpoints(
         livemode: null,
         expected_scope: spec.scope,
         connect_scope: null,
+        connect_application: null,
         secret_env_present,
         missing_required_events: spec.requiredEvents,
         missing_recommended_events: spec.recommendedEvents,
@@ -520,20 +524,20 @@ export async function checkWebhookEndpoints(
      * endpoint listening for connected-account events is not "failing" — Stripe
      * never attempts a delivery, so the endpoint's own log stays empty and every
      * other check here still reads green.
+     *
+     * Read from `application`, NOT `connect`. `connect` is a create-only
+     * parameter: verified against a live account, retrieved endpoints come back
+     * with it absent every time, which could only ever produce "unknown".
+     * `application` is a documented attribute of the object and carries the
+     * Connect application id (`ca_…`) on exactly the Connect-scoped endpoints —
+     * null on platform ones. Same live account, three endpoints, the split was
+     * exact.
      */
-    const rawConnect = (match as Stripe.WebhookEndpoint & { connect?: unknown }).connect;
-    const connect_scope = typeof rawConnect === 'boolean' ? rawConnect : null;
+    const application = match.application ?? null;
+    const connect_scope = application !== null;
     const wantsConnect = spec.scope === 'connected_accounts';
 
-    if (connect_scope === null) {
-      issues.push(
-        `Could not read this endpoint's account scope from Stripe (it is a create-only parameter). ` +
-          `Confirm by hand that "Listen to" is set to ` +
-          `${wantsConnect ? '"Events on Connected accounts"' : '"Events on your account"'}` +
-          `${wantsConnect ? ' — every event this endpoint needs fires on a connected account, and a platform-scoped endpoint receives none of them, silently.' : '.'}`,
-      );
-      severities.push('warn');
-    } else if (connect_scope !== wantsConnect) {
+    if (connect_scope !== wantsConnect) {
       issues.push(
         wantsConnect
           ? 'Endpoint is scoped to YOUR account but every event it needs fires on a CONNECTED account — Stripe will never attempt a delivery. Recreate it with "Listen to: Events on Connected accounts" (scope cannot be changed after creation) and update the signing secret.'
@@ -568,6 +572,7 @@ export async function checkWebhookEndpoints(
       livemode: match.livemode,
       expected_scope: spec.scope,
       connect_scope,
+      connect_application: application,
       secret_env_present,
       missing_required_events: missingRequired,
       missing_recommended_events: missingRecommended,

@@ -208,20 +208,20 @@ describe('checkWebhookEndpoints — account scope', () => {
     STRIPE_ONBOARDING_WEBHOOK_SECRET: 'whsec_b',
   };
 
+  /**
+   * Scope is read from `application`: a Connect application id means
+   * Connect-scoped, null means platform. (`connect` is create-only and never
+   * comes back on a retrieved endpoint — verified against a live account.)
+   */
+  const CONNECT_APP = 'ca_UnKM7vPLuTPceXso6KdCRe9rMovXnZs1';
+  const scoped = (isConnect: boolean) => ({ application: isConnect ? CONNECT_APP : null });
+
   /** Both endpoints present and fully configured, scope supplied per argument. */
-  function bothEndpoints(paymentsConnect?: boolean, subsConnect?: boolean) {
+  function bothEndpoints(paymentsConnect: boolean, subsConnect: boolean) {
     const all = [...PAYMENTS.requiredEvents, ...PAYMENTS.recommendedEvents];
     return clientWith([
-      endpoint(
-        PAYMENTS.pathSuffix,
-        all,
-        paymentsConnect === undefined ? {} : { connect: paymentsConnect },
-      ),
-      endpoint(
-        SUBS.pathSuffix,
-        SUBS.requiredEvents,
-        subsConnect === undefined ? {} : { connect: subsConnect },
-      ),
+      endpoint(PAYMENTS.pathSuffix, all, scoped(paymentsConnect)),
+      endpoint(SUBS.pathSuffix, SUBS.requiredEvents, scoped(subsConnect)),
     ]);
   }
 
@@ -257,23 +257,29 @@ describe('checkWebhookEndpoints — account scope', () => {
     expect(subs.connect_scope).toBe(true);
   });
 
-  it('warns rather than passing when Stripe does not report the scope', async () => {
-    // `connect` is a create-only parameter and is not a documented attribute of
-    // the returned object. An absent value must never read as "correct".
-    const res = await checkWebhookEndpoints(bothEndpoints(undefined, undefined), {
-      mode: 'live',
-      env,
-    });
+  it('judges a real Stripe payload, which carries no `connect` key at all', async () => {
+    // The exact shape a live account returns: `application` present, `connect`
+    // absent. Reading `connect` here would have made every verdict "unknown".
+    const client = clientWith([
+      {
+        url: `https://www.resneo.com${PAYMENTS.pathSuffix}`,
+        status: 'enabled',
+        livemode: true,
+        application: CONNECT_APP,
+        enabled_events: [...PAYMENTS.requiredEvents, ...PAYMENTS.recommendedEvents],
+      },
+    ]);
+    const res = await checkWebhookEndpoints(client, { mode: 'live', env });
     const payments = res.find((r) => r.path_suffix === PAYMENTS.pathSuffix)!;
-    expect(payments.connect_scope).toBeNull();
-    expect(payments.severity).toBe('warn');
-    expect(payments.issues.join(' ')).toMatch(/Events on Connected accounts/);
+    expect(payments.connect_scope).toBe(true);
+    expect(payments.connect_application).toBe(CONNECT_APP);
+    expect(payments.severity).toBe('ok');
   });
 
   it('still reports scope alongside the other endpoint problems', async () => {
     // A wrong scope must not mask (or be masked by) missing events.
     const client = clientWith([
-      endpoint(PAYMENTS.pathSuffix, ['payment_intent.succeeded'], { connect: false }),
+      endpoint(PAYMENTS.pathSuffix, ['payment_intent.succeeded'], scoped(false)),
     ]);
     const res = await checkWebhookEndpoints(client, { mode: 'live', env });
     const payments = res.find((r) => r.path_suffix === PAYMENTS.pathSuffix)!;

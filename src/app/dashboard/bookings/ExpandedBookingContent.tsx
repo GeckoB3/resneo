@@ -129,6 +129,8 @@ import {
 } from '@/components/booking/card-hold-ui-state';
 import { CardHoldDetailSection } from '@/components/booking/CardHoldDetailSection';
 import { useDashboardToolbarVenueOptional } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
+import { BookingLocationCallout } from '@/components/booking/BookingLocationCallout';
+import { resolveStaffBookingLocation } from '@/lib/booking/staff-booking-location';
 
 export interface BookingRow {
   id: string;
@@ -226,6 +228,13 @@ export interface BookingDetailLite {
   card_hold?: CardHoldSummary | null;
   /** The service's payment mode ('full_payment' | 'deposit' | 'card_hold' | 'none'); null when not an appointment service booking. */
   service_payment_requirement?: string | null;
+  /**
+   * Online joining details from GET /api/venue/bookings/[id], resolved live from the service and
+   * only for online bookings. Absent until the full detail loads, so the location callout renders
+   * from the list row first and fills these in after.
+   */
+  online_meeting_url?: string | null;
+  online_meeting_info?: string | null;
   cde_context?: {
     inferred_model: BookingModel;
     title: string;
@@ -1144,6 +1153,14 @@ export function ExpandedBookingContent({
     ? `${EXP_BOOKING_BTN} font-semibold ${bookingTransitionButtonSurface(revertAction.target)}`
     : EXP_BOOKING_REVERT;
 
+  // Location type and client address ride on the list row, so the callout renders before the full
+  // detail lands; the online joining details fill in once it does.
+  const staffLocation = resolveStaffBookingLocation({
+    ...effectiveBooking,
+    online_meeting_url: activeDetail?.online_meeting_url ?? null,
+    online_meeting_info: activeDetail?.online_meeting_info ?? null,
+  });
+
   const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [
     {
       key: 'previous-visit',
@@ -1239,39 +1256,6 @@ export function ExpandedBookingContent({
       <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
         <span className="font-medium text-slate-500">Checked in</span>
         <span className="font-semibold text-slate-800">{formatRelative(activeDetail.checked_in_at)}</span>
-      </span>
-      ),
-    });
-  }
-
-  if (effectiveBooking.location_type === 'online') {
-    bookingMetaSegments.push({
-      key: 'location',
-      node: (
-      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-        <span className="font-medium text-slate-500">Location</span>
-        <span className="rounded bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-800 ring-1 ring-sky-200/80">Online</span>
-      </span>
-      ),
-    });
-  } else if (effectiveBooking.location_type === 'client_address') {
-    const clientAddress = [
-      effectiveBooking.client_address_line1,
-      effectiveBooking.client_address_line2,
-      effectiveBooking.client_address_city,
-      effectiveBooking.client_address_postcode,
-    ]
-      .map((p) => (p ?? '').trim())
-      .filter(Boolean)
-      .join(', ');
-    bookingMetaSegments.push({
-      key: 'location',
-      node: (
-      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-        <span className="font-medium text-slate-500">Location</span>
-        <span className="break-words font-semibold text-emerald-800 [overflow-wrap:anywhere]">
-          Client&apos;s address{clientAddress ? ` — ${clientAddress}` : ' (not recorded)'}
-        </span>
       </span>
       ),
     });
@@ -1453,6 +1437,14 @@ export function ExpandedBookingContent({
               </span>
             ))}
           </div>
+          {/* Its own callout rather than another meta chip: someone travelling to this booking
+              needs the address before the deposit status. Address and type come from the list row,
+              so this appears immediately; the online joining details arrive with the full detail. */}
+          {staffLocation ? (
+            <div className="mt-2.5">
+              <BookingLocationCallout view={staffLocation} />
+            </div>
+          ) : null}
           {showGlobalExtras ? (
             <div className="mt-2 border-t border-slate-100 pt-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Extras</p>

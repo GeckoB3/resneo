@@ -15,6 +15,7 @@ import { assertCanDisableBookingModels } from '@/lib/booking/venue-booking-model
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
 import { mergeBookingPageConfigPatch } from '@/lib/booking/booking-page-theme';
+import { GOOGLE_REVIEW_LINK_HELP, normaliseGoogleReviewUrl } from '@/lib/reviews/google-review-link';
 
 /** Pan/zoom framing for logo and cover on the public booking page (sanitised again after parse). */
 const bookingPageImageFramingSchema = z.object({
@@ -51,6 +52,9 @@ const venueProfileSchema = z.object({
   timezone: z.string().max(50).optional(),
   /** Public booking page link; empty clears. Stored as https URL or null. */
   website_url: z.string().max(2000).optional(),
+  /** Pasted Google review link or Place ID; normalised (and validated) before it is stored. */
+  google_review_url: z.string().max(2000).optional(),
+  review_request_enabled: z.boolean().optional(),
   /** Canonical active booking models; appointments plan uses this as the editable source of truth. */
   active_booking_models: z.array(z.string()).optional(),
   /** Secondary bookable models (C/D/E); normalised with {@link normalizeEnabledModels}. */
@@ -126,7 +130,7 @@ export async function GET(request: NextRequest) {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config, in_person_payments_enabled')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, booking_page_config, in_person_payments_enabled, google_review_url, review_request_enabled')
       .eq('id', staff.venue_id)
       .single();
 
@@ -135,7 +139,7 @@ export async function GET(request: NextRequest) {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, in_person_payments_enabled')
+        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology, public_booking_area_mode, require_account_login_for_bookings, feature_flags, embed_accent_colour, in_person_payments_enabled, google_review_url, review_request_enabled')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
@@ -234,6 +238,44 @@ export async function PATCH(request: NextRequest) {
       const nextEmail = data.email === '' ? null : data.email;
       update.email = nextEmail;
       update.reply_to_email = nextEmail;
+    }
+    // Google review request. The pasted value is normalised to a canonical review URL, and a value
+    // we cannot resolve is rejected rather than stored: a broken link fails silently inside an
+    // email, so the failure has to happen here where someone is looking at it.
+    if (data.google_review_url !== undefined) {
+      const raw = typeof data.google_review_url === 'string' ? data.google_review_url.trim() : '';
+      if (!raw) {
+        update.google_review_url = null;
+        update.review_request_enabled = false;
+      } else {
+        const normalised = normaliseGoogleReviewUrl(raw);
+        if (!normalised) {
+          return NextResponse.json({ error: GOOGLE_REVIEW_LINK_HELP }, { status: 400 });
+        }
+        update.google_review_url = normalised;
+      }
+    }
+    if (data.review_request_enabled !== undefined) {
+      const wantsOn = Boolean(data.review_request_enabled);
+      if (wantsOn) {
+        // Resolve against the incoming value when the same save sets both, else the stored one.
+        let link = update.google_review_url as string | null | undefined;
+        if (link === undefined) {
+          const { data: current } = await supabase
+            .from('venues')
+            .select('google_review_url')
+            .eq('id', staff.venue_id)
+            .maybeSingle();
+          link = (current as { google_review_url?: string | null } | null)?.google_review_url ?? null;
+        }
+        if (!link) {
+          return NextResponse.json(
+            { error: 'Add your Google review link before turning review requests on.' },
+            { status: 400 },
+          );
+        }
+      }
+      update.review_request_enabled = wantsOn;
     }
     if (data.cover_photo_url !== undefined) update.cover_photo_url = data.cover_photo_url;
     if (data.logo_url !== undefined) update.logo_url = data.logo_url;

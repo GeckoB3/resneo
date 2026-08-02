@@ -1,8 +1,73 @@
 'use client';
 
-import { forwardRef, type CSSProperties, type ReactNode } from 'react';
+import { forwardRef, useCallback, useState, type CSSProperties, type ReactNode } from 'react';
 
 const BRAND_ACCENT = '#003B6F';
+
+/**
+ * Service / variant description that clips to three lines and offers "Show more" only when the text
+ * genuinely overflows, so the common one-liner carries no extra control.
+ *
+ * Must be rendered as a sibling of the card's click target, never inside it: the toggle is a button,
+ * and a button inside a button is invalid and breaks keyboard and screen-reader use.
+ *
+ * Expanded state is deliberately local and uncontrolled. Every caller sits inside a step that
+ * unmounts when the guest moves on, so going back to a list always starts collapsed.
+ */
+export function ExpandableDescription({
+  description,
+  idSuffix,
+  className,
+}: {
+  description?: string | null;
+  /** Service or variant id, so the toggle's aria-controls is unique on the page. */
+  idSuffix: string;
+  /** Extra classes for the wrapper, e.g. padding when the card puts padding on its click target. */
+  className?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+
+  // Callback ref + ResizeObserver rather than an effect: measurement has to survive late webfont
+  // loads and width changes, and this avoids a setState-in-effect the lint config rejects.
+  const measureRef = useCallback((node: HTMLParagraphElement | null) => {
+    if (!node) return;
+    const check = () => setOverflows(node.scrollHeight > node.clientHeight + 1);
+    check();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(check);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const text = description?.trim();
+  if (!text) return null;
+
+  const panelId = `service-description-${idSuffix}`;
+
+  return (
+    <div className={`mt-1 ${className ?? ''}`}>
+      <p
+        id={panelId}
+        ref={expanded ? undefined : measureRef}
+        className={`text-xs leading-relaxed text-slate-500 ${expanded ? '' : 'line-clamp-3'}`}
+      >
+        {text}
+      </p>
+      {(overflows || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          className="mt-1 text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-800"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** Maps guest flow step to a 3-phase progress indicator (Choose → Schedule → Confirm). */
 export function appointmentProgressPhase(

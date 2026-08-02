@@ -895,6 +895,15 @@ export function BookingDetailPanel({
                 booking_item_name: initialSnapshot?.serviceName ?? serviceLine,
                 group_booking_id: d.group_booking_id ?? null,
                 person_label: d.person_label ?? null,
+                // This popover builds its row by hand rather than from a list row, so the location
+                // has to be carried across explicitly or the callout has nothing to render.
+                location_type: d.location_type ?? null,
+                client_address_line1: d.client_address_line1 ?? null,
+                client_address_line2: d.client_address_line2 ?? null,
+                client_address_city: d.client_address_city ?? null,
+                client_address_postcode: d.client_address_postcode ?? null,
+                online_meeting_url: d.online_meeting_url ?? null,
+                online_meeting_info: d.online_meeting_info ?? null,
               }}
               detail={undefined}
               /* The full GET payload is already loaded here, so hand the money

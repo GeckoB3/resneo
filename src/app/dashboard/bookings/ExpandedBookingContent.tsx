@@ -188,6 +188,12 @@ export interface BookingRow {
   client_address_line2?: string | null;
   client_address_city?: string | null;
   client_address_postcode?: string | null;
+  /**
+   * Online joining details. Absent on list rows, which never carry them; set only by callers that
+   * already hold the full booking detail, such as the calendar's popover.
+   */
+  online_meeting_url?: string | null;
+  online_meeting_info?: string | null;
 }
 
 export interface BookingDetailLite {
@@ -1157,8 +1163,10 @@ export function ExpandedBookingContent({
   // detail lands; the online joining details fill in once it does.
   const staffLocation = resolveStaffBookingLocation({
     ...effectiveBooking,
-    online_meeting_url: activeDetail?.online_meeting_url ?? null,
-    online_meeting_info: activeDetail?.online_meeting_info ?? null,
+    // The row wins when the caller already held the full detail (the calendar popover); otherwise
+    // these arrive with the detail fetch, after the address has already rendered from the row.
+    online_meeting_url: effectiveBooking.online_meeting_url ?? activeDetail?.online_meeting_url ?? null,
+    online_meeting_info: effectiveBooking.online_meeting_info ?? activeDetail?.online_meeting_info ?? null,
   });
 
   const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [

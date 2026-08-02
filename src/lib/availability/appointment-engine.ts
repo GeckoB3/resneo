@@ -20,7 +20,7 @@ import {
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import { candidateStartMinutes } from '@/lib/appointments/booking-interval';
+import { candidateStartMinutes, sanitizeBookingStartTimes } from '@/lib/appointments/booking-interval';
 import type { OpeningHours } from '@/types/availability';
 import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
@@ -605,9 +605,14 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
 }
 
 /**
- * Validates that an appointment can start at an exact time (not limited to 15-minute grid).
+ * Validates that an appointment can start at an exact time (not limited to the interval grid).
  * Used for consecutive multi-service bookings where follow-on start times are derived from
  * previous service end + buffer.
+ *
+ * Fixed start times are still enforced. The interval grid is deliberately relaxed here so a chain
+ * can begin a follow-on service the moment the previous one ends, but fixed times are an explicit
+ * list of when the service runs, not a granularity, so a booking outside that list is not offered
+ * and must not be creatable by posting the time directly.
  */
 export function validateExactAppointmentStart(
   input: AppointmentEngineInput,
@@ -659,6 +664,11 @@ export function validateExactAppointmentStart(
   const t = timeToMinutes(startTimeHHmm.slice(0, 5));
   const slotEnd = t + totalDuration;
   const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
+
+  const fixedStarts = sanitizeBookingStartTimes(svc.booking_start_times ?? null);
+  if (fixedStarts.length > 0 && !fixedStarts.includes(startTimeHHmm.slice(0, 5))) {
+    return { ok: false, reason: 'This service only starts at set times of day' };
+  }
 
   const workingRanges = getWorkingRanges(practitioner, date);
   if (workingRanges.length === 0) {

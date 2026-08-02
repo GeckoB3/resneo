@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import type { OpeningHours } from '@/types/availability';
 import type { AppointmentService, Practitioner, PractitionerService } from '@/types/booking-models';
 import { getDayOfWeek } from '@/lib/availability/engine';
-import { computeAppointmentAvailability, type AppointmentEngineInput } from './appointment-engine';
+import {
+  computeAppointmentAvailability,
+  validateExactAppointmentStart,
+  type AppointmentEngineInput,
+} from './appointment-engine';
 
 const PS_P1_S1: PractitionerService[] = [
   { id: 'ps1', practitioner_id: 'p1', service_id: 's1', custom_duration_minutes: null, custom_price_pence: null },
@@ -191,6 +195,23 @@ describe('computeAppointmentAvailability — fixed start times', () => {
       } as unknown as AppointmentEngineInput['existingBookings'][number],
     ];
     expect(startTimes(input)).toEqual(['09:20', '13:45', '15:30']);
+  });
+
+  it('rejects an exact start outside the fixed times, so a posted time cannot bypass them', () => {
+    const input = fullDayInput({
+      duration_minutes: 90,
+      booking_start_times: ['09:20', '11:30'],
+    });
+    // The interval grid is deliberately relaxed for multi-service chains, but fixed times are a
+    // list of when the service runs, so an unoffered time must not be creatable.
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '10:00').ok).toBe(false);
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '09:20').ok).toBe(true);
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '11:30').ok).toBe(true);
+  });
+
+  it('still allows off-grid exact starts for interval services (chains rely on it)', () => {
+    const input = fullDayInput({ duration_minutes: 30, booking_interval_minutes: 15 });
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '10:07').ok).toBe(true);
   });
 
   it('falls back to the interval grid when the list is empty or null', () => {

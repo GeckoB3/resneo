@@ -665,6 +665,8 @@ export function AppointmentBookingFlow({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /** "Continue" on the extras step, which awaits a round trip when adding another service. */
+  const [addonsAdvancing, setAddonsAdvancing] = useState(false);
 
   // Clear persisted inline-compliance drafts once a booking has actually succeeded (the flow
   // reaches confirmation/payment). Doing it here, not on submit start, means a failed submit
@@ -3274,7 +3276,19 @@ export function AppointmentBookingFlow({
           });
         }
         async function goNext() {
-          if (continueDisabled) return;
+          if (continueDisabled || addonsAdvancing) return;
+          setAddonsAdvancing(true);
+          try {
+            await advanceFromAddons();
+          } finally {
+            setAddonsAdvancing(false);
+          }
+        }
+
+        // The body of "Continue", wrapped by goNext so every exit path clears the pending state.
+        // Adding a second or third service waits on a round trip here, and without feedback the
+        // button looked inert long enough for staff to press it again.
+        async function advanceFromAddons() {
           if (addonFlowContext.kind === 'append') {
             await handlePickAdditionalService(
               addonFlowContext.serviceId,
@@ -3437,13 +3451,22 @@ export function AppointmentBookingFlow({
               <button
                 type="button"
                 onClick={goNext}
-                disabled={continueDisabled}
+                disabled={continueDisabled || addonsAdvancing}
+                aria-busy={addonsAdvancing}
                 className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
+                {addonsAdvancing ? (
+                  <span
+                    className="mr-1 h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                    aria-hidden
+                  />
+                ) : null}
                 Continue
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                </svg>
+                {addonsAdvancing ? null : (
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                  </svg>
+                )}
               </button>
             </div>
           </div>

@@ -60,6 +60,16 @@ export function buildBookingForExpanded(
     booking_item_name: opts.serviceLine,
     booking_addon_labels:
       d.addons?.map((a) => a.addon_name_snapshot).filter((n) => n.trim().length > 0) ?? undefined,
+    // Service delivery location. Same trap as card_hold and the payment fields below: this builder
+    // hand-picks, so an omitted field silently disappears on the popover and modal layouts, which
+    // is exactly how the calendar's booking detail ended up with no location callout.
+    location_type: d.location_type ?? null,
+    client_address_line1: d.client_address_line1 ?? null,
+    client_address_line2: d.client_address_line2 ?? null,
+    client_address_city: d.client_address_city ?? null,
+    client_address_postcode: d.client_address_postcode ?? null,
+    online_meeting_url: d.online_meeting_url ?? null,
+    online_meeting_info: d.online_meeting_info ?? null,
   };
 }
 

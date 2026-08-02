@@ -65,6 +65,7 @@ import {
   APPOINTMENT_PUBLIC_CHEVRON_SM,
   APPOINTMENT_PUBLIC_PRICE,
   AppointmentSummaryStrip,
+  ExpandableDescription,
 } from './appointment-public-ui';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 import {
@@ -116,10 +117,20 @@ function staffDurationOverrideKey(serviceId: string, variantId: string | null): 
   return variantId ? `${serviceId}:${variantId}` : serviceId;
 }
 
-function ServiceCatalogDescription({ description }: { description?: string | null }) {
-  const text = description?.trim();
-  if (!text) return null;
-  return <p className="mt-1 text-xs leading-relaxed text-slate-500 line-clamp-3">{text}</p>;
+/**
+ * Card description. Rendered as a sibling of the card's click target (see the shell/target split in
+ * `choiceCardShellClass`), because it owns an expand toggle and buttons must not nest.
+ */
+function ServiceCatalogDescription({
+  description,
+  idSuffix,
+  className,
+}: {
+  description?: string | null;
+  idSuffix: string;
+  className?: string;
+}) {
+  return <ExpandableDescription description={description} idSuffix={idSuffix} className={className} />;
 }
 
 function catalogVariantsForServiceId(catalogStaff: CatalogPractitioner[], serviceId: string): CatalogVariant[] {
@@ -654,6 +665,8 @@ export function AppointmentBookingFlow({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /** "Continue" on the extras step, which awaits a round trip when adding another service. */
+  const [addonsAdvancing, setAddonsAdvancing] = useState(false);
 
   // Clear persisted inline-compliance drafts once a booking has actually succeeded (the flow
   // reaches confirmation/payment). Doing it here, not on submit start, means a failed submit
@@ -2680,6 +2693,13 @@ export function AppointmentBookingFlow({
   const choiceCardClass = isPublicGuest
     ? 'ap-choice-card w-full text-left'
     : 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
+  // Cards that carry a description split the visual shell (border, padding, hover) from the click
+  // target, so an expand toggle can sit inside the card without nesting a button inside a button.
+  // Padding stays on the shell so the toggle lines up with the text above it.
+  const choiceCardShellClass = isPublicGuest
+    ? 'ap-choice-card'
+    : 'rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
+  const choiceCardTargetClass = 'w-full text-left';
   const publicDetailsFieldProps = isPublicGuest
     ? { submitClassName: APPOINTMENT_DETAILS_SUBMIT_CLASS, fieldClassName: APPOINTMENT_DETAILS_INPUT_CLASS }
     : {};
@@ -2852,11 +2872,11 @@ export function AppointmentBookingFlow({
 
                 if (!isStaff) {
                   return (
+                    <div key={svc.id} className={choiceCardShellClass}>
                     <button
-                      key={svc.id}
                       type="button"
                       onClick={navigateFromServiceRow}
-                      className={choiceCardClass}
+                      className={choiceCardTargetClass}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -2874,7 +2894,6 @@ export function AppointmentBookingFlow({
                             )}
                           </div>
                           <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
-                          <ServiceCatalogDescription description={svc.description} />
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-2">
                           <span className={APPOINTMENT_PUBLIC_PRICE}>{formatFromPrice(svc.minPricePence)}</span>
@@ -2884,23 +2903,31 @@ export function AppointmentBookingFlow({
                         </div>
                       </div>
                     </button>
+                    <ServiceCatalogDescription description={svc.description} idSuffix={svc.id} />
+                    </div>
                   );
                 }
 
                 return (
                   <div key={svc.id} className="relative">
                     <div className="flex w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
-                      <button
-                        type="button"
-                        onClick={navigateFromServiceRow}
-                        className="min-w-0 flex-1 px-4 py-3.5 text-left transition-colors hover:bg-slate-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
-                      >
-                        <div className="font-medium text-slate-900">{svc.name}</div>
-                        {serviceHasVariants ? (
-                          <div className="mt-0.5 text-xs text-slate-500">From {svc.duration_minutes} min</div>
-                        ) : null}
-                        <ServiceCatalogDescription description={svc.description} />
-                      </button>
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={navigateFromServiceRow}
+                          className="w-full px-4 py-3.5 text-left transition-colors hover:bg-slate-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+                        >
+                          <div className="font-medium text-slate-900">{svc.name}</div>
+                          {serviceHasVariants ? (
+                            <div className="mt-0.5 text-xs text-slate-500">From {svc.duration_minutes} min</div>
+                          ) : null}
+                        </button>
+                        <ServiceCatalogDescription
+                          description={svc.description}
+                          idSuffix={svc.id}
+                          className="px-4 pb-3"
+                        />
+                      </div>
                       {!serviceHasVariants ? (
                         <div className="flex flex-shrink-0 items-stretch border-l border-slate-100 bg-white">
                           <button
@@ -3021,8 +3048,8 @@ export function AppointmentBookingFlow({
 
               if (!isStaff) {
                 return (
+                  <div key={variant.id} className={choiceCardShellClass}>
                   <button
-                    key={variant.id}
                     type="button"
                     onClick={() => {
                       setSelectedVariantId(variant.id);
@@ -3066,13 +3093,12 @@ export function AppointmentBookingFlow({
                       }
                       setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
                     }}
-                    className={choiceCardClass}
+                    className={choiceCardTargetClass}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-medium text-slate-900">{variant.name}</div>
                         <div className="mt-0.5 text-xs text-slate-500">{variant.duration_minutes} min</div>
-                        <ServiceCatalogDescription description={variant.description} />
                       </div>
                       <svg
                         className={`${APPOINTMENT_PUBLIC_CHEVRON_SM} flex-shrink-0`}
@@ -3085,6 +3111,8 @@ export function AppointmentBookingFlow({
                       </svg>
                     </div>
                   </button>
+                  <ServiceCatalogDescription description={variant.description} idSuffix={variant.id} />
+                  </div>
                 );
               }
 
@@ -3248,7 +3276,19 @@ export function AppointmentBookingFlow({
           });
         }
         async function goNext() {
-          if (continueDisabled) return;
+          if (continueDisabled || addonsAdvancing) return;
+          setAddonsAdvancing(true);
+          try {
+            await advanceFromAddons();
+          } finally {
+            setAddonsAdvancing(false);
+          }
+        }
+
+        // The body of "Continue", wrapped by goNext so every exit path clears the pending state.
+        // Adding a second or third service waits on a round trip here, and without feedback the
+        // button looked inert long enough for staff to press it again.
+        async function advanceFromAddons() {
           if (addonFlowContext.kind === 'append') {
             await handlePickAdditionalService(
               addonFlowContext.serviceId,
@@ -3411,13 +3451,22 @@ export function AppointmentBookingFlow({
               <button
                 type="button"
                 onClick={goNext}
-                disabled={continueDisabled}
+                disabled={continueDisabled || addonsAdvancing}
+                aria-busy={addonsAdvancing}
                 className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
+                {addonsAdvancing ? (
+                  <span
+                    className="mr-1 h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                    aria-hidden
+                  />
+                ) : null}
                 Continue
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                </svg>
+                {addonsAdvancing ? null : (
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                  </svg>
+                )}
               </button>
             </div>
           </div>
@@ -3976,13 +4025,13 @@ export function AppointmentBookingFlow({
               {variants.map((variant) => {
                 const variantBusy = appendingVariantId === variant.id;
                 return (
+                  <div key={variant.id} className={choiceCardShellClass}>
                   <button
-                    key={variant.id}
                     type="button"
                     disabled={appendingVariantId != null}
                     aria-busy={variantBusy}
                     onClick={() => void pickVariant(variant.id)}
-                    className={`${choiceCardClass} disabled:cursor-not-allowed disabled:opacity-60`}
+                    className={`${choiceCardTargetClass} disabled:cursor-not-allowed disabled:opacity-60`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -3991,7 +4040,6 @@ export function AppointmentBookingFlow({
                           {variant.duration_minutes} min
                           {variant.price_pence != null ? ` · ${formatPrice(variant.price_pence)}` : ''}
                         </div>
-                        <ServiceCatalogDescription description={variant.description} />
                       </div>
                       {variantBusy ? (
                         <span
@@ -4005,6 +4053,8 @@ export function AppointmentBookingFlow({
                       )}
                     </div>
                   </button>
+                  <ServiceCatalogDescription description={variant.description} idSuffix={variant.id} />
+                  </div>
                 );
               })}
             </div>
@@ -4514,8 +4564,8 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {servicesWithFromPrice.map((svc) => (
+                <div key={svc.id} className={choiceCardShellClass}>
                 <button
-                  key={svc.id}
                   type="button"
                   onClick={() => {
                     queuePrefetchForServicePractitioners(svc.id);
@@ -4528,13 +4578,12 @@ export function AppointmentBookingFlow({
                       hasVariants ? 'group_variant' : hasAddons ? 'group_addons' : 'group_practitioner',
                     );
                   }}
-                  className={choiceCardClass}
+                  className={choiceCardTargetClass}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium text-slate-900">{svc.name}</div>
                       <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
-                      <ServiceCatalogDescription description={svc.description} />
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
                       <span className={APPOINTMENT_PUBLIC_PRICE}>{formatFromPrice(svc.minPricePence)}</span>
@@ -4544,6 +4593,8 @@ export function AppointmentBookingFlow({
                     </div>
                   </div>
                 </button>
+                <ServiceCatalogDescription description={svc.description} idSuffix={svc.id} />
+                </div>
               ))}
             </div>
           )}

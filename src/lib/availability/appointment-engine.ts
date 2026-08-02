@@ -20,11 +20,7 @@ import {
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import {
-  bookingIntervalGrid,
-  normalizeBookingIntervalMinutes,
-  sanitizeBookingMinuteMarks,
-} from '@/lib/appointments/booking-interval';
+import { candidateStartMinutes, sanitizeBookingStartTimes } from '@/lib/appointments/booking-interval';
 import type { OpeningHours } from '@/types/availability';
 import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
@@ -550,50 +546,46 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
         date,
       );
 
-      // Candidate start times. Without a per-hour restriction we step by the interval from the range
-      // start — identical to the legacy fixed 15-minute grid for unconfigured services, so existing
-      // services keep their exact slot times. A genuine restriction (a strict, non-empty subset of the
-      // interval grid) is inherently hour-relative, so those marks are anchored to the top of the hour.
-      const bookingInterval = normalizeBookingIntervalMinutes(svc.booking_interval_minutes);
-      const restrictMarks = sanitizeBookingMinuteMarks(svc.booking_minute_marks, bookingInterval);
-      const bookingGrid = bookingIntervalGrid(bookingInterval);
-      const hasHourRestriction = restrictMarks.length > 0 && restrictMarks.length < bookingGrid.length;
-      const allowedStartOffset = hasHourRestriction ? new Set(restrictMarks) : null;
-      const startStep = hasHourRestriction ? 1 : bookingInterval;
+      // Candidate start times: fixed times of day when the service sets them, otherwise the
+      // interval grid (see candidateStartMinutes for the exact anchoring rules).
+      const candidateStarts = candidateStartMinutes({
+        ranges: serviceEffectiveRanges,
+        totalSpan,
+        interval_minutes: svc.booking_interval_minutes,
+        minute_marks: svc.booking_minute_marks,
+        start_times: svc.booking_start_times,
+      });
 
-      for (const range of serviceEffectiveRanges) {
-        for (let t = range.start; t + totalSpan <= range.end; t += startStep) {
-          if (allowedStartOffset && !allowedStartOffset.has(((t % 60) + 60) % 60)) continue;
-          // Guest flow: venue-local “now” + minimum notice (hours). Staff reschedule uses skipPastSlotFilter.
-          if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) continue;
+      for (const t of candidateStarts) {
+        // Guest flow: venue-local “now” + minimum notice (hours). Staff reschedule uses skipPastSlotFilter.
+        if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) continue;
 
-          const slotEnd = t + totalSpan;
-          const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
+        const slotEnd = t + totalSpan;
+        const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
 
-          // Check breaks
-          const hitsBreak = breakRanges.some((b) => overlaps(t, slotEnd, b.start, b.end));
-          if (hitsBreak) continue;
+        // Check breaks
+        const hitsBreak = breakRanges.some((b) => overlaps(t, slotEnd, b.start, b.end));
+        if (hitsBreak) continue;
 
-          // Staff calendar blocks (blocked time ranges)
-          const hitsCalendarBlock = dayBlocks.some((b) => overlaps(t, slotEnd, b.start, b.end));
-          if (hitsCalendarBlock) continue;
+        // Staff calendar blocks (blocked time ranges)
+        const hitsCalendarBlock = dayBlocks.some((b) => overlaps(t, slotEnd, b.start, b.end));
+        if (hitsCalendarBlock) continue;
 
-          // Existing + phantom bookings vs parallel_clients (USE / unified_calendars)
-          const overlapping =
-            countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
-            countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
-          if (overlapping >= parallelCap) continue;
+        // Existing + phantom bookings vs parallel_clients (USE / unified_calendars)
+        const overlapping =
+          countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
+          countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
+        if (overlapping >= parallelCap) continue;
 
-          serviceSlots.push({
-            practitioner_id: practitioner.id,
-            practitioner_name: practitioner.name,
-            service_id: svc.id,
-            service_name: svc.name,
-            start_time: minutesToTime(t),
-            duration_minutes: svc.duration_minutes,
-            price_pence: svc.price_pence,
-          });
-        }
+        serviceSlots.push({
+          practitioner_id: practitioner.id,
+          practitioner_name: practitioner.name,
+          service_id: svc.id,
+          service_name: svc.name,
+          start_time: minutesToTime(t),
+          duration_minutes: svc.duration_minutes,
+          price_pence: svc.price_pence,
+        });
       }
 
       allSlots.push(...serviceSlots);
@@ -613,9 +605,14 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
 }
 
 /**
- * Validates that an appointment can start at an exact time (not limited to 15-minute grid).
+ * Validates that an appointment can start at an exact time (not limited to the interval grid).
  * Used for consecutive multi-service bookings where follow-on start times are derived from
  * previous service end + buffer.
+ *
+ * Fixed start times are still enforced. The interval grid is deliberately relaxed here so a chain
+ * can begin a follow-on service the moment the previous one ends, but fixed times are an explicit
+ * list of when the service runs, not a granularity, so a booking outside that list is not offered
+ * and must not be creatable by posting the time directly.
  */
 export function validateExactAppointmentStart(
   input: AppointmentEngineInput,
@@ -667,6 +664,11 @@ export function validateExactAppointmentStart(
   const t = timeToMinutes(startTimeHHmm.slice(0, 5));
   const slotEnd = t + totalDuration;
   const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
+
+  const fixedStarts = sanitizeBookingStartTimes(svc.booking_start_times ?? null);
+  if (fixedStarts.length > 0 && !fixedStarts.includes(startTimeHHmm.slice(0, 5))) {
+    return { ok: false, reason: 'This service only starts at set times of day' };
+  }
 
   const workingRanges = getWorkingRanges(practitioner, date);
   if (workingRanges.length === 0) {
@@ -1307,6 +1309,7 @@ export async function fetchCalendarAppointmentInput(params: {
       created_at: (s.created_at as string) ?? new Date().toISOString(),
       booking_interval_minutes: (s.booking_interval_minutes as number | undefined) ?? undefined,
       booking_minute_marks: (s.booking_minute_marks as number[] | null | undefined) ?? null,
+      booking_start_times: (s.booking_start_times as string[] | null | undefined) ?? null,
       custom_availability_enabled: Boolean(s.custom_availability_enabled),
       custom_working_hours: parseCustomWorkingHoursFromDb(s.custom_working_hours),
     };

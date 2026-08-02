@@ -58,5 +58,10 @@ export function registryAppointmentToExpandedBookingRow(b: RegistryAppointment):
     booking_item_name: b.booking_item_name ?? null,
     service_variant_name: b.service_variant_name ?? null,
     booking_addon_labels: b.booking_addon_labels ?? undefined,
+    location_type: b.location_type ?? null,
+    client_address_line1: b.client_address_line1 ?? null,
+    client_address_line2: b.client_address_line2 ?? null,
+    client_address_city: b.client_address_city ?? null,
+    client_address_postcode: b.client_address_postcode ?? null,
   };
 }

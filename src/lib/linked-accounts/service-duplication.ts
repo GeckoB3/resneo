@@ -27,6 +27,7 @@ const RICH_COLUMNS = [
   'allow_same_day_booking',
   'booking_interval_minutes',
   'booking_minute_marks',
+  'booking_start_times',
 ] as const;
 
 export interface OfferingTemplate {
@@ -80,7 +81,7 @@ export async function loadOfferingTemplate(
     const { data: svc } = await admin
       .from(table)
       .select(
-        'duration_minutes, price_pence, description, buffer_minutes, deposit_pence, colour, payment_requirement, max_advance_booking_days, min_booking_notice_hours, cancellation_notice_hours, allow_same_day_booking, booking_interval_minutes, booking_minute_marks',
+        'duration_minutes, price_pence, description, buffer_minutes, deposit_pence, colour, payment_requirement, max_advance_booking_days, min_booking_notice_hours, cancellation_notice_hours, allow_same_day_booking, booking_interval_minutes, booking_minute_marks, booking_start_times',
       )
       .eq('id', provider.source_service_id as string)
       .maybeSingle();

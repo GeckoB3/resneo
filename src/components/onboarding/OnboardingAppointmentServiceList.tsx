@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import { sanitizeBookingStartTimes } from '@/lib/appointments/booking-interval';
 import { isServiceCustomScheduleEmpty, toServiceCustomScheduleV2 } from '@/lib/service-custom-availability';
 import {
   DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES,
@@ -132,6 +133,9 @@ function appointmentServiceDraftFromApiRow(row: Record<string, unknown>, practit
     booking_minute_marks: Array.isArray(row.booking_minute_marks)
       ? (row.booking_minute_marks as number[])
       : null,
+    booking_start_times: Array.isArray(row.booking_start_times)
+      ? (row.booking_start_times as string[])
+      : null,
     custom_availability_enabled: Boolean(row.custom_availability_enabled),
     custom_working_hours:
       Boolean(row.custom_availability_enabled) && row.custom_working_hours && typeof row.custom_working_hours === 'object'
@@ -188,6 +192,7 @@ export function serviceDraftToApiPayload(
   const bufferMinutesPayload =
     usesVariantsPayload && primaryForParent ? primaryForParent.buffer_minutes : draft.buffer_minutes;
   const priceStrPayload = usesVariantsPayload && primaryForParent ? primaryForParent.price : draft.price;
+  const cleanedStartTimes = sanitizeBookingStartTimes(draft.booking_start_times ?? []);
 
   const payload: Record<string, unknown> = {
     name: draft.name.trim(),
@@ -206,6 +211,7 @@ export function serviceDraftToApiPayload(
     allow_same_day_booking: draft.allow_same_day_booking,
     booking_interval_minutes: draft.booking_interval_minutes,
     booking_minute_marks: draft.booking_minute_marks,
+    booking_start_times: cleanedStartTimes.length > 0 ? cleanedStartTimes : null,
   };
 
   if (isAdmin) {

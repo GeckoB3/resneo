@@ -52,6 +52,16 @@ export interface RegistryAppointment {
   person_label?: string | null;
   service_variant_name?: string | null;
   booking_addon_labels?: string[];
+  /**
+   * Service delivery location snapshot. Returned by /api/venue/bookings/list all along but never
+   * declared here, so the row marker and the expanded callout had nothing to read.
+   * Null/omitted = business venue, or a booking predating the snapshot.
+   */
+  location_type?: string | null;
+  client_address_line1?: string | null;
+  client_address_line2?: string | null;
+  client_address_city?: string | null;
+  client_address_postcode?: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {

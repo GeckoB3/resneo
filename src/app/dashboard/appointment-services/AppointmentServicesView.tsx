@@ -79,6 +79,7 @@ interface Service {
   allow_same_day_booking?: boolean;
   booking_interval_minutes?: number;
   booking_minute_marks?: number[] | null;
+  booking_start_times?: string[] | null;
   staff_may_customize_name?: boolean;
   staff_may_customize_description?: boolean;
   staff_may_customize_duration?: boolean;
@@ -583,6 +584,7 @@ export function AppointmentServicesView({
       booking_interval_minutes:
         svc.booking_interval_minutes ?? DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES.booking_interval_minutes,
       booking_minute_marks: svc.booking_minute_marks ?? null,
+      booking_start_times: svc.booking_start_times ?? null,
       custom_availability_enabled: svc.custom_availability_enabled ?? false,
       custom_working_hours:
         svc.custom_availability_enabled && svc.custom_working_hours && typeof svc.custom_working_hours === 'object'

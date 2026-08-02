@@ -114,6 +114,11 @@ const serviceSchema = z
     allow_same_day_booking: z.boolean().optional(),
     booking_interval_minutes: z.number().int().min(1).max(60).optional(),
     booking_minute_marks: z.array(z.number().int().min(0).max(59)).max(60).nullable().optional(),
+    booking_start_times: z
+      .array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a 24-hour time like 09:20'))
+      .max(64)
+      .nullable()
+      .optional(),
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
@@ -192,6 +197,11 @@ const servicePatchSchema = z
     allow_same_day_booking: z.boolean().optional(),
     booking_interval_minutes: z.number().int().min(1).max(60).optional(),
     booking_minute_marks: z.array(z.number().int().min(0).max(59)).max(60).nullable().optional(),
+    booking_start_times: z
+      .array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a 24-hour time like 09:20'))
+      .max(64)
+      .nullable()
+      .optional(),
     custom_availability_enabled: z.boolean().optional(),
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
@@ -354,10 +364,12 @@ function locationPatchFields(
 }
 
 /**
- * Apply booking interval + minute marks to a PATCH payload, normalizing for storage. Resolves the
- * effective interval/marks from the patch when present, else the current row, so changing only one
- * of the two still re-anchors marks to the right grid. No-op when the patch touches neither field
- * (e.g. a staff edit, whose payload is permission-filtered and never carries these admin fields).
+ * Apply booking interval + minute marks + fixed start times to a PATCH payload, normalizing for
+ * storage. Resolves each of the three from the patch when present, else the current row, so changing
+ * only one still re-anchors marks to the right grid and leaves the other settings intact (switching
+ * to fixed times keeps the interval, so switching back restores it). No-op when the patch touches
+ * none of them (e.g. a staff edit, whose payload is permission-filtered and never carries these
+ * admin fields).
  */
 function applyBookingStartPatch(
   payload: Record<string, unknown>,
@@ -365,16 +377,21 @@ function applyBookingStartPatch(
 ): void {
   const touchesInterval = payload.booking_interval_minutes !== undefined;
   const touchesMarks = payload.booking_minute_marks !== undefined;
-  if (!touchesInterval && !touchesMarks) return;
+  const touchesStartTimes = payload.booking_start_times !== undefined;
+  if (!touchesInterval && !touchesMarks && !touchesStartTimes) return;
   const effInterval = touchesInterval
     ? payload.booking_interval_minutes
     : currentRow.booking_interval_minutes;
   const effMarks = touchesMarks
     ? (payload.booking_minute_marks as number[] | null)
     : ((currentRow.booking_minute_marks as number[] | null | undefined) ?? null);
-  const norm = normalizeBookingStartForStorage(effInterval, effMarks);
+  const effStartTimes = touchesStartTimes
+    ? (payload.booking_start_times as string[] | null)
+    : ((currentRow.booking_start_times as string[] | null | undefined) ?? null);
+  const norm = normalizeBookingStartForStorage(effInterval, effMarks, effStartTimes);
   payload.booking_interval_minutes = norm.booking_interval_minutes;
   payload.booking_minute_marks = norm.booking_minute_marks;
+  payload.booking_start_times = norm.booking_start_times;
 }
 
 function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<string, unknown> {
@@ -384,6 +401,7 @@ function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<str
     location_type: (row.location_type as string | undefined) ?? 'business_venue',
     booking_interval_minutes: (row.booking_interval_minutes as number | undefined) ?? 15,
     booking_minute_marks: (row.booking_minute_marks as number[] | null | undefined) ?? null,
+    booking_start_times: (row.booking_start_times as string[] | null | undefined) ?? null,
     custom_availability_enabled: (row.custom_availability_enabled as boolean | undefined) ?? false,
     staff_may_customize_name: (row.staff_may_customize_name as boolean | undefined) ?? false,
     staff_may_customize_description: (row.staff_may_customize_description as boolean | undefined) ?? false,
@@ -892,7 +910,11 @@ export async function POST(request: NextRequest) {
         min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
         cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
         allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
-        ...normalizeBookingStartForStorage(parsed.data.booking_interval_minutes, parsed.data.booking_minute_marks),
+        ...normalizeBookingStartForStorage(
+          parsed.data.booking_interval_minutes,
+          parsed.data.booking_minute_marks,
+          parsed.data.booking_start_times,
+        ),
         ...locationInsertFields(parsed.data),
         ...(staff.role === 'admin'
           ? {
@@ -1001,7 +1023,11 @@ export async function POST(request: NextRequest) {
       min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
       cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
       allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
-      ...normalizeBookingStartForStorage(parsed.data.booking_interval_minutes, parsed.data.booking_minute_marks),
+      ...normalizeBookingStartForStorage(
+        parsed.data.booking_interval_minutes,
+        parsed.data.booking_minute_marks,
+        parsed.data.booking_start_times,
+      ),
       ...locationInsertFields(parsed.data),
     };
     const { data, error } = await admin.from('appointment_services').insert(insertRow).select().single();

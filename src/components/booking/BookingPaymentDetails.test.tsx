@@ -25,23 +25,17 @@ describe('BookingPaymentDetails', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('shows the price breakdown and the outstanding balance', () => {
-    render(
+  it('renders nothing for a booking that only has a price, since that now lives in the open body', () => {
+    const { container } = render(
       <BookingPaymentDetails
         booking={booking({
           service_variant_name: 'Cut & finish',
           service_variant_price_pence: 3000,
-          addons: [{ addon_id: 'a1', addon_name_snapshot: 'Gloss', price_pence_at_booking: 800 }],
-          addons_total_price_pence: 800,
-          balance_due_pence: 3800,
+          balance_due_pence: 3000,
         })}
       />,
     );
-    expect(screen.getByText('Cut & finish')).toBeInTheDocument();
-    expect(screen.getByText('Gloss')).toBeInTheDocument();
-    expect(screen.getByText('Booking total')).toBeInTheDocument();
-    expect(screen.getByText('Outstanding')).toBeInTheDocument();
-    expect(screen.getAllByText('£38.00').length).toBeGreaterThan(0);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('shows a payment taken in person on the app, so it is not missed on desktop', () => {

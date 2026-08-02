@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import type { OpeningHours } from '@/types/availability';
 import type { AppointmentService, Practitioner, PractitionerService } from '@/types/booking-models';
 import { getDayOfWeek } from '@/lib/availability/engine';
-import { computeAppointmentAvailability, type AppointmentEngineInput } from './appointment-engine';
+import {
+  computeAppointmentAvailability,
+  validateExactAppointmentStart,
+  type AppointmentEngineInput,
+} from './appointment-engine';
 
 const PS_P1_S1: PractitionerService[] = [
   { id: 'ps1', practitioner_id: 'p1', service_id: 's1', custom_duration_minutes: null, custom_price_pence: null },
@@ -91,5 +95,131 @@ describe('computeAppointmentAvailability — booking interval', () => {
       buildInput({ booking_interval_minutes: 15, booking_minute_marks: [0, 15] }),
     );
     expect(times).toEqual(['09:00', '09:15', '10:00', '10:15']);
+  });
+});
+
+describe('computeAppointmentAvailability — fixed start times', () => {
+  /** Full working day, so fixed times across the afternoon are in range. */
+  function fullDayInput(serviceOverrides: Partial<AppointmentService>): AppointmentEngineInput {
+    const input = buildInput(serviceOverrides);
+    (input.practitioners[0] as unknown as { working_hours: Record<string, unknown> }).working_hours = {
+      [dayKey(DATE)]: [{ start: '09:00', end: '17:00' }],
+    };
+    return input;
+  }
+
+  it('offers exactly the configured times (the four-jobs-a-day case)', () => {
+    const times = startTimes(
+      fullDayInput({
+        duration_minutes: 90,
+        booking_start_times: ['09:20', '11:30', '13:45', '15:30'],
+      }),
+    );
+    expect(times).toEqual(['09:20', '11:30', '13:45', '15:30']);
+  });
+
+  it('drops a fixed time that would run past the end of the working day', () => {
+    const times = startTimes(
+      fullDayInput({
+        duration_minutes: 120,
+        booking_start_times: ['09:20', '15:30'],
+      }),
+    );
+    expect(times).toEqual(['09:20']);
+  });
+
+  it('accounts for buffer and processing time when checking the fit', () => {
+    // 15:30 + 60 duration + 30 buffer = 17:00 exactly, so it still fits.
+    expect(
+      startTimes(
+        fullDayInput({
+          duration_minutes: 60,
+          buffer_minutes: 30,
+          booking_start_times: ['15:30'],
+        }),
+      ),
+    ).toEqual(['15:30']);
+    // One more minute of buffer pushes it past close.
+    expect(
+      startTimes(
+        fullDayInput({
+          duration_minutes: 60,
+          buffer_minutes: 31,
+          booking_start_times: ['15:30'],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('wins over a conflicting interval and minute-mark configuration', () => {
+    const times = startTimes(
+      fullDayInput({
+        duration_minutes: 30,
+        booking_interval_minutes: 15,
+        booking_minute_marks: [0, 15],
+        booking_start_times: ['09:20', '11:30'],
+      }),
+    );
+    expect(times).toEqual(['09:20', '11:30']);
+  });
+
+  it('is narrowed by the service custom schedule', () => {
+    const dk = dayKey(DATE);
+    const times = startTimes(
+      fullDayInput({
+        duration_minutes: 60,
+        booking_start_times: ['09:20', '11:30', '13:45', '15:30'],
+        custom_availability_enabled: true,
+        custom_working_hours: {
+          version: 2,
+          rules: [{ id: 'r1', kind: 'weekly', windows: { [dk]: [{ start: '09:00', end: '13:00' }] } }],
+        },
+      }),
+    );
+    expect(times).toEqual(['09:20', '11:30']);
+  });
+
+  it('skips a fixed time already taken by an existing booking', () => {
+    const input = fullDayInput({
+      duration_minutes: 90,
+      booking_start_times: ['09:20', '11:30', '13:45', '15:30'],
+    });
+    input.existingBookings = [
+      {
+        id: 'b1',
+        practitioner_id: 'p1',
+        booking_time: '11:30',
+        duration_minutes: 90,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+      } as unknown as AppointmentEngineInput['existingBookings'][number],
+    ];
+    expect(startTimes(input)).toEqual(['09:20', '13:45', '15:30']);
+  });
+
+  it('rejects an exact start outside the fixed times, so a posted time cannot bypass them', () => {
+    const input = fullDayInput({
+      duration_minutes: 90,
+      booking_start_times: ['09:20', '11:30'],
+    });
+    // The interval grid is deliberately relaxed for multi-service chains, but fixed times are a
+    // list of when the service runs, so an unoffered time must not be creatable.
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '10:00').ok).toBe(false);
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '09:20').ok).toBe(true);
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '11:30').ok).toBe(true);
+  });
+
+  it('still allows off-grid exact starts for interval services (chains rely on it)', () => {
+    const input = fullDayInput({ duration_minutes: 30, booking_interval_minutes: 15 });
+    expect(validateExactAppointmentStart(input, 'p1', 's1', '10:07').ok).toBe(true);
+  });
+
+  it('falls back to the interval grid when the list is empty or null', () => {
+    expect(startTimes(buildInput({ booking_start_times: [] }))).toEqual([
+      '09:00', '09:15', '09:30', '09:45', '10:00', '10:15', '10:30',
+    ]);
+    expect(startTimes(buildInput({ booking_start_times: null }))).toEqual([
+      '09:00', '09:15', '09:30', '09:45', '10:00', '10:15', '10:30',
+    ]);
   });
 });

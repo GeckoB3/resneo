@@ -706,11 +706,14 @@ export function AppointmentServiceFormFields({
       <BookingIntervalEditor
         intervalMinutes={form.booking_interval_minutes}
         minuteMarks={form.booking_minute_marks}
+        startTimes={form.booking_start_times}
+        spanMinutes={form.duration_minutes + form.buffer_minutes}
         onChange={(next) =>
           setForm((f) => ({
             ...f,
             booking_interval_minutes: next.booking_interval_minutes,
             booking_minute_marks: next.booking_minute_marks,
+            booking_start_times: next.booking_start_times,
           }))
         }
         fieldIdSuffix={fieldGroupSuffix}

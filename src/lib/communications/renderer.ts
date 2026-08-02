@@ -17,6 +17,7 @@ import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import { buildReviewRequestBlock } from '@/lib/emails/review-request-block';
 import {
   bookingConfirmationSmsPriceSuffix,
   cardHoldConfirmationNotice,
@@ -744,7 +745,13 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           opts.refundMessage ?? null,
         ],
       };
-    case 'post_visit_thankyou':
+    case 'post_visit_thankyou': {
+      // Opt-in per venue, and silently absent when unset, so the email is unchanged for anyone who
+      // has not asked for it. Named after the practitioner where we know who delivered the service,
+      // because a review that names someone is both likelier and more use to the venue.
+      const review = buildReviewRequestBlock(opts.venue, {
+        practitionerName: opts.booking?.practitioner_name ?? null,
+      });
       return {
         subject: `Thank you for visiting ${opts.venue.name}`,
         heading: 'Thank you for your visit',
@@ -755,6 +762,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? 'Thank you for choosing us for your appointment. We hope your experience was excellent.'
               : 'Thank you for dining with us. We hope you had a wonderful experience.',
           ),
+          review?.html ?? '',
         ].join(''),
         textLines: [
           `Hi ${guestName},`,
@@ -762,10 +770,12 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           appointment
             ? 'Thank you for choosing us for your appointment.'
             : 'Thank you for dining with us.',
+          ...(review?.textLines ?? []),
         ],
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
       };
+    }
     case 'compliance_form_request':
     case 'compliance_form_reminder': {
       const formName = opts.complianceFormName ?? 'form';

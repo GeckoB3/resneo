@@ -73,6 +73,11 @@ export interface AppointmentServiceFormValues {
   booking_interval_minutes: number;
   /** Allowed start-minute offsets within the hour (0-59), or `null` for every interval mark. */
   booking_minute_marks: number[] | null;
+  /**
+   * Fixed start times of day (`HH:MM`), or `null` to use the interval. While editing, entries may be
+   * blank or repeated; they are cleaned up on save and an empty result stores as `null`.
+   */
+  booking_start_times: string[] | null;
   custom_availability_enabled: boolean;
   custom_working_hours: ServiceCustomScheduleV2;
   variants: AppointmentServiceVariantFormRow[];
@@ -109,6 +114,7 @@ export const DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES: AppointmentServiceFormValu
   allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
   booking_interval_minutes: DEFAULT_BOOKING_INTERVAL_MINUTES,
   booking_minute_marks: null,
+  booking_start_times: null,
   custom_availability_enabled: false,
   custom_working_hours: { version: 2, rules: [] },
   variants: [],

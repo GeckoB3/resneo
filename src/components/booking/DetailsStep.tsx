@@ -680,16 +680,28 @@ export function DetailsStep({
             'min-h-[48px] w-full rounded-xl bg-brand-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50'
           }
         >
-          {isSubmitting
-            ? 'Processing...'
-            : submitLabel ??
-              ((isAppointment || isClass) && hasDeposit
+          {isSubmitting ? (
+            /* A spinner as well as the label: submitting a booking can take a few seconds while
+               the slot is re-validated and payment set up, and changed text alone reads as a dead
+               button to someone who has just tapped it. Both this and the public flow's button are
+               dark with white text, so one spinner colour serves both. */
+            <span className="inline-flex items-center justify-center gap-2">
+              <span
+                className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                aria-hidden
+              />
+              Processing...
+            </span>
+          ) : (
+            submitLabel ??
+            ((isAppointment || isClass) && hasDeposit
               ? 'Continue to payment'
               : showCardHoldOnly || isTableCardHoldSlot
                 ? 'Continue'
                 : !useAppointmentFields && requiresDeposit
                   ? 'Continue to Payment'
-                  : 'Confirm Booking')}
+                  : 'Confirm Booking')
+          )}
         </button>
       </form>
     </div>

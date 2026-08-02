@@ -35,7 +35,7 @@ export function hasCompleteClientAddress(addr: ClientAddressInput): boolean {
 }
 
 export const CLIENT_ADDRESS_REQUIRED_ERROR =
-  'This service takes place at your address — please provide your address line 1, town or city, and postcode.';
+  'This service takes place at your address, so please provide your address line 1, town or city, and postcode.';
 
 /**
  * Resolve the delivery location of the booked service. Pass whichever anchor the booking

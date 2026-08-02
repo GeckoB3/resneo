@@ -71,6 +71,10 @@ import {
 import { bookingStatusVisualForRow } from '@/lib/table-management/booking-status-visual';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import {
+  resolveStaffBookingLocation,
+  staffBookingLocationPillLabel,
+} from '@/lib/booking/staff-booking-location';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
@@ -1371,6 +1375,8 @@ export function AppointmentBookingsDashboard({
 
   function renderAppointmentRow(b: DashboardRegistryRow) {
     const linkedMeta = b._linked;
+    // Only the kind is needed on a collapsed row; the address itself lives in the expanded callout.
+    const rowLocationKind = resolveStaffBookingLocation(b)?.kind ?? null;
     const linkedTimeOnly = linkedMeta?.visibility === 'time_only';
     const linkedFullDetails = linkedMeta?.visibility === 'full_details';
     const rowVenueId = linkedMeta?.sourceVenueId ?? venueId;
@@ -1578,6 +1584,16 @@ export function AppointmentBookingsDashboard({
                 >
                   <Pill variant="warning" size="sm">
                     Linked
+                  </Pill>
+                </span>
+              ) : null}
+              {/* Off-site and online work is visible while scanning the day, without expanding
+                  each row. Shown at every width, unlike the pills above: a practitioner checking
+                  tomorrow on a phone is exactly who needs to know they are travelling. */}
+              {rowLocationKind ? (
+                <span className="inline-flex shrink-0">
+                  <Pill variant={rowLocationKind === 'online' ? 'info' : 'success'} size="sm">
+                    {staffBookingLocationPillLabel(rowLocationKind)}
                   </Pill>
                 </span>
               ) : null}

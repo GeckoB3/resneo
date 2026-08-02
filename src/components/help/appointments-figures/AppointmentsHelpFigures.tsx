@@ -709,6 +709,76 @@ function PaymentsFlowSvg() {
   );
 }
 
+function BookingStartModesSvg() {
+  const intervalSlots = ['9:00', '9:15', '9:30', '9:45', '10:00', '10:15'];
+  const fixedSlots = ['9:20am', '11:30am', '1:45pm', '3:30pm'];
+  return (
+    <svg viewBox="0 0 720 230" className="h-auto w-full max-w-full" aria-hidden>
+      <rect x="8" y="12" width="336" height="206" rx="14" fill="white" stroke={border} />
+      <circle cx="30" cy="40" r="7" fill="white" stroke={brand} strokeWidth="2" />
+      <circle cx="30" cy="40" r="3.5" fill={brand} />
+      <text x="46" y="44" fill={slateDark} fontSize="12" fontWeight="700">
+        Repeat every few minutes
+      </text>
+      <text x="46" y="64" fill={slate} fontSize="10">
+        Interval: 15 minutes
+      </text>
+      <text x="28" y="96" fill={slate} fontSize="10">
+        Slots run through the whole day:
+      </text>
+      {intervalSlots.map((label, i) => (
+        <g key={label}>
+          <rect x={28 + (i % 3) * 100} y={112 + Math.floor(i / 3) * 38} width="88" height="28" rx="14" fill={brandLight} stroke="#cbd5e1" />
+          <text
+            x={72 + (i % 3) * 100}
+            y={130 + Math.floor(i / 3) * 38}
+            textAnchor="middle"
+            fill={brand}
+            fontSize="11"
+            fontWeight="600"
+          >
+            {label}
+          </text>
+        </g>
+      ))}
+      <text x="28" y="200" fill={slate} fontSize="9">
+        and so on, hour after hour
+      </text>
+
+      <rect x="376" y="12" width="336" height="206" rx="14" fill="white" stroke={brand} strokeWidth="2" />
+      <circle cx="398" cy="40" r="7" fill="white" stroke={brand} strokeWidth="2" />
+      <circle cx="398" cy="40" r="3.5" fill={brand} />
+      <text x="414" y="44" fill={slateDark} fontSize="12" fontWeight="700">
+        Fixed times of day
+      </text>
+      <text x="414" y="64" fill={slate} fontSize="10">
+        You name the exact times
+      </text>
+      <text x="396" y="96" fill={slate} fontSize="10">
+        Guests are offered only these:
+      </text>
+      {fixedSlots.map((label, i) => (
+        <g key={label}>
+          <rect x={396 + (i % 2) * 152} y={112 + Math.floor(i / 2) * 38} width="132" height="28" rx="14" fill={brand} />
+          <text
+            x={462 + (i % 2) * 152}
+            y={130 + Math.floor(i / 2) * 38}
+            textAnchor="middle"
+            fill={white}
+            fontSize="11"
+            fontWeight="600"
+          >
+            {label}
+          </text>
+        </g>
+      ))}
+      <text x="396" y="200" fill={slate} fontSize="9">
+        four bookings a day, nothing in between
+      </text>
+    </svg>
+  );
+}
+
 const FIGURE_COPY: Record<string, { title: string; caption?: string; node: ReactNode }> = {
   'tier-compare': {
     title: 'Plan limits at a glance',
@@ -785,6 +855,11 @@ const FIGURE_COPY: Record<string, { title: string; caption?: string; node: React
     title: 'Reports (admin)',
     caption: 'SMS usage, date range, then charts and CSV exports for the selected period.',
     node: <ReportsInsightsSvg />,
+  },
+  'booking-start-modes': {
+    title: 'Booking interval and start times',
+    caption: 'Each service picks one: a repeating interval, or the exact times you name.',
+    node: <BookingStartModesSvg />,
   },
   'widget-settings': {
     title: 'Widget, embed & QR',

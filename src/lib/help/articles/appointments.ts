@@ -174,6 +174,33 @@ Open **Services** (\`/dashboard/appointment-services\`). This catalogue powers t
 
 Fine-tune **how far ahead** guests may book, **minimum notice**, **cancellation notice**, and whether **same-day** bookings are allowed. Heavy services can require more notice than quick add-ons. Set each service the way you run the diary in real life.
 
+## Booking interval and start times
+
+This decides **which times guests see**. Each service picks one of two modes.
+
+:::help-figure booking-start-modes
+
+**Repeat every few minutes** suits most businesses. Set an interval, say 15 minutes, and slots run through the whole day at :00, :15, :30 and :45. If you only want part of each hour, tick **Restrict start times within each hour** and tap the minutes you want, for example on the hour and quarter past only.
+
+**Fixed times of day** suits businesses that take a handful of bookings a day at set times. A piano tuner who does four jobs a day might offer 9:20, 11:30, 1:45 and 3:30. Those times do not repeat neatly every hour, so an interval cannot produce them.
+
+To set fixed times:
+
+1. Open the service and find **Booking interval & start times**.
+2. Choose **Fixed times of day**.
+3. Enter your first time, then use **+ Add a time** for each of the others.
+4. Save. Guests now see only those times.
+
+A few things worth knowing:
+
+- Your fixed times still sit inside your opening hours, the calendar's working hours, and any custom schedule. A shorter day simply offers fewer of them.
+- If a time is too late in the day for the appointment to finish before you close, it is not offered.
+- Times already booked disappear, so four fixed times means at most four bookings a day per calendar.
+- If you set times closer together than the appointment takes, we warn you. That is fine when a calendar takes more than one client at a time, and a mistake otherwise.
+- Your interval settings are kept, so you can switch back at any time without setting them up again.
+
+Want different times on different days? Combine the two. Set your fixed times here, then use **custom availability** below to shorten the days that need it. Fixed times of 9:20, 11:30, 1:45 and 3:30 with a Saturday window of 9:00 to 12:00 gives you 9:20 and 11:30 on Saturdays, and all four on other days.
+
 ## Variants (sub-options)
 
 When a service offers multiple lengths or styles (for example “Cut & blow dry” vs “Cut only”), add **variants**. Guests must pick a variant before times appear, which keeps availability accurate.
@@ -185,6 +212,8 @@ After saving the service, make sure it is offered on the right calendars. Admins
 ## Custom availability
 
 Use the **custom availability** editor when a service is only offered on certain days or windows that do not match your usual template. The calendar will honour those exceptions after you save.
+
+This works alongside **Booking interval and start times** above: that decides which times of day are offered, and this decides which days and hours they are offered in.
 
 ## Staff overrides
 

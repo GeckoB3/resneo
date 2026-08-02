@@ -4,9 +4,11 @@ import {
   checkConnect,
   checkEnvPresence,
   checkKeyMode,
+  checkWebhookEndpoints,
   detectKeyMode,
   evaluatePrice,
   rollupSeverity,
+  WEBHOOK_SPECS,
   type PriceSpec,
 } from './health-checks';
 
@@ -166,5 +168,126 @@ describe('checkEnvPresence', () => {
       STRIPE_RESTAURANT_PRICE_ID: 'price_4',
     };
     expect(checkEnvPresence(env).severity).toBe('ok');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Webhook endpoint account scope
+// ---------------------------------------------------------------------------
+
+/**
+ * The failure this exists for, seen in live mode: card payments succeeded on the
+ * connected account and the ledger row stayed `pending` for ever, because the
+ * endpoint was scoped to the platform account. Stripe does not fail a delivery
+ * in that case — it never attempts one, so the endpoint log is empty and every
+ * other health check still reads green.
+ */
+describe('checkWebhookEndpoints — account scope', () => {
+  const PAYMENTS = WEBHOOK_SPECS.find((s) => s.pathSuffix === '/api/webhooks/stripe')!;
+  const SUBS = WEBHOOK_SPECS.find((s) => s.pathSuffix === '/api/webhooks/stripe-subscription')!;
+
+  /** A Stripe stub returning the given endpoints from webhookEndpoints.list. */
+  function clientWith(endpoints: unknown[]): Stripe {
+    return {
+      webhookEndpoints: { list: async () => ({ data: endpoints }) },
+    } as unknown as Stripe;
+  }
+
+  function endpoint(pathSuffix: string, events: string[], extra: Record<string, unknown> = {}) {
+    return {
+      url: `https://www.resneo.com${pathSuffix}`,
+      status: 'enabled',
+      livemode: true,
+      enabled_events: events,
+      ...extra,
+    };
+  }
+
+  const env = {
+    STRIPE_WEBHOOK_SECRET: 'whsec_a',
+    STRIPE_ONBOARDING_WEBHOOK_SECRET: 'whsec_b',
+  };
+
+  /** Both endpoints present and fully configured, scope supplied per argument. */
+  function bothEndpoints(paymentsConnect?: boolean, subsConnect?: boolean) {
+    const all = [...PAYMENTS.requiredEvents, ...PAYMENTS.recommendedEvents];
+    return clientWith([
+      endpoint(
+        PAYMENTS.pathSuffix,
+        all,
+        paymentsConnect === undefined ? {} : { connect: paymentsConnect },
+      ),
+      endpoint(
+        SUBS.pathSuffix,
+        SUBS.requiredEvents,
+        subsConnect === undefined ? {} : { connect: subsConnect },
+      ),
+    ]);
+  }
+
+  it('declares the payments endpoint connected-account scoped and billing platform scoped', () => {
+    // The specs are the contract the rest of this suite asserts against.
+    expect(PAYMENTS.scope).toBe('connected_accounts');
+    expect(SUBS.scope).toBe('platform');
+  });
+
+  it('passes when each endpoint has the scope its events require', async () => {
+    const res = await checkWebhookEndpoints(bothEndpoints(true, false), { mode: 'live', env });
+    for (const r of res) {
+      expect(r.severity, `${r.label}: ${r.issues.join(' ')}`).toBe('ok');
+      expect(r.issues).toHaveLength(0);
+    }
+  });
+
+  it('FAILS the payments endpoint when it is scoped to the platform account', async () => {
+    const [payments] = await checkWebhookEndpoints(bothEndpoints(false, false), {
+      mode: 'live',
+      env,
+    }).then((r) => r.filter((x) => x.path_suffix === PAYMENTS.pathSuffix));
+    expect(payments.severity).toBe('fail');
+    expect(payments.connect_scope).toBe(false);
+    expect(payments.expected_scope).toBe('connected_accounts');
+    expect(payments.issues.join(' ')).toMatch(/never attempt a delivery/);
+  });
+
+  it('fails the billing endpoint when it is wrongly scoped to connected accounts', async () => {
+    const res = await checkWebhookEndpoints(bothEndpoints(true, true), { mode: 'live', env });
+    const subs = res.find((r) => r.path_suffix === SUBS.pathSuffix)!;
+    expect(subs.severity).toBe('fail');
+    expect(subs.connect_scope).toBe(true);
+  });
+
+  it('warns rather than passing when Stripe does not report the scope', async () => {
+    // `connect` is a create-only parameter and is not a documented attribute of
+    // the returned object. An absent value must never read as "correct".
+    const res = await checkWebhookEndpoints(bothEndpoints(undefined, undefined), {
+      mode: 'live',
+      env,
+    });
+    const payments = res.find((r) => r.path_suffix === PAYMENTS.pathSuffix)!;
+    expect(payments.connect_scope).toBeNull();
+    expect(payments.severity).toBe('warn');
+    expect(payments.issues.join(' ')).toMatch(/Events on Connected accounts/);
+  });
+
+  it('still reports scope alongside the other endpoint problems', async () => {
+    // A wrong scope must not mask (or be masked by) missing events.
+    const client = clientWith([
+      endpoint(PAYMENTS.pathSuffix, ['payment_intent.succeeded'], { connect: false }),
+    ]);
+    const res = await checkWebhookEndpoints(client, { mode: 'live', env });
+    const payments = res.find((r) => r.path_suffix === PAYMENTS.pathSuffix)!;
+    expect(payments.severity).toBe('fail');
+    expect(payments.missing_required_events).toContain('charge.refunded');
+    expect(payments.issues.join(' ')).toMatch(/CONNECTED account/);
+  });
+
+  it('reports a null scope when the endpoint is not registered at all', async () => {
+    const res = await checkWebhookEndpoints(clientWith([]), { mode: 'live', env });
+    for (const r of res) {
+      expect(r.found).toBe(false);
+      expect(r.connect_scope).toBeNull();
+      expect(r.expected_scope).toBe(r.path_suffix === PAYMENTS.pathSuffix ? 'connected_accounts' : 'platform');
+    }
   });
 });

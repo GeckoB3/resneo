@@ -343,6 +343,19 @@ export interface WebhookEndpointSpec {
   label: string;
   pathSuffix: string;
   secretEnvKey: string;
+  /**
+   * WHOSE events this endpoint has to receive.
+   *
+   * `connected_accounts` — Stripe's `connect: true` ("Listen to: Events on
+   * Connected accounts"). Required whenever the objects are created ON a
+   * connected account, because those events are delivered ONLY to Connect-scoped
+   * endpoints. Get this wrong and Stripe does not fail the delivery, it never
+   * attempts one: the dashboard shows no events at all, every payment stays
+   * `pending` for ever, and nothing anywhere reports an error.
+   *
+   * `platform` — events on the ResNeo account itself.
+   */
+  scope: 'connected_accounts' | 'platform';
   requiredEvents: string[];
   recommendedEvents: string[];
   /** Optional context appended to the "missing recommended events" warning so superusers
@@ -355,6 +368,8 @@ export const WEBHOOK_SPECS: WebhookEndpointSpec[] = [
     label: 'Subscription & billing webhook',
     pathSuffix: '/api/webhooks/stripe-subscription',
     secretEnvKey: 'STRIPE_ONBOARDING_WEBHOOK_SECRET',
+    // Venue plan billing is charged by ResNeo on its OWN account.
+    scope: 'platform',
     requiredEvents: [
       'checkout.session.completed',
       'customer.subscription.updated',
@@ -368,6 +383,14 @@ export const WEBHOOK_SPECS: WebhookEndpointSpec[] = [
     label: 'Payments & deposits webhook',
     pathSuffix: '/api/webhooks/stripe',
     secretEnvKey: 'STRIPE_WEBHOOK_SECRET',
+    /*
+     * EVERY event this endpoint consumes fires on a connected account: the
+     * PaymentIntents are created with `stripeAccount: <connected account>`
+     * (direct charges), `account.updated` reports a connected account's
+     * capabilities, and the `customer.subscription.*` pair are connected-account
+     * class memberships. A platform-scoped endpoint here receives nothing.
+     */
+    scope: 'connected_accounts',
     requiredEvents: ['payment_intent.succeeded', 'payment_intent.payment_failed', 'charge.refunded'],
     recommendedEvents: [
       'account.updated',
@@ -393,6 +416,15 @@ export interface WebhookEndpointCheck {
   url: string | null;
   status: string | null;
   livemode: boolean | null;
+  /** Which account's events this endpoint must receive, per its spec. */
+  expected_scope: 'connected_accounts' | 'platform';
+  /**
+   * What Stripe reports: true = Connect-scoped, false = platform-only, null =
+   * Stripe did not say. `connect` is a documented CREATE parameter but is not a
+   * documented attribute of the returned object, so it is read defensively and a
+   * null is surfaced as "verify by hand" rather than silently passing.
+   */
+  connect_scope: boolean | null;
   secret_env_present: boolean;
   missing_required_events: string[];
   missing_recommended_events: string[];
@@ -442,6 +474,8 @@ export async function checkWebhookEndpoints(
         url: null,
         status: null,
         livemode: null,
+        expected_scope: spec.scope,
+        connect_scope: null,
         secret_env_present,
         missing_required_events: spec.requiredEvents,
         missing_recommended_events: spec.recommendedEvents,
@@ -467,6 +501,8 @@ export async function checkWebhookEndpoints(
         url: null,
         status: null,
         livemode: null,
+        expected_scope: spec.scope,
+        connect_scope: null,
         secret_env_present,
         missing_required_events: spec.requiredEvents,
         missing_recommended_events: spec.recommendedEvents,
@@ -478,6 +514,33 @@ export async function checkWebhookEndpoints(
     const wildcard = enabled.includes('*');
     const missingRequired = wildcard ? [] : spec.requiredEvents.filter((ev) => !enabled.includes(ev));
     const missingRecommended = wildcard ? [] : spec.recommendedEvents.filter((ev) => !enabled.includes(ev));
+
+    /*
+     * Account scope. This is the failure that hides best: a platform-scoped
+     * endpoint listening for connected-account events is not "failing" — Stripe
+     * never attempts a delivery, so the endpoint's own log stays empty and every
+     * other check here still reads green.
+     */
+    const rawConnect = (match as Stripe.WebhookEndpoint & { connect?: unknown }).connect;
+    const connect_scope = typeof rawConnect === 'boolean' ? rawConnect : null;
+    const wantsConnect = spec.scope === 'connected_accounts';
+
+    if (connect_scope === null) {
+      issues.push(
+        `Could not read this endpoint's account scope from Stripe (it is a create-only parameter). ` +
+          `Confirm by hand that "Listen to" is set to ` +
+          `${wantsConnect ? '"Events on Connected accounts"' : '"Events on your account"'}` +
+          `${wantsConnect ? ' — every event this endpoint needs fires on a connected account, and a platform-scoped endpoint receives none of them, silently.' : '.'}`,
+      );
+      severities.push('warn');
+    } else if (connect_scope !== wantsConnect) {
+      issues.push(
+        wantsConnect
+          ? 'Endpoint is scoped to YOUR account but every event it needs fires on a CONNECTED account — Stripe will never attempt a delivery. Recreate it with "Listen to: Events on Connected accounts" (scope cannot be changed after creation) and update the signing secret.'
+          : 'Endpoint is scoped to connected accounts but these events fire on the platform account — recreate it with "Listen to: Events on your account" and update the signing secret.',
+      );
+      severities.push('fail');
+    }
 
     if (match.status !== 'enabled') {
       issues.push(`Endpoint is "${match.status}" in Stripe — no events will be delivered.`);
@@ -503,6 +566,8 @@ export async function checkWebhookEndpoints(
       url: match.url,
       status: match.status,
       livemode: match.livemode,
+      expected_scope: spec.scope,
+      connect_scope,
       secret_env_present,
       missing_required_events: missingRequired,
       missing_recommended_events: missingRecommended,

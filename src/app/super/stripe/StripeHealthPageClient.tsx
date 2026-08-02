@@ -51,6 +51,8 @@ interface WebhookEndpointCheck {
   url: string | null;
   status: string | null;
   livemode: boolean | null;
+  expected_scope: 'connected_accounts' | 'platform';
+  connect_scope: boolean | null;
   secret_env_present: boolean;
   missing_required_events: string[];
   missing_recommended_events: string[];
@@ -421,6 +423,31 @@ export function StripeHealthPageClient() {
                       {w.found ? (
                         <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                           {w.status}
+                        </span>
+                      ) : null}
+                      {/* Account scope, shown as a first-class chip: a wrong one
+                          delivers nothing at all, so it must not be buried in
+                          the issue list. Amber when Stripe would not tell us. */}
+                      {w.found ? (
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            w.connect_scope === null
+                              ? 'bg-amber-100 text-amber-800'
+                              : w.connect_scope === (w.expected_scope === 'connected_accounts')
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-rose-100 text-rose-700'
+                          }`}
+                          title={
+                            w.expected_scope === 'connected_accounts'
+                              ? 'Must listen to events on Connected accounts'
+                              : 'Must listen to events on your own account'
+                          }
+                        >
+                          {w.connect_scope === null
+                            ? `scope? (needs ${w.expected_scope === 'connected_accounts' ? 'connected' : 'platform'})`
+                            : w.connect_scope
+                              ? 'connected accounts'
+                              : 'your account'}
                         </span>
                       ) : null}
                       <span

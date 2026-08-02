@@ -1,5 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { normaliseServiceNameForMerge } from './catalogue';
+import { normaliseServiceNameForMerge, sourceDescriptionForProviders } from './catalogue';
+
+describe('sourceDescriptionForProviders', () => {
+  const HOST = 'venue-host';
+  const MEMBER = 'venue-member';
+  const index = new Map<string, { description: string | null }>([
+    [`${HOST}:s1`, { description: 'Host copy' }],
+    [`${MEMBER}:s1`, { description: 'Member copy' }],
+    [`${HOST}:s2`, { description: null }],
+    [`${MEMBER}:s2`, { description: 'Member copy only' }],
+  ]);
+
+  it('prefers the host venue when providers disagree', () => {
+    const providers = [
+      { venueId: MEMBER, sourceServiceId: 's1' },
+      { venueId: HOST, sourceServiceId: 's1' },
+    ];
+    expect(sourceDescriptionForProviders(providers, index, HOST)).toBe('Host copy');
+  });
+
+  it('falls back to another provider when the host has written none', () => {
+    const providers = [
+      { venueId: HOST, sourceServiceId: 's2' },
+      { venueId: MEMBER, sourceServiceId: 's2' },
+    ];
+    expect(sourceDescriptionForProviders(providers, index, HOST)).toBe('Member copy only');
+  });
+
+  it('falls back to the first provider with copy when the host does not provide the offering', () => {
+    const providers = [{ venueId: MEMBER, sourceServiceId: 's1' }];
+    expect(sourceDescriptionForProviders(providers, index, HOST)).toBe('Member copy');
+  });
+
+  it('returns null when no provider has a description', () => {
+    const providers = [{ venueId: HOST, sourceServiceId: 's2' }];
+    expect(sourceDescriptionForProviders(providers, index, null)).toBeNull();
+  });
+
+  it('returns null for an offering with no providers', () => {
+    expect(sourceDescriptionForProviders([], index, HOST)).toBeNull();
+  });
+});
 
 describe('normaliseServiceNameForMerge', () => {
   it('lowercases and collapses whitespace', () => {

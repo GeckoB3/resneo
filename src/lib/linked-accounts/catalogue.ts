@@ -31,13 +31,15 @@ import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog'
  * expects (it maps them per model).
  */
 export interface VenueCatalogueData {
-  /** serviceId → name/duration/price (deduped across calendars). */
+  /** serviceId → name/duration/price/description (deduped across calendars). */
   services: Map<
     string,
     {
       name: string;
       durationMinutes: number | null;
       pricePence: number | null;
+      /** The owning venue's own service description, shown on the combined page. */
+      description: string | null;
       /** The owning venue's chosen display order (Dashboard → Services drag order). */
       sortOrder: number;
     }
@@ -47,7 +49,13 @@ export interface VenueCatalogueData {
   /** serviceId → calendarIds that offer it (for the availability fan-out). */
   serviceCalendars: Map<string, string[]>;
   /** ordered list of services for the builder. */
-  serviceList: { id: string; name: string; durationMinutes: number | null; pricePence: number | null }[];
+  serviceList: {
+    id: string;
+    name: string;
+    durationMinutes: number | null;
+    pricePence: number | null;
+    description: string | null;
+  }[];
   /** ordered list of calendars for the builder. */
   calendarList: { id: string; name: string }[];
 }
@@ -70,7 +78,13 @@ export async function loadVenueCatalogueData(
   }
   const services = new Map<
     string,
-    { name: string; durationMinutes: number | null; pricePence: number | null; sortOrder: number }
+    {
+      name: string;
+      durationMinutes: number | null;
+      pricePence: number | null;
+      description: string | null;
+      sortOrder: number;
+    }
   >();
   const calendars = new Map<string, { name: string }>();
   const serviceCalendars = new Map<string, string[]>();
@@ -87,6 +101,7 @@ export async function loadVenueCatalogueData(
           name: s.name,
           durationMinutes: s.duration_minutes ?? null,
           pricePence: s.price_pence ?? null,
+          description: s.description?.trim() ? s.description.trim() : null,
           sortOrder: s.sort_order ?? 0,
         });
         serviceOrder.push(s.id);
@@ -233,6 +248,7 @@ interface SourceServiceRecord {
   name: string;
   durationMinutes: number | null;
   pricePence: number | null;
+  description: string | null;
   active: boolean;
 }
 
@@ -318,7 +334,7 @@ export async function loadCatalogueForManagement(
 ): Promise<CatalogueManagementView | null> {
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, page_mode')
+    .select('id, page_mode, host_venue_id')
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective) return null;
@@ -353,6 +369,7 @@ export async function loadCatalogueForManagement(
         name: s.name,
         durationMinutes: s.durationMinutes,
         pricePence: s.pricePence,
+        description: s.description,
         active: true,
       });
     }
@@ -433,7 +450,14 @@ export async function loadCatalogueForManagement(
   const itemViews: CatalogueItemView[] = items.map((i) => ({
     id: i.id as string,
     name: (i.name as string) ?? 'Service',
-    description: (i.description as string | null) ?? null,
+    // Same resolution as the live combined page, so the builder preview matches what guests see.
+    description:
+      ((i.description as string | null)?.trim() || null) ??
+      sourceDescriptionForProviders(
+        providersByItem.get(i.id as string) ?? [],
+        serviceIndex,
+        collective.host_venue_id as string | null,
+      ),
     category: (i.category as string | null) ?? null,
     imageUrl: (i.image_url as string | null) ?? null,
     displayOrder: (i.display_order as number) ?? 0,
@@ -572,13 +596,35 @@ export interface PublicCombinedCatalogue {
  * pinned practitioner still live), with effective price/duration resolved.
  * Offerings with no bookable provider are dropped. Read-only.
  */
+/**
+ * Description for an offering, taken from the owning venues' own service settings.
+ *
+ * The combined page manager tells hosts that price, duration and description all come from each
+ * venue's own service (Dashboard → Services), and price and duration already work that way. Where
+ * several venues provide the same offering they may have written different copy, so the host venue's
+ * wins and any other provider's is the fallback, matching who curates the combined page.
+ */
+export function sourceDescriptionForProviders(
+  providers: Array<{ venueId: string; sourceServiceId: string }>,
+  serviceIndex: Map<string, { description: string | null }>,
+  hostVenueId: string | null,
+): string | null {
+  const describe = (p: { venueId: string; sourceServiceId: string }) =>
+    serviceIndex.get(`${p.venueId}:${p.sourceServiceId}`)?.description ?? null;
+  if (hostVenueId) {
+    const hostCopy = providers.filter((p) => p.venueId === hostVenueId).map(describe).find(Boolean);
+    if (hostCopy) return hostCopy;
+  }
+  return providers.map(describe).find(Boolean) ?? null;
+}
+
 export async function loadPublicCombinedCatalogue(
   admin: SupabaseClient,
   collectiveId: string,
 ): Promise<PublicCombinedCatalogue | null> {
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, status, page_mode, service_grouping')
+    .select('id, status, page_mode, service_grouping, host_venue_id')
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective || collective.status !== 'active' || collective.page_mode !== 'unified_catalog') {
@@ -623,7 +669,12 @@ export async function loadPublicCombinedCatalogue(
   // Source services + calendars per eligible venue (model-agnostic).
   const serviceIndex = new Map<
     string,
-    { durationMinutes: number | null; pricePence: number | null; sortOrder: number }
+    {
+      durationMinutes: number | null;
+      pricePence: number | null;
+      description: string | null;
+      sortOrder: number;
+    }
   >();
   const practitioner = new Map<string, { name: string }>();
   for (const venueId of eligibleVenueIds) {
@@ -632,6 +683,7 @@ export async function loadPublicCombinedCatalogue(
       serviceIndex.set(`${venueId}:${id}`, {
         durationMinutes: s.durationMinutes,
         pricePence: s.pricePence,
+        description: s.description,
         sortOrder: s.sortOrder,
       });
     }
@@ -717,7 +769,9 @@ export async function loadPublicCombinedCatalogue(
     publicItems.push({
       id: i.id as string,
       name: (i.name as string) ?? 'Service',
-      description: (i.description as string | null) ?? null,
+      description:
+        ((i.description as string | null)?.trim() || null) ??
+        sourceDescriptionForProviders(providers, serviceIndex, collective.host_venue_id as string | null),
       category: (i.category as string | null) ?? null,
       imageUrl: (i.image_url as string | null) ?? null,
       pricingDisplay: (i.pricing_display as PricingDisplay) ?? 'from',

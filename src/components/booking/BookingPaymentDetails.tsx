@@ -16,8 +16,12 @@ import {
 const PENDING_CARD_TICK_MS = 30_000;
 
 /**
- * Read-only view of a booking's money: the price breakdown, the in-person
- * payment state, any card payment still in flight, and the full ledger.
+ * Read-only view of a booking's payment state: what has been paid (including anything taken in
+ * person on the app), any card payment still in flight, and the full ledger.
+ *
+ * The price breakdown itself lives in {@link BookingPriceSummary}, rendered in the open body of the
+ * booking detail: staff want to see what a booking costs without opening anything, whereas these
+ * payment mechanics are only wanted when money is actually in question.
  *
  * The web cannot TAKE an in-person payment (that is Tap to Pay / a card reader
  * in the ResNeo app), so there is no collect action here. It exists so a payment
@@ -29,7 +33,6 @@ const PENDING_CARD_TICK_MS = 30_000;
  * `@/lib/booking/payment-display`, ported from the app so the two cannot drift.
  */
 export function BookingPaymentDetails({ booking }: { booking: PaymentDisplayBooking }) {
-  const priceRows = buildPriceSummary(booking);
   const history = buildPaymentHistory(booking.payments, booking.id);
 
   /**
@@ -63,32 +66,10 @@ export function BookingPaymentDetails({ booking }: { booking: PaymentDisplayBook
   const showState =
     state === 'paid' || state === 'refunded' || state === 'partially_paid';
 
-  if (priceRows.length === 0 && history.length === 0 && !showState) return null;
+  if (history.length === 0 && !showState && pending.verdict === 'none') return null;
 
   return (
     <div className="space-y-2">
-      {priceRows.length > 0 ? (
-        <ul className="space-y-0.5 text-[11px] text-slate-700">
-          {priceRows.map((r) => (
-            <li
-              key={r.key}
-              className={`flex items-start justify-between gap-3 ${r.indent ? 'pl-3' : ''}`}
-            >
-              <span className={`min-w-0 ${r.emphasis ? 'font-semibold text-slate-900' : ''}`}>
-                {r.label}
-              </span>
-              <span
-                className={`shrink-0 tabular-nums ${
-                  r.emphasis ? 'font-semibold text-slate-900' : ''
-                }`}
-              >
-                {r.pence != null ? formatPence(r.pence) : (r.note ?? '—')}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
       {pending.verdict !== 'none' ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5">
           <p className="text-[11px] font-semibold text-amber-900">

@@ -13,6 +13,8 @@ import {
 import { StaffExpandedBookingModifyModal } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { BookingPaymentDetails } from '@/components/booking/BookingPaymentDetails';
+import { BookingPriceSummary } from '@/components/booking/BookingPriceSummary';
+import { bookingDisplayEndHm } from '@/lib/booking/booking-detail-from-row';
 import {
   formatPence,
   toPaymentDisplayBooking,
@@ -1169,7 +1171,32 @@ export function ExpandedBookingContent({
     online_meeting_info: effectiveBooking.online_meeting_info ?? activeDetail?.online_meeting_info ?? null,
   });
 
-  const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [
+  // When the booking runs. The calendar bar and the list row both show this, but the panel itself
+  // did not, so a staff member reading the detail had to close it again to check the time.
+  const bookingStartHm = effectiveBooking.booking_time?.slice(0, 5) ?? null;
+  const bookingEndHm = bookingDisplayEndHm({
+    booking_time: effectiveBooking.booking_time,
+    booking_end_time: effectiveBooking.booking_end_time ?? null,
+    estimated_end_time: effectiveBooking.estimated_end_time ?? null,
+  });
+
+  const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [];
+
+  if (bookingStartHm) {
+    bookingMetaSegments.push({
+      key: 'when',
+      node: (
+        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+          <span className="font-medium text-slate-500">Time</span>
+          <span className="font-semibold tabular-nums text-slate-800">
+            {bookingEndHm ? `${bookingStartHm}–${bookingEndHm}` : bookingStartHm}
+          </span>
+        </span>
+      ),
+    });
+  }
+
+  bookingMetaSegments.push(
     {
       key: 'previous-visit',
       node: (
@@ -1192,7 +1219,7 @@ export function ExpandedBookingContent({
       </span>
       ),
     },
-  ];
+  );
 
   if (tableStyle) {
     bookingMetaSegments.push({
@@ -1477,6 +1504,15 @@ export function ExpandedBookingContent({
               </ul>
             </div>
           ) : null}
+          {/* What the appointment costs, out in the open. The same breakdown used to sit inside the
+              collapsed payments section, where staff had to go looking for it. */}
+          <div className="mt-2 border-t border-slate-100 pt-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Price</p>
+            <BookingPriceSummary
+              booking={paymentDisplayBooking}
+              serviceName={effectiveBooking.booking_item_name ?? effectiveBooking.service_name ?? null}
+            />
+          </div>
         </SectionCard.Body>
       </SectionCard>
 

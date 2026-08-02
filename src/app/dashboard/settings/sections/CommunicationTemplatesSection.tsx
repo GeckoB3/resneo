@@ -28,6 +28,9 @@ interface CommunicationTemplatesSectionProps {
     email?: string | null;
     owner_booking_notification_enabled?: boolean;
     owner_booking_notification_email?: string | null;
+    /** Google review request on the post-visit thank you. */
+    review_request_enabled?: boolean;
+    google_review_url?: string | null;
   };
   isAdmin: boolean;
   pricingTier?: string;
@@ -39,6 +42,8 @@ interface CommunicationTemplatesSectionProps {
   onUpdate?: (patch: {
     owner_booking_notification_enabled?: boolean;
     owner_booking_notification_email?: string | null;
+    review_request_enabled?: boolean;
+    google_review_url?: string | null;
   }) => void;
   /** Stripe subscription present — Plan checkout completed; hide Light SMS “add a card” banner. */
   hasStripeSubscription?: boolean;
@@ -443,6 +448,58 @@ export function CommunicationTemplatesSection({
   );
   const [ownerAlertError, setOwnerAlertError] = useState<string | null>(null);
 
+  // ── Google review request — venue-level, rides on the post-visit thank you, off by default ──
+  const [reviewEnabled, setReviewEnabled] = useState(Boolean(venue.review_request_enabled));
+  const [reviewLink, setReviewLink] = useState(venue.google_review_url ?? "");
+  const [savedReviewUrl, setSavedReviewUrl] = useState<string | null>(
+    venue.google_review_url ?? null,
+  );
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  const saveReviewRequest = useCallback(
+    async (patch: { review_request_enabled?: boolean; google_review_url?: string }) => {
+      if (!isAdmin) return;
+      setSaveStatus("saving");
+      try {
+        const response = await fetch("/api/venue", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string; google_review_url?: string | null; review_request_enabled?: boolean }
+          | null;
+        if (!response.ok) {
+          // The server normalises and validates the link, so its message is the useful one.
+          setReviewError(payload?.error ?? "Could not save. Check the link and try again.");
+          if (patch.review_request_enabled !== undefined) setReviewEnabled(!patch.review_request_enabled);
+          setSaveStatus("error");
+          return;
+        }
+        setReviewError(null);
+        if (payload?.google_review_url !== undefined) {
+          setSavedReviewUrl(payload.google_review_url ?? null);
+          // Show the canonical form back, so a pasted Place ID becomes a link they can test.
+          setReviewLink(payload.google_review_url ?? "");
+          if (!payload.google_review_url) setReviewEnabled(false);
+        }
+        onUpdate?.(patch);
+        setSaveStatus("saved");
+        savedFlashRef.current = setTimeout(() => setSaveStatus("idle"), 1500);
+      } catch (error) {
+        console.error("Failed to save Google review setting:", error);
+        setSaveStatus("error");
+      }
+    },
+    [isAdmin, onUpdate],
+  );
+
+  const commitReviewLink = useCallback(() => {
+    const next = reviewLink.trim();
+    if (next === (savedReviewUrl ?? "")) return;
+    void saveReviewRequest({ google_review_url: next });
+  }, [reviewLink, savedReviewUrl, saveReviewRequest]);
+
   const saveOwnerAlert = useCallback(
     async (patch: {
       owner_booking_notification_enabled?: boolean;
@@ -688,6 +745,82 @@ export function CommunicationTemplatesSection({
               )}
             </div>
           )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-start justify-between gap-4 p-5">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900">Ask for a Google review</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Adds a review button to your post-visit thank you, alongside a link that lets
+                unhappy customers reply to you directly instead. Each customer is asked at most
+                once every six months.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={reviewEnabled}
+              aria-label={`${reviewEnabled ? "Disable" : "Enable"} Google review requests`}
+              disabled={!isAdmin}
+              onClick={() => {
+                const next = !reviewEnabled;
+                setReviewEnabled(next);
+                void saveReviewRequest({ review_request_enabled: next });
+              }}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
+                reviewEnabled ? "bg-brand-600" : "bg-slate-200"
+              } ${!isAdmin ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+            >
+              <span
+                className={`mt-0.5 inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-150 ease-out ${
+                  reviewEnabled ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="border-t border-slate-100 px-5 pb-5 pt-4">
+            <label className="block text-xs font-medium text-slate-600">
+              Google review link
+              <input
+                type="text"
+                value={reviewLink}
+                disabled={!isAdmin}
+                placeholder="https://g.page/r/.../review"
+                onChange={(event) => setReviewLink(event.target.value)}
+                onBlur={commitReviewLink}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+                className="mt-1.5 block w-full max-w-lg rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 disabled:opacity-50"
+              />
+            </label>
+            {reviewError ? (
+              <p className="mt-1.5 text-xs text-red-600">{reviewError}</p>
+            ) : (
+              <p className="mt-1.5 text-xs text-slate-500">
+                Paste the review link from your Google Business Profile, or your Place ID. A Maps
+                search link will not work, because it does not open the review box.
+              </p>
+            )}
+            {savedReviewUrl ? (
+              <a
+                href={savedReviewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block text-xs font-semibold text-brand-600 hover:text-brand-700"
+              >
+                Test this link
+              </a>
+            ) : null}
+            {/* Venues ask for this constantly, so answer it before they build the wrong thing. */}
+            <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+              There is no star picker in the email on purpose. Google does not let a rating be set
+              in advance, and showing the review link only to customers who rate you highly first
+              is against Google&apos;s review policies.
+            </p>
+          </div>
         </div>
       </div>
 

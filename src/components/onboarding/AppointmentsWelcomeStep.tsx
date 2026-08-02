@@ -91,46 +91,6 @@ export function AppointmentsWelcomeStep({
       example: 'Admins manage everything; staff run day-to-day.',
       show: !isLightPlan,
     },
-    ...(activeModels.includes('unified_scheduling')
-      ? [
-          {
-            title: 'Appointments setup',
-            summary: 'The services guests can book with you.',
-            example: 'Duration, price, buffer, payment, and which calendars offer each service.',
-            show: true,
-          },
-        ]
-      : []),
-    ...(activeModels.includes('class_session')
-      ? [
-          {
-            title: 'Classes setup',
-            summary: 'Class types with a duration, capacity, and price.',
-            example: 'Schedule the sessions themselves later from the Class timetable.',
-            show: true,
-          },
-        ]
-      : []),
-    ...(activeModels.includes('event_ticket')
-      ? [
-          {
-            title: 'Events setup',
-            summary: 'Your first one-off or recurring ticketed event.',
-            example: 'Add dates, capacity, ticket types, and an image. Skippable if you’d rather wait.',
-            show: true,
-          },
-        ]
-      : []),
-    ...(activeModels.includes('resource_booking')
-      ? [
-          {
-            title: 'Resources setup',
-            summary: 'Slot-based bookings like courts, rooms, or equipment.',
-            example: 'Weekly availability, slot length, pricing, and how it shows on the calendar.',
-            show: true,
-          },
-        ]
-      : []),
     {
       title: 'Your dashboard',
       summary: 'A guided tour of where you’ll work every day.',
@@ -138,15 +98,9 @@ export function AppointmentsWelcomeStep({
       show: true,
     },
     {
-      title: 'Payments (optional)',
-      summary: 'Connect Stripe if you want deposits or prepayment.',
-      example: 'Skippable: guests can still book for free while you set this up later.',
-      show: true,
-    },
-    {
       title: 'Review & go live',
       summary: 'A final summary and your public booking link.',
-      example: 'Share the link and start taking bookings straight away.',
+      example: 'Your dashboard then has a short checklist for the rest.',
       show: true,
     },
   ].filter((c) => c.show);
@@ -163,8 +117,8 @@ export function AppointmentsWelcomeStep({
           <h2 className="text-lg font-bold text-slate-900">Welcome to ResNeo</h2>
           <p className="mt-1 text-sm text-slate-500">
             {isLightPlan
-              ? 'Let’s get your diary ready in about 10 minutes. Every step is skippable, so you can always finish later from your dashboard.'
-              : 'Let’s get your diary ready in about 10–15 minutes. Every step is skippable, so you can always finish later from your dashboard.'}
+              ? 'Let’s get your diary ready in about 5 minutes. Every step is skippable, so you can always finish later from your dashboard.'
+              : 'Let’s get your diary ready in about 5 to 10 minutes. Every step is skippable, so you can always finish later from your dashboard.'}
           </p>
         </div>
       </div>
@@ -196,6 +150,10 @@ export function AppointmentsWelcomeStep({
         <p className="text-sm text-slate-600">
           We’ll ask a few questions about how your business runs and pre-fill sensible defaults. Nothing is
           final: you can change every setting later from the dashboard.
+        </p>
+        <p className="mt-2 text-sm text-slate-600">
+          Once you’re through, your dashboard walks you through adding what guests can book and connecting
+          payments, so you can do those in your own time.
         </p>
       </div>
 

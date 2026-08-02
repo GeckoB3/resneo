@@ -409,6 +409,7 @@ async function handleCheckoutCompleted(
       onboarding_step: 0,
       onboarding_completed: false,
       appointments_onboarding_unified_flow: isAppointmentPlanTier(plan),
+      appointments_onboarding_lean_flow: true,
       daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
       ...(isLight
         ? {

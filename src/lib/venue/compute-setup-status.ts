@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { hasServiceConfig } from '@/lib/availability';
 import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
+import { isOptionalSetupStepKey } from '@/lib/venue/setup-checklist-steps';
 import type { BookingModel } from '@/types/booking-models';
 import {
   activeModelsToLegacyEnabledModels,
@@ -13,6 +14,8 @@ import {
 export interface SetupStatus {
   /** True when this staff row has dismissed the dashboard checklist (X) or it was recorded on completion. */
   setup_checklist_dismissed: boolean;
+  /** Optional checklist rows this staff member snoozed with "Not now" (see `OPTIONAL_SETUP_STEP_KEYS`). */
+  setup_checklist_snoozed_keys: string[];
   onboarding_completed: boolean;
   pricing_tier: string | null;
   profile_complete: boolean;
@@ -145,18 +148,36 @@ export async function computeSetupStatus(staff: VenueStaff): Promise<SetupStatus
 
   const firstBookingMade = (bookingCount ?? 0) > 0;
 
-  const { data: staffDismissRow } = await staff.db
+  const { data: staffPrefsRow, error: staffPrefsError } = await staff.db
     .from('staff')
-    .select('dashboard_setup_checklist_dismissed_at')
+    .select('dashboard_setup_checklist_dismissed_at, dashboard_setup_checklist_snoozed_keys')
     .eq('id', staff.id)
     .maybeSingle();
 
-  const setupChecklistDismissed =
-    (staffDismissRow as { dashboard_setup_checklist_dismissed_at?: string | null } | null)
-      ?.dashboard_setup_checklist_dismissed_at != null;
+  // A failure here (most likely a missing column on an unmigrated database) silently
+  // degrades to "not dismissed, nothing snoozed", which un-hides the checklist for
+  // everyone. Log it so that shows up as a deploy-order problem rather than a mystery.
+  if (staffPrefsError) {
+    console.error(
+      '[computeSetupStatus] staff checklist preferences read failed; defaulting to not dismissed:',
+      staffPrefsError.message,
+      { staffId: staff.id, venueId },
+    );
+  }
+
+  const staffPrefs = staffPrefsRow as {
+    dashboard_setup_checklist_dismissed_at?: string | null;
+    dashboard_setup_checklist_snoozed_keys?: string[] | null;
+  } | null;
+
+  const setupChecklistDismissed = staffPrefs?.dashboard_setup_checklist_dismissed_at != null;
+  const setupChecklistSnoozedKeys = (staffPrefs?.dashboard_setup_checklist_snoozed_keys ?? []).filter(
+    isOptionalSetupStepKey,
+  );
 
   return {
     setup_checklist_dismissed: setupChecklistDismissed,
+    setup_checklist_snoozed_keys: setupChecklistSnoozedKeys,
     onboarding_completed: (venue as { onboarding_completed?: boolean }).onboarding_completed === true,
     pricing_tier: ((venue as { pricing_tier?: string | null }).pricing_tier ?? null) as string | null,
     profile_complete: profileComplete,

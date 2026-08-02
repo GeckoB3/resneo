@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isOptionalSetupStepKey } from '@/lib/venue/setup-checklist-steps';
 
 type SetupStepKey = keyof Omit<
   SetupStatus,
@@ -35,6 +36,12 @@ interface Step {
   actionLabel: string;
   /** Marks the step complete once its action button is clicked (see clicked-steps storage). */
   completeOnClick?: boolean;
+  /**
+   * Steps a venue may legitimately never do (payments, a test booking). These offer
+   * "Not now", and once snoozed they stop blocking the checklist from auto-hiding.
+   * Keys must appear in `OPTIONAL_SETUP_STEP_KEYS` for the snooze API to accept them.
+   */
+  optional?: boolean;
 }
 
 /** Extra prompts shown alongside the required steps once onboarding is complete. */
@@ -71,13 +78,16 @@ const POST_ONBOARDING_SETUP_STEPS: Step[] = [
 /**
  * A required step is complete when its key maps to a truthy `SetupStatus` flag. A
  * `completeOnClick` prompt is complete once the user has clicked through to it
- * (its key is in `clickedStepKeys`).
+ * (its key is in `clickedStepKeys`). An optional step also counts as done once it
+ * has been snoozed, so it drops out of the list and the progress count.
  */
 export function isStepComplete(
   status: SetupStatus,
   step: Step,
   clickedStepKeys?: ReadonlySet<string>,
+  snoozedStepKeys?: ReadonlySet<string>,
 ): boolean {
+  if (step.optional && snoozedStepKeys?.has(step.key)) return true;
   if (step.completeOnClick) return Boolean(clickedStepKeys?.has(step.key));
   return Boolean(status[step.key as SetupStepKey]);
 }
@@ -130,13 +140,19 @@ function getAvailabilityStep(model: BookingModel, onboardingCompleted: boolean):
   }
 }
 
-function isSetupComplete(s: SetupStatus) {
+/**
+ * Whether the checklist can hide itself for good. Required steps must be done; the
+ * optional ones (payments, test booking) count as settled once done *or* snoozed,
+ * so a venue that never takes payments is not nagged forever.
+ */
+export function isSetupComplete(s: SetupStatus, snoozedStepKeys?: ReadonlySet<string>) {
+  const settled = (key: string, flag: boolean) => flag || Boolean(snoozedStepKeys?.has(key));
   return (
     s.profile_complete &&
     s.availability_set &&
     s.guest_booking_ready &&
-    s.stripe_connected &&
-    s.first_booking_made &&
+    settled('stripe_connected', s.stripe_connected) &&
+    settled('first_booking_made', s.first_booking_made) &&
     s.secondary_event_catalog_ready &&
     s.secondary_class_catalog_ready &&
     s.secondary_resource_catalog_ready
@@ -306,6 +322,25 @@ function markStepClicked(venueId: string, stepKey: string): void {
   notifyClickedStepsChanged();
 }
 
+/**
+ * Snooze is persisted server-side (not localStorage) because `/auth/signed-out`
+ * responds with `Clear-Site-Data: "cache", "storage"`, which would reset the
+ * preference on every sign-out.
+ */
+async function persistSnoozeToServer(stepKey: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/venue/setup-checklist-snooze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ step_key: stepKey }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.error('[SetupChecklist] persist snooze to server failed:', e);
+    return false;
+  }
+}
+
 async function persistDismissToServer(): Promise<boolean> {
   try {
     const res = await fetch('/api/venue/setup-checklist-dismiss', { method: 'POST' });
@@ -345,6 +380,7 @@ export function getSteps(status: SetupStatus): Step[] {
         'Connect Stripe so you can take deposits and card payments (Connect pays out to your bank).',
       href: '/dashboard/settings?tab=payments',
       actionLabel: 'Connect Stripe',
+      optional: true,
     },
     {
       key: 'first_booking_made',
@@ -352,6 +388,7 @@ export function getSteps(status: SetupStatus): Step[] {
       description: 'Try the guest flow once to confirm booking and emails look right.',
       href: '/dashboard/bookings/new',
       actionLabel: 'Create booking',
+      optional: true,
     },
   );
   // Post-onboarding "What's next" prompts, shown alongside the required steps.
@@ -395,7 +432,7 @@ export function SetupChecklist({
           return;
         }
         setStatus(data);
-        if (isSetupComplete(data)) {
+        if (isSetupComplete(data, new Set(data.setup_checklist_snoozed_keys))) {
           writeDismissedToStorage(venueId);
           void persistDismissToServer();
           setDismissed(true);
@@ -422,7 +459,7 @@ export function SetupChecklist({
             return;
           }
           setStatus(data);
-          if (isSetupComplete(data)) {
+          if (isSetupComplete(data, new Set(data.setup_checklist_snoozed_keys))) {
             writeDismissedToStorage(venueId);
             void persistDismissToServer();
             setDismissed(true);
@@ -438,12 +475,33 @@ export function SetupChecklist({
   // `completeOnClick` prompts complete once the user clicks through to their page.
   const clickedSteps = useClickedSteps(venueId);
 
+  /** Snoozes clicked in this session, applied on top of what the server returned. */
+  const [pendingSnoozes, setPendingSnoozes] = useState<readonly string[]>([]);
+
+  const snoozedSteps = useMemo(
+    () => new Set([...(status?.setup_checklist_snoozed_keys ?? []), ...pendingSnoozes]),
+    [status, pendingSnoozes],
+  );
+
   const steps = useMemo(() => (status ? getSteps(status) : []), [status]);
 
   const incompleteSteps = useMemo(
-    () => (status ? steps.filter((s) => !isStepComplete(status, s, clickedSteps)) : steps),
-    [steps, status, clickedSteps],
+    () => (status ? steps.filter((s) => !isStepComplete(status, s, clickedSteps, snoozedSteps)) : steps),
+    [steps, status, clickedSteps, snoozedSteps],
   );
+
+  function snooze(step: Step) {
+    if (!isOptionalSetupStepKey(step.key)) return;
+    setPendingSnoozes((prev) => (prev.includes(step.key) ? prev : [...prev, step.key]));
+    void persistSnoozeToServer(step.key).then((ok) => {
+      if (!ok) {
+        console.error('[SetupChecklist] Snooze not saved; it will reappear on reload.', {
+          venueId,
+          stepKey: step.key,
+        });
+      }
+    });
+  }
 
   function dismiss() {
     writeDismissedToStorage(venueId);
@@ -457,7 +515,9 @@ export function SetupChecklist({
 
   if (dismissed || !status) return null;
 
-  const completedCount = steps.filter((s) => isStepComplete(status, s, clickedSteps)).length;
+  const completedCount = steps.filter((s) =>
+    isStepComplete(status, s, clickedSteps, snoozedSteps),
+  ).length;
   const totalCount = steps.length;
   if (totalCount > 0 && completedCount === totalCount) return null;
 
@@ -505,7 +565,12 @@ export function SetupChecklist({
           </div>
           <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100 bg-slate-50/40">
             {incompleteSteps.map((step) => (
-              <li key={step.key} className="flex items-center gap-4 px-4 py-3.5 sm:px-5">
+              // Controls wrap onto their own row on narrow screens: two side-by-side
+              // shrink-0 buttons would otherwise crush the description to a few px.
+              <li
+                key={step.key}
+                className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3.5 sm:flex-nowrap sm:px-5"
+              >
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 border-dashed border-slate-200 bg-white">
                   <div className="h-2 w-2 rounded-full bg-slate-300" />
                 </div>
@@ -513,13 +578,24 @@ export function SetupChecklist({
                   <p className="text-sm font-semibold text-slate-900">{step.label}</p>
                   <p className="mt-0.5 text-xs leading-relaxed text-slate-600">{step.description}</p>
                 </div>
-                <Link
-                  href={step.href}
-                  onClick={step.completeOnClick ? () => markStepClicked(venueId, step.key) : undefined}
-                  className="flex-shrink-0 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-800 shadow-sm transition-colors hover:bg-brand-100"
-                >
-                  {step.actionLabel}
-                </Link>
+                <div className="flex w-full flex-shrink-0 items-center justify-end gap-2 sm:w-auto">
+                  {step.optional ? (
+                    <button
+                      type="button"
+                      onClick={() => snooze(step)}
+                      className="rounded-xl px-2 py-2 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                    >
+                      Not now
+                    </button>
+                  ) : null}
+                  <Link
+                    href={step.href}
+                    onClick={step.completeOnClick ? () => markStepClicked(venueId, step.key) : undefined}
+                    className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-800 shadow-sm transition-colors hover:bg-brand-100"
+                  >
+                    {step.actionLabel}
+                  </Link>
+                </div>
               </li>
             ))}
           </ul>

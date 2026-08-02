@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { getSteps, isStepComplete } from './SetupChecklist';
+import { getSteps, isSetupComplete, isStepComplete } from './SetupChecklist';
 import type { SetupStatus } from '@/lib/venue/compute-setup-status';
 
 function makeStatus(overrides: Partial<SetupStatus> = {}): SetupStatus {
   return {
     setup_checklist_dismissed: false,
+    setup_checklist_snoozed_keys: [],
     onboarding_completed: true,
     pricing_tier: 'appointments',
     profile_complete: true,
@@ -97,5 +98,61 @@ describe('isStepComplete', () => {
     expect(isStepComplete(makeStatus({ stripe_connected: false }), step, new Set(['stripe_connected']))).toBe(
       false,
     );
+  });
+});
+
+describe('optional steps', () => {
+  const OPTIONAL_KEYS = ['stripe_connected', 'first_booking_made'];
+
+  it('marks payments and the test booking optional, and nothing else', () => {
+    const steps = getSteps(makeStatus());
+    expect(steps.filter((s) => s.optional).map((s) => s.key)).toEqual(OPTIONAL_KEYS);
+  });
+
+  it('treats a snoozed optional step as complete', () => {
+    const status = makeStatus({ stripe_connected: false });
+    const step = getSteps(status).find((s) => s.key === 'stripe_connected')!;
+    expect(isStepComplete(status, step, undefined, new Set())).toBe(false);
+    expect(isStepComplete(status, step, undefined, new Set(['stripe_connected']))).toBe(true);
+  });
+
+  it('does not let a snooze complete a required step', () => {
+    const status = makeStatus({ guest_booking_ready: false });
+    const step = getSteps(status).find((s) => s.key === 'guest_booking_ready')!;
+    expect(step.optional).toBeUndefined();
+    expect(isStepComplete(status, step, undefined, new Set(['guest_booking_ready']))).toBe(false);
+  });
+});
+
+describe('isSetupComplete', () => {
+  /** Required flags all true; the two optional ones left undone. */
+  const readyExceptOptional = () =>
+    makeStatus({ stripe_connected: false, first_booking_made: false });
+
+  it('stays incomplete while an optional step is neither done nor snoozed', () => {
+    expect(isSetupComplete(readyExceptOptional(), new Set())).toBe(false);
+    expect(isSetupComplete(readyExceptOptional(), new Set(['stripe_connected']))).toBe(false);
+  });
+
+  it('completes once every optional step is snoozed', () => {
+    expect(
+      isSetupComplete(readyExceptOptional(), new Set(['stripe_connected', 'first_booking_made'])),
+    ).toBe(true);
+  });
+
+  it('completes when the optional steps are genuinely done', () => {
+    const status = makeStatus({ stripe_connected: true, first_booking_made: true });
+    expect(isSetupComplete(status, new Set())).toBe(true);
+  });
+
+  it('never completes on a snooze alone while a required step is outstanding', () => {
+    const status = makeStatus({
+      guest_booking_ready: false,
+      stripe_connected: false,
+      first_booking_made: false,
+    });
+    expect(
+      isSetupComplete(status, new Set(['stripe_connected', 'first_booking_made', 'guest_booking_ready'])),
+    ).toBe(false);
   });
 });

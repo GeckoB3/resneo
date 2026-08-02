@@ -1,6 +1,6 @@
 # Lean onboarding: move catalogue setup and Stripe into "What's next"
 
-Status: Phases 0, 1, and 2 implemented. **Both migrations must be applied before the code ships** (see 3.5 and 5.6). Phase 3 not started.
+Status: Phases 0, 1, and 2 shipped (migrations applied, merged to main). Phase 3 implemented on branch `phase-3-remove-dead-onboarding-steps`, needs no migration.
 Owner: TBC.
 Scope: Appointments-plan onboarding (`src/app/onboarding/page.tsx`) and the dashboard setup checklist (`src/app/dashboard/SetupChecklist.tsx`).
 
@@ -164,21 +164,48 @@ Apply `20270102121000_appointments_onboarding_lean_flow.sql` before shipping the
 
 Venues that are neither appointments-plan nor restaurant still use `buildLegacyGenericNonRestaurantOnboardingSteps`, which retains its own `services` and `stripe_onboarding` steps. Untouched here.
 
-## 6. Phase 3: delete the dead code
+## 6. Phase 3: delete the dead code (implemented, on a branch)
 
-Once every venue carries the lean flag, roughly 1,700 lines of render blocks and 350 lines of save handlers become unreachable in a 4,651-line file. Do this as a **separate commit** so Phase 2 stays reviewable and revertible.
+`src/app/onboarding/page.tsx` goes from 4,650 lines to 2,075, and the file now lints clean (the hand-rolled-modal warning went with the add-calendar modal). Two components are deleted outright: `OnboardingAppointmentServiceList` (518 lines) and `OnboardingInlineAddCalendarControls` (79 lines), neither with any other consumer.
 
-| Step | Save handler | Render block |
-|---|---|---|
-| `services` | `1799` to `1877` | `2826` to `2895` |
-| `first_event` | `1936` to `2019` | `2984` to `3446` |
-| `classes` | `2019` to `2095` | `3447` to `3877` |
-| `resources` | `2095` to approx. `2260` | `3878` to `4385` |
-| `stripe_onboarding` | `1481` to `1498` | `2383` to `2421` |
+### 6.1 Two corrections to this section as originally written
 
-Also then unused: `OnboardingAppointmentServiceList` (`src/components/onboarding/OnboardingAppointmentServiceList.tsx`, no other consumer), the `services` / `classes` / `resources` / `eventDraft` state and their defaulting effects (`page.tsx:1191` to `1259`), the business-config service prefill (`page.tsx:1011`), the roster prefetch key list (`page.tsx:1216`), and `servicesSyncReady` (`page.tsx:1261`).
+**`stripe_onboarding` is not dead and was not deleted.** `buildRestaurantOnboardingSteps` still includes it, so every restaurant reaches that screen. Its render block and save handler stay.
 
-Check `buildLegacyAppointmentsPlanModelSteps` and `buildLegacyGenericNonRestaurantOnboardingSteps` are still needed for the older remap chain before touching them. They are index-remap fixtures, not live layouts, and must keep describing history accurately.
+**The four catalogue steps were not dead either, until this phase made them so.** They were still reachable through the third branch of `modelSteps`, the one for venues that are neither on an appointments plan nor running table reservations. That branch is live for a restaurant or founding tier whose booking model is not `table_reservation`, which signup can produce because it takes the booking model from the business type (`config.model`) rather than from the plan. Only 6 of the 70 entries in `business-config.ts` map to `table_reservation`.
+
+So Phase 3 could not be a pure deletion. **Decision taken:** apply the same change to that flow, dropping its catalogue steps as `buildGenericNonRestaurantOnboardingSteps`:
+
+```
+profile → stripe_onboarding → [team → hours, appointment models only] → preview
+```
+
+Stripe stays there, unlike the appointments plan, because that flow has no dashboard tour step to hand over from. Those venues get the same one-shot remap, reusing the `appointments_onboarding_lean_flow` column, with `buildLegacyGenericNonRestaurantOnboardingSteps` as the source layout.
+
+This is a behaviour change for a cohort we have no size estimate for. To check whether it is empty:
+
+```sql
+select count(*) from venues
+where lower(trim(pricing_tier)) in ('restaurant', 'founding')
+  and booking_model <> 'table_reservation'
+  and onboarding_completed = false;
+```
+
+If that returns 0, the change is a no-op in practice and only the deletion matters. To back it out, restore the old inline branch in `modelSteps` and keep the render blocks.
+
+### 6.2 What was removed
+
+| Area | Detail |
+|---|---|
+| Save handlers | `services`, `first_event`, `classes`, `resources` (366 lines) |
+| Render blocks | the same four steps (1,466 lines) |
+| Inline add-calendar | modal, state, callbacks, entitlement close effect: only entry point was the services step |
+| Draft state | `services`, `classes`, `resources`, `eventDraft`, `servicesSyncReady`, and the ticket-type helpers |
+| Effects | class/resource host-calendar defaulting, event calendar alignment, services roster defaulting, services server-sync |
+| Types and helpers | `EventDraft`, `EventTicketDraft`, `ClassDraft`, `ResourceDraft`, their factories, validators, and the `RES_*` bounds |
+| Prefill | business-config default services, resource seed row |
+
+`buildCatalogueAppointmentsPlanSteps`, `buildLegacyAppointmentsPlanModelSteps`, and `buildLegacyGenericNonRestaurantOnboardingSteps` all stay. They are index-remap fixtures, not live layouts, and must keep describing history accurately.
 
 ## 7. Testing
 

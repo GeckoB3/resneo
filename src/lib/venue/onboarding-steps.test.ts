@@ -3,9 +3,12 @@ import {
   type AppointmentPlanModel,
   buildAppointmentsPlanModelSteps,
   buildCatalogueAppointmentsPlanSteps,
+  buildGenericNonRestaurantOnboardingSteps,
   buildLegacyAppointmentsPlanModelSteps,
+  buildLegacyGenericNonRestaurantOnboardingSteps,
   migrateOnboardingStepToCurrentLayout,
 } from './onboarding-steps';
+import type { BookingModel } from '@/types/booking-models';
 
 const ALL_MODELS: AppointmentPlanModel[] = [
   'unified_scheduling',
@@ -157,5 +160,77 @@ describe('migrateOnboardingStepToCurrentLayout to the lean layout', () => {
     const legacy = buildCatalogueAppointmentsPlanSteps(['unified_scheduling']);
     expect(migrateOnboardingStepToCurrentLayout(99, legacy, current)).toBe(current.length - 1);
     expect(migrateOnboardingStepToCurrentLayout(-1, legacy, current)).toBe(0);
+  });
+});
+
+describe('buildGenericNonRestaurantOnboardingSteps', () => {
+  // Restaurant / founding tier on a non-table booking model. Reachable because signup
+  // takes the booking model from the business type, not from the plan.
+  const terms = { staff: 'Staff' };
+  const models: BookingModel[] = [
+    'unified_scheduling',
+    'practitioner_appointment',
+    'class_session',
+    'event_ticket',
+    'resource_booking',
+  ];
+
+  it('drops the catalogue steps for every booking model', () => {
+    for (const model of models) {
+      const k = keys(buildGenericNonRestaurantOnboardingSteps(model, terms));
+      for (const removed of ['services', 'classes', 'first_event', 'resources']) {
+        expect(k).not.toContain(removed);
+      }
+    }
+  });
+
+  it('keeps Stripe, which this flow still needs', () => {
+    for (const model of models) {
+      expect(keys(buildGenericNonRestaurantOnboardingSteps(model, terms))).toContain(
+        'stripe_onboarding',
+      );
+    }
+  });
+
+  it('keeps calendars and hours for the appointment models only', () => {
+    expect(keys(buildGenericNonRestaurantOnboardingSteps('unified_scheduling', terms))).toEqual([
+      'profile',
+      'stripe_onboarding',
+      'team',
+      'hours',
+      'preview',
+    ]);
+    expect(keys(buildGenericNonRestaurantOnboardingSteps('class_session', terms))).toEqual([
+      'profile',
+      'stripe_onboarding',
+      'preview',
+    ]);
+  });
+
+  it('remaps a venue off each removed step without going backwards', () => {
+    for (const model of models) {
+      const legacy = buildLegacyGenericNonRestaurantOnboardingSteps(model, terms);
+      const current = buildGenericNonRestaurantOnboardingSteps(model, terms);
+      legacy.forEach((step, storedIndex) => {
+        const landed = migrateOnboardingStepToCurrentLayout(storedIndex, legacy, current);
+        const landedKey = current[landed]?.key;
+        expect(landedKey).toBeDefined();
+        if (current.some((s) => s.key === step.key)) {
+          expect(landedKey).toBe(step.key);
+        } else {
+          // Removed step: must resume at something later in the OLD flow.
+          expect(legacy.findIndex((s) => s.key === landedKey)).toBeGreaterThan(storedIndex);
+        }
+      });
+    }
+  });
+
+  it('is idempotent once a venue is already on the new layout', () => {
+    for (const model of models) {
+      const current = buildGenericNonRestaurantOnboardingSteps(model, terms);
+      current.forEach((_s, idx) => {
+        expect(migrateOnboardingStepToCurrentLayout(idx, current, current)).toBe(idx);
+      });
+    }
   });
 });

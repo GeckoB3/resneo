@@ -131,6 +131,76 @@ export function buildLegacyAppointmentsPlanModelSteps(
   return steps;
 }
 
+/** Plan §8.2 Step 2: heading adapts to terminology (team / calendars). */
+export function unifiedTeamStepLabel(terms: { staff: string }): string {
+  const s = terms.staff.trim();
+  if (/^staff$/i.test(s)) {
+    return 'Your team & calendars';
+  }
+  return `Your ${s}s`;
+}
+
+/**
+ * Onboarding for venues that are neither on an appointments plan nor running table
+ * reservations: a restaurant or founding tier whose booking model is not
+ * `table_reservation`. Reachable because signup takes the booking model from the
+ * business type rather than the plan.
+ *
+ * Catalogue setup is dropped here for the same reason as the appointments plan: the
+ * dashboard checklist covers every model. Stripe stays, unlike the appointments plan,
+ * because this flow has no dashboard tour step to hand over from.
+ */
+export function buildGenericNonRestaurantOnboardingSteps(
+  bookingModel: BookingModel,
+  terms: { staff: string },
+): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'profile', label: 'Business Profile' },
+    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
+  ];
+  if (bookingModel === 'practitioner_appointment' || bookingModel === 'unified_scheduling') {
+    steps.push({ key: 'team', label: unifiedTeamStepLabel(terms) });
+    steps.push({ key: 'hours', label: 'Opening hours & schedules' });
+  }
+  steps.push({ key: 'preview', label: 'Preview & Go Live' });
+  return steps;
+}
+
+/**
+ * The layout `buildGenericNonRestaurantOnboardingSteps` replaced, and also the layout
+ * Appointments Plus used before the unified flow. Remap source only.
+ */
+export function buildLegacyGenericNonRestaurantOnboardingSteps(
+  bookingModel: BookingModel,
+  terms: { staff: string },
+): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'profile', label: 'Business Profile' },
+    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
+  ];
+  switch (bookingModel) {
+    case 'practitioner_appointment':
+    case 'unified_scheduling':
+      steps.push({ key: 'team', label: unifiedTeamStepLabel(terms) });
+      steps.push({ key: 'services', label: 'Services' });
+      steps.push({ key: 'hours', label: 'Opening hours & schedules' });
+      break;
+    case 'event_ticket':
+      steps.push({ key: 'first_event', label: 'First Event' });
+      break;
+    case 'class_session':
+      steps.push({ key: 'classes', label: 'Classes & Timetable' });
+      break;
+    case 'resource_booking':
+      steps.push({ key: 'resources', label: 'Your Resources' });
+      break;
+    default:
+      break;
+  }
+  steps.push({ key: 'preview', label: 'Preview & Go Live' });
+  return steps;
+}
+
 /**
  * Remap a stored `onboarding_step` index from an older layout onto the current one.
  *

@@ -483,7 +483,19 @@ export function CommunicationTemplatesSection({
           setReviewLink(payload.google_review_url ?? "");
           if (!payload.google_review_url) setReviewEnabled(false);
         }
-        onUpdate?.(patch);
+        if (payload?.review_request_enabled !== undefined) {
+          setReviewEnabled(payload.review_request_enabled);
+        }
+        // Feed the parent what was stored, not what was typed: the server normalises the link, and
+        // clearing it also turns the request off.
+        onUpdate?.({
+          ...(payload?.google_review_url !== undefined
+            ? { google_review_url: payload.google_review_url ?? null }
+            : {}),
+          ...(payload?.review_request_enabled !== undefined
+            ? { review_request_enabled: payload.review_request_enabled }
+            : {}),
+        });
         setSaveStatus("saved");
         savedFlashRef.current = setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (error) {

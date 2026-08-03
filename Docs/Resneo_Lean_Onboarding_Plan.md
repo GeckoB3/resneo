@@ -135,18 +135,26 @@ Note the corollary: the remapped index may be **lower** than the stored one, and
 
 No work needed: `POST /api/venue/stripe-connect` already defaults `returnPath` to `/dashboard/settings?stripe=success` (`route.ts:39`) and only overrides it from a caller-supplied value. The onboarding-side return effect exits safely when the step is absent (`stripeIndex < 0`), so it can be deleted in Phase 3.
 
-### 5.5 Restaurant flow: deferred, blocked on a live bug
+### 5.5 Restaurant flow: the blocking bug is fixed; the Stripe change is still deferred
 
-The plan recommended removing Stripe from the restaurant flow too. **Not done**, and it should stay blocked until a separate defect is fixed.
+The plan recommended removing Stripe from the restaurant flow too. **Still not done**, but the defect that blocked it is now fixed.
 
-`migrateRestaurantOnboardingStepToCurrentLayout` runs on **every** onboarding load with no marker guard, unlike the appointments remap. It therefore re-interprets an already-current index against the legacy layout and moves restaurants **backwards**. Verified by simulating both builders:
+`migrateRestaurantOnboardingStepToCurrentLayout` ran on **every** onboarding load with no marker guard, unlike the appointments remap. It therefore re-interpreted an already-current index against the legacy layout and moved restaurants **backwards**. Verified by simulating both builders:
 
 ```
 table management ON:  stored 5 (r_table_setup) -> 4 (r_services); 6 (r_dashboard) -> 4; 7 (stripe) -> 5; 8 (preview) -> 5
 table management OFF: stored 5 (r_dashboard)   -> 4 (r_services); 6 (stripe)      -> 4; 7 (preview) -> 5
 ```
 
-Any restaurant that reaches Table Setup or later, closes the tab, and returns is bounced back to Services. Adding another layout change to that path would compound a bug that already exists. Fix the guard first, then revisit.
+Any restaurant that reached Table Setup or later, closed the tab, and returned was bounced back to Services.
+
+**Fixed by removing the remap, not by adding a guard.** A marker column was the obvious move, mirroring `appointments_onboarding_lean_flow`, but it buys nothing here and costs something. The merged-services layout shipped on 2026-05-08 and the remap has run unguarded ever since, so every restaurant that has opened the wizard in the three months since has already been converted; simulating a second pass shows affected venues settle on `r_services` and stay there. There is no cohort left for a one-shot migration to serve. Meanwhile a new column is a hard deploy prerequisite for the whole wizard (§5.6), and backfilling it `false` would have dragged in-flight venues backwards one final time.
+
+So `buildRestaurantOnboardingSteps` moved to `src/lib/venue/onboarding-steps.ts` beside its siblings, `buildLegacyRestaurantOnboardingSteps` and `migrateRestaurantOnboardingStepToCurrentLayout` are deleted, and a stored index is now read as what it is: an index into the current layout, clamped by the existing `modelSteps` sync effect if it is past the end.
+
+Residual risk, accepted: a restaurant that has been dormant mid-onboarding since before 2026-05-08 still holds a legacy index and will resume on the wrong step (forward, not backward, and navigable). Nothing in the venue row distinguishes that case from a bug-mangled one, and the cohort is a three-month-idle signup.
+
+The next restaurant layout change needs its own legacy fixture and its own marker column, gated like the appointments remaps. Recover the deleted fixture from git history rather than rebuilding it from memory.
 
 ### 5.6 Deployment: the migration is a hard prerequisite
 

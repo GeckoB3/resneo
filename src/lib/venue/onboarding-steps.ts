@@ -141,6 +141,34 @@ export function unifiedTeamStepLabel(terms: { staff: string }): string {
 }
 
 /**
+ * Restaurant plan onboarding (`table_reservation`).
+ *
+ * Services, capacity, dining duration, and booking rules were four separate screens until
+ * 2026-05-08; they are one `r_services` step now. There is deliberately no remap from that
+ * older layout: it ran unguarded for three months, so every venue that has opened the
+ * wizard since has already been converted, and re-running it on an already-current index
+ * reads it against the wrong layout and walks the venue backwards.
+ */
+export function buildRestaurantOnboardingSteps(tableManagementEnabled: boolean): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'profile', label: 'Business Profile' },
+    { key: 'r_welcome', label: 'Welcome' },
+    { key: 'r_opening_hours', label: 'Opening Hours' },
+    { key: 'r_table_mode', label: 'Table Management' },
+    { key: 'r_services', label: 'Services & booking rules' },
+  ];
+  if (tableManagementEnabled) {
+    steps.push({ key: 'r_table_setup', label: 'Table Setup' });
+  }
+  steps.push(
+    { key: 'r_dashboard', label: 'Your Dashboard' },
+    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
+    { key: 'preview', label: 'Preview & Go Live' },
+  );
+  return steps;
+}
+
+/**
  * Onboarding for venues that are neither on an appointments plan nor running table
  * reservations: a restaurant or founding tier whose booking model is not
  * `table_reservation`. Reachable because signup takes the booking model from the

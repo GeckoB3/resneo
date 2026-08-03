@@ -11,12 +11,12 @@ import { slugFromBusinessNameOrFallback } from '@/lib/venue/slug-from-business-n
 import { resolvePreviewCatalogState } from '@/lib/venue/onboarding-preview-catalog';
 import {
   type AppointmentPlanModel,
-  type OnboardingStepDef,
   buildAppointmentsPlanModelSteps,
   buildCatalogueAppointmentsPlanSteps,
   buildGenericNonRestaurantOnboardingSteps,
   buildLegacyAppointmentsPlanModelSteps,
   buildLegacyGenericNonRestaurantOnboardingSteps,
+  buildRestaurantOnboardingSteps,
   isAppointmentPlanModel,
   migrateOnboardingStepToCurrentLayout,
   unifiedTeamStepLabel,
@@ -107,77 +107,6 @@ function onboardingRosterFromPractitioners(
   return (practitioners ?? [])
     .filter((p) => (p.calendar_type ?? 'practitioner') !== 'resource')
     .map((p) => ({ id: p.id, name: p.name }));
-}
-
-/** Restaurant plan onboarding (current layout: one step for services + capacity + duration + rules). */
-function buildRestaurantOnboardingSteps(tableManagementEnabled: boolean): OnboardingStepDef[] {
-  const steps: OnboardingStepDef[] = [
-    { key: 'profile', label: 'Business Profile' },
-    { key: 'r_welcome', label: 'Welcome' },
-    { key: 'r_opening_hours', label: 'Opening Hours' },
-    { key: 'r_table_mode', label: 'Table Management' },
-    { key: 'r_services', label: 'Services & booking rules' },
-  ];
-  if (tableManagementEnabled) {
-    steps.push({ key: 'r_table_setup', label: 'Table Setup' });
-  }
-  steps.push(
-    { key: 'r_dashboard', label: 'Your Dashboard' },
-    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
-    { key: 'preview', label: 'Preview & Go Live' },
-  );
-  return steps;
-}
-
-/** Previous restaurant flow: four separate screens for the same service editor. */
-function buildLegacyRestaurantOnboardingSteps(tableManagementEnabled: boolean): OnboardingStepDef[] {
-  const steps: OnboardingStepDef[] = [
-    { key: 'profile', label: 'Business Profile' },
-    { key: 'r_welcome', label: 'Welcome' },
-    { key: 'r_opening_hours', label: 'Opening Hours' },
-    { key: 'r_table_mode', label: 'Table Management' },
-    { key: 'r_services', label: 'Dining Services' },
-    { key: 'r_capacity', label: 'Capacity' },
-    { key: 'r_dining_duration', label: 'Dining Duration' },
-    { key: 'r_booking_rules', label: 'Booking Rules' },
-  ];
-  if (tableManagementEnabled) {
-    steps.push({ key: 'r_table_setup', label: 'Table Setup' });
-  }
-  steps.push(
-    { key: 'r_dashboard', label: 'Your Dashboard' },
-    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
-    { key: 'preview', label: 'Preview & Go Live' },
-  );
-  return steps;
-}
-
-/**
- * Maps stored step index when the restaurant onboarding flow drops duplicate service-setup screens.
- * If the user had already reached the last redundant step, resume on the next substantive step.
- */
-function migrateRestaurantOnboardingStepToCurrentLayout(
-  storedIndex: number,
-  legacySteps: OnboardingStepDef[],
-  currentSteps: OnboardingStepDef[],
-): number {
-  const legacyKey = legacySteps[storedIndex]?.key;
-  if (!legacyKey) {
-    return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
-  }
-  if (legacyKey === 'r_booking_rules') {
-    const svcIdx = currentSteps.findIndex((s) => s.key === 'r_services');
-    if (svcIdx >= 0 && svcIdx + 1 < currentSteps.length) {
-      return svcIdx + 1;
-    }
-    return svcIdx >= 0 ? svcIdx : 0;
-  }
-  const mergedHead = ['r_services', 'r_capacity', 'r_dining_duration'];
-  if (mergedHead.includes(legacyKey)) {
-    const idx = currentSteps.findIndex((s) => s.key === 'r_services');
-    if (idx >= 0) return idx;
-  }
-  return migrateOnboardingStepToCurrentLayout(storedIndex, legacySteps, currentSteps);
 }
 
 export default function OnboardingPage() {
@@ -298,18 +227,8 @@ export default function OnboardingPage() {
             /* non-blocking */
           }
           setTableManagementEnabled(restaurantTableMgmt);
-          const currentR = buildRestaurantOnboardingSteps(restaurantTableMgmt);
-          const legacyR = buildLegacyRestaurantOnboardingSteps(restaurantTableMgmt);
-          const migratedR = migrateRestaurantOnboardingStepToCurrentLayout(v.onboarding_step, legacyR, currentR);
-          if (migratedR !== v.onboarding_step) {
-            initialStep = migratedR;
-            initialMaxStep = migratedR;
-            void fetch('/api/venue/onboarding', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ onboarding_step: migratedR }),
-            });
-          }
+          // The stored index is taken at face value: it already refers to this layout. Any index
+          // past the end is clamped by the effect that syncs `step` against `modelSteps`.
         }
 
         if (isAppointmentPlanTier(v.pricing_tier)) {

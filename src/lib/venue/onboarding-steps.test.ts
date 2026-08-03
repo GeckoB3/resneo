@@ -6,6 +6,7 @@ import {
   buildGenericNonRestaurantOnboardingSteps,
   buildLegacyAppointmentsPlanModelSteps,
   buildLegacyGenericNonRestaurantOnboardingSteps,
+  buildRestaurantOnboardingSteps,
   migrateOnboardingStepToCurrentLayout,
 } from './onboarding-steps';
 import type { BookingModel } from '@/types/booking-models';
@@ -160,6 +161,45 @@ describe('migrateOnboardingStepToCurrentLayout to the lean layout', () => {
     const legacy = buildCatalogueAppointmentsPlanSteps(['unified_scheduling']);
     expect(migrateOnboardingStepToCurrentLayout(99, legacy, current)).toBe(current.length - 1);
     expect(migrateOnboardingStepToCurrentLayout(-1, legacy, current)).toBe(0);
+  });
+});
+
+describe('buildRestaurantOnboardingSteps', () => {
+  it('puts services, capacity, duration, and rules on one step', () => {
+    expect(keys(buildRestaurantOnboardingSteps(false))).toEqual([
+      'profile',
+      'r_welcome',
+      'r_opening_hours',
+      'r_table_mode',
+      'r_services',
+      'r_dashboard',
+      'stripe_onboarding',
+      'preview',
+    ]);
+    for (const dropped of ['r_capacity', 'r_dining_duration', 'r_booking_rules']) {
+      expect(keys(buildRestaurantOnboardingSteps(false))).not.toContain(dropped);
+    }
+  });
+
+  it('adds table setup after services when table management is on', () => {
+    const k = keys(buildRestaurantOnboardingSteps(true));
+    expect(k).toContain('r_table_setup');
+    expect(k.indexOf('r_table_setup')).toBe(k.indexOf('r_services') + 1);
+    expect(k.indexOf('r_table_setup')).toBeLessThan(k.indexOf('r_dashboard'));
+  });
+
+  it('holds a stored index still, whichever step a venue parked on', () => {
+    // The regression this guards: the restaurant flow used to remap on every load against
+    // the pre-2026-05-08 layout, which read an already-current index as legacy and walked
+    // the venue backwards (Table Setup and later all collapsed onto Services). There is no
+    // restaurant remap now, so an index only ever means the current layout.
+    for (const tableManagement of [true, false]) {
+      const current = buildRestaurantOnboardingSteps(tableManagement);
+      current.forEach((step, idx) => {
+        expect(migrateOnboardingStepToCurrentLayout(idx, current, current)).toBe(idx);
+        expect(current[idx]?.key).toBe(step.key);
+      });
+    }
   });
 });
 

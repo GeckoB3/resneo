@@ -18,7 +18,7 @@ export interface HelpVideoDef {
 
 export const HELP_VIDEOS: Record<string, HelpVideoDef> = {
   'services-setup': {
-    youtubeId: 'ARezQjb-NsA',
+    youtubeId: '96Nw37-Kfrg',
     title: 'Watch: setting up your services',
     caption: 'A walkthrough of building a service, from naming it to linking it to a calendar.',
   },

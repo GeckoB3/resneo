@@ -28,12 +28,12 @@ export const HELP_VIDEOS: Record<string, HelpVideoDef> = {
     caption: 'How to choose which messages go out, by email or SMS, and when they send.',
   },
   'booking-page-setup': {
-    youtubeId: 'wx-FW6455Dg',
+    youtubeId: 'ScW3XxcciHE',
     title: 'Watch: setting up your booking page',
     caption: 'Setting your booking page address, branding it, and sharing the link with clients.',
   },
   'linked-venues-setup': {
-    youtubeId: 'y_-fpQCHXO4',
+    youtubeId: 'M1SF8ZFMXSE',
     title: 'Watch: setting up linked venues and collectives',
     caption: 'How to link another venue, choose what you share, and set up a combined booking page.',
   },

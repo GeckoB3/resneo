@@ -26,6 +26,10 @@ export interface VenueSettings {
   owner_booking_notification_enabled?: boolean;
   /** Alert recipient override; null falls back to the venue profile email. */
   owner_booking_notification_email?: string | null;
+  /** Canonical Google write-a-review URL, normalised on save; null = not configured. */
+  google_review_url?: string | null;
+  /** Include the Google review block in the post-visit thank you. Requires google_review_url. */
+  review_request_enabled?: boolean;
   communication_templates: Record<string, { subject?: string; body?: string }> | null;
   opening_hours: OpeningHoursSettings | null;
   /** Unified / appointment venues: date-range closures or amended opening hours (see venue-opening-exceptions API). */

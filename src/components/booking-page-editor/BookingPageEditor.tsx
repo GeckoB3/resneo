@@ -13,6 +13,8 @@ import {
 } from '@/lib/booking/booking-page-cover';
 import { BookingPageCoverCropper } from '@/app/dashboard/settings/sections/BookingPageCoverCropper';
 import { BookingPageDraggableLogo } from '@/app/dashboard/settings/sections/BookingPageDraggableLogo';
+import { BookingPageDraggableImage } from '@/app/dashboard/settings/sections/BookingPageDraggableImage';
+import { BookingPageImageFramingControls } from '@/app/dashboard/settings/sections/BookingPageImageFramingControls';
 import { BookingPageLogoFramingControls } from '@/app/dashboard/settings/sections/BookingPageLogoFramingControls';
 import { InlineBookingPreview } from './InlineBookingPreview';
 import {
@@ -61,6 +63,10 @@ import {
   sanitizeBookingPageLogoCrop,
   type BookingPageLogoCrop,
 } from '@/lib/booking/booking-page-logo';
+import {
+  sanitizeBookingPageImageFraming,
+  type BookingPageImageFraming,
+} from '@/lib/booking/booking-page-image-framing';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import type { BookingPageEditorAdapter, ImportSource, SaveReporter } from './types';
 import { ImportFromMember, type ImportScope } from './ImportFromMember';
@@ -170,6 +176,9 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
   const [servicePhotos, setServicePhotos] = useState<Record<string, string>>(cfg0.service_photos ?? {});
+  const [servicePhotoCrops, setServicePhotoCrops] = useState<Record<string, BookingPageImageFraming>>(
+    cfg0.service_photo_crops ?? {},
+  );
   const [showServicesTab, setShowServicesTab] = useState(cfg0.show_services_tab === true);
   const [showTeamTab, setShowTeamTab] = useState(cfg0.show_team_tab === true);
   const [showAboutTab, setShowAboutTab] = useState(cfg0.show_about_tab === true);
@@ -200,6 +209,36 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     [serviceList],
   );
 
+  /**
+   * The photo showing for each service right now. Venue photos live in the config (so state is
+   * the source of truth); collective offering photos live on the item, so they arrive on the
+   * list and state only holds this session's edits. An empty string is a tombstone: the user
+   * removed the photo, so the value from the list must not resurface before it reloads.
+   */
+  const effectiveServicePhotos = useMemo((): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const s of serviceList) {
+      const edited = servicePhotos[s.id];
+      const url = (edited !== undefined ? edited : s.imageUrl ?? '').trim();
+      if (url) out[s.id] = url;
+    }
+    return out;
+  }, [serviceList, servicePhotos]);
+
+  /** Framing is only meaningful for a service that currently has a photo, and that still exists. */
+  const servicePhotoCropsForConfig = useCallback(
+    (crops: Record<string, BookingPageImageFraming>, photos: Record<string, string>) => {
+      const out: Record<string, BookingPageImageFraming> = {};
+      for (const [id, crop] of Object.entries(crops)) {
+        if (!photos[id]) continue;
+        const framed = sanitizeBookingPageImageFraming(crop);
+        if (framed) out[id] = framed;
+      }
+      return out;
+    },
+    [],
+  );
+
   const buildConfigFromState = useCallback((): BookingPageConfig => {
     const config: BookingPageConfig = {};
     const primary = normalizeHexColor(brandPrimary);
@@ -220,6 +259,10 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
       const photos = servicePhotosForConfig(servicePhotos);
       config.service_photos = Object.keys(photos).length > 0 ? photos : null;
     }
+    // Framing rides the config for both surfaces, including collectives, whose offering photo
+    // itself lives on the catalogue item (see sanitizeCollectiveBookingPageConfig).
+    const crops = servicePhotoCropsForConfig(servicePhotoCrops, effectiveServicePhotos);
+    config.service_photo_crops = Object.keys(crops).length > 0 ? crops : null;
     config.show_services_tab = showServicesTab;
     config.show_team_tab = showTeamTab;
     config.show_about_tab = showAboutTab;
@@ -231,7 +274,12 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
       const clean: BookingTeamProfile = {};
       if (p.bio?.trim()) clean.bio = p.bio.trim();
       if (p.specialties?.trim()) clean.specialties = p.specialties.trim();
-      if (p.photo?.trim()) clean.photo = p.photo.trim();
+      if (p.photo?.trim()) {
+        clean.photo = p.photo.trim();
+        // Framing only travels with a photo; the sanitiser drops it otherwise anyway.
+        const framed = sanitizeBookingPageImageFraming(p.photo_crop);
+        if (framed) clean.photo_crop = framed;
+      }
       if (!showTeamTab || p.hidden) clean.hidden = true;
       if (clean.bio || clean.specialties || clean.photo || clean.hidden) profiles[id] = clean;
     }
@@ -263,6 +311,9 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     gallery,
     servicePhotos,
     servicePhotosForConfig,
+    servicePhotoCrops,
+    servicePhotoCropsForConfig,
+    effectiveServicePhotos,
     showServicesTab,
     showTeamTab,
     showAboutTab,
@@ -271,11 +322,26 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   ]);
 
   const persistBookingPageConfig = useCallback(
-    async (photosOverride?: Record<string, string>) => {
+    async (
+      photosOverride?: Record<string, string>,
+      cropsOverride?: Record<string, BookingPageImageFraming>,
+    ) => {
       const config = buildConfigFromState();
       if (photosOverride !== undefined && adapter.capabilities.servicePhotosInConfig) {
         const photos = servicePhotosForConfig(photosOverride);
         config.service_photos = Object.keys(photos).length > 0 ? photos : null;
+      }
+      // Photo uploads and removals save immediately, before React has re-rendered with the new
+      // state, so the caller passes what it just set rather than letting the stale closure win.
+      if (photosOverride !== undefined || cropsOverride !== undefined) {
+        // Only the config-backed surface can read the live photo set off the override; for a
+        // collective the photos come from the catalogue item, so the rendered set is the truth.
+        const photosForCrops =
+          photosOverride !== undefined && adapter.capabilities.servicePhotosInConfig
+            ? servicePhotosForConfig(photosOverride)
+            : effectiveServicePhotos;
+        const crops = servicePhotoCropsForConfig(cropsOverride ?? servicePhotoCrops, photosForCrops);
+        config.service_photo_crops = Object.keys(crops).length > 0 ? crops : null;
       }
       report({ status: 'saving', message: null });
       const savedConfig = await adapter.savePatch(config);
@@ -286,7 +352,15 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
       report({ status: 'saved', message: 'Booking page updated.' });
       return savedConfig;
     },
-    [adapter, buildConfigFromState, servicePhotosForConfig, report],
+    [
+      adapter,
+      buildConfigFromState,
+      servicePhotosForConfig,
+      servicePhotoCropsForConfig,
+      servicePhotoCrops,
+      effectiveServicePhotos,
+      report,
+    ],
   );
 
   const primaryHasColour = Boolean(normalizeHexColor(brandPrimary));
@@ -300,15 +374,19 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
 
   const previewServices = useMemo((): BookingPagePublicService[] => {
     if (!showServicesTab) return [];
-    return serviceList.map((s) => ({
+    return serviceList.map((s) => {
+      const imageUrl = effectiveServicePhotos[s.id] ?? null;
+      return {
         id: s.id,
         name: s.name,
         description: typeof s.description === 'string' && s.description.trim() ? s.description.trim() : null,
-        image_url: servicePhotos[s.id]?.trim() || null,
+        image_url: imageUrl,
+        image_crop: imageUrl ? servicePhotoCrops[s.id] ?? null : null,
         price_pence: typeof s.price_pence === 'number' ? s.price_pence : null,
         duration_minutes: typeof s.duration_minutes === 'number' && s.duration_minutes > 0 ? s.duration_minutes : 60,
-      }));
-  }, [showServicesTab, serviceList, servicePhotos]);
+      };
+    });
+  }, [showServicesTab, serviceList, effectiveServicePhotos, servicePhotoCrops]);
 
   const previewTeam = showTeamTab ? teamList : [];
 
@@ -326,6 +404,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setXUrl(c.social_links?.x ?? '');
     setGallery(c.gallery ?? []);
     setServicePhotos(c.service_photos ?? {});
+    setServicePhotoCrops(c.service_photo_crops ?? {});
     setShowServicesTab(c.show_services_tab === true);
     setShowTeamTab(c.show_team_tab === true);
     setShowAboutTab(c.show_about_tab === true);
@@ -544,9 +623,15 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
             nextPhotos = { ...prev, [serviceId]: url };
             return nextPhotos;
           });
+          // A new photo starts centred: framing chosen for the old one means nothing here.
+          const nextCrops = { ...servicePhotoCrops };
+          delete nextCrops[serviceId];
+          setServicePhotoCrops(nextCrops);
           if (adapter.capabilities.servicePhotosInConfig) {
-            await persistBookingPageConfig(nextPhotos);
+            await persistBookingPageConfig(nextPhotos, nextCrops);
           } else {
+            // Collective: the photo lives on the item, and the dropped framing rides the
+            // debounced config save that this state change triggers.
             await adapter.services.photo.save(serviceId, url);
           }
         } catch (err) {
@@ -560,21 +645,25 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         }
       });
     },
-    [isAdmin, adapter, persistBookingPageConfig, report],
+    [isAdmin, adapter, persistBookingPageConfig, servicePhotoCrops, report],
   );
 
   const removeServicePhoto = useCallback(
     (serviceId: string) => {
-      const removedUrl = servicePhotos[serviceId]?.trim() ?? '';
-      const next = { ...servicePhotos };
-      delete next[serviceId];
+      const removedUrl = effectiveServicePhotos[serviceId]?.trim() ?? '';
+      // Empty string, not a delete: for a collective the url also lives on the catalogue item,
+      // which would put the photo straight back until the catalogue reloads.
+      const next = { ...servicePhotos, [serviceId]: '' };
+      const nextCrops = { ...servicePhotoCrops };
+      delete nextCrops[serviceId];
       setServicePhotos(next);
+      setServicePhotoCrops(nextCrops);
       setServicePhotoError(null);
       void (async () => {
         report({ status: 'saving', message: null });
         try {
           if (adapter.capabilities.servicePhotosInConfig) {
-            await persistBookingPageConfig(next);
+            await persistBookingPageConfig(next, nextCrops);
           } else {
             await adapter.services.photo.save(serviceId, null);
           }
@@ -587,14 +676,23 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
           }
           report({ status: 'saved', message: 'Service photo removed.' });
         } catch (err) {
+          // Put both back: the photo is still there, so its framing is still meaningful.
           setServicePhotos(servicePhotos);
+          setServicePhotoCrops(servicePhotoCrops);
           const message = err instanceof Error ? err.message : 'Failed to remove photo';
           setServicePhotoError(message);
           report({ status: 'error', message });
         }
       })();
     },
-    [adapter, persistBookingPageConfig, report, servicePhotos],
+    [
+      adapter,
+      effectiveServicePhotos,
+      persistBookingPageConfig,
+      report,
+      servicePhotos,
+      servicePhotoCrops,
+    ],
   );
 
   const hideAllTeamProfilesOnPage = useCallback(() => {
@@ -621,6 +719,10 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setTeamProfiles((prev) => ({ ...prev, [memberId]: { ...prev[memberId], ...patch } }));
   }, []);
 
+  const setServicePhotoCrop = useCallback((serviceId: string, crop: BookingPageImageFraming) => {
+    setServicePhotoCrops((prev) => ({ ...prev, [serviceId]: crop }));
+  }, []);
+
   const onTeamPhotoChange = useCallback(
     async (memberId: string, e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -630,7 +732,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         setTeamPhotoBusyId(memberId);
         try {
           const url = await adapter.team.uploadPhoto(memberId, file);
-          updateTeamProfile(memberId, { photo: url });
+          // New photo, fresh framing: whatever suited the previous one does not apply.
+          updateTeamProfile(memberId, { photo: url, photo_crop: null });
         } catch {
           /* debounced branding save surfaces errors */
         } finally {
@@ -1200,6 +1303,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Service photos</span>
               <p className="mb-2 text-xs text-slate-500">
                 Add a photo to each service. Shown on the Services tab when that tab is enabled.
+                Drag a photo to reposition it, and use the scale slider to zoom.
               </p>
               {servicePhotoError ? (
                 <p className="mb-2 text-sm text-red-600" role="alert">
@@ -1208,21 +1312,30 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               ) : null}
               <div className="space-y-2">
                 {serviceList.map((svc) => {
-                  const url = servicePhotos[svc.id];
+                  const url = effectiveServicePhotos[svc.id];
                   const busy = servicePhotoBusyId === svc.id;
                   return (
-                    <div key={svc.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5">
-                      <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200">
-                        {url ? (
-                          <img src={url} alt="" className="h-full w-full object-cover" />
-                        ) : (
+                    <div key={svc.id} className="rounded-xl border border-slate-200 bg-white p-2.5">
+                      <div className="flex items-center gap-3">
+                      {url ? (
+                        <BookingPageDraggableImage
+                          imageUrl={url}
+                          crop={servicePhotoCrops[svc.id] ?? null}
+                          onCropChange={(crop) => setServicePhotoCrop(svc.id, crop)}
+                          sizePx={48}
+                          shape="rounded"
+                          disabled={!isAdmin}
+                          label={`Reposition the photo for ${svc.name}`}
+                        />
+                      ) : (
+                        <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200">
                           <div className="flex h-full w-full items-center justify-center text-slate-300">
                             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M18 14.25v4.5m-9-12.75h.008v.008H9V6Z" />
                             </svg>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{svc.name}</span>
                       <label
                         className={`cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 ${
@@ -1248,6 +1361,17 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
                           Remove
                         </button>
                       )}
+                      </div>
+                      {url ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2">
+                          <BookingPageImageFramingControls
+                            crop={servicePhotoCrops[svc.id] ?? {}}
+                            disabled={!isAdmin}
+                            onChange={(crop) => setServicePhotoCrop(svc.id, crop)}
+                            controlId={`service-photo-${svc.id}`}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -1274,7 +1398,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               <div>
               <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Team profiles</span>
               <p className="mb-2 text-xs text-slate-500">
-                Add a photo, short bio, and specialties for each team member.
+                Add a photo, short bio, and specialties for each team member. Drag a photo to
+                reposition it, and use the scale slider to zoom.
               </p>
               <div className="space-y-3">
                 {teamList.map((m) => {
@@ -1283,15 +1408,23 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
                   return (
                     <div key={m.id} className="rounded-xl border border-slate-200 bg-white p-3">
                       <div className="flex items-start gap-3">
-                        <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200">
-                          {profile.photo ? (
-                            <img src={profile.photo} alt="" className="h-full w-full object-cover" />
-                          ) : (
+                        {profile.photo ? (
+                          <BookingPageDraggableImage
+                            imageUrl={profile.photo}
+                            crop={profile.photo_crop ?? null}
+                            onCropChange={(crop) => updateTeamProfile(m.id, { photo_crop: crop })}
+                            sizePx={56}
+                            shape="circle"
+                            disabled={!isAdmin}
+                            label={`Reposition the photo for ${m.name}`}
+                          />
+                        ) : (
+                          <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200">
                             <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-slate-400">
                               {m.name.charAt(0).toUpperCase()}
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                         <div className="min-w-0 flex-1 space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <span className="truncate text-sm font-semibold text-slate-900">{m.name}</span>
@@ -1328,13 +1461,23 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
                             {profile.photo && (
                               <button
                                 type="button"
-                                onClick={() => updateTeamProfile(m.id, { photo: null })}
+                                onClick={() => updateTeamProfile(m.id, { photo: null, photo_crop: null })}
                                 className="text-xs font-medium text-red-600 hover:text-red-700"
                               >
                                 Remove photo
                               </button>
                             )}
                           </div>
+                          {profile.photo ? (
+                            <div className="flex flex-wrap items-center gap-3">
+                              <BookingPageImageFramingControls
+                                crop={profile.photo_crop ?? {}}
+                                disabled={!isAdmin}
+                                onChange={(crop) => updateTeamProfile(m.id, { photo_crop: crop })}
+                                controlId={`team-photo-${m.id}`}
+                              />
+                            </div>
+                          ) : null}
                           <input
                             type="text"
                             value={profile.specialties ?? ''}

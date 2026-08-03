@@ -18,22 +18,22 @@ export interface HelpVideoDef {
 
 export const HELP_VIDEOS: Record<string, HelpVideoDef> = {
   'services-setup': {
-    youtubeId: 'ARezQjb-NsA',
+    youtubeId: '96Nw37-Kfrg',
     title: 'Watch: setting up your services',
     caption: 'A walkthrough of building a service, from naming it to linking it to a calendar.',
   },
   'communications-setup': {
-    youtubeId: 'DBCcKebhbKA',
+    youtubeId: '4NpaZxd11mA',
     title: 'Watch: setting up your communication settings',
     caption: 'How to choose which messages go out, by email or SMS, and when they send.',
   },
   'booking-page-setup': {
-    youtubeId: 'wx-FW6455Dg',
+    youtubeId: 'ScW3XxcciHE',
     title: 'Watch: setting up your booking page',
     caption: 'Setting your booking page address, branding it, and sharing the link with clients.',
   },
   'linked-venues-setup': {
-    youtubeId: 'y_-fpQCHXO4',
+    youtubeId: 'M1SF8ZFMXSE',
     title: 'Watch: setting up linked venues and collectives',
     caption: 'How to link another venue, choose what you share, and set up a combined booking page.',
   },

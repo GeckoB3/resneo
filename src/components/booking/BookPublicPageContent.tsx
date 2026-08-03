@@ -15,6 +15,10 @@ import {
   type BookingPageTeamMember,
 } from '@/lib/booking/booking-page-tabs';
 import type { BookingPageSocialLinks } from '@/lib/booking/booking-page-theme';
+import {
+  bookingPageImageFramingStyle,
+  type BookingPageImageFraming,
+} from '@/lib/booking/booking-page-image-framing';
 import type { VenuePublic } from '@/components/booking/types';
 
 const TAB_LABELS: Record<BookingPageTabId, string> = {
@@ -63,7 +67,7 @@ function ServiceMetaPills({
 }
 
 const SERVICE_THUMB_CLASS =
-  'h-[4.5rem] w-[4.5rem] shrink-0 rounded-xl object-cover object-center ring-1 ring-slate-200/90 sm:h-20 sm:w-20';
+  'h-[4.5rem] w-[4.5rem] shrink-0 rounded-xl ring-1 ring-slate-200/90 sm:h-20 sm:w-20';
 
 function ServiceCardInitial({ name }: { name: string }) {
   const letter = name.trim().charAt(0).toUpperCase() || '?';
@@ -77,14 +81,29 @@ function ServiceCardInitial({ name }: { name: string }) {
   );
 }
 
-function ServiceCardThumbnail({ name, imageUrl }: { name: string; imageUrl: string }) {
+/**
+ * The photo is framed by a clipping box rather than styled directly: zooming applies a CSS
+ * transform, which would paint outside the thumbnail's own rounded box with nothing to clip it.
+ */
+function ServiceCardThumbnail({
+  name,
+  imageUrl,
+  crop,
+}: {
+  name: string;
+  imageUrl: string;
+  crop?: BookingPageImageFraming | null;
+}) {
   return (
-    <img
-      src={imageUrl}
-      alt={name}
-      loading="lazy"
-      className={`bg-slate-100 ${SERVICE_THUMB_CLASS}`}
-    />
+    <div className={`overflow-hidden bg-slate-100 ${SERVICE_THUMB_CLASS}`}>
+      <img
+        src={imageUrl}
+        alt={name}
+        loading="lazy"
+        className="h-full w-full"
+        style={bookingPageImageFramingStyle(crop)}
+      />
+    </div>
   );
 }
 
@@ -99,7 +118,7 @@ function BookingPageServiceCard({ svc }: { svc: BookingPagePublicService }) {
     <article className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3.5 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-4">
       <div className="flex items-start gap-3 sm:gap-3.5">
         {photoUrl ? (
-          <ServiceCardThumbnail name={svc.name} imageUrl={photoUrl} />
+          <ServiceCardThumbnail name={svc.name} imageUrl={photoUrl} crop={svc.image_crop} />
         ) : (
           <ServiceCardInitial name={svc.name} />
         )}
@@ -160,12 +179,15 @@ function BookingPageTeamPanel({ members }: { members: BookingPageTeamMember[] })
           return (
             <div key={m.id} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
               {m.profile.photo?.trim() ? (
-                <img
-                  src={m.profile.photo.trim()}
-                  alt=""
-                  loading="lazy"
-                  className="h-16 w-16 flex-shrink-0 rounded-full object-cover ring-1 ring-slate-200"
-                />
+                <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200">
+                  <img
+                    src={m.profile.photo.trim()}
+                    alt=""
+                    loading="lazy"
+                    className="h-full w-full"
+                    style={bookingPageImageFramingStyle(m.profile.photo_crop)}
+                  />
+                </div>
               ) : (
                 <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700 ring-1 ring-slate-200">
                   {m.name.trim().charAt(0).toUpperCase()}

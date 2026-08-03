@@ -192,6 +192,64 @@ describe('sanitizeBookingPageConfig', () => {
     });
   });
 
+  it('keeps service photo framing for uuid keys, dropping default framing', () => {
+    const out = sanitizeBookingPageConfig({
+      service_photo_crops: {
+        'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { x: 30, y: 70, zoom: 1.5 },
+        // Centred at 100% is the default: storing it would be noise.
+        'b1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { x: 50, y: 50, zoom: 1 },
+        'not-a-uuid': { x: 10, y: 10, zoom: 2 },
+      },
+    });
+    expect(out.service_photo_crops).toEqual({
+      'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { x: 30, y: 70, zoom: 1.5 },
+    });
+  });
+
+  it('clamps out-of-range service photo framing rather than dropping it', () => {
+    const out = sanitizeBookingPageConfig({
+      service_photo_crops: {
+        'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { x: -40, y: 900, zoom: 99 },
+      },
+    });
+    expect(out.service_photo_crops).toEqual({
+      'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { x: 0, y: 100, zoom: 3 },
+    });
+  });
+
+  it('drops service photo framing when the photos are cleared', () => {
+    const existing = {
+      service_photos: { 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': 'https://cdn/s.jpg' },
+      service_photo_crops: { 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { x: 20, y: 20, zoom: 2 } },
+    };
+    const out = mergeBookingPageConfigPatch(existing, { service_photos: null });
+    expect(out.service_photos).toBeUndefined();
+    expect(out.service_photo_crops).toBeUndefined();
+  });
+
+  it('keeps team photo framing, but only alongside a photo', () => {
+    const withPhoto = sanitizeBookingPageConfig({
+      team_profiles: {
+        'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': {
+          photo: 'https://cdn/p.jpg',
+          photo_crop: { x: 40, y: 25, zoom: 1.4 },
+        },
+      },
+    });
+    expect(withPhoto.team_profiles?.['a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d']).toEqual({
+      photo: 'https://cdn/p.jpg',
+      photo_crop: { x: 40, y: 25, zoom: 1.4 },
+    });
+
+    // Framing with nothing to frame is meaningless and must not keep the profile alive.
+    const withoutPhoto = sanitizeBookingPageConfig({
+      team_profiles: {
+        'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d': { photo_crop: { x: 40, y: 25, zoom: 1.4 } },
+      },
+    });
+    expect(withoutPhoto.team_profiles).toBeUndefined();
+  });
+
   it('keeps only valid http(s) gallery URLs, de-duped and capped', () => {
     const out = sanitizeBookingPageConfig({
       gallery: ['https://cdn/x.jpg', 'https://cdn/x.jpg', 'not-a-url', '  https://cdn/y.png  ', 42],

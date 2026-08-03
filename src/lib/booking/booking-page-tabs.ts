@@ -1,4 +1,8 @@
-import type { BookingPageConfig, BookingTeamProfile } from '@/lib/booking/booking-page-theme';
+import type {
+  BookingPageConfig,
+  BookingPageImageFraming,
+  BookingTeamProfile,
+} from '@/lib/booking/booking-page-theme';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { isCdeBookingModel } from '@/lib/booking/cde-booking';
 import type { BookingModel } from '@/types/booking-models';
@@ -21,6 +25,8 @@ export interface BookingPagePublicService {
   name: string;
   description: string | null;
   image_url: string | null;
+  /** Pan/zoom framing for {@link image_url} inside the fixed square thumbnail. */
+  image_crop?: BookingPageImageFraming | null;
   price_pence: number | null;
   duration_minutes: number;
 }

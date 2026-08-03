@@ -65,7 +65,7 @@ export async function loadCollectivePageView(
   }
 
   const [services, team] = await Promise.all([
-    loadCollectivePublicServices(admin, collective.id),
+    loadCollectivePublicServices(admin, collective.id, venue.booking_page_config),
     loadCollectiveTeam(admin, collective.id),
   ]);
   return { status: 'live', venue, services, team };

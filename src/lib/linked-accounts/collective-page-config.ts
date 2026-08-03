@@ -20,8 +20,11 @@ function sanitizeCoverPhotoUrl(raw: unknown): string | null {
 /**
  * Sanitise a collective combined-page config. Reuses the single-venue sanitiser for all
  * shared fields (colours, font, logo/cover crops, gallery, social links, team profiles
- * incl. photo, tab toggles), then drops `service_photos` (collective offering photos live
- * on the item, not the config) and adds the collective-only `cover_photo_url`.
+ * incl. photo and its framing, tab toggles), then drops `service_photos` (collective offering
+ * photos live on the item, not the config) and adds the collective-only `cover_photo_url`.
+ *
+ * `service_photo_crops` is deliberately kept: the framing belongs to this page even though the
+ * photo it frames is stored on the catalogue item.
  */
 export function sanitizeCollectiveBookingPageConfig(raw: unknown): CollectiveBookingPageConfig {
   const base = sanitizeBookingPageConfig(raw) as CollectiveBookingPageConfig;
@@ -80,6 +83,7 @@ export async function loadCollectiveMemberImportSources(
   return (venues ?? []).map((v) => {
     const config = sanitizeBookingPageConfig(v.booking_page_config) as BookingPageConfig;
     delete config.service_photos;
+    delete config.service_photo_crops;
     delete config.team_profiles;
     return {
       venueId: v.id as string,

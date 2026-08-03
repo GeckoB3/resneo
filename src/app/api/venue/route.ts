@@ -86,6 +86,11 @@ const venueProfileSchema = z.object({
       cover_full_width: z.boolean().optional(),
       gallery: z.array(z.string().max(2000)).max(50).nullable().optional(),
       service_photos: z.record(z.string(), z.string().max(2000)).nullable().optional(),
+      /** Pan/zoom framing per service photo, keyed by the same service id. */
+      service_photo_crops: z
+        .record(z.string(), bookingPageImageFramingSchema)
+        .nullable()
+        .optional(),
       show_services_tab: z.boolean().optional(),
       show_team_tab: z.boolean().optional(),
       show_about_tab: z.boolean().optional(),
@@ -96,6 +101,7 @@ const venueProfileSchema = z.object({
             .object({
               bio: z.string().max(2000).nullable().optional(),
               photo: z.string().max(2000).nullable().optional(),
+              photo_crop: bookingPageImageFramingSchema.nullable().optional(),
               specialties: z.string().max(400).nullable().optional(),
               hidden: z.boolean().optional(),
             })
@@ -261,7 +267,10 @@ export async function PATCH(request: NextRequest) {
         // Resolve against the incoming value when the same save sets both, else the stored one.
         let link = update.google_review_url as string | null | undefined;
         if (link === undefined) {
-          const { data: current } = await supabase
+          // Admin client, like every other query here: the venues RLS policy matches the JWT email
+          // against the staff row, so a user-scoped read can come back empty for a venue that does
+          // have a link, and the toggle would refuse with "add your link first".
+          const { data: current } = await staff.db
             .from('venues')
             .select('google_review_url')
             .eq('id', staff.venue_id)
@@ -422,7 +431,7 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq('id', staff.venue_id)
       .select(
-        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings, embed_accent_colour, booking_page_config',
+        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, logo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, owner_booking_notification_enabled, owner_booking_notification_email, google_review_url, review_request_enabled, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, require_account_login_for_bookings, embed_accent_colour, booking_page_config',
       )
       .single();
 

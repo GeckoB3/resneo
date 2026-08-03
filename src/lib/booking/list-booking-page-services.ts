@@ -2,6 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
 import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
+import {
+  sanitizeBookingPageImageFraming,
+  type BookingPageImageFraming,
+} from '@/lib/booking/booking-page-image-framing';
 
 function parseServicePhotosFromConfig(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object') return {};
@@ -10,6 +14,18 @@ function parseServicePhotosFromConfig(raw: unknown): Record<string, string> {
       (entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim()),
     ),
   );
+}
+
+function parseServicePhotoCropsFromConfig(
+  raw: unknown,
+): Record<string, BookingPageImageFraming> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, BookingPageImageFraming> = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    const crop = sanitizeBookingPageImageFraming(value);
+    if (crop) out[id] = crop;
+  }
+  return out;
 }
 
 /**
@@ -25,9 +41,14 @@ export async function listBookingPageServices(
     supabase.from('venues').select('booking_page_config').eq('id', venueId).maybeSingle(),
   ]);
 
-  const servicePhotos = parseServicePhotosFromConfig(
-    (venueRes.data as { booking_page_config?: { service_photos?: unknown } } | null)?.booking_page_config
-      ?.service_photos,
+  const bookingPageConfig = (
+    venueRes.data as {
+      booking_page_config?: { service_photos?: unknown; service_photo_crops?: unknown };
+    } | null
+  )?.booking_page_config;
+  const servicePhotos = parseServicePhotosFromConfig(bookingPageConfig?.service_photos);
+  const servicePhotoCrops = parseServicePhotoCropsFromConfig(
+    bookingPageConfig?.service_photo_crops,
   );
 
   const byId = new Map<string, BookingPagePublicService>();
@@ -43,6 +64,7 @@ export async function listBookingPageServices(
           name: svc.name,
           description: svc.description?.trim() ? svc.description.trim() : null,
           image_url: photo,
+          image_crop: photo ? servicePhotoCrops[svc.id] ?? null : null,
           price_pence: svc.price_pence,
           duration_minutes: svc.duration_minutes,
         });
@@ -54,6 +76,7 @@ export async function listBookingPageServices(
       }
       if (!existing.image_url && photo) {
         existing.image_url = photo;
+        existing.image_crop = servicePhotoCrops[svc.id] ?? null;
       }
     }
   }

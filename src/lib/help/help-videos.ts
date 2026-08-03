@@ -23,7 +23,7 @@ export const HELP_VIDEOS: Record<string, HelpVideoDef> = {
     caption: 'A walkthrough of building a service, from naming it to linking it to a calendar.',
   },
   'communications-setup': {
-    youtubeId: 'DBCcKebhbKA',
+    youtubeId: '4NpaZxd11mA',
     title: 'Watch: setting up your communication settings',
     caption: 'How to choose which messages go out, by email or SMS, and when they send.',
   },

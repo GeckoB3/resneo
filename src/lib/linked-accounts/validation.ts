@@ -111,15 +111,14 @@ const hexColour = z
   .nullable()
   .optional();
 
-/** Image framing (logo) — ranges are re-clamped by the server sanitiser. */
-const imageFramingSchema = z
-  .object({
-    x: z.number(),
-    y: z.number(),
-    zoom: z.number(),
-  })
-  .nullable()
-  .optional();
+/** Image framing (logo, team photo, offering photo) — re-clamped by the server sanitiser. */
+const imageFramingShape = z.object({
+  x: z.number(),
+  y: z.number(),
+  zoom: z.number(),
+});
+
+const imageFramingSchema = imageFramingShape.nullable().optional();
 
 /** Free-form cover crop (fractions of the source image) — re-clamped by the server sanitiser. */
 const coverCropBoxSchema = z
@@ -166,6 +165,12 @@ export const collectiveBookingPageConfigSchema = z
       .nullable()
       .optional(),
     gallery: z.array(z.string().max(2000)).max(50).nullable().optional(),
+    /**
+     * Framing for each offering photo, keyed by catalogue item id. The photo itself lives on
+     * the item (so `service_photos` is dropped for collectives), but the item image has only
+     * this page as a consumer, so its framing rides the page config.
+     */
+    service_photo_crops: z.record(z.string().uuid(), imageFramingShape).nullable().optional(),
     /** Host overrides over inherited staff bios, keyed by calendar id (D-V2). */
     team_profiles: z
       .record(
@@ -173,6 +178,7 @@ export const collectiveBookingPageConfigSchema = z
         z.object({
           bio: z.string().max(600).nullable().optional(),
           photo: z.string().max(2000).nullable().optional(),
+          photo_crop: imageFramingSchema,
           specialties: z.string().max(200).nullable().optional(),
           hidden: z.boolean().optional(),
         }),

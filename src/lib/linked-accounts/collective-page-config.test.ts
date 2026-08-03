@@ -27,6 +27,24 @@ describe('sanitizeCollectiveBookingPageConfig', () => {
     expect(out.service_photos).toBeUndefined();
   });
 
+  it('keeps offering photo framing even though the photo itself lives on the item', () => {
+    const out = sanitizeCollectiveBookingPageConfig({
+      service_photos: { [CAL_ID]: 'https://x/y.jpg' },
+      service_photo_crops: { [CAL_ID]: { x: 30, y: 60, zoom: 1.5 } },
+    });
+    expect(out.service_photos).toBeUndefined();
+    expect(out.service_photo_crops).toEqual({ [CAL_ID]: { x: 30, y: 60, zoom: 1.5 } });
+  });
+
+  it('keeps team photo framing keyed by calendar id', () => {
+    const out = sanitizeCollectiveBookingPageConfig({
+      team_profiles: {
+        [CAL_ID]: { photo: 'https://x/p.jpg', photo_crop: { x: 20, y: 80, zoom: 2 } },
+      },
+    });
+    expect(out.team_profiles?.[CAL_ID]?.photo_crop).toEqual({ x: 20, y: 80, zoom: 2 });
+  });
+
   it('keeps team profile photos keyed by calendar id', () => {
     const out = sanitizeCollectiveBookingPageConfig({
       team_profiles: { [CAL_ID]: { bio: 'Hi', photo: 'https://x/p.jpg' } },

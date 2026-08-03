@@ -379,22 +379,33 @@ export async function loadCollectiveAppointmentCatalog(
   return { practitioners: result };
 }
 
-/** Services for the Services tab — the offerings, deduped, with effective "from" pricing. */
+/**
+ * Services for the Services tab — the offerings, deduped, with effective "from" pricing.
+ *
+ * The offering photo lives on the catalogue item, but its framing lives on the combined page
+ * config, so the caller passes the page config in rather than this reloading it.
+ */
 export async function loadCollectivePublicServices(
   admin: SupabaseClient,
   collectiveId: string,
+  pageConfig?: BookingPageConfig | null,
 ): Promise<BookingPagePublicService[]> {
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
   if (!catalogue) return [];
-  return catalogue.items.map((i) => ({
-    id: i.id,
-    name: i.name,
-    description: i.description,
-    image_url: i.imageUrl ?? null,
-    price_pence: i.fromPricePence,
-    duration_minutes:
-      i.providers.find((p) => p.durationMinutes != null)?.durationMinutes ?? 0,
-  }));
+  const crops = pageConfig?.service_photo_crops ?? {};
+  return catalogue.items.map((i) => {
+    const imageUrl = i.imageUrl ?? null;
+    return {
+      id: i.id,
+      name: i.name,
+      description: i.description,
+      image_url: imageUrl,
+      image_crop: imageUrl ? crops[i.id] ?? null : null,
+      price_pence: i.fromPricePence,
+      duration_minutes:
+        i.providers.find((p) => p.durationMinutes != null)?.durationMinutes ?? 0,
+    };
+  });
 }
 
 /** "Meet the team" members — the union of provider calendars across venues. */

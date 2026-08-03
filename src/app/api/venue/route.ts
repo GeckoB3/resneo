@@ -86,6 +86,11 @@ const venueProfileSchema = z.object({
       cover_full_width: z.boolean().optional(),
       gallery: z.array(z.string().max(2000)).max(50).nullable().optional(),
       service_photos: z.record(z.string(), z.string().max(2000)).nullable().optional(),
+      /** Pan/zoom framing per service photo, keyed by the same service id. */
+      service_photo_crops: z
+        .record(z.string(), bookingPageImageFramingSchema)
+        .nullable()
+        .optional(),
       show_services_tab: z.boolean().optional(),
       show_team_tab: z.boolean().optional(),
       show_about_tab: z.boolean().optional(),
@@ -96,6 +101,7 @@ const venueProfileSchema = z.object({
             .object({
               bio: z.string().max(2000).nullable().optional(),
               photo: z.string().max(2000).nullable().optional(),
+              photo_crop: bookingPageImageFramingSchema.nullable().optional(),
               specialties: z.string().max(400).nullable().optional(),
               hidden: z.boolean().optional(),
             })

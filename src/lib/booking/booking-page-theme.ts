@@ -6,8 +6,12 @@ import {
   sanitizeBookingPageLogoCrop,
   type BookingPageLogoCrop,
 } from '@/lib/booking/booking-page-logo';
+import {
+  sanitizeBookingPageImageFraming,
+  type BookingPageImageFraming,
+} from '@/lib/booking/booking-page-image-framing';
 
-export type { BookingPageCoverCropBox, BookingPageLogoCrop };
+export type { BookingPageCoverCropBox, BookingPageLogoCrop, BookingPageImageFraming };
 
 /**
  * Public booking-page branding (Phase 1 of the Booking Site Studio).
@@ -87,6 +91,16 @@ export interface BookingPageConfig {
   gallery?: string[] | null;
   /** Per-service photos for the public Services tab only (not the booking form), keyed by service id. */
   service_photos?: Record<string, string> | null;
+  /**
+   * Pan/zoom framing for each service photo, keyed by the same service id. The uploaded file is
+   * never altered; the thumbnail is a fixed square, so framing is all that is needed to choose
+   * what shows inside it. Absent for a service → centred at 100%.
+   *
+   * Collectives keep their offering photo on the catalogue item rather than in `service_photos`,
+   * but the framing still lives here, keyed by item id: the item image has exactly one consumer
+   * (the combined page this config belongs to), so the two never need to travel together.
+   */
+  service_photo_crops?: Record<string, BookingPageImageFraming> | null;
   /** When true, show a Services tab (photos + descriptions) on the public booking page. */
   show_services_tab?: boolean;
   /** When true, show a Meet the team tab on the public booking page. */
@@ -102,6 +116,11 @@ export interface BookingTeamProfile {
   bio?: string | null;
   /** Public photo URL (stored in `venue-team-photos` bucket). */
   photo?: string | null;
+  /**
+   * Pan/zoom framing for {@link photo} inside its fixed circle. The upload is never altered.
+   * Absent → centred at 100%.
+   */
+  photo_crop?: BookingPageImageFraming | null;
   /** Comma-separated specialties, rendered as chips. */
   specialties?: string | null;
   /** Hide this member from the public "Meet the team" section. */
@@ -350,6 +369,9 @@ export function sanitizeBookingPageConfig(raw: unknown): BookingPageConfig {
   const servicePhotos = sanitizeServicePhotos(src.service_photos);
   if (Object.keys(servicePhotos).length > 0) config.service_photos = servicePhotos;
 
+  const servicePhotoCrops = sanitizeServicePhotoCrops(src.service_photo_crops);
+  if (Object.keys(servicePhotoCrops).length > 0) config.service_photo_crops = servicePhotoCrops;
+
   const teamProfiles = sanitizeTeamProfiles(src.team_profiles);
   if (Object.keys(teamProfiles).length > 0) config.team_profiles = teamProfiles;
 
@@ -372,6 +394,10 @@ export function mergeBookingPageConfigPatch(
   const merged: Record<string, unknown> = { ...existing, ...incoming };
   if ('service_photos' in incoming && incoming.service_photos === null) {
     delete merged.service_photos;
+    delete merged.service_photo_crops;
+  }
+  if ('service_photo_crops' in incoming && incoming.service_photo_crops === null) {
+    delete merged.service_photo_crops;
   }
   if ('cover_full_width' in incoming) {
     merged.cover_full_width = incoming.cover_full_width === true;
@@ -426,6 +452,11 @@ function sanitizeTeamProfiles(raw: unknown): Record<string, BookingTeamProfile> 
       const photo = src.photo.trim();
       if (photo && photo.length <= 2000 && /^https?:\/\//i.test(photo)) profile.photo = photo;
     }
+    // Framing without a photo to frame is meaningless, so it is dropped with the photo.
+    if (profile.photo) {
+      const crop = sanitizeBookingPageImageFraming(src.photo_crop);
+      if (crop) profile.photo_crop = crop;
+    }
     if (src.hidden === true) profile.hidden = true;
     // Keep only profiles that carry something meaningful.
     if (profile.bio || profile.photo || profile.specialties || profile.hidden) {
@@ -449,6 +480,25 @@ function sanitizeServicePhotos(raw: unknown): Record<string, string> {
     const url = value.trim();
     if (!url || url.length > 2000 || !/^https?:\/\//i.test(url)) continue;
     out[key] = url;
+    count += 1;
+    if (count >= 200) break;
+  }
+  return out;
+}
+
+/**
+ * Per-service photo framing. Default framing sanitises to null and is dropped, so the config
+ * only ever carries deliberate adjustments.
+ */
+function sanitizeServicePhotoCrops(raw: unknown): Record<string, BookingPageImageFraming> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, BookingPageImageFraming> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!UUID_RE.test(key)) continue;
+    const crop = sanitizeBookingPageImageFraming(value);
+    if (!crop) continue;
+    out[key] = crop;
     count += 1;
     if (count >= 200) break;
   }

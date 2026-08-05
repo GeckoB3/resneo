@@ -351,8 +351,23 @@ export function computeVagaro(input: CalculatorInputs): ProviderResult {
 // Phorest (no published prices)
 // ---------------------------------------------------------------------------
 
+export const PHOREST = {
+  /**
+   * Phorest publishes no plan prices, but its UK pricing page does list SMS
+   * rates by tier: 9.5p on Starter, 8.2p on Grow, and 7p on Ultimate and Elite
+   * with 500 free a month.
+   *
+   * We use the top-tier terms, which are the cheapest of the three and carry the
+   * only free allowance. That is the reading most favourable to Phorest, and it
+   * keeps the one figure Phorest actually publishes in the model rather than
+   * leaving its row entirely to guesswork.
+   */
+  smsIncluded: 500,
+  smsPerMessage: 0.07,
+} as const;
+
 /**
- * Phorest is subscription only here, on purpose.
+ * The subscription remains the visitor's own figure, on purpose.
  *
  * An earlier version of this model charged the salon a per online booking fee,
  * on the strength of a range quoted in a rival vendor's blog. Phorest's own
@@ -364,15 +379,21 @@ export function computeVagaro(input: CalculatorInputs): ProviderResult {
  */
 export function computePhorest(input: CalculatorInputs): ProviderResult {
   const subscription = clampMin(input.phorestMonthlyEstimate, 0);
+  const smsOverage = Math.max(0, clampMin(input.smsPerMonth, 0) - PHOREST.smsIncluded);
 
   return summarise({
     id: 'phorest',
     name: 'Phorest',
     planLabel: 'Quote only',
     estimated: true,
-    note: 'Phorest publishes no prices at all, so this is entirely your own figure. Nothing here is our estimate of what Phorest would charge you.',
+    note: 'Phorest publishes no plan prices, so the subscription is entirely your own figure. Its text rates are published, and the cheapest of them is used here.',
     lines: [
       { label: 'Subscription', amount: round2(subscription), detail: 'The monthly fee you entered' },
+      {
+        label: 'Text messages',
+        amount: round2(smsOverage * PHOREST.smsPerMessage),
+        detail: `${PHOREST.smsIncluded} included on the top tiers, then ${Math.round(PHOREST.smsPerMessage * 100)}p each`,
+      },
     ],
   });
 }
@@ -480,8 +501,8 @@ export const PRICING_SOURCES: { provider: string; what: string; url: string }[] 
   },
   {
     provider: 'Phorest',
-    what: 'Confirmation that pricing is quote only, which is why the Phorest figure is yours rather than ours',
-    url: 'https://www.phorest.com/pricing/',
+    what: 'Confirmation that plan pricing is quote only, which is why the Phorest subscription is yours rather than ours, plus its published SMS rates of 9.5p, 8.2p and 7p by tier with 500 free a month on the top tiers',
+    url: 'https://www.phorest.com/gb/pricing/',
   },
   {
     provider: 'Treatwell',
@@ -508,7 +529,7 @@ export const PRICING_ASSUMPTIONS: string[] = [
   'Fresha’s 20 free monthly messages are for automated reminders, so reminders beyond that are charged at 6p. Fresha’s separate marketing texts at 8p are not modelled.',
   'Vagaro charges a one-time 20% fee on a new Marketplace client’s first appointment, stated on its UK pricing page. Its UK product page separately says there are no booking fees. We follow the pricing page, and read the product page line as being about repeat bookings, which genuinely carry no fee. No minimum fee is published, so unlike Fresha and Booksy no floor is applied, which is the reading most favourable to Vagaro.',
   'Vagaro includes 1,000 email marketing messages a month, but text messaging in the UK is a paid plan rather than a free service as it is in the US and Canada. Those UK plan prices are not published, so no text cost is counted against Vagaro here and its total should be read as a floor. Its branded app, website builder and forms are extra too, and are also unpriced in pounds.',
-  'Phorest publishes nothing, so its total is only the figure you type in. A per online booking fee exists in the UK and Ireland, but Phorest describes it as a fee the client pays to secure the slot which is then deducted from their treatment price, so it is not charged to the business here.',
+  'Phorest publishes no plan prices, so its subscription is only the figure you type in. It does publish SMS rates of 9.5p, 8.2p and 7p depending on tier, and we apply the cheapest, which is the 7p top tier that also includes 500 free messages a month. A per online booking fee exists in the UK and Ireland, but Phorest describes it as a fee the client pays to secure the slot which is then deducted from their treatment price, so it is not charged to the business here.',
   'Treatwell’s own pricing page offers both its plans as "start for free" with no monthly fee, so the software fee defaults to zero and Treatwell is costed on commission alone. If you are on a paid tier, put the figure in and the row follows it. Its 2.5% fee on online prepayments is not modelled, in line with leaving card processing out for everyone.',
   'Marketplace commissions are one-off charges on a new client’s first booking. The calculator applies them to the number of new marketplace clients you expect each month, which is the steady monthly run rate.',
   'New marketplace clients are capped at your total monthly bookings, so the commission can never exceed what you could actually take.',

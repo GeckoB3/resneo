@@ -179,6 +179,14 @@ describe('estimate-backed providers', () => {
     expect(few.total).toBe(many.total);
   });
 
+  it('charges Phorest texts at its published 7p beyond the 500 included', () => {
+    const inside = computePhorest(input({ phorestMonthlyEstimate: 100, smsPerMonth: 500 }));
+    expect(inside.total).toBe(100);
+    // 1,200 sent means 700 chargeable at 7p.
+    const over = computePhorest(input({ phorestMonthlyEstimate: 100, smsPerMonth: 1200 }));
+    expect(over.total).toBe(149);
+  });
+
   it('costs Treatwell on commission alone, because its published plans start free', () => {
     const r = computeTreatwell(
       input({

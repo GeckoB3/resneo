@@ -64,7 +64,8 @@ const CHARGING_MODELS: {
     name: 'Phorest',
     subscription: 'Quote only, not published',
     commission: 'None advertised',
-    extras: 'SMS bundles vary by tier. An online booking fee exists, but Phorest describes it as one the client pays to secure the slot',
+    extras:
+      'Texts are 9.5p, 8.2p or 7p depending on tier, with 500 free a month on the top tiers. An online booking fee exists, but Phorest describes it as one the client pays to secure the slot',
   },
   {
     name: 'Treatwell',

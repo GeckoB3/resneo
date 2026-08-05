@@ -285,6 +285,13 @@ export async function POST(request: NextRequest) {
       // no hold. Gated on the OWNER venue's card_hold_deposits flag; a zero-fee
       // card_hold config resolves as none and is allowed through, matching the
       // Phase 1 resolvers.
+      //
+      // The message must name the Calendar screen specifically. Staff CAN create a
+      // card-hold booking for a linked venue, but only from the linked column on
+      // /dashboard/calendar, which posts to /api/venue/bookings and carries the
+      // full payment path. /dashboard/bookings/new is scoped to the staff member's
+      // own venue and can never do it, so "the main booking form" sent people to a
+      // dead end.
       const serviceCharge = resolveAppointmentServiceOnlineCharge(
         service as unknown as AppointmentServicePaymentFields,
       );
@@ -302,7 +309,8 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(
             {
               code: 'card_hold_service_unsupported',
-              error: 'This service requires a card hold. Create the booking from the main booking form.',
+              error:
+                'This service needs a card hold, which this form cannot take. Create it from the Calendar screen instead: find the venue’s linked column and click the time you want.',
             },
             { status: 400 },
           );

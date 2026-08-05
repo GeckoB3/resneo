@@ -2077,7 +2077,8 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   onEventBlockClick?: (block: ScheduleBlockDTO) => void;
   onClassBlockClick?: (block: ScheduleBlockDTO, anchor: { x: number; y: number }) => void;
   /** When set, empty slots are clickable to create a booking (§4.3). */
-  onCreateAt?: (time: string) => void;
+  /** Carries the event so the caller can anchor its slot menu at the pointer. */
+  onCreateAt?: (time: string, ev: MouseEvent) => void;
   bookingRowOverlayForId?: (id: string) => BookingRowOverlay;
 }) {
   return (
@@ -2107,7 +2108,7 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
                 <button
                   key={`slot-${i}`}
                   type="button"
-                  onClick={() => onCreateAt(slotTime)}
+                  onClick={(ev) => onCreateAt(slotTime, ev)}
                   className="absolute left-0 w-full transition-colors hover:bg-brand-50/60"
                   style={{ top: i * slotHeightPx, height: slotHeightPx }}
                   title={`New booking at ${slotTime}`}
@@ -2321,7 +2322,13 @@ export function PractitionerCalendarView({
     { column: LinkedColumn; booking: LinkedBooking } | null
   >(null);
   const [linkedCreating, setLinkedCreating] = useState<
-    { venue: LinkedVenueCalendar; practitionerId?: string; time?: string } | null
+    {
+      venue: LinkedVenueCalendar;
+      practitionerId?: string;
+      time?: string;
+      /** Mirrors the own-venue slot menu: a walk-in is the same booking with `source: 'walk-in'`. */
+      intent: 'new' | 'walk-in';
+    } | null
   >(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
@@ -2349,6 +2356,13 @@ export function PractitionerCalendarView({
     time: string;
     x: number;
     y: number;
+    /**
+     * Set when the slot belongs to a LINKED venue's column. The menu then offers
+     * only the two booking actions: "Block time" is deliberately absent, because
+     * blocking an independent venue's diary is a statement about when it may
+     * trade, and the §5.3 grant ladder only ever speaks about bookings.
+     */
+    linked?: { venue: LinkedVenueCalendar; practitionerId?: string };
   } | null>(null);
   const [blockModal, setBlockModal] = useState<{
     blockId?: string;
@@ -5898,6 +5912,7 @@ export function PractitionerCalendarView({
                               setLinkedCreating({
                                 venue: v,
                                 practitionerId: col.practitionerId,
+                                intent: 'new',
                               });
                           }}
                           className={`mt-1.5 ${linkedNewBookingButtonClass}`}
@@ -6151,6 +6166,7 @@ export function PractitionerCalendarView({
                                 setLinkedCreating({
                                   venue: v,
                                   practitionerId: linkedCol.practitionerId,
+                                  intent: 'new',
                                 });
                             }}
                             className={`mt-1 self-center ${linkedNewBookingButtonClass}`}
@@ -6211,6 +6227,7 @@ export function PractitionerCalendarView({
                               setLinkedCreating({
                                 venue: v,
                                 practitionerId: col.practitionerId,
+                                intent: 'new',
                               });
                           }}
                           className={`mt-1 self-center ${linkedNewBookingButtonClass}`}
@@ -6305,15 +6322,19 @@ export function PractitionerCalendarView({
                               const linkedCol = linkedNativeGridColumnByKey.get(pid);
                               if (linkedCol) {
                                 // A linked column must never fall through to the own-venue
-                                // slot menu (it would create a booking on the wrong venue).
-                                // Only a create grant may start a booking here.
+                                // slot menu (it would create a booking on the wrong venue,
+                                // and offer Block time on a diary that is not ours). It gets
+                                // its own two-option menu instead.
                                 if (linkedCol.action === 'create_edit_cancel') {
                                   const v = linkedVenueById.get(linkedCol.venueId);
                                   if (v) {
-                                    setLinkedCreating({
-                                      venue: v,
-                                      practitionerId: linkedCol.practitionerId,
+                                    setSlotMenu({
+                                      pracId: pid,
+                                      dateStr: dstr,
                                       time: t,
+                                      x: Math.max(8, Math.min(ev.clientX - 72, window.innerWidth - 200)),
+                                      y: Math.max(8, Math.min(ev.clientY - 8, window.innerHeight - 160)),
+                                      linked: { venue: v, practitionerId: linkedCol.practitionerId },
                                     });
                                   }
                                 } else {
@@ -7157,13 +7178,16 @@ export function PractitionerCalendarView({
                       onClassBlockClick={openClassInstanceDetail}
                       onCreateAt={
                         col.action === 'create_edit_cancel'
-                          ? (time) => {
+                          ? (time, ev) => {
                               const v = linkedVenueById.get(col.venueId);
                               if (v)
-                                setLinkedCreating({
-                                  venue: v,
-                                  practitionerId: col.practitionerId,
+                                setSlotMenu({
+                                  pracId: col.key,
+                                  dateStr: date,
                                   time,
+                                  x: Math.max(8, Math.min(ev.clientX - 72, window.innerWidth - 200)),
+                                  y: Math.max(8, Math.min(ev.clientY - 8, window.innerHeight - 160)),
+                                  linked: { venue: v, practitionerId: col.practitionerId },
                                 });
                             }
                           : undefined
@@ -7188,7 +7212,21 @@ export function PractitionerCalendarView({
       )}
 
       {slotMenu && (() => {
-        const resourcesHere = venueResources.filter((r) => r.display_on_calendar_id === slotMenu.pracId);
+        const linkedHere = slotMenu.linked;
+        const resourcesHere =
+          linkedHere ?
+            []
+          : venueResources.filter((r) => r.display_on_calendar_id === slotMenu.pracId);
+        const openLinked = (intent: 'new' | 'walk-in') => {
+          if (!linkedHere) return;
+          setLinkedCreating({
+            venue: linkedHere.venue,
+            practitionerId: linkedHere.practitionerId,
+            time: slotMenu.time,
+            intent,
+          });
+          setSlotMenu(null);
+        };
         return (
           <>
             <button
@@ -7201,17 +7239,30 @@ export function PractitionerCalendarView({
               className="fixed z-[60] min-w-[11rem] max-w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
               style={{ left: slotMenu.x, top: slotMenu.y }}
             >
+              {linkedHere ? (
+                <p className="truncate px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  In {linkedHere.venue.venueName}
+                </p>
+              ) : null}
               <button
                 type="button"
                 className="block w-full px-3 py-2.5 text-left text-sm font-medium text-slate-800 hover:bg-slate-50"
-                onClick={() => openNewAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
+                onClick={() =>
+                  linkedHere ?
+                    openLinked('new')
+                  : openNewAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)
+                }
               >
                 New appointment
               </button>
               <button
                 type="button"
                 className="block w-full px-3 py-2.5 text-left text-sm font-medium text-slate-800 hover:bg-slate-50"
-                onClick={() => openWalkInAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
+                onClick={() =>
+                  linkedHere ?
+                    openLinked('walk-in')
+                  : openWalkInAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)
+                }
               >
                 Walk-in
               </button>
@@ -7239,14 +7290,18 @@ export function PractitionerCalendarView({
                   ))}
                 </>
               ) : null}
-              <div className="mx-3 my-1 border-t border-slate-100" />
-              <button
-                type="button"
-                className="block w-full px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
-                onClick={() => openBlockModal(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
-              >
-                Block time
-              </button>
+              {linkedHere ? null : (
+                <>
+                  <div className="mx-3 my-1 border-t border-slate-100" />
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => openBlockModal(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
+                  >
+                    Block time
+                  </button>
+                </>
+              )}
             </div>
           </>
         );
@@ -7567,7 +7622,7 @@ export function PractitionerCalendarView({
       {linkedCreating ? (
         <CalendarStaffBookingModal
           open
-          intent="new"
+          intent={linkedCreating.intent}
           linkedOwnerVenueId={linkedCreating.venue.venueId}
           linkedVenueName={linkedCreating.venue.venueName}
           stackKey={`linked-${linkedCreating.venue.venueId}-${linkedCreating.practitionerId ?? 'any'}`}

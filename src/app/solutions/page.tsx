@@ -174,6 +174,13 @@ const guides: { name: string; blurb: string; href: string; meta: string }[] = [
     href: "/solutions/salon-chair-rental-hmrc-employment-status",
     meta: "Salons & barbers · 6 min read",
   },
+  {
+    name: "What is a subscription plus commission booking platform actually costing you?",
+    blurb:
+      "Some class and wellness platforms charge a subscription per location, then take a cut of the bookings their own app brings you. How the two layers work, and what to check on your bill.",
+    href: "/solutions/fitness-studio-booking-software-true-cost",
+    meta: "Studios, gyms & clinics · 7 min read",
+  },
 ];
 
 /** Only ships comparisons that exist. Placeholders belong in the backlog, not the page. */

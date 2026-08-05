@@ -18,11 +18,23 @@ import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 /** §5.7 — cap for staff-entered amounts when the price is unknown (£1,000). */
 const MAX_IN_PERSON_PENCE = 100_000;
 
+/** Pence → "£1,000.00" for an error message. Errors are English-only, as elsewhere. */
+function formatPenceForError(pence: number): string {
+  return `£${(pence / 100).toLocaleString('en-GB', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 const schema = z.object({
   method: z.enum(['card_present', 'cash', 'external']).optional(),
   action: z.literal('refund').optional(), // admin-only; always full (v1, §6.3a)
   // Charges only — refunds ignore it. Omit = full balance (when known).
-  amount_pence: z.number().int().min(1).max(MAX_IN_PERSON_PENCE).optional(),
+  // The MAX_IN_PERSON_PENCE cap is deliberately NOT a `.max()` here: a schema
+  // breach fails parse and returns a bare `{ error: 'Invalid request' }`, which
+  // is unusable to a client and left staff with no idea a cap existed. It is
+  // enforced below instead, with a message and a code.
+  amount_pence: z.number().int().min(1).optional(),
   // REQUIRED for card_present: client-generated once per payment attempt.
   // Keys the PI idempotency so equal-amount split payments never collide (§6.3c).
   attempt_id: z.string().uuid().optional(),
@@ -71,6 +83,20 @@ export async function POST(
   const isRefund = input.action === 'refund';
   if (!isRefund && !input.method) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+  }
+  // The £1,000 cap, enforced here rather than in the schema so a breach is
+  // explicable. Applied to any explicitly supplied amount, exactly as the schema
+  // did — omitting `amount_pence` still charges the resolved balance in full,
+  // whatever its size.
+  if (input.amount_pence != null && input.amount_pence > MAX_IN_PERSON_PENCE) {
+    return NextResponse.json(
+      {
+        error: `The most you can take in one in-person payment is ${formatPenceForError(MAX_IN_PERSON_PENCE)}.`,
+        code: 'amount_above_cap',
+        max_amount_pence: MAX_IN_PERSON_PENCE,
+      },
+      { status: 400 },
+    );
   }
 
   const loaded = await loadStaffAccessibleBooking(staff, id);
@@ -261,11 +287,32 @@ export async function POST(
 
   let chargePence: number;
   if (balanceDuePence !== null) {
-    if (balanceDuePence === 0) {
+    if (balanceDuePence <= 0) {
       return NextResponse.json({ error: 'Nothing left to pay.' }, { status: 400 });
     }
-    // Staff-confirmable but clamped to the outstanding balance.
-    chargePence = Math.min(Math.max(input.amount_pence ?? balanceDuePence, 1), balanceDuePence);
+    const requested = input.amount_pence ?? balanceDuePence;
+    /**
+     * Refuse an over-payment rather than silently clamping it.
+     *
+     * The old `Math.min(...)` recorded a different figure from the one
+     * submitted, without saying so. On cash that is a till-reconciliation bug:
+     * staff take £50 in notes, the ledger says £30, and nothing anywhere
+     * reports the discrepancy. Clients that check client-side never see this;
+     * ones that do not silently corrupt the ledger.
+     */
+    if (requested > balanceDuePence) {
+      return NextResponse.json(
+        {
+          error: 'That is more than the outstanding balance for this visit.',
+          code: 'amount_exceeds_balance',
+          balance_due_pence: balanceDuePence,
+        },
+        { status: 400 },
+      );
+    }
+    // The schema floors a supplied amount at 1, and an omitted one takes the
+    // balance, which the guard above proved positive.
+    chargePence = requested;
   } else {
     // Unknown price: the staff-entered amount is required (schema caps it).
     if (typeof input.amount_pence !== 'number') {
@@ -306,7 +353,27 @@ export async function POST(
       method: input.method,
       amount_pence: chargePence,
     });
-    return NextResponse.json({ success: true });
+    /**
+     * Echo what was actually recorded, and re-read the balance rather than
+     * subtracting locally.
+     *
+     * The route previously returned a bare `{ success: true }`, so the client's
+     * success screen ("£30 collected, £60 still outstanding") was built from
+     * what it believed the balance was at render time. If the server balance had
+     * moved in between — a deposit landing, a sibling service settled, a
+     * colleague collecting — staff read the wrong number out to the client. The
+     * card path was already immune because it echoes `amount_pence`.
+     */
+    const settled = await loadVisitPaymentPicture(
+      staff.db,
+      visitAnchorFromBooking(booking as Record<string, unknown>, { id, venueId: scopeVenueId }),
+      { venueId: scopeVenueId },
+    );
+    return NextResponse.json({
+      success: true,
+      amount_pence: chargePence,
+      balance_due_pence: settled.balanceDuePence,
+    });
   }
 
   // ---------------------------------------------------------------------------

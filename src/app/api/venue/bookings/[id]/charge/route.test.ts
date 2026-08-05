@@ -250,11 +250,42 @@ describe('charge route — card_present (§6.3c)', () => {
     expect(mockPiCreate).not.toHaveBeenCalled();
   });
 
-  it('clamps a staff-entered amount to the outstanding balance', async () => {
+  it('REFUSES an over-payment instead of silently clamping it', async () => {
+    // The old behaviour recorded a different figure from the one submitted,
+    // without saying so — a till-reconciliation bug on cash, where staff take
+    // £50 in notes and the ledger says £40.
     setup();
     const res = await post({ method: 'card_present', attempt_id: ATTEMPT, amount_pence: 99_999 });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe('amount_exceeds_balance');
+    expect(body.balance_due_pence).toBe(4000);
+    expect(mockPiCreate).not.toHaveBeenCalled();
+  });
+
+  it('charges the full balance when the amount is omitted, whatever its size', async () => {
+    // Omitting the amount stays exempt from the £1,000 cap: it is not a
+    // staff-entered figure, it is the balance the server resolved itself.
+    setup({ totalPence: 250_000 });
+    const res = await post({ method: 'card_present', attempt_id: ATTEMPT });
     expect(res.status).toBe(200);
-    expect((await res.json()).amount_pence).toBe(4000);
+    // £2,490 — the £2,500 total less the harness's £10 deposit, and well past
+    // the £1,000 cap that applies only to staff-entered figures.
+    expect((await res.json()).amount_pence).toBe(249_000);
+  });
+
+  it('explains the £1,000 cap instead of returning a bare "Invalid request"', async () => {
+    setup({ totalPence: null });
+    const res = await post({
+      method: 'card_present',
+      attempt_id: ATTEMPT,
+      amount_pence: 100_001,
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe('amount_above_cap');
+    expect(body.max_amount_pence).toBe(100_000);
+    expect(body.error).toContain('£1,000.00');
   });
 
   it('accepts a smaller staff-entered amount unchanged (partial settlement)', async () => {
@@ -407,7 +438,10 @@ describe('charge route — cash/external (§6.3b)', () => {
     const { calls } = setup();
     const res = await post({ method: 'cash', note: 'paid at desk' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ success: true });
+    // Echoes what it recorded, so the client's success screen is built from the
+    // server's figures rather than what it believed the balance was at render
+    // time. The card path already echoed `amount_pence`; cash did not.
+    expect(await res.json()).toMatchObject({ success: true, amount_pence: 4000 });
 
     const insert = calls.find((c) => c.table === 'booking_payments' && c.op === 'insert');
     expect(insert?.payload).toMatchObject({

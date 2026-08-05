@@ -360,7 +360,17 @@ export async function GET(
     // from any line of it.
     const { data: paymentRowsData, error: paymentRowsErr } = await getSupabaseAdminClient()
       .from('booking_payments')
-      .select('id, booking_id, method, status, amount_pence, note, created_at')
+      /**
+       * `stripe_payment_intent_id` lets a client identify the row it just drove.
+       * The row is written `pending` at PI-create time and only the webhook moves
+       * it, so without this a declined tap — which the client watched fail — still
+       * read as "in flight" until the failed webhook landed, and the mobile app
+       * had to match rows with a booking + amount + ±2-minute heuristic. Not a
+       * secret: the client already holds that intent's client secret.
+       */
+      .select(
+        'id, booking_id, method, status, amount_pence, note, created_at, stripe_payment_intent_id',
+      )
       .in('booking_id', visit.bookingIds)
       .order('created_at', { ascending: false });
     if (paymentRowsErr) {

@@ -84,7 +84,11 @@ The capability layer is set up once per venue (or never, for venues that opt out
 
 ### 3.4 Enforcement checklist (must hold true)
 1. No status-transition endpoint or UI control is modified to check `payment_state`. (Audit `useUpdateBookingStatus` and the booking status routes — they must remain payment-agnostic.)
-2. The **Take payment** button is rendered **only** when `in_person_payments_enabled && isAppointment && !isCancelled && payment_state ∉ {paid, refunded} && (balanceDue === null || balanceDue > 0)`. `balanceDue` is `null` when the price is unknown (§5.7) — in that case the button still shows and staff enter the amount. Otherwise the button does not exist in the tree.
+2. The **Take payment** button is rendered **only** when `in_person_payments_enabled && isAppointment && !isCancelled && payment_state !== 'paid' && (balanceDue === null || balanceDue > 0)`. `balanceDue` is `null` when the price is unknown (§5.7) — in that case the button still shows and staff enter the amount. Otherwise the button does not exist in the tree.
+
+   > **Corrected 2026-08-05: `'refunded'` was removed from the exclusion.** This rule previously read `payment_state ∉ {paid, refunded}`, which contradicted this document's own accounting. In `payment-summary.ts` a refunded ledger row contributes nothing to `balancePaidPence`, and `deriveBookingPaymentState` returns `'refunded'` only when `hasRefundedRow && amountPaid === 0` — i.e. the booking owes the **full amount again** and `balanceDue` has been restored. The charge route accepts a fresh payment; only the UI refused to offer one.
+   >
+   > Found in device testing: take £50, realise it should have been £25, refund, and there was then no route to collect the £25. Because this gate governs the whole payment surface, **cash and external could not be recorded either**, so money genuinely taken could never reach the ledger. `'refunded'` now falls through to the `balanceDue` check, which is server-computed and remains the real guard against collecting twice. Implemented in the mobile app as `canTakeInPersonPayment` (`resneo-app/lib/payments/payment-display.ts`).
 3. No code path auto-opens `TakePaymentSheet` (no `useEffect` triggers on status change, arrival, completion, etc.).
 4. `payment_state ∈ {unpaid, deposit_paid, partially_paid}` is rendered as neutral information, never as a blocking error or a required-action callout.
 5. Disabling the venue flag instantly removes the entire surface with no data migration and no orphaned UI.

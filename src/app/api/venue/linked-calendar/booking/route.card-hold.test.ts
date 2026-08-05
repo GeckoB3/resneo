@@ -139,9 +139,11 @@ describe('POST /api/venue/linked-calendar/booking card-hold rejection (spec D6)'
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.code).toBe('card_hold_service_unsupported');
-    expect(json.error).toBe(
-      'This service requires a card hold. Create the booking from the main booking form.',
-    );
+    // The message must point at the Calendar screen, which can genuinely take a
+    // card-hold booking for a linked venue. It previously said "the main booking
+    // form", which is scoped to the staff member's own venue and cannot.
+    expect(json.error).toContain('Calendar screen');
+    expect(json.error).not.toContain('main booking form');
     expect(rpc).not.toHaveBeenCalled();
   });
 

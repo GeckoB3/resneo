@@ -284,7 +284,9 @@ venue_collectives
 ├── branding                 jsonb NOT NULL default '{}'  -- logo_url, primary_colour, description
 ├── service_grouping         text NOT NULL default 'by_practitioner'
 │       'by_practitioner' | 'by_service_type'
-├── allow_any_practitioner   boolean NOT NULL default false
+│   -- allow_any_practitioner: DROPPED 2026-07-26 (migration 20270101122000). Never wired.
+│   -- "Any available" on the combined page follows the HOST venue's own flag; per-offering
+│   -- pooling uses collective_service_items.allow_any_available. See §7.6 and §15.6.
 ├── status                   text NOT NULL default 'active'   -- 'active' | 'dissolved'
 ├── created_at, updated_at   timestamptz NOT NULL default now()
 
@@ -753,8 +755,8 @@ and when the underlying link actually ends.
 ### 7.3 Creation flow
 
 1. An Admin with ≥ 1 full-mutual link opens Linked Accounts tab → "Create venue collective".
-2. Configure: `name`, `slug` (live availability check), `branding`, `service_grouping`,
-   `allow_any_practitioner`.
+2. Configure: `name`, `slug` (live availability check), `branding`, `service_grouping`.
+   (No `allow_any_practitioner` step: that column was dropped, see §7.6 and §15.6.)
 3. Invite linked venues. Each invitee gets an email + dashboard banner.
 4. Each invitee accepts and configures `visible_practitioner_ids`, `visible_service_ids`,
    `allow_any_practitioner_substitution`, and `display_order`.
@@ -762,8 +764,9 @@ and when the underlying link actually ends.
 
 ### 7.4 Host responsibilities and transfer
 
-The host venue controls `name`, `slug`, `branding`, `service_grouping`,
-`allow_any_practitioner`, member removal, and dissolution. The host may transfer host status
+The host venue controls `name`, `slug`, `branding`, `service_grouping`, member removal, and
+dissolution. It also controls, indirectly and as a side effect, whether the combined page offers
+"Any available" at all: that follows the host venue's *own* booking setting (§7.6). The host may transfer host status
 to any `active` member (who must accept). If the host venue leaves or is deleted, the system
 requires host transfer first or auto-dissolves the collective.
 
@@ -795,11 +798,29 @@ RLS will already have cut off the data.
 
 ### 7.6 "Any practitioner" routing
 
-When `allow_any_practitioner` is on at the collective level and a member opts in per service
-(`allow_any_practitioner_substitution`), the page offers "Any available practitioner". On
-selection the system finds the earliest slot across eligible `practitioners` (across member
-venues), and the resulting `bookings` row is created **in the chosen practitioner's owning
-venue** — `venue_id` and `practitioner_id` of that venue. Data ownership is unchanged.
+> **As built (superseding the original design below).** There is no collective-level
+> `allow_any_practitioner`: that column was **dropped 2026-07-26** (migration `20270101122000`)
+> having never been wired, and its create/edit toggle has been removed from the UI. What ships
+> instead is a two-level control:
+>
+> - **Whether the combined page offers "Any available" at all** follows the **host venue's own**
+>   `any_available_practitioner` feature flag, resolved in
+>   `loadCollectiveVenuePublic` (`src/lib/linked-accounts/collective-venue.ts`), on the reasoning
+>   that a combined page should behave like one venue rather than force the option on.
+> - **Whether a given offering pools across providers** is per-offering, via
+>   `collective_service_items.allow_any_available`.
+>
+> The member-level `allow_any_practitioner_substitution` column still exists and is read and
+> written by the members API, but has no create/edit UI (§16.2).
+>
+> See §15.6 for the deviation record, including the host-coupling caveat.
+
+The original design, retained for context: when `allow_any_practitioner` is on at the collective
+level and a member opts in per service (`allow_any_practitioner_substitution`), the page offers
+"Any available practitioner". On selection the system finds the earliest slot across eligible
+`practitioners` (across member venues), and the resulting `bookings` row is created **in the
+chosen practitioner's owning venue** — `venue_id` and `practitioner_id` of that venue. Data
+ownership is unchanged. (Full cross-venue earliest-slot routing remains deferred.)
 
 ### 7.7 Booking attribution and data flow
 
@@ -1112,10 +1133,61 @@ Status key: ✅ shipped · 🟡 partial · ⬜ not started
 - Revenue-sharing or chair-rent tracking between linked venues.
 - Restaurant (table-reservation) venue participation in any form.
 - SMS notifications for link events.
+- A collective-wide staff booking form. The staff-facing New Booking form stays scoped to the
+  signed-in venue; cross-venue booking goes through the Linked calendars screen so the boundary,
+  the client ownership and the audit trail all stay intact. Decided 2026-08-05, see §14.
 
 ---
 
 ## 14. Decision log
+
+**2026-08-05 (staff booking form stays venue-scoped — decided, not building):** Considered making
+the staff-facing New Booking form (`/dashboard/bookings/new`) offer the merged catalogue and
+calendars of a venue collective, rather than only the signed-in venue's own, for collectives whose
+members trade as a single shop while keeping separate books. **Decision: leave as is.** Staff who
+need to book into a linked venue continue to use the Linked calendars screen's "New booking"
+button (`CreateLinkedBookingModal` → `POST /api/venue/linked-calendar/booking`).
+
+The plumbing is closer than it looks, which is why this is recorded rather than left implicit:
+`/api/booking/create` already accepts a collective id in place of `venue_id`, resolves the chosen
+(offering, calendar) to the owning venue and source service, and writes a normal booking there
+(§7.7, §22 G3/G4). `appointment-catalog`, `appointment-calendar` and `availability` do the same,
+and the staff form already calls those exact endpoints. Write permission is likewise already
+guaranteed for `unified_catalog` collectives, since `hasFullMutualWriteLinks` requires
+`create_edit_cancel` + `full_details` + unscoped calendars in both directions between every pair.
+
+It was not done for four reasons, in order of weight:
+
+1. **Client ownership.** Staff guest search is scoped to `staff.venue_id` from the session, while
+   the linked-calendar modal deliberately searches the *owning* venue's clients via `?venueId=`.
+   A merged form picking from the acting venue's client list and writing into another venue's
+   diary would either duplicate the client across the boundary or strand a booking against a
+   client the owning venue cannot see. §13 keeps `guests` rows unshared, and that is the one
+   promise the feature cannot break.
+2. **The cross-venue audit trail would go silent.** The linked-calendar routes pass
+   `p_acting_venue_id` so the trigger records who acted (§10.1), visible to both venues.
+   `/api/booking/create` sets nothing, because it is the customer path. Routing staff writes
+   through it would make cross-venue bookings invisible in the log that makes shared access
+   defensible.
+3. **Collective membership is the wrong gate.** Only `unified_catalog` is gated on mutual write;
+   a `directory` collective may have members sharing `time_only` with no action rights.
+4. **Working-practice optics.** HMRC weighs who controls the diary, who takes the money and whose
+   client it is. The present friction (a separate screen, a modal headed "New booking in {venue}",
+   an audit entry both parties can see) is evidence of two businesses co-operating at arm's
+   length. A form that makes another practitioner's diary look like your own reads as central
+   control of an independent contractor's book, which is the opposite of what linking is for.
+
+Note that (4) argues for keeping the boundary *visible*, not for refusing the work: the capability
+already exists via the linked-calendar modal, so the real justification is (1) and (2) plus the
+fact that the gap is convenience rather than capability. **If this is ever revisited, the binding
+constraints are:** gate on `page_mode = 'unified_catalog'`; make it an explicit surface toggle
+("This venue" / "{Collective name}") defaulting to the own venue rather than a silent widening;
+scope client selection to the owning venue once a calendar is chosen; write through a path that
+records `p_acting_venue_id`; make it opt-in per member; and default such bookings to pay-at-venue
+so "who collects the money" stays with the owning venue. A cheaper first move, if the friction is
+what customers actually complain about, is to improve `CreateLinkedBookingModal` itself (it asks
+staff to type a start time rather than offering slots, and carries no add-ons or deposits), which
+removes most of the pain while keeping the boundary and the audit trail intact.
 
 **2026-06-04 (audit + world-class gap analysis):** Full code-vs-spec audit across DB/RLS, API,
 settings UI, calendar/bookings, collectives, and cron/notifications. Synced §4 data-model
@@ -1340,7 +1412,7 @@ spec.
 | No-PII name visibility | Name hidden when `pii=false` (§5.2) | **Closed 2026-07-26** — guest-name snapshots (and `client_address_*`) are now stripped for no-PII viewers on every cross-venue read route. |
 | time_only detail reads | time_only = busy blocks only (§5.1) | **Closed 2026-07-26** — the booking detail GET and bookings-list linked modes now require `full_details`; time_only viewers are limited to the anonymised calendar feed. |
 | Combined page group bookings | Not specified | Single bookings only: the group pipeline (`create-group`) has no collective routing, so the group option is hidden on a collective page until that ships. |
-| `allow_any_practitioner` column | §7.6 flag on `venue_collectives` | **Dropped 2026-07-26** (migration `20270101122000`) — it was never wired; the combined page follows the HOST venue's own flag, and per-offering pooling uses `collective_service_items.allow_any_available`. |
+| `allow_any_practitioner` column | §7.6 flag on `venue_collectives` | **Dropped 2026-07-26** (migration `20270101122000`) — it was never wired; the combined page follows the HOST venue's own flag, and per-offering pooling uses `collective_service_items.allow_any_available`. §4.3/§7.3/§7.4/§7.6 reconciled to this 2026-08-05. **Caveat, not yet addressed:** because the switch is the host's *own venue* setting rather than a collective setting, a host turning "Any available practitioner" off for its own booking page silently removes the option from the shared collective page too, for every member, with nothing in the UI signalling the coupling. Harmless until someone reports "Any available vanished from our combined page", at which point this is the cause. Fixing it properly needs a product decision on who should own the switch (host alone, or a collective-level setting), so it is recorded rather than patched. |
 
 When closing a deviation, update this table and the relevant normative section (§7 / §8 / §10).
 
@@ -1742,7 +1814,8 @@ server-computed venue-local `initialDate` from the standalone page. **§7.2.1** 
 now rejects a name matching one **dissolved within 30 days** (non-disclosing message). **§7.6** —
 the `allow_any_practitioner` toggle is now a disabled **"coming soon"** affordance in both create
 and edit (the live false promise is gone); create never sets it true; the per-member substitution
-toggle remains omitted. Full cross-venue earliest-slot routing stays deferred. **§8.6** —
+toggle remains omitted. *(Superseded 2026-07-26: the column was dropped and the toggle removed
+altogether. See §7.6 and §15.6.)* Full cross-venue earliest-slot routing stays deferred. **§8.6** —
 `loadActiveCollectiveForVenue` + a public `GET /api/public/venue-collective` feed a self-contained
 `CollectiveCrossSuggestion` shown in the appointment flow's *no-availability* state for public
 guests (collective-scoped only; never for pairwise-only venues; not shown inside a collective page).

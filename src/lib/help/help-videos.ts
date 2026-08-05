@@ -16,7 +16,12 @@ export interface HelpVideoDef {
   caption?: string;
 }
 
-export const HELP_VIDEOS: Record<string, HelpVideoDef> = {
+export const HELP_VIDEOS = {
+  'dashboard-tour': {
+    youtubeId: 'l8afPZWnpd8',
+    title: 'Watch: onboarding and a tour of your dashboard',
+    caption: 'Your first sign-in, the setup wizard, and where each tool lives once you are in.',
+  },
   'services-setup': {
     youtubeId: '96Nw37-Kfrg',
     title: 'Watch: setting up your services',
@@ -37,4 +42,10 @@ export const HELP_VIDEOS: Record<string, HelpVideoDef> = {
     title: 'Watch: setting up linked venues and collectives',
     caption: 'How to link another venue, choose what you share, and set up a combined booking page.',
   },
-};
+} satisfies Record<string, HelpVideoDef>;
+
+/**
+ * The known video ids. Declared through `satisfies` above so non-article callers (the
+ * welcome email links to the same videos) fail to compile if an id is renamed here.
+ */
+export type HelpVideoId = keyof typeof HELP_VIDEOS;

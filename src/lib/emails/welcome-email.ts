@@ -1,9 +1,49 @@
 import { sendEmail } from './send-email';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+import { HELP_VIDEOS, type HelpVideoId } from '@/lib/help/help-videos';
 
 /** Friendly, relationship-led sender for the customer welcome (distinct from bookings@). */
 const WELCOME_FROM_EMAIL = 'hello@resneo.com';
 const SUPPORT_EMAIL = 'support@resneo.com';
+
+/**
+ * The setup walkthroughs offered in the welcome email, in the order a new venue should
+ * watch them. The YouTube ids come from HELP_VIDEOS so the same video never ends up with
+ * two different links; the titles and blurbs are written for an email list rather than
+ * reusing the in-article captions.
+ */
+const WELCOME_VIDEOS: { id: HelpVideoId; title: string; blurb: string }[] = [
+  {
+    id: 'dashboard-tour',
+    title: 'Onboarding and a tour of your dashboard',
+    blurb: 'Start here: your first sign-in, the setup wizard, and where everything lives.',
+  },
+  {
+    id: 'services-setup',
+    title: 'Setting up your services',
+    blurb: 'Build what clients book, with a length, a price, and a calendar.',
+  },
+  {
+    id: 'booking-page-setup',
+    title: 'Setting up your booking page',
+    blurb: 'Your public link, your branding, and how to share it with clients.',
+  },
+  {
+    id: 'communications-setup',
+    title: 'Setting up your communication settings',
+    blurb: 'Choose which emails and texts go out to clients, and when they send.',
+  },
+  {
+    id: 'linked-venues-setup',
+    title: 'Linked venues and venue collectives',
+    blurb: 'Share a combined booking page with another ResNeo business.',
+  },
+];
+
+/** Public watch link for a welcome-email video. */
+function videoUrl(id: HelpVideoId): string {
+  return `https://youtu.be/${HELP_VIDEOS[id].youtubeId}`;
+}
 
 /**
  * The customer welcome email, sent once when a new account signs up. Aimed at appointments
@@ -23,6 +63,13 @@ export function renderWelcomeEmail(baseUrl: string): { subject: string; html: st
   const siteUrl = 'https://www.resneo.com';
 
   const subject = "Welcome to ResNeo, let's get you started";
+
+  const videoRowsHtml = WELCOME_VIDEOS.map(
+    (v, i) => `<tr><td style="padding:${i === 0 ? '0' : '14px'} 0 0">
+<a href="${videoUrl(v.id)}" target="_blank" style="font-size:15px;line-height:1.5;color:#00696F;font-weight:600;text-decoration:none">&#9654;&nbsp;&nbsp;${v.title}</a>
+<div style="margin:3px 0 0;font-size:14px;line-height:1.55;color:#45595F">${v.blurb}</div>
+</td></tr>`
+  ).join('\n');
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -66,6 +113,19 @@ export function renderWelcomeEmail(baseUrl: string): { subject: string; html: st
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto"><tr>
 <td style="background-color:#003B6F;border-radius:40px;text-align:center"><a href="${guideUrl}" target="_blank" style="display:inline-block;padding:15px 34px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;border-radius:40px">Open the getting started guide</a></td>
 </tr></table>
+</td></tr>
+
+<tr><td style="padding:10px 30px 6px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F2F6FA;border-radius:18px">
+<tr><td style="padding:26px 26px">
+<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0E7C84;margin:0 0 7px">Video guides</div>
+<div style="font-size:18px;font-weight:600;color:#15324C;margin:0 0 8px">Watch us set ResNeo up</div>
+<p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#4A5663">Five short videos that take you from a brand new account to taking bookings. Watch them in order, or dip into the one you need.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+${videoRowsHtml}
+</table>
+</td></tr>
+</table>
 </td></tr>
 
 <tr><td style="padding:10px 30px 6px">
@@ -129,6 +189,10 @@ export function renderWelcomeEmail(baseUrl: string): { subject: string; html: st
     '',
     'Open the getting started guide:',
     guideUrl,
+    '',
+    'Watch us set ResNeo up',
+    'Five short videos that take you from a brand new account to taking bookings. Watch them in order, or dip into the one you need.',
+    ...WELCOME_VIDEOS.flatMap((v) => ['', `${v.title}: ${videoUrl(v.id)}`, v.blurb]),
     '',
     'Take ResNeo with you',
     'Your business diary, wherever you go. Download the official ResNeo app straight to your phone.',

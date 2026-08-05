@@ -391,6 +391,38 @@ export default function Home() {
       {/* ── Pricing ─────────────────────────────────────────── */}
       <PricingSection />
 
+      {/* ── Price calculator ────────────────────────────────── */}
+      <section className="border-t border-slate-100 bg-slate-50/70 py-16 sm:py-20">
+        <div className="mx-auto max-w-4xl px-6">
+          <HomeReveal>
+            <div className="overflow-hidden rounded-3xl border border-brand-100 bg-white p-8 shadow-sm sm:p-10">
+              <div className="grid items-center gap-8 md:grid-cols-[1fr_auto]">
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-[0.18em] text-accent-700">
+                    Price calculator
+                  </p>
+                  <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                    See how ResNeo compares to Booksy, Fresha, Vagaro and the rest
+                  </h2>
+                  <p className="mt-4 text-base leading-relaxed text-slate-600">
+                    Most booking platforms charge you for every team member, take a commission on new
+                    clients from their marketplace, then price the marketing tools separately. Put
+                    your own chairs, bookings and prices in, and see what each one would actually
+                    cost you a month. Every competitor figure is sourced and dated.
+                  </p>
+                </div>
+                <Link
+                  href="/calculator"
+                  className="inline-flex h-12 items-center justify-center whitespace-nowrap rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                >
+                  Compare the cost
+                </Link>
+              </div>
+            </div>
+          </HomeReveal>
+        </div>
+      </section>
+
       {/* ── Founders card ───────────────────────────────────── */}
       <section className="border-t border-slate-100 bg-white py-16 sm:py-20">
         <div className="mx-auto max-w-4xl px-6">

@@ -1,4 +1,4 @@
-import { HELP_VIDEOS } from '@/lib/help/help-videos';
+import { HELP_VIDEOS, type HelpVideoDef } from '@/lib/help/help-videos';
 
 /**
  * Embedded walkthrough video, referenced from an article body with a
@@ -11,7 +11,7 @@ import { HELP_VIDEOS } from '@/lib/help/help-videos';
  * wire entirely until the reader scrolls to it.
  */
 export function HelpVideo({ id }: { id: string }) {
-  const def = HELP_VIDEOS[id];
+  const def: HelpVideoDef | undefined = (HELP_VIDEOS as Record<string, HelpVideoDef>)[id];
   if (!def) {
     return (
       <div className="my-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

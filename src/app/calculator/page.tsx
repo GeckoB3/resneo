@@ -56,8 +56,9 @@ const CHARGING_MODELS: {
   {
     name: 'Vagaro',
     subscription: '£20 for one calendar, rising £10 per extra calendar to an £80 cap at seven',
-    commission: 'None on marketplace bookings',
-    extras: 'Text marketing, forms, website builder and the branded app are all separate monthly add-ons',
+    commission: '20% of a new Marketplace client’s first appointment, charged once',
+    extras:
+      '1,000 email marketing messages included, but UK text messaging is a paid plan. The branded app, website builder and forms are extra',
   },
   {
     name: 'Phorest',
@@ -268,7 +269,7 @@ export default function CalculatorPage() {
           <ul className="mt-3 space-y-3">
             {PRICING_SOURCES.map((source) => (
               <li
-                key={source.provider}
+                key={`${source.provider}-${source.url}`}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
               >
                 <span className="font-semibold text-slate-900">{source.provider}</span>

@@ -9,6 +9,7 @@ import {
   computePhorest,
   computeResneo,
   computeTreatwell,
+  computeVagaro,
   resneoPlanFor,
   vagaroSubscription,
   type CalculatorInputs,
@@ -135,6 +136,36 @@ describe('vagaroSubscription', () => {
   });
 });
 
+describe('computeVagaro', () => {
+  it('takes 20% of a new Marketplace client’s first appointment', () => {
+    const r = computeVagaro(
+      input({ calendars: 1, averageBookingValue: 50, marketplaceNewClientsPerMonth: 10 }),
+    );
+    expect(r.lines.find((l) => l.label === 'Marketplace commission')?.amount).toBe(100);
+    expect(r.total).toBe(120);
+  });
+
+  it('applies no minimum fee, because Vagaro publishes none', () => {
+    // A £5 first appointment yields 20% = £1. Fresha and Booksy would floor this
+    // at £4 and £5; Vagaro publishes no floor, so it must not get one here.
+    const r = computeVagaro(
+      input({ calendars: 1, averageBookingValue: 5, marketplaceNewClientsPerMonth: 10 }),
+    );
+    expect(r.lines.find((l) => l.label === 'Marketplace commission')?.amount).toBe(10);
+  });
+
+  it('drops the commission when the marketplace is off', () => {
+    const r = computeVagaro(input({ calendars: 1, useMarketplace: false }));
+    expect(r.total).toBe(20);
+  });
+
+  it('never charges for texts, because UK plan prices are not published', () => {
+    const quiet = computeVagaro(input({ calendars: 1, smsPerMonth: 0, useMarketplace: false }));
+    const loud = computeVagaro(input({ calendars: 1, smsPerMonth: 5000, useMarketplace: false }));
+    expect(loud.total).toBe(quiet.total);
+  });
+});
+
 describe('estimate-backed providers', () => {
   it('makes Phorest exactly the visitor figure and nothing more', () => {
     const r = computePhorest(input({ phorestMonthlyEstimate: 200, bookingsPerMonth: 100 }));
@@ -170,22 +201,22 @@ describe('computeAll', () => {
     expect(all.savingVsDearest).toBe(round(totals[totals.length - 1] - all.resneo.total));
   });
 
-  it('undercuts every commission-charging platform on the default three-chair salon', () => {
+  it('undercuts every competitor on the defaults, now Vagaro carries its commission', () => {
     const all = computeAll(input());
-    const commissionLed = all.competitors.filter((c) =>
-      ['fresha', 'booksy', 'treatwell', 'phorest'].includes(c.id),
-    );
-    expect(commissionLed).toHaveLength(4);
-    for (const c of commissionLed) {
+    expect(all.competitors).toHaveLength(5);
+    for (const c of all.competitors) {
       expect(c.total).toBeGreaterThan(all.resneo.total);
     }
+    expect(all.savingVsCheapest).toBeGreaterThan(0);
   });
 
   it('does not pretend to beat Vagaro on subscription alone', () => {
-    // Vagaro's ladder (£40 at three calendars) genuinely undercuts Plus (£49) when
-    // no marketplace commission is in play. The model must show that, not hide it:
-    // the page's claim is about total cost including commission, not a blanket win.
-    const all = computeAll(input({ useMarketplace: false, marketplaceNewClientsPerMonth: 0 }));
+    // With the marketplace off, Vagaro's ladder genuinely undercuts Plus at three
+    // calendars (£40 against £49). The model must keep showing that: the claim is
+    // about total cost including commission, not a blanket win on every input.
+    const all = computeAll(
+      input({ calendars: 3, useMarketplace: false, marketplaceNewClientsPerMonth: 0 }),
+    );
     const vagaro = all.competitors.find((c) => c.id === 'vagaro');
     expect(vagaro?.total).toBeLessThan(all.resneo.total);
     expect(all.savingVsCheapest).toBeLessThan(0);

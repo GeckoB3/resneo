@@ -121,14 +121,14 @@ export function PricingCalculator() {
             <Toggle
               id="marketplace"
               label="Use each platform's marketplace"
-              hint="Booksy Boost, Fresha and Treatwell all charge a one-off fee on a new client's first booking."
+              hint="Booksy, Fresha, Vagaro and Treatwell all charge a one-off fee on a new client's first booking. Only ResNeo does not."
               checked={inputs.useMarketplace}
               onChange={(v) => set('useMarketplace', v)}
             />
             <Toggle
               id="addons"
               label="Add published marketing and loyalty add-ons"
-              hint="Fresha prices Insights and Client Loyalty separately. Booksy includes them. Vagaro publishes its marketing add-ons in dollars only, so they are left out."
+              hint="Fresha prices Insights and Client Loyalty separately. Booksy includes them. Vagaro includes 1,000 marketing emails but charges for UK text messaging, and does not publish those prices, so its total here is a floor."
               checked={inputs.includeAddOns}
               onChange={(v) => set('includeAddOns', v)}
             />

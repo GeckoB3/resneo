@@ -56,11 +56,11 @@ export interface CalculatorInputs {
 }
 
 export const DEFAULT_INPUTS: CalculatorInputs = {
-  calendars: 3,
+  calendars: 1,
   bookingsPerMonth: 260,
   averageBookingValue: 45,
   marketplaceNewClientsPerMonth: 12,
-  smsPerMonth: 300,
+  smsPerMonth: 100,
   useMarketplace: true,
   includeAddOns: false,
   phorestMonthlyEstimate: 129,
@@ -290,6 +290,20 @@ export const VAGARO = {
   /** The ladder stops climbing at 7 calendars. */
   capCalendars: 7,
   capMonthly: 80,
+  /**
+   * "A one-time 20% fee applies to the first appointment" for a client who finds
+   * you through the Vagaro Marketplace, per Vagaro's own UK pricing page.
+   *
+   * Its UK product page separately claims "no booking fees eating into your
+   * revenue". Both are Vagaro's own words. Read together with the support
+   * documentation, which describes the fee and when it is refunded, the product
+   * page line is about repeat bookings: the fee lands once, on the first
+   * appointment, and never again for that client. We follow the pricing page.
+   *
+   * No minimum fee is published, so unlike Fresha and Booksy there is no floor
+   * applied here. That is the reading most favourable to Vagaro.
+   */
+  newClientCommission: 0.2,
 } as const;
 
 export function vagaroSubscription(calendars: number): number {
@@ -300,18 +314,27 @@ export function vagaroSubscription(calendars: number): number {
 
 export function computeVagaro(input: CalculatorInputs): ProviderResult {
   const calendars = clampMin(input.calendars, 1);
+  const commission =
+    input.useMarketplace ?
+      VAGARO.newClientCommission * clampMin(input.averageBookingValue, 0) * effectiveNewClients(input)
+    : 0;
 
   return summarise({
     id: 'vagaro',
     name: 'Vagaro',
     planLabel: `${calendars} bookable ${calendars === 1 ? 'calendar' : 'calendars'}`,
     estimated: false,
-    note: 'No marketplace commission, but the subscription climbs £10 with every calendar, and marketing add-ons are priced separately. Reminder texts are treated as included.',
+    note: 'The subscription climbs £10 with every calendar, and the Marketplace takes 20% of a new client’s first appointment. In the UK, text messaging is a paid plan on top: those prices are not published, so they are not counted here.',
     lines: [
       {
         label: 'Subscription',
         amount: round2(vagaroSubscription(calendars)),
         detail: `£${VAGARO.firstCalendarMonthly} for the first calendar, then £${VAGARO.perExtraCalendarMonthly} each to a £${VAGARO.capMonthly} cap`,
+      },
+      {
+        label: 'Marketplace commission',
+        amount: round2(commission),
+        detail: '20% of a new client’s first appointment, one time',
       },
     ],
   });
@@ -435,8 +458,13 @@ export const PRICING_SOURCES: { provider: string; what: string; url: string }[] 
   },
   {
     provider: 'Vagaro',
-    what: '"£20/mo. to start, with an additional £10 per calendar up to 7 calendars. The cost for 7 or more calendars is £80/mo."',
+    what: 'The calendar ladder: "£20/mo. to start, with an additional £10 per calendar up to 7 calendars. The cost for 7 or more calendars is £80/mo."',
     url: 'https://www.vagaro.com/en-gb/pro',
+  },
+  {
+    provider: 'Vagaro',
+    what: 'The Marketplace fee: "a one-time 20% fee applies to the first appointment" when a new client books you through it',
+    url: 'https://www.vagaro.com/en-gb/pro/pricing',
   },
   {
     provider: 'Phorest',
@@ -466,7 +494,8 @@ export const PRICING_ASSUMPTIONS: string[] = [
   'Booksy states that appointment confirmations and reminders are always free, so reminder texts cost Booksy users nothing here. Its 500 message allowance and 5p overage apply to marketing blasts, which this calculator does not model.',
   'Booksy publishes a £40 base plus £5 per extra team member but does not spell out whether the base includes one person. We assume it does, which is the cheaper reading for Booksy.',
   'Fresha’s 20 free monthly messages are for automated reminders, so reminders beyond that are charged at 6p. Fresha’s separate marketing texts at 8p are not modelled.',
-  'Vagaro reminder texts are treated as included in the subscription. Its text marketing, forms, website builder and branded app are published in dollars rather than pounds, so they are left out of the add-ons toggle entirely.',
+  'Vagaro charges a one-time 20% fee on a new Marketplace client’s first appointment, stated on its UK pricing page. Its UK product page separately says there are no booking fees. We follow the pricing page, and read the product page line as being about repeat bookings, which genuinely carry no fee. No minimum fee is published, so unlike Fresha and Booksy no floor is applied, which is the reading most favourable to Vagaro.',
+  'Vagaro includes 1,000 email marketing messages a month, but text messaging in the UK is a paid plan rather than a free service as it is in the US and Canada. Those UK plan prices are not published, so no text cost is counted against Vagaro here and its total should be read as a floor. Its branded app, website builder and forms are extra too, and are also unpriced in pounds.',
   'Phorest publishes nothing, so its total is only the figure you type in. A per online booking fee exists in the UK and Ireland, but Phorest describes it as a fee the client pays to secure the slot which is then deducted from their treatment price, so it is not charged to the business here.',
   'Treatwell publishes its 35% new client commission but not its software fee, so that part is your figure too. Its 2.5% fee on online prepayments is not modelled.',
   'Marketplace commissions are one-off charges on a new client’s first booking. The calculator applies them to the number of new marketplace clients you expect each month, which is the steady monthly run rate.',

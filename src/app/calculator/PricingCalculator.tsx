@@ -136,12 +136,13 @@ export function PricingCalculator() {
 
           <fieldset className="mt-6 border-t border-slate-100 pt-5">
             <legend className="text-sm font-semibold text-slate-900">
-              Platforms that do not publish prices
+              Subscriptions we cannot look up
             </legend>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              Phorest and Treatwell quote privately, so we will not put words in their mouth. These
-              two boxes are yours: type in a quote or a figure off your own invoice and their rows
-              follow it exactly. Leave them at zero and they drop to commission only.
+              Phorest publishes no prices at all, so its row is only what you type here. Treatwell
+              publishes plans that start free and charges on commission instead, so it starts at
+              zero: put a figure in only if you are on a paid tier. Both rows follow your number
+              exactly.
             </p>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <MoneyInput

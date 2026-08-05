@@ -17,8 +17,9 @@
  *    Those fees go to a payment processor rather than the booking platform, and
  *    the published rates differ by platform, card type and country, so folding
  *    a single guessed rate into each total would add noise rather than signal.
- * 4. **Everything is treated as ex-VAT.** Booksy states its prices that way;
- *    the others do not say either way, so they are taken at face value.
+ * 4. **Everything is treated as ex-VAT.** Booksy and Treatwell both state that
+ *    their prices and fees have VAT added; the others do not say either way, so
+ *    they are taken at face value.
  */
 
 import {
@@ -57,14 +58,20 @@ export interface CalculatorInputs {
 
 export const DEFAULT_INPUTS: CalculatorInputs = {
   calendars: 1,
-  bookingsPerMonth: 260,
-  averageBookingValue: 45,
-  marketplaceNewClientsPerMonth: 12,
+  bookingsPerMonth: 160,
+  averageBookingValue: 35,
+  marketplaceNewClientsPerMonth: 6,
   smsPerMonth: 100,
   useMarketplace: true,
   includeAddOns: false,
   phorestMonthlyEstimate: 129,
-  treatwellMonthlyEstimate: 35,
+  /**
+   * Treatwell's own pricing page offers both its plans as "Start for free" with
+   * no monthly fee, so the default is zero. An earlier version defaulted this to
+   * £35 on the strength of a third-party blog, which simply overstated them.
+   * The input stays so anyone on a paid tier can enter what they actually pay.
+   */
+  treatwellMonthlyEstimate: 0,
 };
 
 export interface CostLine {
@@ -389,10 +396,15 @@ export function computeTreatwell(input: CalculatorInputs): ProviderResult {
     id: 'treatwell',
     name: 'Treatwell',
     planLabel: 'Connect, commission led',
-    estimated: true,
-    note: 'Treatwell publishes its commission but not its software fee, so that part is your own figure.',
+    // Both of Treatwell's published plans start free and the commission is
+    // published, so nothing is estimated until someone enters a paid tier fee.
+    estimated: subscription > 0,
+    note:
+      subscription > 0 ?
+        'Treatwell publishes its commission but not the price of any paid tier, so the software fee here is your own figure.'
+      : 'Treatwell’s published plans start free and charge on commission instead: 35% of a new marketplace client’s first booking, then 0% on every repeat.',
     lines: [
-      { label: 'Software fee', amount: round2(subscription), detail: 'Your own monthly fee' },
+      { label: 'Software fee', amount: round2(subscription), detail: 'The monthly fee you entered' },
       {
         label: 'New client commission',
         amount: round2(commission),
@@ -473,7 +485,7 @@ export const PRICING_SOURCES: { provider: string; what: string; url: string }[] 
   },
   {
     provider: 'Treatwell',
-    what: '35% commission on a new client’s first booking, 0% on repeat bookings',
+    what: 'Plans that "start for free", 35% commission on a new client’s first booking, and 0% on repeat bookings',
     url: 'https://www.treatwell.co.uk/partners/pricing/',
   },
   {
@@ -497,7 +509,7 @@ export const PRICING_ASSUMPTIONS: string[] = [
   'Vagaro charges a one-time 20% fee on a new Marketplace client’s first appointment, stated on its UK pricing page. Its UK product page separately says there are no booking fees. We follow the pricing page, and read the product page line as being about repeat bookings, which genuinely carry no fee. No minimum fee is published, so unlike Fresha and Booksy no floor is applied, which is the reading most favourable to Vagaro.',
   'Vagaro includes 1,000 email marketing messages a month, but text messaging in the UK is a paid plan rather than a free service as it is in the US and Canada. Those UK plan prices are not published, so no text cost is counted against Vagaro here and its total should be read as a floor. Its branded app, website builder and forms are extra too, and are also unpriced in pounds.',
   'Phorest publishes nothing, so its total is only the figure you type in. A per online booking fee exists in the UK and Ireland, but Phorest describes it as a fee the client pays to secure the slot which is then deducted from their treatment price, so it is not charged to the business here.',
-  'Treatwell publishes its 35% new client commission but not its software fee, so that part is your figure too. Its 2.5% fee on online prepayments is not modelled.',
+  'Treatwell’s own pricing page offers both its plans as "start for free" with no monthly fee, so the software fee defaults to zero and Treatwell is costed on commission alone. If you are on a paid tier, put the figure in and the row follows it. Its 2.5% fee on online prepayments is not modelled, in line with leaving card processing out for everyone.',
   'Marketplace commissions are one-off charges on a new client’s first booking. The calculator applies them to the number of new marketplace clients you expect each month, which is the steady monthly run rate.',
   'New marketplace clients are capped at your total monthly bookings, so the commission can never exceed what you could actually take.',
   'Card processing fees are excluded for every platform, ResNeo included.',

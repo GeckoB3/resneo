@@ -179,7 +179,7 @@ describe('estimate-backed providers', () => {
     expect(few.total).toBe(many.total);
   });
 
-  it('flags Treatwell as an estimate and charges 35% on new clients', () => {
+  it('costs Treatwell on commission alone, because its published plans start free', () => {
     const r = computeTreatwell(
       input({
         treatwellMonthlyEstimate: 0,
@@ -187,8 +187,21 @@ describe('estimate-backed providers', () => {
         marketplaceNewClientsPerMonth: 10,
       }),
     );
-    expect(r.estimated).toBe(true);
+    // Nothing is estimated: the free plan and the 35% are both published.
+    expect(r.estimated).toBe(false);
     expect(r.total).toBe(140);
+  });
+
+  it('marks Treatwell as an estimate only once a paid tier fee is entered', () => {
+    const r = computeTreatwell(
+      input({ treatwellMonthlyEstimate: 30, useMarketplace: false }),
+    );
+    expect(r.estimated).toBe(true);
+    expect(r.total).toBe(30);
+  });
+
+  it('defaults Treatwell to no software fee', () => {
+    expect(DEFAULT_INPUTS.treatwellMonthlyEstimate).toBe(0);
   });
 });
 

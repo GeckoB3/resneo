@@ -68,7 +68,7 @@ const CHARGING_MODELS: {
   },
   {
     name: 'Treatwell',
-    subscription: 'Not published',
+    subscription: 'Both published plans start free, with commission instead of a monthly fee',
     commission: '35% of a new marketplace client’s first booking, 0% on repeats',
     extras: 'A further 2.5% processing fee applies when a client prepays online',
   },

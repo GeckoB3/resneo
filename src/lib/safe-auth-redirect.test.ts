@@ -4,6 +4,7 @@ import {
   isSignupResumePath,
   resolveAuthNextPath,
   sanitizeAuthNextPath,
+  safeSameOriginPath,
   sanitizeMagicLinkNextPath,
 } from './safe-auth-redirect';
 
@@ -68,5 +69,72 @@ describe('buildMagicLinkConfirmNextQuery', () => {
     expect(buildMagicLinkConfirmNextQuery('/book/my-venue')).toBe(
       '/auth/callback?next=%2Fbook%2Fmy-venue',
     );
+  });
+});
+
+describe('open-redirect hardening', () => {
+  // Each of these passed the previous guard, which checked startsWith('/') and
+  // rejected only a literal '//'. The WHATWG URL parser then resolved them as
+  // protocol-relative, so NextResponse.redirect sent the user off-origin from a
+  // ResNeo URL. Built from char codes so shell or editor escaping cannot quietly
+  // turn the payload back into something harmless.
+  const BACKSLASH = '/' + String.fromCharCode(92) + 'evil.com';
+  const TAB_SPLIT = '/' + String.fromCharCode(9) + '/evil.com';
+  const LF_SPLIT = '/' + String.fromCharCode(10) + '/evil.com';
+  const CR_SPLIT = '/' + String.fromCharCode(13) + '/evil.com';
+
+  it.each([
+    ['backslash', () => BACKSLASH],
+    ['tab', () => TAB_SPLIT],
+    ['newline', () => LF_SPLIT],
+    ['carriage return', () => CR_SPLIT],
+    ['double slash', () => '//evil.com'],
+    ['absolute url', () => 'https://evil.com'],
+    ['javascript scheme', () => 'javascript:alert(1)'],
+  ])('sanitizeAuthNextPath rejects %s', (_label, make) => {
+    expect(sanitizeAuthNextPath(make())).toBe('/dashboard');
+  });
+
+  it('sanitizeMagicLinkNextPath rejects the backslash bypass', () => {
+    expect(sanitizeMagicLinkNextPath(BACKSLASH)).toBe('/auth/callback');
+  });
+
+  it('buildMagicLinkConfirmNextQuery rejects the backslash bypass', () => {
+    expect(buildMagicLinkConfirmNextQuery(BACKSLASH)).toBe('/auth/callback');
+  });
+
+  it('resolveAuthNextPath rejects a bypass smuggled through the inner next param', () => {
+    const nested = '/auth/callback?next=' + encodeURIComponent(BACKSLASH);
+    expect(resolveAuthNextPath(nested)).toBe('/dashboard');
+  });
+
+  it.each([
+    '/dashboard',
+    '/account/bookings',
+    '/book/my-venue-name',
+    '/signup/payment',
+    '/dashboard?tab=today#section',
+  ])('preserves the legitimate path %s unchanged', (path) => {
+    expect(sanitizeAuthNextPath(path)).toBe(path);
+  });
+
+  it('normalises path traversal rather than passing it through', () => {
+    expect(sanitizeAuthNextPath('/dashboard/../super')).toBe('/super');
+  });
+});
+
+describe('safeSameOriginPath', () => {
+  it('falls back for an off-origin candidate', () => {
+    expect(safeSameOriginPath('https://evil.com', '/dashboard')).toBe('/dashboard');
+    expect(safeSameOriginPath('/' + String.fromCharCode(92) + 'evil.com', '/dashboard')).toBe('/dashboard');
+  });
+
+  it('falls back for null or empty input', () => {
+    expect(safeSameOriginPath(null, '/login')).toBe('/login');
+    expect(safeSameOriginPath('', '/login')).toBe('/login');
+  });
+
+  it('returns a same-origin path untouched', () => {
+    expect(safeSameOriginPath('/account/bookings', '/dashboard')).toBe('/account/bookings');
   });
 });

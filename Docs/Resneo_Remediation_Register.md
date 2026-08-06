@@ -1,6 +1,6 @@
 # ResNeo Remediation Register
 
-**Status:** Open. 51 findings: 5 closed, 46 open, of which 3 are live today (see §3A). `G11c` in the closed table below came from the portal plan, not this register, so it is not in that count.
+**Status:** Open. 51 findings: 8 closed, 43 open, **none live today**. Everything remaining is gated behind enabling a feature (see §3A and the summary table in §3C). `G11c` in the closed list came from the portal plan, not this register, so it is not in that count.
 **Created:** 2026-08-06
 **Last reconciled against the code:** 2026-08-06
 **Supersedes as primary artifact:** `Resneo_Customer_Portal_World_Class_Plan.md` (see §9)
@@ -70,6 +70,9 @@ Since this register was written, three facts changed what is urgent. None of the
 | `P-04` PII redaction defeated in the same response | `48185536` |
 | `P-05` Audit log retained client PII after unlink | `47ad782a`, verified against staging |
 | `G11c` Magic-link endpoint unthrottled | `42eff027` |
+| `S-02` Open redirect off `/login` | `LIVE-FIX` |
+| `Q-17` Stale staff calendar cache | `LIVE-FIX` |
+| `C-07` Guest merge discarded the account link | `LIVE-FIX` |
 
 Also delivered, and **not** originally in this register: reminder and confirmation delivery reconciliation (`83b4997d`). `communication_logs` can only account for sends that were attempted; this detects bookings that generated nothing at all, which was the failure mode with no observer.
 
@@ -77,7 +80,7 @@ Also delivered, and **not** originally in this register: reminder and confirmati
 
 | Gate | Findings |
 | --- | --- |
-| **Live now** | `S-02` open redirect. `Q-17` stale staff calendar cache. `C-07` guest merge silently discarding `user_id`, which accumulates irreversible damage while latent. |
+| **Live now** | None. The three that were live (`S-02`, `Q-17`, `C-07`) are closed. |
 | **Before enabling deposits or payments** | `M-01` to `M-05`, plus the characterisation tests in §7. `M-02` is the one that will bite first: it needs no race and customers find it by accident. |
 | **Before promoting the customer portal** | `C-01` to `C-06`, `C-08` to `C-12`, and all of `Q-*`. |
 | **Before enabling memberships** | `Q-13`. Now more pressing: `a07a0813` made `deleteUser` genuinely run, so a deleted account with a live subscription keeps being billed. |
@@ -95,6 +98,42 @@ Recorded honestly, because a register that cries wolf gets ignored.
 **`C-01`, short-link collision breaking the bookings list.** Requires two concurrent creates for the same booking and purpose. The reminder cron loops sequentially, the two calls in its `Promise.all` use different purposes so they cannot collide with each other, and the select-then-renew path handles expired rows. Real, but rare at this volume, and caught per booking.
 
 **`Q-24`, appointment reschedule capacity race.** Needs two people choosing the identical slot inside the cache window. Uncommon at current volume. Note the related mechanism was also mis-described: `Q-17`'s cache is `private`, so two staff members never share it. The real scenario is one person returning to a view they loaded up to 165 seconds earlier.
+
+---
+
+## 3C. Summary table
+
+Every finding, its state, and what has to happen for an open one to matter. This is the table to scan; the detail is in §4 to §6.
+
+### Closed (8)
+
+| ID | Finding | Closed by | Verified |
+| --- | --- | --- | --- |
+| `P-01` | Deletion request was not cancellable; the confirmation email said otherwise | `a07a0813` | Staging DB |
+| `P-02` | GDPR erasure stalled silently and permanently on a dropped column | `a07a0813` | Tests |
+| `P-03` | Linked venue could enumerate the other venue's whole client book | `b2c70c3f` | Tests |
+| `P-04` | Booking response defeated its own PII redaction | `48185536` | Tests |
+| `P-05` | Audit log kept client PII permanently, readable after unlink | `47ad782a` | Staging DB |
+| `S-02` | Open redirect off `/login` via backslash and control characters | `LIVE-FIX` | Tests, executed against the URL parser |
+| `Q-17` | Stale staff calendar cache, up to 165s | `LIVE-FIX` | Build |
+| `C-07` | Guest merge silently discarded the customer's account link | `LIVE-FIX` | Diff proof, migration not yet run |
+
+Plus reminder delivery reconciliation (`83b4997d`), which was never a register finding but was the largest real gap.
+
+### Open (43)
+
+| Gate | Count | IDs | Why it cannot bite yet |
+| --- | --- | --- | --- |
+| **Enabling deposits or payments** | 5 | `M-01` to `M-05` | No venue takes payments. `M-02` will bite first: no race needed, customers find it by accident |
+| **Promoting the customer portal** | 33 | `C-01` to `C-06`, `C-08` to `C-12`, `Q-01` to `Q-12`, `Q-14` to `Q-16`, `Q-18` to `Q-23`, `Q-25` | Almost nobody uses the portal |
+| **Enabling memberships** | 1 | `Q-13` | No memberships exist. Note `a07a0813` made `deleteUser` genuinely run, so a deleted account with a live subscription would now keep billing |
+| **A decision, not a fix** | 1 | `S-03` | Live, but the fix is a choice between three options with different costs. See the entry |
+| **Reaching roughly 50x current volume** | 2 | `S-01`, `Q-24` | Arithmetic in §3B |
+| **Staff RLS hardening** | 1 | `S-04` | Prerequisite for any customer policy on `bookings`, which is portal work |
+
+### The one open finding that is live
+
+`S-03`. Confirm email is off in production, so claiming guest rows by unverified email is exploitable today. It is not in the "live" fix list above because the fix recorded originally was wrong and the replacement is a decision rather than a patch. The likelier harm is mundane: a mistyped email assigns a booking to whoever owns the typo.
 
 ---
 
@@ -202,7 +241,7 @@ The amplifier is the portal: `hydrateAccountBookingRow` mints a manage link for 
 
 *Fix:* at least 12 characters with rejection sampling instead of modulo; rate limit `/b/[code]` per IP with backoff on miss; stop minting links during a read (see C-02).
 
-**S-02. Open redirect off `/login`.** High. **VERIFIED** (executed)
+**S-02. Open redirect off `/login`.** High. **CLOSED**
 
 `sanitizeAuthNextPath` (`src/lib/safe-auth-redirect.ts:62-67`) rejects `//` but not `/\` or control characters. Verified against the WHATWG URL parser:
 
@@ -215,7 +254,9 @@ The amplifier is the portal: `hydrateAccountBookingRow` mints a manage link for 
 
 `src/middleware.ts:275` passes the result to `NextResponse.redirect`, so an authenticated victim is sent off-origin from a ResNeo URL. Two weaker variants exist at `src/app/login/page.tsx:19-21` (no sanitiser at all, currently shadowed by middleware) and `src/app/login/login-form.tsx:63-76`.
 
-*Fix:* resolve against a placeholder origin and reject anything that changes origin, then return `pathname + search`. Apply at all three call sites.
+*Closed by:* one shared `toSameOriginPath` primitive that strips C0 controls by code point, resolves against a reserved `.invalid` probe origin, and accepts only what stayed on it. All three weak guards in the module now use it, and the two unguarded call sites (`login/page.tsx`, `login-form.tsx`) use an exported `safeSameOriginPath`. Path traversal is normalised away as a side effect.
+
+Nineteen tests added, with attack strings built from character codes so that shell or editor escaping cannot quietly neuter the payload. That mattered: the original report of this finding did not reproduce until it was retested without shell escaping (see §8).
 
 **S-03. Guest rows are claimed by unverified email on every login.** High. **VERIFIED**
 
@@ -283,11 +324,15 @@ None of the five section `load()` functions has a `try`/`catch`, and each parses
 
 `loadAccountBookings(supabase, admin, 100)` with no pagination, no "load more" and no message. A class member attending three times a week passes 100 within a year and loses their past with no indication.
 
-**C-07. Guest merge orphans the customer's account.** High. **VERIFIED**
+**C-07. Guest merge orphans the customer's account.** High. **CLOSED**
 
 `merge_guests_into` contains zero references to `user_id` and deletes the source rows. A venue merging a linked guest into an unlinked one silently severs the account link; every booking at that venue disappears from the portal with no error and no recovery path. It also omits `communication_logs`, `waitlist` and `booking_card_holds` from its re-point list.
 
-*Fix:* carry a non-null `user_id` to the target before deleting, and raise if two different non-null user ids would be collapsed, because that is two real accounts.
+*Closed by:* migration `20270103122000`. The account link is carried to the target before the sources are deleted, and a merge spanning two different non-null `user_id`s raises rather than silently picking one, because that is two real accounts and a human has to decide.
+
+The function was regenerated by splicing into the previous definition programmatically rather than retyping it: a diff against `20261231120000` shows 29 lines added and **zero removed**, so the 122 lines of existing merge logic are byte-identical.
+
+*Not fixed, and unfixable:* links discarded by merges already performed are gone. Nothing records what they were.
 
 **C-08. Deep-link checkout can charge the wrong venue and plan.** High. **VERIFIED** (mechanism) / **REPORTED** (live impact)
 
@@ -337,7 +382,7 @@ Real, but none blocks the others.
 | Q-14 | No retention policy or purge exists anywhere, while `/privacy` tells data subjects retention follows venue settings that do not exist | Medium | REPORTED |
 | Q-15 | Raw Stripe and database enum values rendered to consumers (`past_due`, `trialing`), plus "the nightly cron will start materialising bookings" and "Connect customer" | Medium | VERIFIED |
 | Q-16 | The Locale setting is written to the database and never read; the section promises it affects date display | Medium | VERIFIED |
-| Q-17 | `venue/appointment-calendar` still returns `max-age=45` on an authenticated response while the rest of the catalog migrated to `no-store`. The cache is `private`, so two staff never share it; the real case is one person returning to a view up to 165s stale. Endpoint is user-driven, not polled, so `no-store` will not materially raise load | Medium | VERIFIED |
+| Q-17 | ~~`venue/appointment-calendar` returned `max-age=45` on an authenticated response while the rest of the catalog used `no-store`~~ **CLOSED**: now uses the shared `VENUE_CATALOG_CACHE_CONTROL` constant. The endpoint is user-driven rather than polled and the cache was `private`, so it never reduced load across users; removing it does not materially change traffic | Medium | CLOSED |
 | Q-18 | Zero explicit cache headers across 26 authenticated account routes, against a codebase convention with a named `NO_STORE_HEADERS` constant used in nine other route groups | Medium | VERIFIED |
 | Q-19 | Loyalty is a shipped staff feature with no customer surface: staff award points via `/api/venue/guests/[guestId]/loyalty`, customers cannot see a balance | Medium | VERIFIED |
 | Q-20 | No concept of booking for a dependant. `person_label` exists and is never rendered. Dominant pattern in clinics and class studios | Medium | VERIFIED |

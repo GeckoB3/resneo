@@ -400,8 +400,12 @@ export async function GET(request: NextRequest) {
           source: (b.source as string | null) ?? null,
           depositStatus: (b.deposit_status as string) ?? 'none',
           depositAmountPence: (b.deposit_amount_pence as number | null) ?? null,
-          specialRequests: (b.special_requests as string | null) ?? null,
-          internalNotes: (b.internal_notes as string | null) ?? null,
+          // Client-authored free text routinely contains the client's name, and
+          // dietary notes carry health and religious information. Gate on the PII
+          // grant, not on fullDetails alone: "you can see what is booked, not who"
+          // is a supported configuration and this text defeats it.
+          specialRequests: canSeePii ? (b.special_requests as string | null) ?? null : null,
+          internalNotes: canSeePii ? (b.internal_notes as string | null) ?? null : null,
           clientArrivedAt: (b.client_arrived_at as string | null) ?? null,
           guestAttendanceConfirmedAt:
             (b.guest_attendance_confirmed_at as string | null) ?? null,

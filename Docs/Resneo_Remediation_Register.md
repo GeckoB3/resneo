@@ -56,7 +56,7 @@ Since this register was written, three facts changed what is urgent. None of the
 
 **Almost nobody uses the customer portal.** Most of `C-*` and all of `Q-*` describe a surface with no traffic.
 
-**Confirm email is off in the production Supabase project.** This was unknown when the register was written and made `S-03` live rather than latent. Now closed by requiring `email_confirmed_at` in the claim. The setting itself is unchanged, so a password signup still returns a session immediately; it just cannot inherit anyone's records.
+**Confirm email is off in the production Supabase project**, and stays off by decision (recorded under `S-03`). This was unknown when the register was written and made `S-03` live rather than latent. Closed by requiring `email_confirmed_at` in the claim. A password signup still returns a session immediately; it just cannot inherit anyone's records.
 
 **Linked accounts go live imminently.** This is why `P-03` through `P-05` were done first.
 
@@ -282,6 +282,46 @@ The real cost is narrow: the 298 users without the flag will not have a **new** 
 
 *Still true, and not fixed by this:* `guests.user_id` is set by string equality on an email address, so a mistyped address at the counter still assigns a booking to whoever owns the typo. That is a data-entry problem rather than an attack, and it becomes visible when portal usage grows.
 
+---
+
+#### Decision: "Confirm email" stays OFF, and no auth-user backfill. Taken 2026-08-06.
+
+Gating the claim closed the retrospective route: nobody can now sign up on one of the 677 addresses and inherit those records. It does **not** close a second route, which is worth stating plainly rather than leaving implied.
+
+**The route that remains open.** `claim_user_account` is only the secondary way `guests.user_id` gets set. The primary way is `findOrCreateGuest`, which assigns it directly at `src/lib/guests.ts:177` when a customer books, and that path has no confirmation check. So an attacker who registers a future customer's address before that customer next books would be handed the link when the booking happens.
+
+Turning the Supabase "Confirm email" setting on is the complete fix, because it stops anyone obtaining a usable account on an address they do not control. The signup funnel already supports it: `src/app/signup/page.tsx:271` handles the no-session response and renders a "Check your email" screen that resumes to plan or payment.
+
+**It was still judged not worth it, on these grounds:**
+
+1. **Already-linked customers cannot be re-pointed.** `src/lib/guests.ts:178` keeps the existing link and warns if a different auth user turns up. Anyone who has ever booked online is immune regardless of what is registered against their address.
+2. **The 677 self-heal.** Line 177 links an existing unlinked row on that customer's next online booking, so they reach the portal without any backfill.
+3. **What is left is narrow.** An attacker must know a specific person's address, predict they will book with a ResNeo venue, register it first, and get there before the customer next books. Targeted and time-limited, and the payoff is appointment history rather than payment data.
+4. **The cost is a step in a paid conversion funnel**, against a threat that is not opportunistic.
+
+**Backfilling auth users for the 677 was also considered and skipped.** It would make those addresses unregisterable, but points 1 and 2 mean they are largely self-closing, and it trades a one-off script plus 677 dormant auth rows for a narrow window.
+
+**The control that replaces both.** `ensureAuthUserForEmail` creates users *without* a password; signup creates them *with* one. So a password-bearing, never-confirmed account matching a customer's email is either an abandoned venue signup or someone registering a customer's address:
+
+```sql
+SELECT u.email, u.created_at
+FROM auth.users u
+WHERE u.email_confirmed_at IS NULL
+  AND u.encrypted_password IS NOT NULL AND u.encrypted_password <> ''
+  AND EXISTS (SELECT 1 FROM guests g WHERE lower(trim(g.email)) = lower(trim(u.email)));
+```
+
+Expected to be empty, or every row explicable. Run periodically; fold into the `/super` comms health page if it ever returns something.
+
+**Revisit this decision if any of these change:**
+
+- ResNeo moves meaningfully into clinics at scale, where the data is health-adjacent and a targeted attacker is more plausible
+- Consumer-facing signup opens, widening who can register an arbitrary address
+- The detection query above returns anything unexplained
+- Portal usage grows enough that a mis-assigned booking from a mistyped address becomes visible to customers
+
+**Nothing about migration `20270103123000` needs undoing for this decision.** It gates only the secondary path, so with the setting off the normal flow is unaffected: a customer books, an auth user is created, and the guest row is linked at insert.
+
 **S-04. Staff RLS policies ignore revocation and apply to every command.** High. **VERIFIED**
 
 `staff_manage_bookings` and `staff_manage_guests` (`supabase/migrations/20260301000007_rls_policies.sql:52-66`) are `FOR ALL`, carry no `TO` clause, and have no `revoked_at IS NULL` filter. Never redefined since. Because permissive policies OR together, any current or former staff member reads and writes every booking and guest row at that venue through any authenticated session.
@@ -452,3 +492,4 @@ When portal work resumes, the recommended shape is a strangler rather than a reb
 | 2026-08-06 | Accuracy pass. Rewrote every closed entry to record what actually shipped rather than the fix originally proposed; four of the five differed, `P-03` and `P-05` materially. Added `CLOSED` to the status key. Corrected the `Q-17` mechanism (the cache is `private`, so staff never share it) and flagged `Q-13` as now reachable. Extended §8 with three further claims that did not survive checking, including this document's own assertion that delivery monitoring did not exist. Fixed the finding count in the header. |
 | 2026-08-06 | Fixed the three live findings (`S-02`, `Q-17`, `C-07`) and added the §3C summary table. |
 | 2026-08-06 | Closed `S-03` after measuring production: all 677 unlinked guest rows with an email had no auth user, so every one was claimable. **Recorded that this entry was wrong twice in opposite directions**: the original fix was mechanically right, the correction to it was not, because the claim only fills NULLs and cannot unlink anyone. No finding is now live. |
+| 2026-08-06 | Recorded the `S-03` decision: Confirm email stays off and no auth-user backfill, with the residual route, the four grounds, the detection query that replaces both, and the conditions that should trigger a revisit. |

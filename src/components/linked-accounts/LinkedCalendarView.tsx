@@ -763,11 +763,20 @@ export function CreateLinkedBookingModal({
   const [guestResults, setGuestResults] = useState<GuestOption[]>([]);
   const [guest, setGuest] = useState<GuestOption | null>(null);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (guest) return;
+    // Matches MIN_QUERY_LENGTH on the route: below this it returns nothing, so
+    // there is no point asking.
+    if (guestQuery.trim().length < 2) {
+      setGuestResults([]);
+      setSearchError(null);
+      setSearching(false);
+      return;
+    }
     let cancelled = false;
     setSearching(true);
     const handle = setTimeout(async () => {
@@ -777,10 +786,22 @@ export function CreateLinkedBookingModal({
             guestQuery,
           )}`,
         );
-        const json = await res.json();
-        if (!cancelled) setGuestResults(res.ok ? json.guests ?? [] : []);
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) {
+          // Previously this rendered as "no clients found", which hid a broken
+          // query behind a plausible empty state for anyone searching.
+          setGuestResults([]);
+          setSearchError(json?.error ?? 'Could not search clients. Try again.');
+          return;
+        }
+        setGuestResults(json.guests ?? []);
+        setSearchError(null);
       } catch {
-        if (!cancelled) setGuestResults([]);
+        if (!cancelled) {
+          setGuestResults([]);
+          setSearchError('Could not search clients. Check your connection.');
+        }
       } finally {
         if (!cancelled) setSearching(false);
       }
@@ -863,9 +884,17 @@ export function CreateLinkedBookingModal({
               />
               <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200">
                 {searching ? (
-                  <p className="px-3 py-2 text-xs text-slate-400">Searching…</p>
+                  <p className="px-3 py-2 text-xs text-slate-500">Searching…</p>
+                ) : searchError ? (
+                  <p className="px-3 py-2 text-xs text-red-700" role="alert">
+                    {searchError}
+                  </p>
+                ) : guestQuery.trim().length < 2 ? (
+                  <p className="px-3 py-2 text-xs text-slate-500">
+                    Type at least 2 characters to search.
+                  </p>
                 ) : guestResults.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-slate-400">No clients found.</p>
+                  <p className="px-3 py-2 text-xs text-slate-500">No clients found.</p>
                 ) : (
                   guestResults.map((g) => (
                     <button

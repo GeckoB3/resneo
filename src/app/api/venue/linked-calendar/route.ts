@@ -300,15 +300,14 @@ export async function GET(request: NextRequest) {
           if (guestIds.length > 0) {
             const { data: guests } = await admin
               .from('guests')
-              .select('id, name, first_name, last_name, email, phone')
+              .select('id, first_name, last_name, email, phone')
               .in('id', guestIds);
             for (const g of guests ?? []) {
               const composed = [g.first_name, g.last_name]
                 .filter((x): x is string => Boolean(x))
                 .join(' ')
                 .trim();
-              guestNames[g.id as string] =
-                composed || (g.name as string) || 'Client';
+              guestNames[g.id as string] = composed || 'Client';
               guestEmails[g.id as string] = (g.email as string | null) ?? null;
               guestPhones[g.id as string] = (g.phone as string | null) ?? null;
             }

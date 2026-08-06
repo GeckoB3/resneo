@@ -7,7 +7,14 @@ export async function GET(request: NextRequest) {
   return POST(request);
 }
 
-/** Hard-delete auth users whose 30-day account deletion grace period has elapsed. */
+/**
+ * Hard-delete auth users whose 30-day account deletion grace period has elapsed.
+ *
+ * This is where anonymisation happens. `request_account_deletion` used to do it at
+ * request time, which made the advertised "cancel deletion" impossible; since
+ * migration 20270103121000 the request marks intent only and this cron is the sole
+ * writer that destroys identity.
+ */
 export const POST = withCronRunLogging('account-hard-delete', handlePost);
 
 async function handlePost(request: NextRequest) {
@@ -28,10 +35,35 @@ async function handlePost(request: NextRequest) {
   }
 
   let deleted = 0;
+  let skippedCancelled = 0;
   const errors: Array<{ user_id: string; error: string }> = [];
 
   for (const profile of profiles ?? []) {
     const userId = profile.id as string;
+
+    // Re-read immediately before destroying anything. A batch of 100 takes a
+    // while to work through, and the customer can cancel at any point in that
+    // window: `cancel_account_deletion` clears `deleted_at`. Anonymisation is
+    // irreversible, so a stale read is not an acceptable basis for it.
+    const { data: current, error: recheckErr } = await admin
+      .from('user_profiles')
+      .select('deleted_at')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (recheckErr) {
+      console.error('[account-hard-delete] recheck:', userId, recheckErr.message);
+      errors.push({ user_id: userId, error: recheckErr.message });
+      continue;
+    }
+
+    const stillDue =
+      current?.deleted_at != null && new Date(current.deleted_at as string) <= new Date();
+    if (!stillDue) {
+      skippedCancelled += 1;
+      continue;
+    }
+
     const { data: guestRows, error: guestsErr } = await admin
       .from('guests')
       .select('id')
@@ -49,7 +81,13 @@ async function handlePost(request: NextRequest) {
       const { error: guestUpdErr } = await admin
         .from('guests')
         .update({
-          name: 'Deleted User',
+          // `guests.name` was dropped in 20260810120000; writing it made every
+          // run fail with PGRST204 and silently skip deleteUser, so erasure
+          // never completed. This was masked only because the old
+          // request_account_deletion had already nulled user_id, leaving this
+          // loop with no rows to process.
+          first_name: 'Deleted',
+          last_name: 'User',
           email: `deleted-${userId}-${guestId}@reserveni.deleted`,
           phone: null,
           user_id: null,
@@ -79,5 +117,5 @@ async function handlePost(request: NextRequest) {
     deleted += 1;
   }
 
-  return NextResponse.json({ deleted, errors });
+  return NextResponse.json({ deleted, skipped_cancelled: skippedCancelled, errors });
 }

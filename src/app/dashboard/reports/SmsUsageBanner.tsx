@@ -63,7 +63,7 @@ export function SmsUsageBanner() {
               Overage
             </Pill>
             <span>
-              {smsUsage.overage_count} SMS segments beyond your included allowance — about £
+              {smsUsage.overage_count} SMS segments beyond your included allowance, about £
               {(smsUsage.overage_amount_pence / 100).toFixed(2)} at £{smsUsage.billable_unit_gbp.toFixed(2)} each.
               Overage is metered against the current Stripe subscription period.
             </span>

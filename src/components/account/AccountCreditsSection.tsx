@@ -366,7 +366,7 @@ function BuyPackPicker({
         >
           {productChoices.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} — {p.credits_count} credits (£{(p.price_pence / 100).toFixed(2)})
+              {p.name}: {p.credits_count} credits (£{(p.price_pence / 100).toFixed(2)})
             </option>
           ))}
         </select>

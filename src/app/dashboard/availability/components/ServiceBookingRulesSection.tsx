@@ -185,7 +185,7 @@ export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDep
           </div>
           <div className="col-span-2">
             <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
-              Cancellation notice (hours) — deposit refund{' '}
+              Cancellation notice (hours): deposit refund{' '}
               <HelpTooltip content="Guests who cancel at least this many hours before the reservation start can receive an automatic deposit refund (when deposits apply)." />
             </label>
             <NumericInput

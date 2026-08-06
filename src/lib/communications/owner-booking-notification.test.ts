@@ -90,7 +90,7 @@ describe('renderOwnerBookingNotificationEmail: booking location', () => {
       }),
       venue,
     );
-    expect(text).toContain("Location: Client's address — 12 High Street, Belfast, BT1 1AA");
+    expect(text).toContain("Location: Client's address (12 High Street, Belfast, BT1 1AA)");
     expect(html).toContain('12 High Street, Belfast, BT1 1AA');
     // Staff email must not borrow the guest-facing "Your address" wording.
     expect(html).not.toContain('Your address');

@@ -370,7 +370,7 @@ export function MergeContactsModal({
                       >
                         <span className="font-semibold text-slate-900">{formatGuestDisplayName(g.first_name, g.last_name)}</span>
                         <span className="text-xs text-slate-500">
-                          {[displayStr(g.email), displayStr(g.phone)].filter((x) => x !== '—').join(' · ') || 'No email or phone'}
+                          {[displayStr(g.email), displayStr(g.phone)].filter((x) => x !== ', ').join(' · ') || 'No email or phone'}
                         </span>
                       </button>
                     </li>
@@ -397,7 +397,7 @@ export function MergeContactsModal({
               <li>The merge-from guest row is permanently deleted.</li>
             </ul>
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-950">
-              Booking guest snapshots (names on past confirmations) are not rewritten — only the linked guest record changes.
+              Booking guest snapshots (names on past confirmations) are not rewritten, only the linked guest record changes.
             </p>
           </div>
         )}

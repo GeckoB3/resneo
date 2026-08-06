@@ -455,7 +455,7 @@ export function AppointmentDetailSheet({
         return;
       }
       if (data.errors && data.errors.length > 0) {
-        setActionError(`Partially sent — ${data.errors.join('; ')}`);
+        setActionError(`Partially sent: ${data.errors.join('; ')}`);
       }
       setGuestMessageDraft('');
       await loadDetail();

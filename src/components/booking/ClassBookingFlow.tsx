@@ -747,8 +747,8 @@ export function ClassBookingFlow({
                   <h3 className="mt-1 text-base font-semibold text-slate-900">Come often? Save with a pack or plan.</h3>
                   <p className="mt-1 text-sm text-slate-600">
                     {signedIn
-                      ? 'Buy a pack, enroll in a course, or start a membership — then come back to book.'
-                      : 'Sign in to buy packs, enroll in courses, or start a membership — then book classes from your account.'}
+                      ? 'Buy a pack, enroll in a course, or start a membership, then come back to book.'
+                      : 'Sign in to buy packs, enroll in courses, or start a membership, then book classes from your account.'}
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 sm:items-end">
@@ -1005,7 +1005,7 @@ export function ClassBookingFlow({
             {payWithClassCredits && (selectedClass.price_pence ?? 0) > 0 ? (
               <ul className="mt-2 space-y-1 text-sm text-slate-800">
                 <li>
-                  Pay with class credits — {spots} credit{spots !== 1 ? 's' : ''} (same email as your account).
+                  Pay with class credits: {spots} credit{spots !== 1 ? 's' : ''} (same email as your account).
                 </li>
               </ul>
             ) : (

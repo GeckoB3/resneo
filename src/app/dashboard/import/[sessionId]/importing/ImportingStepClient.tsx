@@ -179,7 +179,7 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
           } catch (e) {
             if (e instanceof DOMException && e.name === 'AbortError') {
               throw new Error(
-                'The import request timed out in your browser. The server may still be working — wait a minute and refresh this page to see updated progress.',
+                'The import request timed out in your browser. The server may still be working, wait a minute and refresh this page to see updated progress.',
               );
             }
             throw e instanceof Error ? e : new Error('Import request failed');
@@ -256,9 +256,9 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
     if (executingBatch) return 'Processing a batch on the server…';
     if (st === 'importing') return 'Import in progress…';
     if (st === 'ready') return 'Starting import…';
-    if (st === 'validating') return 'Validation still running — finish the Validate step, or wait and refresh.';
-    if (st === 'mapping') return 'Mappings not finished — complete the Map step first.';
-    if (st === 'uploading') return 'Upload not complete — finish the Upload step first.';
+    if (st === 'validating') return 'Validation still running. Finish the Validate step, or wait and refresh.';
+    if (st === 'mapping') return 'Mappings not finished. Complete the Map step first.';
+    if (st === 'uploading') return 'Upload not complete. Finish the Upload step first.';
     if (st === 'undone') return 'This import was undone.';
     /** First paint before the first `/progress` response (or stalled load). */
     if (progress == null) return 'Loading import status…';
@@ -273,7 +273,7 @@ export function ImportingStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Importing</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Large imports run in batches. You can leave this page — progress is saved. Open this step again anytime to
+          Large imports run in batches. You can leave this page. Progress is saved. Open this step again anytime to
           resume.
         </p>
       </div>

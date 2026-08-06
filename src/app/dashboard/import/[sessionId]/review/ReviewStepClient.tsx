@@ -264,7 +264,7 @@ export function ReviewStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Review</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Confirm how each CSV column is used — including custom profile fields and split columns — before we validate
+          Confirm how each CSV column is used, including custom profile fields and split columns, before we validate
           rows.
         </p>
       </div>
@@ -561,7 +561,7 @@ function ValueMapPanel({
         How your “{sourceColumn}” values map to {label.toLowerCase()}
       </p>
       <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-        We matched these values automatically — change any that look wrong. Values not listed here are matched
+        We matched these values automatically. Change any that look wrong. Values not listed here are matched
         automatically.
       </p>
 

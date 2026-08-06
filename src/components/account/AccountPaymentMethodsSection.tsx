@@ -137,7 +137,7 @@ export function AccountPaymentMethodsSection() {
           ))}
         </select>
         {venues.length === 0 ? (
-          <p className="mt-2 text-xs text-slate-500">No linked venues yet — book or buy credits at a venue first.</p>
+          <p className="mt-2 text-xs text-slate-500">No linked venues yet. Book or buy credits at a venue first.</p>
         ) : null}
       </div>
 

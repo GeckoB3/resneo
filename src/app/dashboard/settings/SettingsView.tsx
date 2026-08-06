@@ -886,7 +886,7 @@ function PlanSection({
           <p className="mt-2 text-xs text-slate-600">
             {smsUsagePercent ?? 0}% of included allowance used.
             {isFreeAccess
-              ? ' Free access: no paid overage — sends stop at the cap.'
+              ? ' Free access: no paid overage, sends stop at the cap.'
               : ` Overage is £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS segment.`}
           </p>
           {smsCountUsesStripePeriod ? (
@@ -1570,7 +1570,7 @@ function SettingsViewInner({
             brandHeadings
             eyebrow="Guest-facing page"
             title="URL & branding"
-            description="Your public booking page address, logo, and cover photo — what guests see before they book."
+            description="Your public booking page address, logo, and cover photo: what guests see before they book."
           >
             <BookingPageSection
               venue={venue}

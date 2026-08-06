@@ -213,7 +213,7 @@ export function ResourceCalendarMonth({
 
       <div
         role="grid"
-        aria-label={`${title} — choose a date`}
+        aria-label={`${title}: choose a date`}
         aria-rowcount={Math.ceil(cells.length / 7) + 1}
         aria-colcount={7}
       >
@@ -326,7 +326,7 @@ export function ResourceCalendarMonth({
           Has availability
         </span>
         {!loading && availableDates.size === 0 ? (
-          <span className="text-slate-400">No bookable days this month — try another month.</span>
+          <span className="text-slate-400">No bookable days this month. Try another month.</span>
         ) : null}
       </p>
     </div>

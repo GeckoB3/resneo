@@ -157,7 +157,7 @@ export function VenueCollectivesPanel({
         ) : null}
         {/* Why the "Create venue collective" button is disabled. The button itself
             only carries a hover tooltip, and the explanatory empty-state below is
-            hidden whenever any row is listed — including a *dissolved* one — so a
+            hidden whenever any row is listed, including a *dissolved* one, so a
             venue that dissolved a collective and relinked would otherwise see a
             greyed-out button with no on-screen reason. Shown whenever the button is
             visible (no live collective) but disabled (no full create/edit/cancel link). */}

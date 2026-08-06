@@ -62,7 +62,7 @@ export function renderReminder56h(
     `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +
     `<p style="margin:0 0 12px 0">You have an upcoming booking. Please confirm you're still coming, ` +
     `or use <strong>Manage or cancel</strong> if you need to change or cancel your booking. ` +
-    `<strong>If you do not reply, your booking stays in place</strong> — we will not cancel it automatically.</p>`;
+    `<strong>If you do not reply, your booking stays in place</strong>. We will not cancel it automatically.</p>`;
 
   const confirmCancelLink = booking.confirm_cancel_link ?? "";
   const manageLink = booking.manage_booking_link ?? "";

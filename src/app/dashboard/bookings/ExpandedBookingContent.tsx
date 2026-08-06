@@ -1232,7 +1232,7 @@ export function ExpandedBookingContent({
         >
           {tableNames.length > 0 ? tableNames.join(' + ') : tableManagementEnabled ? 'Unassigned' : 'N/A'}
           {activeDetail?.combination_staff_notes ? (
-            <span className="font-medium text-emerald-800"> — {activeDetail.combination_staff_notes}</span>
+            <span className="font-medium text-emerald-800">: {activeDetail.combination_staff_notes}</span>
           ) : null}
         </span>
       </span>
@@ -1337,12 +1337,12 @@ export function ExpandedBookingContent({
     >
       {linkedViewOnly ? (
         <p className="rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-2 text-xs text-sky-900">
-          Linked booking — view only. You can see full details here but cannot edit, reschedule or
+          Linked booking, view only. You can see full details here but cannot edit, reschedule or
           cancel this booking.
         </p>
       ) : linkedLimitedEdit ? (
         <p className="rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2 text-xs text-amber-950">
-          Linked booking — you can edit existing bookings but cannot create new ones or cancel.
+          Linked booking. You can edit existing bookings but cannot create new ones or cancel.
         </p>
       ) : null}
       <SectionCard

@@ -1532,7 +1532,7 @@ export function UnifiedBookingForm({
           </div>
         ) : nearbySlots.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-3 py-4 text-center text-xs text-slate-500 sm:rounded-xl sm:px-4 sm:py-5 sm:text-sm">
-            No slots near {gridCenter} &mdash; try a different time
+            No slots near {gridCenter}. Try a different time
           </div>
         ) : (
           <>

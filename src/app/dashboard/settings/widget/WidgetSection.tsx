@@ -222,7 +222,7 @@ export function WidgetSection({
               <option value="venue">My venue only ({venueName})</option>
               {collectives.map((c) => (
                 <option key={c.slug} value={c.slug}>
-                  Venue collective — {c.name}
+                  Venue collective: {c.name}
                 </option>
               ))}
             </select>
@@ -279,7 +279,7 @@ export function WidgetSection({
             ) : null}
           </div>
           <p className="mt-1 text-xs text-neutral-500">
-            Buttons and highlights in the embedded widget. Pick a colour or enter a 6-digit hex value — saved
+            Buttons and highlights in the embedded widget. Pick a colour or enter a 6-digit hex value, saved
             automatically.
           </p>
           {accentSaveState === 'saving' ? (
@@ -299,7 +299,7 @@ export function WidgetSection({
             onClick={() => void copyEmbed()}
             className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
           >
-            {copyState === 'copied' ? 'Copied!' : copyState === 'error' ? 'Copy failed — try again' : 'Copy code'}
+            {copyState === 'copied' ? 'Copied!' : copyState === 'error' ? 'Copy failed. Try again' : 'Copy code'}
           </button>
           <p
             id="embed-copy-feedback"

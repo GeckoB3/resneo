@@ -2161,7 +2161,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
             <div className="px-3 py-3">
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Tips</p>
               <ul className="space-y-0.5 text-[10px] text-slate-400 leading-relaxed">
-                <li>• Tap a shape in Elements to add a table in the centre — Custom opens draw mode</li>
+                <li>• Tap a shape in Elements to add a table in the centre. Custom opens draw mode</li>
                 <li>• Shift+click or shift-drag a box to multi-select</li>
                 <li>• Arrow keys nudge · Shift+Arrow for 10×</li>
                 <li>• Ctrl+Z undo · Ctrl+Shift+Z redo · Ctrl+D duplicate</li>
@@ -2408,7 +2408,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                         handleLayoutResize(v, Math.round(layoutHeight ?? canvasDims.height));
                         handleLayoutResizeEnd();
                       }}
-                      title="Canvas width in pixels — press Enter to apply"
+                      title="Canvas width in pixels. Press Enter to apply"
                     />
                     <span className="text-[10px] text-slate-400">×</span>
                     <LayoutSizeInput
@@ -2419,7 +2419,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                         handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), v);
                         handleLayoutResizeEnd();
                       }}
-                      title="Canvas height in pixels — press Enter to apply"
+                      title="Canvas height in pixels. Press Enter to apply"
                     />
                   </div>
                 </div>
@@ -2528,7 +2528,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                 handleLayoutResize(v, Math.round(layoutHeight ?? canvasDims.height));
                 handleLayoutResizeEnd();
               }}
-              title="Canvas width in pixels — press Enter to apply"
+              title="Canvas width in pixels. Press Enter to apply"
             />
             <span className="text-[10px] text-slate-400">×</span>
             <LayoutSizeInput
@@ -2539,7 +2539,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                 handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), v);
                 handleLayoutResizeEnd();
               }}
-              title="Canvas height in pixels — press Enter to apply"
+              title="Canvas height in pixels. Press Enter to apply"
             />
           </div>
 
@@ -2654,7 +2654,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         maxWidthPx={288}
         id="floor-plan-elements-popover"
         onDismiss={() => setMobilePanel(null)}
-        aria-label="Elements — tap a shape to add a table in the centre of the layout"
+        aria-label="Elements. Tap a shape to add a table in the centre of the layout"
         className="animate-fade-in z-[70] max-h-[min(72vh,520px)] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-100"
       >
         <ElementsPalette />
@@ -2796,7 +2796,7 @@ function SaveStatusPill({
         type="button"
         onClick={onRetry}
         className="rounded border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100"
-        title="Changes failed to save — click to retry"
+        title="Changes failed to save. Click to retry"
       >
         Retry save
       </button>

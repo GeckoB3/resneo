@@ -197,7 +197,7 @@ function bodyMembershipEnded(v: { venueName: string; planName: string }) {
   const subject = `Your ${v.planName} membership has ended`;
   const lines = [
     `Your ${v.planName} membership at ${v.venueName} has ended.`,
-    'Thanks for being a member — you can subscribe again any time from your account.',
+    'Thanks for being a member. You can subscribe again any time from your account.',
   ];
   return { subject, text: lines.join('\n\n'), html: htmlParas(...lines) };
 }

@@ -204,7 +204,7 @@ export function ImportHub() {
                     onClick={() => {
                       if (
                         !window.confirm(
-                          'Remove this import from the list? Uploaded CSV files for this session will be deleted. This does not remove guests or bookings already written to your venue — use Undo on a completed import if you need to revert data.',
+                          'Remove this import from the list? Uploaded CSV files for this session will be deleted. This does not remove guests or bookings already written to your venue. Use Undo on a completed import if you need to revert data.',
                         )
                       ) {
                         return;

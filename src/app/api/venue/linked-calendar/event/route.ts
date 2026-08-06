@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
     if (access.grant.calendar === 'time_only') {
       return NextResponse.json(
-        { error: 'This link only shows busy time — event details are not available.' },
+        { error: 'This link only shows busy time. Event details are not available.' },
         { status: 403 },
       );
     }

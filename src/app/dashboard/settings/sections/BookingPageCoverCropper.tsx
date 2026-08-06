@@ -236,7 +236,7 @@ export function BookingPageCoverCropper({
         </div>
         <p className="mt-3 text-xs text-slate-500">
           Tip: the area inside the box is exactly what appears on your booking page. Drag a corner
-          to change its shape — there are no fixed dimensions.
+          to change its shape. There are no fixed dimensions.
         </p>
       </div>
     </Dialog>

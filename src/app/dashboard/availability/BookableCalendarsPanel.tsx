@@ -564,7 +564,7 @@ export function BookableCalendarsPanel({
                         {inactiveOnColumn.map((e) => (
                           <li
                             key={e.id}
-                            title="Paused — not bookable"
+                            title="Paused, not bookable"
                             className={`${chipBase} max-w-full bg-slate-100 text-slate-600 ring-slate-200/90`}
                           >
                             <span className="break-words">{e.name}</span>
@@ -580,7 +580,7 @@ export function BookableCalendarsPanel({
                       <span className="text-[11px] leading-snug text-slate-500">
                         {venueHasActiveEvents ? (
                           <>
-                            None here —{' '}
+                            None here.{' '}
                             <Link
                               href="/dashboard/event-manager"
                               className="font-medium text-brand-700 underline decoration-brand-200 underline-offset-2 hover:text-brand-800"

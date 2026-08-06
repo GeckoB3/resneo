@@ -277,7 +277,7 @@ export function AddonsLibraryView({
       ) : groups.length === 0 ? (
         <EmptyState
           title="No add-on groups yet"
-          description="Build a reusable group of optional extras — a single conditioner choice, a multi-select set of finishing touches, or a hidden staff-only add-on."
+          description="Build a reusable group of optional extras: a single conditioner choice, a multi-select set of finishing touches, or a hidden staff-only add-on."
           action={
             isAdmin ? (
               <button

@@ -844,7 +844,7 @@ export function ContactsDashboard({
       addToast(
         created
           ? `${clientWord} added to contacts`
-          : `Already in contacts — opened the existing ${clientLower}`,
+          : `Already in contacts, opened the existing ${clientLower}`,
         'success',
       );
       openContact(guest.id);
@@ -1971,7 +1971,7 @@ export function ContactsDashboard({
             void runBulkContactMessage(msg, ch);
           }}
           title={`Message ${selectedIds.length} ${clientWord}${selectedIds.length !== 1 ? 's' : ''}`}
-          description={`The same message goes to each selected ${clientLower}. Contacts without email or SMS on file are skipped when that channel is chosen — same behaviour as bulk messaging from ${bookingWord}s.`}
+          description={`The same message goes to each selected ${clientLower}. Contacts without email or SMS on file are skipped when that channel is chosen, same behaviour as bulk messaging from ${bookingWord}s.`}
         />
       ) : null}
 

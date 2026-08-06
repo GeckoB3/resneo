@@ -156,7 +156,7 @@ export function AppointmentsDashboardStep({
           </li>
           <li>
             To put the booking flow directly on your own site, use the embeddable widget (iframe snippet) or a
-            printable QR code—both are under Settings → Profile (Booking widget & QR).
+            printable QR code, both are under Settings → Profile (Booking widget & QR).
           </li>
           <li>
             Notifications (emails and optional SMS) are sent to guests automatically on booking, rescheduling,

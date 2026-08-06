@@ -30,8 +30,9 @@ export default function EmailTemplatesPage() {
           </p>
           {process.env.NODE_ENV === 'production' ? (
             <p className="mt-3 text-xs text-amber-800">
-              Gallery enabled via <code className="rounded bg-amber-100 px-1 py-0.5">ALLOW_EMAIL_TEMPLATE_GALLERY</code>{' '}
-              — disable when no longer needed.
+              Gallery enabled via{' '}
+              <code className="rounded bg-amber-100 px-1 py-0.5">ALLOW_EMAIL_TEMPLATE_GALLERY</code>. Disable when no
+              longer needed.
             </p>
           ) : null}
         </div>

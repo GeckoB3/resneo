@@ -186,7 +186,7 @@ export function AppointmentServiceModal({
             </div>
           ) : (
             <p className="text-sm text-slate-500">
-              No calendars found for this venue yet — you can link this service to calendars later under Services.
+              No calendars found for this venue yet. You can link this service to calendars later under Services.
             </p>
           )
         }

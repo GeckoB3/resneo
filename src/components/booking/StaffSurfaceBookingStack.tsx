@@ -428,8 +428,8 @@ function StaffSurfaceBookingStackInner({
         onChange={setActiveTab}
         ariaLabel={
           isAppointmentPlan
-            ? 'Booking type — appointments, events, classes, resources'
-            : 'Booking type — table, appointments, events, classes, resources'
+            ? 'Booking type: appointments, events, classes, resources'
+            : 'Booking type: table, appointments, events, classes, resources'
         }
       />
       <div className={`mx-auto w-full ${contentWidthClass}`}>{body()}</div>

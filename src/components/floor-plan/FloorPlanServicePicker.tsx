@@ -62,7 +62,7 @@ export function FloorPlanServicePicker({
         aria-expanded={open}
         aria-controls={panelId}
         aria-label="Service"
-        title={selected ? `Service: ${selected.name}` : 'Choose service — sets timeline to service hours'}
+        title={selected ? `Service: ${selected.name}` : 'Choose service, sets timeline to service hours'}
       >
         <span className="min-w-0 truncate">{selected?.name ?? 'Service'}</span>
         <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">

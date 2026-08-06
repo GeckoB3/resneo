@@ -860,7 +860,7 @@ export async function PATCH(
           return NextResponse.json(
             {
               error:
-                'Refund could not be processed. The booking was not cancelled — please try again or refund manually in Stripe.',
+                'Refund could not be processed. The booking was not cancelled. Please try again or refund manually in Stripe.',
               code: 'REFUND_FAILED',
             },
             { status: 502 },

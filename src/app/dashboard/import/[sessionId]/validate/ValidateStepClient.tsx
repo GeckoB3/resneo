@@ -417,7 +417,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
         <h1 className="text-xl font-semibold text-slate-900">Validate</h1>
         <p className="mt-1 text-sm text-slate-500">
           We scan your rows for missing fields, duplicates, and ambiguous dates. Large files are checked in the
-          background — your progress is saved, so you can safely leave and come back.
+          background. Your progress is saved, so you can safely leave and come back.
         </p>
       </div>
 
@@ -476,7 +476,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             <p className="text-xs text-slate-500">Preparing row scan…</p>
           )}
           {polling && (
-            <p className="text-xs text-slate-500">Your progress is saved — you can safely leave and come back.</p>
+            <p className="text-xs text-slate-500">Your progress is saved. You can safely leave and come back.</p>
           )}
         </div>
       )}
@@ -823,7 +823,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             <li className="flex items-start gap-2">
               <span aria-hidden className="mt-0.5 font-semibold text-sky-600">↻</span>
               <span>
-                <strong>{existingRows}</strong> match existing {clientPlural.toLowerCase()} — handled per your choices above.
+                <strong>{existingRows}</strong> match existing {clientPlural.toLowerCase()}, handled per your choices above.
               </span>
             </li>
           )}

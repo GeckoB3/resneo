@@ -229,7 +229,7 @@ export async function POST(request: NextRequest) {
     // (a scoped link with no chosen calendar cannot be satisfied).
     if (!linkedGrantAllowsCalendar(access.grant, false, input.practitionerId ?? null)) {
       return NextResponse.json(
-        { error: 'This link only covers specific calendars — choose one of them.' },
+        { error: 'This link only covers specific calendars. Choose one of them.' },
         { status: 403 },
       );
     }

@@ -93,7 +93,7 @@ function buildBody(event: StaffPushEvent, booking: StaffPushBooking): string {
     case 'no_show':
       return when ? `${who} hasn’t arrived · ${when}` : `${who} hasn’t arrived`;
     case 'payment_failed':
-      return when ? `${who}${svc} · ${when} — deposit unpaid` : `${who}${svc} — deposit unpaid`;
+      return when ? `${who}${svc} · ${when} · deposit unpaid` : `${who}${svc} · deposit unpaid`;
   }
 }
 

@@ -63,7 +63,7 @@ const RESOURCE_BOOKING: BookingEmailData = {
   ...BASE_TABLE_BOOKING,
   guest_name: 'Chris Bell',
   party_size: 1,
-  appointment_service_name: 'Tennis Court 1 — 1 hour',
+  appointment_service_name: 'Tennis Court 1 (1 hour)',
   practitioner_name: null,
 };
 

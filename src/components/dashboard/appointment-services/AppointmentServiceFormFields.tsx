@@ -233,8 +233,8 @@ export function AppointmentServiceFormFields({
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-900">Multiple bookable options</p>
                 <p className="mt-0.5 text-xs text-slate-600">
-                  Guests choose an option before picking a time. You&apos;ll set up <strong>one option at a time</strong>{' '}
-                  — finish each option, then add the next. Each option has its own duration, buffer, price, optional
+                  Guests choose an option before picking a time. You&apos;ll set up <strong>one option at a time</strong>.
+                  Finish each option, then add the next. Each option has its own duration, buffer, price, optional
                   description, and optional deposit override.
                 </p>
               </div>
@@ -257,7 +257,7 @@ export function AppointmentServiceFormFields({
                 Work through each card in order. When an option has a name, valid duration
                 {form.payment_requirement === 'full_payment' ? ', and a price (for options offered online)' : ''}, you
                 can add another. Payment rules still come from{' '}
-                <span className="font-medium text-slate-800">Online payment when booking</span> below — deposit defaults
+                <span className="font-medium text-slate-800">Online payment when booking</span> below, deposit defaults
                 apply when an option&apos;s deposit is blank.
               </p>
             </div>
@@ -265,7 +265,7 @@ export function AppointmentServiceFormFields({
 
           {form.variants.length === 1 ? (
             <div className="rounded-lg border border-brand-200/80 bg-brand-50/40 px-3 py-2.5">
-              <p className="text-xs font-semibold text-brand-900">Step 1 — Your first option</p>
+              <p className="text-xs font-semibold text-brand-900">Step 1. Your first option</p>
               <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-[11px] leading-snug text-brand-950/85">
                 <li>Name it clearly (e.g. &quot;45 minutes&quot;, &quot;Colour &amp; cut&quot;).</li>
                 <li>Set duration, buffer, and price.</li>
@@ -357,7 +357,7 @@ export function AppointmentServiceFormFields({
                         variants: f.variants.map((row, i) => (i === idx ? { ...row, description: e.target.value } : row)),
                       }))
                     }
-                    placeholder="e.g. Includes toner — allow 15 extra minutes."
+                    placeholder="e.g. Includes toner, allow 15 extra minutes."
                     rows={2}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
@@ -631,7 +631,7 @@ export function AppointmentServiceFormFields({
           {form.payment_requirement === 'full_payment' && (
             <p className="text-xs text-slate-500">
               {usesVariants
-                ? 'Each option offered to clients needs its own price — that is what they pay online at booking.'
+                ? 'Each option offered to clients needs its own price. That is what they pay online at booking.'
                 : 'The full service price (above) is charged when the guest completes booking online.'}
             </p>
           )}
@@ -739,7 +739,7 @@ export function AppointmentServiceFormFields({
               />
               <span>
                 At your venue{' '}
-                <span className="text-xs text-slate-500">— clients come to your business address</span>
+                <span className="text-xs text-slate-500">(clients come to your business address)</span>
               </span>
             </label>
             <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
@@ -752,7 +752,7 @@ export function AppointmentServiceFormFields({
               />
               <span>
                 At the client&apos;s address{' '}
-                <span className="text-xs text-slate-500">— you travel to them</span>
+                <span className="text-xs text-slate-500">(you travel to them)</span>
               </span>
             </label>
             <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
@@ -764,7 +764,7 @@ export function AppointmentServiceFormFields({
                 onChange={() => setForm((f) => ({ ...f, location_type: 'online' }))}
               />
               <span>
-                Online <span className="text-xs text-slate-500">— delivered remotely (video call, etc.)</span>
+                Online <span className="text-xs text-slate-500">(delivered remotely, video call etc.)</span>
               </span>
             </label>
           </div>
@@ -917,7 +917,7 @@ export function AppointmentServiceFormFields({
             <div>
               <p className="text-sm font-medium text-slate-800">This service&apos;s schedule</p>
               <p className="mt-0.5 text-xs text-slate-500">
-                Optional — only turn on if this service should be bookable for less time than its calendars are open
+                Optional, only turn on if this service should be bookable for less time than its calendars are open
                 (for example a brunch menu, or evening-only therapy).
               </p>
             </div>

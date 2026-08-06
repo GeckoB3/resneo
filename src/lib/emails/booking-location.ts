@@ -53,12 +53,12 @@ export function resolveEmailLocation(
     const addr = loc.client_address?.trim() || null;
     return {
       kind: 'client_address',
-      rowValue: addr ? `Your address — ${addr}` : 'Your address',
+      rowValue: addr ? `Your address (${addr})` : 'Your address',
       rowExtra: null,
       joinUrl: null,
       mapsUrl: null,
       calendarLocation: addr,
-      textLines: addr ? [`Location: Your address — ${addr}`] : ['Location: Your address'],
+      textLines: addr ? [`Location: Your address (${addr})`] : ['Location: Your address'],
     };
   }
 

@@ -1007,7 +1007,7 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                         return;
                       }
                       if (payload.errors && payload.errors.length > 0) {
-                        setError(`Partially sent — ${payload.errors.join('; ')}`);
+                        setError(`Partially sent: ${payload.errors.join('; ')}`);
                       } else {
                         setError(null);
                       }

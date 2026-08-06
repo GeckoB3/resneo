@@ -117,7 +117,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
         }
         await load();
       } catch {
-        setReshapeFailed((prev) => ({ ...prev, [fileId]: 'Could not reorganise this file — please try again.' }));
+        setReshapeFailed((prev) => ({ ...prev, [fileId]: 'Could not reorganise this file. Please try again.' }));
       } finally {
         setReshaping((prev) => {
           const next = new Set(prev);
@@ -278,9 +278,9 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Upload your files</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Upload your exports from your old system — Excel or CSV, just as they came. We detect whether each is a
+          Upload your exports from your old system. Excel or CSV, just as they came. We detect whether each is a
           client list, booking history, or staff list; you just confirm. If a file has both bookings and client
-          details (most do), label it <strong>Booking history</strong> — the client details are imported too.
+          details (most do), label it <strong>Booking history</strong> and the client details are imported too.
         </p>
       </div>
 
@@ -359,7 +359,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
                 </p>
                 {det?.applied && f.file_type === det.detected_kind && (
                   <p className="mt-1 text-[11px] font-medium text-emerald-700">
-                    Auto-detected: {KIND_LABELS[det.detected_kind] ?? det.detected_kind} — change it below if that&apos;s
+                    Auto-detected: {KIND_LABELS[det.detected_kind] ?? det.detected_kind}. Change it below if that&apos;s
                     wrong.
                   </p>
                 )}
@@ -395,7 +395,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
                   <div className="flex items-center gap-2 rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
                     <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
                     <span>
-                      Reorganising this file into a table — reading the dates, times and staff. This can take several
+                      Reorganising this file into a table, reading the dates, times and staff. This can take several
                       minutes for large files, so please keep this tab open.
                     </span>
                   </div>
@@ -483,7 +483,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
           <p className="font-medium text-slate-800">Supported sources</p>
           <p className="mt-2">
             Excel workbooks (.xlsx, .xls) and CSV exports from existing salon, clinic, or restaurant booking systems
-            all work — including files with title rows, multiple sheets, or unusual characters. On the next step your
+            all work, including files with title rows, multiple sheets, or unusual characters. On the next step your
             columns are matched to ResNeo fields automatically; you just review the result, so the source platform
             does not need to be recognised.
           </p>
@@ -491,7 +491,7 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
             <p className="font-medium text-slate-800">Not sure what a file should look like?</p>
             <p className="mt-1 text-xs text-slate-500">
               Download an example to see the kind of columns we expect. Your own file doesn&apos;t need to match
-              exactly — these are just a guide.
+              exactly, so these are just a guide.
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               <button
@@ -537,8 +537,8 @@ export function UploadStepClient({ sessionId }: { sessionId: string }) {
       {!canContinue && files.length > 0 && (
         <p className="text-xs text-amber-700">
           {anyReshaping
-            ? 'Hang on — we’re reorganising a report-style file into a table. Continue unlocks when it’s done.'
-            : 'Confirm a label for each file — Client list, Booking history, or Staff list. We pre-fill the ones we can detect.'}
+            ? 'Hang on, we’re reorganising a report-style file into a table. Continue unlocks when it’s done.'
+            : 'Confirm a label for each file. Client list, Booking history, or Staff list. We pre-fill the ones we can detect.'}
         </p>
       )}
     </div>

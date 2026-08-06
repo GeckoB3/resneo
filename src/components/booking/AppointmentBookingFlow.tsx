@@ -5017,7 +5017,7 @@ export function AppointmentBookingFlow({
           <div className="mt-3 space-y-2">
             {groupPeople.map((person, idx) => (
               <div key={idx} className="text-sm text-brand-700">
-                <span className="font-medium">{person.label}</span> &mdash; {person.serviceName} with {person.practitionerName} at {person.time}
+                <span className="font-medium">{person.label}</span>: {person.serviceName} with {person.practitionerName} at {person.time}
               </div>
             ))}
           </div>

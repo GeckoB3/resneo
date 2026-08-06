@@ -167,7 +167,7 @@ export function ServiceCustomAvailabilityEditor({
 
           {active && value.rules.length === 0 && !readonly && (
             <p className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900">
-              Custom scheduling is on but has no rules. Add at least one, or turn the toggle off —
+              Custom scheduling is on but has no rules. Add at least one, or turn the toggle off,
               otherwise this service will not be bookable online.
             </p>
           )}
@@ -817,7 +817,7 @@ function PlainLanguageSummary({ schedule }: { schedule: ServiceCustomScheduleV2 
         ))}
       </ul>
       <p className="mt-2 text-[11px] text-slate-500">
-        Rules are combined — a time is bookable if any rule allows it (still within venue and
+        Rules are combined, a time is bookable if any rule allows it (still within venue and
         calendar hours).
       </p>
     </div>

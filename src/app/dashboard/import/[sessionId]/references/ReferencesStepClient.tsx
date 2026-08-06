@@ -368,7 +368,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
       /* reload best-effort */
     }
     if (failures > 0) {
-      setError(`${failures} suggestion${failures === 1 ? '' : 's'} could not be applied — match those below.`);
+      setError(`${failures} suggestion${failures === 1 ? '' : 's'} could not be applied, match those below.`);
     }
     setBulkAccepting(false);
   }
@@ -487,7 +487,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
       setSvcContext(ctx);
       return ctx;
     } catch {
-      setError('Could not load service setup details — please try again.');
+      setError('Could not load service setup details. Please try again.');
       return null;
     }
   }, [svcContext]);
@@ -697,7 +697,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
         <h1 className="text-xl font-semibold text-slate-900">Set up services &amp; staff</h1>
         <p className="mt-1 text-sm text-slate-600">
           The services and staff named in your files are matched to what you already have on ResNeo. Anything we
-          couldn&apos;t match can be added as new right here — services just need a duration and price. Complete this
+          couldn&apos;t match can be added as new right here. Services just need a duration and price. Complete this
           step before validation.
         </p>
       </div>
@@ -712,7 +712,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
             <div className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
             <p className="text-sm text-slate-600">Analysing booking file…</p>
           </div>
-          <p className="text-xs text-slate-500">Large files can take a minute — this runs on the server.</p>
+          <p className="text-xs text-slate-500">Large files can take a minute. This runs on the server.</p>
         </div>
       )}
 
@@ -729,16 +729,16 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
           )}
           {(extract.staffReferenceCount ?? 0) > 0 && (
             <p className="text-slate-600">
-              Found <strong>{extract.staffReferenceCount}</strong> staff member(s) in your staff list — match or add
+              Found <strong>{extract.staffReferenceCount}</strong> staff member(s) in your staff list. Match or add
               them under the Staff tab below.
             </p>
           )}
           {extract.mode === 'no_future_rows' && (
-            <p className="text-slate-600">No future-dated rows — this step is not required.</p>
+            <p className="text-slate-600">No future-dated rows. This step is not required.</p>
           )}
           {extract.mode === 'no_booking_date_mapping' && (
             <p className="text-slate-600">
-              No <strong>Booking date</strong> column mapping — reference matching was skipped. Map booking date on the
+              No <strong>Booking date</strong> column mapping. Reference matching was skipped. Map booking date on the
               Map step if you need it.
             </p>
           )}
@@ -775,7 +775,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
               <p className="font-medium text-amber-900">We couldn&apos;t load your services and staff</p>
               <p className="text-amber-800">{catalogError}</p>
               <p className="text-xs text-amber-700">
-                This is needed to match the items in your file. It&apos;s usually a brief network hiccup — try again.
+                This is needed to match the items in your file. It&apos;s usually a brief network hiccup. Try again.
               </p>
               <button
                 type="button"
@@ -807,7 +807,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                     bookings
                   </h2>
                   <p className="mt-1 text-sm text-slate-600">
-                    Set them all up in one step — we&apos;ve filled in a suggested length and price for each from your
+                    Set them all up in one step. We&apos;ve filled in a suggested length and price for each from your
                     data. You can tweak anything before creating.
                   </p>
                 </div>
@@ -1045,7 +1045,7 @@ export function ReferencesStepClient({ sessionId }: { sessionId: string }) {
                             </p>
                           ) : (
                             <p className="text-[11px] text-slate-600">
-                              Creates a bookable calendar with default working hours — fine-tune it later under Staff
+                              Creates a bookable calendar with default working hours. Fine-tune it later under Staff
                               &amp; Calendars.
                             </p>
                           )}
@@ -1263,7 +1263,7 @@ function BulkCreatePanel({
           {result && result.errors.length > 0 && (
             <div className="border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm text-amber-900" role="status">
               Created {result.created} of {result.created + result.errors.length}. {result.errors.length}{' '}
-              couldn&apos;t be created — fix the highlighted {nounPlural} and try again.
+              couldn&apos;t be created. Fix the highlighted {nounPlural} and try again.
             </div>
           )}
 

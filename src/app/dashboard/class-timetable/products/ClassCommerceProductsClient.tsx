@@ -1409,7 +1409,7 @@ function CourseEnrollmentsPanel({
   return (
     <div className="mt-4 rounded-xl bg-slate-50 p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="text-sm font-semibold text-slate-900">Enrollments — {courseName}</h4>
+        <h4 className="text-sm font-semibold text-slate-900">Enrollments: {courseName}</h4>
         <button
           type="button"
           onClick={() => void load()}
@@ -1486,7 +1486,7 @@ function CourseEnrollmentsPanel({
                           type="button"
                           disabled={busyEnrId === e.id}
                           onClick={() => {
-                            const reason = window.prompt('Force-cancel reason (skips refund — handle manually):');
+                            const reason = window.prompt('Force-cancel reason (skips refund, handle manually):');
                             if (reason === null) return;
                             void cancelEnrollment(e.id, { bypassWindow: true, reason });
                           }}
@@ -1524,7 +1524,7 @@ function CourseEnrollmentsPanel({
                   <ul className="mt-2 space-y-1 text-xs text-slate-500">
                     {cancelled.map((e) => (
                       <li key={e.id}>
-                        {guestDisplayName(e.guest)} — cancelled {e.updated_at.slice(0, 10)}
+                        {guestDisplayName(e.guest)}, cancelled {e.updated_at.slice(0, 10)}
                       </li>
                     ))}
                   </ul>

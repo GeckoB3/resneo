@@ -107,7 +107,7 @@ function resolveOwnerLocation(
 
   if (loc?.kind === 'client_address') {
     const addr = loc.client_address?.trim() || null;
-    const value = addr ? `Client's address — ${addr}` : "Client's address";
+    const value = addr ? `Client's address (${addr})` : "Client's address";
     return { rowValue: value, joinUrl: null, extra: null, textLines: [`Location: ${value}`] };
   }
 
@@ -130,7 +130,7 @@ export function renderOwnerBookingNotificationEmail(
   const isAppt = booking.email_variant === 'appointment';
   const location = resolveOwnerLocation(booking, venue);
 
-  const subject = `New booking: ${guestName} — ${dateText} at ${timeText}`;
+  const subject = `New booking: ${guestName}, ${dateText} at ${timeText}`;
 
   const contactLines: string[] = [];
   if (booking.guest_email?.trim()) contactLines.push(booking.guest_email.trim());

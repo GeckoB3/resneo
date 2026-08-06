@@ -66,6 +66,31 @@ Twelve flat nav items in a horizontal scroller (`AccountNav.tsx`). Only two of e
 **G10. Customer push does not exist.**
 The only sender is `src/lib/communications/staff-push-notification.ts`.
 
+**G11. First entry to the portal takes two emails and three clicks.**
+This is the first impression for essentially every customer, and it is the weakest part of the product. Traced end to end:
+
+| # | Step | Where |
+| --- | --- | --- |
+| 1 | Open confirmation, scroll to the final card | Email 1 |
+| 2 | Click "View or sign in to your account" | Email 1 |
+| 3 | Land on a sign-in form, email pre-filled | `/auth/magic` |
+| 4 | Click "Email me a sign-in link" | Browser |
+| 5 | See "Check your inbox" | Browser |
+| 6 | Switch to email app, wait for delivery | Email app |
+| 7 | Open a second, unbranded email | Email 2 |
+| 8 | Click "Sign in to ResNeo" | Email 2 |
+| 9 | `verifyOtp`, `claim_user_account`, resolve destination | `/auth/confirm` |
+| 10 | Arrive at a generic bookings list | `/account/bookings` |
+
+Specific defects inside that flow:
+
+- **G11a.** `accountBookingsMagicLinkUrl` (`src/lib/emails/account-portal-links.ts:20`) hardcodes `redirect=/account/bookings`, so the customer lands on a list rather than the booking they just made.
+- **G11b.** The sign-in email is raw inline HTML with no logo and no template (`src/app/api/auth/send-magic-link/route.ts:86`), while the booking confirmation is fully branded. The quality drop mid-flow reads as a phishing attempt.
+- **G11c.** `POST /api/auth/send-magic-link` is public, unauthenticated and **not rate limited**, despite `src/lib/rate-limit.ts` existing and being used by `booking/create`, `booking/pay` and `contact`. It will send mail to any address on demand. This is an abuse vector against arbitrary third parties, not just a ResNeo problem.
+- **G11d.** Link lifetime is 1 hour, short for anyone who reads email away from a browser.
+- **G11e.** The "Check your inbox" state does not name the address it sent to, and offers no resend. The only recovery is "Use a different email address".
+- **G11f.** The email sets `context=customer`, which `/auth/magic/page.tsx` never reads. Dead parameter.
+
 ### 2.3 Architectural facts that constrain the plan
 
 - **`/api/confirm/route.ts` is 1,770 lines** with cancel, confirm and modify logic inline, including Stripe refunds, card-hold settlement, class credit restoration, waitlist offer cascades and compliance enforcement. This is the logic the portal must reuse. It cannot be called as-is because it authenticates by token.
@@ -124,6 +149,24 @@ Introduce `src/lib/account/booking-instant.ts` with `bookingStartInstant(row): D
 
 This preserves Bearer support so Phase 5 needs no route rewrites.
 
+### AD7. First entry to the portal is one click from the confirmation email, on a scoped session
+
+The account link in transactional emails carries a signed, user-scoped token that establishes a **limited portal session** directly. No second email, no interstitial.
+
+The justification is consistency, not convenience. The same email already carries `manage_booking_link`, which lets whoever holds it cancel a booking and trigger a refund with no second factor. Requiring a full email round trip to *read* the same booking applies a higher bar to a strictly lower-risk action.
+
+**Scope of a token-established session.** Permitted: view bookings, cancel, reschedule, confirm attendance, complete forms, add to calendar. Denied: change email, change password, manage passkeys, view or add saved payment methods, request account deletion, view another venue's data beyond what `guests_account_safe` already returns. Denied actions redirect to a step-up sign-in at `/auth/magic`.
+
+**Token properties.**
+
+- User-scoped, not booking-scoped, so `booking_short_links` cannot be reused (its `purpose` CHECK and `booking_id` FK are both wrong for this).
+- **Reusable within its window, never single-use.** Corporate link scanners (Outlook Safe Links, Proofpoint, Mimecast) fetch every URL in inbound mail. A single-use token is consumed before the human clicks. This property is mandatory, not an optimisation.
+- No state mutation on GET, for the same reason.
+- 30-day validity, revoked when the related booking is more than 30 days past.
+- Stored hashed, never in plaintext.
+
+**`/auth/magic` is retained** as the fallback for a missing, expired or revoked token, and for anyone arriving without one. Its current button-gated send is correct behaviour for that path and must not regress to auto-send on mount (see the note in `AuthMagicForm.tsx`).
+
 ---
 
 ## 4. Target customer journey
@@ -132,8 +175,10 @@ The plan is organised around the full journey. Every stage must have a portal an
 
 | Stage | Customer need | Portal provision | Phase |
 | --- | --- | --- | --- |
-| Discover account | "I did not know I had one" | Magic-link CTA in confirmation and reminder emails; clear first-run state | 3 |
-| Sign in | Fast, passwordless-first | Magic link, password optional, remembered device | Exists |
+| Discover account | "I did not know I had one" | Account CTA in confirmation and reminder emails; clear first-run state | 3 |
+| First entry | One click, no second email | Scoped token link straight into the booking just made (AD7) | 3 |
+| Sign in later | Fast, passwordless-first | Long session, passkey offered after first arrival, `/auth/magic` as fallback | 3 |
+| Step up | Protect sensitive actions | Fresh magic link before email, password, passkey, payment methods or deletion | 3 |
 | Orient | "What is next?" | Hub with next appointment and inline actions | 1 |
 | Prepare | Directions, what to bring, forms | Detail page with location, notes, outstanding forms, add to calendar | 2 |
 | Change plans | Reschedule or cancel | In-portal, policy-aware, with fee and deadline shown before confirming | 2 |
@@ -247,9 +292,56 @@ Each task carries an ID, the files involved, and acceptance criteria. Tasks with
 - Merge credits, courses, memberships and recurring into one route with tabs.
 - **Acceptance:** four old routes redirect; no functionality lost.
 
-**P3-4. Account discovery improvements**
-- Add the magic-link account callout to reminder emails, not only confirmations.
-- First-run interstitial on first portal visit explaining what the account does and offering to set a password.
+**P3-4. One-click first entry** (implements AD7, addresses G11)
+
+This is the highest-value item in Phase 3. It is the first impression for essentially every customer.
+
+**P3-4a. Portal token infrastructure**
+- New table `account_portal_tokens`: `token_hash` (primary key), `user_id`, `scope` (`limited`), `issued_for_booking_id` (nullable, for revocation), `expires_at`, `revoked_at`, `created_at`. Hash only, never plaintext.
+- `src/lib/auth/portal-token.ts`: `issuePortalToken`, `verifyPortalToken`, `revokePortalTokensForBooking`.
+- Reusable within the window, never single-use, and no state mutation on verify. This defeats corporate link scanners (Outlook Safe Links, Proofpoint, Mimecast), which fetch every URL in inbound mail and would otherwise consume a single-use token before the customer clicks.
+- 30-day expiry; revoked once the related booking is more than 30 days past.
+- **Acceptance:** a token verified 20 times in a row still works; verifying issues no writes; an expired or revoked token fails closed.
+
+**P3-4b. Scoped session and step-up**
+- Establish a session carrying a `portal_scope: 'limited'` claim.
+- Permitted: view bookings, cancel, reschedule, confirm attendance, complete forms, add to calendar.
+- Denied: change email, change password, manage passkeys, view or add saved payment methods, request account deletion. Denied routes redirect to `/auth/magic` for step-up.
+- Enforced in middleware and asserted per route, not in the UI alone.
+- **Acceptance:** a route test proves a limited session receives 403 on `/api/account/password`, `/api/account/payment-methods` and `/api/account/delete-request`, and 200 on `/api/account/bookings`.
+
+**P3-4c. Entry route**
+- `GET /auth/portal?t=<token>` verifies, calls `claim_user_account()`, establishes the scoped session, redirects to the target.
+- Any failure falls through to `/auth/magic` with the email pre-filled, never to an error page.
+- **Acceptance:** expired, revoked, malformed and absent tokens all land on a usable sign-in form.
+
+**P3-4d. Email link changes** (fixes G11a)
+- `accountBookingsMagicLinkUrl` becomes `accountPortalEntryUrl(email, { bookingId })`, embedding the token and targeting `/account/bookings/{id}`.
+- Drop the dead `context=customer` parameter (G11f).
+- **Acceptance:** clicking the confirmation email link lands on the specific booking, signed in, in one click.
+
+**P3-4e. Brand the sign-in email** (fixes G11b)
+- Route `/api/auth/send-magic-link` through `renderBaseTemplate` so the fallback email matches the confirmation email's design.
+- **Acceptance:** rendered in the template gallery alongside the other templates.
+
+**P3-4f. Rate-limit the send endpoint** (fixes G11c)
+- Apply `checkRateLimit` from `src/lib/rate-limit.ts` to `POST /api/auth/send-magic-link`, keyed on both client IP and target email.
+- **Acceptance:** repeated requests for one address are throttled; a route test asserts the limit. Ship this independently of the rest of P3-4; it is a live abuse vector and should not wait on the feature.
+
+**P3-4g. Fallback flow polish** (fixes G11d, G11e)
+- Extend magic-link lifetime from 1 hour to 24 hours.
+- "Check your inbox" names the address and offers resend behind a cooldown.
+- Keep the button-gated send. It must not regress to auto-send on mount; see the note in `AuthMagicForm.tsx` recording why that was removed.
+- **Acceptance:** resend is available after the cooldown and the target address is shown.
+
+**P3-4h. Reduce repeat friction**
+- Long-lived session so a second visit needs no authentication.
+- After first successful arrival, offer passkey or password setup once, as a prompt inside the portal, never as a gate before it.
+- **Acceptance:** a returning customer within the session window reaches the hub with zero authentication steps.
+
+**P3-5. Account discovery improvements**
+- Add the account callout to reminder emails, not only confirmations.
+- First-run explainer on first portal visit covering what the account does.
 - **Acceptance:** callout renders in reminder templates; template gallery updated.
 
 ### Phase 4: Completeness
@@ -303,7 +395,7 @@ The React Native app is a separate repository. This phase is the ResNeo-side wor
 
 **Performance budget.** Hub and bookings list under 10 database queries each. No writes during a read. Time to first contentful paint under 1.5s on a mid-tier mobile device.
 
-**Security.** Cross-user access returns 404. All booking access scoped through `loadAccountSafeGuests`, never by raw `booking_id`. No venue-private fields (`notes`, `tags`, `custom_fields`, `no_show_count`) may cross into a customer response; `guests_account_safe` is the only permitted guest projection.
+**Security.** Cross-user access returns 404. All booking access scoped through `loadAccountSafeGuests`, never by raw `booking_id`. No venue-private fields (`notes`, `tags`, `custom_fields`, `no_show_count`) may cross into a customer response; `guests_account_safe` is the only permitted guest projection. Once scoped sessions exist (AD7), every route must declare whether it accepts a `limited` session; the default for a new route is to reject it, so an omission fails closed rather than open. Any public endpoint that sends email or SMS must be rate limited on both IP and target address.
 
 **Timezone.** Every rendered time carries a venue-local value and an explicit timezone label where it differs from the customer's profile timezone.
 
@@ -315,12 +407,13 @@ The React Native app is a separate repository. This phase is the ResNeo-side wor
 
 ## 7. Data model changes
 
-Only two migrations are anticipated.
+Three migrations are anticipated.
 
-1. **Notification preferences matrix** (P4-3). Extend the `notification_preferences` JSON shape on `user_profiles`. Backfill must preserve current effective behaviour for every existing row.
-2. **Optional: `user_profiles.portal_first_seen_at`** (P3-4) to drive the first-run interstitial once.
+1. **`account_portal_tokens`** (P3-4a). New table: `token_hash` primary key, `user_id`, `scope`, `issued_for_booking_id` nullable, `expires_at`, `revoked_at`, `created_at`. Indexed on `user_id` and on `issued_for_booking_id` for revocation. RLS: no direct client access; service role only. `booking_short_links` cannot be reused because it is booking-scoped, its `purpose` column carries a CHECK of `manage | confirm | payment`, and its `booking_id` FK is required.
+2. **Notification preferences matrix** (P4-3). Extend the `notification_preferences` JSON shape on `user_profiles`. Backfill must preserve current effective behaviour for every existing row.
+3. **Optional: `user_profiles.portal_first_seen_at`** (P3-5) to drive the first-run explainer once.
 
-No new tables are required. Receipts, forms, waitlist and history all read from existing tables.
+Receipts, forms, waitlist and history all read from existing tables.
 
 ---
 
@@ -333,6 +426,10 @@ No new tables are required. Receipts, forms, waitlist and history all read from 
 | Cross-venue data leak through a new endpoint | High. Privacy. | Every new route scoped via `loadAccountSafeGuests`; 404-on-foreign-booking asserted in route tests. |
 | Scope creep into commerce | Medium. Delay. | Receipts read the existing ledger only. No product, cart or inventory concepts enter this plan. |
 | Notification preference migration changes who gets messaged | High. Trust, possible compliance issue. | Backfill defaults to current behaviour; a dry-run diff of intended recipients before and after must be produced and reviewed. |
+| Email link scanners consume portal tokens before the customer clicks | High. The one-click flow silently fails for corporate and some consumer mailboxes. | Tokens reusable within window, never single-use; no mutation on verify (P3-4a). Test with a scanner-style double fetch before release. |
+| A forwarded confirmation email grants portal access | Medium. Privacy. | Session is scoped: no email or password change, no payment methods, no deletion (AD7, P3-4b). This is the same exposure the existing `manage_booking_link` already carries, and it is narrowed, not widened. |
+| Unrated-limited magic-link endpoint used to mail-bomb third parties | High. Abuse, sender reputation, possible blocklisting of the sending domain. | P3-4f, shipped independently and ahead of the rest of Phase 3. |
+| One-click entry is read as less secure by a venue or an auditor | Low. Perception. | Document the comparison with `manage_booking_link` explicitly: the token grants strictly less capability than the cancel link already present in the same email. |
 
 ---
 
@@ -343,12 +440,17 @@ No new tables are required. Receipts, forms, waitlist and history all read from 
 | 0 | Foundations: tests, timezone, N+1, action extraction, loading states | 1.5 to 2 weeks |
 | 1 | Hub and navigation | 1 week |
 | 2 | In-portal cancel, reschedule, confirm, detail rebuild | 2 to 2.5 weeks |
-| 3 | Rebook, venue history, consolidation, discovery | 1.5 weeks |
+| 3 | One-click entry (P3-4), rebook, venue history, consolidation, discovery | 2.5 to 3 weeks |
 | 4 | Forms, receipts, notification matrix, waitlist, export | 2 weeks |
-| **Total (web, world-class)** | | **8 to 9 weeks** |
+| **Total (web, world-class)** | | **9 to 10.5 weeks** |
 | 5 | Mobile enablement (ResNeo side only) | 1.5 weeks |
 
 Phase 0 is non-negotiable and must ship before Phase 1. Phases 3 and 4 can be reordered against commercial priority. A credible reduced scope is Phases 0 to 2, which delivers a portal that is genuinely useful, at roughly 4.5 to 5.5 weeks.
+
+**Two items should jump the queue regardless of how the rest is sequenced:**
+
+- **P3-4f (rate limit the magic-link endpoint)** is roughly an hour of work against a live abuse vector. It should ship on its own, immediately, ahead of Phase 0.
+- **P3-4d (land on the specific booking)** is a small change to one URL builder and delivers a disproportionate share of the perceived improvement. It can ship with Phase 1 rather than waiting for the full token work.
 
 ---
 
@@ -356,13 +458,15 @@ Phase 0 is non-negotiable and must ship before Phase 1. Phases 3 and 4 can be re
 
 The portal is world-class when a customer can, without contacting the venue and without leaving `/account`:
 
-1. See their next appointment immediately on sign-in.
-2. Reschedule or cancel it, understanding the fee and deadline before confirming.
-3. Complete any form the venue requires.
-4. See what they paid and what was refunded.
-5. Book the same thing again in one action.
-6. See their history across every ResNeo venue they use.
-7. Control which messages they get, on which channel.
-8. Export or delete their data.
+1. Reach the booking they just made in **one click** from the confirmation email, already signed in, with no second email.
+2. See their next appointment immediately on every later visit, with no authentication step inside the session window.
+3. Reschedule or cancel it, understanding the fee and deadline before confirming.
+4. Complete any form the venue requires.
+5. See what they paid and what was refunded.
+6. Book the same thing again in one action.
+7. See their history across every ResNeo venue they use.
+8. Control which messages they get, on which channel.
+9. Step up to a stronger sign-in only when the action genuinely warrants it.
+10. Export or delete their data.
 
 And the team can change the portal safely, because every route has a test and every customer-visible flow has an e2e.

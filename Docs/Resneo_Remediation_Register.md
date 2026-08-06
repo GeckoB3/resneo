@@ -44,9 +44,61 @@ Where a claim was checked and did **not** survive, it is recorded in §8 rather 
 
 ---
 
+## 3A. Status, and what actually gates each finding
+
+Since this register was written, three facts changed what is urgent. None of the findings went away; most of them stopped being reachable.
+
+**No venue takes deposits or payments, and none uses class credits.** Every money finding needs one of those to fire. `M-01` needs a shared PaymentIntent, `M-03` needs a purchase, `M-04` and `M-05` need credits. Current exposure is zero. They are not live losses, they are landmines that arm the day payments are switched on.
+
+**Almost nobody uses the customer portal.** Most of `C-*` and all of `Q-*` describe a surface with no traffic.
+
+**Confirm email is off in the production Supabase project.** This was unknown when the register was written. It makes `S-03` live rather than latent, and it makes the fix recorded against `S-03` actively wrong. See the corrected entry.
+
+**Linked accounts go live imminently.** This is why `P-03` through `P-05` were done first.
+
+### Closed
+
+| Finding | Closed by |
+| --- | --- |
+| `P-01` Deletion request was not cancellable | `a07a0813`, verified against staging |
+| `P-02` GDPR erasure stalled silently | `a07a0813` |
+| `P-03` Linked venue could enumerate a client book | `b2c70c3f` |
+| `P-04` PII redaction defeated in the same response | `48185536` |
+| `P-05` Audit log retained client PII after unlink | `47ad782a`, verified against staging |
+| `G11c` Magic-link endpoint unthrottled | `42eff027` |
+
+Also delivered, and **not** originally in this register: reminder and confirmation delivery reconciliation (`83b4997d`). `communication_logs` can only account for sends that were attempted; this detects bookings that generated nothing at all, which was the failure mode with no observer.
+
+### Open, grouped by the decision that makes them real
+
+| Gate | Findings |
+| --- | --- |
+| **Live now** | `S-02` open redirect. `Q-17` stale staff calendar cache. `C-07` guest merge silently discarding `user_id`, which accumulates irreversible damage while latent. |
+| **Before enabling deposits or payments** | `M-01` to `M-05`, plus the characterisation tests in §7. `M-02` is the one that will bite first: it needs no race and customers find it by accident. |
+| **Before promoting the customer portal** | `C-01` to `C-06`, `C-08` to `C-12`, and all of `Q-*`. |
+| **Before enabling memberships** | `Q-13`. Now more pressing: `a07a0813` made `deleteUser` genuinely run, so a deleted account with a live subscription keeps being billed. |
+| **Needs a decision, not a fix** | `S-03`. See the corrected entry below. |
+| **Scale-triggered, not urgent** | `S-01`, `Q-24`. See §3B. |
+
+---
+
+## 3B. Findings this register over-stated
+
+Recorded honestly, because a register that cries wolf gets ignored.
+
+**`S-01`, guessable manage links.** Ranked critical on the assumption of roughly 100,000 live short codes. At current volume there are a few hundred, so expected work per hit is around `62^6 / 300` ≈ 190 million requests: three weeks of sustained attack for one random cancellation. Not a realistic problem now. It becomes one at perhaps 50 to 100 times current volume, which is the trigger to watch.
+
+**`C-01`, short-link collision breaking the bookings list.** Requires two concurrent creates for the same booking and purpose. The reminder cron loops sequentially, the two calls in its `Promise.all` use different purposes so they cannot collide with each other, and the select-then-renew path handles expired rows. Real, but rare at this volume, and caught per booking.
+
+**`Q-24`, appointment reschedule capacity race.** Needs two people choosing the identical slot inside the cache window. Uncommon at current volume. Note the related mechanism was also mis-described: `Q-17`'s cache is `private`, so two staff members never share it. The real scenario is one person returning to a view they loaded up to 165 seconds earlier.
+
+---
+
 ## 4. Tier 0: live exposure
 
 Fix before any feature work. Each is small in isolation. Several are one-line changes.
+
+**Tiering below reflects severity if triggered. See §3A for what currently triggers each one.**
 
 ### Money
 
@@ -90,7 +142,7 @@ Restore runs after the booking is cancelled, inside a `catch` that only logs (`s
 
 ### Data protection
 
-**P-01. "Cancel deletion request" does nothing, and the email says otherwise.** Critical. **VERIFIED**
+**P-01. "Cancel deletion request" does nothing, and the email says otherwise.** Critical. **CLOSED** (`a07a0813`)
 
 `request_account_deletion` (`supabase/migrations/20260810120000_guest_first_last_names.sql:250-286`) anonymises at request time: it overwrites `first_name`, `last_name` and `email`, nulls `phone`, and sets `user_id = NULL` on every guest row. `cancel_account_deletion` (`supabase/migrations/20260629120000_user_accounts_foundation.sql:466-482`) clears `user_profiles.deleted_at` and restores nothing.
 
@@ -100,7 +152,7 @@ This is both a data-integrity defect and a statement to data subjects that is no
 
 *Fix:* move all anonymisation out of the RPC into the hard-delete cron. The RPC should set `deleted_at` only.
 
-**P-02. GDPR erasure stalls silently and permanently.** High. **VERIFIED**
+**P-02. GDPR erasure stalls silently and permanently.** High. **CLOSED** (`a07a0813`)
 
 `src/app/api/cron/account-hard-delete/route.ts:52` writes `name: 'Deleted User'`. `guests.name` was dropped at `supabase/migrations/20260810120000_guest_first_last_names.sql:117`. This is the only remaining writer of that column anywhere in the codebase.
 
@@ -108,7 +160,7 @@ Currently masked because P-01 already nulled `user_id`, so the query returns no 
 
 *Fix:* remove the `name` write. Then fix P-01, which is what actually makes this path reachable.
 
-**P-03. A linked venue can enumerate the other venue's entire client list.** Critical. **REPORTED**
+**P-03. A linked venue can enumerate the other venue's entire client list.** Critical. **CLOSED** (`b2c70c3f`)
 
 `src/app/api/venue/linked-calendar/guests/route.ts:38-49` filters on `venue_id` alone, with no requirement that the guest has any relationship to the calling venue. Prefix searching walks the whole book. The backing RLS policy grants SELECT on all of the other venue's guest rows.
 
@@ -116,7 +168,7 @@ Two salons link so a stylist can rent a chair; one exports the other's client li
 
 *Fix:* restrict to guests with a booking on a calendar in scope for the caller, or require an exact email or phone match rather than substring search.
 
-**P-04. The linked-venue PII gate is defeated in the same response that applies it.** High. **REPORTED**
+**P-04. The linked-venue PII gate is defeated in the same response that applies it.** High. **CLOSED** (`48185536`)
 
 `src/app/api/venue/bookings/[id]/route.ts:380` redacts the `guest` object for a `pii = false` linked viewer and then spreads the raw booking row into the same JSON, returning `guest_first_name`, `guest_last_name`, `guest_email`, `guest_phone`, `special_requests`, `dietary_notes` and `internal_notes`. `src/app/api/venue/linked-calendar/route.ts:404-405` returns `special_requests` and `internal_notes` gated on `fullDetails` only, nine lines above correctly gating email and phone on `canSeePii`.
 
@@ -124,7 +176,7 @@ Dietary and health notes are special-category data.
 
 *Fix:* project explicitly rather than spreading; gate free-text fields on the PII flag alongside contact details.
 
-**P-05. Booking snapshots including PII are retained permanently and survive unlinking.** High. **REPORTED**
+**P-05. Booking snapshots including PII are retained permanently and survive unlinking.** High. **CLOSED** (`47ad782a`)
 
 `supabase/migrations/20260919120000_linked_accounts.sql:356-375` stores `to_jsonb(NEW)` and `to_jsonb(OLD)` of the booking row into `account_link_audit_log`, which is append-only, explicitly retained after link termination, and readable by staff of both venues. Because bookings carry guest name, email, phone and free text, each audit row is a permanent copy of the customer's identity and notes, still readable by the other venue after the relationship ends. No erasure path touches this table.
 
@@ -159,11 +211,19 @@ The amplifier is the portal: `hydrateAccountBookingRow` mints a manage link for 
 
 `claim_user_account()` (`supabase/migrations/20261101120500_claim_links_guests_by_email.sql`) links every unlinked guest row whose email matches the caller's, with no `email_confirmed_at` check. `ensureAuthUserForEmail` creates users with `email_confirm: false`. The committed `supabase/config.toml` has `enable_confirmations = false`.
 
-Where confirmations are off, signing up as someone else's address inherits their full cross-venue history, phone number and spend on first login. **The production setting lives in the Supabase dashboard and is not in this repository**, so the production posture is unknown from the code and must be checked directly.
+**Confirmed 2026-08-06: "Confirm email" is OFF in the production Supabase project.** So this is live, not latent. Signing up as someone else's address inherits their full cross-venue history, phone number and spend on first login.
 
-This also matters beyond takeover: `guests.user_id` is the sole key behind every access-control decision in the portal, and it is set by unverified string equality. A receptionist's typo assigns a booking to whoever owns the mistyped address.
+The exposed population is guests with an email and no `user_id`, which in practice means **CSV-imported clients**: online and staff bookings already provision an auth user, and an existing auth user makes the attacking signup fail. Size it before acting, with `SELECT count(*) FROM guests WHERE user_id IS NULL AND email IS NOT NULL`.
 
-*Fix:* add the `email_confirmed_at` condition to the claim, and assert the confirmation setting per environment.
+Impact is lower than it first reads. There are no saved cards and no payment history to take. What an attacker gets is someone's appointment history, phone number, and the ability to cancel their bookings. It also requires targeting a specific person known to be a client of a ResNeo venue, so it is not opportunistic.
+
+This also matters beyond takeover, and this part is the more likely harm: `guests.user_id` is the sole key behind every access-control decision in the portal, and it is set by unverified string equality on every login. A receptionist mistyping a client's email assigns that booking to whoever owns the typo'd address. That is a data-entry error, not an attack, and those happen constantly. It is currently invisible only because nobody uses the portal.
+
+**CORRECTION. The fix originally recorded here was wrong and must not be applied.** Adding an `email_confirmed_at` condition to `claim_user_account` would, with confirmations off, match zero users and **empty every customer's portal on their next login**. Three workable options instead:
+
+1. **Require magic-link provenance in the claim.** Supabase access tokens carry an `amr` claim recording how the session was established. Linking guest rows demands proof of inbox ownership; a magic link is that proof and a password is not. Existing users are unaffected except that password-only sessions stop linking *new* venues. Preferred.
+2. **Backfill existing users as confirmed, then require it.** Grandfathers everyone in, closes it for new signups.
+3. **Turn "Confirm email" on.** Cleanest security-wise, but venue owners sign up with `supabase.auth.signUp` (password), so it inserts a confirmation step into the paid conversion funnel. That is a commercial decision, not an engineering one.
 
 **S-04. Staff RLS policies ignore revocation and apply to every command.** High. **VERIFIED**
 
@@ -324,3 +384,4 @@ When portal work resumes, the recommended shape is a strangler rather than a reb
 | Date | Change |
 | --- | --- |
 | 2026-08-06 | Created from nine adversarial review passes. Portal plan deferred behind Tier 0. |
+| 2026-08-06 | Closed `P-01` to `P-05` and `G11c`. Added `§3A` (status and trigger gating) and `§3B` (findings this register over-stated). **Corrected `S-03`: the fix originally recorded would have emptied every customer portal, because Confirm email is off in production and no user carries `email_confirmed_at`.** Delivered reminder delivery reconciliation, which was not a register item. |

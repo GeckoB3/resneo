@@ -1,6 +1,6 @@
 # ResNeo Remediation Register
 
-**Status:** Open. 51 findings: 8 closed, 43 open, **none live today**. Everything remaining is gated behind enabling a feature (see §3A and the summary table in §3C). `G11c` in the closed list came from the portal plan, not this register, so it is not in that count.
+**Status:** Open. 51 findings: 9 closed, 42 open, **none live today**. Everything remaining is gated behind enabling a feature (see §3A and the summary table in §3C). `G11c` in the closed list came from the portal plan, not this register, so it is not in that count.
 **Created:** 2026-08-06
 **Last reconciled against the code:** 2026-08-06
 **Supersedes as primary artifact:** `Resneo_Customer_Portal_World_Class_Plan.md` (see §9)
@@ -56,7 +56,7 @@ Since this register was written, three facts changed what is urgent. None of the
 
 **Almost nobody uses the customer portal.** Most of `C-*` and all of `Q-*` describe a surface with no traffic.
 
-**Confirm email is off in the production Supabase project.** This was unknown when the register was written. It makes `S-03` live rather than latent, and it makes the fix recorded against `S-03` actively wrong. See the corrected entry.
+**Confirm email is off in the production Supabase project.** This was unknown when the register was written and made `S-03` live rather than latent. Now closed by requiring `email_confirmed_at` in the claim. The setting itself is unchanged, so a password signup still returns a session immediately; it just cannot inherit anyone's records.
 
 **Linked accounts go live imminently.** This is why `P-03` through `P-05` were done first.
 
@@ -73,6 +73,7 @@ Since this register was written, three facts changed what is urgent. None of the
 | `S-02` Open redirect off `/login` | `LIVE-FIX` |
 | `Q-17` Stale staff calendar cache | `LIVE-FIX` |
 | `C-07` Guest merge discarded the account link | `LIVE-FIX` |
+| `S-03` Guest rows claimed by unverified email | `LIVE-FIX` |
 
 Also delivered, and **not** originally in this register: reminder and confirmation delivery reconciliation (`83b4997d`). `communication_logs` can only account for sends that were attempted; this detects bookings that generated nothing at all, which was the failure mode with no observer.
 
@@ -84,7 +85,6 @@ Also delivered, and **not** originally in this register: reminder and confirmati
 | **Before enabling deposits or payments** | `M-01` to `M-05`, plus the characterisation tests in §7. `M-02` is the one that will bite first: it needs no race and customers find it by accident. |
 | **Before promoting the customer portal** | `C-01` to `C-06`, `C-08` to `C-12`, and all of `Q-*`. |
 | **Before enabling memberships** | `Q-13`. Now more pressing: `a07a0813` made `deleteUser` genuinely run, so a deleted account with a live subscription keeps being billed. |
-| **Needs a decision, not a fix** | `S-03`. See the corrected entry below. |
 | **Scale-triggered, not urgent** | `S-01`, `Q-24`. See §3B. |
 
 ---
@@ -105,7 +105,7 @@ Recorded honestly, because a register that cries wolf gets ignored.
 
 Every finding, its state, and what has to happen for an open one to matter. This is the table to scan; the detail is in §4 to §6.
 
-### Closed (8)
+### Closed (9)
 
 | ID | Finding | Closed by | Verified |
 | --- | --- | --- | --- |
@@ -115,25 +115,25 @@ Every finding, its state, and what has to happen for an open one to matter. This
 | `P-04` | Booking response defeated its own PII redaction | `48185536` | Tests |
 | `P-05` | Audit log kept client PII permanently, readable after unlink | `47ad782a` | Staging DB |
 | `S-02` | Open redirect off `/login` via backslash and control characters | `LIVE-FIX` | Tests, executed against the URL parser |
+| `S-03` | Guest rows claimed by unverified email; 677 records were claimable | `LIVE-FIX` | Diff proof, migration not yet run |
 | `Q-17` | Stale staff calendar cache, up to 165s | `LIVE-FIX` | Build |
 | `C-07` | Guest merge silently discarded the customer's account link | `LIVE-FIX` | Diff proof, migration not yet run |
 
 Plus reminder delivery reconciliation (`83b4997d`), which was never a register finding but was the largest real gap.
 
-### Open (43)
+### Open (42)
 
 | Gate | Count | IDs | Why it cannot bite yet |
 | --- | --- | --- | --- |
 | **Enabling deposits or payments** | 5 | `M-01` to `M-05` | No venue takes payments. `M-02` will bite first: no race needed, customers find it by accident |
 | **Promoting the customer portal** | 33 | `C-01` to `C-06`, `C-08` to `C-12`, `Q-01` to `Q-12`, `Q-14` to `Q-16`, `Q-18` to `Q-23`, `Q-25` | Almost nobody uses the portal |
 | **Enabling memberships** | 1 | `Q-13` | No memberships exist. Note `a07a0813` made `deleteUser` genuinely run, so a deleted account with a live subscription would now keep billing |
-| **A decision, not a fix** | 1 | `S-03` | Live, but the fix is a choice between three options with different costs. See the entry |
 | **Reaching roughly 50x current volume** | 2 | `S-01`, `Q-24` | Arithmetic in §3B |
 | **Staff RLS hardening** | 1 | `S-04` | Prerequisite for any customer policy on `bookings`, which is portal work |
 
-### The one open finding that is live
+### Nothing open is live
 
-`S-03`. Confirm email is off in production, so claiming guest rows by unverified email is exploitable today. It is not in the "live" fix list above because the fix recorded originally was wrong and the replacement is a decision rather than a patch. The likelier harm is mundane: a mistyped email assigns a booking to whoever owns the typo.
+Every remaining finding needs a feature enabled, a scale increase, or portal traffic before it can bite. `S-03` was the last live one and is now closed.
 
 ---
 
@@ -258,7 +258,7 @@ The amplifier is the portal: `hydrateAccountBookingRow` mints a manage link for 
 
 Nineteen tests added, with attack strings built from character codes so that shell or editor escaping cannot quietly neuter the payload. That mattered: the original report of this finding did not reproduce until it was retested without shell escaping (see §8).
 
-**S-03. Guest rows are claimed by unverified email on every login.** High. **VERIFIED**
+**S-03. Guest rows are claimed by unverified email on every login.** High. **CLOSED**
 
 `claim_user_account()` (`supabase/migrations/20261101120500_claim_links_guests_by_email.sql`) links every unlinked guest row whose email matches the caller's, with no `email_confirmed_at` check. `ensureAuthUserForEmail` creates users with `email_confirm: false`. The committed `supabase/config.toml` has `enable_confirmations = false`.
 
@@ -270,11 +270,17 @@ Impact is lower than it first reads. There are no saved cards and no payment his
 
 This also matters beyond takeover, and this part is the more likely harm: `guests.user_id` is the sole key behind every access-control decision in the portal, and it is set by unverified string equality on every login. A receptionist mistyping a client's email assigns that booking to whoever owns the typo'd address. That is a data-entry error, not an attack, and those happen constantly. It is currently invisible only because nobody uses the portal.
 
-**CORRECTION. The fix originally recorded here was wrong and must not be applied.** Adding an `email_confirmed_at` condition to `claim_user_account` would, with confirmations off, match zero users and **empty every customer's portal on their next login**. Three workable options instead:
+*Closed by:* migration `20270103123000`. The claim now requires `auth.users.email_confirmed_at`, which is proof the caller holds the inbox. Generated by splicing into the previous definition; the diff is additions only.
 
-1. **Require magic-link provenance in the claim.** Supabase access tokens carry an `amr` claim recording how the session was established. Linking guest rows demands proof of inbox ownership; a magic link is that proof and a password is not. Existing users are unaffected except that password-only sessions stop linking *new* venues. Preferred.
-2. **Backfill existing users as confirmed, then require it.** Grandfathers everyone in, closes it for new signups.
-3. **Turn "Confirm email" on.** Cleanest security-wise, but venue owners sign up with `supabase.auth.signUp` (password), so it inserts a confirmation step into the paid conversion funnel. That is a commercial decision, not an engineering one.
+**Measured on production before the change:** 677 guest rows carry an email, have no `user_id`, and have **no corresponding auth.users row**. Every one was claimable by a signup. They are predominantly CSV-imported clients.
+
+**This entry was wrong twice, in opposite directions, and the sequence is worth recording.** The original fix note said to add the `email_confirmed_at` condition. That was then "corrected" on the reasoning that no user carries the flag, so the condition would match nobody and empty every customer portal. That correction was itself wrong: the statement is `WHERE g.user_id IS NULL`, so it only ever fills blanks and cannot unlink anyone. Existing portals were never at risk. Production data also showed 56 of 354 users do carry the flag, set by using a magic link.
+
+The real cost is narrow: the 298 users without the flag will not have a **new** guest row at a **new** venue linked until they next click a magic link, which sets it permanently. Self-healing, and the magic link is already in every booking confirmation.
+
+*Deliberately not done:* backfilling `email_confirmed_at` for existing users. It would remove even that friction, but it means asserting something untrue in an auth table to spare 298 people a degradation most will never meet.
+
+*Still true, and not fixed by this:* `guests.user_id` is set by string equality on an email address, so a mistyped address at the counter still assigns a booking to whoever owns the typo. That is a data-entry problem rather than an attack, and it becomes visible when portal usage grows.
 
 **S-04. Staff RLS policies ignore revocation and apply to every command.** High. **VERIFIED**
 
@@ -444,3 +450,5 @@ When portal work resumes, the recommended shape is a strangler rather than a reb
 | 2026-08-06 | Created from nine adversarial review passes. Portal plan deferred behind Tier 0. |
 | 2026-08-06 | Closed `P-01` to `P-05` and `G11c`. Added `§3A` (status and trigger gating) and `§3B` (findings this register over-stated). **Corrected `S-03`: the fix originally recorded would have emptied every customer portal, because Confirm email is off in production and no user carries `email_confirmed_at`.** Delivered reminder delivery reconciliation, which was not a register item. |
 | 2026-08-06 | Accuracy pass. Rewrote every closed entry to record what actually shipped rather than the fix originally proposed; four of the five differed, `P-03` and `P-05` materially. Added `CLOSED` to the status key. Corrected the `Q-17` mechanism (the cache is `private`, so staff never share it) and flagged `Q-13` as now reachable. Extended §8 with three further claims that did not survive checking, including this document's own assertion that delivery monitoring did not exist. Fixed the finding count in the header. |
+| 2026-08-06 | Fixed the three live findings (`S-02`, `Q-17`, `C-07`) and added the §3C summary table. |
+| 2026-08-06 | Closed `S-03` after measuring production: all 677 unlinked guest rows with an email had no auth user, so every one was claimable. **Recorded that this entry was wrong twice in opposite directions**: the original fix was mechanically right, the correction to it was not, because the claim only fills NULLs and cannot unlink anyone. No finding is now live. |

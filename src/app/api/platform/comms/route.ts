@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformAuthFailure, requirePlatformSuperuserAuth } from '@/lib/platform-api-auth';
 import { resolveSmsBillingPeriod } from '@/lib/sms-usage';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { loadDeliveryHealth } from '@/lib/communications/delivery-health';
 
 function maskRecipient(recipient: string | null): string {
   if (!recipient) return '—';
@@ -205,6 +206,17 @@ export async function GET(req: NextRequest) {
     const smsTotal = smsTotalRes.count ?? 0;
     const smsFailed = smsFailedRes.count ?? 0;
 
+    // Counting rows by status only sees sends that were attempted. A send that
+    // threw before the log row was written leaves nothing to count, and the cron
+    // still reports a clean run. This reconciles against bookings instead.
+    // Never fail the whole page on it: the status counts above are still useful.
+    let deliveryHealth: Awaited<ReturnType<typeof loadDeliveryHealth>> | null = null;
+    try {
+      deliveryHealth = await loadDeliveryHealth(admin, { windowDays: days });
+    } catch (healthErr) {
+      console.error('[platform/comms] delivery health:', healthErr);
+    }
+
     return NextResponse.json({
       window_days: days,
       summary: {
@@ -215,7 +227,31 @@ export async function GET(req: NextRequest) {
         sms_failed: smsFailed,
         sms_failure_rate_pct: smsTotal > 0 ? Math.round((smsFailed / smsTotal) * 1000) / 10 : 0,
         pending: pendingRes.count ?? 0,
+        uncommunicated_bookings: deliveryHealth?.uncommunicated_count ?? null,
+        stuck_pending: deliveryHealth?.stuck_pending_count ?? null,
       },
+      delivery_health: deliveryHealth
+        ? {
+            window_days: deliveryHealth.window_days,
+            stuck_after_hours: deliveryHealth.stuck_after_hours,
+            uncommunicated: deliveryHealth.uncommunicated.map((b) => ({
+              booking_id: b.booking_id,
+              venue_name: venueNameById.get(b.venue_id) ?? 'Deleted venue',
+              booking_date: b.booking_date,
+              booking_time: b.booking_time,
+              status: b.status,
+              recipient_masked: maskRecipient(b.guest_email),
+            })),
+            stuck_pending: deliveryHealth.stuck_pending.map((r) => ({
+              id: r.id,
+              venue_name: venueNameById.get(r.venue_id) ?? 'Deleted venue',
+              message_type: r.message_type,
+              channel: r.channel,
+              age_hours: r.age_hours,
+              created_at: r.created_at,
+            })),
+          }
+        : null,
       recent_failures: failures.map((f) => ({
         id: f.id,
         venue_name: f.venue_id ? venueNameById.get(f.venue_id) ?? '—' : '—',

@@ -2,6 +2,7 @@
  * DB trigger; read-events are recorded here, debounced to 5-minute windows. */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { buildBookingAuditSnapshot } from '@/lib/linked-accounts/redact-booking-pii';
 
 const READ_DEBOUNCE_MS = 5 * 60 * 1000;
 
@@ -101,8 +102,13 @@ export async function recordBookingWriteAudit(params: BookingWriteAuditParams): 
       action_type: actionType,
       resource_type: 'booking',
       resource_id: bookingId,
-      before_state: beforeState,
-      after_state: afterState,
+      // Callers pass whole booking rows, which carry the client's name, contact
+      // details and free text. This table is append-only, visible to both venues
+      // and outlives the link, so only operational fields are retained. A DB
+      // trigger enforces the same projection; this keeps the PII from leaving
+      // the application at all.
+      before_state: buildBookingAuditSnapshot(beforeState),
+      after_state: buildBookingAuditSnapshot(afterState),
     });
     if (error) {
       console.error('[linked-accounts] recordBookingWriteAudit insert failed:', error.message);

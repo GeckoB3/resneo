@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   BOOKING_PII_FIELDS,
+  buildBookingAuditSnapshot,
   linkedViewerMustNotSeePii,
   redactBookingPiiFields,
   redactCommunicationRecipients,
@@ -86,6 +87,55 @@ describe('redactCommunicationRecipients', () => {
 
   it('handles an empty list', () => {
     expect(redactCommunicationRecipients([])).toEqual([]);
+  });
+});
+
+describe('buildBookingAuditSnapshot', () => {
+  it('keeps the operational fields the audit exists to record', () => {
+    const out = buildBookingAuditSnapshot(bookingRow());
+
+    expect(out).toMatchObject({
+      id: 'b1',
+      venue_id: 'v1',
+      booking_date: '2026-08-10',
+      booking_time: '14:00',
+      status: 'Booked',
+    });
+  });
+
+  it('drops every identifying field, since this table outlives the link', () => {
+    const out = buildBookingAuditSnapshot(bookingRow())!;
+
+    for (const field of BOOKING_PII_FIELDS) {
+      expect(field in out).toBe(false);
+    }
+  });
+
+  it('fails closed on an unknown field, so a new PII column is excluded by default', () => {
+    const out = buildBookingAuditSnapshot({
+      ...bookingRow(),
+      guest_national_insurance_number: 'QQ123456C',
+    })!;
+
+    expect('guest_national_insurance_number' in out).toBe(false);
+  });
+
+  it('passes null through so an absent state stays absent', () => {
+    expect(buildBookingAuditSnapshot(null)).toBeNull();
+    expect(buildBookingAuditSnapshot(undefined)).toBeNull();
+  });
+
+  it('omits allow-listed fields that are not present, rather than inventing nulls', () => {
+    const out = buildBookingAuditSnapshot({ id: 'b1', status: 'Booked' })!;
+
+    expect(out).toEqual({ id: 'b1', status: 'Booked' });
+  });
+
+  it('does not mutate its input', () => {
+    const input = bookingRow();
+    buildBookingAuditSnapshot(input);
+
+    expect(input.guest_email).toBe('ann@example.test');
   });
 });
 

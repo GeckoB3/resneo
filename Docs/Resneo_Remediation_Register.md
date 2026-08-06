@@ -1,8 +1,11 @@
 # ResNeo Remediation Register
 
-**Status:** Open
+**Status:** Open. 51 findings: 5 closed, 46 open, of which 3 are live today (see §3A). `G11c` in the closed table below came from the portal plan, not this register, so it is not in that count.
 **Created:** 2026-08-06
+**Last reconciled against the code:** 2026-08-06
 **Supersedes as primary artifact:** `Resneo_Customer_Portal_World_Class_Plan.md` (see §9)
+
+> Read §3A before acting on anything below. Sections 4 to 6 rank findings by severity *if triggered*, and most of them cannot currently be triggered. §3B records the ones this document originally over-stated.
 
 ---
 
@@ -25,6 +28,7 @@ Every finding below carries a verification status:
 | Status | Meaning |
 | --- | --- |
 | **VERIFIED** | Traced directly against the code or executed, by the author of this register, not only reported |
+| **CLOSED** | Fixed and pushed. The description is kept as a record of what was wrong; the *Closed by* line states what actually shipped, which in several cases differs from the fix originally proposed |
 | **REPORTED** | Found by a review pass with a specific file and line, but not independently re-traced. Treat the mechanism as credible and the exact blast radius as unconfirmed |
 
 Where a claim was checked and did **not** survive, it is recorded in §8 rather than silently dropped. One reported open-redirect variant needed re-testing before it held, and several plan claims turned out to be wrong; both are recorded.
@@ -150,23 +154,27 @@ The confirmation email tells the customer they can cancel before the deletion da
 
 This is both a data-integrity defect and a statement to data subjects that is not true.
 
-*Fix:* move all anonymisation out of the RPC into the hard-delete cron. The RPC should set `deleted_at` only.
+*Closed by:* the RPC now marks intent only and no longer touches identity. It deliberately **keeps** the marketing opt-out, which the original fix note missed: asking to be deleted is an unambiguous objection to marketing, and keeping it there means the existing consent checks keep suppressing during the grace period without a second gate, while operational messages about a live booking continue. `cancel_account_deletion` is unchanged and deliberately does not restore marketing consent.
+
+*Not fixed, and unfixable:* rows anonymised by the old behaviour are unrecoverable.
 
 **P-02. GDPR erasure stalls silently and permanently.** High. **CLOSED** (`a07a0813`)
 
 `src/app/api/cron/account-hard-delete/route.ts:52` writes `name: 'Deleted User'`. `guests.name` was dropped at `supabase/migrations/20260810120000_guest_first_last_names.sql:117`. This is the only remaining writer of that column anywhere in the codebase.
 
-Currently masked because P-01 already nulled `user_id`, so the query returns no rows. It becomes live as soon as a customer books again during the 30-day window and their `user_id` is re-linked: the update then fails with `PGRST204`, the cron skips `deleteUser`, and the request fails on every subsequent run, visible only in logs. Erasure never completes and nobody is told.
+It was masked because P-01 already nulled `user_id`, leaving the loop with no rows. It would have become live the moment a customer booked again during the 30-day window and their `user_id` was re-linked: the update fails with `PGRST204`, the cron skips `deleteUser`, and the request fails on every subsequent run, visible only in logs.
 
-*Fix:* remove the `name` write. Then fix P-01, which is what actually makes this path reachable.
+*Closed by:* the write is now `first_name` / `last_name`. Because fixing P-01 made this path genuinely execute for the first time, the cron also gained a per-user recheck of `deleted_at` immediately before anonymising, since a batch of 100 takes time to work through and anonymisation is irreversible. Cancellations racing the cron are now reported rather than silent. Nine tests added; the path previously had none.
 
 **P-03. A linked venue can enumerate the other venue's entire client list.** Critical. **CLOSED** (`b2c70c3f`)
 
-`src/app/api/venue/linked-calendar/guests/route.ts:38-49` filters on `venue_id` alone, with no requirement that the guest has any relationship to the calling venue. Prefix searching walks the whole book. The backing RLS policy grants SELECT on all of the other venue's guest rows.
+`src/app/api/venue/linked-calendar/guests/route.ts` filtered on `venue_id` alone, with no requirement that the guest had any relationship to the calling venue, and an empty query returned the first 20 clients alphabetically.
 
-Two salons link so a stylist can rent a chair; one exports the other's client list with email addresses. None of those clients visited the second venue, were told about the link, or consented.
+**Two corrections to the original entry.** First, the access gate was stronger than recorded: the route already required a live link with `create_edit_cancel` **and** `pii`, not merely any link. Second, and more importantly, the exposure was not reachable, because both linked-calendar routes selected `guests.name`, a column dropped in `20260810120000`. Neither query could succeed, so the cross-venue booking form had never worked and the UI rendered the failure as an empty result list.
 
-*Fix:* restrict to guests with a booking on a calendar in scope for the caller, or require an exact email or phone match rather than substring search.
+That made the obvious repair the worst available option: fixing the dead column alone would have armed the enumeration.
+
+*Closed by:* both changes together. Queries below two characters now return empty without touching the database, and email matches on prefix rather than substring, since a leading wildcard is the enumeration primitive. The scoping option recorded in the original fix note was **rejected**: restricting to guests with an existing booking would break the legitimate case of booking a client the renting venue has not seen before.
 
 **P-04. The linked-venue PII gate is defeated in the same response that applies it.** High. **CLOSED** (`48185536`)
 
@@ -174,17 +182,19 @@ Two salons link so a stylist can rent a chair; one exports the other's client li
 
 Dietary and health notes are special-category data.
 
-*Fix:* project explicitly rather than spreading; gate free-text fields on the PII flag alongside contact details.
+*Closed by:* a shared redaction helper covering the booking PII fields and `communications[].recipient`, which was also going out unredacted and is literally the email address or phone number. The sibling route's free-text fields now gate on `canSeePii`. The field list lives in one place because the root cause was drift between a redaction and the payload it guarded.
+
+*Deliberately not decided:* whether a linked venue should see `internal_notes` even **with** the PII grant. It is the host venue's private staff commentary; that is a policy question, not a leak fix.
 
 **P-05. Booking snapshots including PII are retained permanently and survive unlinking.** High. **CLOSED** (`47ad782a`)
 
 `supabase/migrations/20260919120000_linked_accounts.sql:356-375` stores `to_jsonb(NEW)` and `to_jsonb(OLD)` of the booking row into `account_link_audit_log`, which is append-only, explicitly retained after link termination, and readable by staff of both venues. Because bookings carry guest name, email, phone and free text, each audit row is a permanent copy of the customer's identity and notes, still readable by the other venue after the relationship ends. No erasure path touches this table.
 
-*Fix:* store a redacted diff rather than whole rows, and add the table to the erasure manifest.
+*Closed by:* a `BEFORE INSERT OR UPDATE` trigger on the audit table itself, projecting any booking snapshot through an allow-list. Enforcement sits on the table rather than in each of the three writers, so future writers are covered too, and it avoided reproducing a 140-line trigger body containing authorisation logic. Deliberately an allow-list, not the diff originally suggested: for a permanent cross-venue store a PII column added later must be excluded by default. Existing rows were projected in place, which is irreversible by design. Verified against the staging database.
 
 ### Security
 
-**S-01. Manage links are guessable and unthrottled, and the portal manufactures them.** Critical. **VERIFIED**
+**S-01. Manage links are guessable and unthrottled, and the portal manufactures them.** Critical if exploitable. **VERIFIED**, but **see §3B: not realistic at current volume.**
 
 `generateBookingShortLinkCode(length = 6)` produces about 35.7 bits in one global namespace, with modulo bias from `BASE62[buf[i] % 62]` making eight characters 25 percent more likely. `src/app/b/[code]/route.ts` has no rate limiting and, on a hit, mints a fresh 30-day HMAC and redirects to `/manage/{id}?hmac=`, which grants cancel, reschedule and refund with no login.
 
@@ -235,9 +245,9 @@ This also matters beyond takeover, and this part is the more likely harm: `guest
 
 ## 5. Tier 1: portal correctness
 
-Cheap, high user impact, no dependency on Tier 0.
+Cheap, and no dependency on Tier 0. Note that "high user impact" would be wrong today: almost nobody uses the portal, so these gate promoting it rather than blocking anything now. `C-07` is the exception and is live, because it silently discards data on every guest merge.
 
-**C-01. A short-link collision 500s the entire bookings list.** High. **VERIFIED**
+**C-01. A short-link collision 500s the entire bookings list.** High. **VERIFIED**, but **see §3B: requires concurrency that current volume makes rare.**
 
 The unique index is on `(booking_id, purpose) WHERE revoked_at IS NULL`, not on `code`. On a `23505` the retry loop in `src/lib/booking-short-links.ts:121-147` generates a fresh random *code* for the same `(booking_id, purpose)`, which collides identically. All twelve attempts fail and it throws, unguarded, inside two nested `Promise.all` calls in `src/lib/account/account-bookings.ts`. A link prefetch racing a click is enough. The customer loses their whole booking history to a link they never used.
 
@@ -323,11 +333,11 @@ Real, but none blocks the others.
 | Q-10 | Zero design-system primitive imports; 22 hand-rolled buttons; `window.confirm` in two places; three different confirmation models | Medium | VERIFIED |
 | Q-11 | Saved cards can be added but never removed. No detach route exists | Medium | VERIFIED |
 | Q-12 | No customer-facing data export route exists at all. The venue-side export misses compliance records, communication logs, booking free text and everything keyed on `user_id` | Medium | REPORTED |
-| Q-13 | Stripe subscriptions and connected-account customers survive account deletion; a live subscription keeps billing after the local pointer is deleted | High | REPORTED |
+| Q-13 | Stripe subscriptions and connected-account customers survive account deletion; a live subscription keeps billing after the local pointer is deleted. **Now reachable**: `a07a0813` made `deleteUser` genuinely run for the first time | High | REPORTED |
 | Q-14 | No retention policy or purge exists anywhere, while `/privacy` tells data subjects retention follows venue settings that do not exist | Medium | REPORTED |
 | Q-15 | Raw Stripe and database enum values rendered to consumers (`past_due`, `trialing`), plus "the nightly cron will start materialising bookings" and "Connect customer" | Medium | VERIFIED |
 | Q-16 | The Locale setting is written to the database and never read; the section promises it affects date display | Medium | VERIFIED |
-| Q-17 | `venue/appointment-calendar` still returns `max-age=45` on an authenticated response while the rest of the catalog migrated to `no-store`. Same class as the known staleness incident | Medium | VERIFIED |
+| Q-17 | `venue/appointment-calendar` still returns `max-age=45` on an authenticated response while the rest of the catalog migrated to `no-store`. The cache is `private`, so two staff never share it; the real case is one person returning to a view up to 165s stale. Endpoint is user-driven, not polled, so `no-store` will not materially raise load | Medium | VERIFIED |
 | Q-18 | Zero explicit cache headers across 26 authenticated account routes, against a codebase convention with a named `NO_STORE_HEADERS` constant used in nine other route groups | Medium | VERIFIED |
 | Q-19 | Loyalty is a shipped staff feature with no customer surface: staff award points via `/api/venue/guests/[guestId]/loyalty`, customers cannot see a balance | Medium | VERIFIED |
 | Q-20 | No concept of booking for a dependant. `person_label` exists and is never rendered. Dominant pattern in clinics and class studios | Medium | VERIFIED |
@@ -362,6 +372,9 @@ Recorded so they are not re-raised.
 - **HMAC manage tokens and confirm tokens.** Sound. Constant-time comparison, embedded expiry, hashed at rest, single-use where intended.
 - **The `idx_guests_user_venue` index concern** raised in the portal plan. The index leads with `user_id`. It is the right index; the doubt was invented.
 - **An open-redirect variant** initially reported did not reproduce until re-tested without shell escaping. It then held. Recorded because the first negative result was a testing artifact, not evidence of safety.
+- **"There is no monitoring of communication delivery."** False, and stated more than once before it was checked. `/super/comms` already tracked email and SMS failure rates, a pending count, recent failures with error messages and a per-venue failure leaderboard; `/super/system` already surfaced `cron_runs`. The genuine gap was narrower: neither can see a send that was never attempted, because no row exists to count. That is what `83b4997d` addresses.
+- **The `/api/venue/linked-calendar/guests` access gate.** Reported as "any linked venue", which overstated it. The route already required a live link with `create_edit_cancel` and `pii`. The enumeration was real; the population who could perform it was smaller than reported.
+- **Two-controls framing in the deferred portal plan.** Its claim that an RLS policy plus the application filter gives two independent controls is false: both reduce to `guests.user_id = auth.uid()`, which `S-03` shows is set by unverified email equality. One control, implemented twice.
 
 ---
 
@@ -385,3 +398,4 @@ When portal work resumes, the recommended shape is a strangler rather than a reb
 | --- | --- |
 | 2026-08-06 | Created from nine adversarial review passes. Portal plan deferred behind Tier 0. |
 | 2026-08-06 | Closed `P-01` to `P-05` and `G11c`. Added `§3A` (status and trigger gating) and `§3B` (findings this register over-stated). **Corrected `S-03`: the fix originally recorded would have emptied every customer portal, because Confirm email is off in production and no user carries `email_confirmed_at`.** Delivered reminder delivery reconciliation, which was not a register item. |
+| 2026-08-06 | Accuracy pass. Rewrote every closed entry to record what actually shipped rather than the fix originally proposed; four of the five differed, `P-03` and `P-05` materially. Added `CLOSED` to the status key. Corrected the `Q-17` mechanism (the cache is `private`, so staff never share it) and flagged `Q-13` as now reachable. Extended §8 with three further claims that did not survive checking, including this document's own assertion that delivery monitoring did not exist. Fixed the finding count in the header. |

@@ -22,7 +22,7 @@ export function AuthMagicForm({
   redirect: string;
 }) {
   const [email, setEmail] = useState(initialEmail);
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error' | 'throttled'>('idle');
 
   async function sendMagicLink(targetEmail: string) {
     setStatus('sending');
@@ -34,6 +34,11 @@ export function AuthMagicForm({
         body: JSON.stringify({ email: trimmed, next: redirect }),
       });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; fallback?: boolean; error?: string };
+
+      if (res.status === 429) {
+        setStatus('throttled');
+        return;
+      }
 
       if (!res.ok) {
         setStatus('error');
@@ -122,6 +127,12 @@ export function AuthMagicForm({
         </button>
         {status === 'error' ? (
           <p className="text-sm text-red-700">Something went wrong. Try again shortly.</p>
+        ) : null}
+        {status === 'throttled' ? (
+          <p className="text-sm text-amber-800">
+            We have sent several sign-in links to this address already. Check your inbox and spam folder, then try
+            again in a few minutes.
+          </p>
         ) : null}
       </form>
     </div>

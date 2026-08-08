@@ -14,6 +14,7 @@ import {
   visitAnchorFromBooking,
 } from '@/lib/booking/payment-summary';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
+import { markBalancePaymentFailedForPaymentIntent } from '@/lib/booking/confirm-balance-payment';
 
 /** §5.7 — cap for staff-entered amounts when the price is unknown (£1,000). */
 const MAX_IN_PERSON_PENCE = 100_000;
@@ -28,7 +29,10 @@ function formatPenceForError(pence: number): string {
 
 const schema = z.object({
   method: z.enum(['card_present', 'cash', 'external']).optional(),
-  action: z.literal('refund').optional(), // admin-only; always full (v1, §6.3a)
+  // 'refund' is admin-only and always full (v1, §6.3a). 'cancel' abandons a card
+  // attempt whose collection never completed, so its pending row does not sit
+  // there warning staff about money that was never taken.
+  action: z.enum(['refund', 'cancel']).optional(),
   // Charges only — refunds ignore it. Omit = full balance (when known).
   // The MAX_IN_PERSON_PENCE cap is deliberately NOT a `.max()` here: a schema
   // breach fails parse and returns a bare `{ error: 'Invalid request' }`, which
@@ -39,6 +43,9 @@ const schema = z.object({
   // Keys the PI idempotency so equal-amount split payments never collide (§6.3c).
   attempt_id: z.string().uuid().optional(),
   payment_id: z.string().uuid().optional(), // refund: which ledger row
+  // cancel: which attempt. The PI id, not the row id — it is what the client
+  // holds from the charge response, and it is the ledger row's true identity.
+  payment_intent_id: z.string().min(1).max(255).optional(),
   note: z.string().max(500).optional(),
   // §7A.8 — which card-present channel collected it (reporting only).
   reader_type: z.enum(['tap_to_pay', 'bluetooth']).optional(),
@@ -81,7 +88,8 @@ export async function POST(
   }
   const input = parsed.data;
   const isRefund = input.action === 'refund';
-  if (!isRefund && !input.method) {
+  const isCancel = input.action === 'cancel';
+  if (!isRefund && !isCancel && !input.method) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
   // The £1,000 cap, enforced here rather than in the schema so a breach is
@@ -155,6 +163,121 @@ export async function POST(
       afterState,
     });
   };
+
+  // ---------------------------------------------------------------------------
+  // (a0) Cancel — abandon a card attempt whose collection never completed.
+  //
+  // WHY THIS EXISTS: the ledger row is written `pending` when the PaymentIntent
+  // is created, BEFORE the card is presented, and only a webhook moves it off
+  // `pending`. When staff cancel at the reader, the client cancels the
+  // *collection* — the PaymentIntent itself was left open, so no webhook ever
+  // fired and the row sat `pending` for ever. Staff were then warned that "a
+  // card payment started a while ago and still has not been confirmed" about
+  // money nobody had ever taken.
+  //
+  // Cancelling the PI here makes Stripe emit `payment_intent.canceled`, which
+  // this codebase ALREADY handles (webhook → markBalancePaymentFailedForPaymentIntent).
+  // The direct flip below is belt-and-braces for a webhook that is slow, or
+  // absent in local dev — it is the same idempotent, `pending`-guarded update.
+  //
+  // Not admin-gated: whoever may take the payment may abandon their own attempt.
+  // ---------------------------------------------------------------------------
+  if (isCancel) {
+    if (!input.payment_intent_id) {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    const { data: pendingData, error: pendingErr } = await staff.db
+      .from('booking_payments')
+      .select('id, booking_id, venue_id, stripe_connected_account_id, stripe_payment_intent_id, method, status, amount_pence, note')
+      .eq('stripe_payment_intent_id', input.payment_intent_id)
+      .eq('booking_id', id)
+      .maybeSingle();
+    if (pendingErr) {
+      console.error('[charge route] cancel payment load failed:', pendingErr.message, {
+        paymentIntentId: input.payment_intent_id,
+      });
+      return NextResponse.json({ error: 'Failed to load payment' }, { status: 500 });
+    }
+    const pending = pendingData as LedgerPaymentRow | null;
+    if (!pending) {
+      return NextResponse.json(
+        { error: 'No payment attempt was found to cancel.', code: 'not_found' },
+        { status: 404 },
+      );
+    }
+    // Anything already settled is the webhook's business, not ours. Refusing
+    // here is what stops a cancel racing a tap from burying a real payment.
+    if (pending.status !== 'pending') {
+      return NextResponse.json(
+        { error: 'This payment attempt is no longer in progress.', code: 'invalid_state' },
+        { status: 409 },
+      );
+    }
+    if (!pending.stripe_connected_account_id) {
+      return NextResponse.json(
+        { error: 'No Stripe payment was found for this ledger entry.', code: 'invalid_state' },
+        { status: 409 },
+      );
+    }
+
+    const stripeAccount = pending.stripe_connected_account_id;
+    try {
+      await stripe.paymentIntents.cancel(input.payment_intent_id, undefined, {
+        stripeAccount,
+        idempotencyKey: `cancel:${input.payment_intent_id}`,
+      });
+    } catch (cancelErr) {
+      // `payment_intent_unexpected_state` covers BOTH "already cancelled" and
+      // "already succeeded", which need opposite answers — so ask Stripe what
+      // the intent actually is rather than guessing from the error.
+      const code = (cancelErr as { code?: string } | null)?.code;
+      if (code !== 'payment_intent_unexpected_state') {
+        console.error('[charge route] PI cancel failed:', cancelErr, {
+          paymentIntentId: input.payment_intent_id,
+        });
+        return NextResponse.json(
+          { error: 'The payment attempt could not be cancelled.' },
+          { status: 502 },
+        );
+      }
+      let liveStatus: string | null = null;
+      try {
+        const live = await stripe.paymentIntents.retrieve(input.payment_intent_id, {
+          stripeAccount,
+        });
+        liveStatus = live.status;
+      } catch (retrieveErr) {
+        console.error('[charge route] PI retrieve after cancel failed:', retrieveErr, {
+          paymentIntentId: input.payment_intent_id,
+        });
+        return NextResponse.json(
+          { error: 'The payment attempt could not be cancelled.' },
+          { status: 502 },
+        );
+      }
+      if (liveStatus !== 'canceled') {
+        // Money may have moved after all (the client tapped as staff cancelled).
+        // Leave the row alone and keep warning — the webhook decides this one.
+        return NextResponse.json(
+          { error: 'This payment attempt is no longer in progress.', code: 'invalid_state' },
+          { status: 409 },
+        );
+      }
+      // Already cancelled in Stripe: fall through so our state converges.
+    }
+
+    await markBalancePaymentFailedForPaymentIntent(staff.db, input.payment_intent_id);
+    await recomputeBookingPaymentSummary(staff.db, id);
+
+    await auditCrossVenueWrite({
+      balance_payment_attempt_cancelled: true,
+      payment_intent_id: input.payment_intent_id,
+      amount_pence: pending.amount_pence,
+    });
+
+    return NextResponse.json({ success: true, cancelled: true });
+  }
 
   // ---------------------------------------------------------------------------
   // (a) Refund — admin-only, always the FULL amount of the chosen row (§6.3a).

@@ -22,7 +22,7 @@ vi.mock('@/lib/booking/staff-booking-access', () => ({
 
 vi.mock('@/lib/stripe', () => ({
   stripe: {
-    paymentIntents: { create: vi.fn() },
+    paymentIntents: { create: vi.fn(), cancel: vi.fn(), retrieve: vi.fn() },
     refunds: { create: vi.fn() },
   },
 }));
@@ -50,6 +50,8 @@ import {
 import { POST } from './route';
 
 const mockPiCreate = vi.mocked(stripe.paymentIntents.create);
+const mockPiCancel = vi.mocked(stripe.paymentIntents.cancel);
+const mockPiRetrieve = vi.mocked(stripe.paymentIntents.retrieve);
 const mockRefundCreate = vi.mocked(stripe.refunds.create);
 const mockGetVenueStaff = vi.mocked(getVenueStaff);
 const mockLoadBooking = vi.mocked(loadStaffAccessibleBooking);
@@ -524,5 +526,108 @@ describe('charge route — refund (§6.3a, full-only)', () => {
     mockRefundCreate.mockRejectedValue(Object.assign(new Error('already'), { code: 'charge_already_refunded' }));
     const res = await post({ action: 'refund', payment_id: PAYMENT_ID });
     expect(res.status).toBe(200);
+  });
+});
+
+describe('charge route — cancel an abandoned card attempt (§6.3d)', () => {
+  const PI = 'pi_abandoned';
+  const pendingCardRow = (over: Row = {}): Row => ({
+    id: PAYMENT_ID,
+    booking_id: 'b1',
+    venue_id: 'v1',
+    stripe_connected_account_id: 'acct_SNAP',
+    stripe_payment_intent_id: PI,
+    method: 'card_present',
+    status: 'pending',
+    amount_pence: 100,
+    note: null,
+    ...over,
+  });
+
+  it('cancels the intent on the SNAPSHOTTED account and fails the row', async () => {
+    const { calls } = setup({ paymentRow: pendingCardRow(), role: 'staff' });
+    mockPiCancel.mockResolvedValue({ id: PI, status: 'canceled' } as never);
+
+    const res = await post({ action: 'cancel', payment_intent_id: PI });
+    expect(res.status).toBe(200);
+
+    expect(mockPiCancel).toHaveBeenCalledWith(PI, undefined, {
+      stripeAccount: 'acct_SNAP',
+      idempotencyKey: `cancel:${PI}`,
+    });
+    // The flip is guarded on `pending`, so it can never bury a settled payment.
+    const update = calls.find((c) => c.table === 'booking_payments' && c.op === 'update');
+    expect(update?.payload).toMatchObject({ status: 'failed' });
+    expect(update?.filters).toContainEqual(['eq', 'status', 'pending']);
+    expect(mockRecompute).toHaveBeenCalledWith(expect.anything(), 'b1');
+  });
+
+  it('is open to non-admin staff — whoever may take a payment may abandon it', async () => {
+    setup({ paymentRow: pendingCardRow(), role: 'staff' });
+    mockPiCancel.mockResolvedValue({ id: PI, status: 'canceled' } as never);
+    const res = await post({ action: 'cancel', payment_intent_id: PI });
+    expect(res.status).toBe(200);
+  });
+
+  it('refuses a row that already settled, without touching Stripe', async () => {
+    setup({ paymentRow: pendingCardRow({ status: 'succeeded' }) });
+    const res = await post({ action: 'cancel', payment_intent_id: PI });
+    expect(res.status).toBe(409);
+    expect(mockPiCancel).not.toHaveBeenCalled();
+  });
+
+  it('404s when no attempt matches the intent on this booking', async () => {
+    setup({ paymentRow: null });
+    const res = await post({ action: 'cancel', payment_intent_id: PI });
+    expect(res.status).toBe(404);
+    expect(mockPiCancel).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The race that matters: staff cancel as the client taps. Stripe answers
+   * `payment_intent_unexpected_state` for BOTH "already cancelled" and "already
+   * succeeded", so the route has to ask what the intent actually is. Guessing
+   * would mark a captured payment as failed.
+   */
+  it('converges when the intent was already cancelled', async () => {
+    const { calls } = setup({ paymentRow: pendingCardRow() });
+    mockPiCancel.mockRejectedValue(
+      Object.assign(new Error('bad state'), { code: 'payment_intent_unexpected_state' }),
+    );
+    mockPiRetrieve.mockResolvedValue({ id: PI, status: 'canceled' } as never);
+
+    const res = await post({ action: 'cancel', payment_intent_id: PI });
+    expect(res.status).toBe(200);
+    expect(calls.some((c) => c.table === 'booking_payments' && c.op === 'update')).toBe(true);
+  });
+
+  it('leaves a payment that actually succeeded alone, and keeps warning', async () => {
+    const { calls } = setup({ paymentRow: pendingCardRow() });
+    mockPiCancel.mockRejectedValue(
+      Object.assign(new Error('bad state'), { code: 'payment_intent_unexpected_state' }),
+    );
+    mockPiRetrieve.mockResolvedValue({ id: PI, status: 'succeeded' } as never);
+
+    const res = await post({ action: 'cancel', payment_intent_id: PI });
+    expect(res.status).toBe(409);
+    // Nothing written: the webhook owns this row's fate, not us.
+    expect(calls.some((c) => c.table === 'booking_payments' && c.op === 'update')).toBe(false);
+    expect(mockRecompute).not.toHaveBeenCalled();
+  });
+
+  it('502s an unexpected Stripe failure rather than lying about the ledger', async () => {
+    const { calls } = setup({ paymentRow: pendingCardRow() });
+    mockPiCancel.mockRejectedValue(Object.assign(new Error('network'), { code: 'api_error' }));
+
+    const res = await post({ action: 'cancel', payment_intent_id: PI });
+    expect(res.status).toBe(502);
+    expect(calls.some((c) => c.table === 'booking_payments' && c.op === 'update')).toBe(false);
+  });
+
+  it('rejects a cancel with no intent id', async () => {
+    setup({ paymentRow: pendingCardRow() });
+    const res = await post({ action: 'cancel' });
+    expect(res.status).toBe(400);
+    expect(mockPiCancel).not.toHaveBeenCalled();
   });
 });

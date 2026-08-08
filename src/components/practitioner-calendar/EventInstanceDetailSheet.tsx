@@ -183,9 +183,9 @@ export function EventInstanceDetailSheet({
               {dateStr} · {startStr} – {endStr}
             </p>
             {linkedReadOnly ? (
-              <p className="mt-1 text-xs text-slate-500">View only — this link does not allow changes.</p>
+              <p className="mt-1 text-xs text-slate-500">View only. This link does not allow changes.</p>
             ) : linked && linked.linkedAct === 'edit_existing' ? (
-              <p className="mt-1 text-xs text-slate-500">Limited edit — cancel and rebook are not available on this link.</p>
+              <p className="mt-1 text-xs text-slate-500">Limited edit. Cancel and rebook are not available on this link.</p>
             ) : null}
             {eventRow?.is_active === false ? (
               <span className="mt-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">

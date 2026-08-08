@@ -90,7 +90,7 @@ export default function AccountSecurityPage() {
           <Link href="/login" className="font-medium text-brand-700 hover:underline">
             login
           </Link>{' '}
-          page. This does not affect magic links — you can keep using those as well.
+          page. This does not affect magic links. You can keep using those as well.
         </p>
         <AccountPasswordForm />
         <p className="mt-4 text-xs text-slate-500">

@@ -256,7 +256,7 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
         {isClassGroup ? (
           <p className="mt-5 rounded-xl border border-amber-200/80 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">
             This is one session of a multi-session course. <strong>Manage booking</strong> on this page affects
-            <strong> only this session</strong> — your other sessions stay booked. To change the whole course,
+            <strong> only this session</strong>. Your other sessions stay booked. To change the whole course,
             cancel each session from your bookings list or contact the venue.
           </p>
         ) : null}

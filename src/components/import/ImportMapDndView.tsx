@@ -117,7 +117,7 @@ function DraggableColumn({
         }}
         className="mt-2 w-full cursor-pointer rounded border border-slate-200 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 md:hidden"
       >
-        {selected ? 'Selected — tap a field' : 'Select for mapping'}
+        {selected ? 'Selected. Tap a field' : 'Select for mapping'}
       </button>
       {onSplit && (
         <button
@@ -515,7 +515,7 @@ export function ImportMapDndView({
     if (needsAttention.length) {
       sections.push({
         title: 'Needs attention',
-        hint: 'Low confidence or not mapped — drag or use dropdowns.',
+        hint: 'Low confidence or not mapped. Drag or use dropdowns.',
         items: needsAttention,
       });
     }

@@ -12,7 +12,30 @@ interface CommsPayload {
     sms_failed: number;
     sms_failure_rate_pct: number;
     pending: number;
+    /** Null when the reconciliation query failed; the status counts above still hold. */
+    uncommunicated_bookings: number | null;
+    stuck_pending: number | null;
   };
+  delivery_health: {
+    window_days: number;
+    stuck_after_hours: number;
+    uncommunicated: Array<{
+      booking_id: string;
+      venue_name: string;
+      booking_date: string;
+      booking_time: string | null;
+      status: string;
+      recipient_masked: string;
+    }>;
+    stuck_pending: Array<{
+      id: string;
+      venue_name: string;
+      message_type: string;
+      channel: string;
+      age_hours: number;
+      created_at: string;
+    }>;
+  } | null;
   recent_failures: Array<{
     id: string;
     venue_name: string;
@@ -110,7 +133,7 @@ export function CommsPageClient() {
         </div>
       ) : data ? (
         <>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
             <Kpi label="Emails sent" value={data.summary.email_sent} />
             <Kpi
               label="Email failure rate"
@@ -126,7 +149,79 @@ export function CommsPageClient() {
               hint={`${data.summary.sms_failed} failed`}
             />
             <Kpi label="Pending" value={data.summary.pending} hint="queued / awaiting send" />
+            {/* The counts above only see sends that were attempted. This one
+                catches the silent case: a booking that generated nothing. */}
+            <Kpi
+              label="Nothing sent"
+              value={data.summary.uncommunicated_bookings ?? '?'}
+              danger={(data.summary.uncommunicated_bookings ?? 0) > 0}
+              hint="past bookings with no comms"
+            />
           </div>
+
+          {data.delivery_health ? (
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    Bookings with nothing sent
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Past bookings in the last {data.delivery_health.window_days} days with a
+                    contactable guest and no communication recorded at all. A failed send appears in
+                    the failure list above. These produced no record either way, so nobody was told.
+                  </p>
+                </div>
+                {data.delivery_health.uncommunicated.length === 0 ? (
+                  <p className="px-5 py-6 text-sm text-slate-500">
+                    Every past booking has at least one communication logged.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {data.delivery_health.uncommunicated.map((b) => (
+                      <li key={b.booking_id} className="px-5 py-3 text-sm">
+                        <div className="font-medium text-slate-900">{b.venue_name}</div>
+                        <div className="mt-0.5 text-xs text-slate-600">
+                          {b.booking_date}
+                          {b.booking_time ? ` at ${b.booking_time.slice(0, 5)}` : ''} · {b.status} ·{' '}
+                          {b.recipient_masked}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <h2 className="text-sm font-semibold text-slate-900">Stuck pending</h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Claimed more than {data.delivery_health.stuck_after_hours} hours ago and never
+                    resolved to sent or failed. The row is written before the provider is called, so
+                    one still pending means the send did not finish.
+                  </p>
+                </div>
+                {data.delivery_health.stuck_pending.length === 0 ? (
+                  <p className="px-5 py-6 text-sm text-slate-500">Nothing stuck.</p>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {data.delivery_health.stuck_pending.map((r) => (
+                      <li key={r.id} className="px-5 py-3 text-sm">
+                        <div className="font-medium text-slate-900">{r.venue_name}</div>
+                        <div className="mt-0.5 text-xs text-slate-600">
+                          {r.message_type} · {r.channel} · stuck {r.age_hours}h
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Delivery reconciliation could not run. The counts above cover attempted sends only.
+            </p>
+          )}
 
           <div className="grid gap-6 lg:grid-cols-3">
             {/* Recent failures */}

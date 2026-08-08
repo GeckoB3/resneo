@@ -129,7 +129,7 @@ export async function PATCH(request: NextRequest) {
           return NextResponse.json(
             {
               error:
-                'You manage more than one calendar — choose which calendar to update (calendar_id in the request body).',
+                'You manage more than one calendar. Choose which calendar to update (calendar_id in the request body).',
             },
             { status: 400 },
           );
@@ -245,7 +245,7 @@ export async function PATCH(request: NextRequest) {
       }
       if (assignedPractitionerIds.length > 1) {
         return NextResponse.json(
-          { error: 'You manage more than one calendar — choose which calendar to update (calendar_id in the request body).' },
+          { error: 'You manage more than one calendar. Choose which calendar to update (calendar_id in the request body).' },
           { status: 400 },
         );
       }

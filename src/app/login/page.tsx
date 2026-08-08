@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { isSalesAgent } from '@/lib/sales/auth';
 import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
+import { safeSameOriginPath } from '@/lib/safe-auth-redirect';
 import { LoginForm } from './login-form';
 import { AuthCallbackErrorBanner } from './AuthCallbackErrorBanner';
 
@@ -18,7 +19,10 @@ export default async function LoginPage({
   if (user) {
     const explicit = sp.redirectTo;
     if (explicit) {
-      redirect(explicit);
+      // Never redirect to a raw query parameter. Middleware currently shadows this
+      // branch for authenticated users, so it is not reachable today, but that is
+      // an accident of routing rather than a guard.
+      redirect(safeSameOriginPath(explicit, '/dashboard'));
     }
     if (isPlatformSuperuser(user)) {
       const allowVenueShell = await hasActiveVenueSupportSession(supabase);

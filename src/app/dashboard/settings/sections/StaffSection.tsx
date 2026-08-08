@@ -175,7 +175,7 @@ export function StaffSection({
         if (row) {
           extras.push({
             ...row,
-            name: `${row.name} (inactive — reassign or activate in Calendar availability)`,
+            name: `${row.name} (inactive, reassign or activate in Calendar availability)`,
           });
         }
       }
@@ -244,7 +244,7 @@ export function StaffSection({
       setCreateSuccess(
         inviteSent
           ? `Invitation sent to ${email}. They will receive a link to set their password and access the dashboard.`
-          : `${email} was added as staff. They may already have an account — if they did not receive a new email, they can sign in or use Forgot password on the login page.`,
+          : `${email} was added as staff. They may already have an account. If they did not receive a new email, they can sign in or use Forgot password on the login page.`,
       );
       setShowCreateForm(false);
       setTimeout(() => setCreateSuccess(null), 4000);
@@ -895,7 +895,7 @@ export function StaffSection({
               <div><span className="font-medium text-purple-700">Admin:</span> Full access to all settings, staff management, reports, and bookings</div>
               <div>
                 <span className="font-medium text-slate-700">Staff:</span> Work in the dashboard for day-to-day
-                operations — schedule, bookings, and guest details for the calendars you assign below
+                operations, schedule, bookings, and guest details for the calendars you assign below
               </div>
             </div>
             {isAdmin && (

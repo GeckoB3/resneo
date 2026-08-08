@@ -116,7 +116,7 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
       <SectionCard elevated>
         <SectionCard.Header
           title="Appointment performance"
-          description="Attendance, reschedules, cancellations, and how quickly your team adds bookings — for the date range selected above."
+          description="Attendance, reschedules, cancellations, and how quickly your team adds bookings, for the date range selected above."
         />
         <SectionCard.Body>
           <p className="text-sm text-slate-600">
@@ -288,7 +288,7 @@ export function BaselineMetricsSection({ metrics, snapshot }: BaselineMetricsSec
 
         <MetricGroup
           heading="After a cancellation"
-          intro="Cancelled appointments with a guest on file — whether the same guest booked again within seven days."
+          intro="Cancelled appointments with a guest on file, whether the same guest booked again within seven days."
         >
           <InsightMetricCard
             title="Rebooked within 7 days"

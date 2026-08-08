@@ -3,7 +3,30 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
 import { buildMagicLinkConfirmNextQuery } from '@/lib/safe-auth-redirect';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { z } from 'zod';
+
+/**
+ * Two independent limits, because they stop different attacks.
+ *
+ * Per IP: one caller spraying sign-in mail at many different addresses.
+ * Per email: many callers (or one behind rotating IPs) bombing a single
+ * inbox. The per-email bucket is the one that protects a third party who
+ * never asked to hear from us, so it is the tighter of the two.
+ *
+ * `checkRateLimit` composes its bucket as `${key}:${identity}`, so passing
+ * a normalised email as the identity gives a per-address counter.
+ */
+const RATE_WINDOW_MS = 15 * 60_000;
+const RATE_LIMIT_PER_IP = 10;
+const RATE_LIMIT_PER_EMAIL = 3;
+
+function tooManyRequests(retryAfterSec: number): NextResponse {
+  return NextResponse.json(
+    { error: 'Too many sign-in link requests. Try again shortly.' },
+    { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+  );
+}
 
 const schema = z.object({
   email: z.string().email(),
@@ -29,6 +52,10 @@ const schema = z.object({
  */
 export async function POST(request: NextRequest) {
   try {
+    const ip = getClientIp(request);
+    const ipLimit = checkRateLimit(ip, 'send-magic-link-ip', RATE_LIMIT_PER_IP, RATE_WINDOW_MS);
+    if (!ipLimit.ok) return tooManyRequests(ipLimit.retryAfterSec);
+
     const body = await request.json().catch(() => ({}));
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
@@ -38,6 +65,16 @@ export async function POST(request: NextRequest) {
     const { email, next } = parsed.data;
     const nextPath = buildMagicLinkConfirmNextQuery(next);
     const normalisedEmail = email.trim().toLowerCase();
+
+    // Applied to every address, registered or not, so a 429 never reveals
+    // whether an account exists.
+    const emailLimit = checkRateLimit(
+      normalisedEmail,
+      'send-magic-link-email',
+      RATE_LIMIT_PER_EMAIL,
+      RATE_WINDOW_MS,
+    );
+    if (!emailLimit.ok) return tooManyRequests(emailLimit.retryAfterSec);
 
     if (!process.env.SENDGRID_API_KEY?.trim()) {
       return NextResponse.json({ fallback: true });

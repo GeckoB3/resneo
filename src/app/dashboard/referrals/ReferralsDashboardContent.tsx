@@ -53,7 +53,7 @@ export function ReferralsDashboardContent({ data }: { data: ReferralsDashboardDa
           <SectionCard.Body>
             <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">In progress</p>
             <p className="mt-2 text-2xl font-bold text-slate-900">{counts.pending}</p>
-            <p className="mt-1 text-xs text-slate-500">Trialling now — credits when they pay.</p>
+            <p className="mt-1 text-xs text-slate-500">Trialling now, credits when they pay.</p>
           </SectionCard.Body>
         </SectionCard>
       </div>

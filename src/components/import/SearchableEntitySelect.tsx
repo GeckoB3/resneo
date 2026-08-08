@@ -165,7 +165,7 @@ export function SearchableEntitySelect({
               }}
               onKeyDown={onKeyDown}
               placeholder={placeholder}
-              aria-label={`${ariaLabel} — search`}
+              aria-label={`${ariaLabel}, search`}
               aria-controls={listId}
               aria-activedescendant={activeOptionId}
               className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-base text-slate-900 outline-none focus:border-brand-300 focus:ring-1 focus:ring-brand-200 sm:text-sm"

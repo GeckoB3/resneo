@@ -96,7 +96,7 @@ export async function GET(
       events.push({
         id: `c-${row.id}`,
         event_type: 'communication',
-        label: `${row.message_type} (${row.channel}) — ${row.status}`,
+        label: `${row.message_type} (${row.channel}): ${row.status}`,
         occurred_at: row.created_at,
         metadata: { communication_id: row.id },
       });

@@ -418,7 +418,7 @@ export async function GET(request: NextRequest) {
 
           periods.push({
             key: multiAreaLabels ? `${area.id}:${service.id}` : service.id,
-            label: multiAreaLabels ? `${service.name} — ${area.name}` : service.name,
+            label: multiAreaLabels ? `${service.name} (${area.name})` : service.name,
             start_time: effectiveService.start_time.slice(0, 5),
             end_time: effectiveService.end_time.slice(0, 5),
             max_covers: maxCovers,

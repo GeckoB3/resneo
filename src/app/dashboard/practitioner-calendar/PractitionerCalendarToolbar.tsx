@@ -211,11 +211,11 @@ export function PractitionerCalendarToolbar({
           type="button"
           onClick={onToggleCompactDay}
           aria-pressed={compactDay}
-          aria-label="Compact day rows — fit the whole day on one screen"
+          aria-label="Compact day rows, fit the whole day on one screen"
           title={
             compactDay
-              ? 'Compact view on — switch back to full-size rows'
-              : 'Compact view — fit the whole day on one screen'
+              ? 'Compact view on, switch back to full-size rows'
+              : 'Compact view, fit the whole day on one screen'
           }
           className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-sm sm:text-xs ${
             compactDay

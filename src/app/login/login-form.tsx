@@ -6,6 +6,7 @@ import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { createClient } from '@/lib/supabase/browser';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { hasSalesAgentJwtRole } from '@/lib/sales/auth';
+import { safeSameOriginPath } from '@/lib/safe-auth-redirect';
 
 export type LoginFormVariant = 'default' | 'booking';
 
@@ -62,11 +63,13 @@ export function LoginForm({
       );
       if (!res.ok) throw new Error(`resolve-next ${res.status}`);
       const body = (await res.json()) as { destination?: string };
-      destination = body.destination?.trim() || (redirectTo ?? '/dashboard');
+      // `redirectTo` comes from the query string, so it is attacker-controlled on
+      // both the success and fallback paths below.
+      destination = body.destination?.trim() || safeSameOriginPath(redirectTo, '/dashboard');
     } catch (resolveErr) {
       console.warn('[login] resolve-next fallback:', resolveErr instanceof Error ? resolveErr.message : resolveErr);
       const { data: { user } } = await supabase.auth.getUser();
-      destination = redirectTo ?? '/dashboard';
+      destination = safeSameOriginPath(redirectTo, '/dashboard');
       if (!redirectTo && hasPlatformSuperuserJwtRole(user)) {
         destination = '/super';
       } else if (!redirectTo && hasSalesAgentJwtRole(user)) {

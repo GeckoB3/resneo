@@ -65,7 +65,7 @@ export function CalendarColumnsChecklist({
             mine && myCalendarIds.length === 1
               ? col.name
               : mine
-                ? `Mine — ${col.name}`
+                ? `Mine: ${col.name}`
                 : col.name;
           const checked = isAll || (value !== null && value.includes(col.id));
           return (

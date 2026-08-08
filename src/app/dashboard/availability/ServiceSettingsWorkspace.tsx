@@ -194,7 +194,7 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
       const data = await res.json();
       setServices(servicesRef.current.map((s) => (s.id === sel.id ? data.service : s)));
       if (data.overlapWarnings?.length > 0) {
-        showToast(`Service updated — warning: ${data.overlapWarnings[0]}`);
+        showToast(`Service updated. Warning: ${data.overlapWarnings[0]}`);
       }
     } catch {
       showToast('Failed to save service');
@@ -380,7 +380,7 @@ export function ServiceSettingsWorkspace({ services, setServices, selectedAreaId
         <SectionCard.Header
           eyebrow="Dining services"
           title="Configure each bookable period end-to-end"
-          description="Pick a service and work through schedule, capacity, durations, and booking rules — changes save automatically as you edit. Switch dining area above when your venue has multiple spaces."
+          description="Pick a service and work through schedule, capacity, durations, and booking rules, changes save automatically as you edit. Switch dining area above when your venue has multiple spaces."
           right={
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
               {services.filter((s) => s.is_active).length} active

@@ -1262,7 +1262,7 @@ export function AppointmentServicesView({
                               <span className="text-sm text-slate-800">
                                 <span className="font-medium">{row?.name ?? 'Unknown'}</span>
                                 <span className="ml-1.5 text-xs font-normal text-amber-900">
-                                  (not available — calendar inactive or not eligible)
+                                  (not available: calendar inactive or not eligible)
                                 </span>
                               </span>
                               <button

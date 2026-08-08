@@ -124,7 +124,7 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
     tableBooking,
     EMAIL_GALLERY_DEMO_VENUE,
     [
-      'We look forward to welcoming you — let us know if you are celebrating something special.',
+      'We look forward to welcoming you. Let us know if you are celebrating something special.',
       'Cancel or modify before 48 hours for a full deposit refund. After that, deposits are non-refundable.',
     ].join('\n\n'),
   );
@@ -200,7 +200,7 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
   const r56 = renderReminder56h(
     enrichDemoBooking(getPreviewBookingSample('table', 'table')),
     EMAIL_GALLERY_DEMO_VENUE,
-    'Looking forward to seeing you — reply if your plans change.',
+    'Looking forward to seeing you. Reply if your plans change.',
   );
   items.push({
     id: 'reminder-56h-email',
@@ -236,7 +236,7 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
   items.push({
     id: 'appointment-waitlist-offer',
     title: 'Appointment waitlist availability',
-    subtitle: 'Slot opened — view availability and book online',
+    subtitle: 'Slot opened: view availability and book online',
     subject: waitlistOffer.subject,
     html: waitlistOffer.html,
   });

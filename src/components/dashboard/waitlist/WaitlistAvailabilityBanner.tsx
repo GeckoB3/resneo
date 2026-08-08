@@ -100,7 +100,7 @@ export function WaitlistAvailabilityBanner() {
         const notified =
           data.email_sent || data.sms_sent
             ? ' They have been notified.'
-            : ' Offer recorded — check contact details if notification failed.';
+            : ' Offer recorded. Check contact details if notification failed.';
         setMessage(`Offer sent to ${guest}.${notified}`);
       }
       await refresh();

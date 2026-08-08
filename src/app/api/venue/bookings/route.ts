@@ -442,7 +442,7 @@ export async function POST(request: NextRequest) {
         // enforce_cde_capacity trigger raised on an oversell race (SQLSTATE 23P01).
         if (evBookErr.code === '23P01' || evBookErr.message?.includes('CDE_CAPACITY')) {
           return NextResponse.json(
-            { error: 'This event is now fully booked — the last tickets were just taken.' },
+            { error: 'This event is now fully booked, the last tickets were just taken.' },
             { status: 409 },
           );
         }
@@ -662,7 +662,7 @@ export async function POST(request: NextRequest) {
         // enforce_cde_capacity trigger raised on an oversell race (SQLSTATE 23P01).
         if (classBookErr.code === '23P01' || classBookErr.message?.includes('CDE_CAPACITY')) {
           return NextResponse.json(
-            { error: 'This class is now full — the last space was just booked.' },
+            { error: 'This class is now full, the last space was just booked.' },
             { status: 409 },
           );
         }
@@ -911,7 +911,7 @@ export async function POST(request: NextRequest) {
         // enforce_cde_capacity trigger raised on an overlap race (SQLSTATE 23P01).
         if (resBookErr.code === '23P01' || resBookErr.message?.includes('CDE_CAPACITY')) {
           return NextResponse.json(
-            { error: 'That slot is no longer available — it was just booked.' },
+            { error: 'That slot is no longer available. It was just booked.' },
             { status: 409 },
           );
         }

@@ -33,7 +33,7 @@ export function renderAppointmentWaitlistOfferEmail(
 
   let mainContent =
     `<p style="margin:0 0 12px 0">Hi ${escapeHtml(input.guestName)},</p>` +
-    `<p style="margin:0 0 12px 0">Good news — availability has opened at <strong>${escapeHtml(input.venueName)}</strong> on <strong>${escapeHtml(dateLabel)}</strong> ${escapeHtml(whenLine)} for the appointment you requested.</p>` +
+    `<p style="margin:0 0 12px 0">Good news: availability has opened at <strong>${escapeHtml(input.venueName)}</strong> on <strong>${escapeHtml(dateLabel)}</strong> ${escapeHtml(whenLine)} for the appointment you requested.</p>` +
     `<p style="margin:0 0 12px 0">Visit our booking page to see what is available and book online.</p>`;
 
   if (input.venuePhone?.trim()) {
@@ -58,7 +58,7 @@ export function renderAppointmentWaitlistOfferEmail(
   const textParts = [
     `Hi ${input.guestName},`,
     '',
-    `Good news — availability has opened at ${input.venueName} on ${dateLabel} ${whenLine} for the appointment you requested.`,
+    `Good news: availability has opened at ${input.venueName} on ${dateLabel} ${whenLine} for the appointment you requested.`,
     '',
     'Visit our booking page to see what is available and book online.',
   ];

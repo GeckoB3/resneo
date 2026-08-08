@@ -78,6 +78,11 @@ import {
   linkedGrantHasFullDetails,
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
+import {
+  linkedViewerMustNotSeePii,
+  redactBookingPiiFields,
+  redactCommunicationRecipients,
+} from '@/lib/linked-accounts/redact-booking-pii';
 import { validateResourceBookingModification } from '@/lib/booking/validate-resource-booking-modification';
 import { validateClassModification } from '@/lib/booking/validate-class-modification';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -247,7 +252,10 @@ export async function GET(
     } | null;
     // §5.2 — without the PII grant the guests-row data stays hidden, including
     // the client's name (the booking's guest-name snapshot counts as the name).
-    if (!isOwnVenue && linkedGrant && !linkedGrant.pii && guest) {
+    // The booking row itself carries a second copy of all of this and is redacted
+    // at the response, below; both must stay in step.
+    const redactPii = linkedViewerMustNotSeePii(isOwnVenue, linkedGrant);
+    if (redactPii && guest) {
       guest = {
         ...guest,
         first_name: null,
@@ -378,13 +386,17 @@ export async function GET(
     }
 
     return NextResponse.json({
-      ...booking,
+      ...(redactPii
+        ? redactBookingPiiFields(booking as unknown as Record<string, unknown>)
+        : booking),
       area_name,
       booking_time: bookingTimeStr,
       practitioner_name,
       guest: guest ?? null,
       events: events ?? [],
-      communications: communications ?? [],
+      communications: redactPii
+        ? redactCommunicationRecipients(communications ?? [])
+        : communications ?? [],
       table_assignments: assignedTables,
       combination_staff_notes,
       cde_context,
@@ -860,7 +872,7 @@ export async function PATCH(
           return NextResponse.json(
             {
               error:
-                'Refund could not be processed. The booking was not cancelled — please try again or refund manually in Stripe.',
+                'Refund could not be processed. The booking was not cancelled. Please try again or refund manually in Stripe.',
               code: 'REFUND_FAILED',
             },
             { status: 502 },

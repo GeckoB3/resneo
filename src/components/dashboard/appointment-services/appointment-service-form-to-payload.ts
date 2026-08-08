@@ -78,7 +78,7 @@ export function appointmentServiceFormToPayload(
         if (p == null || p <= 0) {
           return {
             ok: false,
-            error: `Option "${v.name.trim()}": set a price — full online payment applies to each option.`,
+            error: `Option "${v.name.trim()}": set a price, full online payment applies to each option.`,
           };
         }
       }

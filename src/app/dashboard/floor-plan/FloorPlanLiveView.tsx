@@ -991,7 +991,7 @@ export function FloorPlanLiveView({
   }, [summaryData.next_bookings_slot, timelineScrubBounds]);
 
   const onCoversChipClick = useCallback(() => {
-    addToast('Live covers follow the timeline clock — open the clock button to adjust service time.', 'info');
+    addToast('Live covers follow the timeline clock. Open the clock button to adjust service time.', 'info');
   }, [addToast]);
 
   /** HH:mm for move-validation (cells use wall-clock strings; DB may return ISO). */
@@ -1301,7 +1301,7 @@ export function FloorPlanLiveView({
       } else {
         const data = await res.json().catch(() => ({}));
         if (res.status === 409) {
-          addToast(data.error ?? 'Table conflict — refresh and try again.', 'error');
+          addToast(data.error ?? 'Table conflict. Refresh and try again.', 'error');
         } else {
           addToast(data.error ?? 'Failed to reassign table', 'error');
         }
@@ -1325,7 +1325,7 @@ export function FloorPlanLiveView({
       } else {
         const data = await res.json().catch(() => ({}));
         if (res.status === 409) {
-          addToast(data.error ?? 'Table conflict — another booking may have taken this slot. Refresh and try again.', 'error');
+          addToast(data.error ?? 'Table conflict, another booking may have taken this slot. Refresh and try again.', 'error');
         } else {
           addToast(data.error ?? 'Failed to assign table', 'error');
         }
@@ -2145,7 +2145,7 @@ export function FloorPlanLiveView({
                             ))}
                           </div>
                         ) : (
-                          <p className="mt-2 text-xs text-slate-500">No single-table match at this service time — use pick on floor for combinations.</p>
+                          <p className="mt-2 text-xs text-slate-500">No single-table match at this service time. Use pick on floor for combinations.</p>
                         )}
                         <div className="mt-2 flex flex-wrap gap-2">
                           <button

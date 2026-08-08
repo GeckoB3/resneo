@@ -300,15 +300,14 @@ export async function GET(request: NextRequest) {
           if (guestIds.length > 0) {
             const { data: guests } = await admin
               .from('guests')
-              .select('id, name, first_name, last_name, email, phone')
+              .select('id, first_name, last_name, email, phone')
               .in('id', guestIds);
             for (const g of guests ?? []) {
               const composed = [g.first_name, g.last_name]
                 .filter((x): x is string => Boolean(x))
                 .join(' ')
                 .trim();
-              guestNames[g.id as string] =
-                composed || (g.name as string) || 'Client';
+              guestNames[g.id as string] = composed || 'Client';
               guestEmails[g.id as string] = (g.email as string | null) ?? null;
               guestPhones[g.id as string] = (g.phone as string | null) ?? null;
             }
@@ -401,8 +400,12 @@ export async function GET(request: NextRequest) {
           source: (b.source as string | null) ?? null,
           depositStatus: (b.deposit_status as string) ?? 'none',
           depositAmountPence: (b.deposit_amount_pence as number | null) ?? null,
-          specialRequests: (b.special_requests as string | null) ?? null,
-          internalNotes: (b.internal_notes as string | null) ?? null,
+          // Client-authored free text routinely contains the client's name, and
+          // dietary notes carry health and religious information. Gate on the PII
+          // grant, not on fullDetails alone: "you can see what is booked, not who"
+          // is a supported configuration and this text defeats it.
+          specialRequests: canSeePii ? (b.special_requests as string | null) ?? null : null,
+          internalNotes: canSeePii ? (b.internal_notes as string | null) ?? null : null,
           clientArrivedAt: (b.client_arrived_at as string | null) ?? null,
           guestAttendanceConfirmedAt:
             (b.guest_attendance_confirmed_at as string | null) ?? null,

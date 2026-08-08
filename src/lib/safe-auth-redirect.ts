@@ -1,6 +1,58 @@
 const DEFAULT_AUTH_NEXT = '/dashboard';
 const DEFAULT_MAGIC_LINK_NEXT = '/auth/callback';
 
+/**
+ * Origin used only to resolve candidate redirects. Never navigated to; `.invalid`
+ * is reserved by RFC 2606 and cannot resolve.
+ */
+const SAME_ORIGIN_PROBE = 'https://resneo.invalid';
+
+/**
+ * Returns `raw` as a same-origin path, or null if it can escape the origin.
+ *
+ * A prefix check is not sufficient here. `"/"` followed by a backslash, a tab or a
+ * newline all survive `startsWith('/') && !startsWith('//')` and are then resolved
+ * by the WHATWG URL parser as protocol-relative, so `/\evil.com` navigates to
+ * https://evil.com. Verified against Node's parser, which is the same one
+ * `new URL()` uses in `NextResponse.redirect` and `router.push`.
+ *
+ * So: strip the control characters the parser would ignore, resolve against a
+ * probe origin, and accept only what stayed on it. Path traversal is normalised
+ * away by the parser as a side benefit.
+ */
+function toSameOriginPath(raw: string): string | null {
+  // Drop C0 controls and DEL by code point. The URL parser ignores these, so a
+  // tab or newline inside a candidate could otherwise smuggle a leading '//'
+  // past a textual prefix check.
+  const cleaned = Array.from(raw)
+    .filter((ch) => {
+      const code = ch.charCodeAt(0);
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join('')
+    .trim();
+  if (!cleaned.startsWith('/')) return null;
+  try {
+    const url = new URL(cleaned, SAME_ORIGIN_PROBE);
+    if (url.origin !== SAME_ORIGIN_PROBE) return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same-origin guard for callers outside this module (the login page and form,
+ * which previously used a raw `redirectTo` or none at all).
+ */
+export function safeSameOriginPath(
+  raw: string | null | undefined,
+  fallback: string,
+): string {
+  if (!raw || typeof raw !== 'string') return fallback;
+  return toSameOriginPath(raw) ?? fallback;
+}
+
 function authNextPathOnly(raw: string): string {
   return raw.split('?')[0]?.split('#')[0] ?? raw;
 }
@@ -61,9 +113,7 @@ function isAllowedMagicLinkDestination(pathWithOptionalQuery: string): boolean {
  */
 export function sanitizeAuthNextPath(raw: string | null | undefined): string {
   if (!raw || typeof raw !== 'string') return DEFAULT_AUTH_NEXT;
-  const next = raw.trim();
-  if (!next.startsWith('/') || next.startsWith('//')) return DEFAULT_AUTH_NEXT;
-  return next;
+  return toSameOriginPath(raw) ?? DEFAULT_AUTH_NEXT;
 }
 
 /**
@@ -87,8 +137,8 @@ export function resolveAuthNextPath(raw: string | null | undefined): string {
  */
 export function sanitizeMagicLinkNextPath(raw: string | null | undefined): string {
   if (!raw || typeof raw !== 'string') return DEFAULT_MAGIC_LINK_NEXT;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return DEFAULT_MAGIC_LINK_NEXT;
+  const trimmed = toSameOriginPath(raw);
+  if (trimmed === null) return DEFAULT_MAGIC_LINK_NEXT;
 
   if (trimmed.startsWith('/auth/callback?')) {
     return sanitizeAuthNextPath(trimmed);
@@ -110,8 +160,8 @@ export function buildMagicLinkConfirmNextQuery(raw: string | null | undefined): 
   if (!raw || typeof raw !== 'string' || !raw.trim()) {
     return DEFAULT_MAGIC_LINK_NEXT;
   }
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
+  const trimmed = toSameOriginPath(raw);
+  if (trimmed === null) {
     return DEFAULT_MAGIC_LINK_NEXT;
   }
   if (trimmed === DEFAULT_MAGIC_LINK_NEXT || trimmed.startsWith(`${DEFAULT_MAGIC_LINK_NEXT}?`)) {

@@ -74,7 +74,7 @@ export default async function ChooseDestinationPage() {
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold text-slate-900">Where would you like to go?</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Your account has access to more than one area. Pick a destination — you can switch later.
+          Your account has access to more than one area. Pick a destination. You can switch later.
         </p>
       </div>
       <div className="grid w-full max-w-2xl gap-4 sm:grid-cols-2 lg:grid-cols-3">

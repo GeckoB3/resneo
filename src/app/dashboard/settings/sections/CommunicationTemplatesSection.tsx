@@ -752,7 +752,7 @@ export function CommunicationTemplatesSection({
                 <p className="mt-1.5 text-xs text-slate-500">
                   {venue.email?.trim()
                     ? `Leave blank to use your venue email (${venue.email.trim()}).`
-                    : "No venue email is set in Profile — enter an address here to receive alerts."}
+                    : "No venue email is set in Profile. Enter an address here to receive alerts."}
                 </p>
               )}
             </div>
@@ -891,7 +891,7 @@ function SaveIndicator({
             <path d="M10 13.75v.01" />
             <circle cx="10" cy="10" r="7.5" />
           </svg>
-          Save failed — retrying next change
+          Save failed, retrying next change
         </span>
       )}
     </div>

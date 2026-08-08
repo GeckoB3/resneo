@@ -104,7 +104,7 @@ export function OpeningHoursSection({
         <SectionCard.Header
           eyebrow="Hours"
           title="Weekly opening hours"
-          description="Set the hours you are normally open each day. This is used for availability and guest messaging — review carefully before publishing."
+          description="Set the hours you are normally open each day. This is used for availability and guest messaging. Review carefully before publishing."
         />
         <SectionCard.Body className="space-y-4">
           <OpeningHoursControl value={local} onChange={setLocal} disabled={!isAdmin} />

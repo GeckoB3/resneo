@@ -109,7 +109,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'Refund could not be processed for one or more bookings. No bookings were cancelled — please try again or refund manually in Stripe.',
+            'Refund could not be processed for one or more bookings. No bookings were cancelled. Please try again or refund manually in Stripe.',
           code: 'REFUND_FAILED',
         },
         { status: 502 },

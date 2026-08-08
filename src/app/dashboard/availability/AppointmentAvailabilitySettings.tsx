@@ -995,7 +995,7 @@ export function AppointmentAvailabilitySettings({
                           <label className="mb-1.5 block text-sm font-medium text-slate-700">Ticketed events</label>
                           <p className="mb-2 text-xs text-slate-500">
                             Times on this column must not overlap other items. Events must be on a calendar to be bookable.
-                            You cannot remove an event while it has bookings—cancel or resolve those first. Create events in{' '}
+                            You cannot remove an event while it has bookings. Cancel or resolve those first. Create events in{' '}
                             <Link href="/dashboard/event-manager" className="font-medium text-brand-600 hover:underline">
                               Event manager
                             </Link>

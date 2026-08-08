@@ -21,6 +21,36 @@ const base = {
 } as const;
 
 describe('recordBookingWriteAudit', () => {
+  it('strips client PII from the snapshot before it reaches the audit table', async () => {
+    const { admin, insert } = makeAdmin();
+    // Both call sites in the booking route pass the whole booking row.
+    await recordBookingWriteAudit({
+      admin,
+      ...base,
+      actionType: 'edited_booking',
+      beforeState: {
+        id: 'booking-1',
+        booking_date: '2026-06-01',
+        status: 'Booked',
+        guest_first_name: 'Ann',
+        guest_last_name: 'Lee',
+        guest_email: 'ann@example.test',
+        guest_phone: '07700900000',
+        special_requests: 'Ann is allergic to PPD',
+        dietary_notes: 'Coeliac',
+        internal_notes: 'Late twice',
+      },
+      afterState: null,
+    });
+
+    const payload = insert.mock.calls[0][0] as { before_state: Record<string, unknown> };
+    expect(payload.before_state).toEqual({
+      id: 'booking-1',
+      booking_date: '2026-06-01',
+      status: 'Booked',
+    });
+  });
+
   it('inserts one audit row with the cross-venue fields', async () => {
     const { admin, insert } = makeAdmin();
     await recordBookingWriteAudit({

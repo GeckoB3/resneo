@@ -3,6 +3,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
+import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 import {
   isUnifiedSchedulingVenue,
   venueUsesUnifiedAppointmentData,
@@ -190,7 +191,14 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          'Cache-Control': 'private, max-age=45, stale-while-revalidate=120',
+          // Was `private, max-age=45, stale-while-revalidate=120`, giving a ~165s
+          // window in which a staff member returning to a month they already
+          // viewed could book a slot someone else had since taken. The rest of the
+          // venue catalog migrated to no-store after the same class of staleness
+          // bug; this endpoint was missed. It is user-driven rather than polled,
+          // and the cache was `private` so it never reduced load across users, so
+          // removing it does not materially change traffic.
+          'Cache-Control': VENUE_CATALOG_CACHE_CONTROL,
         },
       },
     );

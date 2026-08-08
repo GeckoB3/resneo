@@ -52,11 +52,11 @@ describe('resolveEmailLocation', () => {
       venue,
     );
     expect(r.kind).toBe('client_address');
-    expect(r.rowValue).toBe('Your address — 5 Oak Road, Lisburn, BT28 9XY');
+    expect(r.rowValue).toBe('Your address (5 Oak Road, Lisburn, BT28 9XY)');
     expect(r.mapsUrl).toBeNull();
     expect(r.joinUrl).toBeNull();
     expect(r.calendarLocation).toBe('5 Oak Road, Lisburn, BT28 9XY');
-    expect(r.textLines).toEqual(['Location: Your address — 5 Oak Road, Lisburn, BT28 9XY']);
+    expect(r.textLines).toEqual(['Location: Your address (5 Oak Road, Lisburn, BT28 9XY)']);
   });
 
   it('client_address without a captured address still labels the location', () => {

@@ -730,7 +730,7 @@ export function ContactDetailPanel({
                       return;
                     }
                     if (payload.errors && payload.errors.length > 0) {
-                      addToast(`Sent with issues — ${payload.errors.join('; ')}`, 'error');
+                      addToast(`Sent with issues: ${payload.errors.join('; ')}`, 'error');
                     } else {
                       addToast('Message sent', 'success');
                     }

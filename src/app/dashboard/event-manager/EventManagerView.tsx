@@ -1262,7 +1262,7 @@ export function EventManagerView({
                       <p className="mt-2 text-xs text-slate-500">
                         {eventForm.customDates.length === 1
                           ? '1 event will be created on this date.'
-                          : `${eventForm.customDates.length} events will be created — one per date.`}
+                          : `${eventForm.customDates.length} events will be created. One per date.`}
                       </p>
                     </>
                   ) : (

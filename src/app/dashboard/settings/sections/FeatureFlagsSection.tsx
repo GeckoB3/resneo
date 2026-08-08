@@ -149,7 +149,7 @@ export function FeatureFlagsSection({
         }
         if (options?.waitlistJustEnabled) {
           setMessage(
-            'Appointment waitlist is on. Guests are notified by email when a slot opens — adjust SMS and templates under Settings → Communications → Waitlist invites.',
+            'Appointment waitlist is on. Guests are notified by email when a slot opens. Adjust SMS and templates under Settings → Communications → Waitlist invites.',
           );
         } else {
           setMessage('Setting saved.');

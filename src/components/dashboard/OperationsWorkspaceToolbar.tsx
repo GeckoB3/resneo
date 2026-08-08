@@ -72,7 +72,7 @@ function KpiChips({
   return (
     <div className="flex flex-wrap items-center gap-1 text-[11px] sm:gap-1.5 sm:text-xs" aria-label="Shift summary">
       {onCoversChipClick ? (
-        <button type="button" className={chipButton} onClick={onCoversChipClick} title="Open timeline — covers follow the service clock">
+        <button type="button" className={chipButton} onClick={onCoversChipClick} title="Open timeline, covers follow the service clock">
           <span className={label}>{useLiveCovers ? 'Live' : 'Booked'}</span>
           <span className="tabular-nums">
             {coversShown}/{summary.total_covers_capacity}

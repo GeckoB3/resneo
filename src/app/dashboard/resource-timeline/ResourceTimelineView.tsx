@@ -984,7 +984,7 @@ export function ResourceTimelineView({
       const json = await res.json();
       if (!res.ok) {
         const j = json as { error?: string; details?: string };
-        const msg = [j.error, j.details].filter(Boolean).join(' — ');
+        const msg = [j.error, j.details].filter(Boolean).join(', ');
         setError(msg || 'Save failed');
         return;
       }
@@ -1332,7 +1332,7 @@ export function ResourceTimelineView({
                   rows={3}
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Shown to guests on the booking page — e.g. what this resource includes."
+                  placeholder="Shown to guests on the booking page, e.g. what this resource includes."
                   className={`${fieldInputClass} resize-y`}
                 />
                 <p className={fieldHintClass}>Optional. Appears under the resource name when guests choose it.</p>
@@ -1820,7 +1820,7 @@ export function ResourceTimelineView({
                     <span className="text-xs text-slate-500 sm:ml-1">
                       {exceptionRangeEnd
                         ? `${exceptionRangeStart} → ${exceptionRangeEnd}`
-                        : `${exceptionRangeStart} (single day — tap Apply)`}
+                        : `${exceptionRangeStart} (single day. Tap Apply)`}
                     </span>
                   ) : null}
                 </div>

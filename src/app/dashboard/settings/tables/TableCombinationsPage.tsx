@@ -798,7 +798,7 @@ function AutoOverrideModal({
             onChange={(e) => setLocked(e.target.checked)}
           />
           <span>
-            Lock this combination — keep it when you click &quot;Update Automatic Table Combinations&quot; even if tables
+            Lock this combination. Keep it when you click &quot;Update Automatic Table Combinations&quot; even if tables
             are no longer detected as adjacent.
           </span>
         </label>

@@ -406,7 +406,7 @@ export function AccountCoursesSection() {
                   ) : (
                     courseChoicesPaid.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name} — £{(c.price_pence / 100).toFixed(2)}
+                        {c.name} (£{(c.price_pence / 100).toFixed(2)})
                       </option>
                     ))
                   )}
@@ -425,7 +425,7 @@ export function AccountCoursesSection() {
             {paidCheckout ? (
               <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 p-3">
                 <p className="text-xs text-slate-600">
-                  Total: £{(paidCheckout.amount_pence / 100).toFixed(2)} — complete payment to confirm your enrollment.
+                  Total: £{(paidCheckout.amount_pence / 100).toFixed(2)}. Complete payment to confirm your enrollment.
                 </p>
                 <Elements
                   stripe={stripeForAccount(paidCheckout.stripe_account_id)}

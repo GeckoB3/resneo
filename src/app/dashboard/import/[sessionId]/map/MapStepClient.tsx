@@ -116,8 +116,8 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
             await load();
             setBanner(
               anyMapped
-                ? 'We mapped your columns automatically. Review them below — anything amber still needs your attention.'
-                : 'Automatic mapping was unavailable — map your columns below.',
+                ? 'We mapped your columns automatically. Review them below. Anything amber still needs your attention.'
+                : 'Automatic mapping was unavailable. Map your columns below.',
             );
             setAiBusy(false);
           }
@@ -379,7 +379,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Map columns</h1>
         <p className="mt-1 text-sm text-slate-500">
-          We matched your columns to ResNeo fields automatically — your job is just to check the result. Drag a column
+          We matched your columns to ResNeo fields automatically. Your job is just to check the result. Drag a column
           onto a field to change it, use the dropdowns, or split a combined column (like a full name) into parts.
         </p>
       </div>
@@ -409,7 +409,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
               onChange={(e) => setInstructions(e.target.value)}
               rows={3}
               maxLength={2000}
-              placeholder={`Anything that helps us map your file correctly — e.g. "Column 'No.' is the client ID from our old system", "the Visits sheet is bookings, dates are American format", "ignore the Balance column".`}
+              placeholder={`Anything that helps us map your file correctly, e.g. "Column 'No.' is the client ID from our old system", "the Visits sheet is bookings, dates are American format", "ignore the Balance column".`}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
             <div className="flex justify-end">
@@ -500,7 +500,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
                     Split “{splitDraft.source}” into multiple fields
                   </p>
                   <p className="mt-0.5 text-xs text-slate-600">
-                    Each part of the value goes to its own field. Name splits are smart — “Smith, John” and compound
+                    Each part of the value goes to its own field. Name splits are smart: “Smith, John” and compound
                     surnames are handled for you.
                   </p>
                 </div>
@@ -631,7 +631,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
       </div>
       {!canContinue && blockedFiles.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-          <p className="font-semibold">Almost there — these files still need something:</p>
+          <p className="font-semibold">Almost there, these files still need something:</p>
           <ul className="mt-1 list-inside list-disc space-y-0.5">
             {blockedFiles.map((bf) => (
               <li key={bf.fileId}>

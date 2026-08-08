@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     const pricePence = (product as { price_pence: number }).price_pence;
     if (pricePence <= 0) {
-      return NextResponse.json({ error: 'This course is free — use enroll instead.' }, { status: 400 });
+      return NextResponse.json({ error: 'This course is free. Use enroll instead.' }, { status: 400 });
     }
 
     const now = new Date().toISOString();

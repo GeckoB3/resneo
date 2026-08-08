@@ -1130,8 +1130,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
                       ? 'Showing your selected crop as a full-width banner. Use Edit crop to change the area, or Reset crop to show the whole photo.'
                       : 'Showing your selected crop above your venue name. Use Edit crop to change the area, or Reset crop to show the whole photo.'
                     : coverFullWidth
-                      ? 'Showing the whole photo as a full-width banner — never cropped. Use Crop photo to choose a specific area.'
-                      : 'Showing the whole photo above your venue name — never cropped. Use Crop photo to choose a specific area.'
+                      ? 'Showing the whole photo as a full-width banner, never cropped. Use Crop photo to choose a specific area.'
+                      : 'Showing the whole photo above your venue name, never cropped. Use Crop photo to choose a specific area.'
                   : coverFullWidth
                     ? 'Upload a photo to show as a full-width banner at the top of your booking page.'
                     : 'Upload a photo to show above your venue name at a fixed content width.'}

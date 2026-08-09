@@ -3139,10 +3139,14 @@ export function AppointmentBookingFlow({
                     setStep('service');
                   }}
                   className={choiceCardClass}
+                  aria-label="Any available"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-100 text-base font-bold text-brand-700">
+                      <div
+                        className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-100 text-base font-bold text-brand-700"
+                        aria-hidden
+                      >
                         *
                       </div>
                       <div>
@@ -3150,7 +3154,7 @@ export function AppointmentBookingFlow({
                         <p className="text-xs text-slate-500">First available time across the team</p>
                       </div>
                     </div>
-                    <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                    <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                   </div>
                 </button>
               ) : null}

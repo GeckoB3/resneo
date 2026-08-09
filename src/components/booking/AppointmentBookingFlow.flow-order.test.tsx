@@ -1466,6 +1466,20 @@ describe('staff-first: surfaces that keep the old order', () => {
     expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
   });
 
+  it('does the same for a link naming a service that no longer exists', async () => {
+    // The order is settled from the link's shape, not from whether the service
+    // resolves, so a stale link degrades to the old flow rather than breaking.
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue(), preselectedServiceId: 'svc-deleted-last-year' });
+
+    await waitForStep(STEP.modeChoice);
+    clickButton(/Book an appointment/i);
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+    // And the guest can still pick something.
+    expect(screen.getByRole('button', { name: /Plain Service/i })).toBeInTheDocument();
+  });
+
 });
 
 // ---------------------------------------------------------------------------

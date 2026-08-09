@@ -27,6 +27,24 @@ Use **`?tab=<slug>`** to open a specific bookable service tab. Invalid or missin
 2. If the venue exposes only one tab, `?tab=` is ignored and the primary tab is always shown.
 3. Canonical slug list: `PUBLIC_BOOK_TAB_SLUGS` in `src/lib/booking/public-book-tabs.ts` - do not introduce alternate names (e.g. hash-only or postMessage-only tab APIs) without updating that module and this document.
 
+## `?start=service` - skip the single/group chooser
+
+Appointment venues normally open on "How would you like to book?" (a single
+appointment or a group booking). Pass **`?start=service`** to skip that and open
+on the first step of the booking itself.
+
+The step it lands on follows the venue's own booking order:
+
+| Venue setting | Lands on |
+|---|---|
+| Default (service first) | "Select a service" |
+| Staff-first booking on | "Who would you like to see?" |
+
+Either way the back link is hidden, because the chooser it would return to was
+deliberately skipped. The parameter name is historical: read it as "start on the
+booking", not "start on the service list". Group bookings remain reachable from
+the venue's own page, just not from a link that opted out of the chooser.
+
 ## Example
 
 `https://<your-domain>/embed/my-venue?tab=classes&accent=2563EB`

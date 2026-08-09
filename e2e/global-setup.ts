@@ -39,4 +39,17 @@ export default async function globalSetup(): Promise<void> {
   }
 
   console.log(`[e2e] Smoke fixture venue slug: ${slug}`);
+
+  const staffFirstSlug = process.env.E2E_STAFF_FIRST_VENUE_SLUG?.trim();
+  if (!staffFirstSlug) {
+    console.warn(
+      '[e2e] E2E_STAFF_FIRST_VENUE_SLUG is not set — staff-first smoke tests will be skipped. Run the seed script and copy the value it prints. See Docs/E2E_SMOKE.md',
+    );
+  } else if (staffFirstSlug === slug) {
+    throw new Error(
+      '[e2e] E2E_STAFF_FIRST_VENUE_SLUG and E2E_VENUE_SLUG point at the same venue, so one ordering would be tested twice and the other not at all.',
+    );
+  } else {
+    console.log(`[e2e] Staff-first fixture venue slug: ${staffFirstSlug}`);
+  }
 }

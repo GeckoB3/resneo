@@ -24,6 +24,9 @@ export function mapApiVenueToVenuePublic(data: Record<string, unknown>): VenuePu
     public_booking_area_mode:
       data.public_booking_area_mode === 'manual' ? 'manual' : data.public_booking_area_mode === 'auto' ? 'auto' : undefined,
     feature_flags: mapVenueFeatureFlagsForPublic(data.feature_flags),
+    // Carries the team photos, which the staff-first picker shows beside each
+    // name. Without it a staff surface falls back to initials for everyone.
+    booking_page_config: data.booking_page_config as VenuePublic['booking_page_config'],
     require_account_login_for_bookings:
       data.require_account_login_for_bookings === true ? true : undefined,
   };

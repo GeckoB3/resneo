@@ -1536,9 +1536,34 @@ describe('staff-first: surfaces that keep the old order', () => {
     expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
   });
 
-  it('leaves the staff dashboard alone', async () => {
+  it('leaves a session that already knows the person alone', async () => {
+    // Staff clicked an empty slot on someone's calendar column, so date, time
+    // and person are all settled and only the service is still a question.
     installFetch(venueCatalog());
-    renderFlow({ venue: staffFirstVenue(), bookingAudience: 'staff' });
+    renderFlow({
+      venue: staffFirstVenue(),
+      bookingAudience: 'staff',
+      initialDate: todayYmd(),
+      initialTime: '10:00',
+      preselectedPractitionerId: ADA.id,
+    });
+
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+  });
+
+  it('leaves a rebook alone, which arrives knowing the last service', async () => {
+    installFetch(venueCatalog());
+    renderFlow({
+      venue: staffFirstVenue(),
+      bookingAudience: 'staff',
+      staffRebookBootstrap: {
+        v: 1,
+        surface: 'unified_scheduling',
+        appointment: { serviceId: PLAIN, practitionerId: ADA.id, durationMinutes: 30 },
+        guest: {},
+      },
+    });
 
     await waitForStep(STEP.service);
     expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
@@ -1569,6 +1594,110 @@ describe('staff-first: surfaces that keep the old order', () => {
     expect(screen.getByRole('button', { name: /Plain Service/i })).toBeInTheDocument();
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// Staff-first on the staff surface
+// ---------------------------------------------------------------------------
+
+/**
+ * The dashboard form is the same component with `bookingAudience="staff"`, so
+ * these walks pin the two things that differ from the guest surface: staff open
+ * straight onto the picker (they never see the single-or-group chooser, which
+ * is the only route into the group flow), and the copy is written for someone
+ * booking on another person's behalf.
+ */
+describe('staff-first: the dashboard booking form', () => {
+  const staffProps = { venue: staffFirstVenue(), bookingAudience: 'staff' } as const;
+
+  it('opens on the picker rather than the service list', async () => {
+    installFetch(venueCatalog());
+    renderFlow(staffProps);
+
+    await screen.findByTestId(STAFF_PICK);
+    notAtStep(STEP.service);
+  });
+
+  it('asks who the appointment is with, not who you would like to see', async () => {
+    installFetch(venueCatalog());
+    renderFlow(staffProps);
+
+    await screen.findByTestId(STAFF_PICK);
+    expect(
+      screen.getByRole('heading', { name: 'Who is this appointment with?' }),
+    ).toBeInTheDocument();
+    notAtStep(STEP.practitioner);
+  });
+
+  it('offers no way back, because the picker is the first step', async () => {
+    // Staff skip the single-or-group chooser, so a back link here would strand
+    // them on a step their surface never uses.
+    installFetch(venueCatalog());
+    renderFlow(staffProps);
+
+    await screen.findByTestId(STAFF_PICK);
+    expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
+  });
+
+  it('lists only the chosen person\'s services, then reaches the times', async () => {
+    installFetch(venueCatalog());
+    renderFlow(staffProps);
+    await screen.findByTestId(STAFF_PICK);
+
+    clickPractitioner('Ben');
+    await waitForStep(STEP.service);
+    expect(screen.getByRole('button', { name: /Ben Only Service/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Addons Service/i })).not.toBeInTheDocument();
+
+    clickService('Plain Service');
+    await waitForStep(STEP.slot);
+    // Asking again would undo the whole point of the ordering.
+    notAtStep(STEP.practitioner);
+  });
+
+  it('goes back from the services to the picker, not to the chooser', async () => {
+    installFetch(venueCatalog());
+    renderFlow(staffProps);
+    await screen.findByTestId(STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickBack();
+
+    await screen.findByTestId(STAFF_PICK);
+    notAtStep(STEP.modeChoice);
+  });
+
+  it('asks a walk-in who first, since the person is as open a question as the service', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ ...staffProps, staffBookingSource: 'walk-in' });
+
+    await screen.findByTestId(STAFF_PICK);
+    notAtStep(STEP.service);
+  });
+
+  it('still asks a walk-in who first when launched from a calendar column', async () => {
+    // A walk-in is never treated as slot-prefilled, so the column it was
+    // started from does not settle the question of who.
+    installFetch(venueCatalog());
+    renderFlow({
+      ...staffProps,
+      staffBookingSource: 'walk-in',
+      initialDate: todayYmd(),
+      initialTime: '10:00',
+      preselectedPractitionerId: ADA.id,
+    });
+
+    await screen.findByTestId(STAFF_PICK);
+  });
+
+  it('keeps the old order when the venue has the toggle off', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ bookingAudience: 'staff' });
+
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

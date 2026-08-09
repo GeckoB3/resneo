@@ -722,17 +722,28 @@ export function AppointmentBookingFlow({
 
   /**
    * Whether this session asks for a person before a service. Decided once, at
-   * mount: a guest part-way through must never have the steps rearranged under
-   * them because the venue flipped the setting, and the surfaces excluded here
-   * (staff, edits, per-practitioner pages) cannot change mid-session either.
+   * mount: nobody part-way through must have the steps rearranged under them
+   * because the venue flipped the setting, and the surfaces excluded here
+   * (edits, per-practitioner pages) cannot change mid-session either.
    *
-   * A session that already knows the service (a waitlist offer, a `service_id`
-   * link) stays service-first: the guest has committed to the what, so asking
-   * them for the who first would be a step backwards.
+   * The rule on both sides of the desk is the same: reorder only when the
+   * session does not already know the answer to one of the two questions.
+   *   * Knows the *what* already (a waitlist offer, a `service_id` link, a
+   *     rebook seeded from a past appointment): stay service-first, because
+   *     asking who first would be a step backwards.
+   *   * Knows the *who* already (staff clicked an empty slot on someone's
+   *     calendar column, so date, time and person are all set): stay
+   *     service-first, because the person is no longer a question.
+   *
+   * Walk-ins are deliberately not excluded. Someone is standing at the desk
+   * asking for a person as often as for a service, so the toggle applies:
+   * `staffCalendarSlotPrefillActive` already treats walk-ins as unprefilled
+   * even when launched from a column.
    */
   const [orderingForSession] = useState<AppointmentFlowOrdering>(() =>
     venue.feature_flags?.resolved?.staff_first_booking_flow === true &&
-    bookingAudience === 'public' &&
+    (bookingAudience === 'public' ||
+      (isStaff && !staffCalendarSlotPrefillActive && !staffRebookBootstrap?.appointment)) &&
     !editBooking &&
     !(lockedPractitioner?.id && lockedPractitioner?.bookingSlug) &&
     !preselectedServiceId
@@ -763,9 +774,12 @@ export function AppointmentBookingFlow({
   // group pipeline has no collective routing, so only single bookings are offered.
   const [step, setStep] = useState<Step>(() => {
     if (isStaffFirst) {
-      // A combined page has no single-or-group chooser, and `?start=service`
-      // means "skip the chooser", which lands on the picker either way.
-      return venue.is_collective || initialStep === 'service' ? 'staff_pick' : 'mode_choice';
+      // A combined page has no single-or-group chooser, staff never see one
+      // either (group bookings are reached only from `mode_choice`), and
+      // `?start=service` means "skip the chooser". All three land on the picker.
+      return venue.is_collective || isStaff || initialStep === 'service'
+        ? 'staff_pick'
+        : 'mode_choice';
     }
     return editBooking ||
       isLockedPractitionerFlow ||
@@ -983,7 +997,7 @@ export function AppointmentBookingFlow({
       } else if (isStaffFirst) {
         setAnyRouteActive(false);
         setCarriedServiceId(null);
-        setStep(venue.is_collective ? 'staff_pick' : 'mode_choice');
+        setStep(venue.is_collective || isStaff ? 'staff_pick' : 'mode_choice');
         setSelectedPractitionerId(null);
       } else {
         setStep(isStaff || venue.is_collective ? 'service' : 'mode_choice');
@@ -3125,11 +3139,15 @@ export function AppointmentBookingFlow({
 
       {step === 'staff_pick' && (
         <div data-testid="staff-pick-step">
-          {backFromStaffPick(flowShape) && initialStep !== 'service' && (
+          {/* Staff never pass through the single-or-group chooser, so the picker
+              is their first step and there is nothing behind it. */}
+          {backFromStaffPick(flowShape) && initialStep !== 'service' && !isStaff && (
             <AppointmentBackLink onClick={() => setStep('mode_choice')} />
           )}
           <AppointmentStepHeader
-            title="Who would you like to see?"
+            // Staff are booking on someone else's behalf, so the guest-facing
+            // phrasing would be addressed to the wrong person.
+            title={isStaff ? 'Who is this appointment with?' : 'Who would you like to see?'}
             description="Pick a person to see their services and prices."
           />
           {catalogLoading ? (
@@ -3143,7 +3161,11 @@ export function AppointmentBookingFlow({
               <p className="text-sm font-medium text-slate-600">
                 No {terms.staff.toLowerCase()} are available to book right now.
               </p>
-              <p className="mt-1 text-xs text-slate-400">Try again later or contact the venue.</p>
+              <p className="mt-1 text-xs text-slate-400">
+                {isStaff
+                  ? `Check that your ${terms.staff.toLowerCase()} have bookable calendars and services.`
+                  : 'Try again later or contact the venue.'}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">

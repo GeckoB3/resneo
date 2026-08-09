@@ -33,10 +33,14 @@
 --   * It does not stop services being deleted. Deletion is now simply survivable.
 
 ALTER TABLE public.bookings
-  ADD COLUMN IF NOT EXISTS service_name_snapshot text;
+  ADD COLUMN IF NOT EXISTS service_name_snapshot text,
+  ADD COLUMN IF NOT EXISTS service_variant_name_snapshot text;
 
 COMMENT ON COLUMN public.bookings.service_name_snapshot IS
   'The service name as it read when this booking was taken. Written once by trigger; never updated. History must not depend on the catalogue, which can be renamed or deleted.';
+
+COMMENT ON COLUMN public.bookings.service_variant_name_snapshot IS
+  'The chosen option''s name as it read when this booking was taken. Variants are ON DELETE CASCADE from their service, so deleting a service takes the option with it and nulls this booking''s link.';
 
 -- Resolve the name from whichever service reference the booking carries, in the
 -- same order the application uses when it resolves names live.
@@ -68,6 +72,16 @@ BEGIN
     SELECT vs.name INTO NEW.service_name_snapshot
     FROM public.venue_services vs
     WHERE vs.id = NEW.service_id;
+  END IF;
+
+  -- The chosen option, which is what actually distinguishes a 30 minute cut
+  -- from a 60 minute one on the record.
+  IF NEW.service_variant_id IS NOT NULL
+     AND (NEW.service_variant_name_snapshot IS NULL
+          OR btrim(NEW.service_variant_name_snapshot) = '') THEN
+    SELECT sv.name INTO NEW.service_variant_name_snapshot
+    FROM public.service_variants sv
+    WHERE sv.id = NEW.service_variant_id;
   END IF;
 
   RETURN NEW;
@@ -103,3 +117,10 @@ FROM public.venue_services vs
 WHERE b.service_id = vs.id
   AND b.service_name_snapshot IS NULL
   AND vs.name IS NOT NULL;
+
+UPDATE public.bookings b
+SET service_variant_name_snapshot = sv.name
+FROM public.service_variants sv
+WHERE b.service_variant_id = sv.id
+  AND b.service_variant_name_snapshot IS NULL
+  AND sv.name IS NOT NULL;

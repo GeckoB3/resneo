@@ -32,7 +32,7 @@ import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
  *   Cancelled bookings are excluded from this view by default; pass `status=Cancelled` to opt in.
  */
 const BOOKINGS_LIST_SELECT_FULL =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode';
 
 /**
  * Hard ceiling on rows returned by the otherwise-unbounded query shapes
@@ -43,7 +43,7 @@ const BOOKINGS_LIST_MAX_ROWS = 1000;
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes';
 
 export async function GET(request: NextRequest) {
   try {
@@ -410,10 +410,16 @@ export async function GET(request: NextRequest) {
         addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
         addons_count: addonCountByBooking.get(r.id as string) ?? 0,
         booking_addon_labels: addonLabelsByBooking.get(r.id as string) ?? [],
+        // What the booking recorded beats the catalogue: options are deleted
+        // along with their service, taking the live name with them.
         service_variant_name:
-          typeof r.service_variant_id === 'string' && r.service_variant_id.trim().length > 0
+          (typeof r.service_variant_name_snapshot === 'string'
+            && r.service_variant_name_snapshot.trim().length > 0
+            ? r.service_variant_name_snapshot.trim()
+            : null)
+          ?? (typeof r.service_variant_id === 'string' && r.service_variant_id.trim().length > 0
             ? serviceVariantNameById.get(r.service_variant_id as string) ?? null
-            : null,
+            : null),
       };
     });
 

@@ -2,6 +2,8 @@
 export interface CalendarBookingServiceLabelBooking {
   booking_item_name?: string | null;
   service_variant_id?: string | null;
+  /** The option's name as recorded when the booking was taken; outlives the catalogue. */
+  service_variant_name_snapshot?: string | null;
   booking_addon_labels?: string[] | null;
 }
 
@@ -29,10 +31,9 @@ export function calendarBookingServiceDisplayLine(params: {
 }): string | null {
   const base =
     params.booking.booking_item_name?.trim() || params.catalogService?.name?.trim() || null;
-  const variantName = variantNameForBooking(
-    params.booking.service_variant_id,
-    params.catalogService?.variants,
-  );
+  const variantName =
+    params.booking.service_variant_name_snapshot?.trim() ||
+    variantNameForBooking(params.booking.service_variant_id, params.catalogService?.variants);
 
   let serviceLabel = base;
   if (base && variantName && !base.includes(variantName)) {

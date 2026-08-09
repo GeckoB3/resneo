@@ -236,7 +236,13 @@ export async function GET(
     }
 
     const area_name = detailBundle.area_name;
-    const service_variant_name = detailBundle.service_variant_name;
+    // Prefer what the booking recorded. The bundle resolves the option live, and
+    // options are deleted along with their service.
+    const variantSnapshot =
+      typeof (booking as { service_variant_name_snapshot?: unknown }).service_variant_name_snapshot === 'string'
+        ? ((booking as { service_variant_name_snapshot?: string }).service_variant_name_snapshot ?? '').trim()
+        : '';
+    const service_variant_name = variantSnapshot || detailBundle.service_variant_name;
     const service_variant_price_pence = detailBundle.service_variant_price_pence;
 
     let guest = detailBundle.guest as {

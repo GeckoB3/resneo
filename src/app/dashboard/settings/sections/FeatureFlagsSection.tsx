@@ -29,7 +29,7 @@ const FLAG_META: {
     key: 'staff_first_booking_flow',
     title: 'Staff-first booking',
     description:
-      "Guests pick who they want to see first, then choose from that person's services, on your public booking page and your combined page if you host one. Team photos and specialties from your Meet the team profiles appear when guests choose a person; with one team member, guests see a single card first.",
+      "Guests pick who they want to see first, then choose from that person's services, on your public booking page and your combined page if you host one. Each person shows as their Meet the team photo and their name; with one team member, guests see a single card first.",
   },
   {
     key: 'guest_self_reschedule',

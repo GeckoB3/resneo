@@ -4,21 +4,9 @@ import { bookingPageImageFramingStyle } from '@/lib/booking/booking-page-image-f
 import type { BookingTeamProfile } from '@/lib/booking/booking-page-theme';
 import { APPOINTMENT_PUBLIC_CHEVRON_SM } from '@/components/booking/appointment-public-ui';
 
-/** Specialties beyond this many collapse into a "+N" chip so a card stays one glance. */
-const MAX_SPECIALTY_CHIPS = 3;
-
-function specialtyList(profile: BookingTeamProfile | undefined): string[] {
-  return (profile?.specialties ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 interface StaffChoiceCardProps {
   name: string;
-  /** Combined pages: which venue this person works at, shown under their name. */
-  venueName?: string | null;
-  /** Their "Meet the team" profile, when the venue has filled one in. */
+  /** Their "Meet the team" profile, read only for the photo. */
   profile?: BookingTeamProfile;
   onClick: () => void;
   className: string;
@@ -26,27 +14,18 @@ interface StaffChoiceCardProps {
 
 /**
  * One person on the staff-first picker: the first choice a guest makes, before
- * any service is in play, so it carries who they are rather than what anything
- * costs.
+ * any service is in play.
  *
- * A profile marked hidden is still bookable and still listed, but shows only an
- * initial and a name. Hiding is a "keep me off the marketing page" setting, and
- * honouring it for the photo while still showing the bio would leak exactly what
- * the venue asked to withhold.
+ * Deliberately just a face and a name. Bios and specialties belong on the Meet
+ * the team tab, where someone has gone looking for them; here they turn a quick
+ * choice into a page of reading.
+ *
+ * A profile marked hidden is still bookable and still listed, but shows an
+ * initial rather than their photo, since hiding is a "keep me off the public
+ * page" setting.
  */
-export function StaffChoiceCard({
-  name,
-  venueName,
-  profile,
-  onClick,
-  className,
-}: StaffChoiceCardProps) {
-  const marketingHidden = profile?.hidden === true;
-  const photo = marketingHidden ? '' : (profile?.photo?.trim() ?? '');
-  const bio = marketingHidden ? '' : (profile?.bio?.trim() ?? '');
-  const specialties = marketingHidden ? [] : specialtyList(profile);
-  const shownSpecialties = specialties.slice(0, MAX_SPECIALTY_CHIPS);
-  const overflowCount = specialties.length - shownSpecialties.length;
+export function StaffChoiceCard({ name, profile, onClick, className }: StaffChoiceCardProps) {
+  const photo = profile?.hidden === true ? '' : (profile?.photo?.trim() ?? '');
 
   return (
     <button type="button" onClick={onClick} className={className} aria-label={name}>
@@ -67,30 +46,7 @@ export function StaffChoiceCard({
               {name.charAt(0).toUpperCase()}
             </div>
           )}
-          <div className="min-w-0">
-            <div className="font-medium text-slate-900">{name}</div>
-            {venueName?.trim() ? (
-              <div className="truncate text-xs text-slate-500">{venueName.trim()}</div>
-            ) : null}
-            {shownSpecialties.length > 0 ? (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {shownSpecialties.map((s, i) => (
-                  <span
-                    key={`${s}-${i}`}
-                    className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
-                  >
-                    {s}
-                  </span>
-                ))}
-                {overflowCount > 0 ? (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                    +{overflowCount}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            {bio ? <p className="mt-1 truncate text-xs text-slate-500">{bio}</p> : null}
-          </div>
+          <div className="min-w-0 truncate font-medium text-slate-900">{name}</div>
         </div>
         <svg
           className={`${APPOINTMENT_PUBLIC_CHEVRON_SM} flex-shrink-0`}
@@ -107,11 +63,7 @@ export function StaffChoiceCard({
   );
 }
 
-/**
- * Sized to a real card so the picker does not jump as the catalog lands. Venues
- * that have filled in team profiles get slightly taller cards; this matches the
- * common case of a name and an initial.
- */
+/** Sized to a real card so the picker does not jump as the catalog lands. */
 export function StaffChoiceCardSkeleton() {
   return <div className="h-[86px] animate-pulse rounded-xl bg-slate-100" />;
 }

@@ -1189,7 +1189,9 @@ describe('staff-first: person before service', () => {
     expect(screen.queryByText('Hidden bio')).not.toBeInTheDocument();
   });
 
-  it('shows a photo, specialties and a bio for a visible profile', async () => {
+  it('shows a face and a name, and nothing else to read', async () => {
+    // Bios and specialties live on the Meet the team tab. The picker is a quick
+    // choice, so a card carries a photo and a name and stops there.
     installFetch(venueCatalog());
     renderFlow({
       venue: staffFirstVenue({
@@ -1197,7 +1199,7 @@ describe('staff-first: person before service', () => {
           team_profiles: {
             [ADA.id]: {
               photo: 'https://example.test/ada.jpg',
-              specialties: 'Colour, Cutting, Styling, Extensions',
+              specialties: 'Colour, Cutting, Styling',
               bio: 'Twelve years behind the chair.',
             },
           },
@@ -1206,11 +1208,11 @@ describe('staff-first: person before service', () => {
     });
     await startStaffFirstBooking();
 
-    expect(screen.getByText('Twelve years behind the chair.')).toBeInTheDocument();
-    expect(screen.getByText('Colour')).toBeInTheDocument();
-    // Four specialties, three chips, and the rest folded into an overflow chip.
-    expect(screen.getByText('+1')).toBeInTheDocument();
-    expect(screen.queryByText('Extensions')).not.toBeInTheDocument();
+    const card = personCard('Ada');
+    expect(card.querySelector('img')).toHaveAttribute('src', 'https://example.test/ada.jpg');
+    expect(card).toHaveTextContent('Ada');
+    expect(card).not.toHaveTextContent('Twelve years behind the chair.');
+    expect(card).not.toHaveTextContent('Colour');
   });
 
   it('tells the guest when nobody is bookable', async () => {
@@ -1671,13 +1673,15 @@ describe('staff-first: combined page', () => {
     expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
   });
 
-  it('says which venue each person works at', async () => {
+  it('keeps the cards to a face and a name here too', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
     await screen.findByTestId(STAFF_PICK);
 
-    expect(personCard('Ada')).toHaveTextContent('Harbour Clinic');
-    expect(personCard('Ben')).toHaveTextContent('Riverside Studio');
+    // No venue line, for the same reason there is no bio: this is a quick pick.
+    expect(personCard('Ada')).not.toHaveTextContent('Harbour Clinic');
+    expect(personCard('Ben')).not.toHaveTextContent('Riverside Studio');
+    expect(personCard('Ada')).toHaveTextContent('Ada');
   });
 
   it('walks calendar to their own options to times', async () => {

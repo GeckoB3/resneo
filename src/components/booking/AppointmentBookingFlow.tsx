@@ -368,8 +368,6 @@ function StaffCustomDurationPopover({
 interface CatalogPractitioner {
   id: string;
   name: string;
-  /** Combined pages only: the venue this calendar belongs to, shown on the picker. */
-  owning_venue_name?: string;
   services: Array<{
     id: string;
     name: string;
@@ -3162,7 +3160,6 @@ export function AppointmentBookingFlow({
                 <StaffChoiceCard
                   key={prac.id}
                   name={prac.name}
-                  venueName={isCombined ? prac.owning_venue_name : null}
                   profile={teamProfiles[prac.id]}
                   className={choiceCardClass}
                   onClick={() => {
@@ -4989,7 +4986,6 @@ export function AppointmentBookingFlow({
                 <StaffChoiceCard
                   key={prac.id}
                   name={prac.name}
-                  venueName={isCombined ? prac.owning_venue_name : null}
                   profile={teamProfiles[prac.id]}
                   className={choiceCardClass}
                   onClick={() => {

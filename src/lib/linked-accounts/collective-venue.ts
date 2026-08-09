@@ -180,10 +180,8 @@ export interface CollectiveCatalogPractitioner {
   /** Routing: the venue that owns this calendar (booking writes here). */
   owning_venue_id: string;
   /**
-   * The owning venue's name, shown under the person on the combined page's
-   * picker. Which venue someone works at is decision-critical when the person
-   * is chosen before any service, so it is populated for every calendar, not
-   * only for the duplicate names that get it folded into {@link name}.
+   * The owning venue's name. Not shown to guests directly: it orders the merged
+   * list and qualifies duplicate names by folding itself into {@link name}.
    */
   owning_venue_name: string;
   services: CollectiveCatalogService[];

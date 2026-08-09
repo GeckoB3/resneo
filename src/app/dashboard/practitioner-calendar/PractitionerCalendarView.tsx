@@ -262,6 +262,13 @@ interface Booking {
   appointment_service_id: string | null;
   service_item_id: string | null;
   service_variant_id?: string | null;
+  /**
+   * Names as the booking recorded them. Both outlive the catalogue, so a bar
+   * still says what the appointment was for after the service is deleted and
+   * the ids above are nulled.
+   */
+  service_name_snapshot?: string | null;
+  service_variant_name_snapshot?: string | null;
   processing_time_blocks?: unknown | null;
   guest_id?: string;
   guest_name: string;

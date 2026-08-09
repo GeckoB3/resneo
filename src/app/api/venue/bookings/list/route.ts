@@ -410,6 +410,11 @@ export async function GET(request: NextRequest) {
         addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
         addons_count: addonCountByBooking.get(r.id as string) ?? 0,
         booking_addon_labels: addonLabelsByBooking.get(r.id as string) ?? [],
+        // Carried through verbatim because this projection is an allowlist:
+        // anything omitted here is invisible to the label resolution below and
+        // to the calendar bar, however faithfully the columns were selected.
+        service_name_snapshot: r.service_name_snapshot ?? null,
+        service_variant_name_snapshot: r.service_variant_name_snapshot ?? null,
         // What the booking recorded beats the catalogue: options are deleted
         // along with their service, taking the live name with them.
         service_variant_name:

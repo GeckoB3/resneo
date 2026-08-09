@@ -172,7 +172,7 @@ export async function GET(
     const { data: recentRaw, error: rbErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, booking_model, estimated_end_time, booking_end_time, service_id, area_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, experience_event_id, class_instance_id, resource_id, event_session_id',
+        'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, booking_model, estimated_end_time, booking_end_time, service_id, area_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, experience_event_id, class_instance_id, resource_id, event_session_id',
       )
       .eq('guest_id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -285,6 +285,7 @@ export async function GET(
         calendar_id?: string | null;
         service_item_id?: string | null;
         service_variant_id?: string | null;
+        service_name_snapshot?: string | null;
         experience_event_id?: string | null;
         class_instance_id?: string | null;
         resource_id?: string | null;
@@ -294,7 +295,12 @@ export async function GET(
       const practitioner_name = row.practitioner_id ? prMap.get(row.practitioner_id) ?? null : null;
       const service_name = row.appointment_service_id ? svcMap.get(row.appointment_service_id) ?? null : null;
       const calendar_name = row.calendar_id ? calMap.get(row.calendar_id) ?? null : null;
-      const service_item_name = row.service_item_id ? siMap.get(row.service_item_id) ?? null : null;
+      // A client's history is the worst place to lose a service name, so what
+      // the booking recorded wins over the catalogue, which may have renamed or
+      // deleted the service since.
+      const recordedServiceName = row.service_name_snapshot?.trim() || null;
+      const service_item_name =
+        recordedServiceName ?? (row.service_item_id ? siMap.get(row.service_item_id) ?? null : null);
 
       let detail_label = '';
       if (model === 'event_ticket' && row.experience_event_id) {

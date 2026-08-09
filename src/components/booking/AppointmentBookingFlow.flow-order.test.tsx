@@ -1043,7 +1043,17 @@ describe('after a booking is confirmed', () => {
       venue({ terminology: { client: 'Client', booking: 'Session', staff: 'Coach' } }),
     );
 
+    expect(screen.getByRole('heading', { name: /Session Confirmed/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Book another session/i })).toBeInTheDocument();
+  });
+
+  it('turns the phrasing round for venues whose word is just "Booking"', async () => {
+    await bookToConfirmation(
+      venue({ terminology: { client: 'Client', booking: 'Booking', staff: 'Staff' } }),
+    );
+
+    expect(screen.getByRole('button', { name: 'Make another booking' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Book another booking/i })).not.toBeInTheDocument();
   });
 
   it('does not offer it to staff, who have their own Done control', async () => {

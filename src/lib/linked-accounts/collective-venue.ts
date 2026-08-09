@@ -18,6 +18,7 @@ import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import { loadPublicCombinedCatalogue, loadVenueCatalogueData } from './catalogue';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
@@ -124,7 +125,10 @@ export async function loadCollectiveVenuePublic(
     booking_model: 'unified_scheduling',
     active_booking_models: ['unified_scheduling'],
     enabled_models: [],
-    terminology: (host?.terminology as VenuePublic['terminology']) ?? undefined,
+    // The combined page is always an appointments page, so the host's words are
+    // resolved against that model rather than passed through raw: a host that
+    // signed up as a restaurant would otherwise label everything "Reservation".
+    terminology: mergeVenueTerminology('unified_scheduling', host?.terminology),
     currency: (host?.currency as string) ?? 'GBP',
     booking_paused: !bookable,
     is_collective: true,

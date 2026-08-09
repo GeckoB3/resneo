@@ -3021,7 +3021,11 @@ export function AppointmentBookingFlow({
         onClick={restartPublicAppointmentBooking}
         className="mt-6 w-full rounded-xl border border-brand-200 bg-white px-4 py-3 text-sm font-semibold text-brand-800 transition-colors hover:border-brand-300 hover:bg-brand-50/70"
       >
-        Book another {terms.booking.toLowerCase()}
+        {/* "Book another booking" is not a sentence, so venues whose word for a
+            booking is just that get the phrasing the other way round. */}
+        {terms.booking.trim().toLowerCase() === 'booking'
+          ? 'Make another booking'
+          : `Book another ${terms.booking.toLowerCase()}`}
       </button>
     ) : null;
 

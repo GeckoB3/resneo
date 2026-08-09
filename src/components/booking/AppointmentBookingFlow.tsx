@@ -2947,11 +2947,12 @@ export function AppointmentBookingFlow({
     : 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
   // Cards that carry a description split the visual shell (border, padding, hover) from the click
   // target, so an expand toggle can sit inside the card without nesting a button inside a button.
-  // Padding stays on the shell so the toggle lines up with the text above it.
+  // Padding stays on the shell so the toggle lines up with the text above it. The target then
+  // stretches over the whole shell (`ap-card-stretch`), so the description is not a dead zone.
   const choiceCardShellClass = isPublicGuest
-    ? 'ap-choice-card'
-    : 'rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
-  const choiceCardTargetClass = 'w-full text-left';
+    ? 'ap-choice-card ap-card-shell'
+    : 'ap-card-shell rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
+  const choiceCardTargetClass = 'ap-card-stretch w-full text-left';
   const publicDetailsFieldProps = isPublicGuest
     ? { submitClassName: APPOINTMENT_DETAILS_SUBMIT_CLASS, fieldClassName: APPOINTMENT_DETAILS_INPUT_CLASS }
     : {};

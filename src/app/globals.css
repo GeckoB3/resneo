@@ -572,6 +572,31 @@ button, a, input, select, textarea {
   transform: scale(0.995);
 }
 
+/*
+ * Choice cards that carry a description.
+ *
+ * The description cannot live inside the card's button, because it owns a
+ * "Show more" toggle and a button may not nest inside a button. Left alone that
+ * makes a long description a dead zone: the card looks clickable and most of it
+ * is not. So the button's click target is stretched over the whole card, and
+ * the few real controls inside raise themselves back above it.
+ *
+ * Unscoped on purpose: the staff booking surfaces use these cards too, and they
+ * are not inside `.appointment-public`.
+ */
+.ap-card-shell {
+  position: relative;
+}
+.ap-card-stretch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.ap-card-raise {
+  position: relative;
+  z-index: 1;
+}
+
 .appointment-public .ap-choice-icon {
   background: var(--ap-accent-soft);
   color: var(--ap-accent);

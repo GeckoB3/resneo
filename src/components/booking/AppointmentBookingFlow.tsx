@@ -207,6 +207,19 @@ function addonGroupsForServiceFromStaff(
   return catalogAddonGroupsForServiceId(catalogStaff, serviceId);
 }
 
+/**
+ * Combined pages: whether an offering is the same thing whoever provides it.
+ * Only those can be pooled; the rest need a calendar chosen first, because the
+ * options and the price come off that calendar's own source service.
+ */
+function offeringIsUniform(catalogStaff: CatalogPractitioner[], serviceId: string): boolean {
+  for (const p of catalogStaff) {
+    const offer = p.services.find((s) => s.id === serviceId);
+    if (offer && offer.any_available === false) return false;
+  }
+  return true;
+}
+
 type CatalogServiceOffer = CatalogPractitioner['services'][number];
 
 /** Apply chosen variant duration / buffer / price / deposit on a catalog service offer. */
@@ -355,6 +368,8 @@ function StaffCustomDurationPopover({
 interface CatalogPractitioner {
   id: string;
   name: string;
+  /** Combined pages only: the venue this calendar belongs to, shown on the picker. */
+  owning_venue_name?: string;
   services: Array<{
     id: string;
     name: string;
@@ -700,20 +715,27 @@ export function AppointmentBookingFlow({
     bookingAudience === 'public' &&
     !editBooking &&
     !(lockedPractitioner?.id && lockedPractitioner?.bookingSlug) &&
-    !preselectedServiceId &&
-    // Combined pages join in the next change, which brings the calendar
-    // attribution and pooled-offering routing they need.
-    !venue.is_collective
+    !preselectedServiceId
       ? 'staff_first'
       : 'service_first',
   );
+  /**
+   * Combined pages only. Set when a guest who chose "Any available" picks an
+   * offering that differs by calendar: they have to name a calendar after all,
+   * and from that point the flow behaves exactly like the combined
+   * service-first flow, which is what {@link flowShape} then reports.
+   */
+  const [anyRouteActive, setAnyRouteActive] = useState(false);
   const isStaffFirst = orderingForSession === 'staff_first';
   const flowShape: AppointmentFlowShape = useMemo(
     () => ({
-      ordering: orderingForSession,
+      // Inside the pooled-offering detour the guest is picking a calendar and
+      // then its own options, which is the combined service-first flow exactly.
+      // Reporting it as such is what keeps that detour on tested ground.
+      ordering: anyRouteActive ? 'service_first' : orderingForSession,
       surface: isLockedPractitionerFlow ? 'locked' : venue.is_collective ? 'combined' : 'venue',
     }),
-    [orderingForSession, isLockedPractitionerFlow, venue.is_collective],
+    [orderingForSession, anyRouteActive, isLockedPractitionerFlow, venue.is_collective],
   );
 
   // Shared state
@@ -939,6 +961,8 @@ export function AppointmentBookingFlow({
         setStep('service');
         setSelectedPractitionerId(lockedPractitioner.id);
       } else if (isStaffFirst) {
+        setAnyRouteActive(false);
+        setCarriedServiceId(null);
         setStep(venue.is_collective ? 'staff_pick' : 'mode_choice');
         setSelectedPractitionerId(null);
       } else {
@@ -2862,6 +2886,24 @@ export function AppointmentBookingFlow({
     ? { submitClassName: APPOINTMENT_DETAILS_SUBMIT_CLASS, fieldClassName: APPOINTMENT_DETAILS_INPUT_CLASS }
     : {};
 
+  /**
+   * The only way to the picker. Every arrival clears the pooled-offering detour,
+   * so no exit from it can be forgotten and leave the flow routing as though a
+   * calendar still had to be chosen.
+   */
+  function goToStaffPick(opts?: { carryServiceId?: string | null }) {
+    setAnyRouteActive(false);
+    setCarriedServiceId(opts?.carryServiceId ?? null);
+    setSelectedPractitionerId(null);
+    setSelectedServiceId(null);
+    setSelectedVariantId(null);
+    setSelectedAddonIds([]);
+    setSelectedTime(null);
+    setMultiServiceSegments(null);
+    setError(null);
+    setStep('staff_pick');
+  }
+
   /** Shared by the guest and staff copies of the times step so they cannot drift. */
   function goBackFromSlot() {
     setSelectedTime(null);
@@ -2887,15 +2929,7 @@ export function AppointmentBookingFlow({
    * service back to the picker so the next person's list can point at it.
    */
   function seeSomeoneElse() {
-    setCarriedServiceId(selectedServiceId);
-    setSelectedTime(null);
-    setMultiServiceSegments(null);
-    setSelectedPractitionerId(null);
-    setSelectedServiceId(null);
-    setSelectedVariantId(null);
-    setSelectedAddonIds([]);
-    setError(null);
-    setStep('staff_pick');
+    goToStaffPick({ carryServiceId: selectedServiceId });
   }
 
   /** Offered only when switching is actually possible, and not from the pooled option. */
@@ -2971,7 +3005,7 @@ export function AppointmentBookingFlow({
           />
           <div className="space-y-3">
             <AppointmentChoiceCard
-              onClick={() => setStep(isStaffFirst ? 'staff_pick' : 'service')}
+              onClick={() => (isStaffFirst ? goToStaffPick() : setStep('service'))}
               title="Book an appointment"
               description="Schedule an appointment for yourself"
               icon={
@@ -3001,16 +3035,7 @@ export function AppointmentBookingFlow({
       {step === 'staff_pick' && (
         <div data-testid="staff-pick-step">
           {backFromStaffPick(flowShape) && initialStep !== 'service' && (
-            <AppointmentBackLink
-              onClick={() => {
-                setSelectedPractitionerId(null);
-                setSelectedServiceId(null);
-                setSelectedVariantId(null);
-                setSelectedAddonIds([]);
-                setCarriedServiceId(null);
-                setStep('mode_choice');
-              }}
-            />
+            <AppointmentBackLink onClick={() => setStep('mode_choice')} />
           )}
           <AppointmentStepHeader
             title="Who would you like to see?"
@@ -3064,6 +3089,7 @@ export function AppointmentBookingFlow({
                 <StaffChoiceCard
                   key={prac.id}
                   name={prac.name}
+                  venueName={isCombined ? prac.owning_venue_name : null}
                   profile={teamProfiles[prac.id]}
                   className={choiceCardClass}
                   onClick={() => {
@@ -3086,12 +3112,11 @@ export function AppointmentBookingFlow({
           {isStaffFirst ? (
             <AppointmentBackLink
               onClick={() => {
-                setSelectedPractitionerId(null);
-                setSelectedServiceId(null);
-                setSelectedVariantId(null);
-                setSelectedAddonIds([]);
-                setCarriedServiceId(null);
-                setStep(backFromService(flowShape) === 'staff_pick' ? 'staff_pick' : 'mode_choice');
+                if (backFromService(flowShape) === 'staff_pick') {
+                  goToStaffPick();
+                  return;
+                }
+                setStep('mode_choice');
               }}
             />
           ) : !isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && initialStep !== 'service' ? (
@@ -3156,6 +3181,19 @@ export function AppointmentBookingFlow({
                   setSelectedVariantId(null);
                   setSelectedAddonIds([]);
                   setCarriedServiceId(null);
+                  // Pooled on a combined page: an offering that differs by
+                  // calendar cannot be booked without naming one, so this is
+                  // where the guest is handed back to the calendar list.
+                  if (
+                    isCombined &&
+                    isAnyAvailablePractitionerId(selectedPractitionerId) &&
+                    !offeringIsUniform(catalogStaff, svc.id)
+                  ) {
+                    setAnyRouteActive(true);
+                    setSelectedPractitionerId(null);
+                    setStep('practitioner');
+                    return;
+                  }
                   const hasAddonGroups = isStaffFirst
                     ? addonGroupsForServiceFromStaff(catalogStaff, svc.id, selectedPractitionerId).length > 0
                     : catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
@@ -3812,6 +3850,17 @@ export function AppointmentBookingFlow({
         <div>
           <button
             onClick={() => {
+              if (anyRouteActive) {
+                // Leaving the pooled-offering detour: put "Any available" back so
+                // the service list the guest returns to is the one they were on.
+                setAnyRouteActive(false);
+                setSelectedVariantId(null);
+                setSelectedAddonIds([]);
+                setSelectedServiceId(null);
+                setSelectedPractitionerId(ANY_AVAILABLE_PRACTITIONER_ID);
+                setStep('service');
+                return;
+              }
               if (isCombined) {
                 // Calendar-first: practitioner is reached straight from service, so
                 // Back returns there (variants/add-ons come AFTER the calendar).
@@ -3858,6 +3907,11 @@ export function AppointmentBookingFlow({
               <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {serviceSelectionDurationMinutes ?? selectedService.duration_minutes} min &middot; {selectedVariant ? formatPrice(selectedVariant.price_pence) : formatFromPrice(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence)}</span></div>
             </div>
           )}
+          {anyRouteActive ? (
+            <p className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              This service is a little different for each {terms.staff.toLowerCase()}.
+            </p>
+          ) : null}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Who would you like to see?</h2>
           <p className="mb-4 text-sm text-slate-500">
             {isEdit

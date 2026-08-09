@@ -93,7 +93,12 @@ function addonGroup(groupId: string, groupName: string, addonId: string, addonNa
 }
 
 type CatalogService = Record<string, unknown> & { id: string };
-type CatalogPractitioner = { id: string; name: string; services: CatalogService[] };
+type CatalogPractitioner = {
+  id: string;
+  name: string;
+  owning_venue_name?: string;
+  services: CatalogService[];
+};
 
 function service(
   id: string,
@@ -156,6 +161,7 @@ function combinedCatalog(): CatalogPractitioner[] {
   return [
     {
       ...ADA,
+      owning_venue_name: 'Harbour Clinic',
       services: [
         service(PLAIN, 'Plain Offering', 3000, { any_available: true }),
         service(VARIANTS, 'Options Offering', 3000, {
@@ -175,6 +181,7 @@ function combinedCatalog(): CatalogPractitioner[] {
     },
     {
       ...BEN,
+      owning_venue_name: 'Riverside Studio',
       services: [
         service(PLAIN, 'Plain Offering', 3000, { any_available: true }),
         service(VARIANTS, 'Options Offering', 4000, {
@@ -1261,20 +1268,20 @@ describe('staff-first: any available', () => {
   });
 });
 
-describe('staff-first: when the chosen person is fully booked', () => {
-  /** Availability with no slots, so the times step shows its empty state. */
-  function installEmptyAvailability(catalog: CatalogPractitioner[]): void {
-    installFetch(catalog);
-    const inner = globalThis.fetch as unknown as (input: RequestInfo | URL) => Promise<Response>;
-    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : String(input);
-      if (url.includes('/api/booking/availability')) {
-        return jsonResponse({ practitioners: [] });
-      }
-      return inner(input);
-    });
-  }
+/** Availability with no slots, so the times step shows its empty state. */
+function installEmptyAvailability(catalog: CatalogPractitioner[]): void {
+  installFetch(catalog);
+  const inner = globalThis.fetch as unknown as (input: RequestInfo | URL) => Promise<Response>;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : String(input);
+    if (url.includes('/api/booking/availability')) {
+      return jsonResponse({ practitioners: [] });
+    }
+    return inner(input);
+  });
+}
 
+describe('staff-first: when the chosen person is fully booked', () => {
   async function reachEmptyTimes(): Promise<void> {
     await startStaffFirstBooking();
     clickPractitioner('Ada');
@@ -1459,12 +1466,269 @@ describe('staff-first: surfaces that keep the old order', () => {
     expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
   });
 
-  it('leaves a combined page alone until its own change lands', async () => {
-    installFetch(combinedCatalog());
-    renderFlow({ venue: staffFirstVenue({ is_collective: true }) });
+});
 
+// ---------------------------------------------------------------------------
+// Staff-first on a combined page
+// ---------------------------------------------------------------------------
+
+describe('staff-first: combined page', () => {
+  const combinedStaffFirst = staffFirstVenue({ is_collective: true });
+
+  it('opens straight on the picker, with nothing behind it', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedStaffFirst });
+
+    await screen.findByTestId(STAFF_PICK);
+    notAtStep(STEP.modeChoice);
+    expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
+  });
+
+  it('says which venue each person works at', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedStaffFirst });
+    await screen.findByTestId(STAFF_PICK);
+
+    expect(personCard('Ada')).toHaveTextContent('Harbour Clinic');
+    expect(personCard('Ben')).toHaveTextContent('Riverside Studio');
+  });
+
+  it('walks calendar to their own options to times', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedStaffFirst });
+    await screen.findByTestId(STAFF_PICK);
+
+    clickPractitioner('Ben');
     await waitForStep(STEP.service);
-    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+    clickService('Full Offering');
+    await waitForStep(STEP.variant);
+
+    // Ben's own option, priced by his venue.
+    expect(screen.getByRole('button', { name: /Ben Short/i })).toBeInTheDocument();
+    clickButton(/Ben Short/);
+    await waitForStep(STEP.addons);
+    expect(screen.getByText('Ben Finishing')).toBeInTheDocument();
+
+    clickButton(/^Continue$/);
+    await waitForStep(STEP.slot);
+    notAtStep(STEP.practitioner);
+  });
+
+  it('unwinds back to the picker without passing a calendar list', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedStaffFirst });
+    await screen.findByTestId(STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Full Offering');
+    await waitForStep(STEP.variant);
+    clickButton(/Ada Short/);
+    await waitForStep(STEP.addons);
+    clickButton(/^Continue$/);
+    await waitForStep(STEP.slot);
+
+    clickBack();
+    await waitForStep(STEP.addons);
+    clickBack();
+    await waitForStep(STEP.variant);
+    clickBack();
+    await waitForStep(STEP.service);
+    notAtStep(STEP.practitioner);
+    clickBack();
+    await screen.findByTestId(STAFF_PICK);
+  });
+
+  it('returns to the picker on reset', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedStaffFirst });
+    await screen.findByTestId(STAFF_PICK);
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+
+    fireEvent(window, new Event(APPOINTMENT_BOOKING_RESET_EVENT));
+
+    await screen.findByTestId(STAFF_PICK);
+  });
+});
+
+describe('staff-first: combined page, pooled offerings', () => {
+  const combinedPooled = staffFirstVenue({
+    is_collective: true,
+    feature_flags: {
+      resolved: { any_available_practitioner: true, staff_first_booking_flow: true },
+    },
+  });
+
+  /** A collective where no offering is the same across calendars. */
+  function nonUniformOnlyCatalog(): CatalogPractitioner[] {
+    return combinedCatalog().map((p) => ({
+      ...p,
+      services: p.services.filter((s) => s.id !== PLAIN),
+    }));
+  }
+
+  it('offers the pool when at least one offering is the same everywhere', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    expect(screen.getByRole('button', { name: /Any available/i })).toBeInTheDocument();
+  });
+
+  it('hides the pool when nothing can actually be pooled', async () => {
+    installFetch(nonUniformOnlyCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    expect(screen.queryByRole('button', { name: /Any available/i })).not.toBeInTheDocument();
+  });
+
+  it('still lists every offering after the pool is chosen', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+
+    // Nothing is hidden just because it needs a calendar.
+    expect(screen.getByRole('button', { name: /Plain Offering/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Divergent Offering/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Full Offering/i })).toBeInTheDocument();
+  });
+
+  it('goes straight to times for an offering that is the same everywhere', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+    clickService('Plain Offering');
+
+    await waitForStep(STEP.slot);
+    notAtStep(STEP.practitioner);
+  });
+
+  it('asks for a calendar, with a reason, when the offering differs', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+    clickService('Divergent Offering');
+
+    await waitForStep(STEP.practitioner);
+    expect(
+      screen.getByText(/This service is a little different for each staff/i),
+    ).toBeInTheDocument();
+  });
+
+  it('then behaves exactly like the calendar-first flow', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+    clickService('Full Offering');
+    await waitForStep(STEP.practitioner);
+
+    clickPractitioner('Ben');
+    await waitForStep(STEP.variant);
+    clickButton(/Ben Short/);
+    await waitForStep(STEP.addons);
+    clickButton(/^Continue$/);
+    await waitForStep(STEP.slot);
+
+    // And unwinds the same way, back to the calendar list.
+    clickBack();
+    await waitForStep(STEP.addons);
+    clickBack();
+    await waitForStep(STEP.variant);
+    clickBack();
+    await waitForStep(STEP.practitioner);
+  });
+
+  it('puts the pool back when the guest backs out of the calendar list', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+    clickService('Divergent Offering');
+    await waitForStep(STEP.practitioner);
+
+    clickBack();
+    await waitForStep(STEP.service);
+
+    // Back on the pooled service list, not stranded without a person.
+    expect(screen.getByText('Booking with whoever is available first')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Plain Offering/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Divergent Offering/i })).toBeInTheDocument();
+  });
+
+  it('leaves the detour behind when recovering out of it from a dead end', async () => {
+    // The deepest way out of the detour: a calendar was chosen inside it, that
+    // calendar is full, and the guest takes "See someone else". If the detour
+    // outlived that, the next person's steps would route as though a calendar
+    // were still owed, and Back would land on a calendar list they never saw.
+    installEmptyAvailability(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+    clickService('Divergent Offering');
+    await waitForStep(STEP.practitioner);
+    clickPractitioner('Ben');
+    await waitForStep(STEP.addons);
+    clickButton(/^Continue$/);
+    await waitForStep(STEP.slot);
+    await screen.findByText(/No times available/i);
+
+    clickButton(/See someone else/i);
+    await screen.findByTestId(STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Full Offering');
+    await waitForStep(STEP.variant);
+
+    clickBack();
+    // Ada's service list, not the calendar list the abandoned detour would give.
+    await waitForStep(STEP.service);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
+  });
+
+  it('leaves the detour behind when the guest goes back to the picker', async () => {
+    // The detour flag must not survive a return to the picker: if it did, the
+    // next person's steps would route as though a calendar were still owed.
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedPooled });
+    await screen.findByTestId(STAFF_PICK);
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+    clickService('Divergent Offering');
+    await waitForStep(STEP.practitioner);
+    clickBack();
+    await waitForStep(STEP.service);
+    clickBack();
+    await screen.findByTestId(STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Full Offering');
+    await waitForStep(STEP.variant);
+
+    // Straight to Ada's options: no calendar list in between.
+    clickBack();
+    await waitForStep(STEP.service);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
   });
 });
 

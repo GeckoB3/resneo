@@ -179,6 +179,13 @@ export interface CollectiveCatalogPractitioner {
   name: string;
   /** Routing: the venue that owns this calendar (booking writes here). */
   owning_venue_id: string;
+  /**
+   * The owning venue's name, shown under the person on the combined page's
+   * picker. Which venue someone works at is decision-critical when the person
+   * is chosen before any service, so it is populated for every calendar, not
+   * only for the duplicate names that get it folded into {@link name}.
+   */
+  owning_venue_name: string;
   services: CollectiveCatalogService[];
 }
 
@@ -301,7 +308,13 @@ export async function loadCollectiveAppointmentCatalog(
   const ensure = (calendarId: string, name: string, venueId: string): CollectiveCatalogPractitioner => {
     let entry = byCalendar.get(calendarId);
     if (!entry) {
-      entry = { id: calendarId, name, owning_venue_id: venueId, services: [] };
+      entry = {
+        id: calendarId,
+        name,
+        owning_venue_id: venueId,
+        owning_venue_name: '',
+        services: [],
+      };
       byCalendar.set(calendarId, entry);
     }
     return entry;
@@ -361,26 +374,60 @@ export async function loadCollectiveAppointmentCatalog(
 
   const result = [...byCalendar.values()].filter((p) => p.services.length > 0);
 
+  // Every calendar carries its venue's name: the picker shows it under each
+  // person, and duplicate names still fold it into the name itself so the
+  // downstream summaries and banners stay unambiguous.
+  const { data: venueRows } = await admin.from('venues').select('id, name').in('id', venueIds);
+  const venueName: Record<string, string> = {};
+  for (const v of venueRows ?? []) venueName[v.id as string] = (v.name as string) ?? '';
+  for (const p of result) {
+    p.owning_venue_name = venueName[p.owning_venue_id] ?? '';
+  }
+
   // Venue-qualify duplicate staff names (e.g. two "Andrew"s, one per venue) so
   // customers can tell them apart on the merged page.
   const nameCounts = new Map<string, number>();
   for (const p of result) nameCounts.set(p.name, (nameCounts.get(p.name) ?? 0) + 1);
   const dupNames = new Set([...nameCounts.entries()].filter(([, n]) => n > 1).map(([name]) => name));
-  if (dupNames.size > 0) {
-    const { data: venueRows } = await admin
-      .from('venues')
-      .select('id, name')
-      .in('id', venueIds);
-    const venueName: Record<string, string> = {};
-    for (const v of venueRows ?? []) venueName[v.id as string] = (v.name as string) ?? '';
-    for (const p of result) {
-      if (dupNames.has(p.name) && venueName[p.owning_venue_id]) {
-        p.name = `${p.name} · ${venueName[p.owning_venue_id]}`;
-      }
+  for (const p of result) {
+    if (dupNames.has(p.name) && p.owning_venue_name) {
+      p.name = `${p.name} · ${p.owning_venue_name}`;
     }
   }
 
+  const { data: collectiveRow } = await admin
+    .from('venue_collectives')
+    .select('host_venue_id')
+    .eq('id', collectiveId)
+    .maybeSingle();
+  sortCollectivePractitioners(
+    result,
+    (collectiveRow as { host_venue_id?: string } | null)?.host_venue_id ?? null,
+  );
+
   return { practitioners: result };
+}
+
+/**
+ * Deterministic display order: the host's own calendars first (it curates the
+ * page), then the other venues alphabetically, then by name within each venue.
+ *
+ * The order used to be however the catalogue happened to be assembled, which is
+ * fine for a list nobody reads top-down but not for a picker that is now the
+ * first thing a guest sees. It also fixes the "Meet the team" tab, which maps
+ * this same list.
+ */
+export function sortCollectivePractitioners<
+  T extends { name: string; owning_venue_id: string; owning_venue_name: string },
+>(practitioners: T[], hostVenueId: string | null): T[] {
+  return practitioners.sort((a, b) => {
+    const aHost = a.owning_venue_id === hostVenueId ? 0 : 1;
+    const bHost = b.owning_venue_id === hostVenueId ? 0 : 1;
+    if (aHost !== bHost) return aHost - bHost;
+    const byVenue = a.owning_venue_name.localeCompare(b.owning_venue_name);
+    if (byVenue !== 0) return byVenue;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 /**

@@ -963,7 +963,10 @@ function PlanSection({
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p className="font-medium">Changed your mind?</p>
           <p className="mt-1 text-amber-800">
-            Restart the subscription before the billing period ends to keep your current plan active without interruption.
+            {periodEndLabel
+              ? `Restart before ${periodEndLabel} and your plan carries on with nothing changing for your clients.`
+              : 'Restart before your paid period ends and your plan carries on with nothing changing for your clients.'}{' '}
+            If your subscription has already been closed, we will take you to Stripe to start a new one.
           </p>
           <button
             type="button"

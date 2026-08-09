@@ -739,11 +739,10 @@ describe('combined page, service-first: calendar before options', () => {
     await waitForStep(STEP.service);
   });
 
-  it('DELTA (plan 4.2 / phase 2.7): shows the first calendar\'s extras whichever calendar is chosen', async () => {
-    // Each calendar carries its own add-on groups for the same offering, but the
-    // extras step resolves them by service id alone, so choosing Ben still shows
-    // Ada's groups while the booking would charge Ben's. Phase 2.7 scopes this
-    // to the chosen calendar and flips the expectation below.
+  it('shows the chosen calendar\'s own extras, not the first calendar\'s', async () => {
+    // Was a DELTA: the extras step used to resolve groups by service id alone, so
+    // choosing Ben showed Ada's extras while the booking charged Ben's. Now
+    // scoped to the chosen calendar, in both toggle states.
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
     await waitForStep(STEP.service);
@@ -751,6 +750,20 @@ describe('combined page, service-first: calendar before options', () => {
     clickService('Divergent Offering');
     await waitForStep(STEP.practitioner);
     clickPractitioner('Ben');
+    await waitForStep(STEP.addons);
+
+    expect(screen.getByText('Ben Extras')).toBeInTheDocument();
+    expect(screen.queryByText('Ada Extras')).not.toBeInTheDocument();
+  });
+
+  it('shows the other calendar\'s extras when that one is chosen', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedVenue });
+    await waitForStep(STEP.service);
+
+    clickService('Divergent Offering');
+    await waitForStep(STEP.practitioner);
+    clickPractitioner('Ada');
     await waitForStep(STEP.addons);
 
     expect(screen.getByText('Ada Extras')).toBeInTheDocument();
@@ -807,10 +820,10 @@ describe('per-practitioner page: person already fixed', () => {
     await waitForStep(STEP.slot);
   });
 
-  it('DELTA (plan 4.11): back from the times skips the extras step', async () => {
-    // The combined page unwinds slot to add-ons correctly; this branch jumps
-    // straight past them, dropping the guest back on the service list and
-    // losing their chosen extras. The rewiring gives it the full unwind.
+  it('unwinds the times back through the extras step', async () => {
+    // Was a DELTA: this branch used to jump straight past the extras to the
+    // service list, losing whatever the guest had chosen. It now unwinds like
+    // every other surface.
     installFetch(lockedCatalog());
     renderFlow({ lockedPractitioner: LOCKED });
     await waitForStep(STEP.service);
@@ -820,6 +833,8 @@ describe('per-practitioner page: person already fixed', () => {
     clickButton(/^Continue$/);
     await waitForStep(STEP.slot);
 
+    clickBack();
+    await waitForStep(STEP.addons);
     clickBack();
     await waitForStep(STEP.service);
   });
@@ -985,6 +1000,471 @@ describe('reset event', () => {
     fireEvent(window, new Event(APPOINTMENT_BOOKING_RESET_EVENT));
 
     await waitForStep(STEP.service);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Staff-first (venue pages)
+// ---------------------------------------------------------------------------
+
+function staffFirstVenue(overrides: Partial<VenuePublic> = {}): VenuePublic {
+  return venue({
+    feature_flags: {
+      resolved: { any_available_practitioner: false, staff_first_booking_flow: true },
+    },
+    ...overrides,
+  });
+}
+
+const STAFF_PICK = 'staff-pick-step';
+
+async function startStaffFirstBooking(): Promise<void> {
+  await waitForStep(STEP.modeChoice);
+  clickButton(/Book an appointment/i);
+  await screen.findByTestId(STAFF_PICK);
+}
+
+describe('staff-first: person before service', () => {
+  it('asks who first, then lists only that person\'s services', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    // Nothing about services yet.
+    expect(screen.queryByRole('button', { name: /Plain Service/i })).not.toBeInTheDocument();
+
+    clickPractitioner('Ben');
+    await waitForStep(STEP.service);
+
+    expect(screen.getByRole('button', { name: /Ben Only Service/i })).toBeInTheDocument();
+    // Ada's exclusive services are not Ben's to sell.
+    expect(screen.queryByRole('button', { name: /Addons Service/i })).not.toBeInTheDocument();
+  });
+
+  it('shows that person\'s own price, not a team-wide "from"', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    clickPractitioner('Ben');
+    await waitForStep(STEP.service);
+
+    const row = screen.getByRole('button', { name: /Plain Service/i });
+    expect(row).toHaveTextContent('£45.00');
+    expect(row).not.toHaveTextContent('From');
+  });
+
+  it('names the chosen person on every step until the times', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
+
+    clickService('Both Service');
+    await waitForStep(STEP.variant);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
+
+    clickButton(/Short/);
+    await waitForStep(STEP.addons);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
+  });
+
+  it('walks all four service shapes to the times, never asking who twice', async () => {
+    for (const [serviceName, viaVariant, viaAddons] of [
+      ['Plain Service', false, false],
+      ['Variants Service', true, false],
+      ['Addons Service', false, true],
+      ['Both Service', true, true],
+    ] as const) {
+      installFetch(venueCatalog());
+      renderFlow({ venue: staffFirstVenue() });
+      await startStaffFirstBooking();
+      clickPractitioner('Ada');
+      await waitForStep(STEP.service);
+
+      clickService(serviceName);
+      if (viaVariant) {
+        await waitForStep(STEP.variant);
+        clickButton(/Short/);
+      }
+      if (viaAddons) {
+        await waitForStep(STEP.addons);
+        clickButton(/^Continue$/);
+      }
+      await waitForStep(STEP.slot);
+      notAtStep(STEP.practitioner);
+      cleanup();
+    }
+  });
+
+  it('unwinds times to extras to options to services, keeping the person', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Both Service');
+    await waitForStep(STEP.variant);
+    clickButton(/Short/);
+    await waitForStep(STEP.addons);
+    clickButton(/^Continue$/);
+    await waitForStep(STEP.slot);
+
+    clickBack();
+    await waitForStep(STEP.addons);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
+
+    clickBack();
+    await waitForStep(STEP.variant);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
+
+    clickBack();
+    await waitForStep(STEP.service);
+    expect(screen.getByText('Booking with Ada')).toBeInTheDocument();
+  });
+
+  it('only lets go of the person at the service list', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+
+    clickBack();
+    await screen.findByTestId(STAFF_PICK);
+    expect(screen.queryByText('Booking with Ada')).not.toBeInTheDocument();
+  });
+
+  it('goes back to the single-or-group chooser from the picker', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    clickBack();
+    await waitForStep(STEP.modeChoice);
+  });
+
+  it('opens straight on the picker for a start=service link, with no way back', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue(), initialStep: 'service' });
+
+    await screen.findByTestId(STAFF_PICK);
+    expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
+  });
+
+  it('returns to the chooser on reset', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+
+    fireEvent(window, new Event(APPOINTMENT_BOOKING_RESET_EVENT));
+
+    await waitForStep(STEP.modeChoice);
+  });
+
+  it('lists everyone bookable, including a person with a hidden profile', async () => {
+    installFetch(venueCatalog());
+    renderFlow({
+      venue: staffFirstVenue({
+        booking_page_config: { team_profiles: { [BEN.id]: { hidden: true, bio: 'Hidden bio' } } },
+      }),
+    });
+    await startStaffFirstBooking();
+
+    expect(personCard('Ada')).toBeInTheDocument();
+    expect(personCard('Ben')).toBeInTheDocument();
+    // Hiding is a marketing setting; it must not leak the bio it withholds.
+    expect(screen.queryByText('Hidden bio')).not.toBeInTheDocument();
+  });
+
+  it('shows a photo, specialties and a bio for a visible profile', async () => {
+    installFetch(venueCatalog());
+    renderFlow({
+      venue: staffFirstVenue({
+        booking_page_config: {
+          team_profiles: {
+            [ADA.id]: {
+              photo: 'https://example.test/ada.jpg',
+              specialties: 'Colour, Cutting, Styling, Extensions',
+              bio: 'Twelve years behind the chair.',
+            },
+          },
+        },
+      }),
+    });
+    await startStaffFirstBooking();
+
+    expect(screen.getByText('Twelve years behind the chair.')).toBeInTheDocument();
+    expect(screen.getByText('Colour')).toBeInTheDocument();
+    // Four specialties, three chips, and the rest folded into an overflow chip.
+    expect(screen.getByText('+1')).toBeInTheDocument();
+    expect(screen.queryByText('Extensions')).not.toBeInTheDocument();
+  });
+
+  it('tells the guest when nobody is bookable', async () => {
+    installFetch([]);
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    expect(screen.getByText(/No staff are available to book right now/i)).toBeInTheDocument();
+  });
+
+  it('still shows one card for a solo venue', async () => {
+    installFetch(lockedCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    expect(personCard('Ada')).toBeInTheDocument();
+  });
+});
+
+describe('staff-first: any available', () => {
+  const pooled = staffFirstVenue({
+    feature_flags: {
+      resolved: { any_available_practitioner: true, staff_first_booking_flow: true },
+    },
+  });
+
+  it('offers the pool at the top of the picker', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: pooled });
+    await startStaffFirstBooking();
+
+    expect(screen.getByRole('button', { name: /Any available/i })).toBeInTheDocument();
+  });
+
+  it('keeps the venue-wide list and "from" prices after choosing the pool', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: pooled });
+    await startStaffFirstBooking();
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+
+    expect(screen.getByText('Booking with whoever is available first')).toBeInTheDocument();
+    // Ben's exclusive service is still on offer, and pricing spans the team.
+    expect(screen.getByRole('button', { name: /Ben Only Service/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Plain Service/i })).toHaveTextContent('From £30.00');
+  });
+
+  it('hides the pool when only one person is bookable', async () => {
+    installFetch(lockedCatalog());
+    renderFlow({ venue: pooled });
+    await startStaffFirstBooking();
+
+    expect(screen.queryByRole('button', { name: /Any available/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('staff-first: when the chosen person is fully booked', () => {
+  /** Availability with no slots, so the times step shows its empty state. */
+  function installEmptyAvailability(catalog: CatalogPractitioner[]): void {
+    installFetch(catalog);
+    const inner = globalThis.fetch as unknown as (input: RequestInfo | URL) => Promise<Response>;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.includes('/api/booking/availability')) {
+        return jsonResponse({ practitioners: [] });
+      }
+      return inner(input);
+    });
+  }
+
+  async function reachEmptyTimes(): Promise<void> {
+    await startStaffFirstBooking();
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Plain Service');
+    await waitForStep(STEP.slot);
+    await screen.findByText(/No times available/i);
+  }
+
+  it('offers a way to someone else and pins the service they were booking', async () => {
+    installEmptyAvailability(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await reachEmptyTimes();
+
+    clickButton(/See someone else/i);
+    await screen.findByTestId(STAFF_PICK);
+
+    clickPractitioner('Ben');
+    await waitForStep(STEP.service);
+
+    const row = screen.getByRole('button', { name: /Plain Service/i });
+    expect(row).toHaveTextContent('You were booking this');
+    // Ben's price for it, visible before any time is picked.
+    expect(row).toHaveTextContent('£45.00');
+  });
+
+  it('says so plainly when the next person does not offer it', async () => {
+    installEmptyAvailability(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Addons Service');
+    await waitForStep(STEP.addons);
+    clickButton(/^Continue$/);
+    await waitForStep(STEP.slot);
+    await screen.findByText(/No times available/i);
+
+    clickButton(/See someone else/i);
+    await screen.findByTestId(STAFF_PICK);
+    clickPractitioner('Ben');
+    await waitForStep(STEP.service);
+
+    expect(
+      screen.getByText(/Ben does not offer the service you were booking/i),
+    ).toBeInTheDocument();
+  });
+
+  it('drops the pin once a service is chosen', async () => {
+    installEmptyAvailability(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await reachEmptyTimes();
+
+    clickButton(/See someone else/i);
+    await screen.findByTestId(STAFF_PICK);
+    clickPractitioner('Ben');
+    await waitForStep(STEP.service);
+    clickService('Plain Service');
+    await waitForStep(STEP.slot);
+
+    clickBack();
+    await waitForStep(STEP.service);
+    expect(screen.queryByText('You were booking this')).not.toBeInTheDocument();
+  });
+
+  it('is not offered from the pooled option, which already covered everyone', async () => {
+    installEmptyAvailability(venueCatalog());
+    renderFlow({
+      venue: staffFirstVenue({
+        feature_flags: {
+          resolved: { any_available_practitioner: true, staff_first_booking_flow: true },
+        },
+      }),
+    });
+    await startStaffFirstBooking();
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+    clickService('Plain Service');
+    await waitForStep(STEP.slot);
+    await screen.findByText(/No times available/i);
+
+    expect(screen.queryByRole('button', { name: /See someone else/i })).not.toBeInTheDocument();
+  });
+
+  it('is not offered on a solo venue, where there is nobody to switch to', async () => {
+    installEmptyAvailability(lockedCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await reachEmptyTimes();
+
+    expect(screen.queryByRole('button', { name: /See someone else/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('staff-first: prefetching', () => {
+  it('warms only the chosen person\'s months, not the whole team\'s', async () => {
+    const stub = installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+
+    await waitFor(() => {
+      expect(stub.calendarRequests().length).toBeGreaterThan(0);
+    });
+    const asked = stub.calendarRequests().map((p) => p.get('practitioner_id'));
+    expect(asked).toContain(ADA.id);
+    expect(asked).not.toContain(BEN.id);
+  });
+
+  it('does not fall back to warming the whole team at a one-service venue', async () => {
+    // The single-service shortcut warms every provider on the service step. Once
+    // a person is chosen that is the wrong set, so staff-first opts out of it.
+    const singleService = venueCatalog().map((p) => ({
+      ...p,
+      services: p.services.filter((s) => s.id === PLAIN),
+    }));
+    const stub = installFetch(singleService);
+    renderFlow({ venue: staffFirstVenue() });
+    await startStaffFirstBooking();
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+
+    await waitFor(() => {
+      expect(stub.calendarRequests().length).toBeGreaterThan(0);
+    });
+    expect(stub.calendarRequests().map((p) => p.get('practitioner_id'))).not.toContain(BEN.id);
+  });
+
+  it('warms nothing after the pool is chosen', async () => {
+    const stub = installFetch(venueCatalog());
+    renderFlow({
+      venue: staffFirstVenue({
+        feature_flags: {
+          resolved: { any_available_practitioner: true, staff_first_booking_flow: true },
+        },
+      }),
+    });
+    await startStaffFirstBooking();
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+
+    expect(stub.calendarRequests()).toHaveLength(0);
+  });
+});
+
+describe('staff-first: surfaces that keep the old order', () => {
+  it('leaves an edit alone', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue(), editBooking: EDIT_BOOKING });
+
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+  });
+
+  it('leaves a per-practitioner page alone', async () => {
+    installFetch(lockedCatalog());
+    renderFlow({ venue: staffFirstVenue(), lockedPractitioner: LOCKED });
+
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+  });
+
+  it('leaves the staff dashboard alone', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue(), bookingAudience: 'staff' });
+
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+  });
+
+  it('leaves a session that already knows the service alone', async () => {
+    // Waitlist offers and service_id links: the guest has committed to the what.
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue(), preselectedServiceId: PLAIN });
+
+    await waitForStep(STEP.modeChoice);
+    clickButton(/Book an appointment/i);
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+  });
+
+  it('leaves a combined page alone until its own change lands', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: staffFirstVenue({ is_collective: true }) });
+
+    await waitForStep(STEP.service);
+    expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
   });
 });
 

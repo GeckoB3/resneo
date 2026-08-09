@@ -11,7 +11,10 @@ import { BrandSpinner } from '@/components/ui/primitives';
 import { clearBookingComplianceDrafts, type BookingComplianceState } from './BookingComplianceForms';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
-import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
+import {
+  APPOINTMENT_BOOKING_RESET_EVENT,
+  restartPublicAppointmentBooking,
+} from './appointment-booking-events';
 import {
   cancellationDeadlineHoursBefore,
   classifyGroupDepositRefunds,
@@ -3006,6 +3009,22 @@ export function AppointmentBookingFlow({
     Boolean(selectedPractitionerId) &&
     !isAnyAvailablePractitionerId(selectedPractitionerId);
 
+  /**
+   * Offered once a booking is done, so a guest booking two things in a row is
+   * not left hunting for a way back to the start. Staff have their own Done
+   * control, and an edit is a change to one booking rather than a new one.
+   */
+  const bookAnotherButton =
+    isPublicGuest && !isEdit ? (
+      <button
+        type="button"
+        onClick={restartPublicAppointmentBooking}
+        className="mt-6 w-full rounded-xl border border-brand-200 bg-white px-4 py-3 text-sm font-semibold text-brand-800 transition-colors hover:border-brand-300 hover:bg-brand-50/70"
+      >
+        Book another {terms.booking.toLowerCase()}
+      </button>
+    ) : null;
+
   const flowContent = (
     <div
       ref={isPublicGuest ? undefined : containerRef}
@@ -4791,6 +4810,7 @@ export function AppointmentBookingFlow({
             </div>
           ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
+          {bookAnotherButton}
         </div>
       )}
 
@@ -5588,6 +5608,7 @@ export function AppointmentBookingFlow({
             </p>
           ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
+          {bookAnotherButton}
         </div>
       )}
     </div>

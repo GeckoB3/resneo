@@ -257,6 +257,19 @@ function installFetch(catalog: CatalogPractitioner[]): FetchStub {
     if (url.includes('appointment-calendar')) {
       return jsonResponse({ available_dates: [todayYmd()] });
     }
+    if (url.includes('/api/booking/create')) {
+      // A free booking: no deposit, so the flow lands straight on confirmation.
+      return jsonResponse({
+        booking_id: 'booking-1',
+        booking_ids: ['booking-1'],
+        requires_deposit: false,
+        deposit_amount_pence: 0,
+        cancellation_notice_hours: 24,
+      });
+    }
+    if (url.includes('validate-appointment-slot')) {
+      return jsonResponse({ ok: true, valid: true });
+    }
     if (url.includes('/api/booking/availability')) {
       const serviceId = params.get('service_id') ?? PLAIN;
       const pooled = params.get('any_available') === '1';
@@ -977,6 +990,70 @@ describe('group booking, service-first', () => {
     await waitForStep(STEP.groupVariant);
     clickBack();
     await screen.findByText('Booking for: Sam');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Booking again after finishing one
+// ---------------------------------------------------------------------------
+
+describe('after a booking is confirmed', () => {
+  /** Drives a free service all the way to the confirmation screen. */
+  async function bookToConfirmation(venueOverride?: VenuePublic): Promise<void> {
+    installFetch(venueCatalog());
+    renderFlow(venueOverride ? { venue: venueOverride } : {});
+    await startSingleBooking();
+    clickService('Plain Service');
+    await waitForStep(STEP.practitioner);
+    clickPractitioner('Ada');
+    await waitForStep(STEP.slot);
+    await pickFirstSlot();
+    await waitForStep(STEP.review);
+    clickButton(/Continue to details/i);
+
+    fireEvent.change(await screen.findByPlaceholderText('First name'), {
+      target: { value: 'Sam' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Surname'), { target: { value: 'Guest' } });
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
+      target: { value: 'sam@example.test' },
+    });
+    // A number the phone field will actually accept: the usual 07700 900xxx
+    // drama range is rejected as unparseable.
+    const phone = document.querySelector('#details-phone');
+    if (phone) fireEvent.change(phone, { target: { value: '02071234567' } });
+    screen.getAllByRole('checkbox').forEach((box) => fireEvent.click(box));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm Booking$/i }));
+    await screen.findByRole('heading', { name: /confirmed/i });
+  }
+
+  it('offers a way to book again, which returns to the first step', async () => {
+    await bookToConfirmation();
+
+    const again = screen.getByRole('button', { name: /Book another appointment/i });
+    fireEvent.click(again);
+
+    // Back to the very start, with the previous booking cleared away.
+    await waitForStep(STEP.modeChoice);
+  });
+
+  it('names the venue\'s own word for a booking', async () => {
+    await bookToConfirmation(
+      venue({ terminology: { client: 'Client', booking: 'Session', staff: 'Coach' } }),
+    );
+
+    expect(screen.getByRole('button', { name: /Book another session/i })).toBeInTheDocument();
+  });
+
+  it('does not offer it to staff, who have their own Done control', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ bookingAudience: 'staff' });
+    await waitForStep(STEP.service);
+
+    expect(
+      screen.queryByRole('button', { name: /Book another/i }),
+    ).not.toBeInTheDocument();
   });
 });
 

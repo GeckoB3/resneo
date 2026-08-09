@@ -1,7 +1,10 @@
 'use client';
 
 import { useCallback, type MouseEvent } from 'react';
-import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
+import {
+  restartPublicAppointmentBooking,
+  scrollToBookingFormStart,
+} from './appointment-booking-events';
 
 interface BookVenueTitleProps {
   name: string;
@@ -10,10 +13,6 @@ interface BookVenueTitleProps {
   className?: string;
   /** 'light' = white text on dark hero (default); 'dark' = dark text on white bg. */
   variant?: 'light' | 'dark';
-}
-
-function scrollToBookingFormStart() {
-  document.getElementById('booking-form-start')?.scrollIntoView({ behavior: 'smooth' });
 }
 
 const titleControlClassName =
@@ -41,7 +40,8 @@ export function BookVenueTitle({ name, isAppointment, className, variant = 'ligh
     (e: MouseEvent<HTMLAnchorElement>) => {
       e.preventDefault();
       if (isAppointment) {
-        window.dispatchEvent(new CustomEvent(APPOINTMENT_BOOKING_RESET_EVENT));
+        restartPublicAppointmentBooking();
+        return;
       }
       scrollToBookingFormStart();
     },

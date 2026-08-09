@@ -334,8 +334,35 @@ const STEP = {
   groupPractitioner: 'Choose staff',
 } as const;
 
+/**
+ * A step renders its heading immediately and its list once the catalogue (or
+ * the slot query) arrives, so waiting for the heading alone leaves the walk
+ * clicking at skeletons. That raced: it passed locally and failed on CI, where
+ * the stubbed fetch resolves a tick later relative to render. Waiting for the
+ * skeletons to clear makes every `clickService` / `clickPractitioner` below
+ * safe without making all hundred-odd of them async.
+ */
+async function waitForNoSkeletons(): Promise<void> {
+  await waitFor(() => {
+    expect(document.querySelector('.animate-pulse')).toBeNull();
+  });
+}
+
 async function waitForStep(heading: string): Promise<void> {
   await screen.findByRole('heading', { name: heading });
+  await waitForNoSkeletons();
+}
+
+/** The staff-first picker is identified by test id rather than a heading. */
+async function waitForStaffPick(): Promise<void> {
+  await screen.findByTestId(STAFF_PICK);
+  await waitForNoSkeletons();
+}
+
+/** Same, for the per-guest picker inside the group flow. */
+async function waitForGroupStaffPick(): Promise<void> {
+  await screen.findByTestId(GROUP_STAFF_PICK);
+  await waitForNoSkeletons();
 }
 
 function notAtStep(heading: string): void {
@@ -1115,7 +1142,7 @@ const STAFF_PICK = 'staff-pick-step';
 async function startStaffFirstBooking(): Promise<void> {
   await waitForStep(STEP.modeChoice);
   clickButton(/Book an appointment/i);
-  await screen.findByTestId(STAFF_PICK);
+  await waitForStaffPick();
 }
 
 describe('staff-first: person before service', () => {
@@ -1228,7 +1255,7 @@ describe('staff-first: person before service', () => {
     await waitForStep(STEP.service);
 
     clickBack();
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     expect(screen.queryByText('Booking with Ada')).not.toBeInTheDocument();
   });
 
@@ -1245,7 +1272,7 @@ describe('staff-first: person before service', () => {
     installFetch(venueCatalog());
     renderFlow({ venue: staffFirstVenue(), initialStep: 'service' });
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
   });
 
@@ -1386,7 +1413,7 @@ describe('staff-first: when the chosen person is fully booked', () => {
     await reachEmptyTimes();
 
     clickButton(/See someone else/i);
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     clickPractitioner('Ben');
     await waitForStep(STEP.service);
@@ -1410,7 +1437,7 @@ describe('staff-first: when the chosen person is fully booked', () => {
     await screen.findByText(/No times available/i);
 
     clickButton(/See someone else/i);
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     clickPractitioner('Ben');
     await waitForStep(STEP.service);
 
@@ -1425,7 +1452,7 @@ describe('staff-first: when the chosen person is fully booked', () => {
     await reachEmptyTimes();
 
     clickButton(/See someone else/i);
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     clickPractitioner('Ben');
     await waitForStep(STEP.service);
     clickService('Plain Service');
@@ -1614,7 +1641,7 @@ describe('staff-first: the dashboard booking form', () => {
     installFetch(venueCatalog());
     renderFlow(staffProps);
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     notAtStep(STEP.service);
   });
 
@@ -1622,7 +1649,7 @@ describe('staff-first: the dashboard booking form', () => {
     installFetch(venueCatalog());
     renderFlow(staffProps);
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     expect(
       screen.getByRole('heading', { name: 'Who is this appointment with?' }),
     ).toBeInTheDocument();
@@ -1635,14 +1662,14 @@ describe('staff-first: the dashboard booking form', () => {
     installFetch(venueCatalog());
     renderFlow(staffProps);
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
   });
 
   it('lists only the chosen person\'s services, then reaches the times', async () => {
     installFetch(venueCatalog());
     renderFlow(staffProps);
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     clickPractitioner('Ben');
     await waitForStep(STEP.service);
@@ -1658,13 +1685,13 @@ describe('staff-first: the dashboard booking form', () => {
   it('goes back from the services to the picker, not to the chooser', async () => {
     installFetch(venueCatalog());
     renderFlow(staffProps);
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
     clickBack();
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     notAtStep(STEP.modeChoice);
   });
 
@@ -1672,7 +1699,7 @@ describe('staff-first: the dashboard booking form', () => {
     installFetch(venueCatalog());
     renderFlow({ ...staffProps, staffBookingSource: 'walk-in' });
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     notAtStep(STEP.service);
   });
 
@@ -1688,7 +1715,7 @@ describe('staff-first: the dashboard booking form', () => {
       preselectedPractitionerId: ADA.id,
     });
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
   });
 
   it('keeps the old order when the venue has the toggle off', async () => {
@@ -1724,7 +1751,7 @@ describe('staff-first: group booking', () => {
     renderFlow({ venue: staffFirstVenue() });
     await openGroupPersonLabel('Sam');
 
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
     expect(screen.getByRole('heading', { name: 'Choose staff' })).toBeInTheDocument();
     expect(screen.getByText(/Who should see Sam\?/)).toBeInTheDocument();
     // The person strip every other group step shows.
@@ -1735,7 +1762,7 @@ describe('staff-first: group booking', () => {
     installFetch(venueCatalog());
     renderFlow({ venue: staffFirstVenue() });
     await openGroupPersonLabel('Sam');
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
 
     clickPractitioner('Ben');
     await waitForStep(STEP.service);
@@ -1749,7 +1776,7 @@ describe('staff-first: group booking', () => {
     installFetch(venueCatalog());
     renderFlow({ venue: staffFirstVenue() });
     await openGroupPersonLabel('Sam');
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
@@ -1767,7 +1794,7 @@ describe('staff-first: group booking', () => {
     installFetch(venueCatalog());
     renderFlow({ venue: staffFirstVenue() });
     await openGroupPersonLabel('Sam');
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
@@ -1784,7 +1811,7 @@ describe('staff-first: group booking', () => {
     installFetch(venueCatalog());
     renderFlow({ venue: staffFirstVenue() });
     await openGroupPersonLabel('Sam');
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
@@ -1803,7 +1830,7 @@ describe('staff-first: group booking', () => {
     await waitForStep(STEP.service);
     notAtStep(STEP.groupPractitioner);
     clickBack();
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
     clickBack();
     await waitForStep(STEP.groupPerson);
   });
@@ -1818,7 +1845,7 @@ describe('staff-first: group booking', () => {
       }),
     });
     await openGroupPersonLabel('Sam');
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
 
     expect(screen.queryByRole('button', { name: /Any available/i })).not.toBeInTheDocument();
   });
@@ -1841,7 +1868,7 @@ describe('staff-first: group booking', () => {
         });
         clickButton(/^Continue$/);
       }
-      await screen.findByTestId(GROUP_STAFF_PICK);
+      await waitForGroupStaffPick();
       clickPractitioner(person);
       await waitForStep(STEP.service);
       clickService('Plain Service');
@@ -1859,7 +1886,7 @@ describe('staff-first: group booking', () => {
     const stub = installFetch(venueCatalog());
     renderFlow({ venue: staffFirstVenue() });
     await openGroupPersonLabel('Sam');
-    await screen.findByTestId(GROUP_STAFF_PICK);
+    await waitForGroupStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
@@ -1884,7 +1911,7 @@ describe('staff-first: combined page', () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     notAtStep(STEP.modeChoice);
     expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
   });
@@ -1892,7 +1919,7 @@ describe('staff-first: combined page', () => {
   it('keeps the cards to a face and a name here too', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     // No venue line, for the same reason there is no bio: this is a quick pick.
     expect(personCard('Ada')).not.toHaveTextContent('Harbour Clinic');
@@ -1903,7 +1930,7 @@ describe('staff-first: combined page', () => {
   it('walks calendar to their own options to times', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     clickPractitioner('Ben');
     await waitForStep(STEP.service);
@@ -1924,7 +1951,7 @@ describe('staff-first: combined page', () => {
   it('unwinds back to the picker without passing a calendar list', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
@@ -1943,19 +1970,19 @@ describe('staff-first: combined page', () => {
     await waitForStep(STEP.service);
     notAtStep(STEP.practitioner);
     clickBack();
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
   });
 
   it('returns to the picker on reset', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
 
     fireEvent(window, new Event(APPOINTMENT_BOOKING_RESET_EVENT));
 
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
   });
 });
 
@@ -1978,7 +2005,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('offers the pool when at least one offering is the same everywhere', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     expect(screen.getByRole('button', { name: /Any available/i })).toBeInTheDocument();
   });
@@ -1986,7 +2013,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('hides the pool when nothing can actually be pooled', async () => {
     installFetch(nonUniformOnlyCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     expect(screen.queryByRole('button', { name: /Any available/i })).not.toBeInTheDocument();
   });
@@ -1994,7 +2021,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('still lists every offering after the pool is chosen', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2008,7 +2035,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('goes straight to times for an offering that is the same everywhere', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2021,7 +2048,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('asks for a calendar, with a reason, when the offering differs', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2036,7 +2063,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('then behaves exactly like the calendar-first flow', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2062,7 +2089,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('puts the pool back when the guest backs out of the calendar list', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2085,7 +2112,7 @@ describe('staff-first: combined page, pooled offerings', () => {
     // were still owed, and Back would land on a calendar list they never saw.
     installEmptyAvailability(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2098,7 +2125,7 @@ describe('staff-first: combined page, pooled offerings', () => {
     await screen.findByText(/No times available/i);
 
     clickButton(/See someone else/i);
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
@@ -2116,7 +2143,7 @@ describe('staff-first: combined page, pooled offerings', () => {
     // next person's steps would route as though a calendar were still owed.
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2125,7 +2152,7 @@ describe('staff-first: combined page, pooled offerings', () => {
     clickBack();
     await waitForStep(STEP.service);
     clickBack();
-    await screen.findByTestId(STAFF_PICK);
+    await waitForStaffPick();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);

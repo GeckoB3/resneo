@@ -1469,6 +1469,179 @@ describe('staff-first: surfaces that keep the old order', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Staff-first group booking
+// ---------------------------------------------------------------------------
+
+const GROUP_STAFF_PICK = 'group-staff-pick-step';
+
+describe('staff-first: group booking', () => {
+  async function openGroupPersonLabel(label: string): Promise<void> {
+    await waitForStep(STEP.modeChoice);
+    clickButton(/Group appointment/i);
+    await waitForStep(STEP.groupReview);
+    clickButton(/Add a person/i);
+    await waitForStep(STEP.groupPerson);
+    fireEvent.change(screen.getByPlaceholderText(/Guest name or label/i), {
+      target: { value: label },
+    });
+    clickButton(/^Continue$/);
+  }
+
+  it('asks who each guest is seeing before what they are having', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await openGroupPersonLabel('Sam');
+
+    await screen.findByTestId(GROUP_STAFF_PICK);
+    expect(screen.getByRole('heading', { name: 'Choose staff' })).toBeInTheDocument();
+    expect(screen.getByText(/Who should see Sam\?/)).toBeInTheDocument();
+    // The person strip every other group step shows.
+    expect(screen.getByText('Booking for: Sam')).toBeInTheDocument();
+  });
+
+  it('lists that person\'s own services at their own prices', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await openGroupPersonLabel('Sam');
+    await screen.findByTestId(GROUP_STAFF_PICK);
+
+    clickPractitioner('Ben');
+    await waitForStep(STEP.service);
+
+    expect(screen.getByRole('button', { name: /Ben Only Service/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Addons Service/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Plain Service/i })).toHaveTextContent('£45.00');
+  });
+
+  it('never asks for the person again on the way to the times', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await openGroupPersonLabel('Sam');
+    await screen.findByTestId(GROUP_STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Both Service');
+    await waitForStep(STEP.groupVariant);
+    clickButton(/Short/);
+    await screen.findByRole('heading', { name: 'Add extras for Sam' });
+    clickButton(/^Continue$/);
+
+    await screen.findByRole('heading', { name: 'Pick a time for Sam' });
+    notAtStep(STEP.groupPractitioner);
+  });
+
+  it('carries the person and the service through the summary strips', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await openGroupPersonLabel('Sam');
+    await screen.findByTestId(GROUP_STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    expect(screen.getByText(/Booking for: Sam/)).toBeInTheDocument();
+    expect(screen.getByText(/· Ada/)).toBeInTheDocument();
+
+    clickService('Both Service');
+    await waitForStep(STEP.groupVariant);
+    expect(screen.getByText(/· Ada/)).toBeInTheDocument();
+    expect(screen.getByText(/· Both Service/)).toBeInTheDocument();
+  });
+
+  it('unwinds all the way back to the person label', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await openGroupPersonLabel('Sam');
+    await screen.findByTestId(GROUP_STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+    clickService('Both Service');
+    await waitForStep(STEP.groupVariant);
+    clickButton(/Short/);
+    await screen.findByRole('heading', { name: 'Add extras for Sam' });
+    clickButton(/^Continue$/);
+    await screen.findByRole('heading', { name: 'Pick a time for Sam' });
+
+    clickBack();
+    await screen.findByRole('heading', { name: 'Add extras for Sam' });
+    clickBack();
+    await waitForStep(STEP.groupVariant);
+    clickBack();
+    await waitForStep(STEP.service);
+    notAtStep(STEP.groupPractitioner);
+    clickBack();
+    await screen.findByTestId(GROUP_STAFF_PICK);
+    clickBack();
+    await waitForStep(STEP.groupPerson);
+  });
+
+  it('offers no pooled option, matching the service-first group flow', async () => {
+    installFetch(venueCatalog());
+    renderFlow({
+      venue: staffFirstVenue({
+        feature_flags: {
+          resolved: { any_available_practitioner: true, staff_first_booking_flow: true },
+        },
+      }),
+    });
+    await openGroupPersonLabel('Sam');
+    await screen.findByTestId(GROUP_STAFF_PICK);
+
+    expect(screen.queryByRole('button', { name: /Any available/i })).not.toBeInTheDocument();
+  });
+
+  it('books two guests with different people', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+
+    for (const [label, person] of [
+      ['Sam', 'Ada'],
+      ['Jo', 'Ben'],
+    ] as const) {
+      if (label === 'Sam') {
+        await openGroupPersonLabel(label);
+      } else {
+        clickButton(/Add a person/i);
+        await waitForStep(STEP.groupPerson);
+        fireEvent.change(screen.getByPlaceholderText(/Guest name or label/i), {
+          target: { value: label },
+        });
+        clickButton(/^Continue$/);
+      }
+      await screen.findByTestId(GROUP_STAFF_PICK);
+      clickPractitioner(person);
+      await waitForStep(STEP.service);
+      clickService('Plain Service');
+      await screen.findByRole('heading', { name: `Pick a time for ${label}` });
+      await pickFirstSlot();
+      await waitForStep(STEP.groupReview);
+    }
+
+    expect(screen.getByText(/2 people added/i)).toBeInTheDocument();
+    expect(screen.getByText(/Plain Service with Ada/)).toBeInTheDocument();
+    expect(screen.getByText(/Plain Service with Ben/)).toBeInTheDocument();
+  });
+
+  it('warms only that guest\'s person, not the whole team', async () => {
+    const stub = installFetch(venueCatalog());
+    renderFlow({ venue: staffFirstVenue() });
+    await openGroupPersonLabel('Sam');
+    await screen.findByTestId(GROUP_STAFF_PICK);
+
+    clickPractitioner('Ada');
+    await waitForStep(STEP.service);
+
+    await waitFor(() => {
+      expect(stub.calendarRequests().length).toBeGreaterThan(0);
+    });
+    const asked = stub.calendarRequests().map((p) => p.get('practitioner_id'));
+    expect(asked).toContain(ADA.id);
+    expect(asked).not.toContain(BEN.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Staff-first on a combined page
 // ---------------------------------------------------------------------------
 

@@ -492,7 +492,7 @@ type Step =
   | 'mode_choice'
   | 'staff_pick'
   | 'service' | 'variant' | 'addons' | 'append_variant' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
-  | 'group_person_label' | 'group_service' | 'group_variant' | 'group_addons' | 'group_practitioner' | 'group_slot'
+  | 'group_person_label' | 'group_staff_pick' | 'group_service' | 'group_variant' | 'group_addons' | 'group_practitioner' | 'group_slot'
   | 'group_review' | 'group_details' | 'group_payment' | 'group_confirmation';
 
 const SINGLE_STEPS: Step[] = ['service', 'variant', 'addons', 'practitioner', 'slot', 'multi_service', 'details'];
@@ -500,6 +500,25 @@ const SINGLE_STEPS_LOCKED: Step[] = ['service', 'variant', 'addons', 'slot', 'mu
 
 /** Steps that show the "Booking with {person}" banner once staff-first has one. */
 const STAFF_FIRST_BANNER_STEPS: Step[] = ['service', 'variant', 'addons'];
+
+/**
+ * The group flow runs the same shape as a single booking, one guest at a time,
+ * so it asks the ordering helper about the single steps and renames the answer.
+ * Its entry and exit (the person label, and the review it returns to) have no
+ * single-flow equivalent and stay at their call sites.
+ */
+const GROUP_STEP_BY_SINGLE = {
+  staff_pick: 'group_staff_pick',
+  service: 'group_service',
+  variant: 'group_variant',
+  addons: 'group_addons',
+  practitioner: 'group_practitioner',
+  slot: 'group_slot',
+} as const satisfies Record<string, Step>;
+
+function groupStep(single: keyof typeof GROUP_STEP_BY_SINGLE): Step {
+  return GROUP_STEP_BY_SINGLE[single];
+}
 
 interface AppointmentBookingFlowProps {
   venue: VenuePublic;
@@ -1383,6 +1402,13 @@ export function AppointmentBookingFlow({
           });
         }
       }
+    } else if (step === 'group_service' && isStaffFirst && groupPractitionerId) {
+      // Staff-first group: this guest's person is settled, so warm their months
+      // while the booker reads the service list.
+      const p = catalogStaff.find((c) => c.id === groupPractitionerId);
+      for (const s of p?.services ?? []) {
+        tasks.push({ practitionerId: p!.id, serviceId: s.id });
+      }
     } else if (step === 'group_practitioner' && groupServiceId) {
       for (const p of catalogStaff) {
         if (p.services.some((s) => s.id === groupServiceId)) {
@@ -1406,6 +1432,7 @@ export function AppointmentBookingFlow({
     lockedPractitioner?.id,
     isStaffFirst,
     selectedPractitionerId,
+    groupPractitionerId,
     catalogStaff,
     calendarMonth,
     prefetchCalendarTasks,
@@ -1656,6 +1683,34 @@ export function AppointmentBookingFlow({
         ),
       );
   }, [isStaffFirst, selectedPractitionerId, catalogStaff]);
+
+  /** The group service step's list once staff-first has a person for this guest. */
+  const groupStaffFirstServices = useMemo(() => {
+    if (!isStaffFirst || !groupPractitionerId) return null;
+    const prac = catalogStaff.find((p) => p.id === groupPractitionerId);
+    if (!prac) return null;
+    return prac.services
+      .map((s) => {
+        const variantPrices = (s.variants ?? [])
+          .map((v) => v.price_pence)
+          .filter((p): p is number => p != null);
+        return {
+          id: s.id,
+          name: s.name,
+          description: s.description?.trim() ? s.description.trim() : null,
+          duration_minutes: s.duration_minutes,
+          minPricePence: variantPrices.length > 0 ? Math.min(...variantPrices) : s.price_pence,
+          sortOrder: s.sort_order ?? 0,
+          location_type: s.location_type,
+        };
+      })
+      .sort((a, b) =>
+        compareByVenueServiceOrder(
+          { sort_order: a.sortOrder, name: a.name },
+          { sort_order: b.sortOrder, name: b.name },
+        ),
+      );
+  }, [isStaffFirst, groupPractitionerId, catalogStaff]);
 
   /** What the service step lists, with a carried service (4.12) pinned to the top. */
   const serviceListForStep = useMemo(() => {
@@ -1916,6 +1971,20 @@ export function AppointmentBookingFlow({
 
   // Group flow helpers
   const groupSelectedPrac = catalogStaff.find((p) => p.id === groupPractitionerId);
+  /**
+   * This guest's options and extras, scoped to their person once staff-first has
+   * chosen one. Drives how far back the times step unwinds.
+   */
+  const groupSelectedVariants = groupServiceId
+    ? isStaffFirst
+      ? catalogVariantsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+      : catalogVariantsForServiceId(catalogStaff, groupServiceId)
+    : [];
+  const groupSelectedAddonGroups = groupServiceId
+    ? isStaffFirst
+      ? addonGroupsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+      : catalogAddonGroupsForServiceId(catalogStaff, groupServiceId)
+    : [];
   const groupSlotPrac = slotPractitioners.find((p) => p.id === groupPractitionerId);
   const groupAvailableSlots = dedupeSlotsByStartTime(
     groupSlotPrac?.slots.filter((s) => !groupServiceId || s.service_id === groupServiceId) ?? [],
@@ -4869,7 +4938,7 @@ export function AppointmentBookingFlow({
           />
           <button
             disabled={!currentPersonLabel.trim()}
-            onClick={() => setStep('group_service')}
+            onClick={() => setStep(isStaffFirst ? 'group_staff_pick' : 'group_service')}
             className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 shadow-sm disabled:opacity-50"
           >
             Continue
@@ -4877,40 +4946,119 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
-      {/* Group: select service */}
-      {step === 'group_service' && (
-        <div>
-          <button onClick={() => setStep('group_person_label')} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+      {/* Group, staff-first: who is this guest seeing? */}
+      {step === 'group_staff_pick' && (
+        <div data-testid="group-staff-pick-step">
+          <button
+            onClick={() => {
+              setGroupPractitionerId(null);
+              setStep('group_person_label');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
           <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm text-purple-700 font-medium">
             Booking for: {currentPersonLabel}
           </div>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">
+            Choose {terms.staff.toLowerCase()}
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">Who should see {currentPersonLabel}?</p>
+          {catalogLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <StaffChoiceCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : bookableStaff.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
+              <p className="text-sm font-medium text-slate-600">
+                No {terms.staff.toLowerCase()} are available to book right now.
+              </p>
+              <p className="mt-1 text-xs text-slate-400">Try again later or contact the venue.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {bookableStaff.map((prac) => (
+                <StaffChoiceCard
+                  key={prac.id}
+                  name={prac.name}
+                  venueName={isCombined ? prac.owning_venue_name : null}
+                  profile={teamProfiles[prac.id]}
+                  className={choiceCardClass}
+                  onClick={() => {
+                    setGroupPractitionerId(prac.id);
+                    setGroupServiceId(null);
+                    setGroupVariantId(null);
+                    setGroupSelectedAddonIds([]);
+                    setStep('group_service');
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Group: select service */}
+      {step === 'group_service' && (
+        <div>
+          <button
+            onClick={() => {
+              if (isStaffFirst) {
+                setGroupPractitionerId(null);
+                setGroupServiceId(null);
+                setStep('group_staff_pick');
+                return;
+              }
+              setStep('group_person_label');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+            Back
+          </button>
+          <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm text-purple-700 font-medium">
+            Booking for: {currentPersonLabel}
+            {isStaffFirst && groupSelectedPrac ? (
+              <span className="text-purple-500"> &middot; {groupSelectedPrac.name}</span>
+            ) : null}
+          </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
           <p className="mb-4 text-sm text-slate-500">What would {currentPersonLabel} like?</p>
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : servicesWithFromPrice.length === 0 ? (
+          ) : (groupStaffFirstServices ?? servicesWithFromPrice).length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No services are available right now</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {servicesWithFromPrice.map((svc) => (
+              {(groupStaffFirstServices ?? servicesWithFromPrice).map((svc) => (
                 <div key={svc.id} className={choiceCardShellClass}>
                 <button
                   type="button"
                   onClick={() => {
-                    queuePrefetchForServicePractitioners(svc.id);
+                    const hasVariants = (isStaffFirst
+                      ? catalogVariantsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId)
+                      : catalogVariantsForServiceId(catalogStaff, svc.id)
+                    ).length > 0;
+                    const hasAddons = (isStaffFirst
+                      ? addonGroupsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId)
+                      : catalogAddonGroupsForServiceId(catalogStaff, svc.id)
+                    ).length > 0;
                     setGroupServiceId(svc.id);
                     setGroupVariantId(null);
                     setGroupSelectedAddonIds([]);
-                    const hasVariants = catalogVariantsForServiceId(catalogStaff, svc.id).length > 0;
-                    const hasAddons = catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
-                    setStep(
-                      hasVariants ? 'group_variant' : hasAddons ? 'group_addons' : 'group_practitioner',
-                    );
+                    const next = afterService(flowShape, { hasVariants, hasAddons });
+                    if (next === 'slot' && groupPractitionerId) {
+                      primeSelectedAppointmentCalendar(groupPractitionerId, svc.id);
+                    } else if (next === 'practitioner') {
+                      queuePrefetchForServicePractitioners(svc.id);
+                    }
+                    setStep(groupStep(next));
                   }}
                   className={choiceCardTargetClass}
                 >
@@ -4920,7 +5068,12 @@ export function AppointmentBookingFlow({
                       <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
-                      <span className={APPOINTMENT_PUBLIC_PRICE}>{formatFromPrice(svc.minPricePence)}</span>
+                      <span className={APPOINTMENT_PUBLIC_PRICE}>
+                        {isStaffFirst && groupStaffFirstServices &&
+                        catalogVariantsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId).length === 0
+                          ? formatPrice(svc.minPricePence)
+                          : formatFromPrice(svc.minPricePence)}
+                      </span>
                       <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                       </svg>
@@ -4937,8 +5090,13 @@ export function AppointmentBookingFlow({
 
       {/* Group: select variant */}
       {step === 'group_variant' && groupServiceId && (() => {
-        const variants = catalogVariantsForServiceId(catalogStaff, groupServiceId);
-        const groupHasAddons = catalogAddonGroupsForServiceId(catalogStaff, groupServiceId).length > 0;
+        const variants = isStaffFirst
+          ? catalogVariantsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogVariantsForServiceId(catalogStaff, groupServiceId);
+        const groupHasAddons = (isStaffFirst
+          ? addonGroupsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogAddonGroupsForServiceId(catalogStaff, groupServiceId)
+        ).length > 0;
         return (
           <div>
             <button
@@ -4950,6 +5108,9 @@ export function AppointmentBookingFlow({
             </button>
             <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
               <span className="font-medium text-purple-700">{currentPersonLabel}</span>
+              {isStaffFirst && groupSelectedPrac ? (
+                <span className="text-purple-500"> &middot; {groupSelectedPrac.name}</span>
+              ) : null}
               <span className="text-purple-500"> &middot; {groupSelectedService?.name}</span>
             </div>
             <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose an option</h2>
@@ -4961,7 +5122,14 @@ export function AppointmentBookingFlow({
                   onClick={() => {
                     setGroupVariantId(v.id);
                     setGroupSelectedAddonIds([]);
-                    setStep(groupHasAddons ? 'group_addons' : 'group_practitioner');
+                    const next = afterVariant(flowShape, {
+                      hasVariants: true,
+                      hasAddons: groupHasAddons,
+                    });
+                    if (next === 'slot' && groupPractitionerId) {
+                      primeSelectedAppointmentCalendar(groupPractitionerId, groupServiceId, null, v.id);
+                    }
+                    setStep(groupStep(next));
                   }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
                 >
@@ -4987,8 +5155,13 @@ export function AppointmentBookingFlow({
 
       {/* Group: select add-ons */}
       {step === 'group_addons' && groupServiceId && (() => {
-        const addonGroups = catalogAddonGroupsForServiceId(catalogStaff, groupServiceId);
-        const groupHasVariants = catalogVariantsForServiceId(catalogStaff, groupServiceId).length > 0;
+        const addonGroups = isStaffFirst
+          ? addonGroupsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogAddonGroupsForServiceId(catalogStaff, groupServiceId);
+        const groupHasVariants = (isStaffFirst
+          ? catalogVariantsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogVariantsForServiceId(catalogStaff, groupServiceId)
+        ).length > 0;
         const selectedIds = new Set(groupSelectedAddonIds);
         const totalsPence = addonGroups.reduce((sum, g) => {
           for (const a of g.addons) if (selectedIds.has(a.id)) sum += a.additional_price_pence;
@@ -5032,7 +5205,14 @@ export function AppointmentBookingFlow({
               type="button"
               onClick={() => {
                 setGroupSelectedAddonIds([]);
-                setStep(groupHasVariants ? 'group_variant' : 'group_service');
+                setStep(
+                  groupStep(
+                    backFromAddons(flowShape, { hasVariants: groupHasVariants, hasAddons: true }) as
+                      | 'variant'
+                      | 'service'
+                      | 'practitioner',
+                  ),
+                );
               }}
               className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
             >
@@ -5041,6 +5221,9 @@ export function AppointmentBookingFlow({
             </button>
             <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
               <span className="font-medium text-purple-700">{currentPersonLabel}</span>
+              {isStaffFirst && groupSelectedPrac ? (
+                <span className="text-purple-500"> &middot; {groupSelectedPrac.name}</span>
+              ) : null}
               <span className="text-purple-500"> &middot; {groupSelectedService?.name}</span>
             </div>
             <h2 className="mb-1 text-lg font-semibold text-slate-900">Add extras for {currentPersonLabel}</h2>
@@ -5123,7 +5306,16 @@ export function AppointmentBookingFlow({
                 type="button"
                 onClick={() => {
                   if (continueDisabled) return;
-                  setStep('group_practitioner');
+                  const next = afterAddons(flowShape);
+                  if (next === 'slot' && groupPractitionerId && groupServiceId) {
+                    primeSelectedAppointmentCalendar(
+                      groupPractitionerId,
+                      groupServiceId,
+                      null,
+                      groupVariantId,
+                    );
+                  }
+                  setStep(groupStep(next));
                 }}
                 disabled={continueDisabled}
                 className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
@@ -5205,13 +5397,31 @@ export function AppointmentBookingFlow({
       {/* Group: select time */}
       {step === 'group_slot' && (
         <div>
-          <button onClick={() => { setGroupPractitionerId(null); setStep('group_practitioner'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+          <button
+            onClick={() => {
+              const target = backFromSlot(flowShape, {
+                hasVariants: groupSelectedVariants.length > 0,
+                hasAddons: groupSelectedAddonGroups.length > 0,
+              });
+              // Service-first hands the guest back to the calendar list, so the
+              // choice is released; staff-first keeps the person throughout.
+              if (target === 'practitioner') setGroupPractitionerId(null);
+              if (target === 'service') setGroupServiceId(null);
+              setStep(groupStep(target));
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
           <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
             <span className="font-medium text-purple-700">{currentPersonLabel}</span>
-            <span className="text-purple-500"> &middot; {groupSelectedService?.name} &middot; {groupSelectedPrac?.name}</span>
+            {/* Staff-first named the person first, so the summary reads in that order. */}
+            <span className="text-purple-500">
+              {isStaffFirst
+                ? ` · ${groupSelectedPrac?.name ?? ''} · ${groupSelectedService?.name ?? ''}`
+                : ` · ${groupSelectedService?.name ?? ''} · ${groupSelectedPrac?.name ?? ''}`}
+            </span>
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Pick a time for {currentPersonLabel}</h2>
           <p className="mb-4 text-sm text-slate-500">Green days have at least one bookable time. Select a day, then choose an available time.</p>

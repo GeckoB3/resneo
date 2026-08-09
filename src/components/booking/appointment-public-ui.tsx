@@ -75,12 +75,14 @@ export function appointmentProgressPhase(
 ): { phase: 0 | 1 | 2; label: string } | null {
   const choose = new Set([
     'mode_choice',
+    'staff_pick',
     'service',
     'variant',
     'addons',
     'practitioner',
     'group_review',
     'group_person_label',
+    'group_staff_pick',
     'group_service',
     'group_variant',
     'group_addons',

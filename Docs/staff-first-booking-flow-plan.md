@@ -72,7 +72,7 @@ adding a third shape.
 - Feature flag key: `staff_first_booking_flow`. Stored in `venues.feature_flags` JSONB, `true` when on, key absent when off (standard pattern).
 - Resolution: env override `FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW` wins, then venue value, then default `false`. Identical to every other flag in `src/lib/feature-flags/resolve.ts`.
 - Combined pages: the synthetic collective venue inherits the **host venue's** resolved value, exactly like `any_available_practitioner` does today (`loadCollectiveVenuePublic`, `src/lib/linked-accounts/collective-venue.ts:74-79` and `:132`).
-- Settings UI ships in two stages (7.3): the flag and flow land dark (no self-serve card); the toggle card in Settings → Profile → "Optional Booking features" (`FeatureFlagsSection`) ships in a follow-up PR once the pilot venue is healthy. Pilot enablement uses the super admin flags page.
+- Settings UI: **owner decision, 2026-08-09, superseding the two-stage plan below.** The toggle ships with the feature, in Settings → Booking settings → "Optional Booking features" (`FeatureFlagsSection`, rendered from `SettingsView` on the `booking-settings` tab; the plan previously said Profile, which was wrong). Every venue can turn it on and off for themselves whenever they like, and it stays off until they do. The dark-launch staging in 7.3 no longer applies; see the note there.
 
 ---
 
@@ -701,11 +701,19 @@ account-gate venue. Enumerate/create them BEFORE QA day (checklist item in the r
 The matrix is 1.5 to 2 days of hands-on execution (32 rows, several with two flag states, three
 payment modes among them). This is separate from rollout elapsed time.
 
-#### 7.3 Rollout (two PRs, dark first)
+#### 7.3 Rollout
 
-1. **PR 1 (the feature, dark)**: everything except the self-serve settings card. No venue can
-   see or enable the flag; only the super admin flags page and env can. Existing e2e specs
-   unmodified and green; new specs green; 1b suite green.
+> **Superseded in part, owner decision 2026-08-09.** The two-PR, dark-first staging below was
+> written to keep the toggle out of venues' hands until a pilot proved out. The owner's call is
+> that every venue should be able to turn this on and off for themselves from the day it ships,
+> so the settings card lands with the feature and there is no PR 2 gate. What survives: the
+> staging soak (step 2), the release preconditions (step 3), and the pilot watch (step 4), which
+> now watches whoever enables it first rather than a venue chosen by us. Consequence to hold in
+> mind: any venue can reach the new order without asking, so the QA matrix should be green before
+> this reaches production rather than during the soak.
+
+1. **One PR**: the feature and its settings card together. Off for every venue until they toggle
+   it. Existing e2e specs unmodified and green; new specs green; 1b suite green.
 2. Enable on an internal test venue in staging via the super flags page. Run the STG matrix rows.
    Rehearse rollback here (M28 + M29): venue-toggle off, env-override off, each verified on the
    public page. Note: the env kill-switch requires a redeploy/restart to take effect (it is read
@@ -724,36 +732,34 @@ payment modes among them). This is separate from rollout elapsed time.
    list and booking detail origin. Healthy = at least 5 such completed bookings spanning plain +
    variant/add-on + deposit, zero new booking-flow errors, no venue-reported issues, across 7
    days.
-5. **Phase 8 / PR 2 (self-serve)**: see the Phase 8 checklist below. Only after step 4 is
-   healthy. Dark-launch honesty note: "dark" means no dashboard surface. The key ships in the
-   PATCH schema from Phase 0.1 and `/api/venue/feature-flags` PATCH is generic (2.3), so a venue
-   admin who learns the key name could enable it with one authenticated API call. Accepted
-   residual risk (they are authenticated admins acting on their own venue); if review prefers,
-   a temporary server-side deny of the key in the PATCH route until PR 2 is a three-line option,
-   decided at PR time.
+5. There is no PR 2. The temporary PATCH deny once considered here is moot: the toggle is the
+   supported way in, so there is nothing to withhold.
 
-### Phase 8 (PR 2): self-serve release (0.5 day)
+### Phase 8: self-serve release
 
-8.1 `FLAG_META` card. Title: "Staff-first booking". Description (static English like its
-siblings, no em-dashes): "Guests pick who they want to see first, then choose from that person's
-services, on your public booking page and your combined page if you host one. Team photos and
-specialties from your Meet the team profiles appear when guests choose a person; with one team
-member, guests see a single card first."
-8.2 `Docs/FEATURE_FLAGS.md` self-serve note, and align the "Beta features" wording with the
-section's real heading "Optional Booking features" (2.3).
-8.3 The help-centre follow-up from 5.4 (toggle behaviour, photos from Meet the team profiles,
-solo one-card note; copy rules apply).
-8.4 PR 2 QA rows, executed at PR 2 time: (a) dashboard card round-trip: toggle on, save, public
-page flips (re-run M29 via the card path); toggle off, restores; also, a venue enabled earlier
-via the super flags page shows the card ON the first time the card renders; (b) non-admin staff
-cannot see or change the card's effect (PATCH is admin-only); (c) card copy audit against the
-copy rules; (d) help link renders and is accurate.
-8.5 If the temporary server-side PATCH deny of the key was taken at PR 1 (7.3 step 5), remove it
-in this PR; 8.4(a) is what proves the removal worked.
+8.1 **Done** (shipped with the feature per the owner decision above). `FLAG_META` card in
+`FeatureFlagsSection`, which `SettingsView` renders on the `booking-settings` tab. Title:
+"Staff-first booking". Description (static English like its siblings, no em-dashes): "Guests pick
+who they want to see first, then choose from that person's services, on your public booking page
+and your combined page if you host one. Team photos and specialties from your Meet the team
+profiles appear when guests choose a person; with one team member, guests see a single card
+first." Covered by `FeatureFlagsSection.test.tsx`: the card renders off by default, toggles on and
+back off, and leaves the venue's other settings untouched.
+8.2 **Done.** `Docs/FEATURE_FLAGS.md` records the toggle and its real location (Settings →
+Booking settings → Optional Booking features); the stale "Profile" and "Beta features" wording is
+corrected.
+8.3 **Still open.** The help-centre follow-up from 5.4 (toggle behaviour, photos from Meet the
+team profiles, solo one-card note; copy rules apply). Now more valuable than when it was a
+follow-up, since venues can find the toggle before anyone tells them about it.
+8.4 QA rows, to run with the rest of the matrix: (a) dashboard card round-trip: toggle on, save,
+public page flips (re-run M29 via the card path); toggle off, restores; (b) non-admin staff cannot
+see or change the card's effect (the card is admin-gated in `SettingsView`, and PATCH is
+admin-only); (c) card copy audit against the copy rules; (d) a venue enabled earlier from the
+super flags page shows the card ON the first time it renders.
 
 #### 7.4 Rollback
 
-- Per venue: toggle off via super flags page (PR 1 phase) or settings card (after PR 2); verified
+- Per venue: the venue's own settings toggle, or the super flags page; verified
   to propagate on a hard reload without redeploy (M29 rehearses this; the collective page is
   force-dynamic, the venue page's caching behaviour is confirmed by the rehearsal).
 - Global: `FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW=false` + redeploy (process-wide, requires

@@ -26,6 +26,12 @@ const FLAG_META: {
       'Guests and your team can book the next available slot without choosing a specific person. Available times are shared across everyone who offers that service.',
   },
   {
+    key: 'staff_first_booking_flow',
+    title: 'Staff-first booking',
+    description:
+      "Guests pick who they want to see first, then choose from that person's services, on your public booking page and your combined page if you host one. Team photos and specialties from your Meet the team profiles appear when guests choose a person; with one team member, guests see a single card first.",
+  },
+  {
     key: 'guest_self_reschedule',
     title: 'Guest self-reschedule',
     description:

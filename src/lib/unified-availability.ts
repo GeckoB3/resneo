@@ -53,6 +53,19 @@ export interface CalendarGridBooking {
    * one that is not.
    */
   payment_state?: string | null;
+  /**
+   * Multi-service visit key: several consecutive bookings for one guest share a
+   * `group_booking_id`. Sent so a client can draw the visit as one bar instead
+   * of one per service, the way the web calendar's `clusterMultiServiceBookings`
+   * does — this grid is the mobile calendar's only source and could not tell.
+   */
+  group_booking_id?: string | null;
+  /**
+   * Per-person label on a group booking ("Person 1", a name…). Distinguishes a
+   * multi-service visit by ONE guest (no label) from a group booking of several
+   * people (each labelled), which must not be merged into a single bar.
+   */
+  person_label?: string | null;
 }
 
 export interface CalendarGridDay {
@@ -401,7 +414,11 @@ export async function getCalendarGrid(params: {
     supabase
       .from('bookings')
       .select(
-        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id, client_arrived_at, staff_attendance_confirmed_at, guest_attendance_confirmed_at, payment_state',
+        // `service_name_snapshot` is what the booking recorded for itself and
+        // must be selected alongside the ids: this grid is the mobile calendar's
+        // only source, so without it a deleted service leaves those bars saying
+        // "Service" while every other surface still names it (20270103125000).
+        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id, service_name_snapshot, group_booking_id, person_label, client_arrived_at, staff_attendance_confirmed_at, guest_attendance_confirmed_at, payment_state',
       )
       .eq('venue_id', venueId)
       .in('calendar_id', calendarIds)
@@ -485,6 +502,9 @@ export async function getCalendarGrid(params: {
       guest_id: string;
       service_item_id?: string | null;
       appointment_service_id?: string | null;
+      service_name_snapshot?: string | null;
+      group_booking_id?: string | null;
+      person_label?: string | null;
       client_arrived_at?: string | null;
       staff_attendance_confirmed_at?: string | null;
       guest_attendance_confirmed_at?: string | null;
@@ -494,13 +514,20 @@ export async function getCalendarGrid(params: {
     const sid = row.service_item_id ?? row.appointment_service_id;
     const list = bookingsByCalDate.get(key) ?? [];
     const end = row.booking_end_time ? String(row.booking_end_time).slice(0, 5) : '';
+    // What the booking recorded beats the catalogue, which may have renamed the
+    // service since or deleted it and nulled the id above. Same precedence as
+    // `labelFromForeignKeys`; the generic 'Service' stays as the last resort for
+    // rows taken before snapshotting existed whose service is also gone.
+    const recordedServiceName = row.service_name_snapshot?.trim();
     list.push({
       id: row.id,
       guestName: guestName.get(row.guest_id) ?? 'Guest',
-      serviceName: (sid && serviceNames.get(sid)) ?? 'Service',
+      serviceName: recordedServiceName || (sid && serviceNames.get(sid)) || 'Service',
       startTime: String(row.booking_time).slice(0, 5),
       endTime: end,
       status: row.status,
+      group_booking_id: row.group_booking_id ?? null,
+      person_label: row.person_label ?? null,
       client_arrived_at: row.client_arrived_at ?? null,
       staff_attendance_confirmed_at: row.staff_attendance_confirmed_at ?? null,
       guest_attendance_confirmed_at: row.guest_attendance_confirmed_at ?? null,

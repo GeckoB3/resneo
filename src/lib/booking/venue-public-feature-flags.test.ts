@@ -27,6 +27,14 @@ describe('mapVenueFeatureFlagsForPublic', () => {
     expect(result?.resolved?.guest_self_reschedule).toBe(true);
   });
 
+  it('maps staff_first_booking_flow through from DB JSON storage', () => {
+    expect(
+      mapVenueFeatureFlagsForPublic({ staff_first_booking_flow: true })?.resolved
+        ?.staff_first_booking_flow,
+    ).toBe(true);
+    expect(mapVenueFeatureFlagsForPublic({})?.resolved?.staff_first_booking_flow).toBe(false);
+  });
+
   it('returns undefined for null', () => {
     expect(mapVenueFeatureFlagsForPublic(null)).toBeUndefined();
   });

@@ -767,7 +767,110 @@ function StaffRolesSvg() {
   );
 }
 
+function BookingOrderSvg() {
+  const step = (
+    x: number,
+    y: number,
+    n: string,
+    label: string,
+    highlight: boolean,
+  ) => (
+    <g key={`${x}-${y}-${label}`}>
+      <rect
+        x={x}
+        y={y}
+        width="196"
+        height="42"
+        rx="10"
+        fill={highlight ? '#E8EFF6' : '#ffffff'}
+        stroke={highlight ? '#003B6F' : '#e2e8f0'}
+        strokeWidth={highlight ? 1.6 : 1}
+      />
+      <circle cx={x + 24} cy={y + 21} r="11" fill={highlight ? '#003B6F' : '#f1f5f9'} />
+      <text
+        x={x + 24}
+        y={y + 25}
+        textAnchor="middle"
+        fill={highlight ? '#ffffff' : '#64748b'}
+        fontSize="11"
+        fontWeight="700"
+      >
+        {n}
+      </text>
+      <text x={x + 44} y={y + 26} fill="#0f172a" fontSize="12" fontWeight="600">
+        {label}
+      </text>
+    </g>
+  );
+
+  const arrow = (x: number, y: number) => (
+    <path
+      key={`arrow-${x}-${y}`}
+      d={`M${x + 98} ${y} l0 14 M${x + 92} ${y + 8} l6 6 l6 -6`}
+      fill="none"
+      stroke="#94a3b8"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  );
+
+  const leftX = 24;
+  const rightX = 300;
+  const rows = [64, 120, 176, 232];
+
+  return (
+    <svg
+      viewBox="0 0 520 320"
+      className="h-auto w-full"
+      role="img"
+      aria-label="Two booking orders side by side. Service first asks for the service, then the person, then the time, then the client's details. Staff first asks for the person, then the service, then the time, then the details. Both finish at the same place."
+    >
+      {/* Column headings */}
+      <rect x={leftX} y="16" width="196" height="30" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
+      <text x={leftX + 98} y="36" textAnchor="middle" fill="#0f172a" fontSize="12" fontWeight="700">
+        Service first
+      </text>
+      <rect x={rightX} y="16" width="196" height="30" rx="8" fill="#003B6F" />
+      <text x={rightX + 98} y="36" textAnchor="middle" fill="#ffffff" fontSize="12" fontWeight="700">
+        Staff first
+      </text>
+
+      {/* Left column: today's order */}
+      {step(leftX, rows[0], '1', 'Choose a service', false)}
+      {arrow(leftX, rows[0] + 42)}
+      {step(leftX, rows[1], '2', 'Choose a person', false)}
+      {arrow(leftX, rows[1] + 42)}
+      {step(leftX, rows[2], '3', 'Pick a time', false)}
+      {arrow(leftX, rows[2] + 42)}
+      {step(leftX, rows[3], '4', 'Their details', false)}
+
+      {/* Right column: the first two swap over */}
+      {step(rightX, rows[0], '1', 'Choose a person', true)}
+      {arrow(rightX, rows[0] + 42)}
+      {step(rightX, rows[1], '2', 'Choose a service', true)}
+      {arrow(rightX, rows[1] + 42)}
+      {step(rightX, rows[2], '3', 'Pick a time', false)}
+      {arrow(rightX, rows[2] + 42)}
+      {step(rightX, rows[3], '4', 'Their details', false)}
+
+      {/* Only the first two steps differ */}
+      <text x="260" y={rows[0] + 26} textAnchor="middle" fill="#00A0A4" fontSize="14" fontWeight="700">
+        ⇄
+      </text>
+      <text x="260" y={rows[1] + 26} textAnchor="middle" fill="#00A0A4" fontSize="14" fontWeight="700">
+        ⇄
+      </text>
+
+      <text x="260" y="300" textAnchor="middle" fill="#64748b" fontSize="10">
+        Only the first two steps swap. Everything after is the same.
+      </text>
+    </svg>
+  );
+}
+
 export const SET_UP_FIGURES: Record<string, { title: string; caption: string; node: ReactNode }> = {
+  "booking-order": { title: "The two booking orders", caption: "Service first is the default. Staff first swaps the first two steps, so clients choose a person before a service.", node: <BookingOrderSvg /> },
   "profile-form": { title: "Settings, Profile tab", caption: "The Business profile card on the Profile tab, where venue details save automatically.", node: <ProfileFormSvg /> },
   "profile-slug": { title: "Booking page address", caption: "Your chosen slug becomes the friendly end of your public booking link.", node: <ProfileSlugSvg /> },
   "profile-models": { title: "Booking models", caption: "Tick the booking models you want active, keeping at least one switched on.", node: <ProfileModelsSvg /> },

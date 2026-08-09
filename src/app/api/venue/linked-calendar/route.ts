@@ -104,7 +104,7 @@ async function loadLinkedResourcesForCalendar(
 
 /** Same column set as staff calendar list (`view=calendar`). */
 const LINKED_CALENDAR_BOOKING_SELECT =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, processing_time_blocks, resource_id, booking_end_time, experience_event_id, class_instance_id, event_session_id, service_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, resource_id, booking_end_time, experience_event_id, class_instance_id, event_session_id, service_id';
 
 /**
  * GET /api/venue/linked-calendar — bookings and practitioners of every venue
@@ -287,6 +287,10 @@ export async function GET(request: NextRequest) {
             practitioner_id: b.practitioner_id as string | null | undefined,
             appointment_service_id: b.appointment_service_id as string | null | undefined,
             service_id: b.service_id as string | null | undefined,
+            // Without this a linked venue's calendar loses the name of any
+            // service the host has since deleted, even though the booking
+            // recorded it.
+            service_name_snapshot: b.service_name_snapshot as string | null | undefined,
           })),
         );
         if (canSeePii) {

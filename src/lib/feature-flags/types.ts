@@ -14,6 +14,7 @@ export const APPOINTMENTS_FEATURE_FLAG_KEYS = [
   'class_commerce_enabled',
   'compliance_records_enabled',
   'card_hold_deposits',
+  'staff_first_booking_flow',
 ] as const;
 
 export type AppointmentsFeatureFlagKey = (typeof APPOINTMENTS_FEATURE_FLAG_KEYS)[number];
@@ -30,6 +31,7 @@ export const venueFeatureFlagsSchema = z
     compliance_records_enabled: z.boolean().optional(),
     compliance: complianceConfigSchema.optional(),
     card_hold_deposits: z.boolean().optional(),
+    staff_first_booking_flow: z.boolean().optional(),
   })
   .strip();
 

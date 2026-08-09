@@ -11,6 +11,7 @@ const ENV_KEYS = {
   waitlist_v2: 'FEATURE_FLAG_WAITLIST_V2',
   guest_self_reschedule: 'FEATURE_FLAG_GUEST_SELF_RESCHEDULE',
   any_available_practitioner: 'FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER',
+  staff_first_booking_flow: 'FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW',
 } as const;
 
 describe('parseVenueFeatureFlags', () => {
@@ -45,6 +46,22 @@ describe('resolveAppointmentsFeatureFlag', () => {
     expect(resolveAppointmentsFeatureFlag('guest_self_reschedule', { guest_self_reschedule: false })).toBe(
       false,
     );
+  });
+
+  it('defaults staff_first_booking_flow to false when unset (service-first stays the default)', () => {
+    expect(resolveAppointmentsFeatureFlag('staff_first_booking_flow', {})).toBe(false);
+    expect(
+      resolveAppointmentsFeatureFlag('staff_first_booking_flow', { staff_first_booking_flow: true }),
+    ).toBe(true);
+  });
+
+  it('env override wins both ways for staff_first_booking_flow', () => {
+    process.env.FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW = 'true';
+    expect(resolveAppointmentsFeatureFlag('staff_first_booking_flow', {})).toBe(true);
+    process.env.FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW = 'false';
+    expect(
+      resolveAppointmentsFeatureFlag('staff_first_booking_flow', { staff_first_booking_flow: true }),
+    ).toBe(false);
   });
 
   it('env true forces on regardless of venue', () => {
@@ -110,6 +127,18 @@ describe('venueFeatureFlagsForStorage', () => {
     expect(venueFeatureFlagsForStorage({ guest_self_reschedule: true })).toEqual({});
   });
 
+  it('round-trips staff_first_booking_flow: true stored, false dropped', () => {
+    expect(venueFeatureFlagsForStorage({ staff_first_booking_flow: true })).toEqual({
+      staff_first_booking_flow: true,
+    });
+    const off = mergeVenueFeatureFlagsPatch(
+      { staff_first_booking_flow: true },
+      { staff_first_booking_flow: false },
+    );
+    expect(off.staff_first_booking_flow).toBeUndefined();
+    expect(venueFeatureFlagsForStorage(off)).toEqual({});
+  });
+
   it('does not persist any-available config when the flag is off', () => {
     expect(
       venueFeatureFlagsForStorage({
@@ -127,6 +156,7 @@ describe('resolveAppointmentsFeatureFlags', () => {
       guest_self_reschedule: true,
       any_available_practitioner: false,
       card_hold_deposits: false,
+      staff_first_booking_flow: false,
     });
   });
 });

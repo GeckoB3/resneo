@@ -29,14 +29,30 @@ Playwright smoke coverage for critical guest paths:
 node scripts/seed-e2e-smoke-venue.mjs
 ```
 
-Add to `.env.local` (see `e2e.env.example`):
+The script seeds **two** venues and is safe to re-run:
+
+| Venue | Slug | What it is for |
+|---|---|---|
+| Default appointments fixture | `E2E_VENUE_SLUG` | The standard service-first flow: deposit, card hold, and an options-and-extras service. |
+| Staff-first fixture | `e2e-smoke-staff-first` (fixed) | The staff-first flow. Two calendars, "E2E Alex" and "E2E Bailey", offering overlapping but different services at different prices, so a service list that ignored the chosen person would show. |
+
+The staff-first slug is deliberately not configurable: if both fixtures could be
+pointed at one venue, the suite would test one ordering twice and the other not
+at all. The seed script and `globalSetup` both refuse that.
+
+Add to `.env.local` (see `e2e.env.example`, and the seed script prints these):
 
 ```env
 E2E_VENUE_SLUG=e2e-smoke-appointments
 E2E_VENUE_NAME=E2E Smoke Salon
 E2E_SERVICE_NAME=E2E Smoke Consultation
+E2E_OPTIONS_SERVICE_NAME=E2E Smoke Options Consultation
+E2E_STAFF_FIRST_VENUE_SLUG=e2e-smoke-staff-first
 E2E_BASE_URL=http://localhost:3000
 ```
+
+Leaving `E2E_STAFF_FIRST_VENUE_SLUG` unset skips the staff-first specs and runs
+the rest.
 
 ## Run locally
 
@@ -58,8 +74,17 @@ The `e2e-smoke` job in `.github/workflows/ci.yml` runs only when the repository 
 When enabled, configure these **secrets** for the job steps:
 
 - `E2E_VENUE_SLUG`
+- `E2E_OPTIONS_SERVICE_NAME` (optional; the default matches the seed script)
 - `E2E_STRIPE_CONNECTED_ACCOUNT_ID`
 - Plus standard app secrets (Supabase, Stripe, `PAYMENT_TOKEN_SECRET`)
+
+And this repository **variable**, alongside `RUN_E2E_SMOKE`:
+
+- `E2E_STAFF_FIRST_VENUE_SLUG` = `e2e-smoke-staff-first`
+
+It is a variable rather than a secret because the slug is not sensitive and is
+fixed in the seed script. Without it the staff-first specs skip, which means a
+green run would not have covered that ordering at all.
 
 If `RUN_E2E_SMOKE` is unset or not `true`, the job is skipped.
 

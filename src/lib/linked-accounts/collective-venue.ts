@@ -18,6 +18,7 @@ import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import { loadPublicCombinedCatalogue, loadVenueCatalogueData } from './catalogue';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
@@ -71,12 +72,11 @@ export async function loadCollectiveVenuePublic(
     .eq('id', col.host_venue_id)
     .maybeSingle();
 
-  // The combined page works like one venue, so its "Any available" option follows
-  // the host venue's own "Any available practitioner" booking setting rather than
-  // being always on.
-  const hostAnyAvailablePractitioner = resolveAppointmentsFeatureFlags(
-    parseVenueFeatureFlags(host?.feature_flags),
-  ).any_available_practitioner;
+  // The combined page works like one venue, so its "Any available" option and its
+  // booking step order follow the host venue's own settings rather than being fixed.
+  const hostFlags = resolveAppointmentsFeatureFlags(parseVenueFeatureFlags(host?.feature_flags));
+  const hostAnyAvailablePractitioner = hostFlags.any_available_practitioner;
+  const hostStaffFirstBookingFlow = hostFlags.staff_first_booking_flow;
 
   const branding = col.branding ?? {};
   const hostConfig = (col.booking_page_config ?? {}) as BookingPageConfig & { cover_photo_url?: string | null };
@@ -125,11 +125,19 @@ export async function loadCollectiveVenuePublic(
     booking_model: 'unified_scheduling',
     active_booking_models: ['unified_scheduling'],
     enabled_models: [],
-    terminology: (host?.terminology as VenuePublic['terminology']) ?? undefined,
+    // The combined page is always an appointments page, so the host's words are
+    // resolved against that model rather than passed through raw: a host that
+    // signed up as a restaurant would otherwise label everything "Reservation".
+    terminology: mergeVenueTerminology('unified_scheduling', host?.terminology),
     currency: (host?.currency as string) ?? 'GBP',
     booking_paused: !bookable,
     is_collective: true,
-    feature_flags: { resolved: { any_available_practitioner: hostAnyAvailablePractitioner } },
+    feature_flags: {
+      resolved: {
+        any_available_practitioner: hostAnyAvailablePractitioner,
+        staff_first_booking_flow: hostStaffFirstBookingFlow,
+      },
+    },
   };
 }
 
@@ -175,6 +183,11 @@ export interface CollectiveCatalogPractitioner {
   name: string;
   /** Routing: the venue that owns this calendar (booking writes here). */
   owning_venue_id: string;
+  /**
+   * The owning venue's name. Not shown to guests directly: it orders the merged
+   * list and qualifies duplicate names by folding itself into {@link name}.
+   */
+  owning_venue_name: string;
   services: CollectiveCatalogService[];
 }
 
@@ -297,7 +310,13 @@ export async function loadCollectiveAppointmentCatalog(
   const ensure = (calendarId: string, name: string, venueId: string): CollectiveCatalogPractitioner => {
     let entry = byCalendar.get(calendarId);
     if (!entry) {
-      entry = { id: calendarId, name, owning_venue_id: venueId, services: [] };
+      entry = {
+        id: calendarId,
+        name,
+        owning_venue_id: venueId,
+        owning_venue_name: '',
+        services: [],
+      };
       byCalendar.set(calendarId, entry);
     }
     return entry;
@@ -357,26 +376,60 @@ export async function loadCollectiveAppointmentCatalog(
 
   const result = [...byCalendar.values()].filter((p) => p.services.length > 0);
 
+  // Every calendar carries its venue's name: the picker shows it under each
+  // person, and duplicate names still fold it into the name itself so the
+  // downstream summaries and banners stay unambiguous.
+  const { data: venueRows } = await admin.from('venues').select('id, name').in('id', venueIds);
+  const venueName: Record<string, string> = {};
+  for (const v of venueRows ?? []) venueName[v.id as string] = (v.name as string) ?? '';
+  for (const p of result) {
+    p.owning_venue_name = venueName[p.owning_venue_id] ?? '';
+  }
+
   // Venue-qualify duplicate staff names (e.g. two "Andrew"s, one per venue) so
   // customers can tell them apart on the merged page.
   const nameCounts = new Map<string, number>();
   for (const p of result) nameCounts.set(p.name, (nameCounts.get(p.name) ?? 0) + 1);
   const dupNames = new Set([...nameCounts.entries()].filter(([, n]) => n > 1).map(([name]) => name));
-  if (dupNames.size > 0) {
-    const { data: venueRows } = await admin
-      .from('venues')
-      .select('id, name')
-      .in('id', venueIds);
-    const venueName: Record<string, string> = {};
-    for (const v of venueRows ?? []) venueName[v.id as string] = (v.name as string) ?? '';
-    for (const p of result) {
-      if (dupNames.has(p.name) && venueName[p.owning_venue_id]) {
-        p.name = `${p.name} · ${venueName[p.owning_venue_id]}`;
-      }
+  for (const p of result) {
+    if (dupNames.has(p.name) && p.owning_venue_name) {
+      p.name = `${p.name} · ${p.owning_venue_name}`;
     }
   }
 
+  const { data: collectiveRow } = await admin
+    .from('venue_collectives')
+    .select('host_venue_id')
+    .eq('id', collectiveId)
+    .maybeSingle();
+  sortCollectivePractitioners(
+    result,
+    (collectiveRow as { host_venue_id?: string } | null)?.host_venue_id ?? null,
+  );
+
   return { practitioners: result };
+}
+
+/**
+ * Deterministic display order: the host's own calendars first (it curates the
+ * page), then the other venues alphabetically, then by name within each venue.
+ *
+ * The order used to be however the catalogue happened to be assembled, which is
+ * fine for a list nobody reads top-down but not for a picker that is now the
+ * first thing a guest sees. It also fixes the "Meet the team" tab, which maps
+ * this same list.
+ */
+export function sortCollectivePractitioners<
+  T extends { name: string; owning_venue_id: string; owning_venue_name: string },
+>(practitioners: T[], hostVenueId: string | null): T[] {
+  return practitioners.sort((a, b) => {
+    const aHost = a.owning_venue_id === hostVenueId ? 0 : 1;
+    const bHost = b.owning_venue_id === hostVenueId ? 0 : 1;
+    if (aHost !== bHost) return aHost - bHost;
+    const byVenue = a.owning_venue_name.localeCompare(b.owning_venue_name);
+    if (byVenue !== 0) return byVenue;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 /**

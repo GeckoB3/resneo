@@ -86,7 +86,7 @@ export function HelpLayoutShell({
             ResNeo <span className="font-semibold text-brand-700">Help</span>
           </Link>
           <div className="hidden min-w-0 flex-1 lg:block">
-            <HelpSearch className="max-w-xl" searchDocs={searchDocs} />
+            <HelpSearch id="help-search-desktop" className="max-w-xl" searchDocs={searchDocs} />
           </div>
           <Link
             href="/"
@@ -102,7 +102,7 @@ export function HelpLayoutShell({
           </Link>
         </div>
         <div className="border-t border-slate-100 px-4 py-2 lg:hidden">
-          <HelpSearch searchDocs={searchDocs} />
+          <HelpSearch id="help-search-mobile" searchDocs={searchDocs} />
         </div>
         {banner ? (
           <div className="border-t border-emerald-100 bg-emerald-50/90 px-4 py-2.5 text-center sm:px-6">

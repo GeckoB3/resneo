@@ -11,7 +11,10 @@ import { BrandSpinner } from '@/components/ui/primitives';
 import { clearBookingComplianceDrafts, type BookingComplianceState } from './BookingComplianceForms';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
-import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
+import {
+  APPOINTMENT_BOOKING_RESET_EVENT,
+  restartPublicAppointmentBooking,
+} from './appointment-booking-events';
 import {
   cancellationDeadlineHoursBefore,
   classifyGroupDepositRefunds,
@@ -67,6 +70,20 @@ import {
   AppointmentSummaryStrip,
   ExpandableDescription,
 } from './appointment-public-ui';
+import { StaffChoiceCard, StaffChoiceCardSkeleton } from '@/components/booking/StaffChoiceCard';
+import {
+  afterAddons,
+  afterService,
+  afterVariant,
+  anyAvailableCardVisible,
+  backFromAddons,
+  backFromService,
+  backFromSlot,
+  backFromStaffPick,
+  backFromVariant,
+  type AppointmentFlowOrdering,
+  type AppointmentFlowShape,
+} from '@/lib/booking/appointment-flow-order';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 import {
   ANY_AVAILABLE_PRACTITIONER_ID,
@@ -170,6 +187,40 @@ function catalogAddonGroupsForServiceId(
     if (offer?.addon_groups && offer.addon_groups.length > 0) return offer.addon_groups;
   }
   return [];
+}
+
+/**
+ * Add-on groups for a service, scoped to a specific calendar when given. Combined
+ * pages need this because each calendar's source service carries its OWN groups,
+ * so resolving by service id alone can show one venue's extras while charging
+ * another's. Omitting the id (single venue) falls back to first-match, where every
+ * calendar shares the same set.
+ */
+function addonGroupsForServiceFromStaff(
+  catalogStaff: CatalogPractitioner[],
+  serviceId: string,
+  practitionerId?: string | null,
+): import('@/types/booking-models').AppointmentCatalogAddonGroup[] {
+  if (practitionerId) {
+    const scoped = catalogStaff
+      .find((p) => p.id === practitionerId)
+      ?.services.find((s) => s.id === serviceId)?.addon_groups;
+    if (scoped) return scoped;
+  }
+  return catalogAddonGroupsForServiceId(catalogStaff, serviceId);
+}
+
+/**
+ * Combined pages: whether an offering is the same thing whoever provides it.
+ * Only those can be pooled; the rest need a calendar chosen first, because the
+ * options and the price come off that calendar's own source service.
+ */
+function offeringIsUniform(catalogStaff: CatalogPractitioner[], serviceId: string): boolean {
+  for (const p of catalogStaff) {
+    const offer = p.services.find((s) => s.id === serviceId);
+    if (offer && offer.any_available === false) return false;
+  }
+  return true;
 }
 
 type CatalogServiceOffer = CatalogPractitioner['services'][number];
@@ -440,12 +491,35 @@ function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart:
 
 type Step =
   | 'mode_choice'
+  | 'staff_pick'
   | 'service' | 'variant' | 'addons' | 'append_variant' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
-  | 'group_person_label' | 'group_service' | 'group_variant' | 'group_addons' | 'group_practitioner' | 'group_slot'
+  | 'group_person_label' | 'group_staff_pick' | 'group_service' | 'group_variant' | 'group_addons' | 'group_practitioner' | 'group_slot'
   | 'group_review' | 'group_details' | 'group_payment' | 'group_confirmation';
 
 const SINGLE_STEPS: Step[] = ['service', 'variant', 'addons', 'practitioner', 'slot', 'multi_service', 'details'];
 const SINGLE_STEPS_LOCKED: Step[] = ['service', 'variant', 'addons', 'slot', 'multi_service', 'details'];
+
+/** Steps that show the "Booking with {person}" banner once staff-first has one. */
+const STAFF_FIRST_BANNER_STEPS: Step[] = ['service', 'variant', 'addons'];
+
+/**
+ * The group flow runs the same shape as a single booking, one guest at a time,
+ * so it asks the ordering helper about the single steps and renames the answer.
+ * Its entry and exit (the person label, and the review it returns to) have no
+ * single-flow equivalent and stay at their call sites.
+ */
+const GROUP_STEP_BY_SINGLE = {
+  staff_pick: 'group_staff_pick',
+  service: 'group_service',
+  variant: 'group_variant',
+  addons: 'group_addons',
+  practitioner: 'group_practitioner',
+  slot: 'group_slot',
+} as const satisfies Record<string, Step>;
+
+function groupStep(single: keyof typeof GROUP_STEP_BY_SINGLE): Step {
+  return GROUP_STEP_BY_SINGLE[single];
+}
 
 interface AppointmentBookingFlowProps {
   venue: VenuePublic;
@@ -646,18 +720,75 @@ export function AppointmentBookingFlow({
   ]);
   const singleFlowSteps: Step[] = isLockedPractitionerFlow ? SINGLE_STEPS_LOCKED : SINGLE_STEPS;
 
+  /**
+   * Whether this session asks for a person before a service. Decided once, at
+   * mount: nobody part-way through must have the steps rearranged under them
+   * because the venue flipped the setting, and the surfaces excluded here
+   * (edits, per-practitioner pages) cannot change mid-session either.
+   *
+   * The rule on both sides of the desk is the same: reorder only when the
+   * session does not already know the answer to one of the two questions.
+   *   * Knows the *what* already (a waitlist offer, a `service_id` link, a
+   *     rebook seeded from a past appointment): stay service-first, because
+   *     asking who first would be a step backwards.
+   *   * Knows the *who* already (staff clicked an empty slot on someone's
+   *     calendar column, so date, time and person are all set): stay
+   *     service-first, because the person is no longer a question.
+   *
+   * Walk-ins are deliberately not excluded. Someone is standing at the desk
+   * asking for a person as often as for a service, so the toggle applies:
+   * `staffCalendarSlotPrefillActive` already treats walk-ins as unprefilled
+   * even when launched from a column.
+   */
+  const [orderingForSession] = useState<AppointmentFlowOrdering>(() =>
+    venue.feature_flags?.resolved?.staff_first_booking_flow === true &&
+    (bookingAudience === 'public' ||
+      (isStaff && !staffCalendarSlotPrefillActive && !staffRebookBootstrap?.appointment)) &&
+    !editBooking &&
+    !(lockedPractitioner?.id && lockedPractitioner?.bookingSlug) &&
+    !preselectedServiceId
+      ? 'staff_first'
+      : 'service_first',
+  );
+  /**
+   * Combined pages only. Set when a guest who chose "Any available" picks an
+   * offering that differs by calendar: they have to name a calendar after all,
+   * and from that point the flow behaves exactly like the combined
+   * service-first flow, which is what {@link flowShape} then reports.
+   */
+  const [anyRouteActive, setAnyRouteActive] = useState(false);
+  const isStaffFirst = orderingForSession === 'staff_first';
+  const flowShape: AppointmentFlowShape = useMemo(
+    () => ({
+      // Inside the pooled-offering detour the guest is picking a calendar and
+      // then its own options, which is the combined service-first flow exactly.
+      // Reporting it as such is what keeps that detour on tested ground.
+      ordering: anyRouteActive ? 'service_first' : orderingForSession,
+      surface: isLockedPractitionerFlow ? 'locked' : venue.is_collective ? 'combined' : 'venue',
+    }),
+    [orderingForSession, anyRouteActive, isLockedPractitionerFlow, venue.is_collective],
+  );
+
   // Shared state
   // A combined page (venue collective) skips the single/group mode choice: the
   // group pipeline has no collective routing, so only single bookings are offered.
-  const [step, setStep] = useState<Step>(() =>
-    editBooking ||
-    isLockedPractitionerFlow ||
-    isStaff ||
-    venue.is_collective ||
-    initialStep === 'service'
+  const [step, setStep] = useState<Step>(() => {
+    if (isStaffFirst) {
+      // A combined page has no single-or-group chooser, staff never see one
+      // either (group bookings are reached only from `mode_choice`), and
+      // `?start=service` means "skip the chooser". All three land on the picker.
+      return venue.is_collective || isStaff || initialStep === 'service'
+        ? 'staff_pick'
+        : 'mode_choice';
+    }
+    return editBooking ||
+      isLockedPractitionerFlow ||
+      isStaff ||
+      venue.is_collective ||
+      initialStep === 'service'
       ? 'service'
-      : 'mode_choice',
-  );
+      : 'mode_choice';
+  });
   const [date, setDate] = useState(() => editBooking?.booking_date ?? initialDate ?? todayStr());
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -700,6 +831,13 @@ export function AppointmentBookingFlow({
     editBooking?.practitioner_id ?? (lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null),
   );
   const [selectedTime, setSelectedTime] = useState<string | null>(() => editBooking?.booking_time.slice(0, 5) ?? initialTime ?? null);
+  /**
+   * Staff-first only: the service a guest was trying to book when the person
+   * they picked turned out to be full. Purely presentational, so the next
+   * person's list can pin it and say "you were booking this"; it never changes
+   * where any step goes.
+   */
+  const [carriedServiceId, setCarriedServiceId] = useState<string | null>(null);
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{
     booking_id: string;
@@ -856,6 +994,11 @@ export function AppointmentBookingFlow({
       if (lockedPractitioner?.id && lockedPractitioner?.bookingSlug) {
         setStep('service');
         setSelectedPractitionerId(lockedPractitioner.id);
+      } else if (isStaffFirst) {
+        setAnyRouteActive(false);
+        setCarriedServiceId(null);
+        setStep(venue.is_collective || isStaff ? 'staff_pick' : 'mode_choice');
+        setSelectedPractitionerId(null);
       } else {
         setStep(isStaff || venue.is_collective ? 'service' : 'mode_choice');
         setSelectedPractitionerId(null);
@@ -863,7 +1006,7 @@ export function AppointmentBookingFlow({
     }
     window.addEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
     return () => window.removeEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
-  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff, venue.is_collective, isPublicGuest, accountGate.guestDetailsPrefill?.email]);
+  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff, isStaffFirst, venue.is_collective, isPublicGuest, accountGate.guestDetailsPrefill?.email]);
 
   // Build phantom bookings from already-selected group people
   const phantomBookings = useMemo(() => {
@@ -1252,8 +1395,19 @@ export function AppointmentBookingFlow({
           durationMinutes,
         });
       }
-    } else if (isLockedPractitionerFlow && step === 'service' && lockedPractitioner?.id) {
-      const p = catalogStaff.find((c) => c.id === lockedPractitioner.id);
+    } else if (
+      step === 'service' &&
+      (isLockedPractitionerFlow
+        ? Boolean(lockedPractitioner?.id)
+        : // Staff-first knows the person on the service step too, so warm their
+          // months while the guest reads. Skipped for the pooled option, whose
+          // month grids are the most expensive thing the server computes.
+          isStaffFirst &&
+          Boolean(selectedPractitionerId) &&
+          !isAnyAvailablePractitionerId(selectedPractitionerId))
+    ) {
+      const chosenId = isLockedPractitionerFlow ? lockedPractitioner?.id : selectedPractitionerId;
+      const p = catalogStaff.find((c) => c.id === chosenId);
       if (p) {
         for (const s of p.services) {
           tasks.push({
@@ -1262,6 +1416,13 @@ export function AppointmentBookingFlow({
             durationMinutes: staffDurationOverrides[s.id] ?? null,
           });
         }
+      }
+    } else if (step === 'group_service' && isStaffFirst && groupPractitionerId) {
+      // Staff-first group: this guest's person is settled, so warm their months
+      // while the booker reads the service list.
+      const p = catalogStaff.find((c) => c.id === groupPractitionerId);
+      for (const s of p?.services ?? []) {
+        tasks.push({ practitionerId: p!.id, serviceId: s.id });
       }
     } else if (step === 'group_practitioner' && groupServiceId) {
       for (const p of catalogStaff) {
@@ -1284,6 +1445,9 @@ export function AppointmentBookingFlow({
     groupServiceId,
     isLockedPractitionerFlow,
     lockedPractitioner?.id,
+    isStaffFirst,
+    selectedPractitionerId,
+    groupPractitionerId,
     catalogStaff,
     calendarMonth,
     prefetchCalendarTasks,
@@ -1458,7 +1622,11 @@ export function AppointmentBookingFlow({
    * of throttled requests, same as practitioner-step prefetch).
    */
   useEffect(() => {
-    if (step !== 'service' || catalogLoading || isLockedPractitionerFlow || !onlyListedServiceId) return;
+    // Staff-first has already narrowed to one person by this step, so warming
+    // every provider here would either duplicate that or, after "Any available",
+    // fire the pooled requests the branch above deliberately skips.
+    if (step !== 'service' || catalogLoading || isLockedPractitionerFlow || isStaffFirst) return;
+    if (!onlyListedServiceId) return;
     const { year, month } = calendarMonth;
     const durationMinutes = staffDurationOverrides[onlyListedServiceId] ?? null;
     const tasks: Array<{ practitionerId: string; serviceId: string; durationMinutes?: number | null }> = [];
@@ -1475,6 +1643,7 @@ export function AppointmentBookingFlow({
     step,
     catalogLoading,
     isLockedPractitionerFlow,
+    isStaffFirst,
     onlyListedServiceId,
     staffDurationOverrides,
     catalogStaff,
@@ -1486,6 +1655,89 @@ export function AppointmentBookingFlow({
     if (!selectedServiceId) return [];
     return catalogStaff.filter((p) => p.services.some((s) => s.id === selectedServiceId));
   }, [catalogStaff, selectedServiceId]);
+
+  /** Everyone the staff-first picker offers; empty calendars are already excluded upstream. */
+  const bookableStaff = useMemo(
+    () => catalogStaff.filter((p) => p.services.length > 0),
+    [catalogStaff],
+  );
+  const teamProfiles = venue.booking_page_config?.team_profiles ?? {};
+
+  /**
+   * The service list once a person is chosen: their own services at their own
+   * prices, rather than the venue-wide list with a "from" price folded across
+   * everyone. Picking "Any available" keeps the venue-wide list, which is what
+   * the pooled option means and what service-first already shows for it.
+   */
+  const staffFirstServices = useMemo(() => {
+    if (!isStaffFirst || !selectedPractitionerId) return null;
+    if (isAnyAvailablePractitionerId(selectedPractitionerId)) return null;
+    const prac = catalogStaff.find((p) => p.id === selectedPractitionerId);
+    if (!prac) return null;
+    return prac.services
+      .map((s) => {
+        const variantPrices = (s.variants ?? [])
+          .map((v) => v.price_pence)
+          .filter((p): p is number => p != null);
+        return {
+          id: s.id,
+          name: s.name,
+          description: s.description?.trim() ? s.description.trim() : null,
+          duration_minutes: s.duration_minutes,
+          // A service with options is priced "from" its cheapest option, as the
+          // venue-wide list does; otherwise it is simply this person's price.
+          minPricePence: variantPrices.length > 0 ? Math.min(...variantPrices) : s.price_pence,
+          sortOrder: s.sort_order ?? 0,
+          location_type: s.location_type,
+        };
+      })
+      .sort((a, b) =>
+        compareByVenueServiceOrder(
+          { sort_order: a.sortOrder, name: a.name },
+          { sort_order: b.sortOrder, name: b.name },
+        ),
+      );
+  }, [isStaffFirst, selectedPractitionerId, catalogStaff]);
+
+  /** The group service step's list once staff-first has a person for this guest. */
+  const groupStaffFirstServices = useMemo(() => {
+    if (!isStaffFirst || !groupPractitionerId) return null;
+    const prac = catalogStaff.find((p) => p.id === groupPractitionerId);
+    if (!prac) return null;
+    return prac.services
+      .map((s) => {
+        const variantPrices = (s.variants ?? [])
+          .map((v) => v.price_pence)
+          .filter((p): p is number => p != null);
+        return {
+          id: s.id,
+          name: s.name,
+          description: s.description?.trim() ? s.description.trim() : null,
+          duration_minutes: s.duration_minutes,
+          minPricePence: variantPrices.length > 0 ? Math.min(...variantPrices) : s.price_pence,
+          sortOrder: s.sort_order ?? 0,
+          location_type: s.location_type,
+        };
+      })
+      .sort((a, b) =>
+        compareByVenueServiceOrder(
+          { sort_order: a.sortOrder, name: a.name },
+          { sort_order: b.sortOrder, name: b.name },
+        ),
+      );
+  }, [isStaffFirst, groupPractitionerId, catalogStaff]);
+
+  /** What the service step lists, with a carried service (4.12) pinned to the top. */
+  const serviceListForStep = useMemo(() => {
+    const base = staffFirstServices ?? servicesWithFromPrice;
+    if (!carriedServiceId) return base;
+    const carried = base.find((s) => s.id === carriedServiceId);
+    return carried ? [carried, ...base.filter((s) => s.id !== carriedServiceId)] : base;
+  }, [staffFirstServices, servicesWithFromPrice, carriedServiceId]);
+
+  /** The person the guest just switched to does not do the service they were booking. */
+  const carriedServiceUnavailable =
+    carriedServiceId != null && !serviceListForStep.some((s) => s.id === carriedServiceId);
 
   const practitionersForGroupService = useMemo(() => {
     if (!groupServiceId) return [];
@@ -1734,6 +1986,20 @@ export function AppointmentBookingFlow({
 
   // Group flow helpers
   const groupSelectedPrac = catalogStaff.find((p) => p.id === groupPractitionerId);
+  /**
+   * This guest's options and extras, scoped to their person once staff-first has
+   * chosen one. Drives how far back the times step unwinds.
+   */
+  const groupSelectedVariants = groupServiceId
+    ? isStaffFirst
+      ? catalogVariantsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+      : catalogVariantsForServiceId(catalogStaff, groupServiceId)
+    : [];
+  const groupSelectedAddonGroups = groupServiceId
+    ? isStaffFirst
+      ? addonGroupsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+      : catalogAddonGroupsForServiceId(catalogStaff, groupServiceId)
+    : [];
   const groupSlotPrac = slotPractitioners.find((p) => p.id === groupPractitionerId);
   const groupAvailableSlots = dedupeSlotsByStartTime(
     groupSlotPrac?.slots.filter((s) => !groupServiceId || s.service_id === groupServiceId) ?? [],
@@ -2695,14 +2961,88 @@ export function AppointmentBookingFlow({
     : 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
   // Cards that carry a description split the visual shell (border, padding, hover) from the click
   // target, so an expand toggle can sit inside the card without nesting a button inside a button.
-  // Padding stays on the shell so the toggle lines up with the text above it.
+  // Padding stays on the shell so the toggle lines up with the text above it. The target then
+  // stretches over the whole shell (`ap-card-stretch`), so the description is not a dead zone.
   const choiceCardShellClass = isPublicGuest
-    ? 'ap-choice-card'
-    : 'rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
-  const choiceCardTargetClass = 'w-full text-left';
+    ? 'ap-choice-card ap-card-shell'
+    : 'ap-card-shell rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]';
+  const choiceCardTargetClass = 'ap-card-stretch w-full text-left';
   const publicDetailsFieldProps = isPublicGuest
     ? { submitClassName: APPOINTMENT_DETAILS_SUBMIT_CLASS, fieldClassName: APPOINTMENT_DETAILS_INPUT_CLASS }
     : {};
+
+  /**
+   * The only way to the picker. Every arrival clears the pooled-offering detour,
+   * so no exit from it can be forgotten and leave the flow routing as though a
+   * calendar still had to be chosen.
+   */
+  function goToStaffPick(opts?: { carryServiceId?: string | null }) {
+    setAnyRouteActive(false);
+    setCarriedServiceId(opts?.carryServiceId ?? null);
+    setSelectedPractitionerId(null);
+    setSelectedServiceId(null);
+    setSelectedVariantId(null);
+    setSelectedAddonIds([]);
+    setSelectedTime(null);
+    setMultiServiceSegments(null);
+    setError(null);
+    setStep('staff_pick');
+  }
+
+  /** Shared by the guest and staff copies of the times step so they cannot drift. */
+  function goBackFromSlot() {
+    setSelectedTime(null);
+    setMultiServiceSegments(null);
+    const target = backFromSlot(flowShape, {
+      hasVariants: serviceHasVariants,
+      hasAddons: serviceHasAddons,
+    });
+    if (target === 'practitioner') {
+      setSelectedPractitionerId(null);
+    }
+    if (target === 'service') {
+      setSelectedServiceId(null);
+      setSelectedVariantId(null);
+      setDurationPopoverServiceId(null);
+      setDurationPopoverOpenForKey(null);
+    }
+    setStep(target);
+  }
+
+  /**
+   * Staff-first dead end: the person the guest picked has nothing free. Carry the
+   * service back to the picker so the next person's list can point at it.
+   */
+  function seeSomeoneElse() {
+    goToStaffPick({ carryServiceId: selectedServiceId });
+  }
+
+  /** Offered only when switching is actually possible, and not from the pooled option. */
+  const canSeeSomeoneElse =
+    isStaffFirst &&
+    bookableStaff.length > 1 &&
+    Boolean(selectedPractitionerId) &&
+    !isAnyAvailablePractitionerId(selectedPractitionerId);
+
+  /**
+   * Offered once a booking is done, so a guest booking two things in a row is
+   * not left hunting for a way back to the start. Staff have their own Done
+   * control, and an edit is a change to one booking rather than a new one.
+   */
+  const bookAnotherButton =
+    isPublicGuest && !isEdit ? (
+      <button
+        type="button"
+        onClick={restartPublicAppointmentBooking}
+        className="mt-6 w-full rounded-xl border border-brand-200 bg-white px-4 py-3 text-sm font-semibold text-brand-800 transition-colors hover:border-brand-300 hover:bg-brand-50/70"
+      >
+        {/* "Book another booking" is not a sentence, so venues whose word for a
+            booking is just that get the phrasing the other way round. */}
+        {terms.booking.trim().toLowerCase() === 'booking'
+          ? 'Make another booking'
+          : `Book another ${terms.booking.toLowerCase()}`}
+      </button>
+    ) : null;
 
   const flowContent = (
     <div
@@ -2740,6 +3080,21 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
+      {isStaffFirst && selectedPractitionerId && STAFF_FIRST_BANNER_STEPS.includes(step) && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-3 text-sm text-brand-900">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-800">
+            {isAnyAvailablePractitionerId(selectedPractitionerId)
+              ? '*'
+              : (selectedPrac?.name ?? '').charAt(0).toUpperCase()}
+          </div>
+          <div className="font-medium">
+            {isAnyAvailablePractitionerId(selectedPractitionerId)
+              ? 'Booking with whoever is available first'
+              : `Booking with ${selectedPrac?.name ?? ''}`}
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
@@ -2755,7 +3110,7 @@ export function AppointmentBookingFlow({
           />
           <div className="space-y-3">
             <AppointmentChoiceCard
-              onClick={() => setStep('service')}
+              onClick={() => (isStaffFirst ? goToStaffPick() : setStep('service'))}
               title="Book an appointment"
               description="Schedule an appointment for yourself"
               icon={
@@ -2779,12 +3134,108 @@ export function AppointmentBookingFlow({
       )}
 
       {/* ════════════════════════════════════════════════
+          STAFF-FIRST: choose a person, then their services
+          ════════════════════════════════════════════════ */}
+
+      {step === 'staff_pick' && (
+        <div data-testid="staff-pick-step">
+          {/* Staff never pass through the single-or-group chooser, so the picker
+              is their first step and there is nothing behind it. */}
+          {backFromStaffPick(flowShape) && initialStep !== 'service' && !isStaff && (
+            <AppointmentBackLink onClick={() => setStep('mode_choice')} />
+          )}
+          <AppointmentStepHeader
+            // Staff are booking on someone else's behalf, so the guest-facing
+            // phrasing would be addressed to the wrong person.
+            title={isStaff ? 'Who is this appointment with?' : 'Who would you like to see?'}
+            description="Pick a person to see their services and prices."
+          />
+          {catalogLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <StaffChoiceCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : bookableStaff.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
+              <p className="text-sm font-medium text-slate-600">
+                No {terms.staff.toLowerCase()} are available to book right now.
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {isStaff
+                  ? `Check that your ${terms.staff.toLowerCase()} have bookable calendars and services.`
+                  : 'Try again later or contact the venue.'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {anyAvailableCardVisible(flowShape, {
+                flagOn: anyAvailablePractitionerEnabled,
+                listedCount: bookableStaff.length,
+                hasUniformOffering: catalogStaff.some((p) =>
+                  p.services.some((s) => s.any_available !== false),
+                ),
+              }) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPractitionerId(ANY_AVAILABLE_PRACTITIONER_ID);
+                    setStep('service');
+                  }}
+                  className={choiceCardClass}
+                  aria-label="Any available"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-100 text-base font-bold text-brand-700"
+                        aria-hidden
+                      >
+                        *
+                      </div>
+                      <div>
+                        <div className="font-medium text-slate-900">Any available</div>
+                        <p className="text-xs text-slate-500">First available time across the team</p>
+                      </div>
+                    </div>
+                    <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                  </div>
+                </button>
+              ) : null}
+              {bookableStaff.map((prac) => (
+                <StaffChoiceCard
+                  key={prac.id}
+                  name={prac.name}
+                  profile={teamProfiles[prac.id]}
+                  className={choiceCardClass}
+                  onClick={() => {
+                    setSelectedPractitionerId(prac.id);
+                    setStep('service');
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════
           SINGLE BOOKING FLOW (unchanged from before)
           ════════════════════════════════════════════════ */}
 
       {step === 'service' && (
         <div>
-          {!isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && initialStep !== 'service' && (
+          {isStaffFirst ? (
+            <AppointmentBackLink
+              onClick={() => {
+                if (backFromService(flowShape) === 'staff_pick') {
+                  goToStaffPick();
+                  return;
+                }
+                setStep('mode_choice');
+              }}
+            />
+          ) : !isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && initialStep !== 'service' ? (
             isPublicGuest ? (
               <AppointmentBackLink onClick={() => setStep('mode_choice')} />
             ) : (
@@ -2793,7 +3244,7 @@ export function AppointmentBookingFlow({
                 Back
               </button>
             )
-          )}
+          ) : null}
           {isPublicGuest ? (
             <AppointmentStepHeader
               title="Select a service"
@@ -2815,16 +3266,25 @@ export function AppointmentBookingFlow({
           )}
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : servicesWithFromPrice.length === 0 ? (
+          ) : serviceListForStep.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No services are available right now</p>
               <p className="mt-1 text-xs text-slate-400">Try again later or contact the venue.</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {servicesWithFromPrice.map((svc) => {
-                const serviceVariants = catalogVariantsForServiceId(catalogStaff, svc.id);
+              {carriedServiceUnavailable && selectedPrac?.name ? (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  {selectedPrac.name} does not offer the service you were booking, but here is what
+                  they do.
+                </p>
+              ) : null}
+              {serviceListForStep.map((svc) => {
+                const serviceVariants = isStaffFirst
+                  ? catalogVariantsForServiceFromStaff(catalogStaff, svc.id, selectedPractitionerId)
+                  : catalogVariantsForServiceId(catalogStaff, svc.id);
                 const serviceHasVariants = serviceVariants.length > 0;
+                const isCarriedService = isStaffFirst && svc.id === carriedServiceId;
                 const displayedDuration = staffDurationOverrides[svc.id] ?? svc.duration_minutes;
                 const durationIsCustom = displayedDuration !== svc.duration_minutes;
                 const staffDurationOverrideForService = staffDurationOverrides[svc.id] ?? null;
@@ -2836,22 +3296,27 @@ export function AppointmentBookingFlow({
                   setSelectedServiceId(svc.id);
                   setSelectedVariantId(null);
                   setSelectedAddonIds([]);
-                  // Combined page: resolve the calendar (and therefore the venue) BEFORE
-                  // variants/add-ons — those live on the chosen calendar's source service.
-                  if (isCombined) {
+                  setCarriedServiceId(null);
+                  // Pooled on a combined page: an offering that differs by
+                  // calendar cannot be booked without naming one, so this is
+                  // where the guest is handed back to the calendar list.
+                  if (
+                    isCombined &&
+                    isAnyAvailablePractitionerId(selectedPractitionerId) &&
+                    !offeringIsUniform(catalogStaff, svc.id)
+                  ) {
+                    setAnyRouteActive(true);
+                    setSelectedPractitionerId(null);
                     setStep('practitioner');
                     return;
                   }
-                  if (serviceHasVariants) {
-                    setStep('variant');
-                    return;
-                  }
-                  const hasAddonGroups = catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
-                  if (hasAddonGroups) {
-                    setStep('addons');
-                    return;
-                  }
-                  if (isEdit) {
+                  const hasAddonGroups = isStaffFirst
+                    ? addonGroupsForServiceFromStaff(catalogStaff, svc.id, selectedPractitionerId).length > 0
+                    : catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
+                  // Editing keeps the booking's own person, so it can skip ahead to the
+                  // times once there is nothing left to choose. This sits after the
+                  // options checks, exactly as it always has.
+                  if (isEdit && !serviceHasVariants && !hasAddonGroups) {
                     const existingOrFirst =
                       catalogStaff.find((p) => p.id === selectedPractitionerId && p.services.some((s) => s.id === svc.id)) ??
                       catalogStaff.find((p) => p.services.some((s) => s.id === svc.id));
@@ -2864,10 +3329,14 @@ export function AppointmentBookingFlow({
                     }
                     return;
                   }
-                  if (isLockedPractitionerFlow && selectedPractitionerId) {
+                  const next = afterService(flowShape, {
+                    hasVariants: serviceHasVariants,
+                    hasAddons: hasAddonGroups,
+                  });
+                  if (next === 'slot' && selectedPractitionerId) {
                     primeSelectedAppointmentCalendar(selectedPractitionerId, svc.id, staffDurationOverrideForService);
                   }
-                  setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                  setStep(next);
                 }
 
                 if (!isStaff) {
@@ -2892,11 +3361,22 @@ export function AppointmentBookingFlow({
                                 At your address
                               </span>
                             )}
+                            {isCarriedService && (
+                              <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-700 ring-1 ring-brand-200/80">
+                                You were booking this
+                              </span>
+                            )}
                           </div>
                           <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-2">
-                          <span className={APPOINTMENT_PUBLIC_PRICE}>{formatFromPrice(svc.minPricePence)}</span>
+                          <span className={APPOINTMENT_PUBLIC_PRICE}>
+                            {/* One person's own price is exact; a "from" only makes sense
+                                across their options, or across the whole team. */}
+                            {isStaffFirst && staffFirstServices && !serviceHasVariants
+                              ? formatPrice(svc.minPricePence)
+                              : formatFromPrice(svc.minPricePence)}
+                          </span>
                           <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                           </svg>
@@ -3017,15 +3497,13 @@ export function AppointmentBookingFlow({
               setSelectedVariantId(null);
               setDurationPopoverOpenForKey(null);
               setDurationPopoverServiceId(null);
-              if (isCombined) {
-                // Calendar-first: variant → calendar (the practitioner step).
-                setStep('practitioner');
-                return;
-              }
-              if (isLockedPractitionerFlow) {
+              const target = backFromVariant(flowShape);
+              if (target === 'service' && (isLockedPractitionerFlow || isStaffFirst)) {
+                // These flows keep the person, so the service list is what is
+                // genuinely behind the options and the choice has to be released.
                 setSelectedServiceId(null);
               }
-              setStep('service');
+              setStep(target);
             }}
             className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
           >
@@ -3056,25 +3534,8 @@ export function AppointmentBookingFlow({
                       setSelectedAddonIds([]);
                       // Combined page: the calendar is already chosen — add-ons next (its
                       // own), else straight to slots.
-                      if (isCombined) {
-                        if (serviceHasAddons) {
-                          setStep('addons');
-                          return;
-                        }
-                        if (selectedPractitionerId && selectedServiceId) {
-                          primeSelectedAppointmentCalendar(selectedPractitionerId, selectedServiceId, primeDuration, variant.id);
-                        }
-                        setStep('slot');
-                        return;
-                      }
-                      const hasAddonGroups =
-                        selectedServiceId != null &&
-                        catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId).length > 0;
-                      if (hasAddonGroups) {
-                        setStep('addons');
-                        return;
-                      }
                       if (
+                        !isCombined &&
                         staffCalendarSlotPrefillActive &&
                         preselectedPractitionerId &&
                         !isLockedPractitionerFlow &&
@@ -3083,7 +3544,17 @@ export function AppointmentBookingFlow({
                         void continueStaffCalendarSlotPrefill({ serviceId: selectedServiceId, variantId: variant.id });
                         return;
                       }
-                      if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+                      const next = afterVariant(flowShape, {
+                        hasVariants: true,
+                        hasAddons: isCombined
+                          ? serviceHasAddons
+                          : selectedServiceId != null &&
+                            (isStaffFirst
+                              ? addonGroupsForServiceFromStaff(catalogStaff, selectedServiceId, selectedPractitionerId)
+                              : catalogAddonGroupsForServiceId(catalogStaff, selectedServiceId)
+                            ).length > 0,
+                      });
+                      if (next === 'slot' && selectedPractitionerId && selectedServiceId) {
                         primeSelectedAppointmentCalendar(
                           selectedPractitionerId,
                           selectedServiceId,
@@ -3091,7 +3562,7 @@ export function AppointmentBookingFlow({
                           variant.id,
                         );
                       }
-                      setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                      setStep(next);
                     }}
                     className={choiceCardTargetClass}
                   >
@@ -3137,7 +3608,8 @@ export function AppointmentBookingFlow({
                   void continueStaffCalendarSlotPrefill({ serviceId: selectedServiceId, variantId: variant.id });
                   return;
                 }
-                if (isLockedPractitionerFlow && selectedPractitionerId && selectedServiceId) {
+                const next = afterVariant(flowShape, { hasVariants: true, hasAddons: false });
+                if (next === 'slot' && selectedPractitionerId && selectedServiceId) {
                   primeSelectedAppointmentCalendar(
                     selectedPractitionerId,
                     selectedServiceId,
@@ -3145,7 +3617,7 @@ export function AppointmentBookingFlow({
                     variant.id,
                   );
                 }
-                setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                setStep(next);
               }
 
               return (
@@ -3230,8 +3702,18 @@ export function AppointmentBookingFlow({
                 null
               : null;
         const addonStepIsSegment = addonFlowContext.kind !== 'primary';
+        // Scope the groups to whoever this booking (or this segment) is with. On a
+        // combined page two calendars can offer the same service with different
+        // extras, and the charge already follows the chosen calendar, so resolving
+        // by service id alone showed one venue's extras while charging another's.
+        const addonStepPractitionerId =
+          addonFlowContext.kind === 'edit'
+            ? multiServiceSegments?.[addonFlowContext.segmentIndex]?.practitionerId ?? null
+            : addonFlowContext.kind === 'append'
+              ? visitPractitioner?.id ?? null
+              : selectedPractitionerId;
         const addonGroups = addonStepServiceId
-          ? catalogAddonGroupsForServiceId(catalogStaff, addonStepServiceId)
+          ? addonGroupsForServiceFromStaff(catalogStaff, addonStepServiceId, addonStepPractitionerId)
           : [];
         const selectedIds = new Set(selectedAddonIds);
         const totalsPence = addonGroups.reduce((sum, g) => {
@@ -3325,9 +3807,10 @@ export function AppointmentBookingFlow({
             });
             return;
           }
-          if ((isLockedPractitionerFlow || isCombined) && selectedPractitionerId && selectedServiceId) {
-            // Combined page: the calendar is already chosen, so prime it (with the
-            // variant/add-on duration) and head straight to slots.
+          const next = afterAddons(flowShape);
+          if (next === 'slot' && selectedPractitionerId && selectedServiceId) {
+            // The person or calendar is already settled, so prime their month
+            // (with the variant and add-on duration) and head straight to times.
             primeSelectedAppointmentCalendar(
               selectedPractitionerId,
               selectedServiceId,
@@ -3335,7 +3818,7 @@ export function AppointmentBookingFlow({
               selectedVariantId ?? null,
             );
           }
-          setStep(isLockedPractitionerFlow || isCombined ? 'slot' : 'practitioner');
+          setStep(next);
         }
         return (
           <div>
@@ -3349,12 +3832,17 @@ export function AppointmentBookingFlow({
                   return;
                 }
                 setSelectedAddonIds([]);
-                if (isCombined) {
-                  // Calendar-first: unwind add-ons → variant → calendar (never to service).
-                  setStep(serviceHasVariants ? 'variant' : 'practitioner');
-                  return;
+                const target = backFromAddons(flowShape, {
+                  hasVariants: serviceHasVariants,
+                  hasAddons: true,
+                });
+                if (target === 'service' && isStaffFirst) {
+                  // Staff-first keeps the person; the service choice is what the
+                  // guest is going back to change.
+                  setSelectedServiceId(null);
+                  setSelectedVariantId(null);
                 }
-                setStep(serviceHasVariants ? 'variant' : 'service');
+                setStep(target);
               }}
               className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
             >
@@ -3478,6 +3966,17 @@ export function AppointmentBookingFlow({
         <div>
           <button
             onClick={() => {
+              if (anyRouteActive) {
+                // Leaving the pooled-offering detour: put "Any available" back so
+                // the service list the guest returns to is the one they were on.
+                setAnyRouteActive(false);
+                setSelectedVariantId(null);
+                setSelectedAddonIds([]);
+                setSelectedServiceId(null);
+                setSelectedPractitionerId(ANY_AVAILABLE_PRACTITIONER_ID);
+                setStep('service');
+                return;
+              }
               if (isCombined) {
                 // Calendar-first: practitioner is reached straight from service, so
                 // Back returns there (variants/add-ons come AFTER the calendar).
@@ -3524,6 +4023,11 @@ export function AppointmentBookingFlow({
               <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {serviceSelectionDurationMinutes ?? selectedService.duration_minutes} min &middot; {selectedVariant ? formatPrice(selectedVariant.price_pence) : formatFromPrice(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence)}</span></div>
             </div>
           )}
+          {anyRouteActive ? (
+            <p className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              This service is a little different for each {terms.staff.toLowerCase()}.
+            </p>
+          ) : null}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Who would you like to see?</h2>
           <p className="mb-4 text-sm text-slate-500">
             {isEdit
@@ -3628,75 +4132,11 @@ export function AppointmentBookingFlow({
       {step === 'slot' && (
         <div>
           {isPublicGuest ? (
-            <AppointmentBackLink
-              onClick={() => {
-                setSelectedTime(null);
-                setMultiServiceSegments(null);
-                if (isCombined) {
-                  // Combined page (calendar-first): unwind slot → add-ons → variant → calendar.
-                  if (serviceHasAddons) {
-                    setStep('addons');
-                    return;
-                  }
-                  if (serviceHasVariants) {
-                    setStep('variant');
-                    return;
-                  }
-                  setSelectedPractitionerId(null);
-                  setStep('practitioner');
-                  return;
-                }
-                if (isLockedPractitionerFlow) {
-                  if (serviceHasVariants) {
-                    setStep('variant');
-                    return;
-                  }
-                  setSelectedServiceId(null);
-                  setSelectedVariantId(null);
-                  setDurationPopoverServiceId(null);
-                  setDurationPopoverOpenForKey(null);
-                  setStep('service');
-                } else {
-                  setSelectedPractitionerId(null);
-                  setStep('practitioner');
-                }
-              }}
-            />
+            <AppointmentBackLink onClick={goBackFromSlot} />
           ) : (
             <button
               type="button"
-              onClick={() => {
-                setSelectedTime(null);
-                setMultiServiceSegments(null);
-                if (isCombined) {
-                  // Combined page (calendar-first): unwind slot → add-ons → variant → calendar.
-                  if (serviceHasAddons) {
-                    setStep('addons');
-                    return;
-                  }
-                  if (serviceHasVariants) {
-                    setStep('variant');
-                    return;
-                  }
-                  setSelectedPractitionerId(null);
-                  setStep('practitioner');
-                  return;
-                }
-                if (isLockedPractitionerFlow) {
-                  if (serviceHasVariants) {
-                    setStep('variant');
-                    return;
-                  }
-                  setSelectedServiceId(null);
-                  setSelectedVariantId(null);
-                  setDurationPopoverServiceId(null);
-                  setDurationPopoverOpenForKey(null);
-                  setStep('service');
-                } else {
-                  setSelectedPractitionerId(null);
-                  setStep('practitioner');
-                }
-              }}
+              onClick={goBackFromSlot}
               className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
@@ -3801,6 +4241,15 @@ export function AppointmentBookingFlow({
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No times available on {formatDateHuman(date)}</p>
               <p className="mt-1 text-xs text-slate-400">Try a different date above.</p>
+              {canSeeSomeoneElse ? (
+                <button
+                  type="button"
+                  onClick={seeSomeoneElse}
+                  className="mt-4 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+                >
+                  See someone else
+                </button>
+              ) : null}
               {appointmentWaitlistEnabled && isPublicGuest ? (
                 <AppointmentWaitlistJoin
                   venueId={venue.id}
@@ -4388,6 +4837,7 @@ export function AppointmentBookingFlow({
             </div>
           ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
+          {bookAnotherButton}
         </div>
       )}
 
@@ -4536,7 +4986,7 @@ export function AppointmentBookingFlow({
           />
           <button
             disabled={!currentPersonLabel.trim()}
-            onClick={() => setStep('group_service')}
+            onClick={() => setStep(isStaffFirst ? 'group_staff_pick' : 'group_service')}
             className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 shadow-sm disabled:opacity-50"
           >
             Continue
@@ -4544,40 +4994,118 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
-      {/* Group: select service */}
-      {step === 'group_service' && (
-        <div>
-          <button onClick={() => setStep('group_person_label')} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+      {/* Group, staff-first: who is this guest seeing? */}
+      {step === 'group_staff_pick' && (
+        <div data-testid="group-staff-pick-step">
+          <button
+            onClick={() => {
+              setGroupPractitionerId(null);
+              setStep('group_person_label');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
           <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm text-purple-700 font-medium">
             Booking for: {currentPersonLabel}
           </div>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">
+            Choose {terms.staff.toLowerCase()}
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">Who should see {currentPersonLabel}?</p>
+          {catalogLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <StaffChoiceCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : bookableStaff.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
+              <p className="text-sm font-medium text-slate-600">
+                No {terms.staff.toLowerCase()} are available to book right now.
+              </p>
+              <p className="mt-1 text-xs text-slate-400">Try again later or contact the venue.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {bookableStaff.map((prac) => (
+                <StaffChoiceCard
+                  key={prac.id}
+                  name={prac.name}
+                  profile={teamProfiles[prac.id]}
+                  className={choiceCardClass}
+                  onClick={() => {
+                    setGroupPractitionerId(prac.id);
+                    setGroupServiceId(null);
+                    setGroupVariantId(null);
+                    setGroupSelectedAddonIds([]);
+                    setStep('group_service');
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Group: select service */}
+      {step === 'group_service' && (
+        <div>
+          <button
+            onClick={() => {
+              if (isStaffFirst) {
+                setGroupPractitionerId(null);
+                setGroupServiceId(null);
+                setStep('group_staff_pick');
+                return;
+              }
+              setStep('group_person_label');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+            Back
+          </button>
+          <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm text-purple-700 font-medium">
+            Booking for: {currentPersonLabel}
+            {isStaffFirst && groupSelectedPrac ? (
+              <span className="text-purple-500"> &middot; {groupSelectedPrac.name}</span>
+            ) : null}
+          </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
           <p className="mb-4 text-sm text-slate-500">What would {currentPersonLabel} like?</p>
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : servicesWithFromPrice.length === 0 ? (
+          ) : (groupStaffFirstServices ?? servicesWithFromPrice).length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No services are available right now</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {servicesWithFromPrice.map((svc) => (
+              {(groupStaffFirstServices ?? servicesWithFromPrice).map((svc) => (
                 <div key={svc.id} className={choiceCardShellClass}>
                 <button
                   type="button"
                   onClick={() => {
-                    queuePrefetchForServicePractitioners(svc.id);
+                    const hasVariants = (isStaffFirst
+                      ? catalogVariantsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId)
+                      : catalogVariantsForServiceId(catalogStaff, svc.id)
+                    ).length > 0;
+                    const hasAddons = (isStaffFirst
+                      ? addonGroupsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId)
+                      : catalogAddonGroupsForServiceId(catalogStaff, svc.id)
+                    ).length > 0;
                     setGroupServiceId(svc.id);
                     setGroupVariantId(null);
                     setGroupSelectedAddonIds([]);
-                    const hasVariants = catalogVariantsForServiceId(catalogStaff, svc.id).length > 0;
-                    const hasAddons = catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
-                    setStep(
-                      hasVariants ? 'group_variant' : hasAddons ? 'group_addons' : 'group_practitioner',
-                    );
+                    const next = afterService(flowShape, { hasVariants, hasAddons });
+                    if (next === 'slot' && groupPractitionerId) {
+                      primeSelectedAppointmentCalendar(groupPractitionerId, svc.id);
+                    } else if (next === 'practitioner') {
+                      queuePrefetchForServicePractitioners(svc.id);
+                    }
+                    setStep(groupStep(next));
                   }}
                   className={choiceCardTargetClass}
                 >
@@ -4587,7 +5115,12 @@ export function AppointmentBookingFlow({
                       <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
-                      <span className={APPOINTMENT_PUBLIC_PRICE}>{formatFromPrice(svc.minPricePence)}</span>
+                      <span className={APPOINTMENT_PUBLIC_PRICE}>
+                        {isStaffFirst && groupStaffFirstServices &&
+                        catalogVariantsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId).length === 0
+                          ? formatPrice(svc.minPricePence)
+                          : formatFromPrice(svc.minPricePence)}
+                      </span>
                       <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                       </svg>
@@ -4604,8 +5137,13 @@ export function AppointmentBookingFlow({
 
       {/* Group: select variant */}
       {step === 'group_variant' && groupServiceId && (() => {
-        const variants = catalogVariantsForServiceId(catalogStaff, groupServiceId);
-        const groupHasAddons = catalogAddonGroupsForServiceId(catalogStaff, groupServiceId).length > 0;
+        const variants = isStaffFirst
+          ? catalogVariantsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogVariantsForServiceId(catalogStaff, groupServiceId);
+        const groupHasAddons = (isStaffFirst
+          ? addonGroupsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogAddonGroupsForServiceId(catalogStaff, groupServiceId)
+        ).length > 0;
         return (
           <div>
             <button
@@ -4617,6 +5155,9 @@ export function AppointmentBookingFlow({
             </button>
             <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
               <span className="font-medium text-purple-700">{currentPersonLabel}</span>
+              {isStaffFirst && groupSelectedPrac ? (
+                <span className="text-purple-500"> &middot; {groupSelectedPrac.name}</span>
+              ) : null}
               <span className="text-purple-500"> &middot; {groupSelectedService?.name}</span>
             </div>
             <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose an option</h2>
@@ -4628,7 +5169,14 @@ export function AppointmentBookingFlow({
                   onClick={() => {
                     setGroupVariantId(v.id);
                     setGroupSelectedAddonIds([]);
-                    setStep(groupHasAddons ? 'group_addons' : 'group_practitioner');
+                    const next = afterVariant(flowShape, {
+                      hasVariants: true,
+                      hasAddons: groupHasAddons,
+                    });
+                    if (next === 'slot' && groupPractitionerId) {
+                      primeSelectedAppointmentCalendar(groupPractitionerId, groupServiceId, null, v.id);
+                    }
+                    setStep(groupStep(next));
                   }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
                 >
@@ -4654,8 +5202,13 @@ export function AppointmentBookingFlow({
 
       {/* Group: select add-ons */}
       {step === 'group_addons' && groupServiceId && (() => {
-        const addonGroups = catalogAddonGroupsForServiceId(catalogStaff, groupServiceId);
-        const groupHasVariants = catalogVariantsForServiceId(catalogStaff, groupServiceId).length > 0;
+        const addonGroups = isStaffFirst
+          ? addonGroupsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogAddonGroupsForServiceId(catalogStaff, groupServiceId);
+        const groupHasVariants = (isStaffFirst
+          ? catalogVariantsForServiceFromStaff(catalogStaff, groupServiceId, groupPractitionerId)
+          : catalogVariantsForServiceId(catalogStaff, groupServiceId)
+        ).length > 0;
         const selectedIds = new Set(groupSelectedAddonIds);
         const totalsPence = addonGroups.reduce((sum, g) => {
           for (const a of g.addons) if (selectedIds.has(a.id)) sum += a.additional_price_pence;
@@ -4699,7 +5252,14 @@ export function AppointmentBookingFlow({
               type="button"
               onClick={() => {
                 setGroupSelectedAddonIds([]);
-                setStep(groupHasVariants ? 'group_variant' : 'group_service');
+                setStep(
+                  groupStep(
+                    backFromAddons(flowShape, { hasVariants: groupHasVariants, hasAddons: true }) as
+                      | 'variant'
+                      | 'service'
+                      | 'practitioner',
+                  ),
+                );
               }}
               className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
             >
@@ -4708,6 +5268,9 @@ export function AppointmentBookingFlow({
             </button>
             <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
               <span className="font-medium text-purple-700">{currentPersonLabel}</span>
+              {isStaffFirst && groupSelectedPrac ? (
+                <span className="text-purple-500"> &middot; {groupSelectedPrac.name}</span>
+              ) : null}
               <span className="text-purple-500"> &middot; {groupSelectedService?.name}</span>
             </div>
             <h2 className="mb-1 text-lg font-semibold text-slate-900">Add extras for {currentPersonLabel}</h2>
@@ -4790,7 +5353,16 @@ export function AppointmentBookingFlow({
                 type="button"
                 onClick={() => {
                   if (continueDisabled) return;
-                  setStep('group_practitioner');
+                  const next = afterAddons(flowShape);
+                  if (next === 'slot' && groupPractitionerId && groupServiceId) {
+                    primeSelectedAppointmentCalendar(
+                      groupPractitionerId,
+                      groupServiceId,
+                      null,
+                      groupVariantId,
+                    );
+                  }
+                  setStep(groupStep(next));
                 }}
                 disabled={continueDisabled}
                 className="inline-flex items-center gap-1 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
@@ -4872,13 +5444,31 @@ export function AppointmentBookingFlow({
       {/* Group: select time */}
       {step === 'group_slot' && (
         <div>
-          <button onClick={() => { setGroupPractitionerId(null); setStep('group_practitioner'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+          <button
+            onClick={() => {
+              const target = backFromSlot(flowShape, {
+                hasVariants: groupSelectedVariants.length > 0,
+                hasAddons: groupSelectedAddonGroups.length > 0,
+              });
+              // Service-first hands the guest back to the calendar list, so the
+              // choice is released; staff-first keeps the person throughout.
+              if (target === 'practitioner') setGroupPractitionerId(null);
+              if (target === 'service') setGroupServiceId(null);
+              setStep(groupStep(target));
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
           <div className="mb-3 rounded-xl border border-purple-100 bg-purple-50/50 px-4 py-2.5 text-sm">
             <span className="font-medium text-purple-700">{currentPersonLabel}</span>
-            <span className="text-purple-500"> &middot; {groupSelectedService?.name} &middot; {groupSelectedPrac?.name}</span>
+            {/* Staff-first named the person first, so the summary reads in that order. */}
+            <span className="text-purple-500">
+              {isStaffFirst
+                ? ` · ${groupSelectedPrac?.name ?? ''} · ${groupSelectedService?.name ?? ''}`
+                : ` · ${groupSelectedService?.name ?? ''} · ${groupSelectedPrac?.name ?? ''}`}
+            </span>
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Pick a time for {currentPersonLabel}</h2>
           <p className="mb-4 text-sm text-slate-500">Green days have at least one bookable time. Select a day, then choose an available time.</p>
@@ -5045,6 +5635,7 @@ export function AppointmentBookingFlow({
             </p>
           ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
+          {bookAnotherButton}
         </div>
       )}
     </div>

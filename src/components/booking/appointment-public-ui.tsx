@@ -60,7 +60,9 @@ export function ExpandableDescription({
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
           aria-controls={panelId}
-          className="mt-1 text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-800"
+          // Raised above the card's stretched click target, so expanding the
+          // text does not also pick the service.
+          className="ap-card-raise mt-1 text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-800"
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
@@ -75,12 +77,14 @@ export function appointmentProgressPhase(
 ): { phase: 0 | 1 | 2; label: string } | null {
   const choose = new Set([
     'mode_choice',
+    'staff_pick',
     'service',
     'variant',
     'addons',
     'practitioner',
     'group_review',
     'group_person_label',
+    'group_staff_pick',
     'group_service',
     'group_variant',
     'group_addons',

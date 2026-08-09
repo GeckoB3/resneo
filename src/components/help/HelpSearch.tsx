@@ -1,22 +1,33 @@
 'use client';
 
 import Link from 'next/link';
-import { useId, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createHelpSearchFuse, searchHelpArticlesWithFuse } from '@/lib/help/search-index';
 import type { HelpSearchDoc } from '@/lib/help/types';
 import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 
 export function HelpSearch({
+  id,
   className = '',
   searchDocs,
 }: {
+  /**
+   * Stable id for the input, unique per instance on the page. Deliberately not
+   * `useId`: the help layout hydrates this component at a tree position the
+   * server and client disagree about, so a generated id renders differently on
+   * each side. React does not patch mismatched attributes, so the input kept
+   * the server's id while the results list rendered with the client's, leaving
+   * `aria-controls` pointing at an element that does not exist. A caller-owned
+   * id is identical on both sides and cannot drift.
+   */
+  id: string;
   className?: string;
   searchDocs: HelpSearchDoc[];
 }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const inputId = useId();
+  const inputId = id;
   const listboxId = `${inputId}-results`;
 
   const fuse = useMemo(() => createHelpSearchFuse(searchDocs), [searchDocs]);

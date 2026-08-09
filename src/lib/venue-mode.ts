@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { hasServiceConfig } from '@/lib/availability';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
-import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
+import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import {
   getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
@@ -72,10 +72,7 @@ async function resolveVenueModeUncached(
     ((venue?.booking_model as BookingModel | undefined) ?? 'table_reservation'),
   );
   const enabledModels = activeModelsToLegacyEnabledModels(activeBookingModels, bookingModel);
-  const terminology: VenueTerminology = {
-    ...DEFAULT_TERMINOLOGY[bookingModel],
-    ...(venue?.terminology as Partial<VenueTerminology> | null),
-  };
+  const terminology: VenueTerminology = mergeVenueTerminology(bookingModel, venue?.terminology);
 
   return {
     bookingModel,

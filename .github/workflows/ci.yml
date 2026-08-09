@@ -114,6 +114,7 @@ jobs:
           E2E_VENUE_SLUG: ${{ secrets.E2E_VENUE_SLUG }}
           E2E_VENUE_NAME: ${{ secrets.E2E_VENUE_NAME }}
           E2E_SERVICE_NAME: ${{ secrets.E2E_SERVICE_NAME }}
+          E2E_OPTIONS_SERVICE_NAME: ${{ secrets.E2E_OPTIONS_SERVICE_NAME }}
           E2E_STRIPE_CONNECTED_ACCOUNT_ID: ${{ secrets.E2E_STRIPE_CONNECTED_ACCOUNT_ID }}
           NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
 
@@ -125,6 +126,10 @@ jobs:
           E2E_VENUE_SLUG: ${{ secrets.E2E_VENUE_SLUG }}
           E2E_VENUE_NAME: ${{ secrets.E2E_VENUE_NAME }}
           E2E_SERVICE_NAME: ${{ secrets.E2E_SERVICE_NAME }}
+          E2E_OPTIONS_SERVICE_NAME: ${{ secrets.E2E_OPTIONS_SERVICE_NAME }}
+          # Fixed slug printed by the seed script; set it as a repo variable so
+          # the staff-first specs run rather than skip.
+          E2E_STAFF_FIRST_VENUE_SLUG: ${{ vars.E2E_STAFF_FIRST_VENUE_SLUG }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}

@@ -14,6 +14,34 @@ describe('calendarBookingServiceDisplayLine', () => {
     ).toBe('Cut – Short');
   });
 
+  it('keeps the option a booking recorded after its service is deleted', () => {
+    // Options cascade-delete with their service and the booking's link is
+    // nulled, so the catalogue can offer nothing here.
+    expect(
+      calendarBookingServiceDisplayLine({
+        booking: {
+          booking_item_name: 'Cut',
+          service_variant_id: null,
+          service_variant_name_snapshot: 'Short',
+        },
+        catalogService: null,
+      }),
+    ).toBe('Cut – Short');
+  });
+
+  it('prefers the recorded option over a renamed one', () => {
+    expect(
+      calendarBookingServiceDisplayLine({
+        booking: {
+          booking_item_name: 'Cut',
+          service_variant_id: 'v1',
+          service_variant_name_snapshot: 'Short',
+        },
+        catalogService: { name: 'Cut', variants: [{ id: 'v1', name: 'Quick Trim' }] },
+      }),
+    ).toBe('Cut – Short');
+  });
+
   it('includes add-on snapshots', () => {
     expect(
       calendarBookingServiceDisplayLine({

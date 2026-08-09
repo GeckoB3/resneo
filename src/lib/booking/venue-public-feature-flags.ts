@@ -44,6 +44,7 @@ export function mapVenueFeatureFlagsForPublic(
       // /api/booking/venue route builds its own resolved object and does not
       // expose this flag.
       card_hold_deposits: resolved.card_hold_deposits,
+      staff_first_booking_flow: resolved.staff_first_booking_flow,
     },
     any_available_practitioner_config: parseAnyAvailablePractitionerConfig(raw),
   };

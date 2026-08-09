@@ -17,8 +17,20 @@ export function collectiveSettingsToPreviewPublic(args: {
   draftConfig: BookingPageConfig;
   /** The host venue's "Any available practitioner" setting, which the combined page follows. */
   anyAvailablePractitioner: boolean;
+  /** The host venue's "Staff-first booking" setting, which the combined page follows. */
+  staffFirstBookingFlow: boolean;
 }): VenuePublic {
-  const { id, name, slug, logoUrl, coverUrl, timezone, draftConfig, anyAvailablePractitioner } = args;
+  const {
+    id,
+    name,
+    slug,
+    logoUrl,
+    coverUrl,
+    timezone,
+    draftConfig,
+    anyAvailablePractitioner,
+    staffFirstBookingFlow,
+  } = args;
   return {
     id,
     name,
@@ -40,6 +52,11 @@ export function collectiveSettingsToPreviewPublic(args: {
     currency: 'GBP',
     booking_paused: false,
     is_collective: true,
-    feature_flags: { resolved: { any_available_practitioner: anyAvailablePractitioner } },
+    feature_flags: {
+      resolved: {
+        any_available_practitioner: anyAvailablePractitioner,
+        staff_first_booking_flow: staffFirstBookingFlow,
+      },
+    },
   };
 }

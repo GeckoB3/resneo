@@ -15,6 +15,13 @@ export interface BookingListRowForLabel {
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
   service_id?: string | null;
+  /**
+   * The service name as it read when the booking was taken. Written once, so a
+   * renamed or deleted service cannot rewrite or erase what a past booking says
+   * it was for. Absent on rows taken before snapshotting existed, which fall
+   * back to the live catalogue below.
+   */
+  service_name_snapshot?: string | null;
 }
 
 type Db = Pick<SupabaseClient, 'from'>;
@@ -32,10 +39,17 @@ function labelFromForeignKeys(
     venueService: Map<string, string>;
   },
 ): string | null {
+  // Classes, events and resources still resolve from their own tables; a row
+  // carrying both must not be relabelled with its service.
   if (row.experience_event_id) return maps.experienceEvent.get(row.experience_event_id) ?? null;
   if (row.class_instance_id) return maps.classInstance.get(row.class_instance_id) ?? null;
   if (row.resource_id) return maps.resource.get(row.resource_id) ?? null;
   if (row.event_session_id) return maps.eventSession.get(row.event_session_id) ?? null;
+  // Service-shaped from here, so what the booking recorded for itself beats
+  // anything the catalogue says now: the service may since have been renamed,
+  // or deleted and its link nulled.
+  const snapshot = row.service_name_snapshot?.trim();
+  if (snapshot) return snapshot;
   if (row.calendar_id && row.service_item_id) return maps.serviceItem.get(row.service_item_id) ?? null;
   if (row.practitioner_id && row.appointment_service_id) {
     return maps.appointmentService.get(row.appointment_service_id) ?? null;

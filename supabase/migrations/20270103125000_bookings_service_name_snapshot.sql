@@ -6,8 +6,8 @@
 --
 --   * Deleting a service hard-deletes the row, and `service_item_id` is declared
 --     ON DELETE SET NULL, so every past booking silently loses its link and then
---     shows no service at all. On the staging database 20 of 341 appointment
---     bookings already have no service link.
+--     shows no service at all. Dozens of appointment bookings on the shared
+--     database had already been emptied this way before this migration ran.
 --   * Renaming a service rewrites the past. Rename "Gents Cut" to "Classic Cut"
 --     and every booking ever taken under the old name now reports the new one.
 --

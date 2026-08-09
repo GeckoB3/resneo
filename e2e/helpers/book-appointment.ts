@@ -39,15 +39,24 @@ export async function declineCookiesIfPresent(page: Page): Promise<void> {
   }
 }
 
-/** Picks the first day the calendar marks bookable, then its first free time. */
-export async function pickFirstAvailableSlot(page: Page): Promise<void> {
+/**
+ * Picks the first day the calendar marks bookable, then a free time on it.
+ *
+ * `preferIndex` exists because the fixtures are shared: runs on different
+ * branches can hit the same database at the same time, and two of them racing
+ * for the same first slot is the likeliest way this suite flakes. Specs that
+ * do not care which time they get take a later one. Falls back to the last
+ * available time when the day is thinner than that.
+ */
+export async function pickAvailableSlot(page: Page, preferIndex = 0): Promise<void> {
   const availableDay = page.getByRole('button', { name: /has availability/i }).first();
   await availableDay.waitFor({ state: 'visible', timeout: 60_000 });
   await availableDay.click();
 
-  const timeSlot = page.locator('.ap-time-slot:not(.ap-time-slot-selected)').first();
-  await timeSlot.waitFor({ state: 'visible', timeout: 30_000 });
-  await timeSlot.click();
+  const slots = page.locator('.ap-time-slot:not(.ap-time-slot-selected)');
+  await slots.first().waitFor({ state: 'visible', timeout: 30_000 });
+  const count = await slots.count();
+  await slots.nth(Math.min(preferIndex, count - 1)).click();
 }
 
 /**
@@ -101,7 +110,7 @@ export async function bookAppointmentWithDeposit(
     }
   }
 
-  await pickFirstAvailableSlot(page);
+  await pickAvailableSlot(page);
   await completeDetailsAndPay(page, opts.guestEmail);
 
   await expect

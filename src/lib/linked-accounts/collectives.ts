@@ -120,6 +120,12 @@ export interface CollectiveView {
    * mirror whether the live page shows the "Any available" option.
    */
   hostAnyAvailablePractitioner: boolean;
+  /**
+   * The host venue's resolved "Staff-first booking" setting, which the combined
+   * page follows for the same reason, so the editor preview mirrors the live
+   * booking step order.
+   */
+  hostStaffFirstBookingFlow: boolean;
   /** Combined booking page (plan §1.3). */
   pageMode: PageMode;
   slugStrategy: SlugStrategy;
@@ -277,6 +283,7 @@ export async function loadCollectiveViewsForVenue(
   for (const c of collectives ?? []) venueIdsToLoad.add((c as VenueCollectiveRow).host_venue_id);
   const venueNames: Record<string, string> = {};
   const venueAnyAvailable: Record<string, boolean> = {};
+  const venueStaffFirst: Record<string, boolean> = {};
   if (venueIdsToLoad.size > 0) {
     const { data: venues } = await admin
       .from('venues')
@@ -284,9 +291,11 @@ export async function loadCollectiveViewsForVenue(
       .in('id', [...venueIdsToLoad]);
     for (const v of venues ?? []) {
       venueNames[v.id as string] = (v.name as string) ?? 'Venue';
-      venueAnyAvailable[v.id as string] = resolveAppointmentsFeatureFlags(
+      const flags = resolveAppointmentsFeatureFlags(
         parseVenueFeatureFlags((v as { feature_flags?: unknown }).feature_flags),
-      ).any_available_practitioner;
+      );
+      venueAnyAvailable[v.id as string] = flags.any_available_practitioner;
+      venueStaffFirst[v.id as string] = flags.staff_first_booking_flow;
     }
   }
 
@@ -314,6 +323,7 @@ export async function loadCollectiveViewsForVenue(
       branding: row.branding ?? {},
       serviceGrouping: row.service_grouping,
       hostAnyAvailablePractitioner: venueAnyAvailable[row.host_venue_id] ?? false,
+      hostStaffFirstBookingFlow: venueStaffFirst[row.host_venue_id] ?? false,
       pageMode: (row.page_mode as PageMode) ?? 'directory',
       slugStrategy: (row.slug_strategy as SlugStrategy) ?? 'dedicated',
       adoptedVenueId: row.adopted_venue_id ?? null,

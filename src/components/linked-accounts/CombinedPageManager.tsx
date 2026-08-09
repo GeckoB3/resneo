@@ -463,6 +463,7 @@ export function CombinedPageManager({
           timezone: collective.timezone,
           draftConfig: draft,
           anyAvailablePractitioner: collective.hostAnyAvailablePractitioner,
+          staffFirstBookingFlow: collective.hostStaffFirstBookingFlow,
         }),
       preserveScroll: async (task) => task(),
       capabilities: {

@@ -30,6 +30,10 @@ const FLAG_LABELS: Record<string, { label: string; description: string }> = {
     label: 'Card hold deposits',
     description: 'Card on file with a chargeable no-show fee. No payment taken at booking.',
   },
+  staff_first_booking_flow: {
+    label: 'Staff-first booking',
+    description: 'Guests choose a team member first, then that person’s services',
+  },
 };
 
 function flagMeta(key: string): { label: string; description: string } {

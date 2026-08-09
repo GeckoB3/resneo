@@ -57,6 +57,11 @@ export interface VenuePublic {
        * which never needs it (the toggle is staff-audience only).
        */
       card_hold_deposits?: boolean;
+      /**
+       * Staff-first booking: the public flow asks the guest to choose a team
+       * member before a service. Combined pages inherit the host venue's value.
+       */
+      staff_first_booking_flow?: boolean;
     };
     any_available_practitioner_config?: {
       mode: 'priority' | 'random';

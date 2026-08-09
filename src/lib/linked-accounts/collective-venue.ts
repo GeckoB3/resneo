@@ -71,12 +71,11 @@ export async function loadCollectiveVenuePublic(
     .eq('id', col.host_venue_id)
     .maybeSingle();
 
-  // The combined page works like one venue, so its "Any available" option follows
-  // the host venue's own "Any available practitioner" booking setting rather than
-  // being always on.
-  const hostAnyAvailablePractitioner = resolveAppointmentsFeatureFlags(
-    parseVenueFeatureFlags(host?.feature_flags),
-  ).any_available_practitioner;
+  // The combined page works like one venue, so its "Any available" option and its
+  // booking step order follow the host venue's own settings rather than being fixed.
+  const hostFlags = resolveAppointmentsFeatureFlags(parseVenueFeatureFlags(host?.feature_flags));
+  const hostAnyAvailablePractitioner = hostFlags.any_available_practitioner;
+  const hostStaffFirstBookingFlow = hostFlags.staff_first_booking_flow;
 
   const branding = col.branding ?? {};
   const hostConfig = (col.booking_page_config ?? {}) as BookingPageConfig & { cover_photo_url?: string | null };
@@ -129,7 +128,12 @@ export async function loadCollectiveVenuePublic(
     currency: (host?.currency as string) ?? 'GBP',
     booking_paused: !bookable,
     is_collective: true,
-    feature_flags: { resolved: { any_available_practitioner: hostAnyAvailablePractitioner } },
+    feature_flags: {
+      resolved: {
+        any_available_practitioner: hostAnyAvailablePractitioner,
+        staff_first_booking_flow: hostStaffFirstBookingFlow,
+      },
+    },
   };
 }
 

@@ -72,6 +72,7 @@ export async function GET(request: NextRequest) {
           any_available_practitioner: resolvedFlags.any_available_practitioner,
           guest_self_reschedule: resolvedFlags.guest_self_reschedule,
           waitlist_v2: resolvedFlags.waitlist_v2,
+          staff_first_booking_flow: resolvedFlags.staff_first_booking_flow,
         },
         any_available_practitioner_config: publicFeatureFlags?.any_available_practitioner_config,
       },

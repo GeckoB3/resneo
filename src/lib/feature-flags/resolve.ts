@@ -13,6 +13,7 @@ const ENV_BY_FLAG: Record<AppointmentsFeatureFlagKey, string> = {
   class_commerce_enabled: 'FEATURE_FLAG_CLASS_COMMERCE_ENABLED',
   compliance_records_enabled: 'FEATURE_FLAG_COMPLIANCE_RECORDS_ENABLED',
   card_hold_deposits: 'FEATURE_FLAG_CARD_HOLD_DEPOSITS',
+  staff_first_booking_flow: 'FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW',
 };
 
 /** Per-flag defaults when venue storage omits the key (env override still wins). */

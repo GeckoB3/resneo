@@ -40,7 +40,11 @@ export async function bookingCaptureUnitOwesCapture(
   let query = admin
     .from('bookings')
     .select('id, deposit_status, deposit_amount_pence')
-    .eq('venue_id', venueId);
+    .eq('venue_id', venueId)
+    // Only LIVE rows can owe: a previously cancelled group sibling keeps its
+    // stale 'Pending' deposit columns, and its dead debt must neither trip
+    // the guard nor be "accepted".
+    .in('status', ['Pending', 'Booked', 'Confirmed', 'Seated']);
   query = groupBookingId ? query.eq('group_booking_id', groupBookingId) : query.eq('id', bookingId);
   const { data: rowData, error: rowErr } = await query;
   if (rowErr) {

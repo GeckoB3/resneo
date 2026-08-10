@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { bookingCaptureUnitOwesCapture } from './booking-owes-capture';
 
@@ -56,7 +56,7 @@ const PARAMS = { bookingId: 'b1', venueId: 'venue-1', groupBookingId: null };
 describe('bookingCaptureUnitOwesCapture', () => {
   it('owes for a Pending money deposit', async () => {
     const admin = makeAdmin(
-      [{ id: 'b1', venue_id: 'venue-1', deposit_status: 'Pending', deposit_amount_pence: 2000 }],
+      [{ id: 'b1', venue_id: 'venue-1', status: 'Pending', deposit_status: 'Pending', deposit_amount_pence: 2000 }],
       [],
     );
     const result = await bookingCaptureUnitOwesCapture(admin, PARAMS);
@@ -68,7 +68,7 @@ describe('bookingCaptureUnitOwesCapture', () => {
 
   it('owes for a Failed deposit (a failed attempt does not settle the debt)', async () => {
     const admin = makeAdmin(
-      [{ id: 'b1', venue_id: 'venue-1', deposit_status: 'Failed', deposit_amount_pence: 2000 }],
+      [{ id: 'b1', venue_id: 'venue-1', status: 'Pending', deposit_status: 'Failed', deposit_amount_pence: 2000 }],
       [],
     );
     const result = await bookingCaptureUnitOwesCapture(admin, PARAMS);
@@ -78,7 +78,7 @@ describe('bookingCaptureUnitOwesCapture', () => {
 
   it('owes for an open unsaved card hold with no money deposit', async () => {
     const admin = makeAdmin(
-      [{ id: 'b1', venue_id: 'venue-1', deposit_status: 'Pending', deposit_amount_pence: null }],
+      [{ id: 'b1', venue_id: 'venue-1', status: 'Pending', deposit_status: 'Pending', deposit_amount_pence: null }],
       [
         {
           booking_id: 'b1',
@@ -95,7 +95,7 @@ describe('bookingCaptureUnitOwesCapture', () => {
 
   it('does not owe when the hold is released or saved', async () => {
     const admin = makeAdmin(
-      [{ id: 'b1', venue_id: 'venue-1', deposit_status: 'Pending', deposit_amount_pence: null }],
+      [{ id: 'b1', venue_id: 'venue-1', status: 'Pending', deposit_status: 'Pending', deposit_amount_pence: null }],
       [
         {
           booking_id: 'b1',
@@ -112,7 +112,7 @@ describe('bookingCaptureUnitOwesCapture', () => {
   it('does not owe for Paid, Waived or Not Required deposits', async () => {
     for (const status of ['Paid', 'Waived', 'Not Required', 'Card Held']) {
       const admin = makeAdmin(
-        [{ id: 'b1', venue_id: 'venue-1', deposit_status: status, deposit_amount_pence: 2000 }],
+        [{ id: 'b1', venue_id: 'venue-1', status: 'Pending', deposit_status: status, deposit_amount_pence: 2000 }],
         [],
       );
       const result = await bookingCaptureUnitOwesCapture(admin, PARAMS);
@@ -123,9 +123,9 @@ describe('bookingCaptureUnitOwesCapture', () => {
   it('a group unit owes when ANY sibling owes, summing the amounts', async () => {
     const admin = makeAdmin(
       [
-        { id: 'b1', venue_id: 'venue-1', group_booking_id: 'grp1', deposit_status: 'Paid', deposit_amount_pence: 1500 },
-        { id: 'b2', venue_id: 'venue-1', group_booking_id: 'grp1', deposit_status: 'Pending', deposit_amount_pence: 2000 },
-        { id: 'b3', venue_id: 'venue-1', group_booking_id: 'grp1', deposit_status: 'Failed', deposit_amount_pence: 1000 },
+        { id: 'b1', venue_id: 'venue-1', group_booking_id: 'grp1', status: 'Pending', deposit_status: 'Paid', deposit_amount_pence: 1500 },
+        { id: 'b2', venue_id: 'venue-1', group_booking_id: 'grp1', status: 'Pending', deposit_status: 'Pending', deposit_amount_pence: 2000 },
+        { id: 'b3', venue_id: 'venue-1', group_booking_id: 'grp1', status: 'Pending', deposit_status: 'Failed', deposit_amount_pence: 1000 },
       ],
       [],
     );
@@ -144,5 +144,24 @@ describe('bookingCaptureUnitOwesCapture', () => {
     const admin = makeAdmin([], [], { bookingsError: true });
     const result = await bookingCaptureUnitOwesCapture(admin, PARAMS);
     expect(result.owes).toBe(true);
+  });
+
+  it("a CANCELLED sibling's stale owed deposit does not trip the guard (regression)", async () => {
+    // A group member individually cancelled earlier keeps deposit_status
+    // 'Pending' on its dead row; only live rows can owe.
+    const admin = makeAdmin(
+      [
+        { id: 'b1', venue_id: 'venue-1', group_booking_id: 'grp1', status: 'Pending', deposit_status: 'Paid', deposit_amount_pence: 1500 },
+        { id: 'b2', venue_id: 'venue-1', group_booking_id: 'grp1', status: 'Cancelled', deposit_status: 'Pending', deposit_amount_pence: 2000 },
+      ],
+      [],
+    );
+    const result = await bookingCaptureUnitOwesCapture(admin, {
+      bookingId: 'b1',
+      venueId: 'venue-1',
+      groupBookingId: 'grp1',
+    });
+    expect(result.owes).toBe(false);
+    expect(result.unitBookingIds).toEqual(['b1']);
   });
 });

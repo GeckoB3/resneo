@@ -8,10 +8,8 @@ import {
   type BookingScheduleChangeSummary,
 } from '@/components/booking/BookingModifyNotifyFollowUp';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
-import {
-  MAX_APPOINTMENT_CORE_DURATION_MINUTES,
-  minutesBetweenStartAndEndHM,
-} from '@/lib/booking/validate-appointment-modification';
+import { MAX_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/booking/validate-appointment-modification';
+import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
 
 interface ServiceRow {
   id: string;
@@ -29,22 +27,6 @@ interface PractitionerRow {
   id: string;
   name: string;
   is_active?: boolean;
-}
-
-function initialCoreDurationMinutes(booking: StaffExpandedBookingModifySource): number {
-  const start = booking.booking_time.slice(0, 5);
-  if (booking.booking_end_time && booking.booking_end_time.length >= 5) {
-    return Math.max(15, minutesBetweenStartAndEndHM(start, booking.booking_end_time.slice(0, 5)));
-  }
-  if (booking.estimated_end_time) {
-    const iso = booking.estimated_end_time.trim();
-    const d = new Date(iso);
-    if (!Number.isNaN(d.getTime())) {
-      const hm = d.toISOString().slice(11, 16);
-      return Math.max(15, minutesBetweenStartAndEndHM(start, hm));
-    }
-  }
-  return 30;
 }
 
 function buildPatchPayload(params: {
@@ -110,7 +92,23 @@ export function StaffAppointmentModifyForm({
   const [serviceId, setServiceId] = useState(initialServiceId);
   const [bookingDate, setBookingDate] = useState(booking.booking_date);
   const [bookingTime, setBookingTime] = useState(booking.booking_time.slice(0, 5));
-  const [durationMinutes, setDurationMinutes] = useState(() => initialCoreDurationMinutes(booking));
+  /**
+   * null until resolved: the booking's own duration when its row carries an end
+   * time, otherwise the service's catalogue duration adopted once the catalogue
+   * loads (see the effect below). Never a hardcoded default, which used to
+   * shrink appointments whose row reached this form without an end time.
+   */
+  const [durationMinutes, setDurationMinutes] = useState<number | null>(() =>
+    resolveBookingCoreDurationMinutes(booking),
+  );
+  /**
+   * What the form OPENED with. Tracks an adopted catalogue duration so
+   * adopting one is not mistaken for a staff edit (which would enable Save on
+   * a form nobody has touched).
+   */
+  const [baselineDuration, setBaselineDuration] = useState<number | null>(() =>
+    resolveBookingCoreDurationMinutes(booking),
+  );
   const [variantId, setVariantId] = useState<string | null>(booking.service_variant_id ?? null);
 
   const [validationState, setValidationState] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle');
@@ -150,10 +148,10 @@ export function StaffAppointmentModifyForm({
         serviceId: initialServiceId,
         bookingDate: booking.booking_date,
         bookingTime: booking.booking_time.slice(0, 5),
-        duration: initialCoreDurationMinutes(booking),
+        duration: baselineDuration,
         variant: booking.service_variant_id ?? null,
       }),
-    [booking, initialPractitionerId, initialServiceId],
+    [booking, initialPractitionerId, initialServiceId, baselineDuration],
   );
 
   const currentKey = useMemo(
@@ -245,6 +243,22 @@ export function StaffAppointmentModifyForm({
     }
   }, [practitionerOptions, practitionerId]);
 
+  /**
+   * The booking row carried no end time, so adopt the catalogue duration (the
+   * chosen variant's when there is one) as BOTH the value and the baseline:
+   * it is what this appointment is scheduled for, not an edit staff made.
+   */
+  useEffect(() => {
+    if (durationMinutes != null || !selectedService) return;
+    const activeVariant = (selectedService.variants ?? []).find(
+      (v) => v.is_active && v.id === variantId,
+    );
+    const adopted = activeVariant?.duration_minutes ?? selectedService.duration_minutes;
+    if (!Number.isFinite(adopted) || adopted < 15) return;
+    setDurationMinutes(adopted);
+    setBaselineDuration(adopted);
+  }, [durationMinutes, selectedService, variantId]);
+
   const runValidate = useCallback(async () => {
     if (!practitionerId || !serviceId) {
       setValidationState('invalid');
@@ -261,6 +275,9 @@ export function StaffAppointmentModifyForm({
       setValidationMessage('Select a service variant.');
       return;
     }
+    // Duration not resolved yet (catalogue still loading): stay idle rather
+    // than validate a guess. The effect below re-runs once it lands.
+    if (durationMinutes == null) return;
     setValidationState('loading');
     setValidationMessage(null);
     try {
@@ -312,27 +329,29 @@ export function StaffAppointmentModifyForm({
   }, [catalogError, practitionerId, serviceId, bookingDate, bookingTime, durationMinutes, variantId, runValidate, serviceWarning]);
 
   const endPreview = useMemo(() => {
+    if (durationMinutes == null) return null;
     const start = bookingTime.slice(0, 5);
     return minutesToTime(timeToMinutes(start) + durationMinutes);
   }, [bookingTime, durationMinutes]);
 
   const quickDurations = useMemo(() => {
     const set = new Set<number>();
-    set.add(durationMinutes);
+    if (durationMinutes != null) set.add(durationMinutes);
     if (selectedService) set.add(selectedService.duration_minutes);
-    set.add(initialCoreDurationMinutes(booking));
+    if (baselineDuration != null) set.add(baselineDuration);
     for (let m = 15; m <= Math.min(180, MAX_APPOINTMENT_CORE_DURATION_MINUTES); m += 15) {
       set.add(m);
     }
     return Array.from(set)
       .filter((m) => m >= 15 && m <= MAX_APPOINTMENT_CORE_DURATION_MINUTES)
       .sort((a, b) => a - b);
-  }, [booking, durationMinutes, selectedService]);
+  }, [baselineDuration, durationMinutes, selectedService]);
 
   const saveDisabled =
     saving ||
     !hasChanges ||
     Boolean(serviceWarning) ||
+    durationMinutes == null ||
     !bookingTime ||
     validationState === 'loading' ||
     validationState === 'invalid' ||
@@ -345,6 +364,7 @@ export function StaffAppointmentModifyForm({
   const scheduleChanged = bookingDate !== booking.booking_date || bookingTime !== baselineTime;
 
   const handleSave = async () => {
+    if (durationMinutes == null) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -401,6 +421,10 @@ export function StaffAppointmentModifyForm({
 
   /** Follow-up Undo: restore the original schedule, sending no notification. */
   const undoScheduleChange = useCallback(async (): Promise<boolean> => {
+    // The duration the form opened with (the booking's own, or the catalogue
+    // duration adopted for a row that carried no end time).
+    const revertDuration = baselineDuration;
+    if (revertDuration == null) return false;
     try {
       const payload = buildPatchPayload({
         bookingDate: booking.booking_date,
@@ -408,7 +432,7 @@ export function StaffAppointmentModifyForm({
         practitionerId: initialPractitionerId,
         serviceId: initialServiceId,
         usesServiceItem,
-        durationMinutes: initialCoreDurationMinutes(booking),
+        durationMinutes: revertDuration,
         serviceVariantId: booking.service_variant_id ?? null,
         requiresVariant: Boolean(booking.service_variant_id),
       });
@@ -424,7 +448,16 @@ export function StaffAppointmentModifyForm({
     } catch {
       return false;
     }
-  }, [booking, bookingId, baselineTime, initialPractitionerId, initialServiceId, usesServiceItem, onSaved]);
+  }, [
+    booking,
+    bookingId,
+    baselineTime,
+    baselineDuration,
+    initialPractitionerId,
+    initialServiceId,
+    usesServiceItem,
+    onSaved,
+  ]);
 
   if (catalogError) {
     return (
@@ -441,7 +474,9 @@ export function StaffAppointmentModifyForm({
     );
   }
 
-  if (services.length === 0 && !catalogError) {
+  // Also waits for the duration to resolve: a row with no end time adopts the
+  // catalogue duration in an effect above, so every field below has a number.
+  if (services.length === 0 || durationMinutes == null) {
     return (
       <div className="flex items-center justify-center py-10">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
@@ -593,9 +628,11 @@ export function StaffAppointmentModifyForm({
         </div>
       </div>
 
-      <p className="text-xs text-slate-600">
-        Ends at <span className="font-semibold text-slate-800">{endPreview}</span> (same day)
-      </p>
+      {endPreview ? (
+        <p className="text-xs text-slate-600">
+          Ends at <span className="font-semibold text-slate-800">{endPreview}</span> (same day)
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2 pt-1">
         <button

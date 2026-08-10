@@ -22,9 +22,17 @@ export function registryAppointmentToExpandedBookingRow(b: RegistryAppointment):
     id: b.id,
     booking_date: b.booking_date,
     booking_time: b.booking_time,
+    // `booking_end_time` (venue-local wall clock) wins when the row has it, as
+    // everywhere else. When it is NULL — every guest-created appointment, since
+    // only resource bookings post an end time — keep the row's real
+    // `estimated_end_time` instead of dropping it. Dropping both left the
+    // expanded panel with no end time and, worse, made the Modify form fall back
+    // to a 30-minute default: long appointments silently shrank on save, and one
+    // with processing time was rejected outright ("Processing blocks must lie
+    // within the service duration").
     estimated_end_time: b.booking_end_time
       ? `${b.booking_date}T${b.booking_end_time.slice(0, 5)}:00.000Z`
-      : null,
+      : b.estimated_end_time ?? null,
     created_at: null,
     party_size: b.party_size,
     status: b.status,

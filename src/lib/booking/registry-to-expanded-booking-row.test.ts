@@ -25,6 +25,38 @@ const base: RegistryAppointment = {
 };
 
 describe('registryAppointmentToExpandedBookingRow', () => {
+  it('synthesises estimated_end_time from the wall-clock end when the row has one', () => {
+    const row = registryAppointmentToExpandedBookingRow(base);
+    expect(row.booking_end_time).toBe('10:30');
+    expect(row.estimated_end_time).toBe('2026-05-29T10:30:00.000Z');
+  });
+
+  it('keeps the row estimated_end_time when booking_end_time is NULL (regression)', () => {
+    // Guest-created appointments carry no booking_end_time (only resource
+    // bookings post one), so dropping estimated_end_time here left the Modify
+    // form with no duration to read: it fell back to 30 minutes, which shrank
+    // long appointments and failed processing-time validation outright.
+    const row = registryAppointmentToExpandedBookingRow({
+      ...base,
+      booking_end_time: null,
+      estimated_end_time: '2026-05-29T11:20:00.000Z',
+      processing_time_blocks: [{ id: 'p1', start_minute: 20, duration_minutes: 30 }],
+    });
+    expect(row.estimated_end_time).toBe('2026-05-29T11:20:00.000Z');
+    expect(row.processing_time_blocks).toEqual([
+      { id: 'p1', start_minute: 20, duration_minutes: 30 },
+    ]);
+  });
+
+  it('is null only when the row genuinely has neither end time', () => {
+    const row = registryAppointmentToExpandedBookingRow({
+      ...base,
+      booking_end_time: null,
+      estimated_end_time: null,
+    });
+    expect(row.estimated_end_time).toBeNull();
+  });
+
   it('passes group_booking_id for multi-service visits', () => {
     const row = registryAppointmentToExpandedBookingRow({
       ...base,

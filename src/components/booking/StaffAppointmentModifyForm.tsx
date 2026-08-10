@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StaffExpandedBookingModifySource } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { StaffAppointmentModifyDateTimePicker } from '@/components/booking/StaffAppointmentModifyDateTimePicker';
+import {
+  BookingModifyNotifyFollowUp,
+  type BookingScheduleChangeSummary,
+} from '@/components/booking/BookingModifyNotifyFollowUp';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import {
   MAX_APPOINTMENT_CORE_DURATION_MINUTES,
@@ -113,6 +117,12 @@ export function StaffAppointmentModifyForm({
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /**
+   * Set after a save that moved the appointment start (plan: calendar-parity
+   * notify / skip / undo). The guest notification was DEFERRED on that save;
+   * this panel replaces the form and decides its fate.
+   */
+  const [notifyFollowUp, setNotifyFollowUp] = useState<BookingScheduleChangeSummary | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -331,6 +341,9 @@ export function StaffAppointmentModifyForm({
     !serviceId ||
     (requiresVariant && !variantId);
 
+  const baselineTime = booking.booking_time.slice(0, 5);
+  const scheduleChanged = bookingDate !== booking.booking_date || bookingTime !== baselineTime;
+
   const handleSave = async () => {
     setSaving(true);
     setSaveError(null);
@@ -345,6 +358,12 @@ export function StaffAppointmentModifyForm({
         serviceVariantId: variantId,
         requiresVariant,
       });
+      // Start moved: defer the guest notification so the follow-up panel can
+      // offer notify / skip / undo, exactly like the calendar drag (the server
+      // would otherwise send it immediately in the background).
+      if (scheduleChanged) {
+        payload.defer_modification_guest_notification = true;
+      }
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -365,11 +384,47 @@ export function StaffAppointmentModifyForm({
         return;
       }
       onSaved();
+      if (scheduleChanged) {
+        setNotifyFollowUp({
+          fromDate: booking.booking_date,
+          fromTime: baselineTime,
+          toDate: bookingDate,
+          toTime: bookingTime,
+        });
+        return;
+      }
       onClose();
     } finally {
       setSaving(false);
     }
   };
+
+  /** Follow-up Undo: restore the original schedule, sending no notification. */
+  const undoScheduleChange = useCallback(async (): Promise<boolean> => {
+    try {
+      const payload = buildPatchPayload({
+        bookingDate: booking.booking_date,
+        bookingTime: baselineTime,
+        practitionerId: initialPractitionerId,
+        serviceId: initialServiceId,
+        usesServiceItem,
+        durationMinutes: initialCoreDurationMinutes(booking),
+        serviceVariantId: booking.service_variant_id ?? null,
+        requiresVariant: Boolean(booking.service_variant_id),
+      });
+      payload.skip_booking_modification_guest_notification = true;
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) return false;
+      onSaved();
+      return true;
+    } catch {
+      return false;
+    }
+  }, [booking, bookingId, baselineTime, initialPractitionerId, initialServiceId, usesServiceItem, onSaved]);
 
   if (catalogError) {
     return (
@@ -391,6 +446,17 @@ export function StaffAppointmentModifyForm({
       <div className="flex items-center justify-center py-10">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
       </div>
+    );
+  }
+
+  if (notifyFollowUp) {
+    return (
+      <BookingModifyNotifyFollowUp
+        bookingId={bookingId}
+        change={notifyFollowUp}
+        onUndo={undoScheduleChange}
+        onClose={onClose}
+      />
     );
   }
 

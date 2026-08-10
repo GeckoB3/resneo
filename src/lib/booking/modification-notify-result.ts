@@ -14,5 +14,5 @@ export function formatBookingModificationNotifyToast(
   if (result.emailSent && result.smsSent) return 'Update sent by email and SMS.';
   if (result.emailSent) return 'Update sent by email.';
   if (result.smsSent) return 'Update sent by SMS.';
-  return 'Guest has no email or phone on file — update was not sent.';
+  return 'Guest has no email or phone on file, so the update was not sent.';
 }

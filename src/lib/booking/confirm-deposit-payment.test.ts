@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+﻿import { describe, expect, it, beforeEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   confirmBookingsForSucceededPaymentIntent,
@@ -133,7 +133,7 @@ describe('confirmBookingsForSucceededSetupIntent', () => {
       venueId: 'venue-1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: ['b1', 'b2'], alreadyConfirmed: false });
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1', 'b2'], depositOnlyIds: [], alreadyConfirmed: false });
 
     // Hold rows get the payment method and an accepted_at consent stamp.
     const holdUpdates = calls.filter((c) => c.table === 'booking_card_holds' && c.op === 'update');
@@ -191,7 +191,7 @@ describe('confirmBookingsForSucceededSetupIntent', () => {
       venueId: 'venue-1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: [], alreadyConfirmed: true });
+    expect(result).toEqual({ ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true });
     // No token writes, no events.
     expect(calls.filter((c) => c.table === 'events')).toHaveLength(0);
     expect(
@@ -229,7 +229,7 @@ describe('confirmBookingsForSucceededSetupIntent', () => {
       venueId: 'venue-1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], depositOnlyIds: [], alreadyConfirmed: false });
     // The waived sibling is untouched.
     expect(bookings[1]).toMatchObject({ id: 'b2', status: 'Pending', deposit_status: 'Waived' });
     // The released hold is never re-stamped: every hold update targets h1 only.
@@ -257,7 +257,7 @@ describe('confirmBookingsForSucceededSetupIntent', () => {
       venueId: 'venue-1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], depositOnlyIds: [], alreadyConfirmed: false });
     expect(bookings[0]).toMatchObject({ id: 'b1', status: 'Booked', deposit_status: 'Card Held' });
     expect(bookings[1]).toMatchObject({ id: 'b2', status: 'Pending', deposit_status: 'Waived' });
   });
@@ -272,7 +272,7 @@ describe('confirmBookingsForSucceededSetupIntent', () => {
       venueId: 'venue-1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], depositOnlyIds: [], alreadyConfirmed: false });
     expect(bookings[1]).toMatchObject({ id: 'b2', status: 'Pending', deposit_status: 'Pending' });
   });
 });
@@ -287,7 +287,7 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
       paymentIntentId: 'pi_1',
       venueId: 'venue-1',
     });
-    expect(result).toEqual({ ok: true, confirmedIds: [], alreadyConfirmed: true });
+    expect(result).toEqual({ ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true });
   });
 
   it('reports alreadyConfirmed (not booking_cancelled) when a sibling is live or past', async () => {
@@ -306,7 +306,7 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
       paymentIntentId: 'pi_1',
       venueId: 'venue-1',
     });
-    expect(result).toEqual({ ok: true, confirmedIds: [], alreadyConfirmed: true });
+    expect(result).toEqual({ ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true });
   });
 
   it('reports booking_cancelled when every row of the unit is Cancelled', async () => {
@@ -338,7 +338,7 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
       venueId: 'venue-1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], depositOnlyIds: [], alreadyConfirmed: false });
     const flip = calls.find((c) => c.table === 'bookings' && c.op === 'update' && Array.isArray(filterValue(c, 'id')));
     expect(flip?.payload).toMatchObject({ status: 'Booked', deposit_status: 'Paid' });
   });
@@ -418,7 +418,7 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
       venueId: 'venue-1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], depositOnlyIds: [], alreadyConfirmed: false });
     const flip = calls.find((c) => c.table === 'bookings' && c.op === 'update' && Array.isArray(filterValue(c, 'id')));
     expect(flip?.payload).toMatchObject({ status: 'Booked', deposit_status: 'Paid' });
     expect(bookings[0]).toMatchObject({ id: 'b1', status: 'Booked', deposit_status: 'Paid' });
@@ -453,7 +453,7 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
       paymentMethodId: 'pm_1',
     });
 
-    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], depositOnlyIds: [], alreadyConfirmed: false });
     const flip = calls.find((c) => c.table === 'bookings' && c.op === 'update' && Array.isArray(filterValue(c, 'id')));
     expect(flip?.payload).toMatchObject({ status: 'Booked', deposit_status: 'Card Held' });
     expect(bookings[0]).toMatchObject({ id: 'b1', status: 'Booked', deposit_status: 'Card Held' });
@@ -466,6 +466,92 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
     };
     expect(holdPayload.stripe_payment_method_id).toBe('pm_1');
     expect(holdPayload.terms_snapshot?.accepted_at).toBeTruthy();
+  });
+
+  it("completes an accepted-Booked row's deposit WITHOUT touching its status (plan 6.7)", async () => {
+    // Staff accepted the unit unpaid (accept_unpaid); the guest later paid via
+    // the still-working payment link. The deposit flips to Paid; the lifecycle
+    // status must stay exactly as staff set it.
+    const bookings = [
+      pendingBooking('b1', { status: 'Booked', deposit_status: 'Failed', deposit_amount_pence: 2000 }),
+    ];
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: bookings.map((b) => ({ ...b })), error: null };
+      }
+      if (call.table === 'booking_card_holds' && call.op === 'select') return { data: [], error: null };
+      if (call.table === 'bookings' && call.op === 'update') return applyBookingUpdate(bookings, call);
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+
+    const result = await confirmBookingsForSucceededPaymentIntent(admin, {
+      paymentIntentId: 'pi_1',
+      venueId: 'venue-1',
+    });
+
+    expect(result).toEqual({ ok: true, confirmedIds: [], depositOnlyIds: ['b1'], alreadyConfirmed: false });
+    const flip = calls.find((c) => c.table === 'bookings' && c.op === 'update' && Array.isArray(filterValue(c, 'id')));
+    expect(flip?.payload).toMatchObject({ deposit_status: 'Paid' });
+    expect(flip?.payload).not.toHaveProperty('status');
+    expect(bookings[0]).toMatchObject({ id: 'b1', status: 'Booked', deposit_status: 'Paid' });
+  });
+
+  it('handles a unit mixing a Pending row and an accepted row: full flip vs deposit-only', async () => {
+    const bookings = [
+      pendingBooking('b1', { deposit_amount_pence: 2000 }),
+      pendingBooking('b2', { status: 'Confirmed', deposit_status: 'Pending', deposit_amount_pence: 2000 }),
+    ];
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: bookings.map((b) => ({ ...b })), error: null };
+      }
+      if (call.table === 'booking_card_holds' && call.op === 'select') return { data: [], error: null };
+      if (call.table === 'bookings' && call.op === 'update') return applyBookingUpdate(bookings, call);
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+
+    const result = await confirmBookingsForSucceededPaymentIntent(admin, {
+      paymentIntentId: 'pi_1',
+      venueId: 'venue-1',
+    });
+
+    expect(result).toEqual({ ok: true, confirmedIds: ['b1'], depositOnlyIds: ['b2'], alreadyConfirmed: false });
+    expect(bookings[0]).toMatchObject({ status: 'Booked', deposit_status: 'Paid' });
+    expect(bookings[1]).toMatchObject({ status: 'Confirmed', deposit_status: 'Paid' });
+  });
+
+  it('an accepted payment_with_setup hold row completes to Card Held, status untouched', async () => {
+    const hold = {
+      id: 'h1',
+      booking_id: 'b1',
+      fee_pence: 2500,
+      stripe_payment_method_id: null,
+      terms_snapshot: { version: 1, text: 'consent', fee_pence: 2500, accepted_at: null },
+    };
+    const bookings = [
+      pendingBooking('b1', { status: 'Booked', deposit_status: 'Pending', deposit_amount_pence: null }),
+    ];
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: bookings.map((b) => ({ ...b })), error: null };
+      }
+      if (call.table === 'booking_card_holds' && call.op === 'select') return { data: [hold], error: null };
+      if (call.table === 'booking_card_holds' && call.op === 'update') return { data: null, error: null };
+      if (call.table === 'bookings' && call.op === 'update') return applyBookingUpdate(bookings, call);
+      if (call.table === 'events' && call.op === 'insert') return { data: null, error: null };
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+
+    const result = await confirmBookingsForSucceededPaymentIntent(admin, {
+      paymentIntentId: 'pi_1',
+      venueId: 'venue-1',
+      paymentMethodId: 'pm_1',
+    });
+
+    expect(result).toEqual({ ok: true, confirmedIds: [], depositOnlyIds: ['b1'], alreadyConfirmed: false });
+    expect(bookings[0]).toMatchObject({ status: 'Booked', deposit_status: 'Card Held' });
+    const holdUpdate = calls.find((c) => c.table === 'booking_card_holds' && c.op === 'update');
+    expect((holdUpdate?.payload as { stripe_payment_method_id?: string }).stripe_payment_method_id).toBe('pm_1');
   });
 
   it("keeps 'Not Required' zero-deposit siblings out of the Paid flip (regression)", async () => {
@@ -499,5 +585,35 @@ describe('confirmBookingsForSucceededPaymentIntent', () => {
     const statusOnlyFlip = flips.find((c) => !('deposit_status' in (c.payload as Record<string, unknown>)));
     expect(statusOnlyFlip?.payload).toMatchObject({ status: 'Booked' });
     expect(filterValue(statusOnlyFlip!, 'id')).toEqual(['b2']);
+  });
+});
+
+describe('confirmBookingsForSucceededSetupIntent accepted rows (plan 6.7)', () => {
+  it('completes an accepted card-hold row to Card Held without touching its status', async () => {
+    const holds = [holdRow({ id: 'h1', booking_id: 'b1' })];
+    const bookings = [pendingBooking('b1', { status: 'Booked', deposit_status: 'Pending' })];
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'booking_card_holds' && call.op === 'select') {
+        return { data: rowsMatching(holds, call), error: null };
+      }
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: rowsMatching(bookings, call), error: null };
+      }
+      if (call.table === 'booking_card_holds' && call.op === 'update') return { data: null, error: null };
+      if (call.table === 'bookings' && call.op === 'update') return applyBookingUpdate(bookings, call);
+      if (call.table === 'events' && call.op === 'insert') return { data: null, error: null };
+      throw new Error(`unexpected call ${call.table} ${call.op}`);
+    });
+
+    const result = await confirmBookingsForSucceededSetupIntent(admin, {
+      setupIntentId: 'seti_1',
+      paymentMethodId: 'pm_1',
+      venueId: 'venue-1',
+    });
+
+    expect(result).toEqual({ ok: true, confirmedIds: [], depositOnlyIds: ['b1'], alreadyConfirmed: false });
+    expect(bookings[0]).toMatchObject({ status: 'Booked', deposit_status: 'Card Held' });
+    const holdUpdate = calls.find((c) => c.table === 'booking_card_holds' && c.op === 'update');
+    expect((holdUpdate?.payload as { stripe_payment_method_id?: string }).stripe_payment_method_id).toBe('pm_1');
   });
 });

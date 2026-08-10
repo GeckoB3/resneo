@@ -5,6 +5,7 @@ import {
   canShowConfirmBookingAttendanceAction,
   showAttendanceConfirmedPill,
   showAttendanceConfirmedSupplementPill,
+  showDepositFailedPill,
   showDepositPendingPill,
 } from './booking-staff-indicators';
 
@@ -23,6 +24,26 @@ describe('showDepositPendingPill', () => {
 
   it('false when not required', () => {
     expect(showDepositPendingPill({ deposit_status: 'Not Required', deposit_amount_pence: null })).toBe(false);
+  });
+
+  it('false when the last attempt failed (the failed pill owns that state)', () => {
+    expect(showDepositPendingPill({ deposit_status: 'Failed', deposit_amount_pence: 500 })).toBe(false);
+  });
+});
+
+describe('showDepositFailedPill', () => {
+  it('true for a failed money deposit', () => {
+    expect(showDepositFailedPill({ deposit_status: 'Failed', deposit_amount_pence: 2000 })).toBe(true);
+  });
+
+  it('true for a failed payment_with_setup hold row (no deposit amount)', () => {
+    expect(showDepositFailedPill({ deposit_status: 'Failed', deposit_amount_pence: null })).toBe(true);
+  });
+
+  it('false for pending, paid and not-required deposits', () => {
+    expect(showDepositFailedPill({ deposit_status: 'Pending', deposit_amount_pence: 2000 })).toBe(false);
+    expect(showDepositFailedPill({ deposit_status: 'Paid', deposit_amount_pence: 2000 })).toBe(false);
+    expect(showDepositFailedPill({ deposit_status: 'Not Required', deposit_amount_pence: null })).toBe(false);
   });
 });
 

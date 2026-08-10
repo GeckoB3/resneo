@@ -113,9 +113,8 @@ async function handlePost(request: NextRequest) {
  * cancelling); this arm catches anything they skipped, for example rows
  * shielded by a staff-sent payment link (plan D14).
  *
- * Scoped to `status = 'Pending'` deliberately: accepted-but-unpaid Booked rows
- * cannot have their deposit flipped until the plan's Phase 4 (6.7) ships, so
- * including them would raise a false alert every day. Widen in PR 2.
+ * Includes accepted `Booked`/`Confirmed` rows (plan 6.7 shipped): their late
+ * payment completes the deposit state without touching the lifecycle status.
  */
 async function reconcileStuckPendingMoneyRows(
   supabase: ReturnType<typeof getSupabaseAdminClient>,
@@ -126,7 +125,7 @@ async function reconcileStuckPendingMoneyRows(
   const { data: rows, error: fetchErr } = await supabase
     .from('bookings')
     .select('id, venue_id, stripe_payment_intent_id')
-    .eq('status', 'Pending')
+    .in('status', ['Pending', 'Booked', 'Confirmed'])
     .in('deposit_status', ['Pending', 'Failed'])
     .not('stripe_payment_intent_id', 'is', null)
     .gte('updated_at', notOlderThan)

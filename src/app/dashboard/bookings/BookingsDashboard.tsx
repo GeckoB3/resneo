@@ -21,6 +21,7 @@ import {
 } from '@/lib/table-management/booking-status';
 import { bookingStatusVisualForRow } from '@/lib/table-management/booking-status-visual';
 import { useToast } from '@/components/ui/Toast';
+import { useAcceptUnpaidGuard } from '@/components/booking/AcceptUnpaidBookingDialog';
 import { readResponseJson } from '@/lib/http/read-response-json';
 import { EmptyState as DashboardEmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -372,6 +373,7 @@ export function BookingsDashboard({
   initialTodayIso?: string;
 }) {
   const { addToast } = useToast();
+  const acceptUnpaidGuard = useAcceptUnpaidGuard();
   const {
     peekVenueBookingDetail,
     primeVenueBookingDetail,
@@ -1004,7 +1006,7 @@ export function BookingsDashboard({
     [invalidateVenueBookingDetail, loadBookingDetail, fetchBookings],
   );
 
-  const updateBookingStatus = useCallback(async (bookingId: string, newStatus: BookingStatus) => {
+  const updateBookingStatus = useCallback(async (bookingId: string, newStatus: BookingStatus, acceptUnpaid = false) => {
     const previous = bookings.find((b) => b.id === bookingId)?.status;
     if (!previous || previous === newStatus || !canTransitionBookingStatus(previous, newStatus)) return;
     setBookings((prev) =>
@@ -1014,9 +1016,27 @@ export function BookingsDashboard({
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, ...(acceptUnpaid ? { accept_unpaid: true } : {}) }),
       });
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        // Unpaid promotion (plan 6.4): roll back the optimistic row and let
+        // the accept dialog own the decision.
+        if (
+          acceptUnpaidGuard.intercept(bookingId, res.status, data, () =>
+            updateBookingStatus(bookingId, newStatus, true),
+          )
+        ) {
+          setBookings((prev) =>
+            applyOptimisticStatusToBookingRows(
+              prev,
+              bookingId,
+              previous as BookingStatus,
+              isTableReservationBooking,
+            ),
+          );
+          return;
+        }
         throw new Error('Failed to update booking status');
       }
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -2211,6 +2231,7 @@ export function BookingsDashboard({
         onConfirm={() => confirmDialog?.onConfirm()}
         destructive
       />
+      {acceptUnpaidGuard.dialog}
       {/* Floating bulk-actions tray - appears when rows are selected */}
       {selectedIds.length > 0 && (
         <div className="fixed left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 px-2 bottom-[max(1rem,env(safe-area-inset-bottom,0px))]">

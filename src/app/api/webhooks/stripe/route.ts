@@ -363,6 +363,7 @@ export async function POST(request: NextRequest) {
       }
 
       const confirmedIds = confirmResult.confirmedIds;
+      const depositOnlyIds = confirmResult.depositOnlyIds;
 
       const { data: venue, error: venueErr } = await supabase
         .from('venues')
@@ -394,12 +395,25 @@ export async function POST(request: NextRequest) {
       const venueIdForAfter = booking.venue_id;
       after(async () => {
         const admin = getSupabaseAdminClient();
-        await sendDepositPaidBookingComms(admin, {
-          confirmedIds,
-          venueId: venueIdForAfter,
-          venueData,
-          guest,
-        });
+        if (confirmedIds.length > 0) {
+          await sendDepositPaidBookingComms(admin, {
+            confirmedIds,
+            venueId: venueIdForAfter,
+            venueData,
+            guest,
+          });
+        }
+        // Accepted rows completing a late deposit (plan 6.7): receipt only,
+        // never a second booking confirmation.
+        if (depositOnlyIds.length > 0) {
+          await sendDepositPaidBookingComms(admin, {
+            confirmedIds: depositOnlyIds,
+            venueId: venueIdForAfter,
+            venueData,
+            guest,
+            mode: 'receipt_only',
+          });
+        }
       });
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent;
@@ -619,6 +633,12 @@ export async function POST(request: NextRequest) {
       }
 
       const confirmedIds = confirmResult.confirmedIds;
+      if (confirmedIds.length === 0) {
+        // Only accepted rows completed their card save (plan 6.7): the
+        // acceptance already sent the confirmation and a card save carries no
+        // receipt, so there is nothing to send.
+        return NextResponse.json({ received: true });
+      }
 
       const { data: leadBooking } = await supabase
         .from('bookings')

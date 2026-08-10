@@ -22,6 +22,7 @@ import {
   type GuestCardHoldSummary,
 } from "@/lib/booking/guest-card-hold-summary";
 import { settleCardHoldsOnCancellation } from "@/lib/booking/card-hold-cancellation";
+import { cancelOpenDepositIntentForBookings } from "@/lib/booking/cancel-open-deposit-intent";
 import { formatCardHoldFeePence } from "@/lib/booking/card-hold-terms";
 import { verifyBookingHmac } from "@/lib/short-manage-link";
 import {
@@ -658,6 +659,13 @@ export async function POST(request: NextRequest) {
         previousStatus,
         nextStatus: "Cancelled",
         actorId: null,
+      });
+
+      // Plan 8.3/D7: a cancelled booking's open deposit PI must die with it
+      // (a guest can otherwise still pay through a stale payment tab or link).
+      await cancelOpenDepositIntentForBookings(supabase, {
+        settledBookingIds: [bookingId],
+        venueId: booking.venue_id,
       });
 
       // Card-hold deposits (§9.3 amended): a guest cancel BEFORE the deadline

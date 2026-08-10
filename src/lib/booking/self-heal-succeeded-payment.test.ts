@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/booking/confirm-deposit-payment', () => ({
   confirmBookingsForSucceededPaymentIntent: vi.fn(),
@@ -73,7 +73,7 @@ beforeEach(() => {
 
 describe('selfHealSucceededPaymentIntent', () => {
   it('confirms, sends comms, and inserts the self-healed alert', async () => {
-    mockConfirm.mockResolvedValue({ ok: true, confirmedIds: ['b1', 'b2'], alreadyConfirmed: false });
+    mockConfirm.mockResolvedValue({ ok: true, confirmedIds: ['b1', 'b2'], depositOnlyIds: [], alreadyConfirmed: false });
     const { admin, alertInserts } = makeAdmin();
 
     const result = await selfHealSucceededPaymentIntent(admin as never, PARAMS);
@@ -106,7 +106,7 @@ describe('selfHealSucceededPaymentIntent', () => {
   });
 
   it('an already-confirmed unit is a no-op: no comms, no alert', async () => {
-    mockConfirm.mockResolvedValue({ ok: true, confirmedIds: [], alreadyConfirmed: true });
+    mockConfirm.mockResolvedValue({ ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true });
     const { admin, alertInserts } = makeAdmin();
 
     const result = await selfHealSucceededPaymentIntent(admin as never, PARAMS);
@@ -117,7 +117,7 @@ describe('selfHealSucceededPaymentIntent', () => {
   });
 
   it('a comms failure does not lose the confirm or the alert', async () => {
-    mockConfirm.mockResolvedValue({ ok: true, confirmedIds: ['b1'], alreadyConfirmed: false });
+    mockConfirm.mockResolvedValue({ ok: true, confirmedIds: ['b1'], depositOnlyIds: [], alreadyConfirmed: false });
     mockComms.mockRejectedValue(new Error('smtp down'));
     const { admin, alertInserts } = makeAdmin();
 

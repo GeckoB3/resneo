@@ -2,6 +2,7 @@
 
 import {
   showAttendanceConfirmedSupplementPill,
+  showDepositFailedPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
@@ -173,6 +174,15 @@ export function AppointmentRegistryCard({
                 title="Deposit not yet paid"
               >
                 Deposit pending
+              </span>
+            )}
+            {showDepositFailedPill(booking) &&
+              ['Pending', 'Booked', 'Confirmed'].includes(booking.status) && (
+              <span
+                className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-950 ring-1 ring-red-200/80"
+                title="The deposit payment failed. Send a new payment link or accept without payment."
+              >
+                Deposit failed
               </span>
             )}
             {showAttendanceConfirmedSupplementPill(booking) && (

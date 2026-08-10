@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 // The route reads STRIPE_WEBHOOK_SECRET at module load; set it before imports.
@@ -279,7 +279,7 @@ describe('payment_intent.succeeded PI-linkage backfill (plan 8.1 companion)', ()
         },
       },
     } as never);
-    mockDepositConfirm.mockResolvedValue({ ok: true, confirmedIds: [], alreadyConfirmed: true });
+    mockDepositConfirm.mockResolvedValue({ ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true });
 
     const backfillCalls: RecordedCall[] = [];
     const { admin } = makeAdmin((call) => {
@@ -333,7 +333,7 @@ describe('payment_intent.succeeded PI-linkage backfill (plan 8.1 companion)', ()
         object: { id: 'pi_9', metadata: { booking_id: 'b1' }, payment_method: 'pm_1' },
       },
     } as never);
-    mockDepositConfirm.mockResolvedValue({ ok: true, confirmedIds: [], alreadyConfirmed: true });
+    mockDepositConfirm.mockResolvedValue({ ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true });
 
     const updates: RecordedCall[] = [];
     const { admin } = makeAdmin((call) => {

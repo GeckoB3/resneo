@@ -74,11 +74,16 @@ export async function selfHealSucceededPaymentIntent(
     return { outcome: 'failed', reason: confirmResult.reason };
   }
 
-  if (confirmResult.alreadyConfirmed || confirmResult.confirmedIds.length === 0) {
+  const confirmedIds = confirmResult.confirmedIds;
+  const depositOnlyIds = confirmResult.depositOnlyIds;
+  if (
+    confirmResult.alreadyConfirmed ||
+    (confirmedIds.length === 0 && depositOnlyIds.length === 0)
+  ) {
     return { outcome: 'already_confirmed' };
   }
 
-  const confirmedIds = confirmResult.confirmedIds;
+  const healedIds = [...confirmedIds, ...depositOnlyIds];
 
   // Comms: the guest never got a confirmation for this unit (the normal paths
   // both missed), so send the standard deposit-paid set now.
@@ -94,7 +99,7 @@ export async function selfHealSucceededPaymentIntent(
     const { data: leadBooking } = await admin
       .from('bookings')
       .select('guest_id')
-      .eq('id', confirmedIds[0]!)
+      .eq('id', healedIds[0]!)
       .maybeSingle();
 
     let guest: {
@@ -112,21 +117,30 @@ export async function selfHealSucceededPaymentIntent(
       guest = guestRow ?? null;
     }
 
-    await sendDepositPaidBookingComms(admin, {
-      confirmedIds,
-      venueId,
-      venueData: venueRowToEmailData({
-        name: venue?.name ?? 'Venue',
-        address: venue?.address ?? null,
-        email: venue?.email ?? null,
-        reply_to_email: venue?.reply_to_email ?? null,
-        logo_url: (venue as { logo_url?: string | null } | null)?.logo_url ?? null,
-        cover_photo_url: (venue as { cover_photo_url?: string | null } | null)?.cover_photo_url ?? null,
-        website_url: (venue as { website_url?: string | null } | null)?.website_url ?? null,
-        timezone: (venue as { timezone?: string | null } | null)?.timezone ?? null,
-      }),
-      guest,
+    const venueData = venueRowToEmailData({
+      name: venue?.name ?? 'Venue',
+      address: venue?.address ?? null,
+      email: venue?.email ?? null,
+      reply_to_email: venue?.reply_to_email ?? null,
+      logo_url: (venue as { logo_url?: string | null } | null)?.logo_url ?? null,
+      cover_photo_url: (venue as { cover_photo_url?: string | null } | null)?.cover_photo_url ?? null,
+      website_url: (venue as { website_url?: string | null } | null)?.website_url ?? null,
+      timezone: (venue as { timezone?: string | null } | null)?.timezone ?? null,
     });
+
+    if (confirmedIds.length > 0) {
+      await sendDepositPaidBookingComms(admin, { confirmedIds, venueId, venueData, guest });
+    }
+    // Accepted rows completing a late deposit (plan 6.7): receipt only.
+    if (depositOnlyIds.length > 0) {
+      await sendDepositPaidBookingComms(admin, {
+        confirmedIds: depositOnlyIds,
+        venueId,
+        venueData,
+        guest,
+        mode: 'receipt_only',
+      });
+    }
   } catch (commsErr) {
     // The unit is confirmed either way; losing the email is survivable and the
     // alert below still records that the normal paths missed this payment.
@@ -135,5 +149,5 @@ export async function selfHealSucceededPaymentIntent(
 
   await insertAlert('succeeded_unconfirmed_selfhealed');
 
-  return { outcome: 'confirmed', confirmedIds };
+  return { outcome: 'confirmed', confirmedIds: healedIds };
 }

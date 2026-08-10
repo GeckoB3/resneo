@@ -183,9 +183,14 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const transitionCheck = validateBookingStatusTransition(booking.status, 'Booked');
-      if (!transitionCheck.ok) {
-        return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
+      // Accepted rows (plan 6.7) are already Booked/Confirmed with an owed
+      // deposit: their late payment completes deposit_status only, so the
+      // Pending -> Booked transition rule applies to Pending rows alone.
+      if (booking.status === 'Pending') {
+        const transitionCheck = validateBookingStatusTransition(booking.status, 'Booked');
+        if (!transitionCheck.ok) {
+          return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
+        }
       }
 
       const paymentMethodId =
@@ -215,9 +220,13 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const transitionCheck = validateBookingStatusTransition(booking.status, 'Booked');
-      if (!transitionCheck.ok) {
-        return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
+      // Mirror the PI path (plan 6.7): accepted rows complete the card save
+      // without a status transition.
+      if (booking.status === 'Pending') {
+        const transitionCheck = validateBookingStatusTransition(booking.status, 'Booked');
+        if (!transitionCheck.ok) {
+          return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
+        }
       }
 
       const paymentMethodId =
@@ -267,6 +276,7 @@ export async function POST(request: NextRequest) {
     }
 
     const confirmedIds = confirmResult.confirmedIds;
+    const depositOnlyIds = confirmResult.depositOnlyIds;
 
     const { data: guest } = await supabase
       .from('guests')
@@ -287,13 +297,26 @@ export async function POST(request: NextRequest) {
 
     const venueIdForAfter = booking.venue_id;
     after(async () => {
-      await sendDepositPaidBookingComms(supabase, {
-        confirmedIds,
-        venueId: venueIdForAfter,
-        venueData,
-        guest,
-        guestEmail,
-      });
+      if (confirmedIds.length > 0) {
+        await sendDepositPaidBookingComms(supabase, {
+          confirmedIds,
+          venueId: venueIdForAfter,
+          venueData,
+          guest,
+          guestEmail,
+        });
+      }
+      // Accepted rows completing a late deposit (plan 6.7): receipt only.
+      if (depositOnlyIds.length > 0) {
+        await sendDepositPaidBookingComms(supabase, {
+          confirmedIds: depositOnlyIds,
+          venueId: venueIdForAfter,
+          venueData,
+          guest,
+          guestEmail,
+          mode: 'receipt_only',
+        });
+      }
     });
 
     return NextResponse.json({ confirmed: true });

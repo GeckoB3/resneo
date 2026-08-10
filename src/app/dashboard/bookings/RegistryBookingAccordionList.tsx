@@ -38,6 +38,7 @@ import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
+import { useAcceptUnpaidGuard } from '@/components/booking/AcceptUnpaidBookingDialog';
 import {
   useDashboardDetailCache,
   type VenueBookingDetailPayload,
@@ -127,6 +128,7 @@ export function RegistryBookingAccordionList({
   onBookingsCountChange?: (count: number) => void;
 }) {
   const { addToast } = useToast();
+  const acceptUnpaidGuard = useAcceptUnpaidGuard();
   const {
     peekVenueBookingDetail,
     primeVenueBookingDetail,
@@ -261,7 +263,7 @@ export function RegistryBookingAccordionList({
   );
 
   const updateRowStatus = useCallback(
-    async (bookingId: string, nextStatus: string) => {
+    async (bookingId: string, nextStatus: string, acceptUnpaid = false) => {
       const prev = bookings.find((x) => x.id === bookingId);
       if (!prev) return;
       setBookings((rows) =>
@@ -281,12 +283,20 @@ export function RegistryBookingAccordionList({
         const res = await fetch(`/api/venue/bookings/${bookingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: nextStatus }),
+          body: JSON.stringify({ status: nextStatus, ...(acceptUnpaid ? { accept_unpaid: true } : {}) }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
-          addToast((j as { error?: string }).error ?? 'Could not update status', 'error');
           setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
+          // Unpaid promotion (plan 6.4): the accept dialog owns the decision.
+          if (
+            acceptUnpaidGuard.intercept(bookingId, res.status, j, () =>
+              updateRowStatus(bookingId, nextStatus, true),
+            )
+          ) {
+            return;
+          }
+          addToast((j as { error?: string }).error ?? 'Could not update status', 'error');
           return;
         }
         const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -303,6 +313,7 @@ export function RegistryBookingAccordionList({
         setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- acceptUnpaidGuard.intercept is stable
     [addToast, bookings, onBookingsUpdated],
   );
 
@@ -539,6 +550,7 @@ export function RegistryBookingAccordionList({
           </div>
         );
       })}
+      {acceptUnpaidGuard.dialog}
     </div>
   );
 }

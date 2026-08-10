@@ -11,7 +11,18 @@ import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { VenueEmailData } from '@/lib/emails/types';
 
 export type ConfirmDepositPaymentResult =
-  | { ok: true; confirmedIds: string[]; alreadyConfirmed: boolean }
+  | {
+      ok: true;
+      /** Rows flipped Pending -> Booked by this call. */
+      confirmedIds: string[];
+      /**
+       * Accepted rows (already Booked/Confirmed via staff accept_unpaid,
+       * plan 6.7) whose deposit_status alone was completed by this call.
+       * They get a receipt, never a second booking confirmation.
+       */
+      depositOnlyIds: string[];
+      alreadyConfirmed: boolean;
+    }
   | { ok: false; reason: string };
 
 /** Hold-row fields the confirm paths need (card holds, spec §7.4). */
@@ -222,26 +233,36 @@ export async function confirmBookingsForSucceededPaymentIntent(
     deposit_amount_pence: number | null;
   }>;
   const candidates = allRows.filter((r) => r.status === 'Pending');
+  // Accepted rows (plan 6.7): staff promoted the unit without payment
+  // (accept_unpaid), so the row is already Booked/Confirmed while the deposit
+  // is still owed. A late payment completes the deposit WITHOUT touching the
+  // lifecycle status.
+  const acceptedCandidates = allRows.filter(
+    (r) =>
+      (r.status === 'Booked' || r.status === 'Confirmed') &&
+      (r.deposit_status === 'Pending' || r.deposit_status === 'Failed'),
+  );
 
-  if (candidates.length === 0) {
-    // No Pending rows: usually a benign replay (already Booked), but if the
-    // abandonment sweep Cancelled the unit after this payment succeeded, the
-    // caller must not tell the guest "confirmed" (review finding, J2).
+  if (candidates.length === 0 && acceptedCandidates.length === 0) {
+    // Nothing to flip: usually a benign replay (already Booked and settled),
+    // but if the abandonment sweep Cancelled the unit after this payment
+    // succeeded, the caller must not tell the guest "confirmed" (J2).
     if (
       allRows.length > 0 &&
       classifyZeroRowStatuses(allRows.map((r) => r.status)) === 'cancelled'
     ) {
       return { ok: false, reason: 'booking_cancelled' };
     }
-    return { ok: true, confirmedIds: [], alreadyConfirmed: true };
+    return { ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true };
   }
 
   const candidateIds = candidates.map((c) => c.id);
+  const acceptedIds = acceptedCandidates.map((c) => c.id);
 
   const { data: holdRows, error: holdErr } = await admin
     .from('booking_card_holds')
     .select(CARD_HOLD_CONFIRM_COLUMNS)
-    .in('booking_id', candidateIds)
+    .in('booking_id', [...candidateIds, ...acceptedIds])
     // Exclude released holds so a stale-tab confirm of a long-since-released
     // hold (e.g. an expired payment_with_setup 'Failed' row) can never stamp a
     // payment method onto a dead hold or classify the row as 'Card Held'
@@ -306,30 +327,66 @@ export async function confirmBookingsForSucceededPaymentIntent(
     }
   }
 
-  if (confirmedIds.length === 0) {
+  // Accepted rows (plan 6.7): deposit completion only. The race-safe
+  // conditions live in the UPDATE itself; status is deliberately untouched.
+  const depositOnlyIds: string[] = [];
+  const acceptedHeldIds = acceptedCandidates
+    .filter((r) => holdByBookingId.has(r.id) && r.deposit_amount_pence == null)
+    .map((r) => r.id);
+  const acceptedPaidIds = acceptedIds.filter((id) => !acceptedHeldIds.includes(id));
+  const acceptedGroups: Array<{ ids: string[]; depositStatus: string }> = [
+    { ids: acceptedHeldIds, depositStatus: 'Card Held' },
+    { ids: acceptedPaidIds, depositStatus: 'Paid' },
+  ];
+  for (const group of acceptedGroups) {
+    if (group.ids.length === 0) continue;
+    const { data: updatedRows, error: updateErr } = await admin
+      .from('bookings')
+      .update({ deposit_status: group.depositStatus, updated_at: new Date().toISOString() })
+      .in('id', group.ids)
+      .eq('venue_id', venueId)
+      .in('status', ['Booked', 'Confirmed'])
+      .in('deposit_status', ['Pending', 'Failed'])
+      .select('id');
+    if (updateErr) {
+      console.error(
+        '[confirmBookingsForSucceededPaymentIntent] accepted-row deposit update failed:',
+        updateErr,
+        logContext,
+      );
+      return { ok: false, reason: 'booking_update_failed' };
+    }
+    for (const r of updatedRows ?? []) {
+      if (r.id) depositOnlyIds.push(r.id as string);
+    }
+  }
+
+  if (confirmedIds.length === 0 && depositOnlyIds.length === 0) {
     const outcome = await classifyZeroRowConfirm(admin, candidateIds, venueId, logContext);
     if (outcome === 'cancelled') {
       return { ok: false, reason: 'booking_cancelled' };
     }
-    return { ok: true, confirmedIds: [], alreadyConfirmed: true };
+    return { ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true };
   }
 
-  if (!(await applyGuestEmail(admin, confirmedIds, guestEmail, logContext))) {
+  const touchedIds = [...confirmedIds, ...depositOnlyIds];
+
+  if (!(await applyGuestEmail(admin, touchedIds, guestEmail, logContext))) {
     return { ok: false, reason: 'guest_email_update_failed' };
   }
 
-  if (!(await assignConfirmTokens(admin, confirmedIds, logContext))) {
+  if (!(await assignConfirmTokens(admin, touchedIds, logContext))) {
     return { ok: false, reason: 'confirm_token_update_failed' };
   }
 
-  const confirmedSet = new Set(confirmedIds);
+  const touchedSet = new Set(touchedIds);
   await insertCardHoldSavedEvents(
     admin,
     venueId,
-    holds.filter((h) => confirmedSet.has(h.booking_id)),
+    holds.filter((h) => touchedSet.has(h.booking_id)),
   );
 
-  return { ok: true, confirmedIds, alreadyConfirmed: false };
+  return { ok: true, confirmedIds, depositOnlyIds, alreadyConfirmed: false };
 }
 
 /**
@@ -398,7 +455,23 @@ export async function confirmBookingsForSucceededSetupIntent(
     return { ok: false, reason: 'booking_update_failed' };
   }
 
-  if (!updatedRows?.length) {
+  // Accepted rows (plan 6.7 mirror): staff accepted the unit without the card
+  // save; a late save completes the deposit state, status untouched.
+  const { data: acceptedRows, error: acceptedErr } = await admin
+    .from('bookings')
+    .update({ deposit_status: 'Card Held', updated_at: new Date().toISOString() })
+    .in('id', holds.map((h) => h.booking_id))
+    .eq('venue_id', venueId)
+    .in('status', ['Booked', 'Confirmed'])
+    .eq('deposit_status', 'Pending')
+    .select('id');
+  if (acceptedErr) {
+    console.error('[confirmBookingsForSucceededSetupIntent] accepted-row update failed:', acceptedErr, logContext);
+    return { ok: false, reason: 'booking_update_failed' };
+  }
+  const depositOnlyIds = (acceptedRows ?? []).map((r) => r.id).filter(Boolean) as string[];
+
+  if (!updatedRows?.length && depositOnlyIds.length === 0) {
     const outcome = await classifyZeroRowConfirm(
       admin,
       holds.map((h) => h.booking_id),
@@ -408,27 +481,28 @@ export async function confirmBookingsForSucceededSetupIntent(
     if (outcome === 'cancelled') {
       return { ok: false, reason: 'booking_cancelled' };
     }
-    return { ok: true, confirmedIds: [], alreadyConfirmed: true };
+    return { ok: true, confirmedIds: [], depositOnlyIds: [], alreadyConfirmed: true };
   }
 
-  const confirmedIds = updatedRows.map((r) => r.id).filter(Boolean) as string[];
+  const confirmedIds = (updatedRows ?? []).map((r) => r.id).filter(Boolean) as string[];
+  const touchedIds = [...confirmedIds, ...depositOnlyIds];
 
-  if (!(await applyGuestEmail(admin, confirmedIds, guestEmail, logContext))) {
+  if (!(await applyGuestEmail(admin, touchedIds, guestEmail, logContext))) {
     return { ok: false, reason: 'guest_email_update_failed' };
   }
 
-  if (!(await assignConfirmTokens(admin, confirmedIds, logContext))) {
+  if (!(await assignConfirmTokens(admin, touchedIds, logContext))) {
     return { ok: false, reason: 'confirm_token_update_failed' };
   }
 
-  const confirmedSet = new Set(confirmedIds);
+  const touchedSet = new Set(touchedIds);
   await insertCardHoldSavedEvents(
     admin,
     venueId,
-    holds.filter((h) => confirmedSet.has(h.booking_id)),
+    holds.filter((h) => touchedSet.has(h.booking_id)),
   );
 
-  return { ok: true, confirmedIds, alreadyConfirmed: false };
+  return { ok: true, confirmedIds, depositOnlyIds, alreadyConfirmed: false };
 }
 
 export async function sendDepositPaidBookingComms(
@@ -444,9 +518,17 @@ export async function sendDepositPaidBookingComms(
       phone?: string | null;
     } | null;
     guestEmail?: string | null;
+    /**
+     * 'full' (default): booking confirmation + deposit receipt.
+     * 'receipt_only': accepted rows completing a late deposit (plan 6.7); the
+     * acceptance already sent the confirmation, so only the receipt goes out.
+     * 'confirmation_only': staff accepted without payment (plan 6.1); nothing
+     * was paid, so a receipt would be a lie.
+     */
+    mode?: 'full' | 'confirmation_only' | 'receipt_only';
   },
 ): Promise<void> {
-  const { confirmedIds, venueId, venueData, guest, guestEmail } = params;
+  const { confirmedIds, venueId, venueData, guest, guestEmail, mode = 'full' } = params;
   const recipientEmail = guestEmail ?? guest?.email ?? null;
 
   for (const bid of confirmedIds) {
@@ -486,21 +568,29 @@ export async function sendDepositPaidBookingComms(
     // payment_with_setup unit sends receipts to its paid rows only; hold-only
     // rows get the booking confirmation alone.
     const hasDeposit = Boolean(rowEmail && b.deposit_amount_pence);
-    const skipDepositReceipt = isSelfServeBookingSource(b.source as string | null);
+    // Self-serve sources normally skip the standalone receipt (checkout showed
+    // the deposit and the confirmation email restates it). receipt_only is the
+    // exception: a late pay-by-link completion sends no confirmation, so the
+    // receipt is the guest's only proof and must go out regardless of source.
+    const skipDepositReceipt =
+      mode === 'confirmation_only' ||
+      (mode !== 'receipt_only' && isSelfServeBookingSource(b.source as string | null));
 
-    try {
-      const enriched = await enrichBookingEmailForComms(admin, bid, bookingData);
-      const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
-        enriched,
-        venueData,
-        venueId,
-      );
-      if (!confEmail.sent) console.warn('[deposit-paid comms] confirmation email not sent:', confEmail.reason);
-      if (!confSms.sent && confSms.reason !== 'skipped' && confSms.reason !== 'no_phone') {
-        console.warn('[deposit-paid comms] confirmation SMS not sent:', confSms.reason);
+    if (mode !== 'receipt_only') {
+      try {
+        const enriched = await enrichBookingEmailForComms(admin, bid, bookingData);
+        const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
+          enriched,
+          venueData,
+          venueId,
+        );
+        if (!confEmail.sent) console.warn('[deposit-paid comms] confirmation email not sent:', confEmail.reason);
+        if (!confSms.sent && confSms.reason !== 'skipped' && confSms.reason !== 'no_phone') {
+          console.warn('[deposit-paid comms] confirmation SMS not sent:', confSms.reason);
+        }
+      } catch (err) {
+        console.error('[deposit-paid comms] confirmation notifications failed:', err, { bookingId: bid });
       }
-    } catch (err) {
-      console.error('[deposit-paid comms] confirmation notifications failed:', err, { bookingId: bid });
     }
 
     if (hasDeposit && !skipDepositReceipt) {

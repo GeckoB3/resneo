@@ -121,6 +121,9 @@ export function StaffAppointmentModifyForm({
    * this panel replaces the form and decides its fate.
    */
   const [notifyFollowUp, setNotifyFollowUp] = useState<BookingScheduleChangeSummary | null>(null);
+  /** True while the follow-up is on screen and the caller has not been refreshed yet. */
+  const pendingFollowUpRef = useRef(false);
+  const onSavedRef = useRef(onSaved);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -242,6 +245,24 @@ export function StaffAppointmentModifyForm({
       setPractitionerId(practitionerOptions[0]!.id);
     }
   }, [practitionerOptions, practitionerId]);
+
+  useEffect(() => {
+    onSavedRef.current = onSaved;
+  }, [onSaved]);
+
+  useEffect(() => {
+    pendingFollowUpRef.current = notifyFollowUp != null;
+  }, [notifyFollowUp]);
+
+  // Modal dismissed (X / Escape) while the follow-up was still on screen: the
+  // change IS saved, so refresh the caller or the list keeps showing the old
+  // time. The panel's own cleanup still sends the guest notification.
+  useEffect(
+    () => () => {
+      if (pendingFollowUpRef.current) onSavedRef.current();
+    },
+    [],
+  );
 
   /**
    * The booking row carried no end time, so adopt the catalogue duration (the
@@ -403,8 +424,11 @@ export function StaffAppointmentModifyForm({
         setSaveError(data.error ?? 'Could not save changes.');
         return;
       }
-      onSaved();
       if (scheduleChanged) {
+        // Deliberately NOT onSaved() here: every caller closes the modal in
+        // that callback, which would tear this form down before the follow-up
+        // renders. finishFollowUp() calls it once the staff member has chosen
+        // notify / skip / undo.
         setNotifyFollowUp({
           fromDate: booking.booking_date,
           fromTime: baselineTime,
@@ -413,6 +437,7 @@ export function StaffAppointmentModifyForm({
         });
         return;
       }
+      onSaved();
       onClose();
     } finally {
       setSaving(false);
@@ -443,7 +468,9 @@ export function StaffAppointmentModifyForm({
         body: JSON.stringify(payload),
       });
       if (!res.ok) return false;
-      onSaved();
+      // The caller is refreshed by finishFollowUp, which the panel calls right
+      // after a successful undo (calling onSaved here would close the modal
+      // first and double-refresh).
       return true;
     } catch {
       return false;
@@ -456,8 +483,18 @@ export function StaffAppointmentModifyForm({
     initialPractitionerId,
     initialServiceId,
     usesServiceItem,
-    onSaved,
   ]);
+
+  /**
+   * The staff member finished with the follow-up (notified, skipped, or
+   * undone). onSaved refreshes the caller and, in every caller, closes the
+   * modal; onClose covers any caller whose onSaved does not.
+   */
+  const finishFollowUp = useCallback(() => {
+    pendingFollowUpRef.current = false;
+    onSaved();
+    onClose();
+  }, [onSaved, onClose]);
 
   if (catalogError) {
     return (
@@ -493,7 +530,7 @@ export function StaffAppointmentModifyForm({
         bookingId={bookingId}
         change={notifyFollowUp}
         onUndo={undoScheduleChange}
-        onClose={onClose}
+        onClose={finishFollowUp}
       />
     );
   }

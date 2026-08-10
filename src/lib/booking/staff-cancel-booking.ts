@@ -8,6 +8,7 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { sendCancellationNotification } from '@/lib/communications/send-templated';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
+import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -190,6 +191,12 @@ export async function cancelStaffBookingWithNotify(
   } catch (holdErr) {
     console.error('[staff-cancel-booking] card-hold release failed:', holdErr, { bookingId });
   }
+
+  // Plan 8.3/D7: an open deposit PI dies with the cancelled unit.
+  await cancelOpenDepositIntentForBookings(admin, {
+    settledBookingIds: idsToCancel,
+    venueId,
+  });
 
   for (const row of beforeRows ?? []) {
     const prev = (row as { status?: string }).status ?? st;

@@ -66,6 +66,12 @@ import {
   applyGroupStaffAttendanceChange,
   loadGroupBookingSiblings,
 } from '@/lib/booking/group-booking-status-sync';
+import {
+  bookingCaptureUnitOwesCapture,
+  type CaptureUnitOwes,
+} from '@/lib/booking/booking-owes-capture';
+import { applyAcceptUnpaidSideEffects } from '@/lib/booking/accept-unpaid-booking';
+import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
@@ -96,6 +102,44 @@ import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
+
+/**
+ * Unpaid-promotion gate (deposit-payment-robustness-plan 6.1/6.2): a Pending
+ * capture unit that still owes its deposit or card save must not be promoted
+ * silently. Returns a 409 to block, the owing unit when `accept_unpaid`
+ * authorises it, or null when nothing is owed.
+ */
+async function gateUnpaidPromotion(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  params: {
+    bookingId: string;
+    venueId: string;
+    groupBookingId: string | null;
+    acceptUnpaid: boolean;
+  },
+): Promise<{ blocked: NextResponse } | { acceptedUnit: CaptureUnitOwes } | null> {
+  const owes = await bookingCaptureUnitOwesCapture(admin, {
+    bookingId: params.bookingId,
+    venueId: params.venueId,
+    groupBookingId: params.groupBookingId,
+  });
+  if (!owes.owes) return null;
+  if (!params.acceptUnpaid) {
+    return {
+      blocked: NextResponse.json(
+        {
+          error: 'The deposit for this booking has not been paid.',
+          code: 'DEPOSIT_UNPAID',
+          deposit_status: owes.depositStatus,
+          deposit_amount_pence: owes.depositAmountPence,
+          card_hold_fee_pence: owes.cardHoldFeePence,
+        },
+        { status: 409 },
+      ),
+    };
+  }
+  return { acceptedUnit: owes };
+}
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
   const [y, m, d] = bookingDate.split('-').map(Number);
@@ -520,9 +564,10 @@ export async function PATCH(
       );
     };
 
-    /** Staff attendance toggle only — any venue staff may update (table, event, class, resource, etc.). */
+    /** Staff attendance toggle only — any venue staff may update (table, event, class, resource, etc.).
+     * `accept_unpaid` may ride along: it is the unpaid-promotion escape hatch (plan 6.2), not a field. */
     const bodyKeys = Object.keys(body as Record<string, unknown>).filter(
-      (k) => (body as Record<string, unknown>)[k] !== undefined,
+      (k) => (body as Record<string, unknown>)[k] !== undefined && k !== 'accept_unpaid',
     );
     const isStaffAttendanceOnlyPatch =
       bodyKeys.length === 1 && bodyKeys[0] === 'staff_attendance_confirmed';
@@ -538,6 +583,31 @@ export async function PATCH(
       const groupBookingId = booking.group_booking_id as string | null | undefined;
       const adminForHooks = getSupabaseAdminClient();
 
+      // Unpaid-promotion gate (plan 6.2): confirming attendance on a Pending
+      // unit promotes it to Confirmed, which must not happen silently while
+      // the deposit is owed.
+      let acceptedUnit: CaptureUnitOwes | null = null;
+      if (on) {
+        let promotesFromPending =
+          currentStatus === 'Pending' || currentStatus === 'Deposit Pending';
+        if (groupBookingId && !promotesFromPending) {
+          const siblings = await loadGroupBookingSiblings(staff.db, scopeVenueId, groupBookingId);
+          promotesFromPending = siblings.some(
+            (s) => s.status === 'Pending' || s.status === 'Deposit Pending',
+          );
+        }
+        if (promotesFromPending) {
+          const gate = await gateUnpaidPromotion(adminForHooks, {
+            bookingId: id,
+            venueId: scopeVenueId,
+            groupBookingId: groupBookingId ?? null,
+            acceptUnpaid: body.accept_unpaid === true,
+          });
+          if (gate && 'blocked' in gate) return gate.blocked;
+          acceptedUnit = gate?.acceptedUnit ?? null;
+        }
+      }
+
       if (groupBookingId) {
         const updatedIds = await applyGroupStaffAttendanceChange({
           db: staff.db,
@@ -549,6 +619,14 @@ export async function PATCH(
         });
         if (updatedIds.length === 0) {
           return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
+        }
+        if (acceptedUnit) {
+          await applyAcceptUnpaidSideEffects(adminForHooks, {
+            bookingIds: acceptedUnit.owingBookingIds.filter((bid) => updatedIds.includes(bid)),
+            venueId: scopeVenueId,
+            staffId: staff.id,
+            depositStatus: acceptedUnit.depositStatus,
+          });
         }
       } else {
         const attPayload: Record<string, unknown> = {
@@ -587,6 +665,22 @@ export async function PATCH(
             previousStatus: currentStatus,
             nextStatus: attPayload.status as BookingStatus,
             actorId: staff.id,
+          });
+          // Status-change audit (plan D8). Best-effort.
+          const { error: auditErr } = await adminForHooks.from('events').insert({
+            venue_id: scopeVenueId,
+            booking_id: id,
+            event_type: 'booking_status_changed',
+            payload: { from: currentStatus, to: attPayload.status, staff_id: staff.id },
+          });
+          if (auditErr) console.error('booking_status_changed event insert failed:', auditErr);
+        }
+        if (acceptedUnit) {
+          await applyAcceptUnpaidSideEffects(adminForHooks, {
+            bookingIds: [id],
+            venueId: scopeVenueId,
+            staffId: staff.id,
+            depositStatus: acceptedUnit.depositStatus,
           });
         }
       }
@@ -774,6 +868,20 @@ export async function PATCH(
         return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
       }
 
+      // Unpaid-promotion gate (plan 6.1): accepting a Pending unit that still
+      // owes its deposit or card save requires an explicit accept_unpaid.
+      let acceptedUnpaidUnit: CaptureUnitOwes | null = null;
+      if (newStatus === 'Booked' && booking.status === 'Pending') {
+        const gate = await gateUnpaidPromotion(admin, {
+          bookingId: id,
+          venueId: scopeVenueId,
+          groupBookingId: (booking.group_booking_id as string | null | undefined) ?? null,
+          acceptUnpaid: body.accept_unpaid === true,
+        });
+        if (gate && 'blocked' in gate) return gate.blocked;
+        acceptedUnpaidUnit = gate?.acceptedUnit ?? null;
+      }
+
       if (newStatus === 'No-Show') {
         const { data: venueGrace } = await admin
           .from('venues')
@@ -925,6 +1033,13 @@ export async function PATCH(
             })
             .in('id', idsToCancel);
         }
+
+        // Plan 8.3/D7: a cancelled unit's open deposit PI must die with it, or
+        // a guest holding the payment page can still pay a cancelled booking.
+        await cancelOpenDepositIntentForBookings(admin, {
+          settledBookingIds: idsToCancel,
+          venueId: scopeVenueId,
+        });
 
         logBookingOp({
           operation: 'cancel',
@@ -1176,6 +1291,7 @@ export async function PATCH(
             : new Date().toISOString();
         }
 
+        let promotedIds: string[] = [id];
         if (groupBookingId) {
           const updatedIds = await applyGroupBookingStatusChange({
             db: staff.db,
@@ -1194,6 +1310,7 @@ export async function PATCH(
               { status: 400 },
             );
           }
+          promotedIds = updatedIds;
           statusLifecycleHandled = true;
         } else {
           const statusPayload: Record<string, unknown> = {
@@ -1272,6 +1389,21 @@ export async function PATCH(
             actorId: staff.id,
           });
         }
+
+        // accept_unpaid side effects (plan 6.1): audit events + manage tokens.
+        // Comms are skipped: the Pending -> Booked block above already sends
+        // the booking confirmation for this branch.
+        if (acceptedUnpaidUnit && booking.status === 'Pending' && newStatus === 'Booked') {
+          await applyAcceptUnpaidSideEffects(admin, {
+            bookingIds: acceptedUnpaidUnit.owingBookingIds.filter((bid) =>
+              promotedIds.includes(bid),
+            ),
+            venueId: scopeVenueId,
+            staffId: staff.id,
+            depositStatus: acceptedUnpaidUnit.depositStatus,
+            sendComms: false,
+          });
+        }
       }
 
       if (newStatus === 'Seated' && Array.isArray(body.table_ids) && body.table_ids.length > 0) {
@@ -1281,6 +1413,17 @@ export async function PATCH(
           await replaceBookingAssignments(admin, id, tableIds, staff.id);
           await syncTableStatusesForBooking(admin, id, tableIds, newStatus, staff.id);
         }
+      }
+
+      // Status-change audit (plan D8), all status-branch paths. Best-effort.
+      {
+        const { error: auditErr } = await admin.from('events').insert({
+          venue_id: scopeVenueId,
+          booking_id: id,
+          event_type: 'booking_status_changed',
+          payload: { from: booking.status, to: newStatus, staff_id: staff.id },
+        });
+        if (auditErr) console.error('booking_status_changed event insert failed:', auditErr);
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
@@ -1338,6 +1481,29 @@ export async function PATCH(
       const currentStatus = booking.status as string;
       const groupBookingId = booking.group_booking_id as string | null | undefined;
 
+      // Unpaid-promotion gate (plan 6.2): mirrors the attendance-only fast path.
+      let acceptedUnit: CaptureUnitOwes | null = null;
+      if (on) {
+        let promotesFromPending =
+          currentStatus === 'Pending' || currentStatus === 'Deposit Pending';
+        if (groupBookingId && !promotesFromPending) {
+          const siblings = await loadGroupBookingSiblings(staff.db, scopeVenueId, groupBookingId);
+          promotesFromPending = siblings.some(
+            (s) => s.status === 'Pending' || s.status === 'Deposit Pending',
+          );
+        }
+        if (promotesFromPending) {
+          const gate = await gateUnpaidPromotion(admin, {
+            bookingId: id,
+            venueId: scopeVenueId,
+            groupBookingId: groupBookingId ?? null,
+            acceptUnpaid: body.accept_unpaid === true,
+          });
+          if (gate && 'blocked' in gate) return gate.blocked;
+          acceptedUnit = gate?.acceptedUnit ?? null;
+        }
+      }
+
       if (groupBookingId) {
         const updatedIds = await applyGroupStaffAttendanceChange({
           db: staff.db,
@@ -1349,6 +1515,14 @@ export async function PATCH(
         });
         if (updatedIds.length === 0) {
           return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
+        }
+        if (acceptedUnit) {
+          await applyAcceptUnpaidSideEffects(admin, {
+            bookingIds: acceptedUnit.owingBookingIds.filter((bid) => updatedIds.includes(bid)),
+            venueId: scopeVenueId,
+            staffId: staff.id,
+            depositStatus: acceptedUnit.depositStatus,
+          });
         }
       } else {
         const updatePayload: Record<string, unknown> = {
@@ -1385,6 +1559,22 @@ export async function PATCH(
             previousStatus: currentStatus,
             nextStatus: updatePayload.status as BookingStatus,
             actorId: staff.id,
+          });
+          // Status-change audit (plan D8). Best-effort.
+          const { error: auditErr } = await admin.from('events').insert({
+            venue_id: scopeVenueId,
+            booking_id: id,
+            event_type: 'booking_status_changed',
+            payload: { from: currentStatus, to: updatePayload.status, staff_id: staff.id },
+          });
+          if (auditErr) console.error('booking_status_changed event insert failed:', auditErr);
+        }
+        if (acceptedUnit) {
+          await applyAcceptUnpaidSideEffects(admin, {
+            bookingIds: [id],
+            venueId: scopeVenueId,
+            staffId: staff.id,
+            depositStatus: acceptedUnit.depositStatus,
           });
         }
       }

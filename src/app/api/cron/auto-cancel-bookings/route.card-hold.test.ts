@@ -13,8 +13,11 @@ vi.mock('@/lib/table-management/lifecycle', () => ({
 vi.mock('@/lib/stripe', () => ({
   stripe: {
     setupIntents: { retrieve: vi.fn() },
-    paymentIntents: { retrieve: vi.fn() },
+    paymentIntents: { retrieve: vi.fn(), cancel: vi.fn() },
   },
+}));
+vi.mock('@/lib/booking/self-heal-succeeded-payment', () => ({
+  selfHealSucceededPaymentIntent: vi.fn(async () => ({ outcome: 'already_confirmed' as const })),
 }));
 vi.mock('@/lib/booking/card-hold-release', () => ({
   releaseCardHoldsForBookings: vi.fn(async () => ({
@@ -69,9 +72,13 @@ function makeAdmin(responder: (call: RecordedCall) => { data?: unknown; error?: 
         call.op = 'insert';
         call.payload = payload;
       });
-      for (const op of ['eq', 'in', 'is', 'gte', 'lte', 'lt', 'not'] as const) {
+      for (const op of ['eq', 'in', 'is', 'gte', 'lte', 'lt', 'gt'] as const) {
         builder[op] = chain((k, v) => call.filters.push([op, k as string, v]));
       }
+      // PostgREST negation takes three args: .not(column, operator, value).
+      builder.not = chain((k, opName, v) =>
+        call.filters.push(['not', k as string, { op: opName, value: v }]),
+      );
       builder.order = chain(() => {});
       builder.limit = chain(() => {});
       builder.single = async () => {
@@ -109,6 +116,12 @@ const rowsMatching = (rows: Array<Record<string, unknown>>, call: RecordedCall) 
       if (op === 'gte') return typeof actual === 'string' && actual >= (value as string);
       if (op === 'lte') return typeof actual === 'string' && actual <= (value as string);
       if (op === 'lt') return typeof actual === 'string' && actual < (value as string);
+      if (op === 'gt') return typeof actual === 'number' && actual > (value as number);
+      if (op === 'not') {
+        const spec = value as { op: string; value: unknown };
+        if (spec.op === 'is' && spec.value === null) return actual != null;
+        return true;
+      }
       return true;
     }),
   );
@@ -188,7 +201,9 @@ describe('POST /api/cron/auto-cancel-bookings card-hold exclusion (spec 12.1)', 
       cancelled: 1,
       staff_hold_cancelled: 1,
       online_hold_cancelled: 0,
-      class_cancelled: 0,
+      online_money_cancelled: 0,
+      no_pi_cancelled: 0,
+      self_healed: 0,
     });
 
     // Both bookings end Cancelled, but via different sweeps.

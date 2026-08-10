@@ -13,6 +13,7 @@ import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
   showAttendanceConfirmedSupplementPill,
+  showDepositFailedPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { bookingTimelineEventsForDisplay } from '@/lib/booking/format-booking-timeline-event';
@@ -208,6 +209,12 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                     {showDepositPendingPill(d) ? (
                       <Pill variant="warning" size="sm" dot>
                         Deposit pending
+                      </Pill>
+                    ) : null}
+                    {showDepositFailedPill(d) &&
+                    ['Pending', 'Booked', 'Confirmed'].includes(d.status) ? (
+                      <Pill variant="danger" size="sm" dot>
+                        Deposit failed
                       </Pill>
                     ) : null}
                     {showAttendanceConfirmedSupplementPill(d) ? (

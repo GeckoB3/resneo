@@ -59,6 +59,7 @@ import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/Cla
 import { EventInstanceDetailSheet, type EventInstanceSheetSelection } from '@/components/practitioner-calendar/EventInstanceDetailSheet';
 import { ResourceInstanceDetailSheet } from '@/components/practitioner-calendar/ResourceInstanceDetailSheet';
 import { useToast } from '@/components/ui/Toast';
+import { useAcceptUnpaidGuard } from '@/components/booking/AcceptUnpaidBookingDialog';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
@@ -2262,6 +2263,7 @@ export function PractitionerCalendarView({
   calendarTodayIso?: string;
 }) {
   const { addToast } = useToast();
+  const acceptUnpaidGuard = useAcceptUnpaidGuard();
   const { warmVenueBookingDetail } = useDashboardDetailCache();
   const myCalendarIds = useMemo(
     () => linkedPractitionerIds ?? [],
@@ -4371,7 +4373,6 @@ export function PractitionerCalendarView({
       });
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
-        addToast((payload.error as string | undefined) ?? 'Update failed', 'error');
         if (linkedSnapshot) {
           setLinkedVenues((venues) =>
             venues.map((v) => ({
@@ -4387,6 +4388,15 @@ export function PractitionerCalendarView({
           delete next[bookingId];
           return next;
         });
+        // Unpaid promotion (plan 6.4): the accept dialog owns the decision.
+        if (
+          acceptUnpaidGuard.intercept(bookingId, res.status, payload, (extra) =>
+            quickPatchBooking(bookingId, { ...body, ...extra }, opts),
+          )
+        ) {
+          return false;
+        }
+        addToast((payload.error as string | undefined) ?? 'Update failed', 'error');
         return false;
       }
       if (payload && typeof payload === 'object' && !('error' in payload)) {
@@ -7648,6 +7658,7 @@ export function PractitionerCalendarView({
           preselectedTime={linkedCreating.time}
         />
       ) : null}
+      {acceptUnpaidGuard.dialog}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
 import { findOrCreateGuest } from '@/lib/guests';
 import {
   bookingLocationInsertFields,
@@ -1439,6 +1440,10 @@ export async function POST(request: NextRequest) {
           throw e;
         }
       } else if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
+        // Tracked so the catch can kill the intent too (plan 8.1): a
+        // short-link or linkage failure after the PI create otherwise leaves
+        // a live confirmable PI against a deleted booking.
+        let createdPaymentIntentId: string | null = null;
         try {
           const paymentIntent = await stripe.paymentIntents.create(
             {
@@ -1449,15 +1454,20 @@ export async function POST(request: NextRequest) {
             },
             { stripeAccount: venue.stripe_connected_account_id },
           );
-          await admin
+          createdPaymentIntentId = paymentIntent.id;
+          const { error: linkErr } = await admin
             .from('bookings')
             .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
             .eq('id', apptBooking.id);
+          if (linkErr) throw new Error(`PI linkage write failed: ${linkErr.message}`);
 
           const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
           payment_url = await createOrGetPaymentShortLink(venueId, apptBooking.id, baseUrl);
         } catch (stripeErr) {
           console.error('PaymentIntent create failed for appointment:', stripeErr);
+          await cancelAbandonedPaymentIntent(createdPaymentIntentId, venue.stripe_connected_account_id, {
+            bookingId: apptBooking.id,
+          });
           await admin.from('bookings').delete().eq('id', apptBooking.id);
           return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
         }
@@ -1831,6 +1841,8 @@ export async function POST(request: NextRequest) {
         throw e;
       }
     } else if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
+      // Tracked so the catch can kill the intent too (plan 8.1).
+      let createdPaymentIntentId: string | null = null;
       try {
         const paymentIntent = await stripe.paymentIntents.create(
           {
@@ -1841,19 +1853,24 @@ export async function POST(request: NextRequest) {
           },
           { stripeAccount: venue.stripe_connected_account_id }
         );
+        createdPaymentIntentId = paymentIntent.id;
 
-        await admin
+        const { error: linkErr } = await admin
           .from('bookings')
           .update({
             stripe_payment_intent_id: paymentIntent.id,
             updated_at: new Date().toISOString(),
           })
           .eq('id', booking.id);
+        if (linkErr) throw new Error(`PI linkage write failed: ${linkErr.message}`);
 
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
         payment_url = await createOrGetPaymentShortLink(venueId, booking.id, baseUrl);
       } catch (stripeErr) {
         console.error('PaymentIntent create failed for phone booking:', stripeErr);
+        await cancelAbandonedPaymentIntent(createdPaymentIntentId, venue.stripe_connected_account_id, {
+          bookingId: booking.id,
+        });
         await admin.from('bookings').delete().eq('id', booking.id);
         return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
       }

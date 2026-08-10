@@ -9,6 +9,15 @@ import Image from 'next/image';
 import { isDepositRefundAvailableAt } from '@/lib/booking/cancellation-deadline';
 import { renderCardHoldConsentText, formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { BrandSpinner } from '@/components/ui/primitives';
+import {
+  confirmBookingPaymentWithServer,
+  isCanceledIntentConfirmError,
+  BOOKING_CANCELLED_MESSAGE,
+  BOOKING_TIMED_OUT_MESSAGE,
+  PAYMENT_PROCESSING_BODY,
+  PAYMENT_PROCESSING_HEADING,
+  type ConfirmOutcome,
+} from '@/lib/booking/client-confirm-payment';
 
 const stripeCache = new Map<string, Promise<Stripe | null>>();
 
@@ -177,7 +186,7 @@ function PayForm({
   bookingId: string;
   email: string;
   onEmailChange: (v: string) => void;
-  onSuccess: () => void;
+  onSuccess: (outcome: ConfirmOutcome) => void;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -230,21 +239,29 @@ function PayForm({
             redirect: 'if_required',
           });
       if (confirmError) {
-        setError(confirmError.message ?? confirmFallbackError);
+        // A sweep or cancellation killed the intent while this form sat open:
+        // show the timed-out copy, not Stripe's jargon.
+        setError(
+          isCanceledIntentConfirmError(confirmError)
+            ? BOOKING_TIMED_OUT_MESSAGE
+            : confirmError.message ?? confirmFallbackError,
+        );
         setLoading(false);
         return;
       }
 
-      try {
-        await fetch('/api/booking/confirm-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_id: bookingId, guest_email: email.trim() }),
-        });
-      } catch {
-        // Non-critical - webhook will handle if this fails.
+      // Server-verified outcome (plan Phase 5): the success screen must not
+      // claim more than the server confirmed.
+      const outcome = await confirmBookingPaymentWithServer({
+        booking_id: bookingId,
+        guest_email: email.trim(),
+      });
+      if (outcome === 'cancelled') {
+        setError(BOOKING_CANCELLED_MESSAGE);
+        setLoading(false);
+        return;
       }
-      onSuccess();
+      onSuccess(outcome);
     } catch (err) {
       setError(err instanceof Error ? err.message : confirmFallbackError);
     } finally {
@@ -306,6 +323,8 @@ function PayContent() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'success' | 'error'>(() =>
     token ? 'loading' : 'error',
   );
+  /** Server-verified payment outcome (plan Phase 5): drives honest success copy. */
+  const [paymentOutcome, setPaymentOutcome] = useState<ConfirmOutcome | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(() =>
     !token ? 'This link is not valid. Please open the link from your email or text message again.' : null,
   );
@@ -351,7 +370,8 @@ function PayContent() {
       });
   }, [token]);
 
-  const onSuccess = useCallback(() => {
+  const onSuccess = useCallback((outcome: ConfirmOutcome) => {
+    setPaymentOutcome(outcome);
     setStatus('success');
   }, []);
 
@@ -383,7 +403,12 @@ function PayContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
               </svg>
             </div>
-            {isSetup ? (
+            {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed' ? (
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">{PAYMENT_PROCESSING_HEADING}</h2>
+                <p className="mt-1 text-sm text-slate-500">{PAYMENT_PROCESSING_BODY}</p>
+              </div>
+            ) : isSetup ? (
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Card saved</h2>
                 <p className="mt-1 text-sm text-slate-500">Your booking is confirmed. No payment has been taken.</p>

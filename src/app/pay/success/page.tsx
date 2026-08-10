@@ -20,18 +20,22 @@ function SuccessContent() {
   const setupIntentId = setupIntentIdFromParams(searchParams);
   const confirmSent = useRef(false);
 
-  // A 3DS-challenged card save redirects here without the /pay page's inline
-  // confirm call ever running, so fire it best-effort on mount. The webhook
-  // remains the guaranteed path; errors are swallowed silently. When the
-  // return_url carried no booking_id, fall back to Stripe's own setup_intent
-  // param: the confirm route resolves the hold's bookings from it.
+  // A 3DS-challenged payment or card save redirects here without the inline
+  // confirm call ever running, so fire it best-effort on mount for BOTH modes
+  // (plan 7.3; payment mode used to be skipped and rely on the webhook alone).
+  // The webhook remains the guaranteed path; errors are swallowed silently.
+  // When the return_url carried no booking_id, fall back to Stripe's own
+  // params: the confirm route resolves the unit from either intent id.
   useEffect(() => {
-    if (mode !== 'setup' || status !== 'succeeded' || confirmSent.current) return;
+    if (status !== 'succeeded' || confirmSent.current) return;
+    const paymentIntentId = searchParams.get('payment_intent')?.trim() || null;
     const body = bookingId
       ? { booking_id: bookingId }
-      : setupIntentId
+      : mode === 'setup' && setupIntentId
         ? { setup_intent_id: setupIntentId }
-        : null;
+        : paymentIntentId
+          ? { payment_intent_id: paymentIntentId }
+          : null;
     if (!body) return;
     confirmSent.current = true;
     fetch('/api/booking/confirm-payment', {
@@ -41,7 +45,7 @@ function SuccessContent() {
     }).catch(() => {
       // Non-critical - webhook will handle if this fails.
     });
-  }, [mode, status, bookingId, setupIntentId]);
+  }, [mode, status, bookingId, setupIntentId, searchParams]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4">
@@ -136,6 +140,9 @@ function SuccessContent() {
             >
               Try again
             </button>
+            <p className="mt-3 text-xs text-slate-400">
+              If that does not work, contact the venue to finish your booking.
+            </p>
           </div>
         )}
 

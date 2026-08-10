@@ -14,6 +14,8 @@ import {
   recordCardHoldChargeFailure,
 } from '@/lib/booking/card-hold-charge';
 import { sendCardHoldChargedReceipt, sendPaymentReceiptEmail } from '@/lib/communications/send-templated';
+import { sendStaffPush } from '@/lib/communications/staff-push-notification';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   applyBalancePaymentRefundFromWebhook,
   confirmBalancePaymentFromPaymentIntent,
@@ -279,7 +281,7 @@ export async function POST(request: NextRequest) {
 
       const { data: booking, error: bookingLoadErr } = await supabase
         .from('bookings')
-        .select('id, venue_id, guest_id, status, deposit_status, source')
+        .select('id, venue_id, guest_id, status, deposit_status, source, stripe_payment_intent_id')
         .eq('id', bookingId)
         .single();
 
@@ -291,6 +293,30 @@ export async function POST(request: NextRequest) {
       if (!booking) {
         console.log(`[Stripe webhook] Booking ${bookingId} not found \u2014 skipping`);
         return NextResponse.json({ received: true });
+      }
+
+      // Linkage self-repair (deposit-payment-robustness-plan 8.1 companion): if
+      // the PI-id write failed at create time, the unit's rows carry NULL and
+      // the confirm below would find nothing and silently ack a real payment.
+      // The metadata names the unit, so backfill the missing linkage first.
+      // Guarded on IS NULL: an existing (different) linkage is never rewritten.
+      if (!booking.stripe_payment_intent_id) {
+        const unitIds = (meta.booking_ids ? meta.booking_ids.split(',') : [bookingId])
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const { error: backfillErr } = await supabase
+          .from('bookings')
+          .update({ stripe_payment_intent_id: pi.id, updated_at: new Date().toISOString() })
+          .in('id', unitIds)
+          .is('stripe_payment_intent_id', null);
+        if (backfillErr) {
+          console.error('[Stripe webhook] PI linkage backfill failed:', backfillErr, { bookingId });
+          throw backfillErr;
+        }
+        console.warn('[Stripe webhook] backfilled missing PI linkage from metadata', {
+          bookingId,
+          paymentIntentId: pi.id,
+        });
       }
 
       // Thread the payment method through so payment_with_setup units get
@@ -337,6 +363,7 @@ export async function POST(request: NextRequest) {
       }
 
       const confirmedIds = confirmResult.confirmedIds;
+      const depositOnlyIds = confirmResult.depositOnlyIds;
 
       const { data: venue, error: venueErr } = await supabase
         .from('venues')
@@ -368,12 +395,25 @@ export async function POST(request: NextRequest) {
       const venueIdForAfter = booking.venue_id;
       after(async () => {
         const admin = getSupabaseAdminClient();
-        await sendDepositPaidBookingComms(admin, {
-          confirmedIds,
-          venueId: venueIdForAfter,
-          venueData,
-          guest,
-        });
+        if (confirmedIds.length > 0) {
+          await sendDepositPaidBookingComms(admin, {
+            confirmedIds,
+            venueId: venueIdForAfter,
+            venueData,
+            guest,
+          });
+        }
+        // Accepted rows completing a late deposit (plan 6.7): receipt only,
+        // never a second booking confirmation.
+        if (depositOnlyIds.length > 0) {
+          await sendDepositPaidBookingComms(admin, {
+            confirmedIds: depositOnlyIds,
+            venueId: venueIdForAfter,
+            venueData,
+            guest,
+            mode: 'receipt_only',
+          });
+        }
       });
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent;
@@ -409,7 +449,7 @@ export async function POST(request: NextRequest) {
       // mark them all Failed, not just the primary.
       const { data: failedRows, error: failedSelErr } = await supabase
         .from('bookings')
-        .select('id, venue_id, guest_id, status')
+        .select('id, venue_id, guest_id, status, source, booking_date, booking_time, guest_first_name, guest_last_name')
         .eq('stripe_payment_intent_id', pi.id)
         .eq('deposit_status', 'Pending');
 
@@ -423,6 +463,11 @@ export async function POST(request: NextRequest) {
         venue_id: string;
         guest_id: string | null;
         status: string;
+        source: string | null;
+        booking_date: string;
+        booking_time: string;
+        guest_first_name: string | null;
+        guest_last_name: string | null;
       }>;
       if (rowsToFail.length > 0) {
         const { error: failUpdateErr } = await supabase
@@ -446,7 +491,33 @@ export async function POST(request: NextRequest) {
         // consumed entitlement and free the seat too. No-op for card-only bookings.
         await restoreAndReleaseClassBookings(supabase, rowsToFail, 'stripe_payment_failed');
 
-        // One kitchen alert per venue.
+        // Durable per-booking trace (deposit-payment-robustness-plan Phase 2).
+        // Best-effort: the Failed flip above is the critical write; an events
+        // failure must not trigger webhook redelivery storms.
+        const { error: failEventErr } = await supabase.from('events').insert(
+          rowsToFail.map((b) => ({
+            venue_id: b.venue_id,
+            booking_id: b.id,
+            event_type: 'deposit_payment_failed',
+            payload: {
+              payment_intent_id: pi.id,
+              failure_code:
+                pi.last_payment_error?.code ?? pi.last_payment_error?.decline_code ?? 'payment_failed',
+            },
+          })),
+        );
+        if (failEventErr) {
+          console.error('[Stripe webhook] deposit_payment_failed events insert failed:', failEventErr, {
+            paymentIntentId: pi.id,
+          });
+        }
+
+        // One staff push + (legacy) kitchen alert per venue. The IMMEDIATE push
+        // is scoped to phone payment-link bookings: staff initiated that
+        // collection and the sweep backstop is 24h away, so an early signal is
+        // useful. Online failures are usually followed by an inline retry
+        // seconds later; their terminal signal is the sweep's cancellation
+        // push (20-30 min), and the red "Deposit failed" pill covers the gap.
         const venuesSeen = new Set<string>();
         for (const r of rowsToFail) {
           if (venuesSeen.has(r.venue_id)) continue;
@@ -457,6 +528,31 @@ export async function POST(request: NextRequest) {
               .select('name, kitchen_email')
               .eq('id', r.venue_id)
               .maybeSingle();
+            const phoneRow = rowsToFail.find(
+              (b) => b.venue_id === r.venue_id && b.source === 'phone',
+            );
+            if (phoneRow) {
+              try {
+                await sendStaffPush(
+                  {
+                    id: phoneRow.id,
+                    guest_name: formatGuestDisplayName(
+                      phoneRow.guest_first_name,
+                      phoneRow.guest_last_name,
+                    ),
+                    booking_date: phoneRow.booking_date,
+                    booking_time: phoneRow.booking_time,
+                  },
+                  { name: venue?.name ?? null },
+                  r.venue_id,
+                  'payment_failed',
+                );
+              } catch (pushErr) {
+                console.error('[Stripe webhook] payment_failed staff push failed:', pushErr, {
+                  bookingId: phoneRow.id,
+                });
+              }
+            }
             if (venue?.kitchen_email) {
               const bookingsForVenue = rowsToFail
                 .filter((b) => b.venue_id === r.venue_id)
@@ -549,6 +645,12 @@ export async function POST(request: NextRequest) {
       }
 
       const confirmedIds = confirmResult.confirmedIds;
+      if (confirmedIds.length === 0) {
+        // Only accepted rows completed their card save (plan 6.7): the
+        // acceptance already sent the confirmation and a card save carries no
+        // receipt, so there is nothing to send.
+        return NextResponse.json({ received: true });
+      }
 
       const { data: leadBooking } = await supabase
         .from('bookings')

@@ -21,6 +21,7 @@ import {
   type ChargeCardHoldNoShowFeeErrorCode,
 } from '@/lib/booking/card-hold-charge';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
+import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import type { BookingModel } from '@/types/booking-models';
 
@@ -227,6 +228,14 @@ export async function POST(
       }
       return NextResponse.json({ success: true });
     }
+    // Plan 8.3/D7: kill the open deposit PI BEFORE the state flip, while the
+    // row still reads as owing (the helper skips settled rows). A guest with
+    // an open payment tab must not be able to pay a waived deposit: the money
+    // would land with deposit_status stuck at 'Waived', recorded nowhere.
+    await cancelOpenDepositIntentForBookings(admin, {
+      settledBookingIds: [id],
+      venueId: scopeVenueId,
+    });
     await admin.from('bookings').update({ deposit_status: 'Waived', updated_at: new Date().toISOString() }).eq('id', id);
     return NextResponse.json({ success: true });
   }
@@ -243,6 +252,12 @@ export async function POST(
         { status: 409 },
       );
     }
+    // Plan 8.3/D7: cash settles the debt; the card PI must die or the guest
+    // could pay a second time online. Runs before the flip (see waive).
+    await cancelOpenDepositIntentForBookings(admin, {
+      settledBookingIds: [id],
+      venueId: scopeVenueId,
+    });
     const amountPence = parsed.data.amount_pence ?? booking.deposit_amount_pence ?? 0;
     await admin.from('bookings').update({
       deposit_status: 'Paid',
@@ -347,6 +362,32 @@ export async function POST(
   }
 
   // action === 'send_payment_link'
+  // Plan 6.6: only a booking that still owes its capture can be sent a link,
+  // and only while it is live. Accepted (Booked/Confirmed) bookings with an
+  // owed deposit are explicitly allowed: that is the accept-unpaid recovery
+  // path, and GET /api/booking/pay serves them.
+  if (!hold) {
+    const depositStatus = (booking.deposit_status as string | null) ?? null;
+    if (depositStatus !== 'Pending' && depositStatus !== 'Failed') {
+      return NextResponse.json(
+        {
+          error: 'This booking has no deposit to collect. The deposit is already settled.',
+          code: 'invalid_state',
+        },
+        { status: 409 },
+      );
+    }
+    const status = (booking.status as string | null) ?? null;
+    if (status !== 'Pending' && status !== 'Booked' && status !== 'Confirmed') {
+      return NextResponse.json(
+        {
+          error: 'A payment link cannot be sent for this booking any more.',
+          code: 'invalid_state',
+        },
+        { status: 409 },
+      );
+    }
+  }
   if (hold) {
     // §9.2b: a released hold can never be re-sent (any release reason).
     if (hold.released_at != null) {

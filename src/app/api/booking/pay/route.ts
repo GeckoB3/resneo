@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
     const { data: booking } = await supabase
       .from('bookings')
       .select(
-        'id, stripe_payment_intent_id, venue_id, status, booking_date, booking_time, party_size, deposit_amount_pence, guest_email, guest_first_name, guest_last_name, guest_phone, cancellation_deadline, guest_id',
+        'id, stripe_payment_intent_id, venue_id, status, deposit_status, booking_date, booking_time, party_size, deposit_amount_pence, guest_email, guest_first_name, guest_last_name, guest_phone, cancellation_deadline, guest_id',
       )
       .eq('id', bookingId)
       .single();
@@ -78,6 +78,14 @@ export async function GET(request: NextRequest) {
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found or already completed' }, { status: 404 });
     }
+
+    // Plan 6.6 (D4): a link works while the booking is live AND still owes its
+    // capture. 'Booked'/'Confirmed' are the accept-unpaid recovery path: staff
+    // accepted the booking; the deposit stays collectable. Terminal statuses
+    // stay a 404.
+    const LIVE_STATUSES = ['Pending', 'Booked', 'Confirmed'];
+    const depositOwed =
+      booking.deposit_status === 'Pending' || booking.deposit_status === 'Failed';
 
     // The hold row (unique per booking) drives both setup-mode eligibility and
     // the "already secured" 404 nicety, so load it whenever it could matter.
@@ -90,7 +98,7 @@ export async function GET(request: NextRequest) {
       terms_snapshot: { text?: string } | null;
     };
     let hold: HoldRow | null = null;
-    if (booking.status !== 'Pending' || !booking.stripe_payment_intent_id) {
+    if (!depositOwed || !booking.stripe_payment_intent_id) {
       const { data: holdRow } = await supabase
         .from('booking_card_holds')
         .select(
@@ -106,8 +114,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'This booking is already secured.' }, { status: 404 });
     }
 
-    if (booking.status !== 'Pending') {
+    if (!LIVE_STATUSES.includes(booking.status as string)) {
       return NextResponse.json({ error: 'Booking not found or already completed' }, { status: 404 });
+    }
+
+    if (!depositOwed) {
+      // Paid / Waived / Card Held / Refunded: nothing left to collect.
+      return NextResponse.json({ error: 'This booking is already secured.' }, { status: 404 });
     }
 
     const openUnsavedHold =
@@ -210,6 +223,19 @@ export async function GET(request: NextRequest) {
       booking.stripe_payment_intent_id!,
       { stripeAccount: venue.stripe_connected_account_id }
     );
+
+    // A sweep or cancellation killed this intent (plan D7): the link is dead.
+    if (paymentIntent.status === 'canceled') {
+      return NextResponse.json(
+        { error: 'This link has expired. Please contact the venue for a new one.' },
+        { status: 400 },
+      );
+    }
+    // The money already arrived; the state flip is on its way (webhook or
+    // reconciliation). Never collect twice.
+    if (paymentIntent.status === 'succeeded') {
+      return NextResponse.json({ error: 'This booking is already secured.' }, { status: 404 });
+    }
 
     if (!paymentIntent.client_secret) {
       return NextResponse.json({ error: 'We could not load this payment right now. Please try again in a few minutes or contact the venue.' }, { status: 500 });

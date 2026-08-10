@@ -53,7 +53,9 @@ async function handlePost(request: NextRequest) {
       .select('id, venue_id, guest_id, booking_date, booking_time, party_size, deposit_amount_pence, stripe_payment_intent_id, created_at')
       .eq('source', 'phone')
       .eq('status', 'Pending')
-      .eq('deposit_status', 'Pending')
+      // 'Failed' included (deposit-payment-robustness-plan 3.4): a guest whose
+      // attempt bounced still owes and still gets the reminder link.
+      .in('deposit_status', ['Pending', 'Failed'])
       .gte('created_at', twoAndHalfHoursAgo.toISOString())
       .lte('created_at', twoHoursAgo.toISOString());
 

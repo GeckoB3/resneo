@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { parseDietaryNotes, hasAllergyKeywords } from '@/lib/day-sheet';
 import { useToast } from '@/components/ui/Toast';
+import { useAcceptUnpaidGuard } from '@/components/booking/AcceptUnpaidBookingDialog';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -429,6 +430,7 @@ export function DaySheetView({
   linkFeature?: boolean;
 }) {
   const { addToast } = useToast();
+  const acceptUnpaidGuard = useAcceptUnpaidGuard();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -805,7 +807,7 @@ export function DaySheetView({
   );
 
   // Status change with optimistic update
-  const changeStatus = useCallback(async (bookingId: string, newStatus: BookingStatus) => {
+  const changeStatus = useCallback(async (bookingId: string, newStatus: BookingStatus, acceptUnpaid = false) => {
     if (!data) return;
     const currentBooking = data.periods.flatMap((p) => p.bookings).find((b) => b.id === bookingId);
     if (!currentBooking) return;
@@ -870,11 +872,19 @@ export function DaySheetView({
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, ...(acceptUnpaid ? { accept_unpaid: true } : {}) }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         setData(snapshot);
+        // Unpaid promotion (plan 6.4): the accept dialog owns the decision.
+        if (
+          acceptUnpaidGuard.intercept(bookingId, res.status, j, () =>
+            changeStatus(bookingId, newStatus, true),
+          )
+        ) {
+          return;
+        }
         addToast(j.error ?? 'Failed to update status', 'error');
         return;
       }
@@ -1817,6 +1827,7 @@ export function DaySheetView({
           @page :first { margin-top: 1cm; }
         }
       `}</style>
+      {acceptUnpaidGuard.dialog}
     </div>
   );
 }

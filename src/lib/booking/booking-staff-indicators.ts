@@ -19,6 +19,17 @@ export function showDepositPendingPill(row: BookingStaffIndicatorInput): boolean
 }
 
 /**
+ * A payment attempt failed and the money (or card save) is still owed
+ * (deposit-payment-robustness-plan Phase 3). No amount gate: payment_with_setup
+ * hold rows carry deposit_amount_pence NULL but a 'Failed' state is always a
+ * failed collection. Render sites gate on live statuses themselves (mirroring
+ * the pending pill), so Cancelled rows do not carry it.
+ */
+export function showDepositFailedPill(row: BookingStaffIndicatorInput): boolean {
+  return row.deposit_status === 'Failed';
+}
+
+/**
  * True when attendance is considered confirmed: lifecycle `Confirmed`, or either
  * attendance timestamp is set (guest link or staff confirm).
  */

@@ -19,8 +19,11 @@ function formatDateLong(dateStr: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-function formatTimeRange(startHm: string, durationMinutes: number): string {
+function formatTimeRange(startHm: string, durationMinutes: number | null): string {
   const start = startHm.slice(0, 5);
+  // Duration unresolved (the booking's service is missing from the catalogue,
+  // so nothing can supply one): show the start alone rather than invent an end.
+  if (durationMinutes == null) return start;
   const end = minutesToTime(timeToMinutes(start) + durationMinutes);
   return `${start} – ${end}`;
 }
@@ -101,7 +104,8 @@ export function StaffAppointmentModifyDateTimePicker({
   practitionerId: string;
   serviceId: string;
   variantId: string | null;
-  durationMinutes: number;
+  /** null when the form cannot resolve one (unknown service); queries are skipped. */
+  durationMinutes: number | null;
   bookingDate: string;
   bookingTime: string;
   onBookingDateChange: (ymd: string) => void;
@@ -147,7 +151,7 @@ export function StaffAppointmentModifyDateTimePicker({
   }, [bookingDate]);
 
   const loadCalendarMonth = useCallback(async () => {
-    if (!practitionerId || !serviceId || disabled) return;
+    if (!practitionerId || !serviceId || disabled || durationMinutes == null) return;
     setLoadingCalendar(true);
     try {
       const url = appointmentCalendarUrl(
@@ -204,7 +208,7 @@ export function StaffAppointmentModifyDateTimePicker({
   }, [loadCalendarMonth]);
 
   const loadDaySlots = useCallback(async () => {
-    if (!practitionerId || !serviceId || !bookingDate || disabled) {
+    if (!practitionerId || !serviceId || !bookingDate || disabled || durationMinutes == null) {
       setAvailableSlots([]);
       return;
     }

@@ -22,6 +22,7 @@ import {
 import {
   attendanceConfirmationSources,
   showAttendanceConfirmedSupplementPill,
+  showDepositFailedPill,
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { BOOKING_START_PRIMARY_BUTTON_CLASSES } from '@/lib/table-management/booking-status-visual';
@@ -30,6 +31,7 @@ import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNo
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { useAcceptUnpaidGuard } from '@/components/booking/AcceptUnpaidBookingDialog';
 import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
 import {
   resolveCardHoldUiState,
@@ -281,6 +283,7 @@ export function AppointmentDetailSheet({
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const acceptUnpaidGuard = useAcceptUnpaidGuard();
   const [notesDraft, setNotesDraft] = useState('');
   const [graceMinutes, setGraceMinutes] = useState(15);
   const [venueTimezone, setVenueTimezone] = useState('Europe/London');
@@ -399,6 +402,15 @@ export function AppointmentDetailSheet({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: 'Request failed' }));
+        // Unpaid promotion (plan 6.4): open the accept dialog instead of a
+        // raw error; "Accept without payment" replays with accept_unpaid.
+        if (
+          acceptUnpaidGuard.intercept(bookingId, res.status, data, (extra) =>
+            patchJson({ ...body, ...extra }),
+          )
+        ) {
+          return false;
+        }
         setActionError((data as { error?: string }).error ?? 'Update failed');
         return false;
       }
@@ -631,6 +643,17 @@ export function AppointmentDetailSheet({
                       title="Deposit not yet paid"
                     >
                       Deposit pending
+                    </span>
+                  )}
+                  {isApptStyle &&
+                    showDepositFailedPill(detail) &&
+                    ['Pending', 'Booked', 'Confirmed'].includes(detail.status) && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-950 ring-1 ring-red-200/80"
+                      title="The deposit payment failed. Send a new payment link or accept without payment."
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />
+                      Deposit failed
                     </span>
                   )}
                   {isApptStyle &&
@@ -1254,6 +1277,7 @@ export function AppointmentDetailSheet({
           </div>
         </div>
       )}
+      {acceptUnpaidGuard.dialog}
     </>
   );
 }

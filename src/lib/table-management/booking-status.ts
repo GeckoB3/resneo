@@ -40,14 +40,20 @@ export const BOOKING_STATUS_TRANSITIONS: Record<BookingStatus, BookingStatus[]> 
 };
 
 export const BOOKING_PRIMARY_ACTIONS: Partial<Record<BookingStatus, { label: string; target: BookingStatus }>> = {
-  Pending: { label: 'Confirm', target: 'Booked' },
+  // 'Accept', not 'Confirm' (deposit-payment-robustness-plan D9): the attendance
+  // action on a Booked booking is also labelled Confirm, and staff could not
+  // tell that this one accepts a booking whose deposit may be unpaid.
+  Pending: { label: 'Accept', target: 'Booked' },
   Booked: { label: 'Seat', target: 'Seated' },
   Confirmed: { label: 'Seat', target: 'Seated' },
   Seated: { label: 'Complete', target: 'Completed' },
 };
 
 export const BOOKING_REVERT_ACTIONS: Partial<Record<BookingStatus, { label: string; target: BookingStatus }>> = {
-  Booked: { label: 'Mark pending', target: 'Pending' },
+  // No Booked -> Pending revert: it was never a legal transition (see
+  // BOOKING_STATUS_TRANSITIONS), so the button only ever produced an error
+  // (deposit-payment-robustness-plan D13). Deposit collection for an accepted
+  // booking runs through the payment link instead.
   Confirmed: { label: 'Undo confirm', target: 'Booked' },
   Seated: { label: 'Unseat', target: 'Booked' },
   Completed: { label: 'Reopen', target: 'Seated' },

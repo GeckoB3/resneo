@@ -33,6 +33,7 @@ const PENDING_BOOKING = {
   stripe_payment_intent_id: null as string | null,
   venue_id: 'venue-1',
   status: 'Pending',
+  deposit_status: 'Pending',
   booking_date: '2026-07-10',
   booking_time: '18:30:00',
   party_size: 2,
@@ -197,9 +198,30 @@ describe('GET /api/booking/pay (setup mode, spec 7.7)', () => {
     expect(json.error).toBe('Booking not found or already completed');
   });
 
-  it('404s generically when not Pending and there is no hold (deposit path unchanged)', async () => {
+  it('serves an accepted Booked booking that still owes its deposit (plan 6.6 recovery path)', async () => {
     mockSupabase({
-      booking: { ...PENDING_BOOKING, status: 'Booked', stripe_payment_intent_id: 'pi_1' },
+      booking: {
+        ...PENDING_BOOKING,
+        status: 'Booked',
+        deposit_status: 'Failed',
+        stripe_payment_intent_id: 'pi_1',
+        deposit_amount_pence: 2000,
+      },
+      hold: null,
+      venue: { name: 'The Copper Room', stripe_connected_account_id: 'acct_current', address: null },
+    });
+    mockRetrievePaymentIntent.mockResolvedValue({ client_secret: 'pi_1_secret_abc' } as never);
+
+    const res = await GET(payRequest());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.payment_mode).toBe('payment');
+    expect(json.client_secret).toBe('pi_1_secret_abc');
+  });
+
+  it('404s a Cancelled booking even with a PI', async () => {
+    mockSupabase({
+      booking: { ...PENDING_BOOKING, status: 'Cancelled', stripe_payment_intent_id: 'pi_1' },
       hold: null,
     });
 
@@ -207,6 +229,49 @@ describe('GET /api/booking/pay (setup mode, spec 7.7)', () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe('Booking not found or already completed');
+  });
+
+  it('404s with "already secured" when the deposit is settled (Paid)', async () => {
+    mockSupabase({
+      booking: {
+        ...PENDING_BOOKING,
+        status: 'Booked',
+        deposit_status: 'Paid',
+        stripe_payment_intent_id: 'pi_1',
+      },
+      hold: null,
+    });
+
+    const res = await GET(payRequest());
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe('This booking is already secured.');
+  });
+
+  it('400s with expired copy when the PI was cancelled by a sweep (plan D7)', async () => {
+    mockSupabase({
+      booking: { ...PENDING_BOOKING, stripe_payment_intent_id: 'pi_1', deposit_amount_pence: 1500 },
+      venue: { name: 'The Copper Room', stripe_connected_account_id: 'acct_current', address: null },
+    });
+    mockRetrievePaymentIntent.mockResolvedValue({ status: 'canceled', client_secret: 'x' } as never);
+
+    const res = await GET(payRequest());
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe('This link has expired. Please contact the venue for a new one.');
+  });
+
+  it('404s with "already secured" when the PI already succeeded', async () => {
+    mockSupabase({
+      booking: { ...PENDING_BOOKING, stripe_payment_intent_id: 'pi_1', deposit_amount_pence: 1500 },
+      venue: { name: 'The Copper Room', stripe_connected_account_id: 'acct_current', address: null },
+    });
+    mockRetrievePaymentIntent.mockResolvedValue({ status: 'succeeded', client_secret: 'x' } as never);
+
+    const res = await GET(payRequest());
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe('This booking is already secured.');
   });
 });
 

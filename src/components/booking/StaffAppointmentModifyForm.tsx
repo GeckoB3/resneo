@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StaffExpandedBookingModifySource } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { StaffAppointmentModifyDateTimePicker } from '@/components/booking/StaffAppointmentModifyDateTimePicker';
-import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import {
-  MAX_APPOINTMENT_CORE_DURATION_MINUTES,
-  minutesBetweenStartAndEndHM,
-} from '@/lib/booking/validate-appointment-modification';
+  BookingModifyNotifyFollowUp,
+  type BookingScheduleChangeSummary,
+} from '@/components/booking/BookingModifyNotifyFollowUp';
+import { minutesToTime, timeToMinutes } from '@/lib/availability';
+import { MAX_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/booking/validate-appointment-modification';
+import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
 
 interface ServiceRow {
   id: string;
@@ -25,22 +27,6 @@ interface PractitionerRow {
   id: string;
   name: string;
   is_active?: boolean;
-}
-
-function initialCoreDurationMinutes(booking: StaffExpandedBookingModifySource): number {
-  const start = booking.booking_time.slice(0, 5);
-  if (booking.booking_end_time && booking.booking_end_time.length >= 5) {
-    return Math.max(15, minutesBetweenStartAndEndHM(start, booking.booking_end_time.slice(0, 5)));
-  }
-  if (booking.estimated_end_time) {
-    const iso = booking.estimated_end_time.trim();
-    const d = new Date(iso);
-    if (!Number.isNaN(d.getTime())) {
-      const hm = d.toISOString().slice(11, 16);
-      return Math.max(15, minutesBetweenStartAndEndHM(start, hm));
-    }
-  }
-  return 30;
 }
 
 function buildPatchPayload(params: {
@@ -106,13 +92,38 @@ export function StaffAppointmentModifyForm({
   const [serviceId, setServiceId] = useState(initialServiceId);
   const [bookingDate, setBookingDate] = useState(booking.booking_date);
   const [bookingTime, setBookingTime] = useState(booking.booking_time.slice(0, 5));
-  const [durationMinutes, setDurationMinutes] = useState(() => initialCoreDurationMinutes(booking));
+  /**
+   * null until resolved: the booking's own duration when its row carries an end
+   * time, otherwise the service's catalogue duration adopted once the catalogue
+   * loads (see the effect below). Never a hardcoded default, which used to
+   * shrink appointments whose row reached this form without an end time.
+   */
+  const [durationMinutes, setDurationMinutes] = useState<number | null>(() =>
+    resolveBookingCoreDurationMinutes(booking),
+  );
+  /**
+   * What the form OPENED with. Tracks an adopted catalogue duration so
+   * adopting one is not mistaken for a staff edit (which would enable Save on
+   * a form nobody has touched).
+   */
+  const [baselineDuration, setBaselineDuration] = useState<number | null>(() =>
+    resolveBookingCoreDurationMinutes(booking),
+  );
   const [variantId, setVariantId] = useState<string | null>(booking.service_variant_id ?? null);
 
   const [validationState, setValidationState] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle');
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /**
+   * Set after a save that moved the appointment start (plan: calendar-parity
+   * notify / skip / undo). The guest notification was DEFERRED on that save;
+   * this panel replaces the form and decides its fate.
+   */
+  const [notifyFollowUp, setNotifyFollowUp] = useState<BookingScheduleChangeSummary | null>(null);
+  /** True while the follow-up is on screen and the caller has not been refreshed yet. */
+  const pendingFollowUpRef = useRef(false);
+  const onSavedRef = useRef(onSaved);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -140,10 +151,10 @@ export function StaffAppointmentModifyForm({
         serviceId: initialServiceId,
         bookingDate: booking.booking_date,
         bookingTime: booking.booking_time.slice(0, 5),
-        duration: initialCoreDurationMinutes(booking),
+        duration: baselineDuration,
         variant: booking.service_variant_id ?? null,
       }),
-    [booking, initialPractitionerId, initialServiceId],
+    [booking, initialPractitionerId, initialServiceId, baselineDuration],
   );
 
   const currentKey = useMemo(
@@ -235,6 +246,40 @@ export function StaffAppointmentModifyForm({
     }
   }, [practitionerOptions, practitionerId]);
 
+  useEffect(() => {
+    onSavedRef.current = onSaved;
+  }, [onSaved]);
+
+  useEffect(() => {
+    pendingFollowUpRef.current = notifyFollowUp != null;
+  }, [notifyFollowUp]);
+
+  // Modal dismissed (X / Escape) while the follow-up was still on screen: the
+  // change IS saved, so refresh the caller or the list keeps showing the old
+  // time. The panel's own cleanup still sends the guest notification.
+  useEffect(
+    () => () => {
+      if (pendingFollowUpRef.current) onSavedRef.current();
+    },
+    [],
+  );
+
+  /**
+   * The booking row carried no end time, so adopt the catalogue duration (the
+   * chosen variant's when there is one) as BOTH the value and the baseline:
+   * it is what this appointment is scheduled for, not an edit staff made.
+   */
+  useEffect(() => {
+    if (durationMinutes != null || !selectedService) return;
+    const activeVariant = (selectedService.variants ?? []).find(
+      (v) => v.is_active && v.id === variantId,
+    );
+    const adopted = activeVariant?.duration_minutes ?? selectedService.duration_minutes;
+    if (!Number.isFinite(adopted) || adopted < 15) return;
+    setDurationMinutes(adopted);
+    setBaselineDuration(adopted);
+  }, [durationMinutes, selectedService, variantId]);
+
   const runValidate = useCallback(async () => {
     if (!practitionerId || !serviceId) {
       setValidationState('invalid');
@@ -251,6 +296,9 @@ export function StaffAppointmentModifyForm({
       setValidationMessage('Select a service variant.');
       return;
     }
+    // Duration not resolved yet (catalogue still loading): stay idle rather
+    // than validate a guess. The effect below re-runs once it lands.
+    if (durationMinutes == null) return;
     setValidationState('loading');
     setValidationMessage(null);
     try {
@@ -302,27 +350,29 @@ export function StaffAppointmentModifyForm({
   }, [catalogError, practitionerId, serviceId, bookingDate, bookingTime, durationMinutes, variantId, runValidate, serviceWarning]);
 
   const endPreview = useMemo(() => {
+    if (durationMinutes == null) return null;
     const start = bookingTime.slice(0, 5);
     return minutesToTime(timeToMinutes(start) + durationMinutes);
   }, [bookingTime, durationMinutes]);
 
   const quickDurations = useMemo(() => {
     const set = new Set<number>();
-    set.add(durationMinutes);
+    if (durationMinutes != null) set.add(durationMinutes);
     if (selectedService) set.add(selectedService.duration_minutes);
-    set.add(initialCoreDurationMinutes(booking));
+    if (baselineDuration != null) set.add(baselineDuration);
     for (let m = 15; m <= Math.min(180, MAX_APPOINTMENT_CORE_DURATION_MINUTES); m += 15) {
       set.add(m);
     }
     return Array.from(set)
       .filter((m) => m >= 15 && m <= MAX_APPOINTMENT_CORE_DURATION_MINUTES)
       .sort((a, b) => a - b);
-  }, [booking, durationMinutes, selectedService]);
+  }, [baselineDuration, durationMinutes, selectedService]);
 
   const saveDisabled =
     saving ||
     !hasChanges ||
     Boolean(serviceWarning) ||
+    durationMinutes == null ||
     !bookingTime ||
     validationState === 'loading' ||
     validationState === 'invalid' ||
@@ -331,7 +381,11 @@ export function StaffAppointmentModifyForm({
     !serviceId ||
     (requiresVariant && !variantId);
 
+  const baselineTime = booking.booking_time.slice(0, 5);
+  const scheduleChanged = bookingDate !== booking.booking_date || bookingTime !== baselineTime;
+
   const handleSave = async () => {
+    if (durationMinutes == null) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -345,6 +399,12 @@ export function StaffAppointmentModifyForm({
         serviceVariantId: variantId,
         requiresVariant,
       });
+      // Start moved: defer the guest notification so the follow-up panel can
+      // offer notify / skip / undo, exactly like the calendar drag (the server
+      // would otherwise send it immediately in the background).
+      if (scheduleChanged) {
+        payload.defer_modification_guest_notification = true;
+      }
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -364,12 +424,77 @@ export function StaffAppointmentModifyForm({
         setSaveError(data.error ?? 'Could not save changes.');
         return;
       }
+      if (scheduleChanged) {
+        // Deliberately NOT onSaved() here: every caller closes the modal in
+        // that callback, which would tear this form down before the follow-up
+        // renders. finishFollowUp() calls it once the staff member has chosen
+        // notify / skip / undo.
+        setNotifyFollowUp({
+          fromDate: booking.booking_date,
+          fromTime: baselineTime,
+          toDate: bookingDate,
+          toTime: bookingTime,
+        });
+        return;
+      }
       onSaved();
       onClose();
     } finally {
       setSaving(false);
     }
   };
+
+  /** Follow-up Undo: restore the original schedule, sending no notification. */
+  const undoScheduleChange = useCallback(async (): Promise<boolean> => {
+    // The duration the form opened with (the booking's own, or the catalogue
+    // duration adopted for a row that carried no end time).
+    const revertDuration = baselineDuration;
+    if (revertDuration == null) return false;
+    try {
+      const payload = buildPatchPayload({
+        bookingDate: booking.booking_date,
+        bookingTime: baselineTime,
+        practitionerId: initialPractitionerId,
+        serviceId: initialServiceId,
+        usesServiceItem,
+        durationMinutes: revertDuration,
+        serviceVariantId: booking.service_variant_id ?? null,
+        requiresVariant: Boolean(booking.service_variant_id),
+      });
+      payload.skip_booking_modification_guest_notification = true;
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) return false;
+      // The caller is refreshed by finishFollowUp, which the panel calls right
+      // after a successful undo (calling onSaved here would close the modal
+      // first and double-refresh).
+      return true;
+    } catch {
+      return false;
+    }
+  }, [
+    booking,
+    bookingId,
+    baselineTime,
+    baselineDuration,
+    initialPractitionerId,
+    initialServiceId,
+    usesServiceItem,
+  ]);
+
+  /**
+   * The staff member finished with the follow-up (notified, skipped, or
+   * undone). onSaved refreshes the caller and, in every caller, closes the
+   * modal; onClose covers any caller whose onSaved does not.
+   */
+  const finishFollowUp = useCallback(() => {
+    pendingFollowUpRef.current = false;
+    onSaved();
+    onClose();
+  }, [onSaved, onClose]);
 
   if (catalogError) {
     return (
@@ -386,11 +511,27 @@ export function StaffAppointmentModifyForm({
     );
   }
 
-  if (services.length === 0 && !catalogError) {
+  // Also waits for the duration to resolve: a row with no end time adopts the
+  // catalogue duration in an effect above, so every field below has a number.
+  // Not when the service is missing from the catalogue though: nothing will
+  // ever resolve it, and that case must reach the warning below rather than
+  // spin forever.
+  if (services.length === 0 || (durationMinutes == null && !serviceWarning)) {
     return (
       <div className="flex items-center justify-center py-10">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
       </div>
+    );
+  }
+
+  if (notifyFollowUp) {
+    return (
+      <BookingModifyNotifyFollowUp
+        bookingId={bookingId}
+        change={notifyFollowUp}
+        onUndo={undoScheduleChange}
+        onClose={finishFollowUp}
+      />
     );
   }
 
@@ -500,7 +641,7 @@ export function StaffAppointmentModifyForm({
             min={15}
             max={MAX_APPOINTMENT_CORE_DURATION_MINUTES}
             step={5}
-            value={durationMinutes}
+            value={durationMinutes ?? ''}
             onChange={(e) => setDurationMinutes(Number(e.target.value))}
             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
@@ -527,9 +668,11 @@ export function StaffAppointmentModifyForm({
         </div>
       </div>
 
-      <p className="text-xs text-slate-600">
-        Ends at <span className="font-semibold text-slate-800">{endPreview}</span> (same day)
-      </p>
+      {endPreview ? (
+        <p className="text-xs text-slate-600">
+          Ends at <span className="font-semibold text-slate-800">{endPreview}</span> (same day)
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2 pt-1">
         <button

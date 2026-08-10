@@ -5,6 +5,12 @@ import { buildIcsContent } from '@/lib/ics';
 import type { GuestDetails, VenuePublic } from './types';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { cardHoldConfirmationLine, isCardHoldPaymentMode, type CardHoldPaymentMode } from './card-hold-copy';
+import {
+  BOOKING_CANCELLED_MESSAGE,
+  PAYMENT_PROCESSING_BODY,
+  PAYMENT_PROCESSING_HEADING,
+  type ConfirmOutcome,
+} from '@/lib/booking/client-confirm-payment';
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -24,9 +30,11 @@ interface ConfirmationStepProps {
   requiresDeposit?: boolean;
   /** Card capture mode from the create response; hold modes swap the deposit policy copy. */
   paymentMode?: CardHoldPaymentMode;
+  /** Server-verified payment outcome (plan Phase 5): drives honest confirmation copy. */
+  paymentOutcome?: ConfirmOutcome | null;
 }
 
-export function ConfirmationStep({ venue, date, slot, partySize, guest, requiresDeposit, paymentMode }: ConfirmationStepProps) {
+export function ConfirmationStep({ venue, date, slot, partySize, guest, requiresDeposit, paymentMode, paymentOutcome }: ConfirmationStepProps) {
   const dateStr = formatDateLong(date);
   const [showCheck, setShowCheck] = useState(false);
 
@@ -52,6 +60,16 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
     URL.revokeObjectURL(url);
   }, [venue.name, venue.address, date, slot.start_time, partySize]);
 
+  if (paymentOutcome === 'cancelled') {
+    return (
+      <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+        <h2 className="text-xl font-bold text-red-900">Booking not completed</h2>
+        <p className="mt-2 text-sm text-red-800">{BOOKING_CANCELLED_MESSAGE}</p>
+      </div>
+    );
+  }
+  const paymentPending = paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed';
+
   return (
     <div className="space-y-6">
       {/* Success animation */}
@@ -61,8 +79,12 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
             <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
           </svg>
         </div>
-        <h2 className="mt-4 text-xl font-bold text-slate-900">Booking Confirmed!</h2>
-        <p className="mt-1 text-sm text-slate-500">You&apos;ll receive a confirmation email shortly.</p>
+        <h2 className="mt-4 text-xl font-bold text-slate-900">
+          {paymentPending ? PAYMENT_PROCESSING_HEADING : 'Booking Confirmed!'}
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          {paymentPending ? PAYMENT_PROCESSING_BODY : "You'll receive a confirmation email shortly."}
+        </p>
       </div>
 
       {/* Booking details card */}

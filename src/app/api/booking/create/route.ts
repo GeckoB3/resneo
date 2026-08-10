@@ -7,6 +7,7 @@ import {
   CARD_HOLD_SETUP_FAILED_NOTE,
   PAYMENT_SETUP_FAILED_NOTE,
 } from '@/lib/booking/cancel-booking-after-payment-failure';
+import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import {
@@ -591,13 +592,24 @@ export async function POST(request: NextRequest) {
         );
         client_secret = paymentIntent.client_secret;
 
-        await supabase
+        // The linkage write is load-bearing (plan 8.1): without it the webhook
+        // and confirm route cannot find the unit, so a paid guest would be
+        // silently lost. On failure, kill the intent and the booking together.
+        const { error: linkErr } = await supabase
           .from('bookings')
           .update({
             stripe_payment_intent_id: paymentIntent.id,
             updated_at: new Date().toISOString(),
           })
           .eq('id', booking.id);
+        if (linkErr) {
+          console.error('PaymentIntent linkage write failed:', linkErr, { bookingId: booking.id });
+          await cancelAbandonedPaymentIntent(paymentIntent.id, venue.stripe_connected_account_id, {
+            bookingId: booking.id,
+          });
+          await cancelBookingAfterPaymentFailure(supabase, booking.id, PAYMENT_SETUP_FAILED_NOTE);
+          return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+        }
       } catch (stripeErr) {
         console.error('PaymentIntent create failed:', stripeErr);
         await cancelBookingAfterPaymentFailure(supabase, booking.id, PAYMENT_SETUP_FAILED_NOTE);
@@ -1911,10 +1923,21 @@ async function handleNonTableBooking(
       );
       client_secret = paymentIntent.client_secret;
 
-      await supabase
+      // Load-bearing linkage write (plan 8.1): see the table branch.
+      const { error: linkErr } = await supabase
         .from('bookings')
         .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
         .eq('id', booking.id);
+      if (linkErr) {
+        console.error('PaymentIntent linkage write failed:', linkErr, { bookingId: booking.id });
+        await cancelAbandonedPaymentIntent(
+          paymentIntent.id,
+          venue.stripe_connected_account_id as string,
+          { bookingId: booking.id },
+        );
+        await cancelBookingAfterPaymentFailure(supabase, booking.id, PAYMENT_SETUP_FAILED_NOTE);
+        return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+      }
     } catch (stripeErr) {
       console.error('PaymentIntent create failed:', stripeErr);
       await cancelBookingAfterPaymentFailure(supabase, booking.id, PAYMENT_SETUP_FAILED_NOTE);

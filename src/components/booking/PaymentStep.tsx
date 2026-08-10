@@ -6,6 +6,10 @@ import { loadStripe } from '@stripe/stripe-js';
 import type { Stripe } from '@stripe/stripe-js';
 import { renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
 import {
+  BOOKING_TIMED_OUT_MESSAGE,
+  isCanceledIntentConfirmError,
+} from '@/lib/booking/client-confirm-payment';
+import {
   CARD_HOLD_SETUP_HEADING,
   CARD_HOLD_SETUP_SUBHEADING,
   CARD_HOLD_SETUP_SUBMIT_LABEL,
@@ -110,7 +114,13 @@ function PaymentForm({
           ? await stripe.confirmSetup(confirmOptions)
           : await stripe.confirmPayment(confirmOptions);
       if (confirmError) {
-        setError(confirmError.message ?? failureFallback);
+        // The abandonment sweep cancelled the intent while this form sat open
+        // (plan follow-up): show the timed-out copy, not Stripe's jargon.
+        setError(
+          isCanceledIntentConfirmError(confirmError)
+            ? BOOKING_TIMED_OUT_MESSAGE
+            : confirmError.message ?? failureFallback,
+        );
         setLoading(false);
         return;
       }

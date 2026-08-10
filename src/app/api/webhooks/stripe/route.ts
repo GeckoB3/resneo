@@ -449,7 +449,7 @@ export async function POST(request: NextRequest) {
       // mark them all Failed, not just the primary.
       const { data: failedRows, error: failedSelErr } = await supabase
         .from('bookings')
-        .select('id, venue_id, guest_id, status, booking_date, booking_time, guest_first_name, guest_last_name')
+        .select('id, venue_id, guest_id, status, source, booking_date, booking_time, guest_first_name, guest_last_name')
         .eq('stripe_payment_intent_id', pi.id)
         .eq('deposit_status', 'Pending');
 
@@ -463,6 +463,7 @@ export async function POST(request: NextRequest) {
         venue_id: string;
         guest_id: string | null;
         status: string;
+        source: string | null;
         booking_date: string;
         booking_time: string;
         guest_first_name: string | null;
@@ -511,9 +512,12 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // One staff push + (legacy) kitchen alert per venue. The push is the
-        // channel appointments venues actually have; kitchen_email stays for
-        // venues that configured it.
+        // One staff push + (legacy) kitchen alert per venue. The IMMEDIATE push
+        // is scoped to phone payment-link bookings: staff initiated that
+        // collection and the sweep backstop is 24h away, so an early signal is
+        // useful. Online failures are usually followed by an inline retry
+        // seconds later; their terminal signal is the sweep's cancellation
+        // push (20-30 min), and the red "Deposit failed" pill covers the gap.
         const venuesSeen = new Set<string>();
         for (const r of rowsToFail) {
           if (venuesSeen.has(r.venue_id)) continue;
@@ -524,22 +528,30 @@ export async function POST(request: NextRequest) {
               .select('name, kitchen_email')
               .eq('id', r.venue_id)
               .maybeSingle();
-            try {
-              await sendStaffPush(
-                {
-                  id: r.id,
-                  guest_name: formatGuestDisplayName(r.guest_first_name, r.guest_last_name),
-                  booking_date: r.booking_date,
-                  booking_time: r.booking_time,
-                },
-                { name: venue?.name ?? null },
-                r.venue_id,
-                'payment_failed',
-              );
-            } catch (pushErr) {
-              console.error('[Stripe webhook] payment_failed staff push failed:', pushErr, {
-                bookingId: r.id,
-              });
+            const phoneRow = rowsToFail.find(
+              (b) => b.venue_id === r.venue_id && b.source === 'phone',
+            );
+            if (phoneRow) {
+              try {
+                await sendStaffPush(
+                  {
+                    id: phoneRow.id,
+                    guest_name: formatGuestDisplayName(
+                      phoneRow.guest_first_name,
+                      phoneRow.guest_last_name,
+                    ),
+                    booking_date: phoneRow.booking_date,
+                    booking_time: phoneRow.booking_time,
+                  },
+                  { name: venue?.name ?? null },
+                  r.venue_id,
+                  'payment_failed',
+                );
+              } catch (pushErr) {
+                console.error('[Stripe webhook] payment_failed staff push failed:', pushErr, {
+                  bookingId: phoneRow.id,
+                });
+              }
             }
             if (venue?.kitchen_email) {
               const bookingsForVenue = rowsToFail

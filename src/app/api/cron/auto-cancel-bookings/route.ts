@@ -32,13 +32,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *    a `processing` one waits.
  * 2. Staff card-hold arm (24h): phone/walk-in bookings with an open unsaved
  *    hold whose guest never added card details.
- * 3. Online card-hold arm (30m, setup mode): abandoned SetupIntent captures.
- * 4. Online money sweep (30m): EVERY online-like money booking (booking_page,
+ * 3. Online card-hold arm (20m, setup mode): abandoned SetupIntent captures.
+ * 4. Online money sweep (20m): EVERY online-like money booking (booking_page,
  *    widget, online; all models) still Pending with an owed deposit and a PI
  *    in a definitively unpaid state. Also covers payment_with_setup card-hold
  *    units. Bookings a staff member recently sent a payment link for are
  *    excluded (they follow the 24h phone-style deadline instead, plan D14).
- * 5. No-PI arm (30m): online money rows that never got a PaymentIntent linked;
+ * 5. No-PI arm (20m): online money rows that never got a PaymentIntent linked;
  *    nothing can ever pay them.
  */
 export async function GET(request: NextRequest) {
@@ -155,7 +155,12 @@ async function handlePost(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const now = Date.now();
     const cutoff = new Date(now - 24 * 60 * 60 * 1000).toISOString();
-    const classCutoff = new Date(now - 30 * 60 * 1000).toISOString();
+    // 20 minutes (plan follow-up): the clock starts at "Continue to payment",
+    // so this only has to cover time ON the payment step, and in-flight
+    // guests are protected by the PI status check (requires_action /
+    // processing are never swept). With the */10 cadence, cancellation lands
+    // 20-30 minutes after creation.
+    const classCutoff = new Date(now - 20 * 60 * 1000).toISOString();
     /** requires_action older than this is abandoned (plan M4 backstop). */
     const staleActionCutoff = cutoff;
 
@@ -427,7 +432,7 @@ async function handlePost(request: NextRequest) {
     }
 
     // -----------------------------------------------------------------------
-    // Sweep 3 + 4 candidates: online card-hold abandonment (30m, §12.1).
+    // Sweep 3 + 4 candidates: online card-hold abandonment (20m, §12.1).
     // Sources are load-bearing: direct flows post booking_page/widget; only
     // class carts post 'online'. The deposit filter includes 'Failed' because
     // payment_with_setup units share the money PI and a failed attempt flips
@@ -749,7 +754,7 @@ async function handlePost(request: NextRequest) {
     // -----------------------------------------------------------------------
     // Sweep 5: no-PI arm (plan 3.3). Online money rows that never got a
     // PaymentIntent linked (linkage write failed or an unknown crash path):
-    // nothing can ever pay them. The 30m age gate keeps in-flight creates out.
+    // nothing can ever pay them. The 20m age gate keeps in-flight creates out.
     // -----------------------------------------------------------------------
     let noPiCancelled = 0;
     const { data: noPiRows, error: noPiErr } = await supabase

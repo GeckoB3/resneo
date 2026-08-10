@@ -61,3 +61,18 @@ export const PAYMENT_PROCESSING_BODY =
   'Your payment is being processed. You will get your confirmation by email or text as soon as it clears.';
 export const BOOKING_CANCELLED_MESSAGE =
   'This booking was cancelled because it was not completed in time. Please make a new booking. If you were charged, the venue will arrange a refund.';
+/** The abandonment sweep cancelled the intent before the guest pressed Pay: no money moved. */
+export const BOOKING_TIMED_OUT_MESSAGE =
+  'This booking timed out and the slot was released. No payment was taken. Please start a new booking.';
+
+/**
+ * True when a Stripe confirm error means the intent was CANCELLED underneath
+ * the open payment form: the abandonment sweep (or a staff cancel) got there
+ * first. The raw Stripe message is jargon; show BOOKING_TIMED_OUT_MESSAGE.
+ */
+export function isCanceledIntentConfirmError(error: {
+  payment_intent?: { status?: string } | null;
+  setup_intent?: { status?: string } | null;
+}): boolean {
+  return error.payment_intent?.status === 'canceled' || error.setup_intent?.status === 'canceled';
+}

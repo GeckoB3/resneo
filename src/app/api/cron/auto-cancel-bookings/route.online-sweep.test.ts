@@ -237,6 +237,18 @@ describe('online money sweep (plan 3.1)', () => {
     expect(body.online_money_cancelled).toBe(1);
   });
 
+  it('a row younger than the 20-minute threshold is left alone', async () => {
+    const bookings = [
+      onlineMoneyBooking({ created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString() }),
+    ];
+    wireAdmin({ bookings });
+
+    const body = await runCron();
+    expect(body.online_money_cancelled).toBe(0);
+    expect(bookings[0]).toMatchObject({ status: 'Pending' });
+    expect(mockPiRetrieve).not.toHaveBeenCalled();
+  });
+
   it('a staff-sent payment link within 24h shields the booking (plan D14)', async () => {
     const bookings = [onlineMoneyBooking()];
     wireAdmin({

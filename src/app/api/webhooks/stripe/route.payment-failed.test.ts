@@ -167,6 +167,7 @@ const FAILED_ROW = {
   venue_id: 'venue-1',
   guest_id: 'g1',
   status: 'Pending',
+  source: 'phone',
   booking_date: '2026-08-14',
   booking_time: '11:15:00',
   guest_first_name: 'Mia',
@@ -193,7 +194,32 @@ beforeEach(() => {
 });
 
 describe('payment_intent.payment_failed (generic deposit branch, plan Phase 2)', () => {
-  it('flips rows to Failed, inserts deposit_payment_failed events, pushes staff once per venue', async () => {
+  it('an ONLINE failure inserts events but sends no immediate staff push (sweep owns the terminal signal)', async () => {
+    constructEventMock.mockReturnValue(failedEvent() as never);
+
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: [{ ...FAILED_ROW, source: 'booking_page' }], error: null };
+      }
+      if (call.table === 'bookings' && call.op === 'update') {
+        return { data: null, error: null };
+      }
+      if (call.table === 'events' && call.op === 'insert') {
+        return { data: null, error: null };
+      }
+      if (call.table === 'venues' && call.op === 'select') {
+        return { data: [{ name: 'Venue One', kitchen_email: null }], error: null };
+      }
+      return { data: [], error: null };
+    });
+    mockGetAdmin.mockReturnValue(admin as never);
+
+    const res = await POST(webhookRequest());
+    expect(res.status).toBe(200);
+    expect(mockStaffPush).not.toHaveBeenCalled();
+  });
+
+  it('a PHONE payment-link failure flips rows to Failed, inserts events, pushes staff once per venue', async () => {
     constructEventMock.mockReturnValue(failedEvent() as never);
 
     const eventInserts: unknown[] = [];

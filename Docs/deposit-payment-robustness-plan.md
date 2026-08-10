@@ -18,6 +18,16 @@ Implementation deviations from the plan text:
 - 8.2 reconciliation widening to accepted rows shipped together with 6.7 (same commit), not in a
   later PR.
 
+Post-go-live tuning (2026-08-10, owner-approved): sweep cadence tightened to `*/10` and the
+online abandonment threshold to 20 minutes, so cancellation lands 20-30 minutes after creation
+(in-flight guests stay protected by the PI status check; the staff-link exemption stays 24h). A
+cancelled-intent confirm error now shows friendly timed-out copy instead of Stripe's message.
+The IMMEDIATE `payment_failed` staff push is scoped to phone payment-link bookings; online
+failures keep the events row and the red pill, and their terminal signal is the sweep's
+cancellation push (a first decline is usually followed by a successful inline retry, so the
+immediate push was noise). The abandon-beacon idea (instant slot release on explicit leave) was
+considered and deferred.
+
 Revision 3 changes in brief (pass 2): every cleanup catch that abandons a booking after a PI was
 successfully created must also cancel that PI (multi-service/group mixed-mode catches and the
 staff payment helper's post-create short-link failure leave a live confirmable PI against a

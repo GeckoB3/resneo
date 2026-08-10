@@ -11,7 +11,9 @@ import { renderCardHoldConsentText, formatCardHoldFeePence } from '@/lib/booking
 import { BrandSpinner } from '@/components/ui/primitives';
 import {
   confirmBookingPaymentWithServer,
+  isCanceledIntentConfirmError,
   BOOKING_CANCELLED_MESSAGE,
+  BOOKING_TIMED_OUT_MESSAGE,
   PAYMENT_PROCESSING_BODY,
   PAYMENT_PROCESSING_HEADING,
   type ConfirmOutcome,
@@ -237,7 +239,13 @@ function PayForm({
             redirect: 'if_required',
           });
       if (confirmError) {
-        setError(confirmError.message ?? confirmFallbackError);
+        // A sweep or cancellation killed the intent while this form sat open:
+        // show the timed-out copy, not Stripe's jargon.
+        setError(
+          isCanceledIntentConfirmError(confirmError)
+            ? BOOKING_TIMED_OUT_MESSAGE
+            : confirmError.message ?? confirmFallbackError,
+        );
         setLoading(false);
         return;
       }

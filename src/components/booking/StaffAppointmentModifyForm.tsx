@@ -476,7 +476,10 @@ export function StaffAppointmentModifyForm({
 
   // Also waits for the duration to resolve: a row with no end time adopts the
   // catalogue duration in an effect above, so every field below has a number.
-  if (services.length === 0 || durationMinutes == null) {
+  // Not when the service is missing from the catalogue though: nothing will
+  // ever resolve it, and that case must reach the warning below rather than
+  // spin forever.
+  if (services.length === 0 || (durationMinutes == null && !serviceWarning)) {
     return (
       <div className="flex items-center justify-center py-10">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
@@ -601,7 +604,7 @@ export function StaffAppointmentModifyForm({
             min={15}
             max={MAX_APPOINTMENT_CORE_DURATION_MINUTES}
             step={5}
-            value={durationMinutes}
+            value={durationMinutes ?? ''}
             onChange={(e) => setDurationMinutes(Number(e.target.value))}
             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />

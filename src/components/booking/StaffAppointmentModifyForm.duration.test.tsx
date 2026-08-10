@@ -118,4 +118,16 @@ describe('StaffAppointmentModifyForm duration resolution', () => {
       expect(screen.getByRole('button', { name: /Save changes/i })).toBeDisabled();
     });
   });
+
+  it('shows the catalogue warning rather than spinning forever when the service is gone', async () => {
+    // Nothing can resolve the duration for a service that no longer exists, so
+    // the form must fall through to the warning instead of waiting on it.
+    renderForm({ appointment_service_id: 'deleted-service' });
+    await waitFor(() => {
+      expect(
+        screen.getByText(/service is no longer in the catalogue/i),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /Save changes/i })).toBeDisabled();
+  });
 });

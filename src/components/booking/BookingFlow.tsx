@@ -12,6 +12,10 @@ import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-r
 import { isCardHoldPaymentMode, type CardHoldPaymentMode } from './card-hold-copy';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
+import {
+  confirmBookingPaymentWithServer,
+  type ConfirmOutcome,
+} from '@/lib/booking/client-confirm-payment';
 
 export interface BookingFlowProps {
   venue: VenuePublic;
@@ -57,6 +61,8 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     card_hold_consent_text?: string | null;
   } | null>(null);
   const [_paymentComplete, setPaymentComplete] = useState(false);
+  /** Server-verified payment outcome (plan Phase 5): drives honest confirmation copy. */
+  const [paymentOutcome, setPaymentOutcome] = useState<ConfirmOutcome | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -301,26 +307,8 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       goNext();
       return;
     }
-    let confirmed = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const res = await fetch('/api/booking/confirm-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_id: createResult.booking_id }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.confirmed) { confirmed = true; break; }
-        }
-      } catch {
-        // Network error - retry
-      }
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 1500 * attempt));
-    }
-    if (!confirmed) {
-      console.warn('confirm-payment: all attempts failed - webhook will handle confirmation');
-    }
+    const outcome = await confirmBookingPaymentWithServer({ booking_id: createResult.booking_id });
+    setPaymentOutcome(outcome);
     setPaymentComplete(true);
     goNext();
   }, [goNext, createResult?.booking_id]);
@@ -403,6 +391,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
           amountPence={Math.round((selectedSlot?.deposit_amount ?? 0) * 100)}
+          bookingId={createResult.booking_id}
           partySize={partySize}
           onComplete={handlePaymentComplete}
           onBack={goBack}
@@ -416,7 +405,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         />
       )}
       {step === 'confirmation' && (
-        <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} requiresDeposit={requiresDeposit} paymentMode={createResult?.payment_mode} />
+        <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} requiresDeposit={requiresDeposit} paymentMode={createResult?.payment_mode} paymentOutcome={paymentOutcome} />
       )}
     </div>
   );

@@ -16,9 +16,15 @@ import {
   classOfferingsUrl,
   localTodayISO,
   bookingCreateUrl,
-  bookingConfirmPaymentUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import {
+  confirmBookingPaymentWithServer,
+  BOOKING_CANCELLED_MESSAGE,
+  PAYMENT_PROCESSING_BODY,
+  PAYMENT_PROCESSING_HEADING,
+  type ConfirmOutcome,
+} from '@/lib/booking/client-confirm-payment';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 import {
   cardHoldBookingNoticeLine,
@@ -278,6 +284,8 @@ export function ClassBookingFlow({
     /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
     card_hold_requested?: boolean;
   } | null>(null);
+  /** Server-verified payment outcome (plan Phase 5): drives honest confirmation copy. */
+  const [paymentOutcome, setPaymentOutcome] = useState<ConfirmOutcome | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -535,30 +543,18 @@ export function ClassBookingFlow({
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
-      try {
-        await fetch(bookingConfirmPaymentUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_id: createResult.booking_id }),
-        });
-      } catch {
-        /* webhook fallback */
-      }
+      const outcome = await confirmBookingPaymentWithServer({ booking_id: createResult.booking_id });
+      setPaymentOutcome(outcome);
     } else if (createResult?.cart_primary_booking_id) {
-      try {
-        const supabase = createClient();
-        const { data: auth } = await supabase.auth.getUser();
-        await fetch(bookingConfirmPaymentUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            booking_id: createResult.cart_primary_booking_id,
-            ...(auth.user?.email ? { guest_email: auth.user.email } : {}),
-          }),
-        });
-      } catch {
-        /* webhook fallback */
-      }
+      const supabase = createClient();
+      const { data: auth } = await supabase.auth.getUser();
+      const outcome = await confirmBookingPaymentWithServer({
+        booking_id: createResult.cart_primary_booking_id,
+        ...(auth.user?.email ? { guest_email: auth.user.email } : {}),
+      });
+      setPaymentOutcome(outcome);
+    } else {
+      setPaymentOutcome(null);
     }
     setStep('confirmation');
   }, [createResult?.booking_id, createResult?.cart_primary_booking_id]);
@@ -1121,6 +1117,7 @@ export function ClassBookingFlow({
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
           amountPence={createResult.cart_total_amount_pence ?? summary?.chargePence ?? 0}
+          bookingId={createResult.cart_primary_booking_id ?? createResult.booking_id}
           partySize={spots}
           onComplete={handlePaymentComplete}
           onBack={() => setStep(createResult.cart_primary_booking_id ? 'pick-date' : 'details')}
@@ -1140,14 +1137,27 @@ export function ClassBookingFlow({
         />
       )}
 
-      {step === 'confirmation' && (
+      {step === 'confirmation' && paymentOutcome === 'cancelled' && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+          <h2 className="text-xl font-bold text-red-900">{terms.booking} not completed</h2>
+          <p className="mt-2 text-sm text-red-800">{BOOKING_CANCELLED_MESSAGE}</p>
+        </div>
+      )}
+      {step === 'confirmation' && paymentOutcome !== 'cancelled' && (
         <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
             <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-green-900">{terms.booking} confirmed</h2>
+          <h2 className="text-xl font-bold text-green-900">
+            {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed'
+              ? PAYMENT_PROCESSING_HEADING
+              : `${terms.booking} confirmed`}
+          </h2>
+          {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed' ? (
+            <p className="mt-2 text-sm text-green-800">{PAYMENT_PROCESSING_BODY}</p>
+          ) : null}
           {createResult?.cart_booking_count && createResult.cart_booking_count > 1 ? (
             <p className="mt-2 text-sm text-green-800">
               {selectedClass?.class_name}

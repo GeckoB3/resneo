@@ -1,9 +1,22 @@
 # Deposit and payment robustness: implementation plan
 
-Status: REVIEWED (revision 3, 2026-08-10). Two adversarial code-verification passes completed;
-pass 1 found 3 blockers, 5 majors, 6 minors; pass 2 found 1 major, 6 minors, all incorporated.
-PR 1 implementation started on this revision.
-Baseline commit `cf17190b` (staging).
+Status: IMPLEMENTED on staging (2026-08-10, revision 3 + implementation notes). Two adversarial
+code-verification passes preceded implementation (pass 1: 3 blockers, 5 majors, 6 minors; pass 2:
+1 major, 6 minors, all incorporated). All three PR-equivalents are committed on `staging`.
+Baseline commit `cf17190b`.
+
+Implementation deviations from the plan text:
+- 6.4: the accept dialog is wired into the five highest-traffic staff surfaces
+  (AppointmentDetailSheet, RegistryBookingAccordionList, BookingsDashboard, DaySheetView,
+  PractitionerCalendarView). The remaining table-centric surfaces (TimelineGrid, FloorPlanLiveView,
+  TableGridView, EventManagerView, BookingDetailPanel and other PATCH senders) fall back to the
+  server 409's readable message, the same floor an out-of-date mobile app gets (D10). Wire the
+  dialog into them as a follow-up if venues hit it there.
+- 6.1/6.2 tests: the [id] PATCH route has no existing test harness and a very large import graph;
+  the guard's brain is covered by `booking-owes-capture.test.ts` and the accepted-row flips by
+  `confirm-deposit-payment.test.ts`. A route-level guard test remains a follow-up.
+- 8.2 reconciliation widening to accepted rows shipped together with 6.7 (same commit), not in a
+  later PR.
 
 Revision 3 changes in brief (pass 2): every cleanup catch that abandons a booking after a PI was
 successfully created must also cancel that PI (multi-service/group mixed-mode catches and the

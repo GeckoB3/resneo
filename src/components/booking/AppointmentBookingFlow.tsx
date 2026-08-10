@@ -49,9 +49,15 @@ import {
   bookingCreateUrl,
   bookingCreateMultiServiceUrl,
   bookingCreateGroupUrl,
-  bookingConfirmPaymentUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import {
+  confirmBookingPaymentWithServer,
+  BOOKING_CANCELLED_MESSAGE,
+  PAYMENT_PROCESSING_BODY,
+  PAYMENT_PROCESSING_HEADING,
+  type ConfirmOutcome,
+} from '@/lib/booking/client-confirm-payment';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 import {
   AppointmentPublicShell,
@@ -857,6 +863,8 @@ export function AppointmentBookingFlow({
     /** Unmet warn_staff/warn_client requirements flagged at staff booking time (audit M2). */
     compliance_warnings?: Array<{ compliance_type_name: string }>;
   } | null>(null);
+  /** Server-verified payment outcome (plan Phase 5): drives honest confirmation copy. */
+  const [paymentOutcome, setPaymentOutcome] = useState<ConfirmOutcome | null>(null);
 
   // Keyed by booking id so host re-renders (new callback identity) don't re-fire the notify.
   const submittedNotifiedIdRef = useRef<string | null>(null);
@@ -2641,13 +2649,10 @@ export function AppointmentBookingFlow({
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
-      try {
-        await fetch(bookingConfirmPaymentUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_id: createResult.booking_id }),
-        });
-      } catch { /* webhook fallback */ }
+      const outcome = await confirmBookingPaymentWithServer({ booking_id: createResult.booking_id });
+      setPaymentOutcome(outcome);
+    } else {
+      setPaymentOutcome(null);
     }
     setStep('confirmation');
   }, [createResult?.booking_id]);
@@ -2794,13 +2799,12 @@ export function AppointmentBookingFlow({
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
-      try {
-        await fetch(bookingConfirmPaymentUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_id: groupCreateResult.booking_ids[0] }),
-        });
-      } catch { /* webhook fallback */ }
+      const outcome = await confirmBookingPaymentWithServer({
+        booking_id: groupCreateResult.booking_ids[0],
+      });
+      setPaymentOutcome(outcome);
+    } else {
+      setPaymentOutcome(null);
     }
     setStep('group_confirmation');
   }, [groupCreateResult]);
@@ -4748,6 +4752,7 @@ export function AppointmentBookingFlow({
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
           amountPence={createResult.deposit_amount_pence}
+          bookingId={createResult.booking_id}
           partySize={1}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
@@ -4764,10 +4769,26 @@ export function AppointmentBookingFlow({
         />
       )}
 
-      {!isEdit && step === 'confirmation' && (
+      {!isEdit && step === 'confirmation' && paymentOutcome === 'cancelled' && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+          <h2 className="text-xl font-bold text-red-900">{terms.booking} not completed</h2>
+          <p className="mt-2 text-sm text-red-800">{BOOKING_CANCELLED_MESSAGE}</p>
+          {bookAnotherButton}
+        </div>
+      )}
+      {!isEdit && step === 'confirmation' && paymentOutcome !== 'cancelled' && (
         <div className="rounded-2xl border border-brand-200 bg-brand-50 p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-brand-100"><svg className="h-8 w-8 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg></div>
-          <h2 className="text-xl font-bold text-brand-900">{isEdit ? `${terms.booking} Updated` : `${terms.booking} Confirmed`}</h2>
+          <h2 className="text-xl font-bold text-brand-900">
+            {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed'
+              ? PAYMENT_PROCESSING_HEADING
+              : isEdit
+                ? `${terms.booking} Updated`
+                : `${terms.booking} Confirmed`}
+          </h2>
+          {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed' ? (
+            <p className="mt-2 text-sm text-brand-700">{PAYMENT_PROCESSING_BODY}</p>
+          ) : null}
           {multiServiceSegments && multiServiceSegments.length > 1 ? (
             <div className="mt-3 space-y-2 text-left text-sm text-brand-800">
               <p className="text-center text-brand-700">
@@ -5581,6 +5602,7 @@ export function AppointmentBookingFlow({
           clientSecret={groupCreateResult.client_secret}
           stripeAccountId={groupCreateResult.stripe_account_id}
           amountPence={groupCreateResult.total_deposit_pence}
+          bookingId={groupCreateResult.booking_ids?.[0]}
           partySize={groupPeople.length}
           onComplete={handleGroupPaymentComplete}
           onBack={() => setStep('group_details')}
@@ -5598,12 +5620,25 @@ export function AppointmentBookingFlow({
       )}
 
       {/* Group: confirmation */}
-      {step === 'group_confirmation' && (
+      {step === 'group_confirmation' && paymentOutcome === 'cancelled' && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+          <h2 className="text-xl font-bold text-red-900">Group booking not completed</h2>
+          <p className="mt-2 text-sm text-red-800">{BOOKING_CANCELLED_MESSAGE}</p>
+        </div>
+      )}
+      {step === 'group_confirmation' && paymentOutcome !== 'cancelled' && (
         <div className="rounded-2xl border border-brand-200 bg-brand-50 p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-brand-100">
             <svg className="h-8 w-8 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
           </div>
-          <h2 className="text-xl font-bold text-brand-900">Group Booking Confirmed</h2>
+          <h2 className="text-xl font-bold text-brand-900">
+            {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed'
+              ? PAYMENT_PROCESSING_HEADING
+              : 'Group Booking Confirmed'}
+          </h2>
+          {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed' ? (
+            <p className="mt-2 text-sm text-brand-700">{PAYMENT_PROCESSING_BODY}</p>
+          ) : null}
           <div className="mt-3 space-y-2">
             {groupPeople.map((person, idx) => (
               <div key={idx} className="text-sm text-brand-700">

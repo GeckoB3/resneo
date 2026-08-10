@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import type { VenuePublic } from './types';
-import { classOfferingsUrl, bookingConfirmPaymentUrl } from '@/lib/booking/booking-flow-api';
+import { classOfferingsUrl } from '@/lib/booking/booking-flow-api';
+import {
+  confirmBookingPaymentWithServer,
+  BOOKING_CANCELLED_MESSAGE,
+  PAYMENT_PROCESSING_BODY,
+} from '@/lib/booking/client-confirm-payment';
 import { RequireAuthModal } from '@/components/auth/RequireAuthModal';
 import { createClient } from '@/lib/supabase/browser';
 import { PaymentStep } from './PaymentStep';
@@ -72,6 +77,8 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
   const [instances, setInstances] = useState<InstanceRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Post-checkout outcome banner (plan Phase 5): replaces the old blocking alert(). */
+  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [quote, setQuote] = useState<unknown>(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -155,30 +162,30 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
 
   const handlePaymentComplete = useCallback(async () => {
     if (!paymentSession) return;
-    try {
-      const supabase = createClient();
-      const { data: auth } = await supabase.auth.getUser();
-      const guestEmail = auth.user?.email?.trim() ?? undefined;
-      await fetch(bookingConfirmPaymentUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_id: paymentSession.primary_booking_id,
-          ...(guestEmail ? { guest_email: guestEmail } : {}),
-        }),
-      });
-    } catch {
-      /* webhook fallback */
-    }
+    const supabase = createClient();
+    const { data: auth } = await supabase.auth.getUser();
+    const guestEmail = auth.user?.email?.trim() ?? undefined;
+    const outcome = await confirmBookingPaymentWithServer({
+      booking_id: paymentSession.primary_booking_id,
+      ...(guestEmail ? { guest_email: guestEmail } : {}),
+    });
     const savedCardOnly = paymentSession.payment_mode === 'setup';
     setPaymentSession(null);
+    if (outcome === 'cancelled') {
+      // The abandonment sweep won the race (J2): never claim success. The cart
+      // stays so the member can rebook the sessions.
+      setError(BOOKING_CANCELLED_MESSAGE);
+      return;
+    }
     setCart([]);
     setQuote(null);
     setError(null);
-    alert(
-      savedCardOnly
-        ? 'Card saved. No payment has been taken.'
-        : 'Payment successful. Your class bookings are confirmed.',
+    setCompletionMessage(
+      outcome === 'confirmed'
+        ? savedCardOnly
+          ? 'Card saved. No payment has been taken. Your class bookings are confirmed.'
+          : 'Payment successful. Your class bookings are confirmed.'
+        : PAYMENT_PROCESSING_BODY,
     );
   }, [paymentSession]);
 
@@ -243,6 +250,11 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
       </p>
 
       {error ? <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
+      {completionMessage ? (
+        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {completionMessage}
+        </div>
+      ) : null}
 
       {commerce && (commerce.credit_products.length > 0 || commerce.course_products.length > 0) ? (
         <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-800">
@@ -279,6 +291,7 @@ export function ClassMultiSessionCart({ venue }: { venue: VenuePublic }) {
             clientSecret={paymentSession.client_secret}
             stripeAccountId={paymentSession.stripe_account_id}
             amountPence={paymentSession.total_amount_pence}
+            bookingId={paymentSession.primary_booking_id}
             partySize={Math.max(1, paymentSession.total_party_size)}
             onComplete={() => void handlePaymentComplete()}
             onBack={() => {

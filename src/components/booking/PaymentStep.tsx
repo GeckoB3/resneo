@@ -20,6 +20,11 @@ interface PaymentStepProps {
   stripeAccountId?: string;
   amountPence: number;
   partySize: number;
+  /**
+   * Booking id carried in the 3DS redirect return_url (plan 7.3) so
+   * /pay/success can run the server confirm the redirect skipped.
+   */
+  bookingId?: string;
   onComplete: () => void;
   onBack: () => void;
   cancellationPolicy?: string;
@@ -47,6 +52,7 @@ interface PaymentStepProps {
 
 function PaymentForm({
   clientSecret,
+  bookingId,
   onComplete,
   onBack,
   payButtonLabel,
@@ -54,6 +60,7 @@ function PaymentForm({
   consentText,
 }: {
   clientSecret: string;
+  bookingId?: string;
   onComplete: () => void;
   onBack: () => void;
   payButtonLabel: string;
@@ -85,7 +92,11 @@ function PaymentForm({
         elements,
         clientSecret,
         confirmParams: {
-          return_url: `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/success`,
+          // booking_id rides along (plan 7.3) so /pay/success can run the
+          // best-effort server confirm after a 3DS redirect.
+          return_url: `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/success${
+            bookingId ? `?booking_id=${encodeURIComponent(bookingId)}` : ''
+          }`,
         },
         // Stay on page for standard cards; only redirect when required
         // (e.g. 3D Secure bank authentication flows).
@@ -167,6 +178,7 @@ export function PaymentStep({
   stripeAccountId,
   amountPence,
   partySize,
+  bookingId,
   onComplete,
   onBack,
   cancellationPolicy,
@@ -263,6 +275,7 @@ export function PaymentStep({
       <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#003B6F', borderRadius: '12px' } } }}>
         <PaymentForm
           clientSecret={clientSecret}
+          bookingId={bookingId}
           onComplete={onComplete}
           onBack={onBack}
           payButtonLabel={payButtonLabel}

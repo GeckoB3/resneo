@@ -14,6 +14,8 @@ import {
   recordCardHoldChargeFailure,
 } from '@/lib/booking/card-hold-charge';
 import { sendCardHoldChargedReceipt, sendPaymentReceiptEmail } from '@/lib/communications/send-templated';
+import { sendStaffPush } from '@/lib/communications/staff-push-notification';
+import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   applyBalancePaymentRefundFromWebhook,
   confirmBalancePaymentFromPaymentIntent,
@@ -279,7 +281,7 @@ export async function POST(request: NextRequest) {
 
       const { data: booking, error: bookingLoadErr } = await supabase
         .from('bookings')
-        .select('id, venue_id, guest_id, status, deposit_status, source')
+        .select('id, venue_id, guest_id, status, deposit_status, source, stripe_payment_intent_id')
         .eq('id', bookingId)
         .single();
 
@@ -291,6 +293,30 @@ export async function POST(request: NextRequest) {
       if (!booking) {
         console.log(`[Stripe webhook] Booking ${bookingId} not found \u2014 skipping`);
         return NextResponse.json({ received: true });
+      }
+
+      // Linkage self-repair (deposit-payment-robustness-plan 8.1 companion): if
+      // the PI-id write failed at create time, the unit's rows carry NULL and
+      // the confirm below would find nothing and silently ack a real payment.
+      // The metadata names the unit, so backfill the missing linkage first.
+      // Guarded on IS NULL: an existing (different) linkage is never rewritten.
+      if (!booking.stripe_payment_intent_id) {
+        const unitIds = (meta.booking_ids ? meta.booking_ids.split(',') : [bookingId])
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const { error: backfillErr } = await supabase
+          .from('bookings')
+          .update({ stripe_payment_intent_id: pi.id, updated_at: new Date().toISOString() })
+          .in('id', unitIds)
+          .is('stripe_payment_intent_id', null);
+        if (backfillErr) {
+          console.error('[Stripe webhook] PI linkage backfill failed:', backfillErr, { bookingId });
+          throw backfillErr;
+        }
+        console.warn('[Stripe webhook] backfilled missing PI linkage from metadata', {
+          bookingId,
+          paymentIntentId: pi.id,
+        });
       }
 
       // Thread the payment method through so payment_with_setup units get
@@ -409,7 +435,7 @@ export async function POST(request: NextRequest) {
       // mark them all Failed, not just the primary.
       const { data: failedRows, error: failedSelErr } = await supabase
         .from('bookings')
-        .select('id, venue_id, guest_id, status')
+        .select('id, venue_id, guest_id, status, booking_date, booking_time, guest_first_name, guest_last_name')
         .eq('stripe_payment_intent_id', pi.id)
         .eq('deposit_status', 'Pending');
 
@@ -423,6 +449,10 @@ export async function POST(request: NextRequest) {
         venue_id: string;
         guest_id: string | null;
         status: string;
+        booking_date: string;
+        booking_time: string;
+        guest_first_name: string | null;
+        guest_last_name: string | null;
       }>;
       if (rowsToFail.length > 0) {
         const { error: failUpdateErr } = await supabase
@@ -446,7 +476,30 @@ export async function POST(request: NextRequest) {
         // consumed entitlement and free the seat too. No-op for card-only bookings.
         await restoreAndReleaseClassBookings(supabase, rowsToFail, 'stripe_payment_failed');
 
-        // One kitchen alert per venue.
+        // Durable per-booking trace (deposit-payment-robustness-plan Phase 2).
+        // Best-effort: the Failed flip above is the critical write; an events
+        // failure must not trigger webhook redelivery storms.
+        const { error: failEventErr } = await supabase.from('events').insert(
+          rowsToFail.map((b) => ({
+            venue_id: b.venue_id,
+            booking_id: b.id,
+            event_type: 'deposit_payment_failed',
+            payload: {
+              payment_intent_id: pi.id,
+              failure_code:
+                pi.last_payment_error?.code ?? pi.last_payment_error?.decline_code ?? 'payment_failed',
+            },
+          })),
+        );
+        if (failEventErr) {
+          console.error('[Stripe webhook] deposit_payment_failed events insert failed:', failEventErr, {
+            paymentIntentId: pi.id,
+          });
+        }
+
+        // One staff push + (legacy) kitchen alert per venue. The push is the
+        // channel appointments venues actually have; kitchen_email stays for
+        // venues that configured it.
         const venuesSeen = new Set<string>();
         for (const r of rowsToFail) {
           if (venuesSeen.has(r.venue_id)) continue;
@@ -457,6 +510,23 @@ export async function POST(request: NextRequest) {
               .select('name, kitchen_email')
               .eq('id', r.venue_id)
               .maybeSingle();
+            try {
+              await sendStaffPush(
+                {
+                  id: r.id,
+                  guest_name: formatGuestDisplayName(r.guest_first_name, r.guest_last_name),
+                  booking_date: r.booking_date,
+                  booking_time: r.booking_time,
+                },
+                { name: venue?.name ?? null },
+                r.venue_id,
+                'payment_failed',
+              );
+            } catch (pushErr) {
+              console.error('[Stripe webhook] payment_failed staff push failed:', pushErr, {
+                bookingId: r.id,
+              });
+            }
             if (venue?.kitchen_email) {
               const bookingsForVenue = rowsToFail
                 .filter((b) => b.venue_id === r.venue_id)

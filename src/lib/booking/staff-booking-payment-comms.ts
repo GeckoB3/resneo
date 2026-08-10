@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { NextRequest } from 'next/server';
 import { after } from 'next/server';
 import { stripe } from '@/lib/stripe';
+import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { createOrGetBookingShortLink, createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import {
@@ -177,6 +178,10 @@ export async function applyStaffBookingPaymentAndComms(params: {
       }
     });
   } else if (requiresDeposit && depositAmountPence > 0 && stripeConnectedAccountId) {
+    // Tracked so the catch can kill the intent too (plan 8.1): a short-link or
+    // linkage failure after the PI create makes the caller delete the booking,
+    // which would otherwise leave a live confirmable PI behind.
+    let createdPaymentIntentId: string | null = null;
     try {
       const paymentIntent = await stripe.paymentIntents.create(
         {
@@ -187,14 +192,19 @@ export async function applyStaffBookingPaymentAndComms(params: {
         },
         { stripeAccount: stripeConnectedAccountId },
       );
-      await admin
+      createdPaymentIntentId = paymentIntent.id;
+      const { error: linkErr } = await admin
         .from('bookings')
         .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
         .eq('id', bookingId);
+      if (linkErr) throw new Error(`PI linkage write failed: ${linkErr.message}`);
 
       payment_url = await createOrGetPaymentShortLink(venueId, bookingId, publicBaseUrl);
     } catch (stripeErr) {
       console.error(`PaymentIntent create failed (${logContext}):`, stripeErr);
+      await cancelAbandonedPaymentIntent(createdPaymentIntentId, stripeConnectedAccountId, {
+        bookingId,
+      });
       throw new Error('payment_failed');
     }
 

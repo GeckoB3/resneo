@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { withCronRunLogging } from '@/lib/platform/cron-log';
+import { selfHealSucceededPaymentIntent } from '@/lib/booking/self-heal-succeeded-payment';
 
 /**
  * GET/POST /api/cron/reconciliation
@@ -92,15 +93,98 @@ async function handlePost(request: NextRequest) {
     }
 
     const holdResult = await reconcileCardHolds(supabase, cutoff);
+    const stuckResult = await reconcileStuckPendingMoneyRows(supabase);
 
     return NextResponse.json({
-      checked: bookings.length + holdResult.checked,
+      checked: bookings.length + holdResult.checked + stuckResult.checked,
       alerts: alerts + holdResult.alerts,
+      self_healed: stuckResult.healed,
     });
   } catch (err) {
     console.error('reconciliation cron failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+/**
+ * Daily backstop for paid-but-stuck-Pending money rows (plan 8.2): a PI that
+ * succeeded while the webhook AND the client confirm both missed it. The
+ * 30-minute sweeps self-heal these fast (they already retrieve the PI before
+ * cancelling); this arm catches anything they skipped, for example rows
+ * shielded by a staff-sent payment link (plan D14).
+ *
+ * Scoped to `status = 'Pending'` deliberately: accepted-but-unpaid Booked rows
+ * cannot have their deposit flipped until the plan's Phase 4 (6.7) ships, so
+ * including them would raise a false alert every day. Widen in PR 2.
+ */
+async function reconcileStuckPendingMoneyRows(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+): Promise<{ checked: number; healed: number }> {
+  const oldEnough = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const notOlderThan = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+  const { data: rows, error: fetchErr } = await supabase
+    .from('bookings')
+    .select('id, venue_id, stripe_payment_intent_id')
+    .eq('status', 'Pending')
+    .in('deposit_status', ['Pending', 'Failed'])
+    .not('stripe_payment_intent_id', 'is', null)
+    .gte('updated_at', notOlderThan)
+    .lte('updated_at', oldEnough)
+    .limit(200);
+
+  if (fetchErr) {
+    console.error('reconciliation stuck-pending fetch failed:', fetchErr);
+    return { checked: 0, healed: 0 };
+  }
+
+  const pending = (rows ?? []) as Array<{
+    id: string;
+    venue_id: string;
+    stripe_payment_intent_id: string;
+  }>;
+  if (pending.length === 0) return { checked: 0, healed: 0 };
+
+  const byPi = new Map<string, typeof pending>();
+  for (const b of pending) {
+    const list = byPi.get(b.stripe_payment_intent_id) ?? [];
+    list.push(b);
+    byPi.set(b.stripe_payment_intent_id, list);
+  }
+
+  const venueIds = [...new Set(pending.map((b) => b.venue_id))];
+  const { data: venues } = await supabase
+    .from('venues')
+    .select('id, stripe_connected_account_id')
+    .in('id', venueIds);
+  const accountByVenue = new Map(
+    (venues ?? []).map((v) => [v.id, v.stripe_connected_account_id as string | null]),
+  );
+
+  let checked = 0;
+  let healed = 0;
+  for (const [piId, group] of byPi.entries()) {
+    checked++;
+    const accountId = accountByVenue.get(group[0]!.venue_id);
+    if (!accountId) continue;
+    try {
+      const pi = await stripe.paymentIntents.retrieve(piId, { stripeAccount: accountId });
+      if (pi.status !== 'succeeded') continue;
+      const heal = await selfHealSucceededPaymentIntent(supabase, {
+        paymentIntentId: piId,
+        venueId: group[0]!.venue_id,
+        paymentMethodId:
+          typeof pi.payment_method === 'string' ? pi.payment_method : pi.payment_method?.id ?? null,
+        leadBookingId: group[0]!.id,
+        source: 'reconciliation',
+      });
+      if (heal.outcome === 'confirmed') healed += heal.confirmedIds.length;
+    } catch (err) {
+      console.error('reconciliation stuck-pending PI retrieve failed:', err, { piId });
+    }
+  }
+
+  return { checked, healed };
 }
 
 type HoldReconRow = {

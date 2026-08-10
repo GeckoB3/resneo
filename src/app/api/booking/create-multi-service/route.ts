@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { createClient } from '@/lib/supabase/server';
 import { stripe } from '@/lib/stripe';
+import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
 import { findOrCreateGuest } from '@/lib/guests';
 import {
   CLIENT_ADDRESS_REQUIRED_ERROR,
@@ -720,6 +721,10 @@ export async function POST(request: NextRequest) {
     let client_secret: string | null = null;
 
     if (captureMode === 'payment' && requiresDeposit && totalDepositPence > 0 && venue.stripe_connected_account_id) {
+      // Tracked so the catch can kill the intent too (plan 8.1): abandoning
+      // the bookings while the PI stays confirmable would let a guest pay
+      // money against rows that no longer exist.
+      let createdPaymentIntentId: string | null = null;
       try {
         const primaryId = bookingIds[0]!;
         const paymentIntent = await stripe.paymentIntents.create(
@@ -736,17 +741,22 @@ export async function POST(request: NextRequest) {
           },
           { stripeAccount: venue.stripe_connected_account_id },
         );
+        createdPaymentIntentId = paymentIntent.id;
         client_secret = paymentIntent.client_secret;
 
-        await supabase
+        const { error: linkErr } = await supabase
           .from('bookings')
           .update({
             stripe_payment_intent_id: paymentIntent.id,
             updated_at: new Date().toISOString(),
           })
           .in('id', bookingIds);
+        if (linkErr) throw new Error(`PI linkage write failed: ${linkErr.message}`);
       } catch (stripeErr) {
         console.error('Multi-service PaymentIntent create failed:', stripeErr);
+        await cancelAbandonedPaymentIntent(createdPaymentIntentId, venue.stripe_connected_account_id, {
+          groupBookingId,
+        });
         await supabase.from('bookings').delete().in('id', bookingIds);
         return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
       }
@@ -756,6 +766,9 @@ export async function POST(request: NextRequest) {
     ) {
       const stripeAccountId = venue.stripe_connected_account_id;
       let cardHoldCustomerId: string | null = null;
+      // Mixed-mode PI, tracked for catch cleanup (plan 8.1): the old catch
+      // deleted the bookings and the customer but left the PI confirmable.
+      let createdPaymentIntentId: string | null = null;
       try {
         // Dedicated booking-scoped Customer for the capture unit (D2).
         const customer = await createCardHoldCustomer({
@@ -804,15 +817,17 @@ export async function POST(request: NextRequest) {
             },
             { stripeAccount: stripeAccountId },
           );
+          createdPaymentIntentId = paymentIntent.id;
           client_secret = paymentIntent.client_secret;
 
-          await supabase
+          const { error: linkErr } = await supabase
             .from('bookings')
             .update({
               stripe_payment_intent_id: paymentIntent.id,
               updated_at: new Date().toISOString(),
             })
             .in('id', bookingIds);
+          if (linkErr) throw new Error(`PI linkage write failed: ${linkErr.message}`);
 
           await insertCardHoldRows(supabase, cardHoldRowInputs, {
             venueId: venue_id,
@@ -824,6 +839,9 @@ export async function POST(request: NextRequest) {
         }
       } catch (stripeErr) {
         console.error('Multi-service card hold setup failed:', stripeErr);
+        await cancelAbandonedPaymentIntent(createdPaymentIntentId, stripeAccountId, {
+          groupBookingId,
+        });
         await supabase.from('bookings').delete().in('id', bookingIds);
         if (cardHoldCustomerId) {
           try {

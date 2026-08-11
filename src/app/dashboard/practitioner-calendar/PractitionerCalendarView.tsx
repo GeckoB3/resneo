@@ -534,6 +534,24 @@ const MIN_SLOT_PX = 16;
 const COMPACT_DRAG_DEADZONE_PX = 6;
 const SLOT_MINUTES = 15;
 /**
+ * Height a booking bar spends on things OTHER than the info card, so the card is
+ * given an honest budget to lay itself out in.
+ *
+ * `BookingCard` picks how many rows to show from the height it is told it has.
+ * Both bar layouts were handing it the RAW bar height while the same box also
+ * held the button's vertical padding and, when present, the pills row rendered
+ * underneath the card. The card then chose a row count that could not fit: on a
+ * multi-service visit the phone line was sliced in half and the time line
+ * disappeared behind the next segment.
+ *
+ * Measured against the real styles rather than estimated.
+ */
+const BOOKING_CARD_PADDING_TALL_PX = 16;
+const BOOKING_CARD_PADDING_SHORT_PX = 12;
+const BOOKING_CARD_PADDING_SEGMENT_PX = 8;
+const BOOKING_PILLS_ROW_PX = 32;
+const BOOKING_SEGMENT_PILLS_ROW_PX = 28;
+/**
  * Height assumed for the day grid's column-header row until it is measured.
  * Matches the native header cell's own `min-h`, so the first paint lines the time
  * gutter up correctly for the common case (no linked columns, hours on one line).
@@ -6839,13 +6857,27 @@ export function PractitionerCalendarView({
                           const isOverlapLane = layout.laneCount > 1;
                           const reservePx =
                             canDrag && resizeAffordanceOn ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0;
-                          const contentHeightPx = Math.max(0, blockH - reservePx);
+                          // Room left inside the bar once the resize affordance and the
+                          // button's own padding are taken out. Density and the pills-row
+                          // decision are made from this, not the raw bar height.
+                          const barInnerHeightPx = Math.max(
+                            0,
+                            blockH -
+                              reservePx -
+                              (blockH < 56 ? BOOKING_CARD_PADDING_SHORT_PX : BOOKING_CARD_PADDING_TALL_PX),
+                          );
                           const cardDensity =
-                            isOverlapLane || contentHeightPx < 56 ? 'compact' : 'comfortable';
+                            isOverlapLane || barInnerHeightPx < 56 ? 'compact' : 'comfortable';
                           const showPillsRow =
                             !isOverlapLane &&
-                            contentHeightPx >= (cardDensity === 'compact' ? 72 : 88) &&
+                            barInnerHeightPx >= (cardDensity === 'compact' ? 72 : 88) &&
                             bookingHasBlockPills(b);
+                          // The pills row is a sibling of the card inside the same box, so
+                          // its height is not the card's to spend.
+                          const contentHeightPx = Math.max(
+                            0,
+                            barInnerHeightPx - (showPillsRow ? BOOKING_PILLS_ROW_PX : 0),
+                          );
                           return (
                             <DraggableBookingShell
                               key={`${b.id}-${b.status}-${b.client_arrived_at ?? ''}`}
@@ -7229,8 +7261,21 @@ export function PractitionerCalendarView({
                                           const sid = serviceIdForBooking(b);
                                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
                                           const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
+                                          // Room left in this segment once its own padding is
+                                          // taken out, then once the pills row (a sibling of the
+                                          // card) has had its share. Spending the raw segment
+                                          // height is what pushed the phone and time lines out of
+                                          // the box and under the following segment.
+                                          const segmentInnerPx = Math.max(
+                                            0,
+                                            segmentApproxPx - BOOKING_CARD_PADDING_SEGMENT_PX,
+                                          );
                                           const showSegPills =
-                                            !isOverlapLane && segmentApproxPx >= 88 && bookingHasBlockPills(b);
+                                            !isOverlapLane && segmentInnerPx >= 88 && bookingHasBlockPills(b);
+                                          const segmentContentPx = Math.max(
+                                            0,
+                                            segmentInnerPx - (showSegPills ? BOOKING_SEGMENT_PILLS_ROW_PX : 0),
+                                          );
                                           const resSeg = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                                           const segServiceLabel = calendarBookingServiceLabel(b, svc, resSeg ?? null);
                                           return (
@@ -7255,7 +7300,14 @@ export function PractitionerCalendarView({
                                                   }
                                                   hideName={segIdx > 0}
                                                   service={segServiceLabel}
-                                                  phone={formatPhoneForDisplay(b.guest_phone)}
+                                                  /**
+                                                   * Every segment of a visit is the same guest, so
+                                                   * the number only belongs on the first one.
+                                                   * Repeating it read as a duplicate and cost each
+                                                   * following segment a row that its own service
+                                                   * and time needed.
+                                                   */
+                                                  phone={segIdx === 0 ? formatPhoneForDisplay(b.guest_phone) : null}
                                                   start={b.booking_time.slice(0, 5)}
                                                   end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
                                                   pill={
@@ -7263,14 +7315,14 @@ export function PractitionerCalendarView({
                                                       <CalendarBookingStatusBadge b={first} palette={clusterPalette} />
                                                     ) : null
                                                   }
-                                                  contentHeightPx={segmentApproxPx}
+                                                  contentHeightPx={segmentContentPx}
                                                   density={
-                                                    isOverlapLane || segmentApproxPx < 56
+                                                    isOverlapLane || segmentContentPx < 56
                                                       ? 'compact'
                                                       : 'comfortable'
                                                   }
                                                 />
-                                                {!isOverlapLane && showSegPills ? (
+                                                {showSegPills ? (
                                                   <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-white/25 pt-1">
                                                     <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
                                                       <BookingBlockPills b={b} />

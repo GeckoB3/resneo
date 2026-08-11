@@ -48,6 +48,49 @@ describe('pickInfoRowCount', () => {
   });
 });
 
+/**
+ * Height each row count actually needs, measured in the browser against the real
+ * styles (13px name row, 11px/leading-snug meta rows, a status pill, `gap-y-1`).
+ * Re-measure if those change.
+ */
+const MEASURED_ROW_HEIGHT_PX: Record<number, number> = { 1: 20, 2: 39, 3: 58, 4: 77, 5: 100 };
+
+describe('pickInfoRowCount fits the height it is given', () => {
+  /**
+   * The contract the callers rely on: whatever row count is chosen for a height
+   * must actually fit in that height. Nothing asserted this, so the bug lived on
+   * the other side of it: a caller handed the card the RAW bar height while the
+   * button's padding and the pills row were also spending it, and the card
+   * confidently laid out more rows than the box could hold. The phone line was
+   * sliced in half and the time line disappeared under the next segment.
+   */
+  it('never chooses more rows than fit, at any height', () => {
+    for (let h = 0; h <= 240; h++) {
+      for (const itemCount of [4, 5] as const) {
+        for (const density of ['compact', 'comfortable'] as const) {
+          const rows = pickInfoRowCount(h, itemCount, density);
+          const needed = MEASURED_ROW_HEIGHT_PX[rows]!;
+          // A single row is always attempted, even in a box too short for it:
+          // showing a clipped name beats showing an empty bar.
+          if (rows === 1) continue;
+          expect(
+            needed,
+            `${rows} rows need ${needed}px but only ${h}px was available (${density}, ${itemCount} items)`,
+          ).toBeLessThanOrEqual(h);
+        }
+      }
+    }
+  });
+
+  it('still uses the room it has, rather than shrinking to nothing', () => {
+    // Guards the other direction: a fix for the overflow must not make tall bars
+    // render one lonely row.
+    expect(pickInfoRowCount(120, 5)).toBe(5);
+    expect(pickInfoRowCount(95, 5)).toBe(4);
+    expect(pickInfoRowCount(70, 5)).toBe(3);
+  });
+});
+
 describe('groupInfoRows', () => {
   it('collapses all full booking fields onto one row at the shortest height (calendar priority order)', () => {
     expect(groupInfoRows(1, false)).toEqual([['name', 'service', 'phone', 'time', 'pill']]);

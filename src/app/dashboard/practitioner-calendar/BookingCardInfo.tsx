@@ -24,9 +24,20 @@ export function pickInfoRowCount(
   itemCount: 4 | 5 = 5,
   density: BookingCardDensity = 'comfortable',
 ): number {
+  /**
+   * Each threshold is the height at which one MORE row starts fitting, and must
+   * be at least what that row count actually occupies: 39px for two rows, 58 for
+   * three, 77 for four, 100 for five (measured against the real styles; see the
+   * fit test in `BookingCardInfo.test.ts`).
+   *
+   * Compact still packs tighter than comfortable, it just no longer promises
+   * room it does not have. Every compact threshold used to sit BELOW its row
+   * count's real height, so short and overlapping bars quietly clipped their
+   * last line.
+   */
   const t =
     density === 'compact'
-      ? { one: 40, two: 56, three: 72, four: 92 }
+      ? { one: 39, two: 58, three: 77, four: 100 }
       : { one: 48, two: 66, three: 88, four: 108 };
   let raw: number;
   if (contentHeightPx < t.one) raw = 1;

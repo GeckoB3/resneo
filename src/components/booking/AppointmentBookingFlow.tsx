@@ -2359,13 +2359,23 @@ export function AppointmentBookingFlow({
       // slot is picked), falling back to the working buffer for edit/prefill entry paths.
       const singleCreateAddonIds = chain?.[0]?.addonIds ?? selectedAddonIds;
       if (chain && chain.length > 1) {
-        const v = await validateMultiServiceChain(chain);
-        if (v) {
-          setError(v);
-          return;
-        }
+        /**
+         * Marked as submitting BEFORE the chain is re-validated, not after.
+         *
+         * `validateMultiServiceChain` makes one sequential request per segment,
+         * so confirming a two or three service visit sat on the network for a
+         * noticeable moment with no feedback at all: `DetailsStep`'s own spinner
+         * is driven by react-hook-form's `isSubmitting`, and `onSubmit` is a void
+         * callback, so it clears a tick after the click. The single-service path
+         * below never showed this because it flips the flag immediately.
+         */
         setSubmitting(true);
         try {
+          const v = await validateMultiServiceChain(chain);
+          if (v) {
+            setError(v);
+            return;
+          }
           const res = await fetch(bookingCreateMultiServiceUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -552,6 +552,13 @@ const BOOKING_CARD_PADDING_SEGMENT_PX = 8;
 const BOOKING_PILLS_ROW_PX = 32;
 const BOOKING_SEGMENT_PILLS_ROW_PX = 28;
 /**
+ * One line of card text. A segment never gives up so much room to the action
+ * tray that it cannot show even this: the tray is bottom-RIGHT and the stack
+ * already reserves `paddingRight` beside it, so a short segment is better off
+ * letting the tray overlap its empty right-hand side than rendering nothing.
+ */
+const BOOKING_CARD_MIN_ROW_PX = 20;
+/**
  * Height assumed for the day grid's column-header row until it is measured.
  * Matches the native header cell's own `min-h`, so the first paint lines the time
  * gutter up correctly for the common case (no linked columns, hours on one line).
@@ -6857,13 +6864,22 @@ export function PractitionerCalendarView({
                           const isOverlapLane = layout.laneCount > 1;
                           const reservePx =
                             canDrag && resizeAffordanceOn ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0;
-                          // Room left inside the bar once the resize affordance and the
-                          // button's own padding are taken out. Density and the pills-row
-                          // decision are made from this, not the raw bar height.
+                          /**
+                           * The action tray's own footprint. The button below reserves this as
+                           * `paddingBottom`, so it is not the card's to spend either. Computed
+                           * here rather than inside the render prop so the height budget can
+                           * account for it (the same value is reused down there).
+                           */
+                          const actionBlockHeight = Math.max(0, height + resizeExtra - reservePx);
+                          const barActionInset = computeBookingActionCornerInset(b, actionBlockHeight);
+                          // Room left inside the bar once the resize affordance, the action
+                          // tray and the button's own padding are taken out. Density and the
+                          // pills-row decision are made from this, not the raw bar height.
                           const barInnerHeightPx = Math.max(
                             0,
                             blockH -
                               reservePx -
+                              (barActionInset.hasActions ? barActionInset.bottom : 0) -
                               (blockH < 56 ? BOOKING_CARD_PADDING_SHORT_PX : BOOKING_CARD_PADDING_TALL_PX),
                           );
                           const cardDensity =
@@ -7019,11 +7035,8 @@ export function PractitionerCalendarView({
                                             </>
                                           );
                                         }
-                                        const actionBlockHeight = Math.max(
-                                          0,
-                                          height + resizeExtra - reservePx,
-                                        );
-                                        const actionInset = computeBookingActionCornerInset(b, actionBlockHeight);
+                                        // Same value the height budget above was built from.
+                                        const actionInset = barActionInset;
                                         return (
                                           <>
                                             <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -7251,9 +7264,18 @@ export function PractitionerCalendarView({
                                     <>
                                       <div
                                         className="flex min-h-0 min-w-0 flex-1 flex-col"
+                                        /**
+                                         * Horizontal clearance only. The action tray is absolutely
+                                         * positioned in the bottom-right corner, so keeping text
+                                         * out from under it is `paddingRight`'s job. Reserving its
+                                         * full height here as well squeezed EVERY segment: on a
+                                         * 50 minute two-service visit the tray is ~67px of a 160px
+                                         * bar, which left the first segment 48px of the 88px its
+                                         * card had been told it had. Only the last segment sits
+                                         * beside the tray, so only it reserves the height (below).
+                                         */
                                         style={{
                                           paddingRight: actionInset.hasActions ? actionInset.right : undefined,
-                                          paddingBottom: actionInset.hasActions ? actionInset.bottom : undefined,
                                         }}
                                       >
                                         {items.map((b, segIdx) => {
@@ -7261,14 +7283,32 @@ export function PractitionerCalendarView({
                                           const sid = serviceIdForBooking(b);
                                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
                                           const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
-                                          // Room left in this segment once its own padding is
-                                          // taken out, then once the pills row (a sibling of the
-                                          // card) has had its share. Spending the raw segment
-                                          // height is what pushed the phone and time lines out of
-                                          // the box and under the following segment.
+                                          /**
+                                           * Only the bottom segment shares its box with the action
+                                           * tray, so only it gives up height for it.
+                                           */
+                                          const segmentTrayReservePx =
+                                            segIdx === items.length - 1 && actionInset.hasActions
+                                              ? Math.min(
+                                                  actionInset.bottom,
+                                                  Math.max(
+                                                    0,
+                                                    segmentApproxPx -
+                                                      BOOKING_CARD_PADDING_SEGMENT_PX -
+                                                      BOOKING_CARD_MIN_ROW_PX,
+                                                  ),
+                                                )
+                                              : 0;
+                                          // Room left in this segment once its own padding, the
+                                          // tray reserve and (below) the pills row have had their
+                                          // share. Spending the raw segment height is what pushed
+                                          // the phone and time lines out of the box and under the
+                                          // following segment.
                                           const segmentInnerPx = Math.max(
                                             0,
-                                            segmentApproxPx - BOOKING_CARD_PADDING_SEGMENT_PX,
+                                            segmentApproxPx -
+                                              BOOKING_CARD_PADDING_SEGMENT_PX -
+                                              segmentTrayReservePx,
                                           );
                                           const showSegPills =
                                             !isOverlapLane && segmentInnerPx >= 88 && bookingHasBlockPills(b);
@@ -7289,6 +7329,13 @@ export function PractitionerCalendarView({
                                                 type="button"
                                                 onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
                                                 className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
+                                                // Keeps the bottom segment's last line clear of the
+                                                // action tray it shares a corner with.
+                                                style={
+                                                  segmentTrayReservePx
+                                                    ? { paddingBottom: segmentTrayReservePx }
+                                                    : undefined
+                                                }
                                                 aria-label={`Open booking details for ${b.guest_name}`}
                                               >
                                                 <BookingCard

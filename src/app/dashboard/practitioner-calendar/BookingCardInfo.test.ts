@@ -91,6 +91,95 @@ describe('pickInfoRowCount fits the height it is given', () => {
   });
 });
 
+/**
+ * The budget arithmetic a multi-service bar performs before handing each segment
+ * to the card, mirrored here so the invariant can be checked without rendering
+ * the 7,000-line calendar view.
+ *
+ * Two things were being spent twice. The card was told the RAW segment height
+ * while the button's padding and the pills row also came out of it, and the
+ * action tray's full height was reserved from EVERY segment even though the tray
+ * is absolutely positioned in the bottom-right corner and only the last segment
+ * shares a box with it. On the reported booking the first segment was told it
+ * had 88px when it really had 48, so its card laid out a four-row block and the
+ * phone line was cut in half.
+ */
+function segmentContentPx(params: {
+  segmentPx: number;
+  isLast: boolean;
+  hasActions: boolean;
+  trayPx: number;
+  showsPills: boolean;
+}): number {
+  const PAD = 8;
+  const MIN_ROW = 20;
+  const PILLS = 28;
+  const { segmentPx, isLast, hasActions, trayPx, showsPills } = params;
+  const trayReserve =
+    isLast && hasActions ? Math.min(trayPx, Math.max(0, segmentPx - PAD - MIN_ROW)) : 0;
+  const inner = Math.max(0, segmentPx - PAD - trayReserve);
+  return Math.max(0, inner - (showsPills ? PILLS : 0));
+}
+
+describe('multi-service segments fit the box they are given', () => {
+  const TRAY_PX = 67; // Arrived + Start stacked, measured.
+
+  /** Proportional segment heights, as the flex row distributes them. */
+  const segmentsOf = (durations: number[], slotPx = 48) => {
+    const span = durations.reduce((a, b) => a + b, 0);
+    const height = (span / 15) * slotPx;
+    return durations.map((d) => height * (d / span));
+  };
+
+  const visits: Array<{ name: string; durations: number[] }> = [
+    { name: 'blow dry + child haircut (the reported bar)', durations: [30, 20] },
+    { name: 'two equal services', durations: [30, 30] },
+    { name: 'three services', durations: [30, 20, 45] },
+    { name: 'a very short tail segment', durations: [45, 10] },
+  ];
+
+  for (const visit of visits) {
+    for (const hasActions of [false, true]) {
+      it(`${visit.name}${hasActions ? ' with action buttons' : ''}`, () => {
+        const segments = segmentsOf(visit.durations);
+        segments.forEach((segmentPx, i) => {
+          const isLast = i === segments.length - 1;
+          for (const showsPills of [false, true]) {
+            const available = segmentContentPx({
+              segmentPx,
+              isLast,
+              hasActions,
+              trayPx: TRAY_PX,
+              showsPills,
+            });
+            const rows = pickInfoRowCount(available, i === 0 ? 5 : 4);
+            const needed = MEASURED_ROW_HEIGHT_PX[rows]!;
+            // One row is always attempted; below that there is nothing to show.
+            if (rows === 1) return;
+            expect(
+              needed,
+              `segment ${i} of "${visit.name}": ${rows} rows need ${needed}px but only ${Math.round(available)}px is available`,
+            ).toBeLessThanOrEqual(available);
+          }
+        });
+      });
+    }
+  }
+
+  it('never starves a segment of its last line for the action tray', () => {
+    // The tray can be taller than a short tail segment. Reserving it wholesale
+    // left that segment with nothing at all.
+    const available = segmentContentPx({
+      segmentPx: 64,
+      isLast: true,
+      hasActions: true,
+      trayPx: 200,
+      showsPills: false,
+    });
+    expect(available).toBeGreaterThanOrEqual(20);
+  });
+});
+
 describe('groupInfoRows', () => {
   it('collapses all full booking fields onto one row at the shortest height (calendar priority order)', () => {
     expect(groupInfoRows(1, false)).toEqual([['name', 'service', 'phone', 'time', 'pill']]);

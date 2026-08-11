@@ -1075,50 +1075,76 @@ export async function PATCH(
           });
         }
 
-        const cancelledBookingForWaitlist = {
-          id,
-          venue_id: scopeVenueId,
-          booking_date: String(booking.booking_date),
-          booking_time: String(booking.booking_time),
-          practitioner_id: booking.practitioner_id as string | null | undefined,
-          calendar_id: booking.calendar_id as string | null | undefined,
-          appointment_service_id: booking.appointment_service_id as string | null | undefined,
-          service_item_id: booking.service_item_id as string | null | undefined,
-          booking_model: booking.booking_model as string | null | undefined,
-          experience_event_id: booking.experience_event_id as string | null | undefined,
-          class_instance_id: booking.class_instance_id as string | null | undefined,
-          resource_id: booking.resource_id as string | null | undefined,
-          event_session_id: booking.event_session_id as string | null | undefined,
-        };
+        /**
+         * One offer per FREED SLOT, not one per cancel action. Cancelling a
+         * multi-service visit cancels every segment, but only the segment that
+         * was clicked used to be offered to the waitlist: the other segments
+         * freed real time on the calendar that nobody was ever told about, and in
+         * `staff_choose` mode the staff alert panel under-reported the day.
+         *
+         * Segments can sit on different calendars and services, so each is
+         * resolved from its own row rather than the primary one.
+         */
+        const cancelledRowsForWaitlist =
+          idsToCancel.length > 1
+            ? ((
+                await admin
+                  .from('bookings')
+                  .select(
+                    'id, booking_date, booking_time, practitioner_id, calendar_id, appointment_service_id, service_item_id, booking_model, experience_event_id, class_instance_id, resource_id, event_session_id',
+                  )
+                  .in('id', idsToCancel)
+                  .eq('venue_id', scopeVenueId)
+              ).data ?? [])
+            : [booking];
 
-        try {
-          const offerResult = await offerAppointmentWaitlistOnCancel(
-            admin,
-            cancelledBookingForWaitlist,
-          );
-          if (offerResult.offered) {
-            console.info('[PATCH booking cancel] waitlist offer sent', {
-              bookingId: id,
-              mode: offerResult.mode,
-              ...(offerResult.mode === 'notify_in_order'
-                ? {
-                    waitlistEntryId: offerResult.waitlistEntryId,
-                    emailSent: offerResult.emailSent,
-                    smsSent: offerResult.smsSent,
-                  }
-                : offerResult.mode === 'notify_all'
+        for (const row of cancelledRowsForWaitlist as Record<string, unknown>[]) {
+          const cancelledBookingForWaitlist = {
+            id: String(row.id ?? id),
+            venue_id: scopeVenueId,
+            booking_date: String(row.booking_date),
+            booking_time: String(row.booking_time),
+            practitioner_id: row.practitioner_id as string | null | undefined,
+            calendar_id: row.calendar_id as string | null | undefined,
+            appointment_service_id: row.appointment_service_id as string | null | undefined,
+            service_item_id: row.service_item_id as string | null | undefined,
+            booking_model: row.booking_model as string | null | undefined,
+            experience_event_id: row.experience_event_id as string | null | undefined,
+            class_instance_id: row.class_instance_id as string | null | undefined,
+            resource_id: row.resource_id as string | null | undefined,
+            event_session_id: row.event_session_id as string | null | undefined,
+          };
+
+          try {
+            const offerResult = await offerAppointmentWaitlistOnCancel(
+              admin,
+              cancelledBookingForWaitlist,
+            );
+            if (offerResult.offered) {
+              console.info('[PATCH booking cancel] waitlist offer sent', {
+                bookingId: cancelledBookingForWaitlist.id,
+                mode: offerResult.mode,
+                ...(offerResult.mode === 'notify_in_order'
                   ? {
-                      notifiedCount: offerResult.notifiedCount,
-                      emailSentCount: offerResult.emailSentCount,
-                      smsSentCount: offerResult.smsSentCount,
+                      waitlistEntryId: offerResult.waitlistEntryId,
+                      emailSent: offerResult.emailSent,
+                      smsSent: offerResult.smsSent,
                     }
-                  : {}),
+                  : offerResult.mode === 'notify_all'
+                    ? {
+                        notifiedCount: offerResult.notifiedCount,
+                        emailSentCount: offerResult.emailSentCount,
+                        smsSentCount: offerResult.smsSentCount,
+                      }
+                    : {}),
+              });
+            }
+          } catch (waitlistErr) {
+            // Best effort per segment: one failure must not stop the others.
+            console.error('[PATCH booking cancel] waitlist offer failed:', waitlistErr, {
+              bookingId: cancelledBookingForWaitlist.id,
             });
           }
-        } catch (waitlistErr) {
-          console.error('[PATCH booking cancel] waitlist offer failed:', waitlistErr, {
-            bookingId: id,
-          });
         }
 
         const { data: guestRow } = await staff.db

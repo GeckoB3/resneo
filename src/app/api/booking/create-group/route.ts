@@ -276,16 +276,23 @@ export async function POST(request: NextRequest) {
       // makes the availability engine fit the full wall-clock the booking will occupy.
       let personAddonSnapshots: BookingAddonSnapshot[] = [];
       let personAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
-      if (person.addons && person.addons.length > 0) {
-        const { groups, groupsById } = await loadAddonsForBooking({
-          admin: supabase,
-          venueId: venue_id,
-          schema: addonSchema,
-          parentId: person.appointment_service_id,
-          includeHidden: !isOnlineLikeSource,
-        });
+      /**
+       * Always load the linked groups, so a REQUIRED group (`min_select`) is
+       * enforced even when the client omits `addons`. Gating on the client having
+       * sent something let one person in a group booking skip an option the same
+       * service demands when booked on its own. The single-service route has
+       * always done it this way.
+       */
+      const { groups, groupsById } = await loadAddonsForBooking({
+        admin: supabase,
+        venueId: venue_id,
+        schema: addonSchema,
+        parentId: person.appointment_service_id,
+        includeHidden: !isOnlineLikeSource,
+      });
+      if (groups.length > 0) {
         const validation = validateAddonSelections({
-          selections: person.addons,
+          selections: person.addons ?? [],
           groupsForService: groups,
           source: isOnlineLikeSource ? 'public' : 'staff',
         });

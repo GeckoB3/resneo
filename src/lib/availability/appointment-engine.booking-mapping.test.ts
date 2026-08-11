@@ -135,6 +135,15 @@ describe('mapRowToAppointmentBooking', () => {
     expect(b.practitioner_id).toBe('p9');
   });
 
+  it('is the one mapper the month view uses too, so occupancy cannot diverge', () => {
+    // The month builder had its own copy that never read `booking_end_time`, so
+    // a booking resized to three hours still consumed one hour in the date
+    // picker: the date showed green and the day view then offered nothing.
+    const resized = row({ booking_end_time: '13:00:00' });
+    const b = mapOne({ row: resized, services: [service()] });
+    expect(b.duration_minutes).toBe(180);
+  });
+
   describe('processing block resolution', () => {
     const template: ProcessingTimeBlock[] = [{ id: 't', start_minute: 30, duration_minutes: 20 }];
     const snapshot = [{ id: '5a3c1f7e-0000-4000-8000-000000000001', start_minute: 40, duration_minutes: 15 }];

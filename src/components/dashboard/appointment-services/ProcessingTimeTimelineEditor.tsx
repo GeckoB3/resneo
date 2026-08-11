@@ -24,6 +24,12 @@ function randomId(): string {
   return `pt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** A cleared number input reads as '', which `Number` turns into NaN-free 0. */
+function numberOrZero(raw: string): number {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function ProcessingTimeTimelineEditor({
   durationMinutes,
   bufferMinutes,
@@ -131,7 +137,11 @@ export function ProcessingTimeTimelineEditor({
                     min={0}
                     max={durationMinutes}
                     value={b.start_minute}
-                    onChange={(e) => updateRow(b.id, { start_minute: Number(e.target.value) })}
+                    // Clearing a number input yields '', and Number('') is 0.
+                    // Left raw, an emptied Length field stored 0, which fails the
+                    // schema's min(1) BEFORE the friendly range message can be
+                    // produced, so the owner saw a generic invalid-request error.
+                    onChange={(e) => updateRow(b.id, { start_minute: numberOrZero(e.target.value) })}
                     className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
                   />
                 </div>
@@ -142,7 +152,14 @@ export function ProcessingTimeTimelineEditor({
                     min={PROCESSING_BLOCK_MIN_MINUTES}
                     max={durationMinutes}
                     value={b.duration_minutes}
-                    onChange={(e) => updateRow(b.id, { duration_minutes: Number(e.target.value) })}
+                    onChange={(e) =>
+                      updateRow(b.id, {
+                        duration_minutes: Math.max(
+                          PROCESSING_BLOCK_MIN_MINUTES,
+                          numberOrZero(e.target.value),
+                        ),
+                      })
+                    }
                     className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
                   />
                 </div>

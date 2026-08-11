@@ -284,17 +284,26 @@ export async function POST(request: NextRequest) {
       // Validate this segment's add-ons BEFORE the slot check.
       let segAddonSnapshots: BookingAddonSnapshot[] = [];
       let segAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
-      if (seg.addons && seg.addons.length > 0) {
-        const { groups, groupsById } = await loadAddonsForBooking({
-          admin: supabase,
-          venueId: venue_id,
-          schema: addonSchema,
-          parentId: seg.service_id,
-          includeHidden:
-            source !== 'online' && source !== 'widget' && source !== 'booking_page',
-        });
+      /**
+       * Always load the linked groups, so a REQUIRED group (`min_select`) is
+       * enforced even when the client omits `addons` entirely. Gating this whole
+       * block on the client having sent something meant a service that cannot be
+       * booked on its own without choosing an option could be booked without one
+       * simply by being a segment of a multi-service visit, arriving with no
+       * add-on, no charge and the segment chain laid out short. The
+       * single-service route has always done it this way.
+       */
+      const { groups, groupsById } = await loadAddonsForBooking({
+        admin: supabase,
+        venueId: venue_id,
+        schema: addonSchema,
+        parentId: seg.service_id,
+        includeHidden:
+          source !== 'online' && source !== 'widget' && source !== 'booking_page',
+      });
+      if (groups.length > 0) {
         const validation = validateAddonSelections({
-          selections: seg.addons,
+          selections: seg.addons ?? [],
           groupsForService: groups,
           source:
             source === 'online' || source === 'widget' || source === 'booking_page'

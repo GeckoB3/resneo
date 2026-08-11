@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { OpeningHours } from '@/types/availability';
 import type { PractitionerService } from '@/types/booking-models';
 import { getDayOfWeek } from '@/lib/availability/engine';
@@ -535,6 +535,196 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
    * availability routes pass a custom duration and no blocks, so every candidate
    * start failed identically with no explanation.
    */
+  /**
+   * Minimum notice used to be minutes-since-midnight applied only when the
+   * requested date WAS today, so it could not express a window that crosses
+   * midnight: a 48 hour rule accepted a 09:00 booking made at 23:00 the night
+   * before, and above 24 hours it was inert on every date except today.
+   */
+  it('applies minimum notice across dates, not just today', () => {
+    const today = '2030-06-02';
+    const tomorrow = '2030-06-03';
+    const dk = workingHoursDayKey(tomorrow);
+    const input: AppointmentEngineInput = {
+      date: tomorrow,
+      minNoticeHours: 48,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '18:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's30',
+          name: 'Cut',
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          processing_time_minutes: 0,
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [
+        { id: 'ps1', practitioner_id: 'p1', service_id: 's30', custom_duration_minutes: null, custom_price_pence: null },
+      ],
+      existingBookings: [],
+    };
+
+    // 23:00 "today": tomorrow 09:00 is only ~10 hours away, well inside 48.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(`${today}T23:00:00`));
+      const result = computeAppointmentAvailability(input);
+      expect(result.practitioners.flatMap((p) => p.slots)).toHaveLength(0);
+      expect(validateAppointmentCustomInterval(input, 'p1', 's30', '09:00', '09:30').ok).toBe(false);
+
+      // Far enough ahead, the same rule lets it through.
+      const farInput = { ...input, date: '2030-06-10' };
+      const far = computeAppointmentAvailability({
+        ...farInput,
+        practitioners: [
+          {
+            ...input.practitioners[0]!,
+            working_hours: { [workingHoursDayKey('2030-06-10')]: [{ start: '09:00', end: '18:00' }] },
+          } as unknown as import('@/types/booking-models').Practitioner,
+        ],
+      });
+      expect(far.practitioners.flatMap((p) => p.slots).length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * `parallel_clients` caps how many clients are in the room AT ONCE. Counting
+   * how many rows a candidate touched refused a booking that merely spanned two
+   * back-to-back appointments, silently costing capacity.
+   */
+  it('allows a candidate spanning two back-to-back bookings within a cap of 2', () => {
+    const existing: AppointmentBooking[] = [
+      {
+        id: 'a',
+        practitioner_id: 'p1',
+        booking_time: '09:00',
+        duration_minutes: 60,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+        processing_time_blocks: [],
+      },
+      {
+        id: 'b',
+        practitioner_id: 'p1',
+        booking_time: '10:00',
+        duration_minutes: 60,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+        processing_time_blocks: [],
+      },
+    ];
+    const input = processingInput(existing);
+    input.practitioners[0] = {
+      ...input.practitioners[0]!,
+      parallel_clients: 2,
+    } as unknown as import('@/types/booking-models').Practitioner;
+
+    // 09:30-10:30 touches both, but concurrency never exceeds 2 (candidate + one).
+    expect(
+      validateAppointmentCustomInterval(input, 'p1', 's15', '09:30', '10:30', undefined, {
+        processingTimeBlocks: [],
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('still refuses when the cap is genuinely exceeded at one instant', () => {
+    const existing: AppointmentBooking[] = [
+      {
+        id: 'a',
+        practitioner_id: 'p1',
+        booking_time: '09:00',
+        duration_minutes: 60,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+        processing_time_blocks: [],
+      },
+      {
+        id: 'b',
+        practitioner_id: 'p1',
+        booking_time: '09:15',
+        duration_minutes: 60,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+        processing_time_blocks: [],
+      },
+    ];
+    const input = processingInput(existing);
+    input.practitioners[0] = {
+      ...input.practitioners[0]!,
+      parallel_clients: 2,
+    } as unknown as import('@/types/booking-models').Practitioner;
+
+    // Both run together 09:15-10:00, so a third client there exceeds the cap.
+    expect(
+      validateAppointmentCustomInterval(input, 'p1', 's15', '09:30', '09:45', undefined, {
+        processingTimeBlocks: [],
+      }).ok,
+    ).toBe(false);
+  });
+
+  /**
+   * A closure and an amended-hours range can both cover one date, and nothing
+   * stops a venue saving both. Matching in list order (the adapter sorts by
+   * `date_start`) meant a long summer-hours block beat a one-day bank holiday
+   * closure saved later, and appointments were offered on a closed day. Classes,
+   * events and resources already resolved this correctly.
+   */
+  it('honours a closure that overlaps an amended-hours range', () => {
+    const date = '2030-06-05';
+    const dk = workingHoursDayKey(date);
+    const input: AppointmentEngineInput = {
+      date,
+      skipPastSlotFilter: true,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '18:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's30',
+          name: 'Cut',
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          processing_time_minutes: 0,
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [
+        { id: 'ps1', practitioner_id: 'p1', service_id: 's30', custom_duration_minutes: null, custom_price_pence: null },
+      ],
+      existingBookings: [],
+      // Amended hours saved first (earlier date_start), closure saved second.
+      venueOpeningExceptions: [
+        { date_start: '2030-06-01', date_end: '2030-08-31', closed: false, periods: [{ open: '10:00', close: '14:00' }] },
+        { date_start: date, date_end: date, closed: true, periods: [] },
+      ] as unknown as AppointmentEngineInput['venueOpeningExceptions'],
+    };
+
+    const result = computeAppointmentAvailability(input);
+    const slots = result.practitioners.flatMap((p) => p.slots);
+    expect(slots).toHaveLength(0);
+
+    expect(validateAppointmentCustomInterval(input, 'p1', 's30', '11:00', '11:30').ok).toBe(false);
+  });
+
   it('fits the service template to a custom duration instead of refusing every slot', () => {
     const date = '2030-06-02';
     const dk = workingHoursDayKey(date);

@@ -224,6 +224,12 @@ export function AppointmentServiceFormFields({
                           buffer_minutes: f.buffer_minutes,
                           price: f.price,
                           deposit: f.payment_requirement === 'deposit' ? f.deposit : '',
+                          // Carry the processing pattern onto the seeded option.
+                          // Saving clears the parent's blocks once a service uses
+                          // options, so without this the switch silently deleted
+                          // the gap the salon books other clients into, with no
+                          // warning (unlike the reverse switch, which confirms).
+                          processing_time_blocks: f.processing_time_blocks,
                         },
                       ],
                     };

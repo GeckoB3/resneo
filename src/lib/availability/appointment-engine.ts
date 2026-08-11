@@ -13,7 +13,6 @@ import type {
   ProcessingTimeBlock,
 } from '@/types/booking-models';
 import {
-  busyIntervalsOverlap,
   effectiveProcessingBlocksForTemplate,
   fitProcessingBlocksToDuration,
   parseProcessingTimeBlocksFromDb,
@@ -315,29 +314,63 @@ function wallBusyIntervalsForServiceSlot(
   return offsets.map((o) => ({ start: startMin + o.start, end: startMin + o.end }));
 }
 
-function countOverlappingBookings(
+/**
+ * The most bookings running AT ONCE anywhere the candidate would be present.
+ *
+ * `parallel_clients` caps how many clients a calendar handles simultaneously, so
+ * this counts concurrency, not how many rows the candidate happens to touch. The
+ * old count refused a candidate that merely spanned two back-to-back bookings:
+ * with a cap of 2 and bookings at 09:00-10:00 and 10:00-11:00, a 09:30 candidate
+ * touched both and was rejected even though only two clients are ever in the
+ * room at once. That silently cost capacity on every calendar with a cap above 1.
+ *
+ * Each booking contributes at most 1 at any instant, because its own busy
+ * intervals are disjoint (a processing gap splits them but they never overlap).
+ */
+function peakConcurrentBookings(
   bookings: AppointmentBooking[],
+  phantoms: PhantomBooking[],
   candidateBusyWall: Array<{ start: number; end: number }>,
   excludeBookingId?: string,
 ): number {
   const excludeLc = excludeBookingId?.toLowerCase();
-  let n = 0;
+  const busyPerEntity: Array<Array<{ start: number; end: number }>> = [];
   for (const b of bookings) {
     if (excludeLc && b.id.toLowerCase() === excludeLc) continue;
-    if (busyIntervalsOverlap(candidateBusyWall, wallBusyIntervalsForBooking(b))) n++;
+    busyPerEntity.push(wallBusyIntervalsForBooking(b));
   }
-  return n;
-}
-
-function countOverlappingPhantoms(
-  phantoms: PhantomBooking[],
-  candidateBusyWall: Array<{ start: number; end: number }>,
-): number {
-  let n = 0;
   for (const p of phantoms) {
-    if (busyIntervalsOverlap(candidateBusyWall, wallBusyIntervalsForPhantom(p))) n++;
+    busyPerEntity.push(wallBusyIntervalsForPhantom(p));
   }
-  return n;
+
+  // Clip every existing interval to the candidate's own busy span: concurrency
+  // outside the candidate is irrelevant to whether the candidate fits.
+  const events: Array<{ at: number; delta: number }> = [];
+  for (const entity of busyPerEntity) {
+    for (const iv of entity) {
+      for (const c of candidateBusyWall) {
+        const start = Math.max(iv.start, c.start);
+        const end = Math.min(iv.end, c.end);
+        if (start < end) {
+          events.push({ at: start, delta: 1 });
+          events.push({ at: end, delta: -1 });
+        }
+      }
+    }
+  }
+  if (events.length === 0) return 0;
+
+  // Ends before starts at the same instant, matching the half-open intervals
+  // used everywhere else: a booking ending at 11:00 does not overlap one
+  // starting at 11:00.
+  events.sort((a, b) => a.at - b.at || a.delta - b.delta);
+  let current = 0;
+  let peak = 0;
+  for (const ev of events) {
+    current += ev.delta;
+    if (current > peak) peak = current;
+  }
+  return peak;
 }
 
 function parallelCapacityFor(practitioner: Practitioner): number {
@@ -367,15 +400,58 @@ function intersectMinuteRanges(
   return out.sort((x, y) => x.start - y.start);
 }
 
+/** Whole days from `fromYmd` to `toYmd`, negative when `toYmd` is earlier. */
+function wholeDaysBetweenYmd(fromYmd: string, toYmd: string): number {
+  const [fy, fm, fd] = fromYmd.split('-').map(Number);
+  const [ty, tm, td] = toYmd.split('-').map(Number);
+  const from = Date.UTC(fy!, fm! - 1, fd!);
+  const to = Date.UTC(ty!, tm! - 1, td!);
+  return Math.round((to - from) / 86_400_000);
+}
+
+/**
+ * How far ahead a slot is, in venue-local wall-clock minutes.
+ *
+ * The minimum-notice gate used to be written as minutes-since-midnight and
+ * applied only when the requested date WAS today, so it could never express
+ * notice that crosses midnight: a service asking for 48 hours accepted a 09:00
+ * booking made at 23:00 the night before, and above 24 hours the rule was inert
+ * for every date except today. Measuring from the date as well as the clock
+ * makes one comparison work for every date.
+ *
+ * Deliberately wall-clock rather than elapsed real time: a venue promising "48
+ * hours notice" means the calendar, and matching that keeps the rule stable
+ * across a DST boundary.
+ */
+function slotMinutesFromNow(params: {
+  dateStr: string;
+  todayStr: string;
+  slotMinute: number;
+  currentMinute: number;
+}): number {
+  const { dateStr, todayStr, slotMinute, currentMinute } = params;
+  return wholeDaysBetweenYmd(todayStr, dateStr) * 24 * 60 + slotMinute - currentMinute;
+}
+
+/**
+ * The exception that governs `dateStr`. A CLOSURE always wins over amended
+ * hours that happen to span the same date.
+ *
+ * This used to return the first match in list order, and the adapter sorts by
+ * `date_start`, so a long "summer hours" block saved in July beat a one-day bank
+ * holiday closure saved for August: appointments were offered on a day the venue
+ * had explicitly closed. Nothing prevents the two from overlapping, and the
+ * venue-wide resolver used by classes, events and resources already partitions
+ * closures from amendments this way.
+ */
 function findApplicableVenueOpeningException(
   exceptions: VenueOpeningException[] | null | undefined,
   dateStr: string,
 ): VenueOpeningException | null {
   if (!exceptions?.length) return null;
-  for (const ex of exceptions) {
-    if (ex.date_start <= dateStr && dateStr <= ex.date_end) return ex;
-  }
-  return null;
+  const applicable = exceptions.filter((ex) => ex.date_start <= dateStr && dateStr <= ex.date_end);
+  if (applicable.length === 0) return null;
+  return applicable.find((ex) => ex.closed) ?? applicable[0]!;
 }
 
 /**
@@ -484,7 +560,6 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     currentMinute = nowMinutes ?? (now.getHours() * 60 + now.getMinutes());
   }
-  const isToday = date === todayStr;
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
 
   const result: AppointmentAvailabilityResult = { practitioners: [] };
@@ -558,8 +633,15 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
       });
 
       for (const t of candidateStarts) {
-        // Guest flow: venue-local “now” + minimum notice (hours). Staff reschedule uses skipPastSlotFilter.
-        if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) continue;
+        // Guest flow: venue-local “now” + minimum notice (hours), on ANY date.
+        // Staff reschedule uses skipPastSlotFilter.
+        if (
+          !skipPastSlotFilter &&
+          slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) <
+            minNoticeMinutes
+        ) {
+          continue;
+        }
 
         const slotEnd = t + totalSpan;
         const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
@@ -573,10 +655,12 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
         if (hitsCalendarBlock) continue;
 
         // Existing + phantom bookings vs parallel_clients (USE / unified_calendars)
-        const overlapping =
-          countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
-          countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
-        if (overlapping >= parallelCap) continue;
+        const concurrent = peakConcurrentBookings(
+          practitionerBookings,
+          practitionerPhantoms,
+          candidateBusy,
+        );
+        if (concurrent >= parallelCap) continue;
 
         serviceSlots.push({
           practitioner_id: practitioner.id,
@@ -647,7 +731,6 @@ export function validateExactAppointmentStart(
     todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     currentMinute = now.getHours() * 60 + now.getMinutes();
   }
-  const isToday = date === todayStr;
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
 
   const practitioner = practitioners.find((p) => p.id === practitionerId && p.is_active);
@@ -696,7 +779,10 @@ export function validateExactAppointmentStart(
     return { ok: false, reason: 'Outside working hours' };
   }
 
-  if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) {
+  if (
+    !skipPastSlotFilter &&
+    slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) < minNoticeMinutes
+  ) {
     return { ok: false, reason: 'Past minimum notice window' };
   }
 
@@ -717,10 +803,8 @@ export function validateExactAppointmentStart(
 
   const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
   const parallelCap = parallelCapacityFor(practitioner);
-  const overlapping =
-    countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
-    countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
-  if (overlapping >= parallelCap) {
+  const concurrent = peakConcurrentBookings(practitionerBookings, practitionerPhantoms, candidateBusy);
+  if (concurrent >= parallelCap) {
     return { ok: false, reason: 'Conflicts with another booking' };
   }
 
@@ -803,7 +887,6 @@ export function validateAppointmentCustomInterval(
     todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     currentMinute = now.getHours() * 60 + now.getMinutes();
   }
-  const isToday = date === todayStr;
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
 
   const practitioner = practitioners.find((p) => p.id === practitionerId && p.is_active);
@@ -902,9 +985,8 @@ export function validateAppointmentCustomInterval(
 
   if (
     !options?.allowInsideNoticeWindow &&
-    isToday &&
     !skipPastSlotFilter &&
-    t < currentMinute + minNoticeMinutes
+    slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) < minNoticeMinutes
   ) {
     return { ok: false, reason: 'Past minimum notice window' };
   }
@@ -929,10 +1011,13 @@ export function validateAppointmentCustomInterval(
 
     const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
     const parallelCap = parallelCapacityFor(practitioner);
-    const overlapping =
-      countOverlappingBookings(practitionerBookings, busyWall, excludeBookingId) +
-      countOverlappingPhantoms(practitionerPhantoms, busyWall);
-    if (overlapping >= parallelCap) {
+    const concurrent = peakConcurrentBookings(
+      practitionerBookings,
+      practitionerPhantoms,
+      busyWall,
+      excludeBookingId,
+    );
+    if (concurrent >= parallelCap) {
       return { ok: false, reason: 'Conflicts with another booking' };
     }
   }

@@ -695,10 +695,18 @@ export function AppointmentServicesView({
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as {
           error?: string;
-          details?: string;
+          details?: unknown;
         };
         const baseMsg = data.error ?? 'Failed to save service';
-        throw new Error(data.details ? `${baseMsg} ${data.details}` : baseMsg);
+        // `details` is a zod flatten() OBJECT, not a string. Typed as a string it
+        // interpolated as "[object Object]", so a service that failed schema
+        // validation reported "Invalid request [object Object]" and left the
+        // owner with nothing to act on.
+        throw new Error(
+          typeof data.details === 'string' && data.details.trim() !== ''
+            ? `${baseMsg} ${data.details}`
+            : baseMsg,
+        );
       }
 
       setShowModal(false);

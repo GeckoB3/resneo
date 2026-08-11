@@ -533,6 +533,12 @@ const MIN_SLOT_PX = 16;
 /** In compact mode, ignore drag nudges smaller than this so a few px of jitter can't reschedule. */
 const COMPACT_DRAG_DEADZONE_PX = 6;
 const SLOT_MINUTES = 15;
+/**
+ * Height assumed for the day grid's column-header row until it is measured.
+ * Matches the native header cell's own `min-h`, so the first paint lines the time
+ * gutter up correctly for the common case (no linked columns, hours on one line).
+ */
+const DAY_HEADER_FALLBACK_PX = 58;
 const CALENDAR_MOVE_INCREMENT_MINUTES = 1;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -2491,6 +2497,12 @@ export function PractitionerCalendarView({
   const timelineRootRef = useRef<HTMLDivElement>(null);
   /** The day grid's slot canvas (time-gutter body). Measured to fit the compact day on one screen. */
   const slotCanvasRef = useRef<HTMLDivElement>(null);
+  /**
+   * The day grid's sticky column-header row. Measured because the time gutter
+   * beside it has to start at exactly the same y, and the header's height is
+   * content-driven.
+   */
+  const dayHeaderRowRef = useRef<HTMLDivElement>(null);
   /** True while a drag/resize is in flight — pauses compact re-measurement so the slot ratio can't shift mid-gesture. */
   const interactingRef = useRef(false);
   const suppressNextCalendarClick = useRef(false);
@@ -2840,6 +2852,20 @@ export function PractitionerCalendarView({
    */
   const [compactDay, setCompactDay] = useState(false);
   const [measuredSlotHeight, setMeasuredSlotHeight] = useState<number | null>(null);
+  /**
+   * Measured height of the day grid's column-header row.
+   *
+   * The time gutter is a sibling of the column stack, so its own top spacer has
+   * to be exactly as tall as that header or every time label sits off its
+   * gridline. The spacer was a hardcoded 58px while the header grows with its
+   * content: a linked column's header has a third line (min 70px), and a native
+   * header's working-hours line can wrap to two. The whole gutter then rode ~12px
+   * or more high against the grid.
+   *
+   * `DAY_HEADER_FALLBACK_PX` matches the native header's own minimum, so the
+   * first paint (before measurement) is right for the common case.
+   */
+  const [dayHeaderHeightPx, setDayHeaderHeightPx] = useState<number>(DAY_HEADER_FALLBACK_PX);
 
   /** Session preferences are applied after mount so the first paint matches SSR HTML. */
   const [calendarPrefsHydrated, setCalendarPrefsHydrated] = useState(false);
@@ -2964,6 +2990,41 @@ export function PractitionerCalendarView({
     // `loading` is included so the measurement re-runs once the day grid mounts after the
     // initial fetch (the slot canvas isn't in the DOM while loading, so the first pass bails).
   }, [compactDay, viewMode, TOTAL_SLOTS, loading]);
+
+  /**
+   * Keep the time gutter's top spacer exactly as tall as the column-header row it
+   * sits beside, so each label lands on its own gridline. Measured rather than
+   * assumed because the header grows with its content (a linked column adds a
+   * third line; a long working-hours line wraps).
+   */
+  useLayoutEffect(() => {
+    const header = dayHeaderRowRef.current;
+    if (!header) {
+      setDayHeaderHeightPx(DAY_HEADER_FALLBACK_PX);
+      return;
+    }
+    const measure = () => {
+      // Border-box, so this includes the header's own bottom border and the
+      // spacer's height can be set from it directly.
+      const next = Math.round(header.getBoundingClientRect().height);
+      if (Number.isFinite(next) && next > 0) {
+        setDayHeaderHeightPx((prev) => (prev === next ? prev : next));
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(header);
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+    // Only needs to re-bind when the header element itself mounts or unmounts.
+    // A column set that changes the header's height (a linked column adds a
+    // line) resizes the same element, which the observer already catches.
+  }, [viewMode, loading]);
 
   const calendarListQuery = useMemo(() => {
     const { from, to } = listFromTo;
@@ -6138,7 +6199,7 @@ export function PractitionerCalendarView({
               {dayViewNowLineTop != null ? (
                 <div
                   className="pointer-events-none absolute left-0 right-0 z-[25]"
-                  style={{ top: 58 + dayViewNowLineTop }}
+                  style={{ top: dayHeaderHeightPx + dayViewNowLineTop }}
                   aria-hidden
                 >
                   <div className="flex items-center">
@@ -6153,7 +6214,11 @@ export function PractitionerCalendarView({
               ) : null}
               <div className="w-14 flex-shrink-0 border-r border-slate-300 bg-gradient-to-r from-slate-100/90 to-slate-50/80 shadow-[4px_0_14px_rgba(15,23,42,0.05)] sm:w-16">
                 <div
-                  className="min-h-[58px] rounded-tl-xl border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/80"
+                  // Exactly the header row's height, so the slot canvas below
+                  // starts at the same y as the grid's and every label sits on
+                  // its own gridline.
+                  className="rounded-tl-xl border-b border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/80"
+                  style={{ height: dayHeaderHeightPx }}
                   aria-hidden
                 />
                 <div ref={slotCanvasRef} className="relative" style={{ height: TOTAL_SLOTS * slotHeightPx }}>
@@ -6183,6 +6248,7 @@ export function PractitionerCalendarView({
               </div>
               <div className="flex min-w-0 flex-1 flex-col">
                 <div
+                  ref={dayHeaderRowRef}
                   className="sticky top-0 z-20 flex w-full divide-x divide-slate-300 rounded-tr-xl border-b border-slate-300 border-l border-slate-300 bg-gradient-to-br from-white via-slate-50 to-slate-100/90 shadow-sm shadow-slate-900/5"
                   role="row"
                   aria-label="Calendar columns"

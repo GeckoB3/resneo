@@ -2322,6 +2322,14 @@ export function PractitionerCalendarView({
   const [date, setDate] = useState(initialIsoDate);
   const [weekStart, setWeekStart] = useState(initialIsoDate);
   const [monthAnchor, setMonthAnchor] = useState(initialIsoDate);
+  /**
+   * Latest rendered `date`, so a value-or-updater from the toolbar can be
+   * resolved ONCE. `navigateDayDirect` points all three anchors at the same day,
+   * and week/month hold week-start and month-start values, so an updater cannot
+   * simply be handed to each of their setters.
+   */
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [venueWideBlocks, setVenueWideBlocks] = useState<AvailabilityBlock[]>([]);
@@ -3814,16 +3822,27 @@ export function PractitionerCalendarView({
       setDate((d) => addCalendarDays(d, dir));
     } else if (viewMode === 'week') setWeekStart((d) => addCalendarDays(d, dir * 7));
     else {
-      const som = startOfMonth(monthAnchor);
-      const d = new Date(`${som}T12:00:00`);
-      d.setMonth(d.getMonth() + dir);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      setMonthAnchor(`${y}-${m}-01`);
+      // Functional, like the day and week branches above: reading `monthAnchor`
+      // from this render let a burst of rapid clicks all step from the same
+      // month and land short of where the user had clicked to.
+      setMonthAnchor((previous) => {
+        const d = new Date(`${startOfMonth(previous)}T12:00:00`);
+        d.setMonth(d.getMonth() + dir);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        return `${y}-${m}-01`;
+      });
     }
   }
 
-  function navigateDayDirect(iso: string) {
+  /**
+   * Jump every anchor to one specific day (an explicit pick or "Today"), as
+   * opposed to {@link navigateDay}, which steps the anchor for the current view
+   * only. Accepts an updater for prop compatibility with the toolbar; it is
+   * resolved once against the latest date so all three anchors agree.
+   */
+  function navigateDayDirect(next: string | ((previous: string) => string)) {
+    const iso = typeof next === 'function' ? next(dateRef.current) : next;
     clearTimeRangeOverridesForDayChange();
     setDate(iso);
     setWeekStart(iso);

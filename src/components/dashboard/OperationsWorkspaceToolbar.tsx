@@ -177,7 +177,18 @@ export interface OperationsWorkspaceToolbarProps {
   date: string;
   /** yyyy-mm-dd for “today”; when set, avoids local `new Date()` mismatch between SSR and the browser. */
   todayIso?: string;
-  onDateChange: (date: string) => void;
+  /**
+   * Accepts an updater as well as a value, so the arrows can shift from the
+   * LATEST date rather than the one captured when this render happened.
+   *
+   * Deriving the next date from the `date` prop meant a burst of rapid arrow
+   * clicks all computed from the same value: on a heavy dashboard React can
+   * process several clicks before committing a re-render, so every handler in
+   * the burst still saw the old date and the page landed short of where the user
+   * had clicked to. Every caller passes a React state setter, which already
+   * accepts an updater, so this costs them nothing.
+   */
+  onDateChange: (date: string | ((previous: string) => string)) => void;
   onPreviousDate?: () => void;
   onNextDate?: () => void;
   dateLabel?: ReactNode;
@@ -431,7 +442,7 @@ export function OperationsWorkspaceToolbar({
             <div className={compact ? DATE_NAV_GRID_CLASS_COMPACT : DATE_NAV_GRID_CLASS_DEFAULT}>
               <button
                 type="button"
-                onClick={onPreviousDate ?? (() => onDateChange(shiftDate(date, -1)))}
+                onClick={onPreviousDate ?? (() => onDateChange((previous) => shiftDate(previous, -1)))}
                 className={compact
                   ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800'
                   : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}
@@ -486,7 +497,7 @@ export function OperationsWorkspaceToolbar({
               </div>
               <button
                 type="button"
-                onClick={onNextDate ?? (() => onDateChange(shiftDate(date, 1)))}
+                onClick={onNextDate ?? (() => onDateChange((previous) => shiftDate(previous, 1)))}
                 className={compact
                   ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800'
                   : 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 sm:h-9 sm:w-9'}

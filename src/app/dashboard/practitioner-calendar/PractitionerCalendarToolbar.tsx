@@ -15,7 +15,8 @@ export interface PractitionerCalendarToolbarProps {
   compactDay: boolean;
   onToggleCompactDay: () => void;
   onNavigateDay: (delta: 1 | -1) => void;
-  onDateChange: (date: string) => void;
+  /** Value or updater, so a rapid burst of arrow clicks shifts from the latest date. */
+  onDateChange: (date: string | ((previous: string) => string)) => void;
   date: string;
   weekStart: string;
   monthAnchor: string;

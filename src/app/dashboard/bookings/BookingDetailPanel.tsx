@@ -860,9 +860,19 @@ export function BookingDetailPanel({
     optimisticTableLabel ??
     (assignedTables.length > 0 ? assignedTables.map((table) => table.name).join(' + ') : null);
   const hasAssignedTable = Boolean(tableLine);
+  /**
+   * Most specific name first: the chosen option, then the service itself.
+   *
+   * Without the service-name fallback a plain service (no options) had nothing
+   * of its own to show and depended entirely on the name seeded from the list
+   * row, so opening the same booking without that seed left the line blank.
+   */
   const serviceLine =
     d.service_variant_name ??
     d.cde_context?.title ??
+    (typeof d.service_name_snapshot === 'string' && d.service_name_snapshot.trim()
+      ? d.service_name_snapshot.trim()
+      : null) ??
     initialSnapshot?.serviceName ??
     null;
   const panelBodySpacing = isPopover ? 'space-y-1.5 p-2' : 'space-y-3 p-4';

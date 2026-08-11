@@ -76,6 +76,12 @@ export interface BookingDetail {
   area_name?: string | null;
   cde_context?: { title?: string | null; subtitle?: string | null } | null;
   service_variant_name?: string | null;
+  /**
+   * Service name captured at booking time. Present on the detail payload (the
+   * GET spreads the booking row) and needed because a service without options
+   * has no `service_variant_name` of its own to display.
+   */
+  service_name_snapshot?: string | null;
   /** Per-row snapshots of add-ons chosen at booking time. */
   addons?: Array<{
     id: string;

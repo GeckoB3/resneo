@@ -276,6 +276,13 @@ export interface VisitBookingRow {
   practitioner_id?: string | null;
   booking_total_price_pence?: number | null;
   service_variant_id?: string | null;
+  /**
+   * Names captured at booking time. A line only has a variant name when the
+   * service actually has options, so the service name is what labels everything
+   * else, and both survive a later catalogue rename.
+   */
+  service_name_snapshot?: string | null;
+  service_variant_name_snapshot?: string | null;
   addons_total_price_pence?: number | null;
   deposit_status?: string | null;
   deposit_amount_pence?: number | null;
@@ -306,6 +313,10 @@ export function visitAnchorFromBooking(
     group_booking_id: str(booking.group_booking_id),
     booking_total_price_pence: num(booking.booking_total_price_pence),
     service_variant_id: str(booking.service_variant_id),
+    // Carried so the anchor can label its own visit line; without these it was
+    // the one row in a visit that fell back to the word "Service".
+    service_name_snapshot: str(booking.service_name_snapshot),
+    service_variant_name_snapshot: str(booking.service_variant_name_snapshot),
     service_item_id: str(booking.service_item_id),
     appointment_service_id: str(booking.appointment_service_id),
     calendar_id: str(booking.calendar_id),
@@ -332,9 +343,35 @@ export function visitAnchorFromBooking(
  * and are only populated for a real multi-line visit (a standalone booking
  * already carries `service_variant_name` on the detail payload).
  */
+/**
+ * What to call one line of a visit.
+ *
+ * The chosen OPTION is the most specific name, so it wins where there is one.
+ * Otherwise the SERVICE name labels the line: resolving names from
+ * `service_variants` alone meant every line of a visit made from plain services
+ * (no options) came back null, and the breakdown listed each one as the literal
+ * word "Service" with no way to tell them apart.
+ *
+ * Snapshots are preferred over the live variant name for the same reason every
+ * other surface prefers them: they say what was actually booked, and they
+ * survive a later catalogue rename.
+ */
+function visitLineName(
+  row: VisitBookingRow,
+  variantNames: Map<string, string>,
+): string | null {
+  const variantSnapshot = row.service_variant_name_snapshot?.trim();
+  if (variantSnapshot) return variantSnapshot;
+  const liveVariant = row.service_variant_id ? variantNames.get(row.service_variant_id) : undefined;
+  if (liveVariant?.trim()) return liveVariant.trim();
+  const serviceSnapshot = row.service_name_snapshot?.trim();
+  if (serviceSnapshot) return serviceSnapshot;
+  return null;
+}
+
 export interface VisitPaymentLine {
   booking_id: string;
-  /** Service/option name when resolvable; null for an unnamed or non-variant line. */
+  /** Option name when there is one, else the service name; null when neither is known. */
   name: string | null;
   /** This line's resolved price; null when it cannot be determined (§5.7). */
   total_pence: number | null;
@@ -384,7 +421,7 @@ export async function loadVisitPaymentPicture(
     let q = admin
       .from('bookings')
       .select(
-        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
+        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
       )
       .eq('group_booking_id', groupId);
     // Never let a group id reach across venues.
@@ -562,7 +599,7 @@ export async function loadVisitPaymentPicture(
     bookingIds,
     lines: rows.map((r) => ({
       booking_id: r.id,
-      name: r.service_variant_id ? (variantNames.get(r.service_variant_id) ?? null) : null,
+      name: visitLineName(r, variantNames),
       total_pence: rowTotal(r),
     })),
     anchorTotalPence: rowTotal(anchor),
@@ -626,7 +663,7 @@ export async function recomputeBookingPaymentSummary(
   const { data: bookingData, error: bookingErr } = await admin
     .from('bookings')
     .select(
-      'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
+      'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
     )
     .eq('id', bookingId)
     .maybeSingle();

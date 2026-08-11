@@ -11,6 +11,7 @@ import type {
 } from '@/lib/emails/types';
 import { formatDepositAmount } from '@/lib/emails/templates/base-template';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
+import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
 
 function priceDisplayFromPence(pricePence: number | null | undefined): string | null {
   if (pricePence == null) return null;
@@ -650,6 +651,43 @@ async function enrichBookingEmailWithAddons(
 }
 
 /** Appointment/USE enrichment then C/D/E labels for transactional and scheduled comms. */
+/**
+ * The booking's real length, for the "Add to calendar" link.
+ *
+ * `calendar_duration_minutes` was declared on {@link BookingEmailData} and read
+ * by `calendar-links`, but nothing ever wrote it, so every appointment link fell
+ * through to a hardcoded 60 minutes. A guest adding a three-hour balayage to
+ * their calendar got a one-hour event and booked something else over the top of
+ * it.
+ */
+async function withCalendarDurationMinutes(
+  supabase: SupabaseClient,
+  bookingId: string,
+  data: BookingEmailData,
+): Promise<BookingEmailData> {
+  if (typeof data.calendar_duration_minutes === 'number' && data.calendar_duration_minutes > 0) {
+    return data;
+  }
+  const { data: row } = await supabase
+    .from('bookings')
+    .select('booking_time, booking_end_time, estimated_end_time')
+    .eq('id', bookingId)
+    .maybeSingle();
+  const r = row as
+    | { booking_time?: string | null; booking_end_time?: string | null; estimated_end_time?: string | null }
+    | null;
+  if (!r?.booking_time) return data;
+
+  const minutes = resolveBookingCoreDurationMinutes({
+    booking_time: r.booking_time,
+    booking_end_time: r.booking_end_time ?? null,
+    estimated_end_time: r.estimated_end_time ?? null,
+  });
+  // Null means the row carries no end at all; leave the model default in place
+  // rather than inventing one.
+  return minutes != null && minutes > 0 ? { ...data, calendar_duration_minutes: minutes } : data;
+}
+
 export async function enrichBookingEmailForComms(
   supabase: SupabaseClient,
   bookingId: string,
@@ -657,7 +695,8 @@ export async function enrichBookingEmailForComms(
 ): Promise<BookingEmailData> {
   const appt = await enrichBookingEmailForAppointment(supabase, bookingId, base);
   const withSecondary = await enrichBookingEmailForSecondaryModels(supabase, bookingId, appt);
-  return enrichBookingEmailWithAddons(supabase, bookingId, withSecondary);
+  const withAddons = await enrichBookingEmailWithAddons(supabase, bookingId, withSecondary);
+  return withCalendarDurationMinutes(supabase, bookingId, withAddons);
 }
 
 function resourceBookingTotalPence(params: {

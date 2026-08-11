@@ -527,6 +527,123 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
     expect(invalid.ok).toBe(false);
   });
 
+  /**
+   * The other half of the rule above. When the CALLER asserts a pattern an
+   * overrun is a contradiction and is refused (see the test above), but with no
+   * assertion the service template is merely being applied to whatever duration
+   * was asked about, and refusing there emptied the day and month pickers: the
+   * availability routes pass a custom duration and no blocks, so every candidate
+   * start failed identically with no explanation.
+   */
+  it('fits the service template to a custom duration instead of refusing every slot', () => {
+    const date = '2030-06-02';
+    const dk = workingHoursDayKey(date);
+    const input: AppointmentEngineInput = {
+      date,
+      skipPastSlotFilter: true,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '18:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 'balayage',
+          name: 'Balayage',
+          duration_minutes: 180,
+          buffer_minutes: 0,
+          processing_time_minutes: 0,
+          // Free from minute 60 to minute 120 of a 180 minute service.
+          processing_time_blocks: [{ id: 'gap', start_minute: 60, duration_minutes: 60 }],
+          is_active: true,
+        } as unknown as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [
+        {
+          id: 'ps1',
+          practitioner_id: 'p1',
+          service_id: 'balayage',
+          custom_duration_minutes: null,
+          custom_price_pence: null,
+        },
+      ],
+      existingBookings: [],
+    };
+
+    // Staff resized this booking to 90 minutes, so the template's 60-120 gap no
+    // longer fits. The interval is still perfectly bookable.
+    const resized = validateAppointmentCustomInterval(input, 'p1', 'balayage', '10:00', '11:30');
+    expect(resized.ok).toBe(true);
+
+    // And at a duration too short to hold any gap at all.
+    const short = validateAppointmentCustomInterval(input, 'p1', 'balayage', '10:00', '10:30');
+    expect(short.ok).toBe(true);
+  });
+
+  /**
+   * The asymmetry is deliberate, so pin it. Fitting the template (above) only
+   * ever affects the interval being ASKED about, and erring there costs nothing
+   * worse than an offered slot. An EXISTING booking whose stored snapshot
+   * overruns its own duration is a corrupt row, and inferring a gap from it would
+   * free time the practitioner is actually working. That direction stays
+   * conservative: hold the whole span busy.
+   */
+  it('holds an existing booking fully busy when its own snapshot overruns its duration', () => {
+    const existing: AppointmentBooking[] = [
+      {
+        id: 'long',
+        practitioner_id: 'p1',
+        booking_time: '10:00',
+        duration_minutes: 60,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+        // Runs to minute 75, past the end of a 60 minute booking.
+        processing_time_blocks: [{ id: 'g', start_minute: 20, duration_minutes: 55 }],
+      },
+    ];
+    const input = processingInput(existing);
+    for (const [start, end] of [
+      ['10:25', '10:40'],
+      ['10:05', '10:20'],
+    ] as const) {
+      expect(
+        validateAppointmentCustomInterval(input, 'p1', 's15', start, end, undefined, {
+          processingTimeBlocks: [],
+        }).ok,
+      ).toBe(false);
+    }
+  });
+
+  it('opens the gap for an existing booking whose snapshot does fit', () => {
+    const existing: AppointmentBooking[] = [
+      {
+        id: 'long',
+        practitioner_id: 'p1',
+        booking_time: '10:00',
+        duration_minutes: 60,
+        buffer_minutes: 0,
+        status: 'Confirmed',
+        processing_time_blocks: [{ id: 'g', start_minute: 20, duration_minutes: 30 }],
+      },
+    ];
+    const input = processingInput(existing);
+    expect(
+      validateAppointmentCustomInterval(input, 'p1', 's15', '10:25', '10:40', undefined, {
+        processingTimeBlocks: [],
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateAppointmentCustomInterval(input, 'p1', 's15', '10:05', '10:20', undefined, {
+        processingTimeBlocks: [],
+      }).ok,
+    ).toBe(false);
+  });
+
   // p1 works 09:00–18:00; a 19:00 booking is past closing.
   it('blocks past-closing by default but allows it with allowOutsideHours (staff walk-in / move / resize)', () => {
     const input = processingInput([]);

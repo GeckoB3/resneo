@@ -65,6 +65,7 @@ import {
   applyGroupClientArrivedChange,
   applyGroupStaffAttendanceChange,
   loadGroupBookingSiblings,
+  resolveCascadingVisitGroupId,
 } from '@/lib/booking/group-booking-status-sync';
 import {
   bookingCaptureUnitOwesCapture,
@@ -98,7 +99,7 @@ import { cardHoldChargeWindowEndsAtForBooking } from '@/lib/booking/card-hold-wi
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { loadVisitPaymentPicture, visitAnchorFromBooking } from '@/lib/booking/payment-summary';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
-import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 const actualDepartedTimeSchema = z.string().datetime();
@@ -139,14 +140,6 @@ async function gateUnpaidPromotion(
     };
   }
   return { acceptedUnit: owes };
-}
-
-function cancellationDeadline(bookingDate: string, bookingTime: string): string {
-  const [y, m, d] = bookingDate.split('-').map(Number);
-  const [hh, mm] = bookingTime.slice(0, 5).split(':').map(Number);
-  const dt = new Date(Date.UTC(y!, m! - 1, d!, hh, mm, 0));
-  dt.setHours(dt.getHours() - 48);
-  return dt.toISOString();
 }
 
 /**
@@ -580,7 +573,15 @@ export async function PATCH(
       }
       const on = Boolean(body.staff_attendance_confirmed);
       const currentStatus = booking.status as string;
-      const groupBookingId = booking.group_booking_id as string | null | undefined;
+      // Null for a GROUP booking (distinct people, each with a person_label), so
+      // every branch below falls through to its single-row path instead of
+      // cascading one attendee's change onto the others. See
+      // `resolveCascadingVisitGroupId`.
+      const groupBookingId = await resolveCascadingVisitGroupId(
+        staff.db,
+        scopeVenueId,
+        booking.group_booking_id as string | null | undefined,
+      );
       const adminForHooks = getSupabaseAdminClient();
 
       // Unpaid-promotion gate (plan 6.2): confirming attendance on a Pending
@@ -906,7 +907,15 @@ export async function PATCH(
       }
 
       if (newStatus === 'Cancelled' && (booking.status === 'Confirmed' || booking.status === 'Booked' || booking.status === 'Pending' || booking.status === 'Seated')) {
-        const groupBookingId = booking.group_booking_id as string | null | undefined;
+        // Null for a GROUP booking (distinct people, each with a person_label), so
+      // every branch below falls through to its single-row path instead of
+      // cascading one attendee's change onto the others. See
+      // `resolveCascadingVisitGroupId`.
+      const groupBookingId = await resolveCascadingVisitGroupId(
+        staff.db,
+        scopeVenueId,
+        booking.group_booking_id as string | null | undefined,
+      );
         let idsToCancel: string[] = [id];
         let paymentIntentForRefund: string | null =
           typeof booking.stripe_payment_intent_id === 'string' ? booking.stripe_payment_intent_id : null;
@@ -1171,7 +1180,15 @@ export async function PATCH(
           });
         }
       } else if (newStatus === 'No-Show') {
-        const groupBookingId = booking.group_booking_id as string | null | undefined;
+        // Null for a GROUP booking (distinct people, each with a person_label), so
+      // every branch below falls through to its single-row path instead of
+      // cascading one attendee's change onto the others. See
+      // `resolveCascadingVisitGroupId`.
+      const groupBookingId = await resolveCascadingVisitGroupId(
+        staff.db,
+        scopeVenueId,
+        booking.group_booking_id as string | null | undefined,
+      );
         const noShowTargets = groupBookingId
           ? await loadGroupBookingSiblings(staff.db, scopeVenueId, groupBookingId)
           : [
@@ -1274,7 +1291,15 @@ export async function PATCH(
           });
         }
       } else {
-        const groupBookingId = booking.group_booking_id as string | null | undefined;
+        // Null for a GROUP booking (distinct people, each with a person_label), so
+      // every branch below falls through to its single-row path instead of
+      // cascading one attendee's change onto the others. See
+      // `resolveCascadingVisitGroupId`.
+      const groupBookingId = await resolveCascadingVisitGroupId(
+        staff.db,
+        scopeVenueId,
+        booking.group_booking_id as string | null | undefined,
+      );
         let statusLifecycleHandled = false;
 
         let actualDepartedTime: string | undefined;
@@ -1454,7 +1479,15 @@ export async function PATCH(
         );
       }
       const arrived = Boolean(body.client_arrived);
-      const groupBookingId = booking.group_booking_id as string | null | undefined;
+      // Null for a GROUP booking (distinct people, each with a person_label), so
+      // every branch below falls through to its single-row path instead of
+      // cascading one attendee's change onto the others. See
+      // `resolveCascadingVisitGroupId`.
+      const groupBookingId = await resolveCascadingVisitGroupId(
+        staff.db,
+        scopeVenueId,
+        booking.group_booking_id as string | null | undefined,
+      );
       if (groupBookingId) {
         await applyGroupClientArrivedChange(staff.db, scopeVenueId, groupBookingId, arrived);
       } else {
@@ -1479,7 +1512,15 @@ export async function PATCH(
     if (body.staff_attendance_confirmed !== undefined) {
       const on = Boolean(body.staff_attendance_confirmed);
       const currentStatus = booking.status as string;
-      const groupBookingId = booking.group_booking_id as string | null | undefined;
+      // Null for a GROUP booking (distinct people, each with a person_label), so
+      // every branch below falls through to its single-row path instead of
+      // cascading one attendee's change onto the others. See
+      // `resolveCascadingVisitGroupId`.
+      const groupBookingId = await resolveCascadingVisitGroupId(
+        staff.db,
+        scopeVenueId,
+        booking.group_booking_id as string | null | undefined,
+      );
 
       // Unpaid-promotion gate (plan 6.2): mirrors the attendance-only fast path.
       let acceptedUnit: CaptureUnitOwes | null = null;
@@ -1798,25 +1839,19 @@ export async function PATCH(
         const skipModificationGuestNotification =
           (body as Record<string, unknown>).skip_booking_modification_guest_notification === true;
 
-        // estimated_end_time must be a TRUE UTC instant for the venue timezone.
-        // We resolve the venue-local start wall-clock (newDate + timeStr) to a
-        // real UTC instant via venueLocalDateTimeToUtcMs, then add the booking
-        // duration. Adding minutes to the start *instant* is correct across DST
-        // and midnight wrap (unlike re-interpreting an HH:mm end that may have
-        // rolled past 24:00). booking_end_time still carries the venue-local
-        // wall-clock HH:mm, so every wall-clock reader keeps working — they all
-        // prefer booking_end_time over estimated_end_time for resource rows.
-        const { data: venueTz } = await admin
-          .from('venues')
-          .select('timezone')
-          .eq('id', scopeVenueId)
-          .single();
-        const venueTimezone =
-          typeof venueTz?.timezone === 'string' && venueTz.timezone.trim() !== ''
-            ? venueTz.timezone.trim()
-            : 'Europe/London';
-        const startUtcMs = venueLocalDateTimeToUtcMs(newDate, timeStr, venueTimezone);
-        const estimatedEnd = new Date(startUtcMs + validation.durationMinutes * 60_000);
+        /**
+         * Venue-local wall clock encoded as UTC, matching every create path.
+         * This used to write a TRUE instant (`venueLocalDateTimeToUtcMs`), which
+         * is an hour out from the create convention under BST. It was masked
+         * here only because resource rows also carry `booking_end_time` and
+         * every reader prefers that column; the class branch below had the same
+         * split with nothing to mask it.
+         */
+        const resourceEndFields = bookingEndFieldsForStorage({
+          dateYmd: newDate,
+          startHHmm: timeStr,
+          durationMinutes: validation.durationMinutes,
+        });
 
         // Re-pin the deposit-refund deadline to the NEW start. Without this the
         // cancellation_deadline stays anchored to the old start time after a
@@ -1837,7 +1872,7 @@ export async function PATCH(
           booking_date: newDate,
           booking_time: newTime,
           booking_end_time: `${validation.endHHmm}:00`,
-          estimated_end_time: estimatedEnd.toISOString(),
+          estimated_end_time: resourceEndFields.estimated_end_time,
           cancellation_deadline,
           updated_at: new Date().toISOString(),
         };
@@ -2029,12 +2064,19 @@ export async function PATCH(
 
         const newTime =
           validation.startTime.length === 5 ? `${validation.startTime}:00` : validation.startTime;
-        const startUtcMs = venueLocalDateTimeToUtcMs(
-          validation.instanceDate,
-          validation.startTime,
-          venueTimezone,
-        );
-        const estimatedEnd = new Date(startUtcMs + validation.durationMinutes * 60_000);
+        /**
+         * Class rows never carried `booking_end_time`, so every reader fell
+         * through to `estimated_end_time` -- which this branch alone wrote as a
+         * TRUE UTC instant while the class create paths wrote venue-local wall
+         * clock as UTC. Under BST a rescheduled 18:00 class read back as ending
+         * at 18:00, and the list bar wrapped that to "24 hr". Write both columns
+         * from the shared helper so the two encodings cannot drift again.
+         */
+        const classEndFields = bookingEndFieldsForStorage({
+          dateYmd: validation.instanceDate,
+          startHHmm: validation.startTime,
+          durationMinutes: validation.durationMinutes,
+        });
         const cancellation_deadline = cancellationDeadlineHoursBefore(
           validation.instanceDate,
           newTime,
@@ -2050,7 +2092,8 @@ export async function PATCH(
             class_instance_id: targetInstanceId,
             booking_date: validation.instanceDate,
             booking_time: newTime,
-            estimated_end_time: estimatedEnd.toISOString(),
+            estimated_end_time: classEndFields.estimated_end_time,
+            booking_end_time: classEndFields.booking_end_time,
             cancellation_deadline,
             updated_at: new Date().toISOString(),
           })
@@ -2133,6 +2176,35 @@ export async function PATCH(
         (body as Record<string, unknown>).defer_modification_notification === true;
       const skipModificationGuestNotification =
         (body as Record<string, unknown>).skip_booking_modification_guest_notification === true;
+
+      /**
+       * Only a live booking can be MOVED. Without this the appointment and table
+       * branch happily rescheduled a Cancelled or Completed booking: it re-pinned
+       * the refund deadline, deleted the queued reminder rows, re-ran table
+       * auto-assignment, and emailed the guest that their booking had changed.
+       * The resource and class branches have always had this guard.
+       *
+       * Scoped to fields that actually move the booking. Correcting a record
+       * after the fact (party size, or the processing pattern on a finished
+       * appointment) stays allowed on a terminal booking, because that is
+       * bookkeeping rather than a reschedule and it notifies nobody.
+       */
+      const MOVE_STATUSES = ['Pending', 'Deposit Pending', 'Booked', 'Confirmed', 'Seated'];
+      const scheduleMoveRequested =
+        body.booking_date !== undefined ||
+        body.booking_time !== undefined ||
+        body.booking_end_time !== undefined ||
+        body.duration_minutes !== undefined ||
+        body.practitioner_id !== undefined ||
+        body.appointment_service_id !== undefined ||
+        body.service_item_id !== undefined ||
+        (body as { service_variant_id?: unknown }).service_variant_id !== undefined;
+      if (scheduleMoveRequested && !MOVE_STATUSES.includes(booking.status as string)) {
+        return NextResponse.json(
+          { error: `A ${String(booking.status).toLowerCase()} booking cannot be rescheduled.` },
+          { status: 400 },
+        );
+      }
 
       const newDate = (body.booking_date as string) ?? booking.booking_date;
       const newTimeRaw = (body.booking_time as string) ?? (typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00');
@@ -2326,12 +2398,52 @@ export async function PATCH(
       const bookingStartChanged =
         newDate !== before.booking_date || timeStr !== before.booking_time;
 
+      /**
+       * Re-pin the refund deadline using THIS entity's configured notice window,
+       * the same way create, guest self-modify and the resource branch all do.
+       * A local helper here hardcoded 48 hours and read the start as UTC, so a
+       * 15-minute staff reschedule silently moved a 24-hour-notice booking's
+       * deadline to 48 hours while `cancellation_policy_snapshot` on the same row
+       * still promised 24: the guest was then refused a refund their stored
+       * policy entitled them to (and a 72-hour venue handed back refunds it
+       * should have kept).
+       */
+      const modifyRefundWindowHours = await resolveCancellationNoticeHoursForCreate({
+        supabase: admin,
+        venueId: scopeVenueId,
+        effectiveModel: isAppointment ? 'unified_scheduling' : 'table_reservation',
+        ...(isAppointment
+          ? {
+              serviceItemId:
+                (body.service_item_id as string | undefined) ??
+                (booking.service_item_id as string | null) ??
+                undefined,
+              appointmentServiceId:
+                (body.appointment_service_id as string | undefined) ??
+                (booking.appointment_service_id as string | null) ??
+                undefined,
+            }
+          : {}),
+      });
+
       const bookingUpdate: Record<string, unknown> = {
         booking_date: newDate,
         booking_time: newTime,
         party_size: newPartySize,
         updated_at: new Date().toISOString(),
-        cancellation_deadline: cancellationDeadline(newDate, timeStr),
+        cancellation_deadline: cancellationDeadlineHoursBefore(
+          newDate,
+          newTime,
+          modifyRefundWindowHours,
+        ),
+        /**
+         * Kept in step with the deadline above. Re-pinning one without the other
+         * is what let a booking promise a 24 hour window while enforcing 48.
+         */
+        cancellation_policy_snapshot: {
+          refund_window_hours: modifyRefundWindowHours,
+          policy: `Full refund if cancelled ${modifyRefundWindowHours}+ hours before the booking start. No refund within ${modifyRefundWindowHours} hours of the booking or for no-shows.`,
+        },
       };
 
       if (!isAppointment && tableRescheduleServiceId) {
@@ -2363,19 +2475,45 @@ export async function PATCH(
       }
       if (isAppointment && (body.appointment_service_id || body.service_item_id)) {
         const nextServiceId = (body.appointment_service_id as string | undefined) ?? (body.service_item_id as string | undefined);
+        const previousServiceId =
+          (booking.service_item_id as string | null) ?? (booking.appointment_service_id as string | null);
         if (booking.service_item_id) {
           bookingUpdate.service_item_id = nextServiceId;
         } else {
           bookingUpdate.appointment_service_id = nextServiceId;
+        }
+
+        /**
+         * Re-snapshot the display name when the booking genuinely moves to a
+         * different service. `service_name_snapshot` is written by a BEFORE
+         * INSERT trigger and every read prefers it, so a booking switched from
+         * "Gents Cut" to "Beard Trim" kept saying Gents Cut on the calendar, the
+         * day sheet, the bookings list and the guest's visit history, forever.
+         * The trigger exists to survive catalogue RENAMES; it never considered a
+         * booking being deliberately moved.
+         */
+        if (nextServiceId && nextServiceId !== previousServiceId) {
+          const { data: nextSvcRow } = await admin
+            .from(booking.service_item_id ? 'service_items' : 'appointment_services')
+            .select('name')
+            .eq('id', nextServiceId)
+            .maybeSingle();
+          const nextName = (nextSvcRow as { name?: string } | null)?.name;
+          if (typeof nextName === 'string' && nextName.trim() !== '') {
+            bookingUpdate.service_name_snapshot = nextName;
+          }
+          // The old option's name never applies to a different service. The
+          // variant itself is re-resolved above and rejected if it does not
+          // belong to the new service.
+          if (nextServiceId !== previousServiceId) {
+            bookingUpdate.service_variant_name_snapshot = null;
+          }
         }
       }
 
       const appointmentSvcId = booking.appointment_service_id as string | null | undefined;
       const serviceItemId = booking.service_item_id as string | null | undefined;
       if (isAppointment && (appointmentSvcId || serviceItemId)) {
-        const [ry, rmo, rd] = newDate.split('-').map(Number);
-        const [rhh, rmm] = timeStr.split(':').map(Number);
-        const rEnd = new Date(Date.UTC(ry!, rmo! - 1, rd!, rhh!, rmm!, 0));
         const endResolved = resolveAppointmentModifyEndCoreHHmm({
           startHHmm: timeStr,
           durationMinutes: body.duration_minutes as number | null | undefined,
@@ -2386,9 +2524,15 @@ export async function PATCH(
           return NextResponse.json({ error: endResolved.reason }, { status: 400 });
         }
         const durationMinutes = minutesBetweenStartAndEndHM(timeStr, endResolved.endCoreHHmm);
-        rEnd.setMinutes(rEnd.getMinutes() + durationMinutes);
-        bookingUpdate.estimated_end_time = rEnd.toISOString();
-        bookingUpdate.booking_end_time = `${endResolved.endCoreHHmm}:00`;
+        // Both end columns from the shared helper, so this path cannot drift from
+        // the creates the way the class and resource modify paths had.
+        const modifyEndFields = bookingEndFieldsForStorage({
+          dateYmd: newDate,
+          startHHmm: timeStr,
+          durationMinutes,
+        });
+        bookingUpdate.estimated_end_time = modifyEndFields.estimated_end_time;
+        bookingUpdate.booking_end_time = modifyEndFields.booking_end_time;
 
         if (body.processing_time_blocks !== undefined) {
           const procChk = validateProcessingTimeBlocks(

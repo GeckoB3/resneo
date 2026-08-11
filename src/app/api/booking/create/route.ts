@@ -60,6 +60,7 @@ import {
   isResourceBookingStartInPast,
 } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
 import {
@@ -886,6 +887,8 @@ async function handleNonTableBooking(
   let appointmentEmailExtras: Partial<BookingEmailData> = {};
   let unifiedSessionAnchor: { calendar_id: string; service_item_id: string | null } | null = null;
   let appointmentProcessingSnapshot: ProcessingTimeBlock[] | null = null;
+  /** Venue-local wall-clock end of the appointment's core segment (HH:mm:ss). */
+  let appointmentBookingEndTime: string | null = null;
 
   const SESSION_CAPACITY_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
@@ -1189,17 +1192,33 @@ async function handleNonTableBooking(
         effectivePricePence != null ? `£${(effectivePricePence / 100).toFixed(2)}` : null,
     };
     if (svc) {
-      // `svc` was derived from the engine input which we already extended with the
-      // add-on duration above (and the combined-page override, if any). So
-      // `svc.duration_minutes` already reflects the slot length to reserve.
       chosenAddonSnapshots = chosenAddonSnapshotsBuilt;
       chosenAddonTotals = chosenAddonTotalsBuilt;
 
-      const [y, mo, d] = booking_date.split('-').map(Number);
-      const [hh, mm] = timeStr.split(':').map(Number);
-      const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-      endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
-      estimatedEndTime = endDate.toISOString();
+      /**
+       * The length the engine actually reserved. `baseSvc` is the engine input
+       * row, already carrying the variant's duration and the add-on minutes we
+       * folded in above. `svc` is NOT usable for this: re-applying the variant
+       * to build it resets the duration to the variant's own, dropping the
+       * add-on minutes, so a variant booking with add-ons used to be persisted
+       * shorter than the slot it consumed.
+       */
+      const reservedDurationMinutes = baseSvc?.duration_minutes ?? svc.duration_minutes;
+
+      /**
+       * The engine reads a booking's span from `booking_end_time` and falls back
+       * to the CURRENT catalogue duration when it is null. Leaving it null here
+       * meant every online appointment was valued at its parent service's
+       * length: a 150-minute variant looked like a 30-minute parent and the next
+       * guest was offered a slot straight through it.
+       */
+      const endFields = bookingEndFieldsForStorage({
+        dateYmd: booking_date,
+        startHHmm: timeStr,
+        durationMinutes: reservedDurationMinutes,
+      });
+      estimatedEndTime = endFields.estimated_end_time;
+      appointmentBookingEndTime = endFields.booking_end_time;
 
       // Model B: online charge from service payment mode (none / deposit / full payment).
       // The combined-page override replaces the price the deposit is computed from;
@@ -1707,7 +1726,20 @@ async function handleNonTableBooking(
     class_instance_id: class_instance_id ?? null,
     resource_id: resource_id ?? null,
     calendar_id: resource_id ? resource_id : null,
-    booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
+    /**
+     * Appointments use the end WE computed from the reserved slot, never the
+     * request's. `booking_end_time` is a resource-model field; accepting it on an
+     * appointment payload let an unauthenticated caller declare any span it
+     * liked, and the engine trusts this column over everything else, so a single
+     * forged booking could hold (or vacate) a practitioner's whole day.
+     */
+    booking_end_time:
+      appointmentBookingEndTime ??
+      (resource_id && booking_end_time
+        ? booking_end_time.length === 5
+          ? booking_end_time + ':00'
+          : booking_end_time
+        : null),
     event_session_id: event_session_id ?? null,
     capacity_used: capacity_used ?? party_size,
     addons_total_price_pence: chosenAddonTotals.total_price_pence,

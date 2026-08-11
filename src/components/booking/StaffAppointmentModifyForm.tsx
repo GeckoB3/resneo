@@ -10,12 +10,73 @@ import {
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MAX_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/booking/validate-appointment-modification';
 import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
+import {
+  effectiveProcessingBlocksForTemplate,
+  fitProcessingBlocksToDuration,
+  parseProcessingTimeBlocksFromDb,
+} from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
+
+interface ServiceVariantRow {
+  id: string;
+  name: string;
+  is_active: boolean;
+  duration_minutes: number;
+  /** Raw catalogue JSON; parsed before use. */
+  processing_time_blocks?: unknown;
+}
 
 interface ServiceRow {
   id: string;
   name: string;
   duration_minutes: number;
-  variants?: Array<{ id: string; name: string; is_active: boolean; duration_minutes: number }>;
+  /** Raw catalogue JSON; parsed before use. */
+  processing_time_blocks?: unknown;
+  variants?: ServiceVariantRow[];
+}
+
+/** "15 to 45 minutes" / "15 to 45 and 60 to 75 minutes" */
+function describeProcessingGaps(blocks: ProcessingTimeBlock[]): string {
+  const ranges = blocks.map((b) => `${b.start_minute} to ${b.start_minute + b.duration_minutes}`);
+  const joined =
+    ranges.length <= 1
+      ? (ranges[0] ?? '')
+      : `${ranges.slice(0, -1).join(', ')} and ${ranges[ranges.length - 1]}`;
+  return `${joined} minutes`;
+}
+
+/**
+ * What saving will do to the processing time, in words. Null when nothing about
+ * it changes, so the form stays quiet on an ordinary time move.
+ */
+function describeProcessingChange(params: {
+  removed: number;
+  trimmed: number;
+  serviceChanged: boolean;
+}): string | null {
+  const { removed, trimmed, serviceChanged } = params;
+  const sentences: string[] = [];
+  if (serviceChanged) {
+    sentences.push('Changing the service swaps in that service’s processing pattern.');
+  }
+  if (removed > 0 && trimmed > 0) {
+    sentences.push(
+      'This duration cannot hold all of it, so saving will shorten one gap and drop the rest.',
+    );
+  } else if (removed > 0) {
+    sentences.push(
+      removed === 1
+        ? 'This duration is too short for the processing gap, so saving will remove it.'
+        : 'This duration is too short for the processing gaps, so saving will remove them.',
+    );
+  } else if (trimmed > 0) {
+    sentences.push(
+      trimmed === 1
+        ? 'Saving will shorten the processing gap so it ends with the appointment.'
+        : 'Saving will shorten the processing gaps so they end with the appointment.',
+    );
+  }
+  return sentences.length > 0 ? sentences.join(' ') : null;
 }
 
 interface PractitionerLink {
@@ -38,6 +99,13 @@ function buildPatchPayload(params: {
   durationMinutes: number;
   serviceVariantId: string | null;
   requiresVariant: boolean;
+  /**
+   * Already fitted to `durationMinutes` by the caller. Sent on every save so the
+   * row stops carrying blocks snapshotted against a duration, service or variant
+   * it no longer has. Null when the caller could not resolve them, which omits
+   * the key so the server keeps the row's snapshot rather than clearing it.
+   */
+  processingTimeBlocks: ProcessingTimeBlock[] | null;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     booking_date: params.bookingDate,
@@ -45,6 +113,9 @@ function buildPatchPayload(params: {
     practitioner_id: params.practitionerId,
     duration_minutes: params.durationMinutes,
   };
+  if (params.processingTimeBlocks) {
+    body.processing_time_blocks = params.processingTimeBlocks;
+  }
   if (params.usesServiceItem) {
     body.service_item_id = params.serviceId;
   } else {
@@ -136,6 +207,89 @@ export function StaffAppointmentModifyForm({
     const v = selectedService?.variants ?? [];
     return v.some((x) => x.is_active);
   }, [selectedService]);
+
+  const activeVariant = useMemo(
+    () => (selectedService?.variants ?? []).find((v) => v.is_active && v.id === variantId) ?? null,
+    [selectedService, variantId],
+  );
+
+  /**
+   * `undefined` means the caller never loaded the column, which is not the same
+   * as "this booking has none". Every current caller passes it (`?? null`), but
+   * guessing `[]` for one that forgot would clear real processing time on save.
+   */
+  const bookingBlocksKnown = booking.processing_time_blocks !== undefined;
+
+  /** This booking's own blocks, snapshotted from the catalogue when it was made. */
+  const bookingProcessingBlocks = useMemo(
+    () => parseProcessingTimeBlocksFromDb(booking.processing_time_blocks),
+    [booking.processing_time_blocks],
+  );
+
+  const processingServiceChanged =
+    serviceId !== initialServiceId || (variantId ?? null) !== (booking.service_variant_id ?? null);
+
+  /**
+   * Which pattern this booking should carry: its own snapshot while it stays on
+   * the same service and variant, otherwise the newly chosen one's template. A
+   * snapshot belongs to the service it was taken from, so keeping it across a
+   * service change would leave the old service's gap on the booking.
+   */
+  const sourceProcessingBlocks = useMemo(() => {
+    if (!processingServiceChanged) return bookingProcessingBlocks;
+    if (!selectedService) return [];
+    return effectiveProcessingBlocksForTemplate({
+      parentBlocks: parseProcessingTimeBlocksFromDb(selectedService.processing_time_blocks),
+      variantBlocks: activeVariant
+        ? parseProcessingTimeBlocksFromDb(activeVariant.processing_time_blocks)
+        : null,
+    });
+  }, [processingServiceChanged, bookingProcessingBlocks, selectedService, activeVariant]);
+
+  /**
+   * The blocks this form will actually send, clamped to the chosen duration.
+   * Without this the server rejects any shortening below the last block's end
+   * ("Processing blocks must lie within the service duration"), which staff had
+   * no way to resolve from this form.
+   */
+  const processingFit = useMemo(
+    () => fitProcessingBlocksToDuration(sourceProcessingBlocks, durationMinutes ?? 0),
+    [sourceProcessingBlocks, durationMinutes],
+  );
+
+  /** What to send, or null to leave the row's snapshot alone. */
+  const processingBlocksToSend = bookingBlocksKnown || processingServiceChanged ? processingFit.blocks : null;
+
+  const processingNotice = useMemo(() => {
+    // Still resolving the duration: every block would look unfittable.
+    if (durationMinutes == null) return null;
+    // Switched to a service that has no processing time at all, so there is
+    // nothing left to trim or describe. Say so rather than dropping it quietly.
+    if (
+      processingServiceChanged &&
+      bookingProcessingBlocks.length > 0 &&
+      sourceProcessingBlocks.length === 0
+    ) {
+      return 'The service you picked has no processing time, so saving will remove this booking’s gap.';
+    }
+    return describeProcessingChange({
+      removed: processingFit.removed.length,
+      trimmed: processingFit.trimmed.length,
+      serviceChanged: processingServiceChanged && sourceProcessingBlocks.length > 0,
+    });
+  }, [
+    durationMinutes,
+    processingFit,
+    processingServiceChanged,
+    bookingProcessingBlocks,
+    sourceProcessingBlocks,
+  ]);
+
+  /** Only worth a panel when this booking has, or is losing, a processing gap. */
+  const showProcessingPanel =
+    durationMinutes != null &&
+    (sourceProcessingBlocks.length > 0 ||
+      (processingServiceChanged && bookingProcessingBlocks.length > 0));
 
   const practitionerOptions = useMemo(() => {
     const svcLinks = new Set(
@@ -312,6 +466,9 @@ export function StaffAppointmentModifyForm({
           ...(usesServiceItem ? { service_item_id: serviceId } : { appointment_service_id: serviceId }),
           duration_minutes: durationMinutes,
           service_variant_id: requiresVariant ? variantId : null,
+          // The same fitted blocks the save will send, so this dry run judges
+          // exactly what the PATCH will persist.
+          ...(processingBlocksToSend ? { processing_time_blocks: processingBlocksToSend } : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -332,6 +489,7 @@ export function StaffAppointmentModifyForm({
     bookingTime,
     durationMinutes,
     practitionerId,
+    processingBlocksToSend,
     requiresVariant,
     serviceId,
     usesServiceItem,
@@ -398,6 +556,7 @@ export function StaffAppointmentModifyForm({
         durationMinutes,
         serviceVariantId: variantId,
         requiresVariant,
+        processingTimeBlocks: processingBlocksToSend,
       });
       // Start moved: defer the guest notification so the follow-up panel can
       // offer notify / skip / undo, exactly like the calendar drag (the server
@@ -460,6 +619,8 @@ export function StaffAppointmentModifyForm({
         durationMinutes: revertDuration,
         serviceVariantId: booking.service_variant_id ?? null,
         requiresVariant: Boolean(booking.service_variant_id),
+        // Undo restores the row's own snapshot, not whatever the save fitted.
+        processingTimeBlocks: bookingBlocksKnown ? bookingProcessingBlocks : null,
       });
       payload.skip_booking_modification_guest_notification = true;
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
@@ -478,6 +639,8 @@ export function StaffAppointmentModifyForm({
   }, [
     booking,
     bookingId,
+    bookingBlocksKnown,
+    bookingProcessingBlocks,
     baselineTime,
     baselineDuration,
     initialPractitionerId,
@@ -647,6 +810,30 @@ export function StaffAppointmentModifyForm({
           />
         </label>
       </div>
+
+      {showProcessingPanel ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <p className="text-xs font-semibold text-slate-700">Processing time</p>
+          <p className="mt-1 text-xs text-slate-600">
+            {processingFit.blocks.length > 0 ? (
+              <>
+                The calendar stays free for another client{' '}
+                <span className="font-semibold text-slate-800">
+                  {describeProcessingGaps(processingFit.blocks)}
+                </span>{' '}
+                after this appointment starts.
+              </>
+            ) : (
+              'This appointment will have no processing gap, so the calendar stays busy all the way through.'
+            )}
+          </p>
+          {processingNotice ? (
+            <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900">
+              {processingNotice}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div>
         <p className="text-xs font-semibold text-slate-700">Quick durations</p>

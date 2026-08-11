@@ -172,6 +172,7 @@ import {
   effectiveProcessingBlocksForTemplate,
   parseProcessingTimeBlocksFromDb,
   practitionerBusyMinuteOffsets,
+  processingBlocksForDurationChange,
 } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 
@@ -731,12 +732,11 @@ function bookingBufferMinutes(
   return Math.max(0, sid ? serviceMap.get(sid)?.buffer_minutes ?? 0 : 0);
 }
 
-function bookingProcessingBlocksForLayout(
+/** The catalogue pattern for this booking's service (and variant, when it has one). */
+function bookingTemplateProcessingBlocks(
   b: Booking,
   serviceMap: Map<string, AppointmentService>,
 ): ProcessingTimeBlock[] {
-  const fromBooking = parseProcessingTimeBlocksFromDb(b.processing_time_blocks);
-  if (fromBooking.length > 0) return fromBooking;
   const sid = serviceIdForBooking(b);
   const svc = sid ? serviceMap.get(sid) : undefined;
   if (!svc) return [];
@@ -746,6 +746,43 @@ function bookingProcessingBlocksForLayout(
   return effectiveProcessingBlocksForTemplate({
     parentBlocks: svc.processing_time_blocks ?? [],
     variantBlocks: variant?.processing_time_blocks,
+  });
+}
+
+/**
+ * What the grid paints. Resolved the same way the SERVER resolves it: a stored
+ * snapshot wins even when empty, and only a missing one falls back to the
+ * catalogue.
+ *
+ * This used to treat an EMPTY snapshot as missing and paint the service
+ * template, so a booking whose gap had deliberately been removed still showed a
+ * hatched free band, and staff dragging a client into it got "Conflicts with
+ * another booking" from a server that did not believe the gap existed.
+ */
+function bookingProcessingBlocksForLayout(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): ProcessingTimeBlock[] {
+  const raw = b.processing_time_blocks;
+  if (raw !== null && raw !== undefined) return parseProcessingTimeBlocksFromDb(raw);
+  return bookingTemplateProcessingBlocks(b, serviceMap);
+}
+
+/**
+ * The blocks to send when a drag changes this booking's duration. Resolution is
+ * deliberately not what the grid paints (see
+ * {@link processingBlocksForDurationChange}): a stored snapshot wins even when
+ * empty, and only a missing one falls back to the catalogue.
+ */
+function bookingProcessingBlocksForPatch(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+  durationMinutes: number,
+): ProcessingTimeBlock[] | null {
+  return processingBlocksForDurationChange({
+    snapshot: b.processing_time_blocks,
+    templateBlocks: bookingTemplateProcessingBlocks(b, serviceMap),
+    durationMinutes,
   });
 }
 
@@ -4070,6 +4107,18 @@ export function PractitionerCalendarView({
         startHm,
         endLen5,
       );
+      /**
+       * A resize changes the core duration, so the booking's processing blocks
+       * have to come with it. Without this the server validates the OLD blocks
+       * against the NEW duration and refuses any shrink past the last gap's end
+       * ("Processing blocks must lie within the service duration"), which the
+       * grid could only surface as a failed drag.
+       */
+      const resizeBlocks = bookingProcessingBlocksForPatch(
+        booking,
+        serviceMapForBooking(booking),
+        timeToMinutes(endLen5) - timeToMinutes(startHm),
+      );
       setLastScheduleEditUndo({ kind: 'resize', prev });
       if (linkedOwnerVenueId) {
         setLinkedVenues((venues) =>
@@ -4083,6 +4132,9 @@ export function PractitionerCalendarView({
                   ...lb,
                   bookingEndTime: endLen5,
                   estimatedEndTime: estimatedEndForStore,
+                  // Repaint the gap with the resize; the old blocks would
+                  // overflow the shortened block until the refetch lands.
+                  ...(resizeBlocks ? { processingTimeBlocks: resizeBlocks } : {}),
                 };
               }),
             };
@@ -4096,6 +4148,9 @@ export function PractitionerCalendarView({
                   ...b,
                   booking_end_time: bookingEndForStore,
                   estimated_end_time: estimatedEndForStore,
+                  // Repaint the gap with the resize; the old blocks would
+                  // overflow the shortened block until the refetch lands.
+                  ...(resizeBlocks ? { processing_time_blocks: resizeBlocks } : {}),
                 }
               : b,
           ),
@@ -4110,6 +4165,7 @@ export function PractitionerCalendarView({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               booking_end_time: bookingEndForStore,
+              ...(resizeBlocks ? { processing_time_blocks: resizeBlocks } : {}),
               allow_manual_overlap: true,
               allow_outside_hours: opts?.allowOutsideHours === true,
               defer_modification_guest_notification: true,
@@ -4150,6 +4206,7 @@ export function PractitionerCalendarView({
       clearScheduleEditFollowUpForBooking,
       refetchBookingsList,
       requestLinkedCalendarSync,
+      serviceMapForBooking,
     ],
   );
 
@@ -4177,6 +4234,17 @@ export function PractitionerCalendarView({
         : `${minutesToTime(timeToMinutes(startHm) + bookingDurationMinutes(prev, serviceMapForBooking(prev)))}:00`;
     const linkedOwnerVenueId = prev._linkedOwnerVenueId;
     const undoPracId = resolveLinkedGridPractitionerIdForPatch(colId);
+    /**
+     * `prev` is the pre-edit row, so its blocks are the ones the booking had
+     * before the resize trimmed them. Fitting them to the restored duration
+     * hands back exactly that, rather than leaving the trim behind on a booking
+     * that is its original length again.
+     */
+    const undoBlocks = bookingProcessingBlocksForPatch(
+      prev,
+      serviceMapForBooking(prev),
+      timeToMinutes(bookingEndForStore.slice(0, 5)) - timeToMinutes(startHm),
+    );
 
     setScheduleUndoPending(true);
     if (linkedOwnerVenueId) {
@@ -4213,6 +4281,7 @@ export function PractitionerCalendarView({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             booking_end_time: bookingEndForStore,
+            ...(undoBlocks ? { processing_time_blocks: undoBlocks } : {}),
             allow_manual_overlap: true,
             ...(skipBookingModificationGuestNotification
               ? { skip_booking_modification_guest_notification: true }

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
+import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 import type { GuestRecord } from '@/lib/guests';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 
@@ -156,11 +157,14 @@ export async function insertPendingPaidClassSessionBooking(
   }
 
   const durationMin = ct.duration_minutes ?? 60;
-  const [y, mo, d] = bookingDate.split('-').map(Number);
-  const [hh, mm] = timeStr.split(':').map(Number);
-  const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-  endDate.setUTCMinutes(endDate.getUTCMinutes() + durationMin);
-  const estimatedEndTime = endDate.toISOString();
+  // Both end columns from one helper. Class rows used to carry only
+  // `estimated_end_time`, so every reader fell through to it and any path that
+  // wrote it in a different encoding produced a nonsense duration.
+  const classEndFields = bookingEndFieldsForStorage({
+    dateYmd: bookingDate,
+    startHHmm: timeStr,
+    durationMinutes: durationMin,
+  });
 
   const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
     supabase: admin,
@@ -191,7 +195,8 @@ export async function insertPendingPaidClassSessionBooking(
     deposit_status: 'Pending',
     cancellation_deadline,
     cancellation_policy_snapshot: cancellationPolicySnapshot,
-    estimated_end_time: estimatedEndTime,
+    estimated_end_time: classEndFields.estimated_end_time,
+    booking_end_time: classEndFields.booking_end_time,
     class_instance_id: classInstanceId,
     capacity_used: partySize,
     group_booking_id: groupBookingId,

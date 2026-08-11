@@ -143,7 +143,9 @@ export async function PATCH(request: NextRequest) {
 
       const { data: svc, error: svcErr } = await admin
         .from('service_items')
-        .select('id')
+        // The staff_may_customize_* flags are the whole authorisation model for
+        // this route; selecting only `id` is what let the gate below go missing.
+        .select('*')
         .eq('id', service_id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
@@ -152,10 +154,29 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Service not found' }, { status: 404 });
       }
 
+      const unifiedService = svc as AppointmentService;
+
+      /**
+       * Enforce the per-field permissions, exactly as the legacy branch below
+       * does. This branch previously allow-listed COLUMN NAMES only and never
+       * loaded the flags, so any staff account could rewrite a service's price
+       * or duration on its calendar even where the admin had deliberately turned
+       * customisation off. The dashboard hides those inputs, but the route is
+       * reachable directly and runs on the service-role client, so there was no
+       * RLS backstop. Every venue is on unified scheduling, which made the
+       * enforced branch the dead one.
+       */
       const updates: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(rawPatch)) {
         if (value === undefined) continue;
         if (key !== 'custom_duration_minutes' && key !== 'custom_price_pence') continue;
+        const perm = OVERRIDE_TO_PERMISSION[key];
+        if (!perm || !Boolean(unifiedService[perm])) {
+          return NextResponse.json(
+            { error: `You are not allowed to customise this field for this service (${key}).` },
+            { status: 403 },
+          );
+        }
         updates[key] = value;
       }
 

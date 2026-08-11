@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ServiceVariant } from '@/types/booking-models';
+import type { ProcessingTimeBlock, ServiceVariant } from '@/types/booking-models';
 import {
   parseProcessingTimeBlocksFromDb,
   processingTimeBlocksSchema,
@@ -52,10 +52,28 @@ export function mapVariantRow(row: Record<string, unknown>): ServiceVariant {
 }
 
 /**
- * Replace the full set of variants for a parent service. We delete-then-insert because
- * variants are edited as a single block in the dashboard and the relation is small (≤40).
+ * Reconcile the full set of variants for a parent service: rows the request still
+ * carries are UPDATED in place, genuinely removed rows are deleted, new ones are
+ * inserted.
  *
- * `parent` selects which FK to populate; the DB CHECK constraint enforces exactly one is set.
+ * This used to delete every row and re-insert, which looked harmless because the
+ * dashboard edits variants as one block. It was not. `bookings.service_variant_id`
+ * is `ON DELETE SET NULL`, so every save of a variant-bearing service -- even one
+ * that only changed the service's colour -- orphaned the variant pointer on all of
+ * that service's existing bookings, past and future. Emails then resolved the
+ * variant live, found nothing, and quoted the parent's name and price instead of
+ * the option the guest actually booked.
+ *
+ * Validation runs BEFORE any mutation for the same reason: a rejected edit used to
+ * return after the delete had already committed, leaving the service with zero
+ * variants and silently turning it into a single-offering service.
+ *
+ * Note that deleting a variant the request genuinely dropped still nulls its
+ * bookings' pointer. That is the intended meaning of removing an option, unlike
+ * the accidental churn above.
+ *
+ * `parent` selects which FK to populate; the DB CHECK constraint enforces exactly
+ * one is set.
  */
 export async function replaceServiceVariants(params: {
   admin: SupabaseClient;
@@ -64,7 +82,11 @@ export async function replaceServiceVariants(params: {
     | { kind: 'service_item'; service_item_id: string }
     | { kind: 'appointment_service'; appointment_service_id: string };
   variants: VariantInput[];
-}): Promise<{ ok: true; variants: ServiceVariant[] } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; variants: ServiceVariant[] }
+  /** `invalid` is the caller's input (answer 400), otherwise the write failed (500). */
+  | { ok: false; error: string; invalid?: boolean }
+> {
   const { admin, venueId, parent, variants } = params;
 
   const filterColumn =
@@ -72,60 +94,115 @@ export async function replaceServiceVariants(params: {
   const parentId =
     parent.kind === 'service_item' ? parent.service_item_id : parent.appointment_service_id;
 
-  const delRes = await admin
-    .from('service_variants')
-    .delete()
-    .eq('venue_id', venueId)
-    .eq(filterColumn, parentId);
-
-  if (delRes.error) {
-    console.error('replaceServiceVariants delete failed:', delRes.error);
-    return { ok: false, error: 'Failed to clear existing variants' };
-  }
-
-  if (variants.length === 0) {
-    return { ok: true, variants: [] };
-  }
-
+  // Validate everything first: nothing below runs if any option is invalid.
+  const normalizedBlocks: ProcessingTimeBlock[][] = [];
   for (const v of variants) {
     const chk = validateProcessingTimeBlocks(
       parseProcessingTimeBlocksFromDb(v.processing_time_blocks ?? []),
       v.duration_minutes,
     );
     if (!chk.ok) {
-      return { ok: false, error: `Option "${v.name.trim()}": ${chk.error ?? 'Invalid processing time'}` };
+      return {
+        ok: false,
+        invalid: true,
+        error: `Option "${v.name.trim()}": ${chk.error ?? 'Invalid processing time'}`,
+      };
+    }
+    normalizedBlocks.push(chk.normalized ?? []);
+  }
+
+  const { data: existingRows, error: existingErr } = await admin
+    .from('service_variants')
+    .select('id')
+    .eq('venue_id', venueId)
+    .eq(filterColumn, parentId);
+
+  if (existingErr) {
+    console.error('replaceServiceVariants load failed:', existingErr);
+    return { ok: false, error: 'Failed to load existing variants' };
+  }
+
+  const existingIds = new Set(((existingRows ?? []) as { id: string }[]).map((r) => r.id));
+
+  /** Only an id we already own may be reused; anything else gets a fresh row. */
+  const keepIds = new Set<string>();
+  for (const v of variants) {
+    if (v.id && existingIds.has(v.id)) keepIds.add(v.id);
+  }
+
+  const fieldsFor = (v: VariantInput, idx: number) => ({
+    name: v.name.trim(),
+    description: (v.description ?? null) || null,
+    duration_minutes: v.duration_minutes,
+    buffer_minutes: v.buffer_minutes ?? 0,
+    price_pence: v.price_pence ?? null,
+    deposit_pence: v.deposit_pence ?? null,
+    sort_order: v.sort_order ?? idx,
+    is_active: v.is_active ?? true,
+    processing_time_blocks: normalizedBlocks[idx] ?? [],
+  });
+
+  for (const [idx, v] of variants.entries()) {
+    if (!v.id || !keepIds.has(v.id)) continue;
+    const { error } = await admin
+      .from('service_variants')
+      .update(fieldsFor(v, idx))
+      .eq('id', v.id)
+      .eq('venue_id', venueId)
+      .eq(filterColumn, parentId);
+    if (error) {
+      console.error('replaceServiceVariants update failed:', error);
+      return { ok: false, error: 'Failed to save variants' };
     }
   }
 
-  const rows = variants.map((v, idx) => {
-    const chk = validateProcessingTimeBlocks(
-      parseProcessingTimeBlocksFromDb(v.processing_time_blocks ?? []),
-      v.duration_minutes,
-    );
-    return {
+  const toInsert = variants
+    .map((v, idx) => ({ v, idx }))
+    .filter(({ v }) => !v.id || !keepIds.has(v.id))
+    .map(({ v, idx }) => ({
       venue_id: venueId,
       service_item_id: parent.kind === 'service_item' ? parent.service_item_id : null,
       appointment_service_id:
         parent.kind === 'appointment_service' ? parent.appointment_service_id : null,
-      name: v.name.trim(),
-      description: (v.description ?? null) || null,
-      duration_minutes: v.duration_minutes,
-      buffer_minutes: v.buffer_minutes ?? 0,
-      price_pence: v.price_pence ?? null,
-      deposit_pence: v.deposit_pence ?? null,
-      sort_order: v.sort_order ?? idx,
-      is_active: v.is_active ?? true,
-      processing_time_blocks: chk.normalized ?? [],
-    };
-  });
+      ...fieldsFor(v, idx),
+    }));
 
-  const insRes = await admin.from('service_variants').insert(rows).select();
-  if (insRes.error) {
-    console.error('replaceServiceVariants insert failed:', insRes.error);
+  if (toInsert.length > 0) {
+    const { error } = await admin.from('service_variants').insert(toInsert);
+    if (error) {
+      console.error('replaceServiceVariants insert failed:', error);
+      return { ok: false, error: 'Failed to save variants' };
+    }
+  }
+
+  // Deleted last, so a failure above cannot leave the service short of options.
+  const removedIds = [...existingIds].filter((id) => !keepIds.has(id));
+  if (removedIds.length > 0) {
+    const { error } = await admin
+      .from('service_variants')
+      .delete()
+      .eq('venue_id', venueId)
+      .eq(filterColumn, parentId)
+      .in('id', removedIds);
+    if (error) {
+      console.error('replaceServiceVariants delete failed:', error);
+      return { ok: false, error: 'Failed to remove old variants' };
+    }
+  }
+
+  const { data: savedRows, error: savedErr } = await admin
+    .from('service_variants')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq(filterColumn, parentId)
+    .order('sort_order', { ascending: true });
+
+  if (savedErr) {
+    console.error('replaceServiceVariants reload failed:', savedErr);
     return { ok: false, error: 'Failed to save variants' };
   }
-  const saved = ((insRes.data ?? []) as Record<string, unknown>[]).map(mapVariantRow);
-  return { ok: true, variants: saved };
+
+  return { ok: true, variants: ((savedRows ?? []) as Record<string, unknown>[]).map(mapVariantRow) };
 }
 
 /**

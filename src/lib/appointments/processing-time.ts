@@ -82,6 +82,82 @@ export function validateProcessingTimeBlocks(
   return { ok: true, normalized: withIds };
 }
 
+export interface FitProcessingBlocksResult {
+  /** Blocks that fit `durationMinutes`, sorted by start. */
+  blocks: ProcessingTimeBlock[];
+  /** Dropped: they start at or past the new end, or trimming left them too short. */
+  removed: ProcessingTimeBlock[];
+  /** Kept but shortened so they end at the new duration. */
+  trimmed: ProcessingTimeBlock[];
+  changed: boolean;
+}
+
+/**
+ * Fit blocks to a duration staff just changed.
+ *
+ * Shortening an appointment must not be refused just because its blocks were
+ * snapshotted against a longer one: a block past the new end is dropped, a block
+ * straddling it is trimmed, and a trim leaving less than
+ * `PROCESSING_BLOCK_MIN_MINUTES` drops instead. Lengthening leaves blocks where
+ * they are, which is where the practitioner actually wants the gap.
+ */
+export function fitProcessingBlocksToDuration(
+  blocks: ProcessingTimeBlock[],
+  durationMinutes: number,
+): FitProcessingBlocksResult {
+  const kept: ProcessingTimeBlock[] = [];
+  const removed: ProcessingTimeBlock[] = [];
+  const trimmed: ProcessingTimeBlock[] = [];
+  const limit = Math.max(0, Math.floor(durationMinutes));
+
+  for (const b of [...blocks].sort((a, z) => a.start_minute - z.start_minute)) {
+    const start = Math.max(0, b.start_minute);
+    const room = limit - start;
+    // Already too short to be a block at all (only reachable from hand-edited
+    // rows), or no usable room left before the new end.
+    if (b.duration_minutes < PROCESSING_BLOCK_MIN_MINUTES || room < PROCESSING_BLOCK_MIN_MINUTES) {
+      removed.push(b);
+      continue;
+    }
+    if (b.duration_minutes <= room) {
+      kept.push(start === b.start_minute ? b : { ...b, start_minute: start });
+      continue;
+    }
+    const shortened = { ...b, start_minute: start, duration_minutes: room };
+    kept.push(shortened);
+    trimmed.push(shortened);
+  }
+
+  return {
+    blocks: kept,
+    removed,
+    trimmed,
+    changed: removed.length > 0 || trimmed.length > 0,
+  };
+}
+
+/**
+ * The blocks a modification should send when it changes a booking's duration.
+ *
+ * Mirrors how the server resolves them, so the client sends what the validator
+ * was going to judge anyway: a stored snapshot wins even when it is empty (that
+ * booking deliberately has no gap), a missing snapshot falls back to the
+ * catalogue template, and `undefined` means the caller never loaded the column,
+ * where sending nothing and leaving the row alone is the only safe answer.
+ */
+export function processingBlocksForDurationChange(params: {
+  /** Raw `bookings.processing_time_blocks`; `undefined` when not loaded. */
+  snapshot: unknown;
+  /** Catalogue pattern for the booking's service and variant. */
+  templateBlocks: ProcessingTimeBlock[];
+  durationMinutes: number;
+}): ProcessingTimeBlock[] | null {
+  const { snapshot, templateBlocks, durationMinutes } = params;
+  if (snapshot === undefined) return null;
+  const source = snapshot === null ? templateBlocks : parseProcessingTimeBlocksFromDb(snapshot);
+  return fitProcessingBlocksToDuration(source, durationMinutes).blocks;
+}
+
 /** Total customer + turnover span on the calendar (core + buffer). */
 export function customerOccupyMinutes(
   durationMinutes: number,

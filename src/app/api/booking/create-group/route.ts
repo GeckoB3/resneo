@@ -38,6 +38,7 @@ import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/proc
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
@@ -224,6 +225,7 @@ export async function POST(request: NextRequest) {
       /** No-show fee (pence) when this service's requirement is 'card_hold' (spec 7.1). */
       card_hold_fee_pence: number | null;
       estimated_end_time: string | null;
+      booking_end_time: string | null;
       service_display_name: string;
       service_price_pence: number | null;
       processing_time_blocks: ProcessingTimeBlock[];
@@ -345,16 +347,21 @@ export async function POST(request: NextRequest) {
       }
 
       let estimatedEndTime: string | null = null;
+      let personBookingEndTime: string | null = null;
       let depositPence = 0;
       let personCardHoldFeePence: number | null = null;
 
       if (svc) {
-        const [y, mo, d] = person.booking_date.split('-').map(Number);
-        const [hh, mm] = timeStr.split(':').map(Number);
-        const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-        // durationMins includes add-on minutes; use it (not svc.duration_minutes) for the end time.
-        endDate.setMinutes(endDate.getMinutes() + durationMins);
-        estimatedEndTime = endDate.toISOString();
+        // durationMins includes add-on minutes; use it (not svc.duration_minutes)
+        // for the end time. Both end columns come from one helper so the engine
+        // (which trusts `booking_end_time`) and the UI cannot disagree.
+        const endFields = bookingEndFieldsForStorage({
+          dateYmd: person.booking_date,
+          startHHmm: timeStr,
+          durationMinutes: durationMins,
+        });
+        estimatedEndTime = endFields.estimated_end_time;
+        personBookingEndTime = endFields.booking_end_time;
 
         // Full payment rolls add-on price into the charge; deposit stays on base+variant.
         const online = resolveAppointmentServiceOnlineChargeWithAddons({
@@ -396,6 +403,7 @@ export async function POST(request: NextRequest) {
         deposit_pence: depositPence,
         card_hold_fee_pence: personCardHoldFeePence,
         estimated_end_time: estimatedEndTime,
+        booking_end_time: personBookingEndTime,
         service_display_name: svc?.name ?? 'Treatment',
         service_price_pence: svc?.price_pence ?? null,
         processing_time_blocks: processingSnap,
@@ -626,6 +634,7 @@ export async function POST(request: NextRequest) {
         cancellation_deadline: deadline,
         cancellation_policy_snapshot: policySnapshot,
         estimated_end_time: person.estimated_end_time,
+        booking_end_time: person.booking_end_time,
         practitioner_id: useUnifiedBookingRows ? null : person.practitioner_id,
         appointment_service_id: useUnifiedBookingRows ? null : person.appointment_service_id,
         service_variant_id: person.service_variant_id,

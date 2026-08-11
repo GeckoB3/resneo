@@ -15,6 +15,7 @@ import type {
 import {
   busyIntervalsOverlap,
   effectiveProcessingBlocksForTemplate,
+  fitProcessingBlocksToDuration,
   parseProcessingTimeBlocksFromDb,
   practitionerBusyMinuteOffsets,
   validateProcessingTimeBlocks,
@@ -830,14 +831,34 @@ export function validateAppointmentCustomInterval(
     return { ok: false, reason: 'Appointment duration is too long' };
   }
 
-  const templateBlocks = options?.processingTimeBlocks !== undefined && options.processingTimeBlocks !== null
-    ? options.processingTimeBlocks
-    : (svc.processing_time_blocks ?? []);
-  const blockCheck = validateProcessingTimeBlocks(templateBlocks, coreDuration);
-  if (!blockCheck.ok) {
-    return { ok: false, reason: blockCheck.error ?? 'Invalid processing time for this duration' };
+  const callerBlocks =
+    options?.processingTimeBlocks !== undefined && options.processingTimeBlocks !== null
+      ? options.processingTimeBlocks
+      : null;
+
+  let useBlocks: ProcessingTimeBlock[];
+  if (callerBlocks) {
+    /**
+     * The caller asserted a specific pattern for THIS booking, so an overrun is
+     * a real contradiction and is still refused.
+     */
+    const blockCheck = validateProcessingTimeBlocks(callerBlocks, coreDuration);
+    if (!blockCheck.ok) {
+      return { ok: false, reason: blockCheck.error ?? 'Invalid processing time for this duration' };
+    }
+    useBlocks = blockCheck.normalized ?? [];
+  } else {
+    /**
+     * No assertion, so this is the service TEMPLATE being applied to whatever
+     * duration was asked about. Fit it rather than refusing: the availability
+     * routes pass a custom duration and no blocks, so a template that overran
+     * failed identically for every candidate start and returned an empty day and
+     * an empty month with nothing explaining why. Whether a booking may PERSIST
+     * a given pattern is a separate question, still answered strictly on the
+     * write path.
+     */
+    useBlocks = fitProcessingBlocksToDuration(svc.processing_time_blocks ?? [], coreDuration).blocks;
   }
-  const useBlocks = blockCheck.normalized ?? [];
   const legacyTail = useBlocks.length > 0 ? 0 : (svc.processing_time_minutes ?? 0);
   const busyOffsets = practitionerBusyMinuteOffsets({
     durationMinutes: coreDuration,
@@ -931,6 +952,94 @@ export function resolveEngineBookingProcessingBlocks(params: {
     parentBlocks: params.mergedService?.processing_time_blocks ?? [],
     variantBlocks: params.variantBlocks,
   });
+}
+
+/** The booking columns both fetchers select, before any engine interpretation. */
+export interface EngineBookingRow {
+  id: string;
+  booking_time: string;
+  status: string;
+  practitioner_id?: string | null;
+  calendar_id?: string | null;
+  appointment_service_id?: string | null;
+  service_item_id?: string | null;
+  service_variant_id?: string | null;
+  processing_time_blocks?: unknown;
+  booking_end_time?: string | null;
+}
+
+/**
+ * One row of `bookings` as the engine sees it: how much of the calendar it holds.
+ *
+ * Shared by both fetchers on purpose. These were duplicated blocks that drifted:
+ * the unified one resolved neighbour services against a list narrowed to the
+ * service being browsed, so every booking of a DIFFERENT service came back with
+ * no buffer and a 30-minute default, and the engine handed out slots that ran
+ * into it. Keeping one implementation is what stops that recurring.
+ *
+ * `serviceMap` must therefore cover the whole catalogue, not just the requested
+ * service.
+ *
+ * `forPractitionerId` pins both the returned anchor and the service-link lookup
+ * to the calendar the rows were fetched for. The unified fetcher passes it
+ * because its rows are already scoped by `calendar_id.eq` / `practitioner_id.eq`
+ * and its links are keyed by calendar: a row carrying a stale foreign
+ * `practitioner_id` would otherwise miss its link (losing the calendar's custom
+ * duration) and be filed under a practitioner the engine is not evaluating.
+ */
+export function mapRowToAppointmentBooking(params: {
+  row: EngineBookingRow;
+  serviceMap: Map<string, AppointmentService>;
+  practitionerServices: PractitionerService[];
+  variantBlocksById: Map<string, ProcessingTimeBlock[]>;
+  forPractitionerId?: string;
+}): AppointmentBooking {
+  const { row, serviceMap, practitionerServices, variantBlocksById, forPractitionerId } = params;
+
+  const sid = row.service_item_id ?? row.appointment_service_id ?? null;
+  const svc = sid ? serviceMap.get(sid) : null;
+  const practId = forPractitionerId ?? row.practitioner_id ?? row.calendar_id;
+  const ps =
+    sid && practId
+      ? practitionerServices.find((p) => p.practitioner_id === practId && p.service_id === sid)
+      : undefined;
+  const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
+
+  const startMin = timeToMinutes(row.booking_time.slice(0, 5));
+  let coreDuration = merged?.duration_minutes ?? 30;
+  const rawBet = row.booking_end_time;
+  if (rawBet != null && String(rawBet).trim() !== '') {
+    const endMin = timeToMinutes(String(rawBet).slice(0, 5));
+    /**
+     * Deliberately NOT wrapped past midnight. An end before the start is far
+     * more often a stale row (a reschedule that moved `booking_time` and left
+     * `booking_end_time` behind) than a real overnight appointment, and wrapping
+     * would turn that into a 23-hour block that swallows the practitioner's day.
+     * Falling through to the catalogue duration keeps a corrupt row survivable.
+     * Revisit once every writer maintains `booking_end_time`.
+     */
+    const d = endMin - startMin;
+    // Trust the row's OWN end time down to the same floor a booking may be
+    // created at. Pinned at 15 this silently replaced a shorter booking's real
+    // span with the service's default duration, so a 10-minute appointment
+    // would hold 30 minutes of the calendar against every conflict check.
+    if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
+  }
+
+  return {
+    id: row.id,
+    practitioner_id: practId!,
+    booking_time: row.booking_time.slice(0, 5),
+    duration_minutes: coreDuration,
+    buffer_minutes: merged?.buffer_minutes ?? 0,
+    processing_time_minutes: merged?.processing_time_minutes ?? 0,
+    processing_time_blocks: resolveEngineBookingProcessingBlocks({
+      snapshotRaw: row.processing_time_blocks,
+      mergedService: merged,
+      variantBlocks: row.service_variant_id ? variantBlocksById.get(row.service_variant_id) : undefined,
+    }),
+    status: row.status,
+  };
 }
 
 // Fetcher
@@ -1103,54 +1212,14 @@ export async function fetchAppointmentInput(params: {
     );
   }
 
-  const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
-    const row = b as {
-      practitioner_id: string | null;
-      calendar_id?: string | null;
-      appointment_service_id: string | null;
-      service_item_id: string | null;
-      service_variant_id?: string | null;
-      processing_time_blocks?: unknown;
-      booking_end_time?: string | null;
-    };
-    const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
-    const svc = sid ? serviceMapForBookings.get(sid) : null;
-    const practId = row.practitioner_id ?? row.calendar_id;
-    const ps = sid && practId
-      ? practitionerServices.find((pRow) => pRow.practitioner_id === practId && pRow.service_id === sid)
-      : undefined;
-    const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
-    const startMin = timeToMinutes((b.booking_time as string).slice(0, 5));
-    let coreDuration = merged?.duration_minutes ?? 30;
-    const rawBet = row.booking_end_time;
-    if (rawBet != null && String(rawBet).trim() !== '') {
-      const endMin = timeToMinutes(String(rawBet).slice(0, 5));
-      const d = endMin - startMin;
-      // Trust the row's OWN end time down to the same floor a booking may be
-      // created at. Pinned at 15 this silently replaced a shorter booking's real
-      // span with the service's default duration, so a 10-minute appointment
-      // would hold 30 minutes of the calendar against every conflict check.
-      if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
-    }
-    const variantBl = row.service_variant_id
-      ? variantBlocksById.get(row.service_variant_id)
-      : undefined;
-    const processingBlocks = resolveEngineBookingProcessingBlocks({
-      snapshotRaw: row.processing_time_blocks,
-      mergedService: merged,
-      variantBlocks: variantBl,
-    });
-    return {
-      id: b.id,
-      practitioner_id: practId!,
-      booking_time: (b.booking_time as string).slice(0, 5),
-      duration_minutes: coreDuration,
-      buffer_minutes: merged?.buffer_minutes ?? 0,
-      processing_time_minutes: merged?.processing_time_minutes ?? 0,
-      processing_time_blocks: processingBlocks,
-      status: b.status,
-    };
-  });
+  const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) =>
+    mapRowToAppointmentBooking({
+      row: b as unknown as EngineBookingRow,
+      serviceMap: serviceMapForBookings,
+      practitionerServices,
+      variantBlocksById,
+    }),
+  );
 
   const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = [
     ...(blocksRes.error
@@ -1284,22 +1353,36 @@ export async function fetchCalendarAppointmentInput(params: {
     assignList.map((a) => [(a as { service_item_id: string }).service_item_id, a]),
   );
 
-  let services: AppointmentService[] = (svcRows ?? []).map((raw) => {
+  const allServices: AppointmentService[] = (svcRows ?? []).map((raw) => {
     const s = raw as Record<string, unknown>;
     const a = assignMap.get(s.id as string) as
       | { custom_duration_minutes?: number | null; custom_price_pence?: number | null }
       | undefined;
     const customDur = a?.custom_duration_minutes;
     const customPrice = a?.custom_price_pence;
+    const effectiveDuration = (customDur ?? s.duration_minutes) as number;
+    /**
+     * A calendar's `custom_duration_minutes` shortens the service without
+     * touching its processing pattern, so the catalogue's blocks can fall
+     * outside the duration this calendar actually books. Unfitted, they failed
+     * validation downstream and were dropped wholesale, which silently held the
+     * practitioner busy for the entire appointment and lost the parallel-booking
+     * capacity the venue had deliberately configured. Trimming keeps as much of
+     * the gap as still fits.
+     */
+    const fittedBlocks = fitProcessingBlocksToDuration(
+      parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+      effectiveDuration,
+    ).blocks;
     return {
       id: s.id as string,
       venue_id: venueId,
       name: s.name as string,
       description: (s.description as string) ?? null,
-      duration_minutes: (customDur ?? s.duration_minutes) as number,
+      duration_minutes: effectiveDuration,
       buffer_minutes: (s.buffer_minutes as number) ?? 0,
       processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
-      processing_time_blocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+      processing_time_blocks: fittedBlocks,
       price_pence: (customPrice ?? s.price_pence) as number | null,
       payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
       deposit_pence: (s.deposit_pence as number | null) ?? null,
@@ -1314,9 +1397,15 @@ export async function fetchCalendarAppointmentInput(params: {
       custom_working_hours: parseCustomWorkingHoursFromDb(s.custom_working_hours),
     };
   });
-  if (serviceId) {
-    services = services.filter((s) => s.id === serviceId);
-  }
+  /**
+   * Narrowed for SLOT GENERATION only. Existing bookings on this calendar can be
+   * for any service, so their duration and buffer must resolve against the full
+   * catalogue (see `serviceMapForBookings` below). Building that map from the
+   * narrowed list left every neighbouring booking of a different service with
+   * `buffer_minutes: 0` and a 30-minute default, which handed out slots that ran
+   * straight into them. The legacy sibling keeps the same split deliberately.
+   */
+  const services = serviceId ? allServices.filter((s) => s.id === serviceId) : allServices;
 
   const practitionerServices: PractitionerService[] = assignList.map((a) => {
     const row = a as {
@@ -1329,7 +1418,19 @@ export async function fetchCalendarAppointmentInput(params: {
       id: row.id,
       practitioner_id: calendarId,
       service_id: row.service_item_id,
-      custom_duration_minutes: row.custom_duration_minutes,
+      /**
+       * Deliberately NOT carried: `custom_duration_minutes` is already baked
+       * into `allServices[].duration_minutes` above. Carrying it here too made
+       * `getOfferedAppointmentServicesForPractitioner` re-apply it on top of any
+       * duration a caller had deliberately set, silently reverting a chosen
+       * variant's length and any add-on minutes back to the override. The slot
+       * was then validated for a shorter appointment than the one being booked.
+       *
+       * Callers that need to force a duration still set this on their own copy
+       * (see `unified-availability.ts`), which keeps working because the merge
+       * itself is unchanged.
+       */
+      custom_duration_minutes: null,
       custom_price_pence: row.custom_price_pence,
     };
   });
@@ -1401,7 +1502,7 @@ export async function fetchCalendarAppointmentInput(params: {
       .gte('date_end', date),
   ]);
 
-  const serviceMapForBookings = new Map(services.map((s) => [s.id, s]));
+  const serviceMapForBookings = new Map(allServices.map((s) => [s.id, s]));
 
   const calVariantIds = [
     ...new Set(
@@ -1425,50 +1526,13 @@ export async function fetchCalendarAppointmentInput(params: {
   }
 
   const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
-    const row = b as {
-      practitioner_id: string | null;
-      calendar_id?: string | null;
-      appointment_service_id: string | null;
-      service_item_id: string | null;
-      service_variant_id?: string | null;
-      processing_time_blocks?: unknown;
-      booking_end_time?: string | null;
-    };
-    const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
-    const svc = sid ? serviceMapForBookings.get(sid) : null;
-    const practKey = row.practitioner_id ?? row.calendar_id ?? calendarId;
-    const ps = sid
-      ? practitionerServices.find((pRow) => pRow.practitioner_id === calendarId && pRow.service_id === sid)
-      : undefined;
-    const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
-    const startMin = timeToMinutes((b.booking_time as string).slice(0, 5));
-    let coreDuration = merged?.duration_minutes ?? 30;
-    const rawBet = row.booking_end_time;
-    if (rawBet != null && String(rawBet).trim() !== '') {
-      const endMin = timeToMinutes(String(rawBet).slice(0, 5));
-      const d = endMin - startMin;
-      // Trust the row's OWN end time down to the same floor a booking may be
-      // created at. Pinned at 15 this silently replaced a shorter booking's real
-      // span with the service's default duration, so a 10-minute appointment
-      // would hold 30 minutes of the calendar against every conflict check.
-      if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
-    }
-    const variantBl = row.service_variant_id ? calVariantBlocksById.get(row.service_variant_id) : undefined;
-    const processingBlocks = resolveEngineBookingProcessingBlocks({
-      snapshotRaw: row.processing_time_blocks,
-      mergedService: merged,
-      variantBlocks: variantBl,
+    return mapRowToAppointmentBooking({
+      row: b as unknown as EngineBookingRow,
+      serviceMap: serviceMapForBookings,
+      practitionerServices,
+      variantBlocksById: calVariantBlocksById,
+      forPractitionerId: calendarId,
     });
-    return {
-      id: b.id,
-      practitioner_id: practKey,
-      booking_time: (b.booking_time as string).slice(0, 5),
-      duration_minutes: coreDuration,
-      buffer_minutes: merged?.buffer_minutes ?? 0,
-      processing_time_minutes: merged?.processing_time_minutes ?? 0,
-      processing_time_blocks: processingBlocks,
-      status: b.status,
-    };
   });
 
   const legacyBlockRanges: PractitionerCalendarBlockedRange[] = blocksRes.error

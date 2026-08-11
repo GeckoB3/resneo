@@ -959,7 +959,10 @@ export async function POST(request: NextRequest) {
         });
         if (!savedVariants.ok) {
           await admin.from('service_items').delete().eq('id', data.id).eq('venue_id', staff.venue_id);
-          return NextResponse.json({ error: savedVariants.error }, { status: 500 });
+          return NextResponse.json(
+            { error: savedVariants.error },
+            { status: savedVariants.invalid ? 400 : 500 },
+          );
         }
       }
 
@@ -1063,7 +1066,10 @@ export async function POST(request: NextRequest) {
       });
       if (!savedVariantsLegacy.ok) {
         await admin.from('appointment_services').delete().eq('id', data.id).eq('venue_id', staff.venue_id);
-        return NextResponse.json({ error: savedVariantsLegacy.error }, { status: 500 });
+        return NextResponse.json(
+          { error: savedVariantsLegacy.error },
+          { status: savedVariantsLegacy.invalid ? 400 : 500 },
+        );
       }
     }
 
@@ -1437,7 +1443,10 @@ export async function PATCH(request: NextRequest) {
           variants: parsedVariants,
         });
         if (!savedVariants.ok) {
-          return NextResponse.json({ error: savedVariants.error }, { status: 500 });
+          return NextResponse.json(
+            { error: savedVariants.error },
+            { status: savedVariants.invalid ? 400 : 500 },
+          );
         }
       }
 
@@ -1713,7 +1722,10 @@ export async function PATCH(request: NextRequest) {
         variants: parsedVariants,
       });
       if (!savedVariantsLegacy.ok) {
-        return NextResponse.json({ error: savedVariantsLegacy.error }, { status: 500 });
+        return NextResponse.json(
+          { error: savedVariantsLegacy.error },
+          { status: savedVariantsLegacy.invalid ? 400 : 500 },
+        );
       }
     }
 

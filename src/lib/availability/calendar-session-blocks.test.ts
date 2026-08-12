@@ -166,7 +166,10 @@ describe('fetchScheduledSessionBlocksForCalendar', () => {
       }),
     });
 
-    const out = await fetchScheduledSessionBlocksForCalendar(admin, 'v1', 'cal-1', '2030-01-05');
+    const out = await fetchScheduledSessionBlocksForCalendar(admin, 'v1', 'cal-1', '2030-01-05', {
+      classes: true,
+      events: true,
+    });
     expect(out).toEqual(
       expect.arrayContaining([
         { start: 18 * 60, end: 19 * 60 },
@@ -174,5 +177,69 @@ describe('fetchScheduledSessionBlocksForCalendar', () => {
       ]),
     );
     expect(out).toHaveLength(2);
+  });
+
+  /**
+   * A model that is switched off must not block. These cover the bug this gating exists for:
+   * the window kept holding the calendar after the model stopped being drawn on it.
+   */
+  describe('with a model switched off', () => {
+    /** Records which tables were queried, so "skipped" means never asked, not merely discarded. */
+    function makeCountingAdmin() {
+      const tablesQueried: string[] = [];
+      const admin = makeAdmin({
+        experience_events: () => {
+          tablesQueried.push('experience_events');
+          return { data: [{ start_time: '18:00', end_time: '19:00' }], error: null };
+        },
+        class_types: () => {
+          tablesQueried.push('class_types');
+          return { data: [{ id: 'ct-1', duration_minutes: 30, instructor_id: 'cal-1' }], error: null };
+        },
+        class_instances: () => {
+          tablesQueried.push('class_instances');
+          return { data: [{ start_time: '09:00', class_type_id: 'ct-1' }], error: null };
+        },
+      });
+      return { admin, tablesQueried };
+    }
+
+    it('drops class ranges but keeps events when the class model is off', async () => {
+      const { admin, tablesQueried } = makeCountingAdmin();
+
+      const out = await fetchScheduledSessionBlocksForCalendar(admin, 'v1', 'cal-1', '2030-01-05', {
+        classes: false,
+        events: true,
+      });
+
+      expect(out).toEqual([{ start: 18 * 60, end: 19 * 60 }]);
+      expect(tablesQueried).toContain('experience_events');
+      expect(tablesQueried).not.toContain('class_types');
+    });
+
+    it('drops event ranges but keeps classes when the event model is off', async () => {
+      const { admin, tablesQueried } = makeCountingAdmin();
+
+      const out = await fetchScheduledSessionBlocksForCalendar(admin, 'v1', 'cal-1', '2030-01-05', {
+        classes: true,
+        events: false,
+      });
+
+      expect(out).toEqual([{ start: 9 * 60, end: 9 * 60 + 30 }]);
+      expect(tablesQueried).toContain('class_types');
+      expect(tablesQueried).not.toContain('experience_events');
+    });
+
+    it('blocks nothing, and queries nothing, when both models are off', async () => {
+      const { admin, tablesQueried } = makeCountingAdmin();
+
+      const out = await fetchScheduledSessionBlocksForCalendar(admin, 'v1', 'cal-1', '2030-01-05', {
+        classes: false,
+        events: false,
+      });
+
+      expect(out).toEqual([]);
+      expect(tablesQueried).toEqual([]);
+    });
   });
 });

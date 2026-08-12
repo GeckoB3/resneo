@@ -1,6 +1,7 @@
 # Disabled booking models must be inert
 
-Status: agreed, not implemented. Branch: `staging`.
+Status: the engine is fixed. The grid and the settings guard are still open.
+Branch: `staging`.
 
 ## Root cause
 
@@ -31,15 +32,49 @@ never in either table.
 
 ## Surfaces
 
-1. **Engine** (`fetchCalendarAppointmentInput`, `fetchAppointmentInput`). Thread
-   the venue's primary + enabled models in and skip the contributions of any
-   disabled model when assembling blocked ranges. This is the fix that matters:
-   without it the other two only hide the symptom.
-2. **Calendar grid.** Do not render columns or blocks belonging to a disabled
+1. **Engine** (`fetchCalendarAppointmentInput`, `fetchAppointmentInput`). DONE.
+2. **Month engine** (`appointment-month-availability.ts`). DONE. Not in the
+   original plan and worth knowing about: it carries its own copy of the same
+   assembly, including a duplicate of the class/event fetching. Left alone it
+   would have greyed out days on the public booking calendar that the day view
+   then offered.
+3. **Calendar grid.** Do not render columns or blocks belonging to a disabled
    model. Partly true today, which is exactly why the block was invisible rather
-   than merely surprising.
-3. **Settings** (`BookingTypesSection.tsx`). Guard the toggle server-side, not
+   than merely surprising. STILL OPEN.
+4. **Settings** (`BookingTypesSection.tsx`). Guard the toggle server-side, not
    just in the UI, since the model flag is writable through the settings API.
+   STILL OPEN.
+
+## How the engine fix went in
+
+`src/lib/availability/blocked-range-models.ts` resolves the venue's models into
+three switches: resources, classes, events. Notes on the shape, since the plan
+had assumed something different:
+
+- **Resolved inside the fetch functions, not threaded in.** The plan said to
+  thread the models through as a parameter. `fetchAppointmentInput` has around
+  fifteen call sites, and a missed one fails silently toward ACCEPTING bookings.
+  Both fetch functions already had `supabase`, `venueId` and a `venues` query, so
+  the columns were added to the query that was already there. No call site
+  changed, and there is nothing to half-apply.
+- **Not routed through `resolveVenueMode`**, which caches for 30 seconds. A model
+  that keeps blocking for another half-minute after being switched off fails the
+  requirement outright. Confirmed live: the toggle took effect immediately.
+- **Failure keeps blocking.** If the venue row cannot be read, every source stays
+  on, which is the old behaviour. Refusing a booking that should have been allowed
+  is visible and recoverable; accepting one onto held time is not.
+- **Classes and events gate separately**, so a venue with classes off and events
+  on gets the right answer for each.
+- **Resource ranges now carry `kind: 'resource'`** and report "Overlaps a resource
+  booking". They were the only untagged source, which is why an ENABLED resource
+  window also said nothing more than "Blocked time".
+- The `sources` parameter on both session-block fetchers is **required, not
+  defaulted**, so a new call site cannot quietly reinstate unconditional blocking.
+
+Verified on the reported case (Plus 1, Fri 14 Aug 2026, David's calendar, Room 1
+hosted on it). Resource model on: 21 slots, nothing offered between 13:30 and
+17:00. Resource model off: 34 slots, the whole 14:00 to 16:45 window offered.
+Toggled back on: 21 slots again.
 
 ## Decisions
 

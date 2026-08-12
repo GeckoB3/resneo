@@ -39,6 +39,10 @@ import type { AvailabilityBlock } from '@/types/availability';
 import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 import { intersectEffectiveRangesWithServiceCustom, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { fetchScheduledSessionBlocksForCalendar } from '@/lib/availability/calendar-session-blocks';
+import {
+  VENUE_BOOKING_MODEL_COLUMNS,
+  blockSourcesFromVenueRow,
+} from '@/lib/availability/blocked-range-models';
 
 // Types
 
@@ -59,9 +63,10 @@ export interface PractitionerCalendarBlockedRange {
   /**
    * Source of the block, used to give a specific conflict reason. Defaults to a generic
    * "Blocked time" when omitted. `scheduled_session` = a class/event on this calendar column;
-   * `leave` = a partial staff-leave window.
+   * `leave` = a partial staff-leave window; `resource` = a bookable resource occupying the
+   * calendar it is displayed on.
    */
-  kind?: 'blocked_time' | 'scheduled_session' | 'leave';
+  kind?: 'blocked_time' | 'scheduled_session' | 'leave' | 'resource';
 }
 
 export interface AppointmentEngineInput {
@@ -224,6 +229,7 @@ function overlaps(startA: number, endA: number, startB: number, endB: number): b
 function blockedRangeReason(kind?: PractitionerCalendarBlockedRange['kind']): string {
   if (kind === 'scheduled_session') return 'Overlaps a scheduled class or event';
   if (kind === 'leave') return 'Staff is on leave at this time';
+  if (kind === 'resource') return 'Overlaps a resource booking';
   return 'Blocked time';
 }
 
@@ -1198,7 +1204,11 @@ export async function fetchAppointmentInput(params: {
       .eq('venue_id', venueId)
       .lte('start_date', date)
       .gte('end_date', date),
-    supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
+    supabase
+      .from('venues')
+      .select(`opening_hours, venue_opening_exceptions, ${VENUE_BOOKING_MODEL_COLUMNS}`)
+      .eq('id', venueId)
+      .single(),
     supabase
       .from('availability_blocks')
       .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
@@ -1208,6 +1218,9 @@ export async function fetchAppointmentInput(params: {
       .lte('date_start', date)
       .gte('date_end', date),
   ]);
+
+  /** A model that is switched off must not block; see `blocked-range-models.ts`. */
+  const blockSources = blockSourcesFromVenueRow(venueRes.error ? null : venueRes.data);
 
   let practitioners = (practitionersRes.data ?? []) as Practitioner[];
 
@@ -1326,7 +1339,7 @@ export async function fetchAppointmentInput(params: {
    */
   const sessionRangesByPractitioner = await Promise.all(
     practitioners.map((p) =>
-      fetchScheduledSessionBlocksForCalendar(supabase, venueId, p.id, date).then((ranges) => ({
+      fetchScheduledSessionBlocksForCalendar(supabase, venueId, p.id, date, blockSources).then((ranges) => ({
         practitioner_id: p.id,
         ranges,
       })),
@@ -1569,7 +1582,11 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('venue_id', venueId)
       .eq('calendar_id', calendarId)
       .eq('block_date', date),
-    supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
+    supabase
+      .from('venues')
+      .select(`opening_hours, venue_opening_exceptions, ${VENUE_BOOKING_MODEL_COLUMNS}`)
+      .eq('id', venueId)
+      .single(),
     supabase
       .from('unified_calendars')
       .select('*')
@@ -1639,8 +1656,16 @@ export async function fetchCalendarAppointmentInput(params: {
       }))
       .filter((b) => b.end > b.start);
 
+  /**
+   * A model that is switched off must not block; see `blocked-range-models.ts`. The sibling
+   * query above still runs because it shares the venue row's round-trip, but its windows are
+   * dropped rather than folded in: with the resource model off they held time on a column
+   * that drew nothing there, and the engine refused every appointment as "Blocked time".
+   */
+  const blockSources = blockSourcesFromVenueRow(venueRes.error ? null : venueRes.data);
+
   let resourceHostBlockRanges: PractitionerCalendarBlockedRange[] = [];
-  if (!siblingResourcesRes.error && (siblingResourcesRes.data?.length ?? 0) > 0) {
+  if (blockSources.resources && !siblingResourcesRes.error && (siblingResourcesRes.data?.length ?? 0) > 0) {
     let siblings = (siblingResourcesRes.data ?? []).map((r) =>
       mapCalendarToResource(r as Record<string, unknown>),
     );
@@ -1650,6 +1675,7 @@ export async function fetchCalendarAppointmentInput(params: {
       practitioner_id: calendarId,
       start: r.start,
       end: r.end,
+      kind: 'resource' as const,
     }));
   }
 
@@ -1658,7 +1684,13 @@ export async function fetchCalendarAppointmentInput(params: {
    * not via `calendar_blocks`. Treat them as blocks so appointments cannot overlap a
    * class/event even before any tickets have been booked.
    */
-  const sessionRanges = await fetchScheduledSessionBlocksForCalendar(supabase, venueId, calendarId, date);
+  const sessionRanges = await fetchScheduledSessionBlocksForCalendar(
+    supabase,
+    venueId,
+    calendarId,
+    date,
+    blockSources,
+  );
   const scheduledSessionBlockRanges: PractitionerCalendarBlockedRange[] = sessionRanges.map((r) => ({
     practitioner_id: calendarId,
     start: r.start,

@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { timeToMinutes } from '@/lib/availability';
+import type { ModelOwnedBlockSources } from '@/lib/availability/blocked-range-models';
 import { resolveInstructorCalendarIdForClass } from '@/lib/class-instances/instructor-calendar-block';
 
 export interface CalendarSessionBlockRange {
@@ -140,16 +141,27 @@ export async function fetchClassInstanceBlocksForCalendar(
  * Combined block ranges for scheduled events and classes on a calendar column for one date.
  * Feed these into the appointment engine's `practitionerBlockedRanges` (per calendar id)
  * so both availability listing and slot validation reject conflicting appointment times.
+ *
+ * `sources` decides which of the two still applies. A venue with the class model off but
+ * the event model on blocks for its events and not its classes, so the two are gated
+ * separately rather than as one "sessions" switch. The parameter is required on purpose:
+ * a default would let a new call site quietly reinstate the unconditional blocking this
+ * exists to remove.
  */
 export async function fetchScheduledSessionBlocksForCalendar(
   admin: SupabaseClient,
   venueId: string,
   calendarId: string,
   date: string,
+  sources: Pick<ModelOwnedBlockSources, 'classes' | 'events'>,
 ): Promise<CalendarSessionBlockRange[]> {
   const [events, classes] = await Promise.all([
-    fetchExperienceEventBlocksForCalendar(admin, venueId, calendarId, date),
-    fetchClassInstanceBlocksForCalendar(admin, venueId, calendarId, date),
+    sources.events
+      ? fetchExperienceEventBlocksForCalendar(admin, venueId, calendarId, date)
+      : Promise.resolve<CalendarSessionBlockRange[]>([]),
+    sources.classes
+      ? fetchClassInstanceBlocksForCalendar(admin, venueId, calendarId, date)
+      : Promise.resolve<CalendarSessionBlockRange[]>([]),
   ]);
   return [...events, ...classes];
 }

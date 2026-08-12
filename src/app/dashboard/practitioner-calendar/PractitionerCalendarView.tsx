@@ -2606,7 +2606,17 @@ export function PractitionerCalendarView({
   /** Single-step undo for drag-move and duration resize on the day/week grid. */
   const [lastScheduleEditUndo, setLastScheduleEditUndo] = useState<{
     kind: 'move' | 'resize';
+    /** The row the toolbar and the bar's pill are keyed on: a visit's FIRST service. */
     prev: Booking;
+    /**
+     * Every row of a moved visit as it stood before the drag, earliest first.
+     * Absent when a single booking was edited.
+     *
+     * The move used to record one entry per row, so this held whichever service
+     * was written last and undo restored only that one: the visit came apart on
+     * the way back, which is the tear commit 281d1d8d closed on the way out.
+     */
+    prevVisitRows?: Booking[];
   } | null>(null);
   const [scheduleUndoPending, setScheduleUndoPending] = useState(false);
   /** In-flight PATCH for drag-move / resize; undo awaits this to avoid racing the save. */
@@ -4188,6 +4198,21 @@ export function PractitionerCalendarView({
   }
 
   /**
+   * A failed save takes its undo entry with it: there is nothing to put back.
+   *
+   * A VISIT entry stays, because it still holds every row's old slot and can put
+   * back the services whose saves did land. Dropping it when one row of a visit
+   * fails is what would leave a half-moved visit with no way home.
+   */
+  function forgetUndoForFailedSave(bookingId: string) {
+    setLastScheduleEditUndo((undo) => {
+      if (!undo) return undo;
+      if (undo.prevVisitRows) return undo;
+      return undo.prev.id === bookingId ? null : undo;
+    });
+  }
+
+  /**
    * Move a whole multi-service visit, keeping its shape.
    *
    * The services are re-laid from the new start through the shared resolver, so
@@ -4267,23 +4292,71 @@ export function PractitionerCalendarView({
      * The resolver orders by start time, so `visit.services[0]` always matches.
      */
     beginScheduleEditFollowUp(visit.services[0]!.id);
+
+    /**
+     * ONE undo entry for the whole visit, holding every row as it stands now.
+     *
+     * `patchBookingMove` records its own entry per row, which left undo holding
+     * only the last service written: pressing it put that one service back and
+     * left the rest at the new time. A visit moves whole, so it comes back
+     * whole (see {@link undoVisitMove}).
+     */
+    const prevVisitRows = laid
+      .map((sv) => byId.get(sv.id))
+      .filter((row): row is Booking => Boolean(row))
+      .map((row) => ({ ...row }));
+    if (prevVisitRows.length > 0) {
+      setLastScheduleEditUndo({
+        kind: 'move',
+        prev: prevVisitRows[0]!,
+        prevVisitRows,
+      });
+    }
+
+    const saves: Promise<'ok' | 'failed'>[] = [];
     for (const sv of laid) {
       const row = byId.get(sv.id);
       if (!row) continue;
-      await patchBookingMove(row, newDate, sv.startHm, newPracId, {
+      const { savePromise } = await patchBookingMove(row, newDate, sv.startHm, newPracId, {
         allowOutsideHours: opts?.allowOutsideHours,
-        skipFollowUp: true,
+        partOfVisitMove: true,
+      });
+      saves.push(savePromise);
+    }
+
+    /**
+     * Tracked against the first service, which is the row undo looks up. Each
+     * row's own save is deliberately not tracked (see `partOfVisitMove`), so
+     * undo waits for the LAST of the visit's writes rather than for whichever
+     * one happened to claim the slot.
+     */
+    const visitSave = Promise.all(saves).then((results) =>
+      results.every((r) => r === 'ok') ? ('ok' as const) : ('failed' as const),
+    );
+    const visitSaveKeyId = prevVisitRows[0]?.id;
+    if (visitSaveKeyId) {
+      scheduleEditSaveRef.current = { bookingId: visitSaveKeyId, promise: visitSave };
+      void visitSave.finally(() => {
+        if (scheduleEditSaveRef.current?.bookingId === visitSaveKeyId) {
+          scheduleEditSaveRef.current = null;
+        }
       });
     }
   }
 
+  /**
+   * `partOfVisitMove` marks a row being carried by {@link patchVisitMove}. The
+   * visit owns the three things that must be visit-level or they end up holding
+   * the last service instead of the booking: the notify follow-up, the undo
+   * entry, and the in-flight save undo waits on.
+   */
   async function patchBookingMove(
     booking: Booking,
     newDate: string,
     newTime: string,
     newPracId: string,
-    opts?: { allowOutsideHours?: boolean; skipFollowUp?: boolean },
-  ) {
+    opts?: { allowOutsideHours?: boolean; partOfVisitMove?: boolean },
+  ): Promise<{ savePromise: Promise<'ok' | 'failed'> }> {
     const prev = { ...booking };
     const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
     const linkedOwnerVenueId = booking._linkedOwnerVenueId;
@@ -4293,7 +4366,7 @@ export function PractitionerCalendarView({
     const endHm = minutesToTime(timeToMinutes(timeHm) + dur);
     const bookingEndForStore = `${endHm}:00`;
     const estimatedEndForStore = estimatedEndIsoFromSchedule(newDate, timeHm, endHm);
-    setLastScheduleEditUndo({ kind: 'move', prev });
+    if (!opts?.partOfVisitMove) setLastScheduleEditUndo({ kind: 'move', prev });
     if (linkedOwnerVenueId) {
       setLinkedVenues((venues) =>
         venues.map((v) => {
@@ -4331,7 +4404,7 @@ export function PractitionerCalendarView({
         ),
       );
     }
-    if (!opts?.skipFollowUp) beginScheduleEditFollowUp(booking.id);
+    if (!opts?.partOfVisitMove) beginScheduleEditFollowUp(booking.id);
 
     const savePromise = (async (): Promise<'ok' | 'failed'> => {
       try {
@@ -4375,7 +4448,7 @@ export function PractitionerCalendarView({
           } else {
             setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
           }
-          setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+          forgetUndoForFailedSave(prev.id);
           clearScheduleEditFollowUpForBooking(booking.id);
           return 'failed';
         }
@@ -4389,18 +4462,21 @@ export function PractitionerCalendarView({
         } else {
           setBookings((rows) => rows.map((b) => (b.id === prev.id ? prev : b)));
         }
-        setLastScheduleEditUndo((undo) => (undo?.prev.id === prev.id ? null : undo));
+        forgetUndoForFailedSave(prev.id);
         clearScheduleEditFollowUpForBooking(booking.id);
         return 'failed';
       }
     })();
 
-    scheduleEditSaveRef.current = { bookingId: booking.id, promise: savePromise };
-    void savePromise.finally(() => {
-      if (scheduleEditSaveRef.current?.bookingId === booking.id) {
-        scheduleEditSaveRef.current = null;
-      }
-    });
+    if (!opts?.partOfVisitMove) {
+      scheduleEditSaveRef.current = { bookingId: booking.id, promise: savePromise };
+      void savePromise.finally(() => {
+        if (scheduleEditSaveRef.current?.bookingId === booking.id) {
+          scheduleEditSaveRef.current = null;
+        }
+      });
+    }
+    return { savePromise };
   }
 
   const patchBookingResize = useCallback(
@@ -4527,15 +4603,196 @@ export function PractitionerCalendarView({
     ],
   );
 
+  /**
+   * Put every service of a moved visit back where it was.
+   *
+   * Undo restored a single row, so a three service visit came back one service
+   * at a time and the other two stayed at the new time: the visit was torn by
+   * the way back rather than by the way out. The rows carry their exact old
+   * slots, so this restores what was there rather than re-laying the visit,
+   * which would close any gap the shape legitimately had.
+   *
+   * Every service is checked at its old slot before anything is written, the
+   * same all-or-nothing rule the move itself follows.
+   */
+  const undoVisitMove = useCallback(
+    async (prevRows: Booking[]) => {
+      const targets = prevRows.map((prev) => {
+        const startHm = prev.booking_time.slice(0, 5);
+        return {
+          prev,
+          startHm,
+          colId: resolveBookingColumnId(prev, resourceParentById),
+          timeForStore: bookingTimeToStore(prev.booking_time),
+          endForStore:
+            prev.booking_end_time && prev.booking_end_time.trim() !== ''
+              ? bookingTimeToStore(prev.booking_end_time)
+              : `${minutesToTime(timeToMinutes(startHm) + bookingDurationMinutes(prev, serviceMapForBooking(prev)))}:00`,
+        };
+      });
+
+      if (targets.some((t) => !t.colId)) {
+        addToast('Cannot undo: calendar column is no longer available', 'error');
+        return;
+      }
+
+      setScheduleUndoPending(true);
+      try {
+        const checks = await Promise.all(
+          targets.map(async (t) => {
+            try {
+              const res = await fetch(
+                `/api/venue/bookings/${t.prev.id}/validate-appointment-modification`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    booking_date: t.prev.booking_date,
+                    booking_time: t.timeForStore,
+                    practitioner_id: resolveLinkedGridPractitionerIdForPatch(t.colId!),
+                    booking_end_time: t.endForStore,
+                    allow_manual_overlap: true,
+                  }),
+                },
+              );
+              const j = (await res.json().catch(() => ({}))) as {
+                ok?: boolean;
+                error?: string;
+                reason?: string;
+              };
+              if (res.ok && j.ok !== false) return { t, ok: true, error: null as string | null };
+              return { t, ok: false, error: j.reason ?? j.error ?? 'Not available' };
+            } catch {
+              return { t, ok: false, error: 'Could not check availability' };
+            }
+          }),
+        );
+
+        const blocked = checks.find((c) => !c.ok);
+        if (blocked) {
+          const name = blocked.t.prev.booking_item_name ?? 'A service';
+          addToast(
+            `${name} cannot go back to ${blocked.t.startHm}: ${blocked.error}. Nothing was changed.`,
+            'error',
+          );
+          void refetchBookingsList();
+          return;
+        }
+
+        const linkedOwnerVenueId = prevRows[0]?._linkedOwnerVenueId;
+        const targetById = new Map(targets.map((t) => [t.prev.id, t]));
+        if (linkedOwnerVenueId) {
+          setLinkedVenues((venues) =>
+            venues.map((v) => {
+              if (v.venueId !== linkedOwnerVenueId) return v;
+              return {
+                ...v,
+                bookings: v.bookings.map((lb) => {
+                  const t = targetById.get(lb.id);
+                  if (!t) return lb;
+                  return {
+                    ...lb,
+                    bookingDate: t.prev.booking_date,
+                    bookingTime: t.startHm,
+                    bookingEndTime: t.prev.booking_end_time?.slice(0, 5) ?? null,
+                    practitionerId: resolveLinkedGridPractitionerIdForPatch(t.colId!),
+                    estimatedEndTime: t.prev.estimated_end_time,
+                  };
+                }),
+              };
+            }),
+          );
+        } else {
+          setBookings((rows) =>
+            rows.map((b) => {
+              const t = targetById.get(b.id);
+              return t ? { ...t.prev } : b;
+            }),
+          );
+        }
+
+        /**
+         * At most one guest email for the undo, matching the move: the move
+         * deferred every row's notification and fired one against the first
+         * service, so letting all three rows notify here would tell the guest
+         * three times that their visit had changed.
+         */
+        const notifyPending = prevRows.some(
+          (r) => pendingDeferredModificationNotifyBookingIdRef.current === r.id,
+        );
+        const results = await Promise.all(
+          targets.map(async (t, i) => {
+            try {
+              const res = await fetch(`/api/venue/bookings/${t.prev.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  booking_date: t.prev.booking_date,
+                  booking_time: t.timeForStore,
+                  practitioner_id: resolveLinkedGridPractitionerIdForPatch(t.colId!),
+                  booking_end_time: t.endForStore,
+                  allow_manual_overlap: true,
+                  ...(notifyPending || i > 0
+                    ? { skip_booking_modification_guest_notification: true }
+                    : {}),
+                }),
+              });
+              return res.ok;
+            } catch {
+              return false;
+            }
+          }),
+        );
+
+        if (results.some((ok) => !ok)) {
+          addToast('Could not undo the move', 'error');
+          void refetchBookingsList();
+          if (linkedOwnerVenueId) void requestLinkedCalendarSync();
+          return;
+        }
+
+        cancelPendingDeferredModificationGuestNotify();
+        setLastScheduleEditUndo(null);
+        setDragMoveConfirmBookingId(null);
+        addToast('Change undone', 'success');
+        void refetchBookingsList();
+        if (linkedOwnerVenueId) void requestLinkedCalendarSync();
+      } catch {
+        addToast('Could not undo the move', 'error');
+        void refetchBookingsList();
+      } finally {
+        setScheduleUndoPending(false);
+      }
+    },
+    [
+      addToast,
+      cancelPendingDeferredModificationGuestNotify,
+      refetchBookingsList,
+      requestLinkedCalendarSync,
+      resourceParentById,
+      serviceMapForBooking,
+    ],
+  );
+
   const undoLastScheduleEdit = useCallback(async () => {
     if (!lastScheduleEditUndo || scheduleUndoPending) return;
-    const { kind, prev } = lastScheduleEditUndo;
+    const { kind, prev, prevVisitRows } = lastScheduleEditUndo;
     const bookingId = prev.id;
 
     const inflight = scheduleEditSaveRef.current;
     if (inflight?.bookingId === bookingId) {
       const saveResult = await inflight.promise;
-      if (saveResult === 'failed') return;
+      /**
+       * A visit goes on. Its save reports 'failed' when ANY row failed, and the
+       * rows that did land are exactly what has to come back; only a single
+       * booking has nothing left to undo, having already been rolled back.
+       */
+      if (saveResult === 'failed' && !prevVisitRows) return;
+    }
+
+    if (kind === 'move' && prevVisitRows && prevVisitRows.length > 1) {
+      await undoVisitMove(prevVisitRows);
+      return;
     }
 
     const colId = resolveBookingColumnId(prev, resourceParentById);
@@ -4655,6 +4912,7 @@ export function PractitionerCalendarView({
     cancelPendingDeferredModificationGuestNotify,
     refetchBookingsList,
     requestLinkedCalendarSync,
+    undoVisitMove,
   ]);
 
   function applyCalendarBookingQuickPatch(b: Booking, body: Record<string, unknown>): Booking {

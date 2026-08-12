@@ -90,9 +90,14 @@ function metaTextClass(micro: boolean): string {
   // Colour is inherited from the bar's palette (`color: p.text` on the card shell) so meta
   // reads white on saturated fills and dark on the light amber/cancelled fills. Slight opacity
   // gives the secondary hierarchy beneath the full-strength contact name.
+  // 0.95, not 0.85. The secondary hierarchy still reads, but 0.85 composited the
+  // meta lines toward the fill hard enough to cost ~1 whole contrast point: it
+  // put Booked meta at 3.58:1 and Pending/Seated near 2.5:1, under the 4.5:1 AA
+  // floor at 11px. The name row above is already full-strength and bolder, so the
+  // hierarchy never depended on the extra fade.
   return micro
-    ? 'text-[10px] font-medium leading-snug opacity-[0.85]'
-    : 'text-[11px] font-medium leading-snug opacity-[0.85]';
+    ? 'text-[10px] font-medium leading-snug opacity-95'
+    : 'text-[11px] font-medium leading-snug opacity-95';
 }
 
 export function groupInfoRows(

@@ -57,7 +57,14 @@ const BOOKING_STATUS_VISUAL_MAP: Record<string, BookingStatusVisual> = {
     pill: 'border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412]',
     dot: 'bg-[#EA580C]',
     listBorderLeft: 'border-l-[#EA580C]',
-    calendarBlock: { bg: '#EA580C', text: '#FFFFFF', border: '#C2410C', accent: '#C2410C' },
+    /**
+     * Darkened from orange-600 `#EA580C` to orange-800. The bar paints a white
+     * gloss over its fill, so white text on the old hue measured 2.96:1 where the
+     * name sits and 2.53:1 for the meta lines (which render at 85% opacity), both
+     * well under the 4.5:1 AA floor. Orange-800 clears it while staying
+     * unmistakably the "awaiting payment" orange beside the Arrived amber.
+     */
+    calendarBlock: { bg: '#9A3412', text: '#FFFFFF', border: '#7C2D12', accent: '#7C2D12' },
   },
   Booked: {
     timeline: 'bg-[#E0F2FE] border-[#38BDF8] border-l-[#0369A1] text-[#0C4A6E]',
@@ -78,9 +85,14 @@ const BOOKING_STATUS_VISUAL_MAP: Record<string, BookingStatusVisual> = {
     pill: 'border-[#34D399] bg-[#D1FAE5] text-[#064E3B]',
     dot: 'bg-[#047857]',
     listBorderLeft: 'border-l-[#047857]',
-    // Started / in-progress (Seated) bars use a brighter, more vibrant emerald-600 fill so the
-    // active bookings pop; the deeper emerald-700 stays as the edge + dot/pill hue (legible on white).
-    calendarBlock: { bg: '#059669', text: '#FFFFFF', border: '#047857', accent: '#047857' },
+    /**
+     * Darkened from emerald-600 `#059669` to emerald-800. The brighter fill was
+     * chosen so in-progress bars pop, but white text on it measured 3.03:1 at the
+     * name and 2.60:1 for meta once the bar's white gloss composites — under the
+     * 4.5:1 AA floor. Emerald-800 keeps it clearly the "started" green (still the
+     * most saturated bar on the grid next to Confirmed navy) and reads cleanly.
+     */
+    calendarBlock: { bg: '#065F46', text: '#FFFFFF', border: '#064E3B', accent: '#047857' },
   },
   Arrived: {
     timeline: 'bg-[#FEF3C7] border-[#FBBF24] border-l-[#D97706] text-[#78350F]',
@@ -118,7 +130,14 @@ const BOOKING_STATUS_VISUAL_MAP: Record<string, BookingStatusVisual> = {
     pill: 'border-[#FB923C] bg-[#FFEDD5] text-[#9A3412]',
     dot: 'bg-[#EA580C]',
     listBorderLeft: 'border-l-[#EA580C]',
-    calendarBlock: { bg: '#EA580C', text: '#FFFFFF', border: '#C2410C', accent: '#C2410C' },
+    /**
+     * Darkened from orange-600 `#EA580C` to orange-800. The bar paints a white
+     * gloss over its fill, so white text on the old hue measured 2.96:1 where the
+     * name sits and 2.53:1 for the meta lines (which render at 85% opacity), both
+     * well under the 4.5:1 AA floor. Orange-800 clears it while staying
+     * unmistakably the "awaiting payment" orange beside the Arrived amber.
+     */
+    calendarBlock: { bg: '#9A3412', text: '#FFFFFF', border: '#7C2D12', accent: '#7C2D12' },
   },
 };
 

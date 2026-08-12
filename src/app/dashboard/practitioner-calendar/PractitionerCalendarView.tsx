@@ -126,6 +126,16 @@ import {
   isArrivedWaitingDisplay,
 } from '@/lib/calendar/booking-calendar-block-style';
 import {
+  BOOKING_ACTIONS_CORNER_RIGHT_PX,
+  BOOKING_ACTION_BUTTON_WIDTH_PX,
+  BOOKING_ACTION_TRAY_TOP_GAP_PX,
+  BOOKING_CORNER_BUTTON_FLOOR_HEIGHT_PX,
+  BOOKING_CORNER_TRAY_RIGHT_PX,
+  bookingCornerTraySpacing,
+  planBookingCornerActions,
+  type BookingCornerActionInput,
+} from '@/lib/calendar/booking-corner-actions';
+import {
   applyBookingRowOverlayFields,
   mergeBookingRowOverlay,
   overlayFromClientArrivedPatch,
@@ -152,7 +162,6 @@ import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { BookingCard } from './BookingCard';
-import { CompactBookingActions } from './CompactBookingActions';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import {
   ComplianceBarIcon,
@@ -558,6 +567,13 @@ const BOOKING_SEGMENT_PILLS_ROW_PX = 28;
  * letting the tray overlap its empty right-hand side than rendering nothing.
  */
 const BOOKING_CARD_MIN_ROW_PX = 20;
+/**
+ * The bar's own 1px top and bottom border. `border-box` means it is inside the
+ * height every budget starts from, and no budget was subtracting it, so all of
+ * them ran 2px optimistic. Harmless where thresholds carry slack; not harmless in
+ * compact, whose thresholds sit exactly on the measured row heights.
+ */
+const BOOKING_CARD_BORDER_PX = 2;
 /**
  * Height assumed for the day grid's column-header row until it is measured.
  * Matches the native header cell's own `min-h`, so the first paint lines the time
@@ -1131,8 +1147,18 @@ const BOOKING_MODIFY_NOTIFY_DEFER_MS = 60_000;
 const BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX = 18;
 const BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX = 9;
 
-/** Gap between stacked corner action buttons (gap-0.5 ≈ 2px). */
-const BOOKING_RIGHT_GAP_PX = 2;
+/**
+ * Outline separating an action button from whatever colour its bar is painted.
+ *
+ * Label-on-button contrast was always fine; the button's own EDGE was not. On a
+ * started (Seated) bar "Complete" measured 1.02:1 against the fill behind it, so
+ * the control read as text floating on the bar rather than as a button. One border
+ * colour cannot fix this, because bar fills run from dark navy to light amber, so
+ * the ring is two-tone: the white inner edge carries the dark fills, the dark outer
+ * edge carries the light ones, and one of the two always clears WCAG 1.4.11's 3:1.
+ */
+const BOOKING_CORNER_BUTTON_OUTLINE =
+  '0 0 0 1px rgba(255,255,255,0.92), 0 0 0 2.5px rgba(15,23,42,0.50), 0 1px 2px rgba(15,23,42,0.35)';
 
 /** Counts must mirror `collectBookingRightColumnActionNodes` render order. */
 function countBookingRightColumnActions(b: Booking): number {
@@ -1162,24 +1188,21 @@ function bookingShowsSeatedUndoInRightColumn(b: Booking): boolean {
   return b.status === 'Seated';
 }
 
-/** Horizontal inset so booking info does not run under bottom-right action buttons. */
-const BOOKING_ACTIONS_CORNER_RIGHT_PX = 68;
-
 /** Action buttons should stay compact on tall booking bars rather than stretching to fill the card. */
 const BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS = 'max-h-9';
-/** Minimum gap between the booking bar top edge and the action stack. */
-const BOOKING_ACTION_TRAY_TOP_GAP_PX = 8;
-/** Gap between the action stack and the resize strip (or card bottom when not resizable). */
-const BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX = 1;
-/** Internal tray padding above / below buttons. */
-const BOOKING_CORNER_TRAY_PAD_TOP_PX = 4;
-const BOOKING_CORNER_TRAY_PAD_BOTTOM_PX = 2;
-const BOOKING_CORNER_TRAY_PAD_Y_PX =
-  BOOKING_CORNER_TRAY_PAD_TOP_PX + BOOKING_CORNER_TRAY_PAD_BOTTOM_PX;
-/** Preferred per-button height in the corner stack; only shrink below when the bar cannot fit. */
-const BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX = 28;
-/** When every action would get less than this, omit secondary rows (Arrived / Undo start). */
-const BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX = 22;
+/**
+ * Vertical padding inside a booking card, and the height budget that must match it.
+ *
+ * `paddingBottom` is set separately (the tray and resize strip own that edge), so
+ * only the top is spent here. The shortest tier exists because a 19px bar was
+ * spending 6px on padding and then clipping the single row it had room for: the
+ * service name was sliced off at the bar's bottom edge.
+ */
+function bookingCardPadding(blockHeightPx: number): { topPx: number; budgetPx: number } {
+  if (blockHeightPx >= 56) return { topPx: 8, budgetPx: BOOKING_CARD_PADDING_TALL_PX };
+  if (blockHeightPx >= 32) return { topPx: 6, budgetPx: BOOKING_CARD_PADDING_SHORT_PX };
+  return { topPx: 2, budgetPx: 4 };
+}
 
 const BOOKING_CARD_ROW_PAD_RESERVE_PX = 8;
 
@@ -1189,66 +1212,8 @@ function narrowBookingActionsWidthPx(shellRowWidthPx: number | null | undefined)
   return Math.min(shellRowWidthPx, actionBudget);
 }
 
-interface BookingRightColumnLayoutResult {
-  compact: boolean;
-  fontSizePx: number;
-  baseClass: string;
-  buttonMinHeightPx: number;
-  stackHeightPx: number;
-}
-
 const BOOKING_CORNER_BUTTON_BASE_CLASS =
-  `inline-flex w-auto min-w-0 shrink-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} items-center justify-center whitespace-nowrap px-2 py-1 text-center font-semibold leading-tight [overflow-wrap:anywhere]`;
-
-function bookingCornerLayoutBudgetPx(blockHeightPx: number): number {
-  return Math.max(
-    0,
-    blockHeightPx - BOOKING_ACTION_TRAY_TOP_GAP_PX - BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX,
-  );
-}
-
-function cornerActionRawPerRowPx(layoutBudgetPx: number, actionCount: number): number {
-  if (actionCount <= 0) return layoutBudgetPx;
-  const gapTotal = Math.max(0, actionCount - 1) * BOOKING_RIGHT_GAP_PX;
-  return (layoutBudgetPx - BOOKING_CORNER_TRAY_PAD_Y_PX - gapTotal) / actionCount;
-}
-
-/** Sizes bottom-right corner actions: comfort height by default, shrink only when the bar cannot fit. */
-function bookingCornerActionLayout(
-  blockHeightPx: number,
-  actionCount: number,
-): BookingRightColumnLayoutResult {
-  if (actionCount <= 0) {
-    return {
-      compact: false,
-      fontSizePx: 10,
-      baseClass: BOOKING_CORNER_BUTTON_BASE_CLASS,
-      buttonMinHeightPx: 0,
-      stackHeightPx: 0,
-    };
-  }
-
-  const gapTotal = Math.max(0, actionCount - 1) * BOOKING_RIGHT_GAP_PX;
-  const rawPer = cornerActionRawPerRowPx(blockHeightPx, actionCount);
-  const buttonMinHeightPx = Math.min(
-    BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX,
-    Math.max(0, Math.floor(rawPer)),
-  );
-  const stackHeightPx =
-    actionCount * buttonMinHeightPx + gapTotal + BOOKING_CORNER_TRAY_PAD_Y_PX;
-  const compact = buttonMinHeightPx < BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX;
-  // Font size stays constant so a button's WIDTH never changes as the bar gets shorter —
-  // only its height compresses (via tighter vertical padding in the button style below).
-  const fontSizePx = 10;
-
-  return {
-    compact,
-    fontSizePx,
-    baseClass: BOOKING_CORNER_BUTTON_BASE_CLASS,
-    buttonMinHeightPx,
-    stackHeightPx,
-  };
-}
+  `inline-flex min-w-0 shrink-0 ${BOOKING_ACTION_BUTTON_MAX_HEIGHT_CLASS} items-center justify-center whitespace-nowrap px-2 py-1 text-center font-semibold leading-tight [overflow-wrap:anywhere]`;
 
 /** Measures guest+actions row width so multi-column actions never steal space needed for the contact name. */
 function BookingGuestActionsRowMeasured({
@@ -1312,16 +1277,29 @@ function collectBookingRightColumnActionNodes({
   // On very short bars the button compresses its HEIGHT via tighter top/bottom padding
   // (overriding the base `py-1`) while its width is left untouched — a short bar must never
   // make the action buttons narrower.
+  // A button cannot render shorter than its own line box plus padding, so the
+  // padding has to come off too or the planned height is a number the DOM ignores:
+  // a 16px bar asked for 14px and got 18px, overhanging the bar.
   const tightVertical = buttonMinHeightPx > 0 && buttonMinHeightPx < 22;
+  const veryTightVertical = buttonMinHeightPx > 0 && buttonMinHeightPx <= 18;
   const buttonStyle: CSSProperties =
     buttonMinHeightPx > 0
       ? {
           minHeight: `${buttonMinHeightPx}px`,
           fontSize: `${fontSizePx}px`,
-          lineHeight: 1.2,
-          ...(tightVertical ? { paddingTop: '2px', paddingBottom: '2px' } : {}),
+          lineHeight: veryTightVertical ? 1 : 1.2,
+          boxShadow: BOOKING_CORNER_BUTTON_OUTLINE,
+          ...(veryTightVertical
+            ? { paddingTop: '1px', paddingBottom: '1px' }
+            : tightVertical
+              ? { paddingTop: '2px', paddingBottom: '2px' }
+              : {}),
         }
-      : { fontSize: `${fontSizePx}px`, lineHeight: 1.2 };
+      : {
+          fontSize: `${fontSizePx}px`,
+          lineHeight: 1.2,
+          boxShadow: BOOKING_CORNER_BUTTON_OUTLINE,
+        };
 
   const out: ReactElement[] = [];
 
@@ -1435,36 +1413,37 @@ function collectBookingRightColumnActionNodes({
   return out;
 }
 
-/** Padding for booking info so text stays clear of the bottom-right action stack. */
+/** Translates a booking's status into the shape the corner-action planner understands. */
+function bookingCornerActionInput(b: Booking): BookingCornerActionInput {
+  return {
+    fullActionCount: countBookingRightColumnActions(b),
+    hasArrivalToggle: bookingHasArrivalToggleInRightColumn(b),
+    showsSeatedUndo: bookingShowsSeatedUndoInRightColumn(b),
+  };
+}
+
+/**
+ * Padding for booking info so text stays clear of the bottom-right action tray.
+ *
+ * HORIZONTAL CLEARANCE ONLY. The tray is a fixed-width column pinned to the
+ * bottom-right, so `right` keeps every text row out of its column for the whole
+ * height of the bar, and the text can then run the full height without ever
+ * reaching it. Reserving the stack's HEIGHT as well was reserving the same space
+ * twice: on a 30 minute bar that took 84px of 94px and left 2px for text, which
+ * rendered as a lone 10px name. The multi-service branch reached the same
+ * conclusion; this is the single-booking half of it.
+ */
 function computeBookingActionCornerInset(
   b: Booking,
   blockHeightPx: number,
 ): { right: number; bottom: number; hasActions: boolean } {
-  const fullActionCount = countBookingRightColumnActions(b);
-  if (fullActionCount <= 0) {
+  const plan = planBookingCornerActions(bookingCornerActionInput(b), blockHeightPx);
+  if (plan.actionCount <= 0) {
     return { right: 0, bottom: 0, hasActions: false };
   }
-
-  const layoutBudgetPx = bookingCornerLayoutBudgetPx(blockHeightPx);
-  const rawPerAll = cornerActionRawPerRowPx(layoutBudgetPx, fullActionCount);
-
-  const omitArrivalActions =
-    bookingHasArrivalToggleInRightColumn(b) &&
-    fullActionCount > 1 &&
-    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
-
-  const omitSeatedUndoActions =
-    bookingShowsSeatedUndoInRightColumn(b) &&
-    fullActionCount > 1 &&
-    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
-
-  const effectiveActionCount =
-    fullActionCount - (omitArrivalActions ? 1 : 0) - (omitSeatedUndoActions ? 1 : 0);
-  const layout = bookingCornerActionLayout(layoutBudgetPx, effectiveActionCount);
-
   return {
     right: BOOKING_ACTIONS_CORNER_RIGHT_PX,
-    bottom: layout.stackHeightPx + BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX,
+    bottom: 0,
     hasActions: true,
   };
 }
@@ -1476,19 +1455,30 @@ function CalendarBookingActionsTray({
   rightPx,
   maxWidthPx,
   topGapPx = BOOKING_ACTION_TRAY_TOP_GAP_PX,
+  padTopPx,
+  padBottomPx,
 }: {
   children: ReactNode;
   bottomPx: number;
   rightPx: number;
   maxWidthPx?: number;
   topGapPx?: number;
+  /**
+   * Tray padding, inline rather than fixed classes so a short bar can collapse it.
+   * The planner sizes the stack against these exact values, so a class that says
+   * otherwise would let `maxHeight` clip the button the plan just made room for.
+   */
+  padTopPx: number;
+  padBottomPx: number;
 }) {
   return (
     <div
-      className="pointer-events-none absolute z-20 flex h-auto w-auto flex-col justify-end gap-0.5 px-0.5 pb-0.5 pt-1"
+      className="pointer-events-none absolute z-20 flex h-auto w-auto flex-col justify-end gap-1 px-0.5"
       style={{
         bottom: bottomPx,
         right: rightPx,
+        paddingTop: padTopPx,
+        paddingBottom: padBottomPx,
         maxHeight: `calc(100% - ${topGapPx + bottomPx}px)`,
         maxWidth: maxWidthPx != null ? maxWidthPx : 'min(100%, calc(100% - 0.35rem))',
       }}
@@ -1508,7 +1498,6 @@ function CalendarBookingRightColumn({
   narrow = false,
   shellRowWidthPx,
   floating = false,
-  bottomReservePx = 0,
 }: {
   b: Booking;
   busy: boolean;
@@ -1520,33 +1509,16 @@ function CalendarBookingRightColumn({
   shellRowWidthPx?: number | null;
   /** Overlap lanes should not reserve a full-width row below the booking content. */
   floating?: boolean;
-  /** Space reserved below floating actions, e.g. the duration resize handle. */
-  bottomReservePx?: number;
 }) {
-  const fullActionCount = countBookingRightColumnActions(b);
-  const layoutBudgetPx = bookingCornerLayoutBudgetPx(blockHeightPx);
-  const rawPerAll = cornerActionRawPerRowPx(layoutBudgetPx, fullActionCount);
+  const { omitArrivalActions, omitSeatedUndoActions, layout, actionCount } =
+    planBookingCornerActions(bookingCornerActionInput(b), blockHeightPx);
 
-  const omitArrivalActions =
-    bookingHasArrivalToggleInRightColumn(b) &&
-    fullActionCount > 1 &&
-    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
-
-  const omitSeatedUndoActions =
-    bookingShowsSeatedUndoInRightColumn(b) &&
-    fullActionCount > 1 &&
-    rawPerAll < BOOKING_CORNER_ACTION_OMIT_RAW_PER_ROW_PX;
-
-  const effectiveActionCount =
-    fullActionCount - (omitArrivalActions ? 1 : 0) - (omitSeatedUndoActions ? 1 : 0);
-  const layout = bookingCornerActionLayout(layoutBudgetPx, effectiveActionCount);
-
-  const actionNodes = collectBookingRightColumnActionNodes({
+  const actionNodes = actionCount <= 0 ? [] : collectBookingRightColumnActionNodes({
     b,
     busy,
     onStatus,
     onArrived,
-    baseClass: layout.baseClass,
+    baseClass: BOOKING_CORNER_BUTTON_BASE_CLASS,
     fontSizePx: layout.fontSizePx,
     buttonMinHeightPx: layout.buttonMinHeightPx,
     narrow,
@@ -1563,14 +1535,28 @@ function CalendarBookingRightColumn({
       ? Math.max(56, shellRowWidthPx - 8)
       : undefined;
 
+  // A short bar spends its height on the button, not on the spacing around it.
+  // These are the exact values `planBookingCornerActions` budgeted against.
+  const spacing = bookingCornerTraySpacing(blockHeightPx);
+
   return (
     <CalendarBookingActionsTray
-      bottomPx={bottomReservePx + BOOKING_ACTION_TRAY_BOTTOM_OFFSET_PX}
-      rightPx={4}
+      padTopPx={spacing.padTopPx}
+      padBottomPx={spacing.padBottomPx}
+      // The spacing already carries the corner inset the resize strip needs, and
+      // taking the larger of the two put the tray 3px above where the plan sized
+      // it, so the button overhung the top edge of every short bar.
+      bottomPx={spacing.bottomInsetPx}
+      rightPx={BOOKING_CORNER_TRAY_RIGHT_PX}
       maxWidthPx={trayMaxWidthPx}
+      topGapPx={spacing.topGapPx}
     >
       <div
-        className="pointer-events-auto flex h-auto w-auto max-w-full flex-col items-stretch gap-0.5 [&_button]:!h-auto [&_button]:!flex-none [&_button]:!basis-auto [&_button]:!grow-0"
+        // Always a stack, always this wide: every button on every bar matches
+        // regardless of its label or its bar's height. Only the button HEIGHT
+        // adapts, which `bookingCornerActionLayout` handles.
+        style={{ width: BOOKING_ACTION_BUTTON_WIDTH_PX }}
+        className="pointer-events-auto flex h-auto max-w-full flex-col items-stretch gap-1 [&_button]:!h-auto [&_button]:!flex-none [&_button]:!basis-auto [&_button]:!grow-0"
         onPointerDown={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -2026,7 +2012,16 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
     );
   }
 
-  const contentHeightPx = blockHeightPx;
+  /**
+   * The linked bar's own padding and border come out first. This handed the card
+   * the RAW block height, which is the same mistake the native bars made: at 48px
+   * the card laid out two rows into a 34px box and the bottom line was sliced
+   * through its descenders.
+   */
+  const contentHeightPx = Math.max(
+    0,
+    blockHeightPx - BOOKING_CARD_BORDER_PX - (blockHeightPx < 56 ? 12 : 16),
+  );
   const cardDensity = contentHeightPx < 56 ? 'compact' : 'comfortable';
   const blockH = blockHeightPx;
 
@@ -5970,7 +5965,7 @@ export function PractitionerCalendarView({
                                   type="button"
                                   onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
                                   {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
-                                  className="flex w-full rounded-xl px-0 py-0 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  className="flex w-full rounded-xl px-0 py-0 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300"
                                   style={bookingCalendarBlockCardStyle(p)}
                                 >
                                   <CalendarBookingStatusStripe palette={p} />
@@ -6171,7 +6166,7 @@ export function PractitionerCalendarView({
                                   onClick={(e) =>
                                     openLinkedBooking(col, b, { x: e.clientX, y: e.clientY })
                                   }
-                                  className="block w-full rounded-xl px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  className="block w-full rounded-xl px-2.5 py-2 text-left text-xs shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-lg hover:shadow-slate-900/10 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300"
                                   style={bookingCalendarBlockCardStyle(
                                     bookingCalendarBlockPaletteWithOverlay(
                                       linkedBookingStatusBooking(b, bookingRowOverlayForId(b.id)),
@@ -6697,12 +6692,12 @@ export function PractitionerCalendarView({
                                       aria-orientation="horizontal"
                                       aria-label="Press and hold, then drag to change block duration"
                                       data-no-calendar-pan="true"
-                                      className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-lg transition-colors duration-150 ${
+                                      className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-lg transition-colors duration-150 ${
                                         resizeArmingThis
                                           ? 'bg-black/[0.12]'
                                           : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
                                       }`}
-                                      style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
+                                      style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX, right: 0 }}
                                       onPointerDown={beginBlockResize(bl)}
                                       onMouseDown={(e) => e.stopPropagation()}
                                     >
@@ -6871,6 +6866,27 @@ export function PractitionerCalendarView({
                            * account for it (the same value is reused down there).
                            */
                           const actionBlockHeight = Math.max(0, height + resizeExtra - reservePx);
+                          /**
+                           * Where the actions go, decided PER BAR rather than per view mode.
+                           *
+                           * The corner tray stacks its buttons vertically and reserves that whole
+                           * stack out of the bar, which only makes sense when the bar can spare it.
+                           * It was gated on the global compact toggle alone, so in the default view
+                           * a 30 minute booking still got the full stack: 84px of a 94px bar, which
+                           * left 2px for text and rendered nothing but a shrunken guest name.
+                           *
+                           * Below the threshold the actions sit inline beside the text instead,
+                           * costing no height at all, so a short bar spends its pixels on the
+                           * booking rather than on chrome.
+                           */
+                          /**
+                           * One action renderer for every bar. Compact used to swap in a
+                           * horizontal row that sat vertically CENTRED against the right
+                           * edge, so the buttons were neither stacked nor in the corner,
+                           * and their widths came from their labels. The corner tray now
+                           * costs no height (it clears the text via `right` alone) and
+                           * shrinks its buttons to fit, so it serves short bars too.
+                           */
                           const barActionInset = computeBookingActionCornerInset(b, actionBlockHeight);
                           // Room left inside the bar once the resize affordance, the action
                           // tray and the button's own padding are taken out. Density and the
@@ -6878,9 +6894,10 @@ export function PractitionerCalendarView({
                           const barInnerHeightPx = Math.max(
                             0,
                             blockH -
+                              BOOKING_CARD_BORDER_PX -
                               reservePx -
                               (barActionInset.hasActions ? barActionInset.bottom : 0) -
-                              (blockH < 56 ? BOOKING_CARD_PADDING_SHORT_PX : BOOKING_CARD_PADDING_TALL_PX),
+                              bookingCardPadding(blockH).budgetPx,
                           );
                           const cardDensity =
                             isOverlapLane || barInnerHeightPx < 56 ? 'compact' : 'comfortable';
@@ -6909,10 +6926,13 @@ export function PractitionerCalendarView({
                               {(handle) => (
                                 <div
                                   className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
-                                    flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
+                                    flash ? 'motion-safe:animate-pulse' : ''
                                   }`}
                                   style={bookingCalendarBlockCardStyle(palette, {
                                     linked: Boolean(b._linkedColumnKey),
+                                    // Ring must ride the inline shadow; a `ring-*`
+                                    // class here loses to this very style object.
+                                    flash,
                                   })}
                                 >
                                   <CalendarBookingStatusStripe palette={palette} />
@@ -6984,57 +7004,9 @@ export function PractitionerCalendarView({
                                   ) : null}
                                   {moveArmingThis ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
                                   <BookingGuestActionsRowMeasured
-                                    className={`relative z-[1] flex min-h-0 min-w-0 flex-1 ${
-                                      compactActive ? 'flex-row items-center' : 'flex-col'
-                                    }`}
+                                    className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col"
                                   >
                                       {(shellRowWidthPx) => {
-                                        if (compactActive) {
-                                          // Compact bars lay the name (flex-1, truncating) and the
-                                          // horizontal action row (flex-none) as siblings, both vertically
-                                          // centred. The name yields width to the buttons rather than the
-                                          // buttons overlapping it, and every control fits within the bar.
-                                          return (
-                                            <>
-                                              <div className="flex min-w-0 flex-1 self-stretch overflow-hidden">
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
-                                                  {...bindDetailPrefetchHandlers(b.id, prefetchBookingDetail)}
-                                                  title={resName ? 'Open to change slot' : undefined}
-                                                  className={`flex h-full min-h-0 w-full flex-col justify-center overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-0 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
-                                                  aria-label={`Open booking details for ${b.guest_name}`}
-                                                >
-                                                  <BookingCard
-                                                    name={b.guest_name}
-                                                    nameAccessory={
-                                                      complianceFlags[b.id] ? (
-                                                        <ComplianceBarIcon flag={complianceFlags[b.id]!} />
-                                                      ) : undefined
-                                                    }
-                                                    service={calendarBookingServiceLabel(b, svc, resName ?? null)}
-                                                    phone={formatPhoneForDisplay(b.guest_phone)}
-                                                    start={b.booking_time.slice(0, 5)}
-                                                    end={displayEndHm}
-                                                    pill={<CalendarBookingStatusBadge b={b} palette={palette} />}
-                                                    contentHeightPx={contentHeightPx}
-                                                    density={cardDensity}
-                                                    actionsReservePx={0}
-                                                  />
-                                                </button>
-                                              </div>
-                                              <CompactBookingActions
-                                                booking={b}
-                                                busy={qBusy}
-                                                barHeightPx={blockH}
-                                                availableWidthPx={shellRowWidthPx}
-                                                narrow={isOverlapLane}
-                                                onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
-                                                onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
-                                              />
-                                            </>
-                                          );
-                                        }
                                         // Same value the height budget above was built from.
                                         const actionInset = barActionInset;
                                         return (
@@ -7050,10 +7022,9 @@ export function PractitionerCalendarView({
                                               // which runs engine validation. Signpost that with a tooltip so a CDE
                                               // block doesn't look like an identical-but-unresponsive appointment.
                                               title={resName ? 'Open to change slot' : undefined}
-                                              className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                                                blockH < 56 ? 'py-1.5' : 'py-2'
-                                              }`}
+                                              className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300`}
                                               style={{
+                                                paddingTop: bookingCardPadding(blockH).topPx,
                                                 paddingRight: actionInset.hasActions
                                                   ? actionInset.right
                                                   : undefined,
@@ -7077,9 +7048,18 @@ export function PractitionerCalendarView({
                                                 pill={<CalendarBookingStatusBadge b={b} palette={palette} />}
                                                 contentHeightPx={contentHeightPx}
                                                 density={cardDensity}
-                                                actionsReservePx={
-                                                  actionInset.hasActions ? actionInset.right : 0
-                                                }
+                                                /**
+                                                 * Zero on purpose. The button above already carries
+                                                 * the tray reserve as `paddingRight`, and this card
+                                                 * is its direct child, so the width it measures is
+                                                 * ALREADY the content box with that reserve removed.
+                                                 * Passing the reserve again charged it twice: the
+                                                 * card believed it had 63px of a real 131px and
+                                                 * dropped the status chip, the time, and on shorter
+                                                 * bars the phone, from any row it had to share.
+                                                 * The multi-service branch has always passed 0 here.
+                                                 */
+                                                actionsReservePx={0}
                                               />
                                               {showPillsRow ? (
                                                 <div className="mt-1.5 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-white/25 pt-1.5">
@@ -7100,7 +7080,6 @@ export function PractitionerCalendarView({
                                               narrow={isOverlapLane}
                                               shellRowWidthPx={shellRowWidthPx}
                                               floating={false}
-                                              bottomReservePx={reservePx}
                                             />
                                           </>
                                         );
@@ -7186,12 +7165,12 @@ export function PractitionerCalendarView({
                                         aria-orientation="horizontal"
                                         aria-label="Press and hold, then drag to change duration"
                                         data-no-calendar-pan="true"
-                                        className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 right-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-2xl transition-colors duration-150 ${
+                                        className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-2xl transition-colors duration-150 ${
                                           resizeArmingThis
                                             ? 'bg-black/[0.12]'
                                             : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
                                         }`}
-                                        style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX }}
+                                        style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX, right: barActionInset.hasActions ? BOOKING_ACTIONS_CORNER_RIGHT_PX : 0 }}
                                         onPointerDown={beginAppointmentResize(b)}
                                         onMouseDown={(e) => e.stopPropagation()}
                                       >
@@ -7248,10 +7227,11 @@ export function PractitionerCalendarView({
                             {() => (
                               <div
                                 className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
-                                  flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
+                                  flash ? 'motion-safe:animate-pulse' : ''
                                 }`}
                                 style={bookingCalendarBlockCardStyle(clusterPalette, {
                                   linked: Boolean(first._linkedColumnKey),
+                                  flash,
                                 })}
                                 title={serviceTitle || undefined}
                                 {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
@@ -7322,13 +7302,23 @@ export function PractitionerCalendarView({
                                             <div
                                               key={b.id}
                                               className="relative flex min-h-0 flex-col overflow-hidden"
-                                              style={{ flex: dur, backgroundColor: clusterPalette.bg }}
+                                              /**
+                                               * No fill of its own. The card underneath already
+                                               * paints this exact colour plus the gloss gradient
+                                               * every bar carries, and repainting it flat here
+                                               * erased that gloss, but only where the segments
+                                               * reach. The action gutter is padding, so no segment
+                                               * covers it, and the surviving gloss showed as a
+                                               * lighter band running the height of the bar's right
+                                               * edge, on multi-service visits only.
+                                               */
+                                              style={{ flex: dur }}
                                             >
                                               <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} wallPaintMinutes={dur} />
                                               <button
                                                 type="button"
                                                 onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
-                                                className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
+                                                className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300`}
                                                 // Keeps the bottom segment's last line clear of the
                                                 // action tray it shares a corner with.
                                                 style={
@@ -7391,7 +7381,6 @@ export function PractitionerCalendarView({
                                         narrow={isOverlapLane}
                                         shellRowWidthPx={shellRowWidthPx}
                                         floating={false}
-                                        bottomReservePx={0}
                                       />
                                     </>
                                     );

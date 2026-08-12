@@ -131,6 +131,7 @@ import {
   bookingCalendarBlockPaletteWithOverlay,
   CalendarBookingStatusStripe,
   isArrivedWaitingDisplay,
+  type BookingBlockPalette,
 } from '@/lib/calendar/booking-calendar-block-style';
 import {
   BOOKING_ACTIONS_CORNER_RIGHT_PX,
@@ -1151,6 +1152,90 @@ function ResizeHoldHint({ label, placement = 'bottom' }: { label: string; placem
         <span className="animate-resize-hold block h-full w-full origin-left rounded-full bg-white" />
       </span>
     </span>
+  );
+}
+
+/**
+ * Notify / skip / undo offered on a booking bar straight after a start-time move.
+ *
+ * One renderer for both bar types. It lived inline in the single-booking branch, so a
+ * multi-service visit armed the follow-up on drop and then had nowhere to draw it: the
+ * countdown ran invisibly and the guest was notified with no chance to skip or undo.
+ * A visit is one booking, so it gets the same prompt a single booking gets.
+ */
+function ScheduleEditFollowUpPill({
+  palette,
+  kind,
+  countdownSec,
+  disabled,
+  onNotifyNow,
+  onSkip,
+  onUndo,
+}: {
+  palette: BookingBlockPalette;
+  kind: 'move' | 'resize';
+  countdownSec: number | null;
+  disabled: boolean;
+  onNotifyNow: () => void;
+  onSkip: () => void;
+  onUndo: () => void;
+}) {
+  return (
+    <div
+      className="pointer-events-auto absolute left-1/2 z-[45] -translate-x-1/2"
+      style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
+      data-no-calendar-pan="true"
+    >
+      <div
+        role="group"
+        aria-label={
+          kind === 'resize' ? 'Confirm or undo this duration change' : 'Confirm or undo this move'
+        }
+        className="flex items-center gap-1 rounded-xl border px-2 py-1 shadow-[0_12px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.72)] ring-1 ring-black/[0.05] backdrop-blur-sm"
+        // Near-white frosted surface with a faint status wash (10% of the
+        // saturated hue) - keeps the dark control labels legible while still
+        // nodding to the booking's status colour.
+        style={{
+          backgroundColor: '#FFFFFF',
+          backgroundImage: `linear-gradient(135deg, ${palette.bg}1A 0%, rgba(255,255,255,0.96) 62%)`,
+          borderColor: palette.border,
+          color: '#334155',
+        }}
+      >
+        <span
+          className="mr-0.5 h-3 w-[3px] shrink-0 rounded-full"
+          style={{ backgroundColor: palette.accent }}
+          aria-hidden
+        />
+        <span className="mr-1 max-w-[7.5rem] truncate text-[10px] font-medium leading-tight text-slate-600">
+          {countdownSec != null ? `Notify in ${countdownSec}s` : 'Notify guest'}
+        </span>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onNotifyNow}
+          className="rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold leading-none text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50"
+        >
+          Notify now
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onSkip}
+          className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Skip notify
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onUndo}
+          className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Undo
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -4175,7 +4260,13 @@ export function PractitionerCalendarView({
       return;
     }
 
-    beginScheduleEditFollowUp(rows[0]!.id);
+    /**
+     * Armed against the visit's FIRST service, which is what the group bar is keyed on.
+     * `rows` arrives in whatever order the bookings list held, so `rows[0]` was only
+     * sometimes the earliest service, and the pill only sometimes had a bar to appear on.
+     * The resolver orders by start time, so `visit.services[0]` always matches.
+     */
+    beginScheduleEditFollowUp(visit.services[0]!.id);
     for (const sv of laid) {
       const row = byId.get(sv.id);
       if (!row) continue;
@@ -7429,65 +7520,15 @@ export function PractitionerCalendarView({
                                         </span>
                                       ) : null}
                                       {showInlineScheduleFollowUp ? (
-                                        <div
-                                          className="pointer-events-auto absolute left-1/2 z-[45] -translate-x-1/2"
-                                          style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
-                                          data-no-calendar-pan="true"
-                                        >
-                                          <div
-                                            role="group"
-                                            aria-label={
-                                              scheduleFollowUpKind === 'resize'
-                                                ? 'Confirm or undo this duration change'
-                                                : 'Confirm or undo this move'
-                                            }
-                                            className="flex items-center gap-1 rounded-xl border px-2 py-1 shadow-[0_12px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.72)] ring-1 ring-black/[0.05] backdrop-blur-sm"
-                                            // Near-white frosted surface with a faint status wash (10% of the
-                                            // saturated hue) — keeps the dark control labels legible while still
-                                            // nodding to the booking's status colour.
-                                            style={{
-                                              backgroundColor: '#FFFFFF',
-                                              backgroundImage: `linear-gradient(135deg, ${palette.bg}1A 0%, rgba(255,255,255,0.96) 62%)`,
-                                              borderColor: palette.border,
-                                              color: '#334155',
-                                            }}
-                                          >
-                                            <span
-                                              className="mr-0.5 h-3 w-[3px] shrink-0 rounded-full"
-                                              style={{ backgroundColor: palette.accent }}
-                                              aria-hidden
-                                            />
-                                            <span className="mr-1 max-w-[7.5rem] truncate text-[10px] font-medium leading-tight text-slate-600">
-                                              {modificationNotifyCountdownSec != null
-                                                ? `Notify in ${modificationNotifyCountdownSec}s`
-                                                : 'Notify guest'}
-                                            </span>
-                                            <button
-                                              type="button"
-                                              disabled={scheduleUndoPending}
-                                              onClick={() => void confirmInlineDragMove()}
-                                              className="rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold leading-none text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50"
-                                            >
-                                              Notify now
-                                            </button>
-                                            <button
-                                              type="button"
-                                              disabled={scheduleUndoPending}
-                                              onClick={dismissPendingModificationGuestNotify}
-                                              className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-                                            >
-                                              Skip notify
-                                            </button>
-                                            <button
-                                              type="button"
-                                              disabled={scheduleUndoPending}
-                                              onClick={() => void undoLastScheduleEdit()}
-                                              className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-                                            >
-                                              Undo
-                                            </button>
-                                          </div>
-                                        </div>
+                                        <ScheduleEditFollowUpPill
+                                          palette={palette}
+                                          kind={scheduleFollowUpKind}
+                                          countdownSec={modificationNotifyCountdownSec}
+                                          disabled={scheduleUndoPending}
+                                          onNotifyNow={() => void confirmInlineDragMove()}
+                                          onSkip={dismissPendingModificationGuestNotify}
+                                          onUndo={() => void undoLastScheduleEdit()}
+                                        />
                                       ) : null}
                                       {resizeArmingThis ? <ResizeHoldHint label="Hold to adjust" /> : null}
                                       {/* touch-action stays pannable so a scroll that merely grazes this thin
@@ -7559,6 +7600,15 @@ export function PractitionerCalendarView({
                           resizeArming?.kind === 'booking' && resizeArming.id === first.id;
                         const visitMoveArming =
                           moveArming?.kind === 'booking' && moveArming.id === first.id;
+                        /**
+                         * `patchVisitMove` arms the follow-up against the visit's first
+                         * service, which is what this bar is keyed on.
+                         */
+                        const showVisitScheduleFollowUp = dragMoveConfirmBookingId === first.id;
+                        const visitScheduleFollowUpKind =
+                          lastScheduleEditUndo?.prev.id === first.id
+                            ? lastScheduleEditUndo.kind
+                            : 'move';
                         return (
                           <DraggableBookingShell
                             key={`${items.map((x) => `${x.id}:${x.status}:${x.client_arrived_at ?? ''}`).join('|')}`}
@@ -7784,6 +7834,17 @@ export function PractitionerCalendarView({
                                         and the resolver decides which service
                                         absorbs it.
                                       */}
+                                      {showVisitScheduleFollowUp ? (
+                                        <ScheduleEditFollowUpPill
+                                          palette={clusterPalette}
+                                          kind={visitScheduleFollowUpKind}
+                                          countdownSec={modificationNotifyCountdownSec}
+                                          disabled={scheduleUndoPending}
+                                          onNotifyNow={() => void confirmInlineDragMove()}
+                                          onSkip={dismissPendingModificationGuestNotify}
+                                          onUndo={() => void undoLastScheduleEdit()}
+                                        />
+                                      ) : null}
                                       {visitResizeArming ? <ResizeHoldHint label="Hold to adjust" /> : null}
                                       {visitResizable ? (
                                         <span

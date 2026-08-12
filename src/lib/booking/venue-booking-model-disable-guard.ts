@@ -32,9 +32,39 @@ const MODEL_LABEL: Partial<Record<BookingModel, string>> = {
   resource_booking: 'Resource bookings',
 };
 
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * "Fri 14 Aug 2026" from a `YYYY-MM-DD`, read at midday so no timezone can shift the day.
+ *
+ * Built by hand rather than through `toLocaleDateString`, whose separators vary with the
+ * runtime's ICU data. This string is copy a venue owner reads, so it should not depend on
+ * which Node the server happens to be running.
+ */
+function formatBookingDay(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return ymd;
+  const at = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  return `${WEEKDAY_SHORT[at.getUTCDay()]} ${d} ${MONTH_SHORT[m - 1]} ${y}`;
+}
+
+/** "9:00am" / "2:30pm" from a `HH:mm` clock time. */
+function formatBookingTime(timeHm: string): string {
+  const [h, min] = timeHm.split(':').map(Number);
+  if (h === undefined || Number.isNaN(h)) return timeHm;
+  const suffix = h < 12 ? 'am' : 'pm';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(min ?? 0).padStart(2, '0')}${suffix}`;
+}
+
 /**
  * If the venue is removing one or more active booking models, ensure there are no
  * upcoming (venue-local) bookings in a non-terminal status for any removed model.
+ *
+ * The refusal carries the count and the date of the next one. "You have upcoming
+ * bookings" on its own sends staff hunting through the calendar for something the
+ * server has already found.
  */
 export async function assertCanDisableBookingModels(
   db: SupabaseClient,
@@ -63,6 +93,12 @@ export async function assertCanDisableBookingModels(
     throw new Error(error.message);
   }
 
+  /**
+   * Every match is tallied before anything is reported. Reporting the first row the
+   * query happened to return could not name the NEXT booking, only an arbitrary one.
+   */
+  const upcomingByModel = new Map<BookingModel, { count: number; nextMs: number; date: string; time: string }>();
+
   for (const row of rows ?? []) {
     const st = typeof row.status === 'string' ? row.status : '';
     if (TERMINAL_STATUSES.has(st)) continue;
@@ -74,14 +110,45 @@ export async function assertCanDisableBookingModels(
     if (startMs < nowMs) continue;
 
     const canonical = rowBookingModelToCanonical(String(row.booking_model));
-    if (canonical && removedModels.includes(canonical)) {
-      const label = MODEL_LABEL[canonical] ?? canonical.replace(/_/g, ' ');
-      const err = new Error(
-        `${label} cannot be turned off while you have upcoming bookings of that type. ` +
-          'Cancel or complete those bookings first, then try again.',
-      );
-      (err as Error & { code?: string }).code = 'BOOKING_MODEL_HAS_FUTURE_BOOKINGS';
-      throw err;
+    if (!canonical || !removedModels.includes(canonical)) continue;
+
+    const seen = upcomingByModel.get(canonical);
+    if (!seen) {
+      upcomingByModel.set(canonical, { count: 1, nextMs: startMs, date: dateStr, time: timeHm });
+    } else {
+      seen.count += 1;
+      if (startMs < seen.nextMs) {
+        seen.nextMs = startMs;
+        seen.date = dateStr;
+        seen.time = timeHm;
+      }
     }
+  }
+
+  /** Iterate the caller's order, not the map's, so the same removal always names the same model. */
+  for (const model of removedModels) {
+    const hit = upcomingByModel.get(model);
+    if (!hit) continue;
+
+    const label = MODEL_LABEL[model] ?? model.replace(/_/g, ' ');
+    const when = `${formatBookingDay(hit.date)} at ${formatBookingTime(hit.time)}`;
+    const message =
+      hit.count === 1
+        ? `${label} cannot be turned off yet. You have 1 upcoming booking of that type, on ${when}. ` +
+          'Cancel or complete it first, then try again.'
+        : `${label} cannot be turned off yet. You have ${hit.count} upcoming bookings of that type, ` +
+          `the next on ${when}. Cancel or complete them first, then try again.`;
+
+    const err = new Error(message) as Error & {
+      code?: string;
+      model?: BookingModel;
+      upcomingCount?: number;
+      nextBookingDate?: string;
+    };
+    err.code = 'BOOKING_MODEL_HAS_FUTURE_BOOKINGS';
+    err.model = model;
+    err.upcomingCount = hit.count;
+    err.nextBookingDate = hit.date;
+    throw err;
   }
 }

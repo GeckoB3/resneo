@@ -1,7 +1,10 @@
 # Disabled booking models must be inert
 
-Status: the engine is fixed. The grid and the settings guard are still open.
-Branch: `staging`.
+Status: done. Branch: `staging`.
+
+The engine was the only thing actually broken. The grid was already correct, and
+the settings guard already existed and worked; it needed a better refusal and the
+tests it never had. See the surface notes below before assuming otherwise.
 
 ## Root cause
 
@@ -38,12 +41,19 @@ never in either table.
    assembly, including a duplicate of the class/event fetching. Left alone it
    would have greyed out days on the public booking calendar that the day view
    then offered.
-3. **Calendar grid.** Do not render columns or blocks belonging to a disabled
-   model. Partly true today, which is exactly why the block was invisible rather
-   than merely surprising. STILL OPEN.
-4. **Settings** (`BookingTypesSection.tsx`). Guard the toggle server-side, not
-   just in the UI, since the model flag is writable through the settings API.
-   STILL OPEN.
+3. **Calendar grid.** ALREADY CORRECT, nothing was needed. Resource calendars are
+   excluded from grid columns unconditionally (`columnPractitioners` in
+   `PractitionerCalendarView.tsx`, which merges a resource into its host column
+   instead), and the `/api/venue/resources` fetch is already behind
+   `venueExposesBookingModel(..., 'resource_booking')`. The grid was never drawing
+   the block. The engine was disagreeing with the grid, and the engine was wrong.
+   Note that `/api/venue/practitioners?roster=1` does still return resource
+   calendars whatever the models say, but no grid column comes of it, and the
+   admin screens that manage those calendars need the unfiltered list.
+4. **Settings** (`BookingTypesSection.tsx`). The server-side guard ALREADY EXISTED,
+   in `src/lib/booking/venue-booking-model-disable-guard.ts`, wired into
+   `PATCH /api/venue` and answering 409. It shipped in `d717b237` (April 2026).
+   Verified firing. What was missing is below.
 
 ## How the engine fix went in
 
@@ -88,8 +98,21 @@ Toggled back on: 21 slots again.
 - **No migration or backfill.** Only test users have used models other than
   appointments, so no venue is stranded by enforcing this.
 
-## Still to settle during implementation
+## The refusal message
 
-- The refusal message names the model and why. Worth including the count and
-  the next affected date, since "you have future bookings" without a date sends
-  staff hunting.
+Settled. It now names the model, the count and the next affected booking:
+
+> Appointments cannot be turned off yet. You have 12 upcoming bookings of that
+> type, the next on Thu 13 Aug 2026 at 9:30am. Cancel or complete them first,
+> then try again.
+
+Two things that had to change to get there. The guard used to throw on the first
+matching row the query returned, which is arbitrary order, so it could not name the
+NEXT booking, only some booking. It now tallies every match before reporting. And
+the date is assembled by hand rather than through `toLocaleDateString`, whose
+separators move with the runtime's ICU data; this is copy an owner reads, so it
+should not depend on which Node the server is running.
+
+The guard had no tests at all despite being a refusal path on a settings route.
+It has eleven now, including the recorded same-day rule (a booking later today
+blocks the toggle, this morning's finished one does not).

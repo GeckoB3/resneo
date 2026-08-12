@@ -112,6 +112,7 @@ import {
   resolveVisitPillAnchorStatus,
   type GroupVisitBookingRow,
 } from '@/lib/booking/group-visit-bookings';
+import { resolveAppointmentVisit } from '@/lib/booking/appointment-visit';
 
 export type { GroupVisitBookingRow } from '@/lib/booking/group-visit-bookings';
 import {
@@ -1173,12 +1174,28 @@ export function ExpandedBookingContent({
 
   // When the booking runs. The calendar bar and the list row both show this, but the panel itself
   // did not, so a staff member reading the detail had to close it again to check the time.
-  const bookingStartHm = effectiveBooking.booking_time?.slice(0, 5) ?? null;
-  const bookingEndHm = bookingDisplayEndHm({
-    booking_time: effectiveBooking.booking_time,
-    booking_end_time: effectiveBooking.booking_end_time ?? null,
-    estimated_end_time: effectiveBooking.estimated_end_time ?? null,
-  });
+  /**
+   * A multi-service visit reports the WHOLE visit's span, not the segment that
+   * happened to be clicked. Opening the third service of a three service visit
+   * showed "10:00-11:00" for a booking that actually ran to 12:15, and the
+   * modify form inherited the same single-segment view.
+   */
+  const visitSpan = useMemo(
+    () => (multiServiceVisitSegments.length > 1
+      ? resolveAppointmentVisit(multiServiceVisitSegments)
+      : null),
+    [multiServiceVisitSegments],
+  );
+
+  const bookingStartHm =
+    visitSpan?.startHm ?? effectiveBooking.booking_time?.slice(0, 5) ?? null;
+  const bookingEndHm =
+    visitSpan?.endHm ??
+    bookingDisplayEndHm({
+      booking_time: effectiveBooking.booking_time,
+      booking_end_time: effectiveBooking.booking_end_time ?? null,
+      estimated_end_time: effectiveBooking.estimated_end_time ?? null,
+    });
 
   const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [];
 

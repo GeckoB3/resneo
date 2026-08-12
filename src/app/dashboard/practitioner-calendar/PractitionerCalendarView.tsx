@@ -96,6 +96,12 @@ import {
 } from '@/lib/availability/resource-booking-engine';
 import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appointment-engine';
 import {
+  distributeVisitDuration,
+  minimumVisitMinutes,
+  resequenceVisit,
+  resolveAppointmentVisit,
+} from '@/lib/booking/appointment-visit';
+import {
   computeResourceAvailabilityMintSlots,
   type ResourceAvailabilityMintSlot,
 } from '@/lib/calendar/resource-availability-mint-slots';
@@ -4096,12 +4102,47 @@ export function PractitionerCalendarView({
     }
   }
 
+  /**
+   * Move a whole multi-service visit, keeping its shape.
+   *
+   * The services are re-laid from the new start through the shared resolver, so
+   * each keeps its duration and the gap it is entitled to, and any dead time an
+   * earlier edit left behind is closed on the way. Each row then goes through the
+   * normal move so linked-venue handling and validation are not duplicated; the
+   * notify follow-up is armed once for the visit rather than once per service.
+   */
+  async function patchVisitMove(
+    rows: Booking[],
+    newDate: string,
+    newTime: string,
+    newPracId: string,
+    opts?: { allowOutsideHours?: boolean },
+  ) {
+    const visit = resolveAppointmentVisit(rows.map(visitRowFor));
+    if (!visit) return;
+    const laid = resequenceVisit(
+      visit,
+      new Map(visit.services.map((sv) => [sv.id, sv.durationMinutes])),
+      newTime.slice(0, 5),
+    );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    beginScheduleEditFollowUp(rows[0]!.id);
+    for (const sv of laid) {
+      const row = byId.get(sv.id);
+      if (!row) continue;
+      await patchBookingMove(row, newDate, sv.startHm, newPracId, {
+        allowOutsideHours: opts?.allowOutsideHours,
+        skipFollowUp: true,
+      });
+    }
+  }
+
   async function patchBookingMove(
     booking: Booking,
     newDate: string,
     newTime: string,
     newPracId: string,
-    opts?: { allowOutsideHours?: boolean },
+    opts?: { allowOutsideHours?: boolean; skipFollowUp?: boolean },
   ) {
     const prev = { ...booking };
     const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
@@ -4150,7 +4191,7 @@ export function PractitionerCalendarView({
         ),
       );
     }
-    beginScheduleEditFollowUp(booking.id);
+    if (!opts?.skipFollowUp) beginScheduleEditFollowUp(booking.id);
 
     const savePromise = (async (): Promise<'ok' | 'failed'> => {
       try {
@@ -4339,7 +4380,6 @@ export function PractitionerCalendarView({
     },
     [
       addToast,
-      beginScheduleEditFollowUp,
       clearScheduleEditFollowUpForBooking,
       refetchBookingsList,
       requestLinkedCalendarSync,
@@ -4959,6 +4999,32 @@ export function PractitionerCalendarView({
     if (movedOutsideHours) {
       addToast('Moved outside opening hours.', 'info');
     }
+    // A multi-service visit moves as one booking: dragging the bar used to carry
+    // only the row the shell held and leave the other services behind.
+    const moveVisitRows = serviceVisitRowsFor(b);
+    if (moveVisitRows) {
+      const visit = resolveAppointmentVisit(moveVisitRows.map(visitRowFor));
+      const startMin = timeToMinutes(newTime.slice(0, 5));
+      const clash = collidingBookingCount({
+        startMin,
+        endMin: startMin + (visit?.totalMinutes ?? 0),
+        columnId: pracId,
+        dateStr,
+        excludeIds: new Set(moveVisitRows.map((r) => r.id)),
+      });
+      if (clash > 0) {
+        addToast(
+          clash === 1
+            ? 'This now overlaps another booking.'
+            : `This now overlaps ${clash} other bookings.`,
+          'info',
+        );
+      }
+      void patchVisitMove(moveVisitRows, dateStr, newTime, pracId, {
+        allowOutsideHours: movedOutsideHours,
+      });
+      return;
+    }
     void patchBookingMove(b, dateStr, newTime, pracId, { allowOutsideHours: movedOutsideHours });
   }
 
@@ -5073,6 +5139,135 @@ export function PractitionerCalendarView({
     [],
   );
 
+  /**
+   * A booking as the visit resolver sees it, with the service's catalogue buffer
+   * attached. Without the buffer the resolver cannot tell a gap a service is
+   * entitled to from dead time an edit left behind, and preserves both.
+   */
+  const visitRowFor = useCallback(
+    (b: Booking) => {
+      const sid = serviceIdForBooking(b);
+      const svc = sid ? serviceMapForBooking(b).get(sid) : null;
+      return { ...b, buffer_minutes: svc?.buffer_minutes ?? null };
+    },
+    [serviceMapForBooking],
+  );
+
+  /**
+   * The other rows of this booking's multi-service visit, or null when it stands
+   * alone. Returns null for a multi-PERSON party, which shares the same
+   * `group_booking_id` and must never be resized as one appointment.
+   */
+  const serviceVisitRowsFor = useCallback(
+    (booking: Booking): Booking[] | null => {
+      const gid = booking.group_booking_id?.trim();
+      if (!gid) return null;
+      const rows = bookings.filter(
+        (b) => b.group_booking_id?.trim() === gid && b.booking_date === booking.booking_date,
+      );
+      if (rows.length <= 1) return null;
+      return resolveAppointmentVisit(rows.map(visitRowFor)) ? rows : null;
+    },
+    [bookings, visitRowFor],
+  );
+
+  /**
+   * Bookings this window would land on, ignoring the visit's own rows.
+   *
+   * A single booking's resize passes `allow_manual_overlap` and permits an
+   * overlap in silence. A visit can grow by an hour in one drag, so staff are
+   * told when that happens. It stays allowed: deliberate double-booking is
+   * legitimate, it just should not be silent.
+   */
+  const collidingBookingCount = useCallback(
+    (params: {
+      startMin: number;
+      endMin: number;
+      columnId: string | null;
+      dateStr: string;
+      excludeIds: Set<string>;
+    }) => {
+      if (!params.columnId) return 0;
+      const { startMin, endMin, columnId, dateStr, excludeIds } = params;
+      return bookings.filter((b) => {
+        if (excludeIds.has(b.id)) return false;
+        if (b.booking_date !== dateStr) return false;
+        if (['Cancelled', 'No-Show'].includes(b.status)) return false;
+        if (resolveBookingColumnId(b, resourceParentById) !== columnId) return false;
+        const s = timeToMinutes(b.booking_time.slice(0, 5));
+        const e = s + bookingCalendarDisplaySpanMinutes(b, serviceMapForBooking(b));
+        return s < endMin && e > startMin;
+      }).length;
+    },
+    [bookings, resourceParentById, serviceMapForBooking],
+  );
+
+  /**
+   * Resize a whole multi-service visit to a new wall-clock end.
+   *
+   * The services are re-laid through the shared resolver, so growth extends the
+   * tail, shrinkage comes off the tail and then cascades backwards, and the gaps
+   * a service's own buffer or processing settings create are carried along
+   * untouched. Re-laying every row is also what stops a hole being left behind
+   * when a service changes length.
+   */
+  const patchVisitResize = useCallback(
+    async (rows: Booking[], newEndMin: number) => {
+      const visit = resolveAppointmentVisit(rows.map(visitRowFor));
+      if (!visit) return;
+      const prevRows = rows.map((r) => ({ ...r }));
+      const durations = distributeVisitDuration(
+        visit,
+        newEndMin - timeToMinutes(visit.startHm),
+      );
+      const laid = resequenceVisit(visit, durations);
+      const byId = new Map(laid.map((s) => [s.id, s]));
+
+      setBookings((all) =>
+        all.map((b) => {
+          const s = byId.get(b.id);
+          if (!s) return b;
+          return {
+            ...b,
+            booking_time: `${s.startHm}:00`,
+            booking_end_time: `${s.endHm}:00`,
+            estimated_end_time: estimatedEndIsoFromSchedule(b.booking_date, s.startHm, s.endHm),
+          };
+        }),
+      );
+
+      const results = await Promise.all(
+        laid.map(async (s) => {
+          try {
+            const res = await fetch(`/api/venue/bookings/${s.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                booking_time: `${s.startHm}:00`,
+                booking_end_time: `${s.endHm}:00`,
+                allow_manual_overlap: true,
+                allow_outside_hours: true,
+                skip_booking_modification_guest_notification: true,
+              }),
+            });
+            return res.ok;
+          } catch {
+            return false;
+          }
+        }),
+      );
+
+      if (results.some((ok) => !ok)) {
+        // Any row failing leaves the visit half-moved, so the whole thing goes
+        // back rather than being left in a shape nobody chose.
+        addToast('Could not update the visit duration', 'error');
+        setBookings((all) => all.map((b) => prevRows.find((p) => p.id === b.id) ?? b));
+      }
+      void refetchBookingsList();
+    },
+    [addToast, refetchBookingsList, visitRowFor],
+  );
+
   const beginAppointmentResize = useCallback(
     (booking: Booking) => {
       const eligible =
@@ -5080,14 +5275,25 @@ export function PractitionerCalendarView({
 
       /** The actual height-drag, run only after the press-and-hold gate arms (see {@link withResizeHold}). */
       const startDrag = (startY: number, target: HTMLElement, pointerId: number) => {
-        const startM = timeToMinutes(booking.booking_time.slice(0, 5));
-        const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
+        /**
+         * A multi-service visit resizes as ONE booking: the handle drags the
+         * whole visit's wall-clock end, not the last service's.
+         */
+        const visitRows = serviceVisitRowsFor(booking);
+        const visit = visitRows ? resolveAppointmentVisit(visitRows.map(visitRowFor)) : null;
+        const startM = timeToMinutes(
+          (visit ? visit.startHm : booking.booking_time.slice(0, 5)),
+        );
+        const dur0 = visit
+          ? visit.totalMinutes
+          : bookingDurationMinutes(booking, serviceMapForBooking(booking));
         const endM0 = startM + dur0;
         // The grid draws in 15 minute slots but a booking is not obliged to be one.
         // The engine has allowed 5 minutes since services were allowed to be that
         // short; flooring the drag at a slot was the only thing making a 10 minute
-        // appointment unresizable on the calendar.
-        const minEnd = startM + MIN_APPOINTMENT_CORE_DURATION_MINUTES;
+        // appointment unresizable on the calendar. A visit floors at every one of
+        // its services on that minimum, with its configured gaps still in place.
+        const minEnd = startM + (visit ? minimumVisitMinutes(visit) : MIN_APPOINTMENT_CORE_DURATION_MINUTES);
         // The booking may be extended past the grid's close (staff can run past
         // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
         // beyond `gridCloseMin` counts as outside opening hours.
@@ -5161,11 +5367,32 @@ export function PractitionerCalendarView({
           if (extendedOutsideHours) {
             addToast('Extended outside opening hours.', 'info');
           }
+          // Overlaps stay allowed (deliberate double-booking is legitimate) but
+          // are never silent: a visit can grow by an hour in a single drag.
+          const clash = collidingBookingCount({
+            startMin: startM,
+            endMin: committedEndMin,
+            columnId: resolveBookingColumnId(booking, resourceParentById),
+            dateStr: booking.booking_date,
+            excludeIds: new Set((visitRows ?? [booking]).map((r) => r.id)),
+          });
+          if (clash > 0) {
+            addToast(
+              clash === 1
+                ? 'This now overlaps another booking.'
+                : `This now overlaps ${clash} other bookings.`,
+              'info',
+            );
+          }
           justResizedBookingIdRef.current = booking.id;
           window.setTimeout(() => {
             if (justResizedBookingIdRef.current === booking.id) justResizedBookingIdRef.current = null;
           }, 220);
-          void patchBookingResize(booking, endStr, { allowOutsideHours: extendedOutsideHours });
+          if (visitRows) {
+            void patchVisitResize(visitRows, committedEndMin);
+          } else {
+            void patchBookingResize(booking, endStr, { allowOutsideHours: extendedOutsideHours });
+          }
         };
 
         window.addEventListener('pointermove', onMove, { passive: false });
@@ -5175,7 +5402,19 @@ export function PractitionerCalendarView({
 
       return withResizeHold({ kind: 'booking', id: booking.id, eligible, startDrag });
     },
-    [addToast, endHour, patchBookingResize, serviceMapForBooking, withResizeHold, slotHeightPx],
+    [
+      addToast,
+      collidingBookingCount,
+      endHour,
+      patchBookingResize,
+      patchVisitResize,
+      resourceParentById,
+      serviceMapForBooking,
+      serviceVisitRowsFor,
+      visitRowFor,
+      withResizeHold,
+      slotHeightPx,
+    ],
   );
 
   const beginBlockResize = useCallback(
@@ -7258,6 +7497,19 @@ export function PractitionerCalendarView({
                             };
                           }),
                         );
+                        /**
+                         * Both controls are live: the move cascades through
+                         * `patchVisitMove` and the resize through
+                         * `patchVisitResize`, so neither can leave a service
+                         * behind.
+                         */
+                        const visitResizable =
+                          !first.resource_id &&
+                          ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(first.status);
+                        const visitResizeArming =
+                          resizeArming?.kind === 'booking' && resizeArming.id === first.id;
+                        const visitMoveArming =
+                          moveArming?.kind === 'booking' && moveArming.id === first.id;
                         return (
                           <DraggableBookingShell
                             key={`${items.map((x) => `${x.id}:${x.status}:${x.client_arrived_at ?? ''}`).join('|')}`}
@@ -7267,9 +7519,9 @@ export function PractitionerCalendarView({
                             slotHeightPx={slotHeightPx}
                             laneIndex={layout.laneIndex}
                             laneCount={layout.laneCount}
-                            canDrag={false}
+                            canDrag={visitResizable}
                           >
-                            {() => (
+                            {(handle) => (
                               <div
                                 className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse' : ''
@@ -7282,6 +7534,54 @@ export function PractitionerCalendarView({
                                 {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >
                                 <CalendarBookingStatusStripe palette={clusterPalette} />
+                                {/*
+                                  The visit's move grip. This branch used to
+                                  discard the shell's drag handle, so a
+                                  multi-service booking had nothing to grab: no
+                                  grip, and `canDrag` off besides.
+                                */}
+                                {visitResizable && handle.listeners && handle.attributes ? (
+                                  <button
+                                    ref={handle.setActivatorNodeRef}
+                                    type="button"
+                                    data-no-calendar-pan="true"
+                                    className={`group/grip relative z-[2] flex shrink-0 cursor-grab [touch-action:pan-x_pan-y] items-center justify-center transition-colors duration-150 active:cursor-grabbing ${
+                                      visitMoveArming ? 'bg-black/[0.12]' : 'bg-black/0 hover:bg-black/[0.06]'
+                                    }`}
+                                    style={{
+                                      width: isOverlapLane
+                                        ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
+                                        : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                      minWidth: isOverlapLane
+                                        ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
+                                        : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
+                                    }}
+                                    aria-label="Press and hold, then drag to reschedule the whole visit"
+                                    {...handle.listeners}
+                                    {...handle.attributes}
+                                    onPointerDown={(e) => {
+                                      handle.listeners?.onPointerDown?.(e);
+                                      beginMoveHoldHint('booking', first.id)(e);
+                                    }}
+                                  >
+                                    {!isOverlapLane && (
+                                      <svg
+                                        viewBox="0 0 10 18"
+                                        className="h-3.5 w-2 opacity-50 transition-opacity duration-150 group-hover:opacity-90 group-hover/grip:opacity-100"
+                                        fill="currentColor"
+                                        aria-hidden
+                                      >
+                                        <circle cx="3" cy="4" r="1.1" />
+                                        <circle cx="7" cy="4" r="1.1" />
+                                        <circle cx="3" cy="9" r="1.1" />
+                                        <circle cx="7" cy="9" r="1.1" />
+                                        <circle cx="3" cy="14" r="1.1" />
+                                        <circle cx="7" cy="14" r="1.1" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                ) : null}
+                                {visitMoveArming ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
                                 <BookingGuestActionsRowMeasured className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                   {(shellRowWidthPx) => {
                                     const actionInset = computeBookingActionCornerInset(first, height);
@@ -7427,6 +7727,43 @@ export function PractitionerCalendarView({
                                         shellRowWidthPx={shellRowWidthPx}
                                         floating={false}
                                       />
+                                      {/*
+                                        A multi-service visit had no duration
+                                        control at all: this branch rendered no
+                                        handle and the shell was canDrag={false}.
+                                        The handle drags the whole visit's end,
+                                        and the resolver decides which service
+                                        absorbs it.
+                                      */}
+                                      {visitResizeArming ? <ResizeHoldHint label="Hold to adjust" /> : null}
+                                      {visitResizable ? (
+                                        <span
+                                          role="separator"
+                                          aria-orientation="horizontal"
+                                          aria-label="Press and hold, then drag to change the visit duration"
+                                          data-no-calendar-pan="true"
+                                          className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-2xl transition-colors duration-150 ${
+                                            visitResizeArming
+                                              ? 'bg-black/[0.12]'
+                                              : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
+                                          }`}
+                                          style={{
+                                            height: BOOKING_RESIZE_HANDLE_HEIGHT_PX,
+                                            right: actionInset.hasActions ? BOOKING_ACTIONS_CORNER_RIGHT_PX : 0,
+                                          }}
+                                          onPointerDown={beginAppointmentResize(first)}
+                                          onMouseDown={(e) => e.stopPropagation()}
+                                        >
+                                          <span
+                                            className={`h-[3px] w-7 rounded-full bg-current transition-opacity duration-150 ${
+                                              visitResizeArming
+                                                ? 'opacity-70'
+                                                : 'opacity-0 group-hover:opacity-25 group-hover/resize:opacity-50'
+                                            }`}
+                                            aria-hidden
+                                          />
+                                        </span>
+                                      ) : null}
                                     </>
                                     );
                                   }}

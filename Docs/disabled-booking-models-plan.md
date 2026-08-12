@@ -41,14 +41,20 @@ never in either table.
 3. **Settings** (`BookingTypesSection.tsx`). Guard the toggle server-side, not
    just in the UI, since the model flag is writable through the settings API.
 
-## Open questions
+## Decisions
 
-- **"Active future booking"**: presumably status not in (Cancelled, No-Show) and
-  starting after now. Confirm whether today's earlier bookings count.
-- **Blocking vs warning on the toggle**: the requirement says refuse. Should a
-  venue with only PAST bookings for a model be free to disable it (yes, on the
-  above definition) and should the refusal offer a link to the offending
-  bookings?
-- **Existing data**: venues that already disabled a model while holding future
-  bookings for it are in the state this guard would have prevented. Decide
-  whether to report on them before enforcing.
+- **"Active future booking"** = status not Cancelled, starting after now,
+  including later the same day. A class at 16:00 blocks disabling classes at
+  14:00; this morning's finished class does not.
+- **The guard is server-side.** The model flag is writable through the settings
+  API, so a check that lived only in `BookingTypesSection` would be bypassable
+  and would leave exactly the invisible-block state this work exists to remove.
+  The UI still needs the message, but the refusal belongs on the route.
+- **No migration or backfill.** Only test users have used models other than
+  appointments, so no venue is stranded by enforcing this.
+
+## Still to settle during implementation
+
+- The refusal message names the model and why. Worth including the count and
+  the next affected date, since "you have future bookings" without a date sends
+  staff hunting.

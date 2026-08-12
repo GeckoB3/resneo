@@ -7501,9 +7501,25 @@ export function PractitionerCalendarView({
 
                       {(() => {
                         const bookingClusters = clusterMultiServiceBookings(pracBookings);
+                        /**
+                         * A visit's resize is keyed on the service its handle sits on (the
+                         * first), but the minutes land on the LAST one, and a cluster's end
+                         * is measured from its last service. Growing the first left the lane
+                         * layout blind to a visit growing under the pointer, so overlapping
+                         * bars only re-flowed once the drag was released.
+                         */
+                        const resizeTailBookingId = (() => {
+                          if (!resizeVisual) return null;
+                          const cluster = bookingClusters.find(
+                            (c) => c.kind === 'group' && c.items[0]?.id === resizeVisual.bookingId,
+                          );
+                          return cluster && cluster.kind === 'group'
+                            ? cluster.items[cluster.items.length - 1]!.id
+                            : resizeVisual.bookingId;
+                        })();
                         const durationForLayout = (booking: Booking) => {
                           const baseDuration = getBookingDuration(booking);
-                          if (resizeVisual?.bookingId !== booking.id) return baseDuration;
+                          if (!resizeVisual || booking.id !== resizeTailBookingId) return baseDuration;
                           const resizeDeltaMins = (resizeVisual.deltaYPx / slotHeightPx) * SLOT_MINUTES;
                           return Math.max(MIN_APPOINTMENT_CORE_DURATION_MINUTES, baseDuration + resizeDeltaMins);
                         };
@@ -7833,6 +7849,42 @@ export function PractitionerCalendarView({
                           timeToMinutes(first.booking_time);
                         const top = slotTop(first.booking_time);
                         const height = slotHeightFromDuration(spanMins);
+                        /**
+                         * The live preview, which this branch simply did not read: the
+                         * handle set `resizeVisual` against the visit's first service and
+                         * nothing here used it, so a multi-service bar sat still under the
+                         * drag and only jumped once the save came back.
+                         *
+                         * The bar follows the pointer exactly as a single booking's does,
+                         * and the LAST service absorbs the change, because that is what
+                         * `distributeVisitDuration` will do when the drag is released. A
+                         * preview that stretched every service equally would be showing a
+                         * shape the save was never going to write.
+                         */
+                        const visitResizeExtra =
+                          resizeVisual?.bookingId === first.id ? resizeVisual.deltaYPx : 0;
+                        const visitBlockH = height + visitResizeExtra;
+                        const visitPreview = (() => {
+                          if (visitResizeExtra === 0) return null;
+                          const visit = resolveAppointmentVisit(items.map(visitRowFor));
+                          if (!visit) return null;
+                          const requested = Math.round(
+                            spanMins + (visitResizeExtra / slotHeightPx) * SLOT_MINUTES,
+                          );
+                          const durations = distributeVisitDuration(
+                            visit,
+                            Math.max(minimumVisitMinutes(visit), requested),
+                          );
+                          const gaps = visit.services.reduce(
+                            (sum, s) => sum + s.expectedGapAfterMinutes,
+                            0,
+                          );
+                          const serviceMinutes = [...durations.values()].reduce((a, b) => a + b, 0);
+                          return { durations, spanMins: serviceMinutes + gaps };
+                        })();
+                        const segmentSpanMins = visitPreview?.spanMins ?? spanMins;
+                        const segmentDurationOf = (b: Booking) =>
+                          visitPreview?.durations.get(b.id) ?? getBookingDuration(b);
                         const flash = items.some((x) => flashIds.has(x.id));
                         const qBusy = items.some((x) => quickActionId === x.id);
                         const isOverlapLane = layout.laneCount > 1;
@@ -7874,6 +7926,7 @@ export function PractitionerCalendarView({
                             top={top}
                             height={height}
                             slotHeightPx={slotHeightPx}
+                            heightExtraPx={visitResizeExtra}
                             laneIndex={layout.laneIndex}
                             laneCount={layout.laneCount}
                             canDrag={visitResizable}
@@ -7941,7 +7994,7 @@ export function PractitionerCalendarView({
                                 {visitMoveArming ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
                                 <BookingGuestActionsRowMeasured className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                   {(shellRowWidthPx) => {
-                                    const actionInset = computeBookingActionCornerInset(first, height);
+                                    const actionInset = computeBookingActionCornerInset(first, visitBlockH);
                                     return (
                                     <>
                                       <div
@@ -7961,10 +8014,11 @@ export function PractitionerCalendarView({
                                         }}
                                       >
                                         {items.map((b, segIdx) => {
-                                          const dur = getBookingDuration(b);
+                                          const dur = segmentDurationOf(b);
                                           const sid = serviceIdForBooking(b);
                                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
-                                          const segmentApproxPx = height * (dur / Math.max(spanMins, 1));
+                                          const segmentApproxPx =
+                                            visitBlockH * (dur / Math.max(segmentSpanMins, 1));
                                           /**
                                            * Only the bottom segment shares its box with the action
                                            * tray, so only it gives up height for it.
@@ -8102,6 +8156,15 @@ export function PractitionerCalendarView({
                                           onSkip={dismissPendingModificationGuestNotify}
                                           onUndo={() => void undoLastScheduleEdit()}
                                         />
+                                      ) : null}
+                                      {/* The same running end time a single booking shows under the drag. */}
+                                      {resizePreviewEnd?.bookingId === first.id ? (
+                                        <span
+                                          className="pointer-events-none absolute left-1/2 z-20 max-w-[calc(100%-0.5rem)] -translate-x-1/2 truncate rounded-md bg-slate-900 px-2 py-0.5 text-center text-[10px] font-bold tabular-nums text-white shadow-md"
+                                          style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
+                                        >
+                                          Until {resizePreviewEnd.endHm}
+                                        </span>
                                       ) : null}
                                       {visitResizeArming ? <ResizeHoldHint label="Hold to adjust" /> : null}
                                       {visitResizable ? (

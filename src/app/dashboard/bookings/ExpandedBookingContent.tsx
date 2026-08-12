@@ -1213,6 +1213,51 @@ export function ExpandedBookingContent({
     });
   }
 
+  /**
+   * A visit's header carries its total duration and the services it is made of, so the
+   * panel answers "how long is this and what is in it" without scrolling to the
+   * breakdown below. The duration is the wall-clock span, matching the single control
+   * the visit is edited by, not the sum of the services (those differ whenever a
+   * service's buffer or processing gap sits between two of them).
+   */
+  if (visitSpan) {
+    bookingMetaSegments.push({
+      key: 'visit-duration',
+      node: (
+        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+          <span className="font-medium text-slate-500">Duration</span>
+          <span className="font-semibold tabular-nums text-slate-800">
+            {formatDurationMinutesLabel(visitSpan.totalMinutes)}
+          </span>
+        </span>
+      ),
+    });
+  }
+
+  if (visitSpan && multiServiceVisitSegmentsForDisplay.length > 0) {
+    const visitServiceNames = multiServiceVisitSegmentsForDisplay.map(
+      (seg) =>
+        expandedBookingOfferingLine({
+          serviceName: seg.booking_item_name,
+          variantName: seg.service_variant_name,
+          addonLabels: seg.booking_addon_labels,
+        }) ?? 'Service',
+    );
+    bookingMetaSegments.push({
+      key: 'visit-services',
+      node: (
+        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+          <span className="font-medium text-slate-500">
+            {visitServiceNames.length === 1 ? 'Service' : 'Services'}
+          </span>
+          <span className="break-words font-semibold text-slate-800 [overflow-wrap:anywhere]">
+            {visitServiceNames.join(', ')}
+          </span>
+        </span>
+      ),
+    });
+  }
+
   bookingMetaSegments.push(
     {
       key: 'previous-visit',

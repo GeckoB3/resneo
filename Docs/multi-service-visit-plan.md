@@ -88,3 +88,44 @@ is needed (confirmed one-off, dev only).
 
 Sequence: 1, 2, 4 are the reported bug and are self-contained. 3's service
 editing is roughly as large as the rest combined and should land separately.
+
+## Status
+
+- **1 Shared resolver: DONE** (`8aebabde`).
+- **2 Detail panel: DONE.** Visit span in `cc9152a7`; total duration and the
+  service list in the header after it. Any segment opens the whole visit.
+- **4 Calendar: DONE.** Move and resize in `df0aa8c7`, the all-or-nothing move
+  guard in `281d1d8d`, and the notify follow-up pill in `a30006e8`.
+- **3 Modify form: NOT STARTED.** The only workstream left, plus 5, which it
+  needs.
+
+### Known bug to fix alongside 3
+
+Undo after a visit move restores only ONE service. `patchBookingMove` records
+`lastScheduleEditUndo` per row, so the loop in `patchVisitMove` leaves it holding
+whichever service moved last. Reachable from the toolbar Undo and from the pill.
+It wants a visit-level undo, which is the same shape as workstream 5's problem.
+
+### Where workstream 3 stands
+
+`StaffAppointmentModifyForm` (831 lines) is single-service throughout: one
+`serviceId`, one `durationMinutes`, one `variantId`, one PATCH to
+`/api/venue/bookings/{id}`. `StaffExpandedBookingModifyModal` hands it a single
+row, chosen by `inferModifyBranch`. Nothing in the form knows about
+`group_booking_id`.
+
+Worth splitting in two, since the first half stops the hole recurring on its own:
+
+- **3a. Open on the visit, one duration control.** Pass the visit's rows in
+  (`ExpandedBookingContent` already resolves them as `multiServiceVisitSegments`
+  and `visitSpan`). Replace per-service duration editing with a single wall-clock
+  control, and re-sequence through `resequenceVisit` / `distributeVisitDuration`,
+  which the calendar's `patchVisitResize` already uses.
+- **3b. Service list editing.** Add / remove / swap with per-service availability
+  revalidation and the price-snapshot rule on swap.
+
+Both need workstream 5 first. Sequential client PATCHes are what tore a visit in
+the calendar (fixed in `281d1d8d` by dry-running every service before moving any),
+and the same trap is waiting here: a duration change rewrites every row, so a
+failure part-way leaves a visit half re-sequenced. Build the visit-level endpoint,
+then 3a on top of it.

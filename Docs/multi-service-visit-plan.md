@@ -105,7 +105,14 @@ editing is roughly as large as the rest combined and should land separately.
   puts back the rows that already landed. **Nothing calls it yet**; the calendar
   still uses its own dry-run plus per-row PATCHes, which is safe because
   `281d1d8d` gave it the same all-or-nothing check.
-- **3 Modify form: NOT STARTED.** The only workstream left.
+- **3a Modify form, opened on the visit: DONE.** `StaffAppointmentModifyForm`
+  takes an optional `visit` (the rows, passed down from `ExpandedBookingContent`
+  through `StaffExpandedBookingModifyModal`) and then edits the VISIT: the
+  services are listed read-only with their planned times, the duration control is
+  the whole visit's wall-clock span, and the live check plus the save both go
+  through the visit endpoint. Per-service duration, service and variant editing
+  are not offered on a visit, which is what closes the hole for good.
+- **3b Service list editing: NOT STARTED.** The only workstream left.
 
 ### Using the visit endpoint from workstream 3
 
@@ -116,6 +123,11 @@ visit's wall-clock span, gaps included). It answers 409 with a message naming
 the service and the time it could not take, and leaves every row where it was.
 Passing no change is legitimate and re-lays the visit, which is what closes dead
 time an earlier per-service edit left behind.
+
+`dry_run: true` plans and checks without writing, and answers in the same shape
+the save does, so a form's live check and its save cannot disagree. The modify
+form also uses it on open, because the rows' own span is not the visit's span
+when an earlier edit left dead time in it.
 
 Two things worth knowing before wiring it up:
 

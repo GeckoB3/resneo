@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 
 // Stub the date/time picker (it fetches its own availability) but expose a
 // control that moves the start time, so the save path can be driven.
@@ -146,10 +146,12 @@ describe('StaffAppointmentModifyForm start-time follow-up', () => {
     const { onSaved, onClose } = renderForm();
     await waitFor(() => expect(screen.getByLabelText(/Duration \(minutes\)/i)).toBeInTheDocument());
 
-    // Change only the duration, leaving the start where it was.
+    // Change only the duration, leaving the start where it was. Through
+    // fireEvent so React sees it: assigning `.value` and dispatching by hand
+    // leaves the form's state on the original duration, and Save only looked
+    // enabled because `hasChanges` was comparing two keys that never matched.
     const duration = screen.getByLabelText(/Duration \(minutes\)/i) as HTMLInputElement;
-    duration.value = '90';
-    duration.dispatchEvent(new Event('input', { bubbles: true }));
+    fireEvent.change(duration, { target: { value: '90' } });
 
     const save = () => screen.getByRole('button', { name: /Save changes/i });
     await waitFor(() => expect(save()).toBeEnabled(), { timeout: 4000 });

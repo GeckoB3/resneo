@@ -2342,6 +2342,24 @@ export function ExpandedBookingContent({
           tableManagementEnabled={tableManagementEnabled}
           linkedAct={linkedAct}
           booking={booking}
+          /**
+           * A multi-service visit is modified as one booking: the clicked row is
+           * one service of it, and editing that row alone is what left a hole in
+           * the reported visit.
+           */
+          visit={
+            resolvedGroupBookingId && multiServiceVisitSegments.length > 1
+              ? {
+                  groupBookingId: resolvedGroupBookingId,
+                  segments: multiServiceVisitSegments.map((seg) => ({
+                    id: seg.id,
+                    booking_time: seg.booking_time,
+                    booking_end_time: seg.booking_end_time,
+                    booking_item_name: seg.booking_item_name,
+                  })),
+                }
+              : null
+          }
           detail={
             activeDetail
               ? {

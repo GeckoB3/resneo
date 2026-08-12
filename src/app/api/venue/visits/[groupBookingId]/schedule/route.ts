@@ -51,6 +51,13 @@ const bodySchema = z
       .optional(),
     allow_manual_overlap: z.boolean().optional(),
     allow_outside_hours: z.boolean().optional(),
+    /**
+     * Plan and check the whole visit, write nothing. The modify form's live
+     * check and its save then judge the same request through the same code,
+     * rather than the form validating each service on its own and hoping the
+     * write agrees.
+     */
+    dry_run: z.boolean().optional(),
     /** The caller will fire the guest notification itself (calendar's undo window). */
     defer_modification_guest_notification: z.boolean().optional(),
     skip_booking_modification_guest_notification: z.boolean().optional(),
@@ -273,23 +280,34 @@ export async function PATCH(
     const dateChanged = newDate !== currentDate;
     const visitStartChanged = dateChanged || plan.startHm !== plan.visit.startHm;
 
-    if (!plan.changed && !dateChanged && !calendarChanged) {
-      return NextResponse.json({
-        ok: true,
-        group_booking_id: groupBookingId,
+    /**
+     * One shape for every answer, so a dry run tells the form exactly what the
+     * save would do: the same per-service times, the same total, the same
+     * `changed`.
+     */
+    const describePlan = (changed: boolean) => ({
+      ok: true as const,
+      group_booking_id: groupBookingId,
+      booking_date: newDate,
+      start_time: plan.startHm,
+      end_time: plan.endHm,
+      total_minutes: plan.totalMinutes,
+      calendar_id: targetCalendarId,
+      changed,
+      dry_run: body.dry_run === true,
+      services: plan.services.map((s) => ({
+        id: s.id,
+        name: plan.visit.services.find((v) => v.id === s.id)?.name ?? null,
         booking_date: newDate,
-        start_time: plan.startHm,
-        end_time: plan.endHm,
-        total_minutes: plan.totalMinutes,
-        changed: false,
-        services: plan.services.map((s) => ({
-          id: s.id,
-          booking_date: newDate,
-          booking_time: `${s.startHm}:00`,
-          booking_end_time: `${s.endHm}:00`,
-          duration_minutes: s.durationMinutes,
-        })),
-      });
+        booking_time: `${s.startHm}:00`,
+        booking_end_time: `${s.endHm}:00`,
+        duration_minutes: s.durationMinutes,
+        moved: s.changed,
+      })),
+    });
+
+    if (!plan.changed && !dateChanged && !calendarChanged) {
+      return NextResponse.json(describePlan(false));
     }
 
     /**
@@ -377,6 +395,10 @@ export async function PATCH(
           );
         }
       }
+    }
+
+    if (body.dry_run === true) {
+      return NextResponse.json(describePlan(true));
     }
 
     /**
@@ -576,23 +598,7 @@ export async function PATCH(
       }
     }
 
-    return NextResponse.json({
-      ok: true,
-      group_booking_id: groupBookingId,
-      booking_date: newDate,
-      start_time: plan.startHm,
-      end_time: plan.endHm,
-      total_minutes: plan.totalMinutes,
-      changed: true,
-      calendar_id: targetCalendarId,
-      services: plan.services.map((s) => ({
-        id: s.id,
-        booking_date: newDate,
-        booking_time: `${s.startHm}:00`,
-        booking_end_time: `${s.endHm}:00`,
-        duration_minutes: s.durationMinutes,
-      })),
-    });
+    return NextResponse.json(describePlan(true));
   } catch (err) {
     console.error('PATCH /api/venue/visits/[groupBookingId]/schedule failed:', err);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

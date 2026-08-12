@@ -4126,6 +4126,55 @@ export function PractitionerCalendarView({
       newTime.slice(0, 5),
     );
     const byId = new Map(rows.map((r) => [r.id, r]));
+
+    /**
+     * Ask the server about every service BEFORE moving any of them.
+     *
+     * Each row was previously moved in turn and validated on its own, so a visit
+     * whose middle service landed on a block moved the services that fitted and
+     * left the rest behind: a 10:00 to 12:15 visit ended up running 10:11 to
+     * 18:16, torn in two. A visit is one booking, so it moves whole or not at
+     * all.
+     */
+    const dryRun = await Promise.all(
+      laid.map(async (sv) => {
+        const row = byId.get(sv.id);
+        if (!row) return { sv, ok: true, error: null as string | null };
+        try {
+          const res = await fetch(
+            `/api/venue/bookings/${sv.id}/validate-appointment-modification`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                booking_date: newDate,
+                booking_time: `${sv.startHm}:00`,
+                practitioner_id: resolveLinkedGridPractitionerIdForPatch(newPracId),
+                booking_end_time: `${sv.endHm}:00`,
+                allow_manual_overlap: true,
+              }),
+            },
+          );
+          const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string };
+          if (res.ok && j.ok !== false) return { sv, ok: true, error: null };
+          return { sv, ok: false, error: j.reason ?? j.error ?? 'Not available' };
+        } catch {
+          return { sv, ok: false, error: 'Could not check availability' };
+        }
+      }),
+    );
+
+    const blocked = dryRun.find((d) => !d.ok);
+    if (blocked) {
+      const name = visit.services.find((sv) => sv.id === blocked.sv.id)?.name ?? 'A service';
+      addToast(
+        `${name} cannot move to ${blocked.sv.startHm}: ${blocked.error}. The visit was not moved.`,
+        'error',
+      );
+      void refetchBookingsList();
+      return;
+    }
+
     beginScheduleEditFollowUp(rows[0]!.id);
     for (const sv of laid) {
       const row = byId.get(sv.id);

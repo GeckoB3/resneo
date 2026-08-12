@@ -811,7 +811,7 @@ export function validateExactAppointmentStart(
   return { ok: true };
 }
 
-const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
+export const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
 /**
  * Shortest bookable appointment, in minutes.
  *

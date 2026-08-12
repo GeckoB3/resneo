@@ -20,6 +20,8 @@ import {
   fetchAppointmentInput,
   validateAppointmentCustomInterval,
   type PhantomBooking,
+  MAX_APPOINTMENT_CORE_DURATION_MINUTES,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
 import {
   buildAnyAvailableAvailabilityPayload,
@@ -600,7 +602,9 @@ async function handleAppointmentAvailability(
   }
 
   const customDurationMinutes = durationParam ? parseInt(durationParam, 10) : null;
-  if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) || customDurationMinutes < 15 || customDurationMinutes > 14 * 60)) {
+  if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) ||
+      customDurationMinutes < MIN_APPOINTMENT_CORE_DURATION_MINUTES ||
+      customDurationMinutes > MAX_APPOINTMENT_CORE_DURATION_MINUTES)) {
     return NextResponse.json({ error: 'Invalid duration_minutes' }, { status: 400 });
   }
 

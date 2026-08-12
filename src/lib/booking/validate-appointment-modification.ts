@@ -4,6 +4,7 @@ import {
   attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
   getOfferedAppointmentServicesForPractitioner,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
   validateAppointmentCustomInterval,
 } from '@/lib/availability/appointment-engine';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
@@ -12,6 +13,8 @@ import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 
 /** Matches `validateAppointmentCustomInterval` cap in appointment-engine. */
 export const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
+/** Re-exported so callers see one floor, not three that drifted apart. */
+export { MIN_APPOINTMENT_CORE_DURATION_MINUTES };
 
 export function minutesBetweenStartAndEndHM(startHHmm: string, endHHmm: string): number {
   const startMin = timeToMinutes(startHHmm);
@@ -35,10 +38,16 @@ export function resolveAppointmentModifyEndCoreHHmm(params: {
   const { startHHmm, durationMinutes, bookingEndTime, defaultDurationMinutes } = params;
   const startMin = timeToMinutes(startHHmm);
   if (typeof durationMinutes === 'number' && Number.isInteger(durationMinutes)) {
-    if (durationMinutes < 15 || durationMinutes > MAX_APPOINTMENT_CORE_DURATION_MINUTES) {
+    // Was a hard-coded 15 while the engine, the API schemas and the calendar drag
+    // all allowed 5, so a 10 minute appointment could be created and dragged but
+    // not saved from the modify form.
+    if (
+      durationMinutes < MIN_APPOINTMENT_CORE_DURATION_MINUTES ||
+      durationMinutes > MAX_APPOINTMENT_CORE_DURATION_MINUTES
+    ) {
       return {
         ok: false,
-        reason: `duration_minutes must be an integer between 15 and ${MAX_APPOINTMENT_CORE_DURATION_MINUTES}`,
+        reason: `duration_minutes must be an integer between ${MIN_APPOINTMENT_CORE_DURATION_MINUTES} and ${MAX_APPOINTMENT_CORE_DURATION_MINUTES}`,
       };
     }
     return { ok: true, endCoreHHmm: minutesToTime(startMin + durationMinutes) };

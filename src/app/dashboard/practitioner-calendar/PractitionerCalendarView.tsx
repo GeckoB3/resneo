@@ -94,6 +94,7 @@ import {
   RESOURCE_BOOKING_CAPACITY_STATUSES,
   type ResourceBooking as EngineResourceBooking,
 } from '@/lib/availability/resource-booking-engine';
+import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appointment-engine';
 import {
   computeResourceAvailabilityMintSlots,
   type ResourceAvailabilityMintSlot,
@@ -543,6 +544,13 @@ const MIN_SLOT_PX = 16;
 const COMPACT_DRAG_DEADZONE_PX = 6;
 const SLOT_MINUTES = 15;
 /**
+ * Shortest a booking bar may be drawn, whatever its duration.
+ *
+ * Set by the one thing a bar must always carry: a quick-action button, plus a
+ * pixel of clearance top and bottom. Real durations are drawn to scale above it.
+ */
+const BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX = BOOKING_CORNER_BUTTON_FLOOR_HEIGHT_PX + 2;
+/**
  * Height a booking bar spends on things OTHER than the info card, so the card is
  * given an honest budget to lay itself out in.
  *
@@ -729,13 +737,13 @@ function minutesBetweenBookingStartAndEstimatedEnd(b: Booking): number | null {
 function bookingDurationMinutes(b: Booking, serviceMap: Map<string, AppointmentService>): number {
   if (b.booking_end_time) {
     return Math.max(
-      SLOT_MINUTES,
+      MIN_APPOINTMENT_CORE_DURATION_MINUTES,
       minutesAfterStart(b.booking_time, b.booking_end_time),
     );
   }
   const fromEstimated = minutesBetweenBookingStartAndEstimatedEnd(b);
   if (fromEstimated != null) {
-    return Math.max(SLOT_MINUTES, fromEstimated);
+    return Math.max(MIN_APPOINTMENT_CORE_DURATION_MINUTES, fromEstimated);
   }
   const sid = serviceIdForBooking(b);
   if (sid) {
@@ -751,7 +759,7 @@ function bookingCalendarDisplaySpanMinutes(
 ): number {
   if (b.booking_end_time) {
     return Math.max(
-      SLOT_MINUTES,
+      MIN_APPOINTMENT_CORE_DURATION_MINUTES,
       minutesAfterStart(b.booking_time, b.booking_end_time),
     );
   }
@@ -761,7 +769,7 @@ function bookingCalendarDisplaySpanMinutes(
   const sid = serviceIdForBooking(b);
   const core = sid ? serviceMap.get(sid)?.duration_minutes ?? 30 : 30;
   const buf = sid ? serviceMap.get(sid)?.buffer_minutes ?? 0 : 0;
-  return Math.max(SLOT_MINUTES, customerOccupyMinutes(core, buf));
+  return Math.max(MIN_APPOINTMENT_CORE_DURATION_MINUTES, customerOccupyMinutes(core, buf));
 }
 
 function bookingCoreDurationForProcessing(
@@ -1802,7 +1810,15 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
     disabled: !canDrag,
     data: { booking },
   });
-  const totalHeight = Math.max(slotHeightPx, height + heightExtraPx);
+  /**
+   * The last place a bar's height was rounded up to a whole grid slot.
+   *
+   * `slotHeightFromDuration` draws to scale and the drag handle clamps to the
+   * engine's 5 minute minimum, but this clamp sat above both and quietly restored
+   * a full slot: dragging a booking shorter moved the time label and left the bar
+   * exactly the same size, and a saved 5 minute appointment still painted 15.
+   */
+  const totalHeight = Math.max(BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX, height + heightExtraPx);
   const widthPct = 100 / Math.max(1, laneCount);
   const style = {
     top,
@@ -3827,8 +3843,20 @@ export function PractitionerCalendarView({
   }
 
   function slotHeightFromDuration(durationMins: number): number {
-    /** At least one grid row so label + actions + optional resize strip do not overlap. */
-    return Math.max((durationMins / SLOT_MINUTES) * slotHeightPx, slotHeightPx);
+    /**
+     * Bars are drawn to scale, including below one grid slot.
+     *
+     * This used to floor at a whole slot, so a 5 or 10 minute appointment was
+     * drawn the same size as a 15 minute one: the drag handle would let you take
+     * a booking down to 5 minutes and the bar would not move. The floor existed
+     * because the card's chrome used to need a slot's worth of room, which it no
+     * longer does now that the tray and the card's padding both collapse on short
+     * bars. A minimum of a couple of pixels keeps a bar clickable at any zoom.
+     */
+    return Math.max(
+      (durationMins / SLOT_MINUTES) * slotHeightPx,
+      BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX,
+    );
   }
 
   function clearTimeRangeOverridesForDayChange() {
@@ -5046,7 +5074,11 @@ export function PractitionerCalendarView({
         const startM = timeToMinutes(booking.booking_time.slice(0, 5));
         const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
         const endM0 = startM + dur0;
-        const minEnd = startM + SLOT_MINUTES;
+        // The grid draws in 15 minute slots but a booking is not obliged to be one.
+        // The engine has allowed 5 minutes since services were allowed to be that
+        // short; flooring the drag at a slot was the only thing making a 10 minute
+        // appointment unresizable on the calendar.
+        const minEnd = startM + MIN_APPOINTMENT_CORE_DURATION_MINUTES;
         // The booking may be extended past the grid's close (staff can run past
         // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
         // beyond `gridCloseMin` counts as outside opening hours.
@@ -5145,7 +5177,11 @@ export function PractitionerCalendarView({
       const startDrag = (startY: number, target: HTMLElement, pointerId: number) => {
         const startM = timeToMinutes(block.start_time.slice(0, 5));
         const endM0 = startM + blockDurationMinutes(block);
-        const minEnd = startM + SLOT_MINUTES;
+        // The grid draws in 15 minute slots but a booking is not obliged to be one.
+        // The engine has allowed 5 minutes since services were allowed to be that
+        // short; flooring the drag at a slot was the only thing making a 10 minute
+        // appointment unresizable on the calendar.
+        const minEnd = startM + MIN_APPOINTMENT_CORE_DURATION_MINUTES;
         const gridEndMax = endHour * 60;
 
         setBlockResizeVisual({ blockId: block.id, deltaYPx: 0 });
@@ -6823,7 +6859,7 @@ export function PractitionerCalendarView({
                           const baseDuration = getBookingDuration(booking);
                           if (resizeVisual?.bookingId !== booking.id) return baseDuration;
                           const resizeDeltaMins = (resizeVisual.deltaYPx / slotHeightPx) * SLOT_MINUTES;
-                          return Math.max(SLOT_MINUTES, baseDuration + resizeDeltaMins);
+                          return Math.max(MIN_APPOINTMENT_CORE_DURATION_MINUTES, baseDuration + resizeDeltaMins);
                         };
                         const clusterLayouts = computeBookingClusterLayouts(bookingClusters, durationForLayout);
                         return bookingClusters.map((cluster) => {

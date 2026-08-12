@@ -8,7 +8,10 @@ import {
   type BookingScheduleChangeSummary,
 } from '@/components/booking/BookingModifyNotifyFollowUp';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
-import { MAX_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/booking/validate-appointment-modification';
+import {
+  MAX_APPOINTMENT_CORE_DURATION_MINUTES,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
+} from '@/lib/booking/validate-appointment-modification';
 import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
 import {
   effectiveProcessingBlocksForTemplate,
@@ -429,7 +432,7 @@ export function StaffAppointmentModifyForm({
       (v) => v.is_active && v.id === variantId,
     );
     const adopted = activeVariant?.duration_minutes ?? selectedService.duration_minutes;
-    if (!Number.isFinite(adopted) || adopted < 15) return;
+    if (!Number.isFinite(adopted) || adopted < MIN_APPOINTMENT_CORE_DURATION_MINUTES) return;
     setDurationMinutes(adopted);
     setBaselineDuration(adopted);
   }, [durationMinutes, selectedService, variantId]);
@@ -518,11 +521,17 @@ export function StaffAppointmentModifyForm({
     if (durationMinutes != null) set.add(durationMinutes);
     if (selectedService) set.add(selectedService.duration_minutes);
     if (baselineDuration != null) set.add(baselineDuration);
+    // Short presets first so a 5 or 10 minute appointment is a click, not typing.
+    for (const m of [5, 10]) set.add(m);
     for (let m = 15; m <= Math.min(180, MAX_APPOINTMENT_CORE_DURATION_MINUTES); m += 15) {
       set.add(m);
     }
     return Array.from(set)
-      .filter((m) => m >= 15 && m <= MAX_APPOINTMENT_CORE_DURATION_MINUTES)
+      .filter(
+        (m) =>
+          m >= MIN_APPOINTMENT_CORE_DURATION_MINUTES &&
+          m <= MAX_APPOINTMENT_CORE_DURATION_MINUTES,
+      )
       .sort((a, b) => a - b);
   }, [baselineDuration, durationMinutes, selectedService]);
 
@@ -801,7 +810,7 @@ export function StaffAppointmentModifyForm({
           Duration (minutes)
           <input
             type="number"
-            min={15}
+            min={MIN_APPOINTMENT_CORE_DURATION_MINUTES}
             max={MAX_APPOINTMENT_CORE_DURATION_MINUTES}
             step={5}
             value={durationMinutes ?? ''}

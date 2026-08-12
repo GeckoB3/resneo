@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_APPOINTMENT_CORE_DURATION_MINUTES,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
   minutesBetweenStartAndEndHM,
   resolveAppointmentModifyEndCoreHHmm,
 } from '@/lib/booking/validate-appointment-modification';
@@ -28,14 +29,30 @@ describe('resolveAppointmentModifyEndCoreHHmm', () => {
     if (r.ok) expect(r.endCoreHHmm).toBe('10:30');
   });
 
-  it('rejects duration under 15 minutes', () => {
+  it('rejects duration under the shared minimum', () => {
+    const r = resolveAppointmentModifyEndCoreHHmm({
+      startHHmm: '10:00',
+      durationMinutes: MIN_APPOINTMENT_CORE_DURATION_MINUTES - 1,
+      bookingEndTime: null,
+      defaultDurationMinutes: 30,
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  /**
+   * This floor was a hard-coded 15 while the engine, the API schemas and the
+   * calendar drag all allowed 5, so a short appointment could be created and
+   * dragged but not saved from the modify form.
+   */
+  it('accepts a 10 minute appointment', () => {
     const r = resolveAppointmentModifyEndCoreHHmm({
       startHHmm: '10:00',
       durationMinutes: 10,
       bookingEndTime: null,
       defaultDurationMinutes: 30,
     });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.endCoreHHmm).toBe('10:10');
   });
 
   it('rejects duration above max', () => {

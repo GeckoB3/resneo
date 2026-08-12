@@ -82,7 +82,9 @@ function parseYieldPayload(raw: unknown): BlockYieldOverridesPayload {
   if (typeof o.buffer_minutes === 'number' && o.buffer_minutes >= 0 && o.buffer_minutes <= 120) {
     out.buffer_minutes = Math.floor(o.buffer_minutes);
   }
-  if (typeof o.duration_minutes === 'number' && o.duration_minutes >= 15 && o.duration_minutes <= 300) {
+  // Silently DROPPED a shorter duration rather than rejecting it, so a 5 or 10
+  // minute override fell back to the service default with no error anywhere.
+  if (typeof o.duration_minutes === 'number' && o.duration_minutes >= 5 && o.duration_minutes <= 300) {
     out.duration_minutes = Math.floor(o.duration_minutes);
   }
   return out;

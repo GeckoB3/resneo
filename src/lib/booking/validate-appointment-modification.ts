@@ -80,6 +80,19 @@ export interface ValidateAppointmentModificationIntervalParams {
   allowManualOverlap?: boolean;
   /** Staff move/resize past opening hours — skips the working/opening-hours gates. */
   allowOutsideHours?: boolean;
+  /**
+   * Other bookings that are moving in the same edit, and so must not be treated
+   * as occupying their old slots.
+   *
+   * A multi-service visit is N rows moving together. Checking service 2 at its
+   * new slot while services 1 and 3 still sit at their old ones reports the
+   * visit as conflicting with itself, which previously left only one way to
+   * validate a visit move at all: `allowManualOverlap`, which switches the
+   * overlap gate off entirely and hides real clashes with other guests.
+   *
+   * The booking being validated is always excluded; these are excluded with it.
+   */
+  excludeBookingIds?: readonly string[];
 }
 
 /**
@@ -104,9 +117,11 @@ export async function validateAppointmentModificationInterval(
     processingTimeBlocksOverride,
     allowManualOverlap,
     allowOutsideHours,
+    excludeBookingIds,
   } = params;
 
   const idLc = bookingId.toLowerCase();
+  const excluded = new Set<string>([idLc, ...(excludeBookingIds ?? []).map((v) => v.toLowerCase())]);
 
   const apptInput = await fetchAppointmentInput({
     supabase: admin,
@@ -115,7 +130,9 @@ export async function validateAppointmentModificationInterval(
     practitionerId: practId,
     serviceId: svcId,
   });
-  apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id.toLowerCase() !== idLc);
+  apptInput.existingBookings = apptInput.existingBookings.filter(
+    (b) => !excluded.has(b.id.toLowerCase()),
+  );
   apptInput.skipPastSlotFilter = true;
 
   const variantIdToUse =

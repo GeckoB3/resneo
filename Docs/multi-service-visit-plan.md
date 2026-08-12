@@ -1,6 +1,7 @@
 # Multi-service visits: one booking, not N rows
 
-Status: agreed, not yet implemented. Branch: `staging`.
+Status: workstreams 1, 2, 4 and 5 built; 3 (modify form) is what is left. See the
+Status section at the bottom for where each one stands. Branch: `staging`.
 
 ## The problem
 
@@ -95,16 +96,54 @@ editing is roughly as large as the rest combined and should land separately.
 - **2 Detail panel: DONE.** Visit span in `cc9152a7`; total duration and the
   service list in the header after it. Any segment opens the whole visit.
 - **4 Calendar: DONE.** Move and resize in `df0aa8c7`, the all-or-nothing move
-  guard in `281d1d8d`, and the notify follow-up pill in `a30006e8`.
-- **3 Modify form: NOT STARTED.** The only workstream left, plus 5, which it
-  needs.
+  guard in `281d1d8d`, and the notify follow-up pill in `a30006e8`. Undo restores
+  the whole visit rather than the last service written (see below).
+- **5 Cascade writes: DONE.** `PATCH /api/venue/visits/[groupBookingId]/schedule`
+  moves a visit, changes its wall-clock span, or both, as one write: every
+  service is planned (`src/lib/booking/visit-schedule-plan.ts`), then checked
+  against the availability engine, then written, and a write that fails part-way
+  puts back the rows that already landed. **Nothing calls it yet**; the calendar
+  still uses its own dry-run plus per-row PATCHes, which is safe because
+  `281d1d8d` gave it the same all-or-nothing check.
+- **3 Modify form: NOT STARTED.** The only workstream left.
 
-### Known bug to fix alongside 3
+### Using the visit endpoint from workstream 3
 
-Undo after a visit move restores only ONE service. `patchBookingMove` records
-`lastScheduleEditUndo` per row, so the loop in `patchVisitMove` leaves it holding
-whichever service moved last. Reachable from the toolbar Undo and from the pill.
-It wants a visit-level undo, which is the same shape as workstream 5's problem.
+`PATCH /api/venue/visits/[groupBookingId]/schedule` takes any of
+`booking_date`, `booking_time` (the visit's start; the rest follow),
+`practitioner_id` (target calendar) and `total_duration_minutes` (the whole
+visit's wall-clock span, gaps included). It answers 409 with a message naming
+the service and the time it could not take, and leaves every row where it was.
+Passing no change is legitimate and re-lays the visit, which is what closes dead
+time an earlier per-service edit left behind.
+
+Two things worth knowing before wiring it up:
+
+- It does **not** switch off the overlap gate. The calendar's drag sends
+  `allow_manual_overlap: true` and so never sees a clash with another guest; the
+  endpoint defaults to refusing one, and takes the same flag to override. The
+  visit's own rows are always excluded from the check, so a service is never
+  reported as conflicting with the sibling it is about to follow
+  (`excludeBookingIds` on `validateAppointmentModificationInterval`).
+- It notifies the guest once, against the visit's first service, and takes the
+  same `defer_` / `skip_booking_modification_guest_notification` flags the
+  per-booking PATCH does.
+
+Service list editing (3b) is not in it: this endpoint writes a schedule, not a
+visit's contents.
+
+### Fixed: undo after a visit move
+
+Undo restored only ONE service, because `patchBookingMove` recorded
+`lastScheduleEditUndo` per row and the loop in `patchVisitMove` left it holding
+whichever service moved last. It now records one visit-level entry holding every
+row's exact old slot, and undo checks all of them before writing any, the same
+all-or-nothing rule as the move. Reachable from the toolbar Undo and from the
+pill; both verified against the reference visit.
+
+Still open next door: `patchVisitResize` records no undo at all, so a visit
+resize shows no pill and leaves the toolbar Undo armed on whatever edit came
+before it.
 
 ### Where workstream 3 stands
 
@@ -124,8 +163,9 @@ Worth splitting in two, since the first half stops the hole recurring on its own
 - **3b. Service list editing.** Add / remove / swap with per-service availability
   revalidation and the price-snapshot rule on swap.
 
-Both need workstream 5 first. Sequential client PATCHes are what tore a visit in
-the calendar (fixed in `281d1d8d` by dry-running every service before moving any),
-and the same trap is waiting here: a duration change rewrites every row, so a
-failure part-way leaves a visit half re-sequenced. Build the visit-level endpoint,
-then 3a on top of it.
+Both need workstream 5, which is now built. Sequential client PATCHes are what
+tore a visit in the calendar (fixed in `281d1d8d` by dry-running every service
+before moving any), and the same trap was waiting here: a duration change
+rewrites every row, so a failure part-way leaves a visit half re-sequenced. 3a
+sends one wall-clock duration to the visit endpoint rather than re-laying the
+rows itself.

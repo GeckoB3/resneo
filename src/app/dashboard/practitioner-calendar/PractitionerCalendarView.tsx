@@ -4284,8 +4284,17 @@ export function PractitionerCalendarView({
           ),
         );
       }
-      beginScheduleEditFollowUp(booking.id);
-
+      /**
+       * No notify / skip / undo pill, and no guest notification.
+       *
+       * A resize changes the DURATION, not when the guest is due. The staff
+       * Modify form has always treated a duration-only edit that way, and the
+       * calendar armed the pill for it purely because it shares this code path
+       * with the drag-to-move: changing a booking from 30 to 45 minutes offered
+       * to tell the guest their appointment had moved, and told them so on its
+       * own after a minute if nobody dismissed it. The move path (above) still
+       * arms it, and the toolbar's Undo still covers a resize.
+       */
       const savePromise = (async (): Promise<'ok' | 'failed'> => {
         try {
           const res = await fetch(`/api/venue/bookings/${booking.id}`, {
@@ -4296,7 +4305,7 @@ export function PractitionerCalendarView({
               ...(resizeBlocks ? { processing_time_blocks: resizeBlocks } : {}),
               allow_manual_overlap: true,
               allow_outside_hours: opts?.allowOutsideHours === true,
-              defer_modification_guest_notification: true,
+              skip_booking_modification_guest_notification: true,
             }),
           });
           if (!res.ok) {

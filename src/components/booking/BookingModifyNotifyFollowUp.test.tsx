@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { BookingModifyNotifyFollowUp } from './BookingModifyNotifyFollowUp';
 
 const fetchMock = vi.fn();
@@ -34,10 +35,15 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
+afterEach(async () => {
+  // Real timers first: the flush below waits on a real macrotask, and a test
+  // that installed fake timers would never resolve it.
   vi.useRealTimers();
+  cleanup();
+  // The dismissal send is scheduled, not inline, so let it land here rather
+  // than in the next test's mock.
+  await new Promise((r) => setTimeout(r, 0));
+  vi.unstubAllGlobals();
 });
 
 describe('BookingModifyNotifyFollowUp', () => {
@@ -103,11 +109,73 @@ describe('BookingModifyNotifyFollowUp', () => {
     });
   });
 
-  it('dismissing without choosing fires the notification on unmount', () => {
+  it('dismissing without choosing fires the notification on unmount', async () => {
     const { unmount } = renderFollowUp();
     unmount();
+    await new Promise((r) => setTimeout(r, 0));
     expect(fetchMock).toHaveBeenCalledWith('/api/venue/bookings/b1/guest-modification-notify', {
       method: 'POST',
     });
+  });
+});
+
+/**
+ * React StrictMode mounts, tears down and immediately remounts every component
+ * once in development, preserving refs across that remount. The dismissal
+ * fallback used to fire inline on teardown and mark the panel settled, so by the
+ * time staff saw it every button was a no-op and the guest had already been
+ * notified. Only the modal's own close button still did anything, which is
+ * exactly how it was reported.
+ */
+describe('survives a StrictMode double mount', () => {
+  function renderStrict(over: Partial<Parameters<typeof BookingModifyNotifyFollowUp>[0]> = {}) {
+    return render(
+      <StrictMode>
+        <BookingModifyNotifyFollowUp
+          bookingId="b1"
+          change={CHANGE}
+          onUndo={over.onUndo ?? vi.fn(async () => true)}
+          onClose={over.onClose ?? vi.fn()}
+          deferMs={over.deferMs ?? 60_000}
+        />
+      </StrictMode>,
+    );
+  }
+
+  it('does not notify the guest just for mounting', async () => {
+    renderStrict();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('Skip notify still closes the panel', async () => {
+    const onClose = vi.fn();
+    renderStrict({ onClose });
+    await new Promise((r) => setTimeout(r, 10));
+    screen.getByRole('button', { name: 'Skip notify' }).click();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('Undo change still runs the revert', async () => {
+    const onUndo = vi.fn(async () => true);
+    const onClose = vi.fn();
+    renderStrict({ onUndo, onClose });
+    await new Promise((r) => setTimeout(r, 10));
+    screen.getByRole('button', { name: 'Undo change' }).click();
+    await waitFor(() => expect(onUndo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('Notify now still sends and shows the result', async () => {
+    renderStrict();
+    await new Promise((r) => setTimeout(r, 10));
+    screen.getByRole('button', { name: 'Notify now' }).click();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/venue/bookings/b1/guest-modification-notify', {
+        method: 'POST',
+      }),
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument());
   });
 });

@@ -18,6 +18,10 @@ const SERVICE = {
   duration_minutes: 60,
   variants: [] as Array<{ id: string; name: string; is_active: boolean; duration_minutes: number }>,
 };
+const SERVICE_2 = { id: 's2', name: 'Olaplex Treatment', duration_minutes: 30, variants: [] };
+const SERVICE_3 = { id: 's3', name: 'Toner / Gloss', duration_minutes: 45, variants: [] };
+const SERVICE_4 = { id: 's4', name: 'Beard Trim', duration_minutes: 15, variants: [] };
+const CATALOGUE = [SERVICE, SERVICE_2, SERVICE_3, SERVICE_4];
 
 /**
  * The reported booking, as its rows stand: a 15 minute hole between Olaplex and
@@ -30,10 +34,13 @@ const SEGMENTS = [
 ];
 
 const VISIT_URL = '/api/venue/visits/g1/schedule';
+const VISIT_SERVICES_URL = '/api/venue/visits/g1/services';
 
 const fetchMock = vi.fn();
 /** Every visit-endpoint request the form made, in order. */
 let visitCalls: Array<Record<string, unknown>> = [];
+/** Requests to the SERVICES endpoint specifically. */
+let visitServiceCalls: Array<Record<string, unknown>> = [];
 
 /** The layout the server would lay out: the hole closed, so 120 minutes not 135. */
 function plannedVisit(startHm: string, total: number, changed: boolean) {
@@ -45,9 +52,9 @@ function plannedVisit(startHm: string, total: number, changed: boolean) {
     total_minutes: total,
     changed,
     services: [
-      { id: 'a', name: 'Cut & Blow Dry', booking_time: `${starts[0]}:00`, booking_end_time: `${starts[1]}:00`, duration_minutes: 60 },
-      { id: 'b', name: 'Olaplex Treatment', booking_time: `${starts[1]}:00`, booking_end_time: `${starts[2]}:00`, duration_minutes: 30 },
-      { id: 'c', name: 'Toner / Gloss', booking_time: `${starts[2]}:00`, booking_end_time: `${addMinutes(startHm, total)}:00`, duration_minutes: total - 90 },
+      { id: 'a', name: 'Cut & Blow Dry', service_id: 's1', booking_time: `${starts[0]}:00`, booking_end_time: `${starts[1]}:00`, duration_minutes: 60 },
+      { id: 'b', name: 'Olaplex Treatment', service_id: 's2', booking_time: `${starts[1]}:00`, booking_end_time: `${starts[2]}:00`, duration_minutes: 30 },
+      { id: 'c', name: 'Toner / Gloss', service_id: 's3', booking_time: `${starts[2]}:00`, booking_end_time: `${addMinutes(startHm, total)}:00`, duration_minutes: total - 90 },
     ],
   };
 }
@@ -67,9 +74,38 @@ function mockApi(visitResponse: (body: Record<string, unknown>) => { ok: boolean
       return Promise.resolve({
         ok: true,
         json: async () => ({
-          services: [SERVICE],
-          practitioner_services: [{ practitioner_id: 'p1', service_id: 's1' }],
+          services: CATALOGUE,
+          practitioner_services: CATALOGUE.map((s) => ({ practitioner_id: 'p1', service_id: s.id })),
         }),
+      });
+    }
+    if (url === VISIT_SERVICES_URL) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      visitServiceCalls.push(body);
+      const lines = (body.services ?? []) as Array<{ service_id: string }>;
+      // Enough of a plan to render: each line at the catalogue length, in order.
+      let cursor = 10 * 60;
+      const services = lines.map((l, i) => {
+        const svc = CATALOGUE.find((s) => s.id === l.service_id)!;
+        const start = cursor;
+        cursor += svc.duration_minutes;
+        const toHm = (m: number) =>
+          `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        return {
+          id: (l as { booking_id?: string | null }).booking_id ?? null,
+          name: svc.name,
+          service_id: svc.id,
+          kind: i,
+          booking_time: `${toHm(start)}:00`,
+          booking_end_time: `${toHm(start + svc.duration_minutes)}:00`,
+          duration_minutes: svc.duration_minutes,
+        };
+      });
+      const total = cursor - 10 * 60;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, changed: true, total_minutes: total, services }),
       });
     }
     if (url.startsWith('/api/venue/practitioners')) {
@@ -133,6 +169,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
   visitCalls = [];
+  visitServiceCalls = [];
   mockApi();
 });
 
@@ -146,9 +183,8 @@ describe('StaffAppointmentModifyForm on a multi-service visit', () => {
     renderVisitForm();
     // The clicked row starts at 11:00; the VISIT starts at 10:00.
     await waitFor(() => expect(screen.getByText(/3 services in this visit/i)).toBeInTheDocument());
-    expect(screen.getByText('Cut & Blow Dry')).toBeInTheDocument();
-    expect(screen.getByText('Olaplex Treatment')).toBeInTheDocument();
-    expect(screen.getByText('Toner / Gloss')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('10:00 to 11:00')).toBeInTheDocument());
+    expect(screen.getByText('11:00 to 11:30')).toBeInTheDocument();
   });
 
   it('offers one wall-clock duration for the whole visit, not the service’s', async () => {
@@ -159,11 +195,101 @@ describe('StaffAppointmentModifyForm on a multi-service visit', () => {
     await waitFor(() => expect(durationInput().value).toBe('120'));
   });
 
-  it('does not offer per-service editing, which is what left the hole', async () => {
+  it('does not offer per-service DURATION editing, which is what left the hole', async () => {
     renderVisitForm();
     await waitFor(() => expect(durationInput()).toBeInTheDocument());
+    // One duration for the visit, and no single-booking service/variant pair.
     expect(screen.queryByLabelText(/^Service$/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/Variant/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Variant$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Duration \(minutes\)/i)).not.toBeInTheDocument();
+  });
+
+  it('lists the services as swappable, once the visit says what they are', async () => {
+    renderVisitForm();
+    await waitFor(() => expect(screen.getByLabelText(/Service 1/i)).toBeInTheDocument());
+    expect((screen.getByLabelText(/Service 1/i) as HTMLSelectElement).value).toBe('s1');
+    expect((screen.getByLabelText(/Service 2/i) as HTMLSelectElement).value).toBe('s2');
+    expect((screen.getByLabelText(/Service 3/i) as HTMLSelectElement).value).toBe('s3');
+  });
+
+  it('a swap goes to the services endpoint, carrying the whole list', async () => {
+    renderVisitForm();
+    await waitFor(() => expect(screen.getByLabelText(/Service 2/i)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Service 2/i), { target: { value: 's4' } });
+    await waitFor(() => expect(visitServiceCalls.length).toBeGreaterThan(0));
+    const sent = visitServiceCalls[visitServiceCalls.length - 1]!;
+    expect(sent.dry_run).toBe(true);
+    expect(sent.services).toEqual([
+      { booking_id: 'a', service_id: 's1', service_variant_id: null },
+      { booking_id: 'b', service_id: 's4', service_variant_id: null },
+      { booking_id: 'c', service_id: 's3', service_variant_id: null },
+    ]);
+  });
+
+  it('removing a service leaves it out of the list that is sent', async () => {
+    renderVisitForm();
+    await waitFor(() => expect(screen.getByLabelText(/Remove Olaplex Treatment/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText(/Remove Olaplex Treatment/i));
+    await waitFor(() => expect(visitServiceCalls.length).toBeGreaterThan(0));
+    const sent = visitServiceCalls[visitServiceCalls.length - 1]!;
+    expect(sent.services).toEqual([
+      { booking_id: 'a', service_id: 's1', service_variant_id: null },
+      { booking_id: 'c', service_id: 's3', service_variant_id: null },
+    ]);
+    /**
+     * Leaving a service out is how it is removed, so the request also says which
+     * visit it was built against. Without this a form opened on three services
+     * would cancel a fourth that appeared while it was open.
+     */
+    expect(sent.known_booking_ids).toEqual(['a', 'b', 'c']);
+  });
+
+  it('an added service goes on the end, with no booking of its own yet', async () => {
+    renderVisitForm();
+    await waitFor(() => expect(screen.getByLabelText(/Add a service/i)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Add a service/i), { target: { value: 's4' } });
+    await waitFor(() => expect(visitServiceCalls.length).toBeGreaterThan(0));
+    const sent = visitServiceCalls[visitServiceCalls.length - 1]!;
+    expect((sent.services as unknown[]).length).toBe(4);
+    expect((sent.services as Array<Record<string, unknown>>)[3]).toEqual({
+      booking_id: null,
+      service_id: 's4',
+      service_variant_id: null,
+    });
+  });
+
+  it('lets the services set the visit’s length rather than competing with it', async () => {
+    renderVisitForm();
+    await waitFor(() => expect(screen.getByLabelText(/Add a service/i)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Add a service/i), { target: { value: 's4' } });
+    await waitFor(() => expect(screen.getByText(/Set by the services in this visit/i)).toBeInTheDocument());
+    expect(durationInput()).toHaveAttribute('readonly');
+    // 60 + 30 + 45 + 15, the catalogue lengths the stub lays out.
+    await waitFor(() => expect(durationInput().value).toBe('150'));
+  });
+
+  it('refuses to remove the last service, so a visit cannot be emptied by editing', async () => {
+    renderVisitForm();
+    await waitFor(() => expect(screen.getByLabelText(/Remove Cut & Blow Dry/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText(/Remove Olaplex Treatment/i));
+    fireEvent.click(screen.getByLabelText(/Remove Toner \/ Gloss/i));
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Remove Cut & Blow Dry/i)).toBeDisabled(),
+    );
+  });
+
+  it('saves a service change through the services endpoint', async () => {
+    renderVisitForm();
+    await waitFor(() => expect(screen.getByLabelText(/Add a service/i)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Add a service/i), { target: { value: 's4' } });
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    fireEvent.click(saveButton());
+    await waitFor(() => {
+      expect(visitServiceCalls.some((c) => c.dry_run === undefined)).toBe(true);
+    });
+    const save = visitServiceCalls.find((c) => c.dry_run === undefined)!;
+    expect((save.services as unknown[]).length).toBe(4);
+    expect(save.booking_time).toBe('10:00');
   });
 
   it('says what saving will do to dead time the rows carry, and lets staff save it', async () => {

@@ -143,13 +143,26 @@ export interface StaffVisitModifySegment {
   booking_item_name: string | null;
 }
 
-/** What the visit endpoint says the save will do, per service. */
+/** What the visit endpoints say the save will do, per service. */
 interface VisitPlannedService {
-  id: string;
+  /** null for a service being added, which has no row yet. */
+  id: string | null;
   name: string | null;
+  service_id?: string | null;
+  service_variant_id?: string | null;
   booking_time: string;
   booking_end_time: string;
   duration_minutes: number;
+}
+
+/** One line of the visit as the staff member currently wants it. */
+interface VisitServiceLine {
+  /** Stable across edits, so a row keeps its React identity while being swapped. */
+  key: string;
+  /** The booking row this line stands on, or null for a service being added. */
+  bookingId: string | null;
+  serviceId: string;
+  variantId: string | null;
 }
 
 interface VisitPlanResponse {
@@ -216,6 +229,9 @@ export function StaffAppointmentModifyForm({
   const visitEndpoint = visit?.groupBookingId
     ? `/api/venue/visits/${encodeURIComponent(visit.groupBookingId)}/schedule`
     : null;
+  const visitServicesEndpoint = visit?.groupBookingId
+    ? `/api/venue/visits/${encodeURIComponent(visit.groupBookingId)}/services`
+    : null;
   /** The row the guest notification is sent against, matching the endpoint. */
   const notifyBookingId = isVisit ? visitSegments[0]!.id : bookingId;
 
@@ -255,6 +271,13 @@ export function StaffAppointmentModifyForm({
   const [variantId, setVariantId] = useState<string | null>(booking.service_variant_id ?? null);
   /** Latest answer from the visit endpoint's dry run: what saving would lay out. */
   const [visitPlan, setVisitPlan] = useState<VisitPlanResponse | null>(null);
+  /**
+   * The visit's services as staff want them, and as they stand. Both null until
+   * the visit answers on open, since the rows the booking list hands this form
+   * carry service NAMES and not ids.
+   */
+  const [serviceLines, setServiceLines] = useState<VisitServiceLine[] | null>(null);
+  const [baselineServiceLines, setBaselineServiceLines] = useState<VisitServiceLine[] | null>(null);
   /**
    * The rows are not in the shape the resolver would give them, before staff
    * have touched anything: dead time an earlier per-service edit left behind.
@@ -518,6 +541,107 @@ export function StaffAppointmentModifyForm({
     setBaselineDuration(adopted);
   }, [durationMinutes, selectedService, variantId]);
 
+  const serviceLinesKey = useMemo(
+    () => JSON.stringify((serviceLines ?? []).map((l) => [l.bookingId, l.serviceId, l.variantId])),
+    [serviceLines],
+  );
+  const baselineServiceLinesKey = useMemo(
+    () =>
+      JSON.stringify((baselineServiceLines ?? []).map((l) => [l.bookingId, l.serviceId, l.variantId])),
+    [baselineServiceLines],
+  );
+  /** True once staff have added, removed or swapped a service. */
+  const servicesChanged =
+    baselineServiceLines != null && serviceLines != null && serviceLinesKey !== baselineServiceLinesKey;
+
+  /** What the visit's services endpoint is asked for, schedule included. */
+  const visitServicesRequestBody = useCallback(
+    () => ({
+      services: (serviceLines ?? []).map((l) => ({
+        booking_id: l.bookingId,
+        service_id: l.serviceId,
+        service_variant_id: l.variantId,
+      })),
+      /**
+       * The visit this form was opened on. Leaving a service out is how it is
+       * removed, so the endpoint refuses the whole request if the visit has
+       * gained or lost one since: a stale form must not cancel a service nobody
+       * on this screen ever saw.
+       */
+      known_booking_ids: (baselineServiceLines ?? [])
+        .map((l) => l.bookingId)
+        .filter((id): id is string => Boolean(id)),
+      booking_date: bookingDate,
+      booking_time: bookingTime,
+      practitioner_id: practitionerId,
+    }),
+    [serviceLines, baselineServiceLines, bookingDate, bookingTime, practitionerId],
+  );
+
+  /**
+   * Only what this calendar actually offers can join the visit: the endpoint
+   * refuses the rest, and a list that offers them anyway invites the refusal.
+   * A line's own service stays listed whatever the links say, so a booking on a
+   * service that has since been unlinked still shows what it is.
+   */
+  const visitServiceOptions = useMemo(() => {
+    const offered = new Set(
+      links.filter((l) => l.practitioner_id === practitionerId).map((l) => l.service_id),
+    );
+    const onVisit = new Set((serviceLines ?? []).map((l) => l.serviceId));
+    return services.filter((s) => offered.has(s.id) || onVisit.has(s.id));
+  }, [links, practitionerId, services, serviceLines]);
+
+  const updateServiceLine = useCallback((key: string, nextServiceId: string) => {
+    setServiceLines((current) => {
+      if (!current) return current;
+      return current.map((line) => (line.key === key ? { ...line, serviceId: nextServiceId, variantId: null } : line));
+    });
+  }, []);
+
+  const removeServiceLine = useCallback((key: string) => {
+    setServiceLines((current) => {
+      if (!current || current.length <= 1) return current;
+      return current.filter((line) => line.key !== key);
+    });
+  }, []);
+
+  const addServiceLine = useCallback((serviceId: string) => {
+    setServiceLines((current) => [
+      ...(current ?? []),
+      { key: `new-${serviceId}-${Date.now()}`, bookingId: null, serviceId, variantId: null },
+    ]);
+  }, []);
+
+  const setServiceLineVariant = useCallback((key: string, variantId: string | null) => {
+    setServiceLines((current) => {
+      if (!current) return current;
+      return current.map((line) => (line.key === key ? { ...line, variantId } : line));
+    });
+  }, []);
+
+  /**
+   * A line whose service has options must carry one, the same rule the
+   * single-booking form applies to its own variant select.
+   */
+  useEffect(() => {
+    if (!serviceLines || services.length === 0) return;
+    let touched = false;
+    const next = serviceLines.map((line) => {
+      const svc = services.find((s) => s.id === line.serviceId);
+      const active = (svc?.variants ?? []).filter((v) => v.is_active);
+      if (active.length === 0) {
+        if (line.variantId == null) return line;
+        touched = true;
+        return { ...line, variantId: null };
+      }
+      if (line.variantId && active.some((v) => v.id === line.variantId)) return line;
+      touched = true;
+      return { ...line, variantId: active[0]!.id };
+    });
+    if (touched) setServiceLines(next);
+  }, [serviceLines, services]);
+
   const runValidate = useCallback(async () => {
     if (!practitionerId || !serviceId) {
       setValidationState('invalid');
@@ -547,16 +671,27 @@ export function StaffAppointmentModifyForm({
      */
     if (isVisit && visitEndpoint) {
       try {
-        const res = await fetch(visitEndpoint, {
+        /**
+         * A visit whose SERVICES changed is planned by the services endpoint,
+         * which lays the visit out from what it now holds. The total then follows
+         * the services rather than being asked for, so it carries the schedule
+         * too and the edit stays one write.
+         */
+        const useServices = servicesChanged && visitServicesEndpoint != null;
+        const res = await fetch(useServices ? visitServicesEndpoint! : visitEndpoint, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dry_run: true,
-            booking_date: bookingDate,
-            booking_time: bookingTime,
-            practitioner_id: practitionerId,
-            total_duration_minutes: durationMinutes,
-          }),
+          body: JSON.stringify(
+            useServices
+              ? { dry_run: true, ...visitServicesRequestBody() }
+              : {
+                  dry_run: true,
+                  booking_date: bookingDate,
+                  booking_time: bookingTime,
+                  practitioner_id: practitionerId,
+                  total_duration_minutes: durationMinutes,
+                },
+          ),
         });
         const data = (await res.json().catch(() => ({}))) as VisitPlanResponse;
         if (!res.ok || !data.ok) {
@@ -566,6 +701,11 @@ export function StaffAppointmentModifyForm({
           return;
         }
         setVisitPlan(data);
+        // The services drive the visit's length, so the duration field follows
+        // what the plan came back with rather than the other way round.
+        if (useServices && typeof data.total_minutes === 'number') {
+          setDurationMinutes(data.total_minutes);
+        }
         setValidationState('valid');
       } catch (e) {
         console.error('Staff visit validate failed:', e);
@@ -613,9 +753,12 @@ export function StaffAppointmentModifyForm({
     processingBlocksToSend,
     requiresVariant,
     serviceId,
+    servicesChanged,
     usesServiceItem,
     variantId,
     visitEndpoint,
+    visitServicesEndpoint,
+    visitServicesRequestBody,
   ]);
 
   /**
@@ -648,6 +791,18 @@ export function StaffAppointmentModifyForm({
         setDurationMinutes(data.total_minutes);
         setBaselineDuration(data.total_minutes);
         setVisitRelayNeeded(data.changed === true);
+        const lines = (data.services ?? [])
+          .filter((s) => s.id && s.service_id)
+          .map((s) => ({
+            key: s.id!,
+            bookingId: s.id!,
+            serviceId: s.service_id!,
+            variantId: s.service_variant_id ?? null,
+          }));
+        if (lines.length > 0) {
+          setServiceLines(lines);
+          setBaselineServiceLines(lines);
+        }
       } catch {
         // The form still works from the rows' own span; the save is checked anyway.
       }
@@ -668,7 +823,18 @@ export function StaffAppointmentModifyForm({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [catalogError, practitionerId, serviceId, bookingDate, bookingTime, durationMinutes, variantId, runValidate, serviceWarning]);
+  }, [
+    catalogError,
+    practitionerId,
+    serviceId,
+    serviceLinesKey,
+    bookingDate,
+    bookingTime,
+    durationMinutes,
+    variantId,
+    runValidate,
+    serviceWarning,
+  ]);
 
   /**
    * The services as they will stand after saving, or as the rows have them
@@ -731,7 +897,7 @@ export function StaffAppointmentModifyForm({
 
   const saveDisabled =
     saving ||
-    (!hasChanges && !visitRelayNeeded) ||
+    (!hasChanges && !visitRelayNeeded && !servicesChanged) ||
     Boolean(serviceWarning) ||
     durationMinutes == null ||
     !bookingTime ||
@@ -751,18 +917,21 @@ export function StaffAppointmentModifyForm({
     setSaveError(null);
     try {
       if (isVisit && visitEndpoint) {
-        const visitBody: Record<string, unknown> = {
-          booking_date: bookingDate,
-          booking_time: bookingTime,
-          practitioner_id: practitionerId,
-          total_duration_minutes: durationMinutes,
-        };
+        const useServices = servicesChanged && visitServicesEndpoint != null;
+        const visitBody: Record<string, unknown> = useServices
+          ? { ...visitServicesRequestBody() }
+          : {
+              booking_date: bookingDate,
+              booking_time: bookingTime,
+              practitioner_id: practitionerId,
+              total_duration_minutes: durationMinutes,
+            };
         // Start moved: defer the guest notification so the follow-up panel can
         // offer notify / skip / undo, exactly as the single-booking save does.
         if (scheduleChanged) {
           visitBody.defer_modification_guest_notification = true;
         }
-        const res = await fetch(visitEndpoint, {
+        const res = await fetch(useServices ? visitServicesEndpoint! : visitEndpoint, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(visitBody),
@@ -1012,24 +1181,99 @@ export function StaffAppointmentModifyForm({
       {isVisit ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
           <p className="text-xs font-semibold text-slate-700">
-            {visitServiceRows.length} services in this visit
+            {(serviceLines ?? visitServiceRows).length} services in this visit
           </p>
-          <ul className="mt-1.5 space-y-1">
-            {visitServiceRows.map((s) => (
-              <li
-                key={s.id}
-                className="flex items-baseline justify-between gap-3 text-xs text-slate-600"
+          {serviceLines ? (
+            <ul className="mt-1.5 space-y-2">
+              {serviceLines.map((line, i) => {
+                const planned = visitServiceRows[i];
+                const svc = services.find((s) => s.id === line.serviceId);
+                const lineVariants = (svc?.variants ?? []).filter((v) => v.is_active);
+                const lineName = svc?.name ?? planned?.name ?? 'Service';
+                return (
+                  <li key={line.key} className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        aria-label={`Service ${i + 1}`}
+                        value={line.serviceId}
+                        onChange={(e) => updateServiceLine(line.key, e.target.value)}
+                        className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                      >
+                        {visitServiceOptions.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-700">
+                        {planned?.end ? `${planned.start} to ${planned.end}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${lineName}`}
+                        disabled={serviceLines.length <= 1}
+                        onClick={() => removeServiceLine(line.key)}
+                        className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {lineVariants.length > 0 ? (
+                      <select
+                        aria-label={`Option for ${lineName}`}
+                        value={line.variantId ?? ''}
+                        onChange={(e) => setServiceLineVariant(line.key, e.target.value || null)}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                      >
+                        {lineVariants.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name} ({v.duration_minutes} min)
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <ul className="mt-1.5 space-y-1">
+              {visitServiceRows.map((s, i) => (
+                <li
+                  key={s.id ?? `row-${i}`}
+                  className="flex items-baseline justify-between gap-3 text-xs text-slate-600"
+                >
+                  <span className="truncate">{s.name ?? 'Service'}</span>
+                  <span className="shrink-0 font-semibold tabular-nums text-slate-800">
+                    {s.end ? `${s.start} to ${s.end}` : s.start}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {serviceLines ? (
+            <label className="mt-2 block text-[11px] font-semibold text-slate-600">
+              Add a service
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) addServiceLine(e.target.value);
+                }}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-normal"
               >
-                <span className="truncate">{s.name ?? 'Service'}</span>
-                <span className="shrink-0 font-semibold tabular-nums text-slate-800">
-                  {s.end ? `${s.start} to ${s.end}` : s.start}
-                </span>
-              </li>
-            ))}
-          </ul>
+                <option value="">Choose a service to add</option>
+                {visitServiceOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.duration_minutes} min)
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <p className="mt-1.5 text-[11px] text-slate-500">
-            They move together and keep their own lengths. Changing which services this visit
-            includes is not available here yet.
+            {servicesChanged
+              ? 'The visit is re-laid around these services, so its total follows them.'
+              : 'They move together and keep their own lengths. A service added here goes on the end.'}
           </p>
         </div>
       ) : (
@@ -1125,13 +1369,19 @@ export function StaffAppointmentModifyForm({
             max={MAX_APPOINTMENT_CORE_DURATION_MINUTES}
             step={5}
             value={durationMinutes ?? ''}
+            // The services set the length of a visit being re-serviced, so the
+            // field reports it rather than competing with it.
+            readOnly={servicesChanged}
             onChange={(e) => setDurationMinutes(Number(e.target.value))}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            className={`mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm ${
+              servicesChanged ? 'bg-slate-100 text-slate-500' : ''
+            }`}
           />
           {isVisit ? (
             <span className="mt-1 block text-[11px] font-normal text-slate-500">
-              The whole visit, start to finish. Extra time goes on the last service, and shortening
-              takes it off the last service first.
+              {servicesChanged
+                ? 'Set by the services in this visit.'
+                : 'The whole visit, start to finish. Extra time goes on the last service, and shortening takes it off the last service first.'}
             </span>
           ) : null}
         </label>

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
+import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import {
   linkedGrantAllowsCalendar,
   linkedGrantAllowsMutation,
@@ -12,8 +13,10 @@ import { planVisitSchedule } from '@/lib/booking/visit-schedule-plan';
 import type { VisitServiceRow } from '@/lib/booking/appointment-visit';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
 import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
-import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
-import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
+import {
+  resetVisitScheduledComms,
+  visitCancellationFields,
+} from '@/lib/booking/visit-write-shared';
 import {
   parseProcessingTimeBlocksFromDb,
   processingBlocksForDurationChange,
@@ -23,7 +26,6 @@ import {
   complianceUnmetMessage,
   COMPLIANCE_REQUIREMENT_UNMET,
 } from '@/lib/compliance/enforce-booking';
-import { COMMUNICATION_LOG_TYPES_RESET_ON_BOOKING_START_CHANGE } from '@/lib/communications/scheduled-log-reset';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appointment-engine';
@@ -112,6 +114,14 @@ export async function PATCH(
 ) {
   try {
     const { groupBookingId } = await params;
+    /**
+     * A `group_booking_id` that is not a uuid cannot match anything, and reaches
+     * the database as a cast error rather than a miss: answer it as the miss it
+     * is instead of a 500.
+     */
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(groupBookingId)) {
+      return NextResponse.json({ error: 'Visit not found' }, { status: 404 });
+    }
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) {
@@ -188,15 +198,37 @@ export async function PATCH(
 
     if (isOwnVenue) {
       if (staff.role !== 'admin') {
-        const access = await requireManagedCalendarAccess(
+        /**
+         * BOTH calendars, because a move has two. The per-booking route gates on
+         * the calendar a booking sits on; gating only on the target would let a
+         * staff member pull a colleague's visit onto their own column, and
+         * gating only on the source would let them push one onto anybody's.
+         */
+        const scopedCalendarId = await resolveBookingScopedCalendarId(
           admin,
           scopeVenueId,
-          staff,
-          targetCalendarId,
-          'You can only move visits on calendars assigned to your account.',
+          rows[0]! as Parameters<typeof resolveBookingScopedCalendarId>[2],
         );
-        if (!access.ok) {
-          return NextResponse.json({ error: access.error }, { status: 403 });
+        if (!scopedCalendarId) {
+          return NextResponse.json(
+            {
+              error:
+                'This visit is not on a team calendar column tied to your permissions. Ask a venue admin to move it.',
+            },
+            { status: 403 },
+          );
+        }
+        for (const calId of new Set([scopedCalendarId, targetCalendarId])) {
+          const access = await requireManagedCalendarAccess(
+            admin,
+            scopeVenueId,
+            staff,
+            calId,
+            'You can only move visits between calendars assigned to your account.',
+          );
+          if (!access.ok) {
+            return NextResponse.json({ error: access.error }, { status: 403 });
+          }
         }
       }
     } else if (!linkedGrantAllowsCalendar(linkedGrant, false, targetCalendarId)) {
@@ -298,6 +330,12 @@ export async function PATCH(
       services: plan.services.map((s) => ({
         id: s.id,
         name: plan.visit.services.find((v) => v.id === s.id)?.name ?? null,
+        // Carried so a caller that only has the visit's rows can drive the
+        // services endpoint, which needs each line's service to say what the
+        // visit is made of. The rows the booking list hands the UI have names,
+        // not ids.
+        service_id: serviceIdOf(rowById.get(s.id)!),
+        service_variant_id: (rowById.get(s.id)!.service_variant_id as string | null) ?? null,
         booking_date: newDate,
         booking_time: `${s.startHm}:00`,
         booking_end_time: `${s.endHm}:00`,
@@ -401,28 +439,17 @@ export async function PATCH(
       return NextResponse.json(describePlan(true));
     }
 
-    /**
-     * One deadline for the whole visit, pinned to its start, which is how
-     * `create-multi-service` writes it. Per-row deadlines would promise the
-     * guest a different refund window for each service of one appointment.
-     */
     const firstRow = rowById.get(plan.services[0]!.id)!;
-    const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
-      supabase: admin,
+    const cancellation = await visitCancellationFields({
+      admin,
       venueId: scopeVenueId,
-      effectiveModel: firstRow.service_item_id ? 'unified_scheduling' : 'practitioner_appointment',
-      serviceItemId: (firstRow.service_item_id as string | null) ?? null,
-      appointmentServiceId: (firstRow.appointment_service_id as string | null) ?? null,
+      anchorRow: {
+        service_item_id: (firstRow.service_item_id as string | null) ?? null,
+        appointment_service_id: (firstRow.appointment_service_id as string | null) ?? null,
+      },
+      dateYmd: newDate,
+      startHm: plan.startHm,
     });
-    const cancellationDeadline = cancellationDeadlineHoursBefore(
-      newDate,
-      plan.startHm,
-      refundWindowHours,
-    );
-    const cancellationPolicySnapshot = {
-      refund_window_hours: refundWindowHours,
-      policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
-    };
 
     /**
      * Written one row at a time, because a visit's rows are separate bookings
@@ -466,8 +493,7 @@ export async function PATCH(
         booking_time: `${t.schedule.startHm}:00`,
         booking_end_time: endFields.booking_end_time,
         estimated_end_time: endFields.estimated_end_time,
-        cancellation_deadline: cancellationDeadline,
-        cancellation_policy_snapshot: cancellationPolicySnapshot,
+        ...cancellation,
         updated_at: new Date().toISOString(),
         ...(t.blocks !== null ? { processing_time_blocks: t.blocks } : {}),
         ...(calendarChanged
@@ -524,17 +550,7 @@ export async function PATCH(
     }
 
     if (visitStartChanged) {
-      // Reminders are scheduled per row, so every service's log is reset or the
-      // guest gets a reminder for the time the visit used to start.
-      try {
-        await admin
-          .from('communication_logs')
-          .delete()
-          .in('booking_id', visitBookingIds)
-          .in('message_type', [...COMMUNICATION_LOG_TYPES_RESET_ON_BOOKING_START_CHANGE]);
-      } catch (logResetErr) {
-        console.error('Communication log reset failed after visit move:', logResetErr);
-      }
+      await resetVisitScheduledComms(admin, visitBookingIds);
     }
 
     /**

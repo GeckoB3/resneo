@@ -1,7 +1,8 @@
 # Multi-service visits: one booking, not N rows
 
-Status: workstreams 1, 2, 4 and 5 built; 3 (modify form) is what is left. See the
-Status section at the bottom for where each one stands. Branch: `staging`.
+Status: every workstream is built. See the Status section at the bottom for where
+each one landed, and the open question about notifying a guest when a visit's
+services change. Branch: `staging`.
 
 ## The problem
 
@@ -112,7 +113,15 @@ editing is roughly as large as the rest combined and should land separately.
   the whole visit's wall-clock span, and the live check plus the save both go
   through the visit endpoint. Per-service duration, service and variant editing
   are not offered on a visit, which is what closes the hole for good.
-- **3b Service list editing: NOT STARTED.** The only workstream left.
+- **3b Service list editing: DONE.**
+  `PATCH /api/venue/visits/[groupBookingId]/services` takes the visit's services
+  as a list, in order, and reconciles: a line with `booking_id` keeps that row (or
+  re-services it when `service_id` differs), a line without one adds a service,
+  and a row left out is removed. It carries `booking_date` / `booking_time` /
+  `practitioner_id` too, so re-servicing and moving a visit in the same edit is
+  still one write. The form's service list is that request, and the duration
+  control goes read-only while it is in play: the services set the visit's length,
+  they do not compete with it.
 
 ### Using the visit endpoint from workstream 3
 
@@ -141,8 +150,43 @@ Two things worth knowing before wiring it up:
   same `defer_` / `skip_booking_modification_guest_notification` flags the
   per-booking PATCH does.
 
-Service list editing (3b) is not in it: this endpoint writes a schedule, not a
-visit's contents.
+Service list editing is not in it: that endpoint writes a schedule, not a visit's
+contents.
+
+### What 3b decided that the plan above could not
+
+Four things had to be settled against the code rather than the plan:
+
+- **A declarative list needs a guard, because omission removes.** The request
+  carries `known_booking_ids`: every scheduled row the caller was looking at when
+  it built the list. If the visit has gained or lost a service since, the whole
+  request is refused with 412 rather than applied. Without it a form opened on
+  three services would cancel a fourth that appeared while it was open, and the
+  per-row `updated_at` guards cannot catch that: the row nobody knew about is
+  exactly the one being dropped.
+
+- **Removing a service cancels its row, it does not delete it.** The payment
+  picture already leaves cancelled lines out of a visit's total, so a cancelled
+  row drops off the visit and the calendar while keeping its own history. A row
+  with money against it (a succeeded ledger row or a paid deposit) is refused
+  outright: refunds belong to cancellation, which has its own rules, and an edit
+  must not quietly keep a guest's money for a service that is no longer happening.
+- **A swap pins the price.** "Keep the original price snapshot" assumed a
+  snapshot that appointments do not have: their price is resolved live from the
+  catalogue (`resolveBookingTotalPenceFromRow`), and only event tickets and
+  imports write `booking_total_price_pence`. So a swap writes it, at the price the
+  row resolved to before the swap, when it is not already set. Without that,
+  changing a service silently re-prices the booking.
+- **A service change does not notify the guest.** The notify rule settled above
+  covers start-time moves, and this endpoint follows it: moving the visit notifies
+  once, changing what is in it notifies nobody. Whether a guest should be told
+  their visit gained or lost a service, and in what words, is a real question and
+  is still open.
+
+Worth knowing: a swap always takes the new service's catalogue duration, so
+swapping a service out and back does NOT restore a duration staff had set by
+hand. That is the rule working (a service's length is its own), but it means a
+swap is not an undo.
 
 ### Fixed: undo after a visit move
 

@@ -55,7 +55,9 @@ The helper layer is careful and the comments are unusually honest. The problem i
 ## Critical findings
 
 ### C0. `admin_hard_delete_venue` and 30 other `SECURITY DEFINER` functions are callable by `anon`
-**CONFIRMED ON THE LIVE STAGING DATABASE, 2026-08-13. This is the most severe finding in the document.**
+**CONFIRMED ON STAGING AND PRODUCTION, 2026-08-13. This is the most severe finding in the document.**
+
+> **STATUS — STAGING REMEDIATED 2026-08-13.** Migration `20270106120000_revoke_definer_function_client_grants.sql` applied to staging; the verification query returned **exactly the expected 16 rows** (8 RLS helpers, 4 report RPCs awaiting C1, 4 `auth.uid()`-scoped). All 15 targeted functions are closed to `anon`/`authenticated`, including `admin_hard_delete_venue`, `lookup_auth_user_id_by_email`, `merge_guests_into` and both `linked_apply_booking_*`. **Production is still exposed** — same migration, not yet applied. Residual on staging: the 4 report RPCs leak per-venue *aggregates* (covers, no-show rates, cancellations, deposit totals) until C1's `staff.db` switch ships; the guest-PII function `report_frequent_visitors` is already closed.
 
 The step-0 sweep returned 31 `SECURITY DEFINER` functions in `public` with `has_function_privilege('anon', …, 'EXECUTE') = true`. Every ACL shows the same shape — `anon=X/postgres, authenticated=X/postgres` — i.e. **direct per-role grants from Supabase's default privileges**, which no `REVOKE … FROM PUBLIC` has ever touched.
 

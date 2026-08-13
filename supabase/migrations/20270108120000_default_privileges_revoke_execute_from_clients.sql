@@ -35,8 +35,18 @@
 --   ORDER BY 2 DESC;
 -- ---------------------------------------------------------------------------
 
+-- PUBLIC must be named alongside the two client roles, for the same reason
+-- every REVOKE in C0 and C1 names all three. PostgreSQL grants EXECUTE on
+-- functions to PUBLIC by default (a built-in default, not a Supabase one), and
+-- anon and authenticated are members of PUBLIC, so revoking only the two direct
+-- role grants leaves a new function just as reachable as before. Verified on
+-- staging 2026-08-13: with only `FROM anon, authenticated`, a freshly created
+-- function's ACL was {=X/postgres,postgres=X/postgres,service_role=X/postgres},
+-- where the leading `=X` is the PUBLIC grant. Reachability was unchanged. This
+-- is the mirror image of the bug in the ~28 migrations that revoked from PUBLIC
+-- alone; the lesson survives being turned around.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- WHAT THIS DOES NOT DO
@@ -44,8 +54,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 --  * It does not change any existing function. Default privileges apply only to
 --    objects created after this statement. The 12 legitimately client-callable
 --    functions keep their grants untouched, so nothing breaks on apply.
---  * It does not affect service_role, which keeps its default EXECUTE. Server
---    code goes through getSupabaseAdminClient() / staff.db and is unaffected.
+--  * It does not affect service_role, despite naming PUBLIC. service_role holds
+--    its own explicit default grant (`service_role=X/postgres`, visible as a
+--    separate ACL entry), which a PUBLIC revoke does not touch. Server code
+--    goes through getSupabaseAdminClient() / staff.db and is unaffected. Nor
+--    does it affect postgres, which has EXECUTE as owner regardless.
 --  * It does not affect trigger functions. Firing a trigger does not check
 --    EXECUTE on its function, so the C4 work and anything like it needs no
 --    grant. Only functions called *by name* by a client are in scope.
@@ -96,21 +109,28 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 --        AND p.prorettype <> 'trigger'::regtype
 --        AND has_function_privilege('anon', p.oid, 'EXECUTE');
 --
--- 3. End-to-end proof, the one that actually falsifies this. Create a throwaway
---    function and read its ACL: anon and authenticated must be absent. Run all
---    three statements together.
+-- 3. End-to-end proof, the one that actually falsifies this. Ask whether anon
+--    can execute a brand new function, rather than reading an ACL string and
+--    reasoning about role membership. Run all three statements together.
 --
 --      CREATE FUNCTION public._defacl_probe() RETURNS int LANGUAGE sql AS 'SELECT 1';
---      SELECT proacl FROM pg_proc WHERE proname = '_defacl_probe';
+--      SELECT proacl,
+--             has_function_privilege('anon', '_defacl_probe()'::regprocedure, 'EXECUTE') AS anon_can_execute
+--      FROM pg_proc WHERE proname = '_defacl_probe';
 --      DROP FUNCTION public._defacl_probe();
 --
---    Before this migration that returns an explicit ACL containing
---    `anon=X/postgres` and `authenticated=X/postgres`, which is precisely what
---    the C0 sweep found on all 31 functions. After it, expect those two entries
---    gone, leaving postgres and service_role. (It is NOT NULL beforehand: a
---    NULL proacl means "owner only, no defaults applied", and Supabase's
---    project-level default privileges are exactly why these grants are explicit
---    and why REVOKE ... FROM PUBLIC never touched them.)
+--    Expect `anon_can_execute = false` and an ACL of
+--    {postgres=X/postgres,service_role=X/postgres}, with **no leading `=X`**.
+--    A leading `=X` is the PUBLIC grant and means this has not worked, however
+--    absent anon and authenticated look.
+--
+--    Read the ACL carefully. `grantee=privs/grantor`, and an EMPTY grantee is
+--    PUBLIC. Before this migration the entry list is
+--    {=X/postgres, anon=X/postgres, authenticated=X/postgres, ...}: the two
+--    named roles are Supabase's project default privileges, the bare `=X` is
+--    PostgreSQL's own. All three have to go, which is why the statement above
+--    names PUBLIC. It is not NULL beforehand; a NULL proacl would mean "owner
+--    only, no grants", and these grants are explicit.
 --
 -- 4. Smoke test: load the dashboard. If the RLS helpers were disturbed the
 --    booking lists come back empty rather than erroring, so check that bookings

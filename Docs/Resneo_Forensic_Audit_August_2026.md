@@ -93,12 +93,17 @@ Three tiers:
 - **Revoke from `anon` only, keep `authenticated`:** `claim_user_account`, `request_account_deletion`, `cancel_account_deletion`, `touch_user_last_active`, `guest_email_collides_for_user_change` — these are `auth.uid()`-scoped and legitimately called by signed-in users. Verify each is a genuine no-op for a null `uid` before relying on that.
 - **Leave alone:** the eight RLS helpers above.
 
-**Durable fix, so new functions stop inheriting this:**
+**Durable fix — the statement below DOES NOT WORK. Tried, measured, corrected 2026-08-13. See step 1b.**
 ```sql
+-- Does NOT make new functions fail closed on this platform:
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
 ```
-This makes future migrations fail closed — any function genuinely needing client access must then grant it explicitly, which is the correct posture. It is a behaviour change: audit existing client-called RPCs before applying it.
+It was applied (`20270108120000`) and a function created immediately afterwards, owned by `postgres` in `public`, still came back anon-executable: `{=X/postgres,postgres=X/postgres,service_role=X/postgres}`, `has_function_privilege('anon', …) = true`. `pg_default_acl` for `postgres`/`public` correctly showed no PUBLIC entry, and new functions received one anyway, so the stored default adds to PostgreSQL's built-in `EXECUTE`-to-`PUBLIC` rather than replacing it. Naming `PUBLIC` explicitly does not help; that was the second attempt.
+
+**What it does buy, which is worth keeping:** `anon` and `authenticated` no longer get *direct* grants on new functions, only PUBLIC membership. So a plain `REVOKE ALL ON FUNCTION x FROM PUBLIC` now genuinely closes a new function. That is exactly the pattern the ~28 historical migrations used, and the direct grants this removes are the reason it closed nothing. The repo's existing instinct is correct going forward.
+
+**Prevention is therefore unavailable at the schema level here, and the control is detection.** See step 1b for what shipped instead.
 
 **Also verified live (both environments):** `anon` holds SELECT on `unified_calendars` under `USING (is_active = true)`, so the venue-id harvest leg of the C1 exploit chain is confirmed reachable. The full chain works end to end on production.
 
@@ -438,14 +443,19 @@ The first pass also over-claimed that `security_invoker` proves the spec is wron
 
 > **H43 was not part of this step, contrary to the line that stood here.** C0 had already revoked `consume_class_credits_atomically` at `20270106120000:107-108`. Also note the original step-1 text named "the six report RPCs": by the time C1 shipped, `report_frequent_visitors` and `report_booking_final_statuses` were already closed by C0, leaving four.
 
-**1b. The durable fix — NOT DONE, and it is the item that stops this class of bug recurring.** Everything above fixed instances; the mechanism that created them is untouched. The next `CREATE FUNCTION` in `public` will inherit `anon=X, authenticated=X` exactly as the original 31 did. `ALTER DEFAULT PRIVILEGES` appears nowhere in the migration history except as a comment in C0's own follow-up block.
+**1b. Stopping this class of bug recurring — DONE on staging, 2026-08-13, but NOT the way this document originally prescribed.**
 
-```sql
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
-```
+C0 and C1 closed 19 individual functions. Neither touched the mechanism, so the next `CREATE FUNCTION` in `public` inherits the same exposure. The fix proposed for this was `ALTER DEFAULT PRIVILEGES`. **It does not work on this platform.** It was applied as `20270108120000` and measured three times: a function created immediately afterwards, owned by `postgres` in `public`, is still anon-executable, because PostgreSQL's built-in `EXECUTE`-to-`PUBLIC` grant survives it. Naming `PUBLIC` explicitly does not help either. Details in C0's "Durable fix" paragraph and in the migration's own header.
 
-C0 deferred this pending "an audit of genuinely client-called RPCs." **That prerequisite is now satisfied.** With C1 shipped, the client-callable set is exactly 12 and every member is accounted for: the 8 RLS helpers, which must keep their grants, and the 4 `auth.uid()`-scoped functions, whose bodies were read on 2026-08-13 and confirmed parameterless. It remains a behaviour change and belongs in its own migration, applied to both environments. Its failure mode is loud (`permission denied` on a new RPC), which is the correct direction. Do this before D1, and preferably before anything else on this list.
+Keep the migration regardless: it removes the *direct* `anon`/`authenticated` default grants, which means a plain `REVOKE ALL ON FUNCTION x FROM PUBLIC` now closes a new function. That is the pattern the ~28 historical migrations used and the reason it failed. The repo's instinct is now correct going forward. It cannot break anything, since it only affects functions created after it.
+
+**The guarantee comes from detection instead**, which turned out to be the better control rather than merely the achievable one:
+
+- `20270109120000` adds `audit_client_executable_functions()`, returning the `SECURITY DEFINER` functions in `public` that `anon` or `authenticated` can execute. `SECURITY INVOKER` deliberately: `pg_catalog` is world-readable and `has_function_privilege()` answers for any role, so policing definer functions needs no definer function of its own.
+- `scripts/check-client-executable-functions.mjs` compares the live set against a committed allowlist of 12 and fails on drift **in either direction**. `UNEXPECTED` is a new C0/C1. `MISSING` is the `DROP`+`CREATE` hazard, where re-creating one of the 8 RLS helpers resets its ACL and strips the `authenticated` grant every policy referencing it needs, making the dashboard return empty rather than error. No default-privileges approach could have caught that second case at all.
+- A `function-grants` CI job runs it on every push, using secrets that already existed. Both failure branches were exercised before shipping, not just the passing one.
+
+**Method note worth carrying forward.** The original prescription was wrong, and it was wrong in exactly the way the rest of this document warns about: a grant statement that returns success while changing nothing. It was caught only because the migration shipped with a probe that creates a function and asks whether `anon` can execute it, rather than a query confirming the statement had been recorded. Prefer checks that test the behaviour you want over checks that confirm the change you made.
 
 **2. C4 via the immutability trigger.** One trigger, protects admin routes too, no realtime impact, no test churn.
 

@@ -1,0 +1,118 @@
+-- Step 1b from Docs/Resneo_Forensic_Audit_August_2026.md: the durable fix.
+--
+-- C0 and C1 closed 19 individual functions that anon could execute. Neither
+-- touched the mechanism that exposed them. Hosted Supabase ships default
+-- privileges granting anon and authenticated a direct EXECUTE on every function
+-- created in `public`, so the next CREATE FUNCTION inherits exactly the same
+-- exposure, and the ~28 migrations in this repo that used the REVOKE ... FROM
+-- PUBLIC pattern show how easily that goes unnoticed for months.
+--
+-- This makes new functions fail closed. Any function that genuinely needs
+-- client access must then grant it explicitly, which is the correct posture:
+-- the grant becomes a visible decision in a migration rather than a silent
+-- default.
+--
+-- PREREQUISITE, now satisfied. C0 deferred this pending an audit of genuinely
+-- client-called RPCs. After C1 that set is exactly 12 and every member is
+-- accounted for: the 8 RLS helpers, which must keep their grants, and the 4
+-- auth.uid()-scoped functions, whose bodies were read on 2026-08-13 and
+-- confirmed parameterless and uid-derived.
+
+-- ---------------------------------------------------------------------------
+-- PRE-FLIGHT. Run this BEFORE applying, and stop if the answer is not postgres.
+--
+-- ALTER DEFAULT PRIVILEGES FOR ROLE x governs only objects created BY x. The
+-- evidence says postgres: every ACL in the C0 sweep read `anon=X/postgres`, so
+-- postgres is the grantor. Confirm it is also the owner. If migrations here run
+-- as some other role, this statement would apply to the wrong one and silently
+-- achieve nothing, which is the same failure mode as REVOKE ... FROM PUBLIC.
+--
+--   SELECT pg_get_userbyid(p.proowner) AS function_owner, count(*)
+--   FROM pg_proc p
+--   JOIN pg_namespace n ON n.oid = p.pronamespace
+--   WHERE n.nspname = 'public'
+--   GROUP BY 1
+--   ORDER BY 2 DESC;
+-- ---------------------------------------------------------------------------
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- WHAT THIS DOES NOT DO
+--
+--  * It does not change any existing function. Default privileges apply only to
+--    objects created after this statement. The 12 legitimately client-callable
+--    functions keep their grants untouched, so nothing breaks on apply.
+--  * It does not affect service_role, which keeps its default EXECUTE. Server
+--    code goes through getSupabaseAdminClient() / staff.db and is unaffected.
+--  * It does not affect trigger functions. Firing a trigger does not check
+--    EXECUTE on its function, so the C4 work and anything like it needs no
+--    grant. Only functions called *by name* by a client are in scope.
+--
+-- TWO HAZARDS FOR FUTURE AUTHORS
+--
+--  1. CREATE OR REPLACE on an EXISTING function preserves its ACL. DROP then
+--     CREATE resets it to the defaults, which after this migration means no
+--     client grant at all. This repo already does DROP+CREATE (20260518120000
+--     on admin_hard_delete_venue, which is why its PUBLIC grant diverged
+--     between environments). If anyone ever DROP+CREATEs one of the 8 RLS
+--     helpers below, the dashboard locks out for every user, because those are
+--     invoked inside policy evaluation as the querying role. Re-grant in the
+--     same migration:
+--
+--       current_staff_venue_ids, caller_staff_venue_ids,
+--       caller_staff_admin_venue_ids, link_action_grant, link_calendar_grant,
+--       link_pii_grant, link_calendar_allows, get_linked_booking_source
+--
+--  2. A new function that a browser client calls by name will now fail with
+--     `42501 permission denied` until it is granted. That is the intended
+--     failure mode, loud and at the call site. Grant deliberately:
+--
+--       GRANT EXECUTE ON FUNCTION public.your_new_fn(args) TO authenticated;
+--
+--     Before writing that line, check the function does its own authorisation.
+--     A SECURITY DEFINER function taking a caller-supplied venue_id with no
+--     guard is C1 all over again.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- VERIFICATION
+--
+-- 1. The default ACL is recorded. Expect one row for schema public showing the
+--    revoke, i.e. no =X entries for anon or authenticated:
+--
+--      SELECT n.nspname AS schema, pg_get_userbyid(d.defaclrole) AS for_role,
+--             d.defaclobjtype AS obj_type, d.defaclacl AS default_acl
+--      FROM pg_default_acl d
+--      JOIN pg_namespace n ON n.oid = d.defaclnamespace
+--      WHERE n.nspname = 'public' AND d.defaclobjtype = 'f';
+--
+-- 2. Nothing existing changed. The C0 sweep must still return 12, unchanged:
+--
+--      SELECT count(*) FROM pg_proc p
+--      JOIN pg_namespace n ON n.oid = p.pronamespace
+--      WHERE n.nspname = 'public' AND p.prosecdef
+--        AND p.prorettype <> 'trigger'::regtype
+--        AND has_function_privilege('anon', p.oid, 'EXECUTE');
+--
+-- 3. End-to-end proof, the one that actually falsifies this. Create a throwaway
+--    function and read its ACL: anon and authenticated must be absent. Run all
+--    three statements together.
+--
+--      CREATE FUNCTION public._defacl_probe() RETURNS int LANGUAGE sql AS 'SELECT 1';
+--      SELECT proacl FROM pg_proc WHERE proname = '_defacl_probe';
+--      DROP FUNCTION public._defacl_probe();
+--
+--    Before this migration that returns an explicit ACL containing
+--    `anon=X/postgres` and `authenticated=X/postgres`, which is precisely what
+--    the C0 sweep found on all 31 functions. After it, expect those two entries
+--    gone, leaving postgres and service_role. (It is NOT NULL beforehand: a
+--    NULL proacl means "owner only, no defaults applied", and Supabase's
+--    project-level default privileges are exactly why these grants are explicit
+--    and why REVOKE ... FROM PUBLIC never touched them.)
+--
+-- 4. Smoke test: load the dashboard. If the RLS helpers were disturbed the
+--    booking lists come back empty rather than erroring, so check that bookings
+--    are actually visible, not merely that the page renders.
+-- ---------------------------------------------------------------------------

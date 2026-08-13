@@ -74,6 +74,33 @@ jobs:
       - name: Run tests
         run: npm run test
 
+  function-grants:
+    name: Function grants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fails if a client role can execute a SECURITY DEFINER function in
+      # `public` that is not allowlisted, or if an allowlisted one has lost its
+      # grant. New functions are anon-callable on creation (see
+      # supabase/migrations/20270108120000), so this is the control that catches
+      # a C0 or C1 recurrence. It reads catalogs only and writes nothing.
+      - name: Check client-executable function grants
+        run: npm run check:function-grants
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+
   e2e-smoke:
     name: E2E smoke (Playwright)
     runs-on: ubuntu-latest

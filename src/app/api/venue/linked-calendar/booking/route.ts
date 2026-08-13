@@ -21,6 +21,13 @@ import {
 } from '@/lib/appointments/appointment-service-payment';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
+import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
+import {
+  parseProcessingTimeBlocksFromDb,
+  snapshotProcessingTimeBlocksFromCatalog,
+} from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
+import { minutesToTime, timeToMinutes } from '@/lib/availability';
 
 /**
  * PATCH /api/venue/linked-calendar/booking — edit (or cancel, via status) a
@@ -251,6 +258,8 @@ export async function POST(request: NextRequest) {
     // The owning venue's column model determines both the table the chosen
     // calendar must exist in and which booking column the row is keyed on.
     const ownerUsesUnified = await venueUsesUnifiedCalendarList(admin, input.ownerVenueId);
+    /** Set once the service is resolved; used for the interval check and the snapshot. */
+    let ownerServiceRow: Record<string, unknown> | null = null;
 
     if (input.practitionerId) {
       const calendarTable = ownerUsesUnified ? 'unified_calendars' : 'practitioners';
@@ -268,9 +277,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (input.appointmentServiceId) {
+      /**
+       * Unified owners keep their catalogue in `service_items`; `appointment_services`
+       * is frozen at its pre-migration contents. Reading only the legacy table meant
+       * any service the owner created after migrating was invisible cross-venue and
+       * posting its id returned "That service does not belong to the linked venue."
+       */
       const { data: service } = await admin
-        .from('appointment_services')
-        .select('id, venue_id, payment_requirement, deposit_pence, price_pence')
+        .from(ownerUsesUnified ? 'service_items' : 'appointment_services')
+        .select(
+          'id, venue_id, payment_requirement, deposit_pence, price_pence, duration_minutes, processing_time_blocks',
+        )
         .eq('id', input.appointmentServiceId)
         .maybeSingle();
       if (!service || service.venue_id !== input.ownerVenueId) {
@@ -279,6 +296,7 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      ownerServiceRow = service as Record<string, unknown>;
 
       // Card-hold services are rejected on this route (spec D6): the RPC below has
       // zero payment logic, so a card-hold booking created here would confirm with
@@ -318,6 +336,46 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    /**
+     * The owner venue's own availability rules apply to a partner write. This
+     * route went straight to the RPC, which is a plain INSERT: no overlap check,
+     * no working-hours check, nothing. A partner could book directly on top of an
+     * existing appointment on someone else's calendar, and the native staff path
+     * has always run this exact validation.
+     */
+    let linkedProcessingSnapshot: ProcessingTimeBlock[] = [];
+    if (input.practitionerId && input.appointmentServiceId && ownerServiceRow) {
+      const startHm = input.bookingTime.slice(0, 5);
+      const catalogueDuration = Number(ownerServiceRow.duration_minutes ?? 30) || 30;
+      const endHm = input.bookingEndTime?.slice(0, 5) || minutesToTime(timeToMinutes(startHm) + catalogueDuration);
+
+      linkedProcessingSnapshot = snapshotProcessingTimeBlocksFromCatalog({
+        service: {
+          processing_time_blocks: parseProcessingTimeBlocksFromDb(ownerServiceRow.processing_time_blocks),
+        },
+        variant: null,
+      });
+
+      const intervalCheck = await validateAppointmentModificationInterval({
+        admin,
+        venueId: input.ownerVenueId,
+        // No booking to exclude yet: this is a create.
+        bookingId: '00000000-0000-0000-0000-000000000000',
+        newDate: input.bookingDate,
+        timeStr: startHm,
+        practId: input.practitionerId,
+        svcId: input.appointmentServiceId,
+        bookingEndTime: endHm,
+        processingTimeBlocksOverride: linkedProcessingSnapshot,
+      });
+      if (!intervalCheck.ok) {
+        return NextResponse.json(
+          { error: intervalCheck.reason ?? 'That time is not available on the linked calendar.' },
+          { status: 409 },
+        );
+      }
+    }
+
     const { data: created, error: rpcError } = await admin.rpc('linked_apply_booking_insert', {
       p_actor_user_id: user?.id ?? null,
       p_acting_venue_id: staff.venue_id,
@@ -328,13 +386,15 @@ export async function POST(request: NextRequest) {
         booking_date: input.bookingDate,
         booking_time: input.bookingTime,
         booking_end_time: input.bookingEndTime ?? '',
+        processing_time_blocks: linkedProcessingSnapshot,
         // Staff-recorded, not an online self-booking: without this the RPC
         // defaults to 'online' and reports misattribute cross-venue creates.
         source: 'phone',
         party_size: input.partySize ?? 1,
         practitioner_id: ownerUsesUnified ? '' : input.practitionerId ?? '',
         calendar_id: ownerUsesUnified ? input.practitionerId ?? '' : '',
-        appointment_service_id: input.appointmentServiceId ?? '',
+        appointment_service_id: ownerUsesUnified ? '' : input.appointmentServiceId ?? '',
+        service_item_id: ownerUsesUnified ? input.appointmentServiceId ?? '' : '',
         special_requests: input.specialRequests ?? null,
       },
     });

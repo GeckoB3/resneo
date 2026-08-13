@@ -19,10 +19,11 @@ import type { AvailabilityBlock } from '@/types/availability';
 import {
   attachVenueClockToAppointmentInput,
   computeAppointmentAvailability,
-  resolveEngineBookingProcessingBlocks,
+  mapRowToAppointmentBooking,
   validateAppointmentCustomInterval,
   type AppointmentBooking,
   type AppointmentEngineInput,
+  type EngineBookingRow,
   type PractitionerCalendarBlockedRange,
 } from '@/lib/availability/appointment-engine';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
@@ -37,8 +38,11 @@ import {
   mapCalendarToResource,
   mergedResourceEffectiveRangesForHost,
 } from '@/lib/availability/resource-booking-engine';
-import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveInstructorCalendarIdForClass } from '@/lib/class-instances/instructor-calendar-block';
+import {
+  fetchModelOwnedBlockSources,
+  type ModelOwnedBlockSources,
+} from '@/lib/availability/blocked-range-models';
 import {
   DEFAULT_ENTITY_BOOKING_WINDOW,
   type EntityBookingWindow,
@@ -166,6 +170,14 @@ export function mapServiceItemToAppointmentService(raw: Record<string, unknown>,
   };
 }
 
+/**
+ * Shares the day view's row mapper on purpose. This was a third copy that had
+ * drifted: it never read `booking_end_time`, so occupancy came from the
+ * catalogue duration alone. A booking resized to three hours still consumed one
+ * hour in the month picker, which painted the date green and then handed the
+ * guest a day view that offered nothing in that window (and the reverse hid
+ * dates that were genuinely bookable).
+ */
 function bookingRowsToAppointmentBookings(
   rows: Record<string, unknown>[],
   servicesForBookings: Map<string, AppointmentService>,
@@ -173,57 +185,51 @@ function bookingRowsToAppointmentBookings(
   fallbackPractitionerId: string,
   variantBlocksById: Map<string, ProcessingTimeBlock[]>,
 ): AppointmentBooking[] {
-  return rows.map((b) => {
-    const practitionerId = ((b.practitioner_id as string | null) ?? (b.calendar_id as string | null) ?? fallbackPractitionerId);
-    const serviceId = ((b.service_item_id as string | null) ?? (b.appointment_service_id as string | null));
-    const service = serviceId ? servicesForBookings.get(serviceId) : null;
-    const practitionerService = serviceId
-      ? practitionerServices.find((row) => row.practitioner_id === practitionerId && row.service_id === serviceId)
-      : undefined;
-    const merged = service ? mergeAppointmentServiceWithPractitionerLink(service, practitionerService) : null;
-    const variantId = b.service_variant_id as string | null | undefined;
-    const variantBl = variantId ? variantBlocksById.get(variantId) : undefined;
-    const processingBlocks = resolveEngineBookingProcessingBlocks({
-      snapshotRaw: b.processing_time_blocks,
-      mergedService: merged,
-      variantBlocks: variantBl,
-    });
-    return {
-      id: b.id as string,
-      practitioner_id: practitionerId,
-      booking_time: String(b.booking_time ?? '00:00').slice(0, 5),
-      duration_minutes: merged?.duration_minutes ?? 30,
-      buffer_minutes: merged?.buffer_minutes ?? 0,
-      processing_time_minutes: merged?.processing_time_minutes ?? 0,
-      processing_time_blocks: processingBlocks,
-      status: b.status as string,
-    };
-  });
+  return rows.map((b) =>
+    mapRowToAppointmentBooking({
+      row: b as unknown as EngineBookingRow,
+      serviceMap: servicesForBookings,
+      practitionerServices,
+      variantBlocksById,
+      forPractitionerId: fallbackPractitionerId,
+    }),
+  );
 }
 
+/**
+ * Month-wide twin of `fetchScheduledSessionBlocksForCalendar`. `sources` gates classes and
+ * events independently, for the same reason and on the same required-parameter terms: the
+ * month view greys out days, so leaving a disabled model blocking here would hide dates the
+ * day view then offers.
+ */
 async function fetchScheduledSessionBlocksForCalendarMonth(
   supabase: SupabaseClient,
   venueId: string,
   calendarId: string,
   monthStart: string,
   monthEnd: string,
+  sources: Pick<ModelOwnedBlockSources, 'classes' | 'events'>,
 ): Promise<Map<string, PractitionerCalendarBlockedRange[]>> {
   const result = new Map<string, PractitionerCalendarBlockedRange[]>();
 
   const [eventsRes, typeRowsRes] = await Promise.all([
-    supabase
-      .from('experience_events')
-      .select('event_date, start_time, end_time')
-      .eq('venue_id', venueId)
-      .eq('calendar_id', calendarId)
-      .gte('event_date', monthStart)
-      .lte('event_date', monthEnd)
-      .eq('is_active', true),
-    supabase
-      .from('class_types')
-      .select('id, duration_minutes, instructor_id')
-      .eq('venue_id', venueId)
-      .eq('is_active', true),
+    sources.events
+      ? supabase
+          .from('experience_events')
+          .select('event_date, start_time, end_time')
+          .eq('venue_id', venueId)
+          .eq('calendar_id', calendarId)
+          .gte('event_date', monthStart)
+          .lte('event_date', monthEnd)
+          .eq('is_active', true)
+      : Promise.resolve({ data: [], error: null }),
+    sources.classes
+      ? supabase
+          .from('class_types')
+          .select('id, duration_minutes, instructor_id')
+          .eq('venue_id', venueId)
+          .eq('is_active', true)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (!eventsRes.error) {
@@ -358,12 +364,20 @@ export async function computeAppointmentAvailableDatesInMonth(
       ? isStaffWalkInBookingDateAllowed(iso, bookingWindow, tz)
       : isGuestBookingDateAllowed(iso, bookingWindow, tz);
 
-  const { data: unifiedCalendarRow } = await supabase
-    .from('unified_calendars')
-    .select('*')
-    .eq('venue_id', venueId)
-    .eq('id', practitionerId)
-    .maybeSingle();
+  /**
+   * Resolved from `venues` directly rather than off `venueClockRow`, which a caller may
+   * supply prefetched and without these columns. A partial row resolves to a different
+   * model set, which would silently unblock windows that should still block.
+   */
+  const [{ data: unifiedCalendarRow }, blockSources] = await Promise.all([
+    supabase
+      .from('unified_calendars')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('id', practitionerId)
+      .maybeSingle(),
+    fetchModelOwnedBlockSources(supabase, venueId),
+  ]);
 
   const inputForDate = unifiedCalendarRow
     ? await buildUnifiedCalendarMonthInputFactory({
@@ -374,6 +388,7 @@ export async function computeAppointmentAvailableDatesInMonth(
         monthStart,
         monthEnd,
         venueClockRow,
+        blockSources,
       })
     : await buildLegacyPractitionerMonthInputFactory({
         supabase,
@@ -383,6 +398,7 @@ export async function computeAppointmentAvailableDatesInMonth(
         monthStart,
         monthEnd,
         venueClockRow,
+        blockSources,
       });
 
   const availableDates: string[] = [];
@@ -439,6 +455,7 @@ async function buildLegacyPractitionerMonthInputFactory({
   monthStart,
   monthEnd,
   venueClockRow,
+  blockSources,
 }: {
   supabase: SupabaseClient;
   venueId: string;
@@ -447,6 +464,7 @@ async function buildLegacyPractitionerMonthInputFactory({
   monthStart: string;
   monthEnd: string;
   venueClockRow: VenueClockRow;
+  blockSources: ModelOwnedBlockSources;
 }): Promise<(date: string) => AppointmentEngineInput> {
   const practitionerQuery = supabase
     .from('practitioners')
@@ -480,7 +498,7 @@ async function buildLegacyPractitionerMonthInputFactory({
     supabase
       .from('bookings')
       .select(
-        'id, practitioner_id, calendar_id, booking_date, booking_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
+        'id, practitioner_id, calendar_id, booking_date, booking_time, booking_end_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
       )
       .eq('venue_id', venueId)
       .gte('booking_date', monthStart)
@@ -509,7 +527,7 @@ async function buildLegacyPractitionerMonthInputFactory({
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
       .lte('date_start', monthEnd)
       .gte('date_end', monthStart),
-    fetchScheduledSessionBlocksForCalendarMonth(supabase, venueId, practitionerId, monthStart, monthEnd),
+    fetchScheduledSessionBlocksForCalendarMonth(supabase, venueId, practitionerId, monthStart, monthEnd, blockSources),
   ]);
 
   const practitioners = (practitionersRes.data ?? []) as Practitioner[];
@@ -625,6 +643,7 @@ async function buildUnifiedCalendarMonthInputFactory({
   monthStart,
   monthEnd,
   venueClockRow,
+  blockSources,
 }: {
   supabase: SupabaseClient;
   venueId: string;
@@ -633,6 +652,7 @@ async function buildUnifiedCalendarMonthInputFactory({
   monthStart: string;
   monthEnd: string;
   venueClockRow: VenueClockRow;
+  blockSources: ModelOwnedBlockSources;
 }): Promise<(date: string) => AppointmentEngineInput> {
   const calendarId = calendarRow.id as string;
   const practitioner = unifiedCalendarRowToPractitioner(calendarRow);
@@ -690,7 +710,7 @@ async function buildUnifiedCalendarMonthInputFactory({
     supabase
       .from('bookings')
       .select(
-        'id, practitioner_id, calendar_id, booking_date, booking_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
+        'id, practitioner_id, calendar_id, booking_date, booking_time, booking_end_time, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, status',
       )
       .eq('venue_id', venueId)
       .gte('booking_date', monthStart)
@@ -733,7 +753,7 @@ async function buildUnifiedCalendarMonthInputFactory({
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
       .lte('date_start', monthEnd)
       .gte('date_end', monthStart),
-    fetchScheduledSessionBlocksForCalendarMonth(supabase, venueId, calendarId, monthStart, monthEnd),
+    fetchScheduledSessionBlocksForCalendarMonth(supabase, venueId, calendarId, monthStart, monthEnd, blockSources),
   ]);
 
   const monthVariantIdsCal = [
@@ -784,11 +804,15 @@ async function buildUnifiedCalendarMonthInputFactory({
       .map((row) => parseMinuteRange(row as { start_time?: string | null; end_time?: string | null }))
       .filter((range): range is { start: number; end: number } => Boolean(range))
       .map((range) => ({ practitioner_id: calendarId, ...range }));
-    const resourceHostBlocks = mergedResourceEffectiveRangesForHost(siblingResources, date).map((range) => ({
-      practitioner_id: calendarId,
-      start: range.start,
-      end: range.end,
-    }));
+    /** With the resource model off these windows must not grey out a day; see `blocked-range-models.ts`. */
+    const resourceHostBlocks = blockSources.resources
+      ? mergedResourceEffectiveRangesForHost(siblingResources, date).map((range) => ({
+          practitioner_id: calendarId,
+          start: range.start,
+          end: range.end,
+          kind: 'resource' as const,
+        }))
+      : [];
 
     return {
       date,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
+import { MIN_CORE_DURATION_MINUTES, resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
 
 describe('resolveBookingCoreDurationMinutes', () => {
   it('uses the wall-clock end when the row has one', () => {
@@ -41,13 +41,24 @@ describe('resolveBookingCoreDurationMinutes', () => {
     ).toBe(60);
   });
 
-  it('never returns less than the engine minimum', () => {
+  it('reports a genuinely short appointment at its real length', () => {
+    // This clamped to 15 while the engine allowed 5, so opening a 5 minute
+    // booking in the modify form silently proposed tripling it.
     expect(
       resolveBookingCoreDurationMinutes({
         booking_time: '11:15',
         booking_end_time: '11:20',
       }),
-    ).toBe(15);
+    ).toBe(5);
+  });
+
+  it('never returns less than the engine minimum', () => {
+    expect(
+      resolveBookingCoreDurationMinutes({
+        booking_time: '11:15',
+        booking_end_time: '11:17',
+      }),
+    ).toBe(MIN_CORE_DURATION_MINUTES);
   });
 
   it('returns null when the row carries no end time (never a made-up default)', () => {

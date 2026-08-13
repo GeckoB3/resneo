@@ -20,6 +20,8 @@ import {
   fetchAppointmentInput,
   validateAppointmentCustomInterval,
   type PhantomBooking,
+  MAX_APPOINTMENT_CORE_DURATION_MINUTES,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
 import {
   buildAnyAvailableAvailabilityPayload,
@@ -583,8 +585,14 @@ async function handleAppointmentAvailability(
   const durationParam = searchParams.get('duration_minutes');
   const waitlistOfferId = searchParams.get('waitlist_offer');
   const excludeBookingId = searchParams.get('exclude_booking_id') ?? undefined;
-  let skipPastSlotFilter =
-    searchParams.get('skip_past_slots') === '1' || searchParams.get('skip_past_slots') === 'true';
+  /**
+   * Only a validated waitlist offer may surface past slots (see below). This was
+   * taken straight from the query string on a public, unauthenticated route, so
+   * anyone could ask for slots the venue does not actually offer. Booking one
+   * still failed at create, which re-checks availability, so the effect was a
+   * confusing "no longer available" at checkout rather than a real bypass.
+   */
+  let skipPastSlotFilter = false;
 
   if (waitlistOfferId) {
     const offer = await loadActiveWaitlistOfferForGuestAccess(supabase, waitlistOfferId, venueId);
@@ -594,7 +602,9 @@ async function handleAppointmentAvailability(
   }
 
   const customDurationMinutes = durationParam ? parseInt(durationParam, 10) : null;
-  if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) || customDurationMinutes < 15 || customDurationMinutes > 14 * 60)) {
+  if (customDurationMinutes != null && (!Number.isInteger(customDurationMinutes) ||
+      customDurationMinutes < MIN_APPOINTMENT_CORE_DURATION_MINUTES ||
+      customDurationMinutes > MAX_APPOINTMENT_CORE_DURATION_MINUTES)) {
     return NextResponse.json({ error: 'Invalid duration_minutes' }, { status: 400 });
   }
 

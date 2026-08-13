@@ -45,12 +45,19 @@ export interface BookingListRowSeed {
 export function bookingDisplayEndHm(
   row: Pick<BookingListRowSeed, 'booking_time' | 'booking_end_time' | 'estimated_end_time'>,
 ): string | null {
-  const wallEnd = row.booking_end_time?.trim()
-    ? row.booking_end_time.slice(0, 5)
-    : row.estimated_end_time
-      ? new Date(row.estimated_end_time).toISOString().slice(11, 16)
-      : '';
-  return /^\d{2}:\d{2}$/.test(wallEnd) ? wallEnd : null;
+  if (row.booking_end_time?.trim()) {
+    const wall = row.booking_end_time.slice(0, 5);
+    return /^\d{2}:\d{2}$/.test(wall) ? wall : null;
+  }
+  if (!row.estimated_end_time) return null;
+  // Guarded like its siblings in `booking-core-duration` and
+  // `group-visit-bookings`. Unguarded, `toISOString()` THROWS on an unparseable
+  // value, which is reachable from optimistic client state and from the
+  // linked-venue payload rather than only from a `timestamptz` read.
+  const parsed = new Date(row.estimated_end_time);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const iso = parsed.toISOString().slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(iso) ? iso : null;
 }
 
 function endTimeFromRow(row: BookingListRowSeed): string {

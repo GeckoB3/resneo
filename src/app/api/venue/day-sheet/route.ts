@@ -98,11 +98,28 @@ function timeStr(t: string): string {
   return typeof t === 'string' ? t.slice(0, 5) : '12:00';
 }
 
+/**
+ * Venue-local `HH:mm` end for a booking, preferring the wall-clock column that
+ * every other schedule surface prefers. `estimated_end_time` is an ISO
+ * timestamptz whose time part carries the same wall clock (creates encode it
+ * that way), so its `HH:mm` is read out of the ISO string rather than sliced off
+ * the front of it.
+ */
+function dayshiftEndHm(bookingEndTime: unknown, estimatedEndTime: unknown): string | null {
+  if (typeof bookingEndTime === 'string' && bookingEndTime.trim().length >= 5) {
+    return bookingEndTime.slice(0, 5);
+  }
+  if (typeof estimatedEndTime === 'string' && estimatedEndTime.includes('T')) {
+    return estimatedEndTime.slice(11, 16);
+  }
+  return null;
+}
+
 const ACTIVE_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
 /** Narrow select for day-sheet list (avoid `*` payload). */
 const DAY_SHEET_BOOKING_SELECT =
-  'id, booking_time, estimated_end_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, special_requests, internal_notes, occasion, guest_id, created_at, booking_date, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest_attendance_confirmed_at, staff_attendance_confirmed_at, client_arrived_at, service_id, area_id';
+  'id, booking_time, booking_end_time, estimated_end_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, special_requests, internal_notes, occasion, guest_id, created_at, booking_date, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest_attendance_confirmed_at, staff_attendance_confirmed_at, client_arrived_at, service_id, area_id';
 
 /**
  * GET /api/venue/day-sheet?date=YYYY-MM-DD
@@ -163,7 +180,13 @@ export async function GET(request: NextRequest) {
     const allBookings: DaySheetBookingRow[] = (bookingRows ?? []).map((b: Record<string, unknown>) => ({
       id: b.id as string,
       booking_time: timeStr(b.booking_time as string),
-      estimated_end_time: b.estimated_end_time ? timeStr(b.estimated_end_time as string) : null,
+      /**
+       * `estimated_end_time` is a timestamptz, so slicing it as if it were a
+       * `time` produced the literal string "2026-" for every booking, which made
+       * the "freeing up soon" count permanently zero. Prefer the wall-clock
+       * column and fall back to the ISO one's time part.
+       */
+      estimated_end_time: dayshiftEndHm(b.booking_end_time, b.estimated_end_time),
       party_size: b.party_size as number,
       status: b.status as string,
       source: (b.source as string) ?? 'Phone',

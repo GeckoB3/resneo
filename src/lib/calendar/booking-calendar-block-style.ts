@@ -63,9 +63,20 @@ export function bookingCalendarBlockPaletteForDisplayRow(
   return bookingCalendarBlockPaletteWithOverlay(row, overlay);
 }
 
+/**
+ * Ring drawn for the post-action flash.
+ *
+ * It has to be part of THIS inline `boxShadow`, not a Tailwind `ring-*` class.
+ * `ring` is itself a box-shadow utility, and an inline style always beats a
+ * class, so the flash ring on the calendar bars never painted at all: the bar
+ * just faded to half opacity and back, which reads as flickering rather than
+ * "look here". Inset so an `overflow-hidden` ancestor cannot clip it.
+ */
+const BOOKING_BLOCK_FLASH_RING = 'inset 0 0 0 2px rgba(56,189,248,0.90)';
+
 export function bookingCalendarBlockCardStyle(
   p: BookingBlockPalette,
-  opts: { linked?: boolean } = {},
+  opts: { linked?: boolean; flash?: boolean } = {},
 ): CSSProperties {
   if (opts.linked) {
     // Linked (other-venue) cards must be instantly distinct from own-venue cards
@@ -85,6 +96,7 @@ export function bookingCalendarBlockCardStyle(
       borderWidth: 1,
       borderColor: p.border,
       boxShadow: [
+        ...(opts.flash ? [BOOKING_BLOCK_FLASH_RING] : []),
         'inset 0 1px 0 rgba(255,255,255,0.28)',
         '0 1px 2px rgba(15,23,42,0.10)',
         '0 12px 24px -14px rgba(2,32,71,0.40)',
@@ -104,6 +116,7 @@ export function bookingCalendarBlockCardStyle(
     borderWidth: 1,
     borderColor: p.border,
     boxShadow: [
+      ...(opts.flash ? [BOOKING_BLOCK_FLASH_RING] : []),
       'inset 0 1px 0 rgba(255,255,255,0.30)', // glossy top edge
       'inset 0 -1px 0 rgba(0,0,0,0.12)', // grounded base edge
       '0 1px 2px rgba(15,23,42,0.10)', // tight contact shadow

@@ -430,6 +430,8 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
         group_booking_id: 'grp-1',
         booking_total_price_pence: 900,
         service_variant_id: 'sv1',
+        service_name_snapshot: 'Colour',
+        service_variant_name_snapshot: 'Full head',
         service_item_id: 'si1',
         appointment_service_id: 'as1',
         calendar_id: 'cal1',
@@ -446,6 +448,8 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
       group_booking_id: 'grp-1',
       booking_total_price_pence: 900,
       service_variant_id: 'sv1',
+      service_name_snapshot: 'Colour',
+      service_variant_name_snapshot: 'Full head',
       service_item_id: 'si1',
       appointment_service_id: 'as1',
       calendar_id: 'cal1',
@@ -582,6 +586,95 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
       // 6000 variant + 500 add-ons
       { booking_id: 'b2', name: 'Colour', total_pence: 6500 },
     ]);
+  });
+
+  it('labels visit lines with the service name when the services have no options', async () => {
+    // Regression: names were resolved from `service_variants` alone, so a visit
+    // built from plain services came back with every line null and the price
+    // breakdown listed each one as the literal word "Service".
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            {
+              id: 'b1',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: null,
+              service_name_snapshot: 'Blow dry',
+              booking_total_price_pence: 2500,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: null,
+              service_name_snapshot: "Child's haircut",
+              booking_total_price_pence: 2000,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, {
+      ...anchor,
+      group_booking_id: 'grp-1',
+      booking_total_price_pence: 2500,
+    });
+    expect(visit.lines).toEqual([
+      { booking_id: 'b1', name: 'Blow dry', total_pence: 2500 },
+      { booking_id: 'b2', name: "Child's haircut", total_pence: 2000 },
+    ]);
+  });
+
+  it('prefers the option name over the service name, and the snapshot over the live one', async () => {
+    const { admin } = makeAdmin((call) => {
+      if (call.table === 'bookings') {
+        return {
+          data: [
+            {
+              id: 'b1',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv1',
+              service_name_snapshot: 'Colour',
+              service_variant_name_snapshot: 'Full head',
+              booking_total_price_pence: 9000,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+            {
+              id: 'b2',
+              venue_id: 'v1',
+              group_booking_id: 'grp-1',
+              service_variant_id: 'sv2',
+              service_name_snapshot: 'Cut',
+              booking_total_price_pence: 3000,
+              deposit_status: 'Not Required',
+              deposit_amount_pence: null,
+            },
+          ],
+        };
+      }
+      if (call.table === 'service_variants') {
+        // Renamed in the catalogue since booking; the snapshot must still win.
+        return { data: [{ id: 'sv1', price_pence: 9000, name: 'Full head (renamed)' }] };
+      }
+      if (call.table === 'booking_payments') return { data: [] };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const visit = await loadVisitPaymentPicture(admin, {
+      ...anchor,
+      group_booking_id: 'grp-1',
+      booking_total_price_pence: 9000,
+    });
+    expect(visit.lines.map((l) => l.name)).toEqual(['Full head', 'Cut']);
   });
 
   it('keeps the single-query fast path for a standalone booking with a known price', async () => {

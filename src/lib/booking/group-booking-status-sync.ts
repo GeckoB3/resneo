@@ -9,9 +9,10 @@ export type GroupBookingStatusRow = {
   calendar_id?: string | null;
   deposit_status?: string | null;
   guest_id: string;
+  person_label?: string | null;
 };
 
-/** Rows in the same multi-service visit (`group_booking_id`). */
+/** Every row sharing a `group_booking_id`, whatever kind of group it is. */
 export async function loadGroupBookingSiblings(
   db: SupabaseClient,
   venueId: string,
@@ -19,7 +20,7 @@ export async function loadGroupBookingSiblings(
 ): Promise<GroupBookingStatusRow[]> {
   const { data, error } = await db
     .from('bookings')
-    .select('id, status, practitioner_id, calendar_id, deposit_status, guest_id')
+    .select('id, status, practitioner_id, calendar_id, deposit_status, guest_id, person_label')
     .eq('venue_id', venueId)
     .eq('group_booking_id', groupBookingId);
 
@@ -28,6 +29,34 @@ export async function loadGroupBookingSiblings(
     return [];
   }
   return (data ?? []) as GroupBookingStatusRow[];
+}
+
+/**
+ * The group id to CASCADE a status change across, or null when there is nothing
+ * to cascade.
+ *
+ * `group_booking_id` links two different things. A MULTI-SERVICE VISIT is one
+ * guest booked into consecutive services, every row with a null `person_label`;
+ * cascading there is right, because it is one visit. A GROUP BOOKING is several
+ * distinct people, each with a `person_label`, often on different calendars at
+ * different times; cascading there was wrong and expensive, because marking one
+ * attendee a no-show flipped every other attendee to no-show and forfeited their
+ * paid deposits.
+ *
+ * Returning null for a group booking makes the caller fall through to its
+ * ordinary single-row path, which is the correct treatment for one attendee. The
+ * read side already drew this distinction ({@link isMultiServiceVisitGroup} in
+ * `booking-list-row-schedule`); it had simply never reached the API.
+ */
+export async function resolveCascadingVisitGroupId(
+  db: SupabaseClient,
+  venueId: string,
+  groupBookingId: string | null | undefined,
+): Promise<string | null> {
+  if (!groupBookingId) return null;
+  const rows = await loadGroupBookingSiblings(db, venueId, groupBookingId);
+  if (rows.length <= 1) return null;
+  return rows.every((r) => !r.person_label?.trim()) ? groupBookingId : null;
 }
 
 /**

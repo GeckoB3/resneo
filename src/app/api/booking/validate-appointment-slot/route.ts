@@ -21,6 +21,10 @@ import {
   loadActiveWaitlistOfferForGuestAccess,
   validateBookingAgainstWaitlistOffer,
 } from '@/lib/booking/validate-waitlist-offer-access';
+import {
+  isCollectiveId,
+  resolveCombinedBookingTarget,
+} from '@/lib/linked-accounts/collective-booking-bridge';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -54,8 +58,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid request' }, { status: 400 });
     }
 
-    const { venue_id, booking_date, practitioner_id, service_id, variant_id, start_time, phantoms, waitlist_offer_id, addons } = parsed.data;
+    const { booking_date, practitioner_id, variant_id, start_time, phantoms, waitlist_offer_id, addons } = parsed.data;
+    let { venue_id, service_id } = parsed.data;
     const supabase = getSupabaseAdminClient();
+
+    /**
+     * Combined booking page (plan §22): the customer flow targets the synthetic
+     * collective venue, so `venue_id` IS the collective id and `service_id` is an
+     * OFFERING id, neither of which exists in `venues` / the owner's catalogue.
+     *
+     * Every other route on that journey resolves this (`appointment-catalog`,
+     * `appointment-calendar`, `availability`, `create`, `create-multi-service`);
+     * this one did not, so `resolveVenueMode` found no venue and answered "Not an
+     * appointment venue". That broke "Add another service" on every combined
+     * page, and with it the confirm step, because `validateMultiServiceChain`
+     * calls this endpoint once per segment.
+     */
+    let collectiveDurationOverride: number | null = null;
+    if (await isCollectiveId(supabase, venue_id)) {
+      const target = await resolveCombinedBookingTarget(supabase, {
+        collectiveId: venue_id,
+        offeringId: service_id,
+        calendarId: practitioner_id,
+      });
+      if (!target) {
+        return NextResponse.json(
+          { ok: false, error: 'This booking option is no longer available.' },
+          { status: 409 },
+        );
+      }
+      venue_id = target.venueId;
+      service_id = target.sourceServiceId;
+      // The collective may sell the offering at its own length; reserve that, not
+      // the source service's, or the slot is checked against the wrong span.
+      collectiveDurationOverride = target.durationMinutes;
+    }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
     if (
@@ -108,6 +145,21 @@ export async function POST(request: NextRequest) {
       serviceId: service_id,
     });
     input.phantomBookings = (phantoms ?? []) as PhantomBooking[];
+
+    /**
+     * Applied before the variant and add-on adjustments below, mirroring the
+     * create route: the collective's effective duration replaces the source
+     * service's, and anything chosen on top of it still stacks.
+     */
+    if (collectiveDurationOverride != null) {
+      const idx = input.services.findIndex((s) => s.id === service_id);
+      if (idx >= 0) {
+        input.services[idx] = {
+          ...input.services[idx]!,
+          duration_minutes: collectiveDurationOverride,
+        };
+      }
+    }
 
     if (variant_id) {
       const variant = await loadActiveVariantForService({

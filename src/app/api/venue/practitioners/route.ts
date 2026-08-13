@@ -174,7 +174,31 @@ const optionalEmail = z.preprocess(
   z.string().email().optional(),
 );
 
-const timeRangeArraySchema = z.array(z.object({ start: z.string(), end: z.string() }));
+/** `HH:mm` or `HH:mm:ss`, as the working-hours and break editors emit. */
+const clockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Use a time like 09:00');
+
+function minutesOfDay(hhmm: string): number {
+  return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+}
+
+/**
+ * A range must END AFTER it starts.
+ *
+ * Nothing validated this, and the appointment engine has no midnight wrap, so a
+ * calendar saved as 20:00 to 02:00 produced a silently EMPTY diary: no slots, no
+ * error, and "Outside working hours" on every attempt to book. Rejecting at save
+ * time is the honest answer until the engine genuinely supports overnight
+ * shifts; a venue working past midnight should split the shift into two ranges
+ * (20:00 to 23:59 and 00:00 to 02:00 on the following day).
+ */
+const timeRangeSchema = z
+  .object({ start: clockTime, end: clockTime })
+  .refine((r) => minutesOfDay(r.end) > minutesOfDay(r.start), {
+    message:
+      'End time must be after start time. For a shift that runs past midnight, add a second range on the next day.',
+  });
+
+const timeRangeArraySchema = z.array(timeRangeSchema);
 
 const practitionerSchema = z.object({
   name: z.string().min(1).max(200),
@@ -183,7 +207,7 @@ const practitionerSchema = z.object({
   /** Public URL segment: /book/{venue-slug}/{slug} - lowercase, numbers, hyphens; empty clears */
   slug: z.string().max(64).nullable().optional(),
   working_hours: z.record(z.string(), timeRangeArraySchema).optional(),
-  break_times: z.array(z.object({ start: z.string(), end: z.string() })).optional(),
+  break_times: timeRangeArraySchema.optional(),
   /** Non-null object = per-weekday breaks; null clears to “same every day” mode (uses break_times). */
   break_times_by_day: z.record(z.string(), timeRangeArraySchema).nullable().optional(),
   days_off: z.array(z.string()).optional(),

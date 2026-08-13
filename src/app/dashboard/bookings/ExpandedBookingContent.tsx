@@ -112,6 +112,7 @@ import {
   resolveVisitPillAnchorStatus,
   type GroupVisitBookingRow,
 } from '@/lib/booking/group-visit-bookings';
+import { resolveAppointmentVisit } from '@/lib/booking/appointment-visit';
 
 export type { GroupVisitBookingRow } from '@/lib/booking/group-visit-bookings';
 import {
@@ -1173,12 +1174,28 @@ export function ExpandedBookingContent({
 
   // When the booking runs. The calendar bar and the list row both show this, but the panel itself
   // did not, so a staff member reading the detail had to close it again to check the time.
-  const bookingStartHm = effectiveBooking.booking_time?.slice(0, 5) ?? null;
-  const bookingEndHm = bookingDisplayEndHm({
-    booking_time: effectiveBooking.booking_time,
-    booking_end_time: effectiveBooking.booking_end_time ?? null,
-    estimated_end_time: effectiveBooking.estimated_end_time ?? null,
-  });
+  /**
+   * A multi-service visit reports the WHOLE visit's span, not the segment that
+   * happened to be clicked. Opening the third service of a three service visit
+   * showed "10:00-11:00" for a booking that actually ran to 12:15, and the
+   * modify form inherited the same single-segment view.
+   */
+  const visitSpan = useMemo(
+    () => (multiServiceVisitSegments.length > 1
+      ? resolveAppointmentVisit(multiServiceVisitSegments)
+      : null),
+    [multiServiceVisitSegments],
+  );
+
+  const bookingStartHm =
+    visitSpan?.startHm ?? effectiveBooking.booking_time?.slice(0, 5) ?? null;
+  const bookingEndHm =
+    visitSpan?.endHm ??
+    bookingDisplayEndHm({
+      booking_time: effectiveBooking.booking_time,
+      booking_end_time: effectiveBooking.booking_end_time ?? null,
+      estimated_end_time: effectiveBooking.estimated_end_time ?? null,
+    });
 
   const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [];
 
@@ -1190,6 +1207,51 @@ export function ExpandedBookingContent({
           <span className="font-medium text-slate-500">Time</span>
           <span className="font-semibold tabular-nums text-slate-800">
             {bookingEndHm ? `${bookingStartHm}–${bookingEndHm}` : bookingStartHm}
+          </span>
+        </span>
+      ),
+    });
+  }
+
+  /**
+   * A visit's header carries its total duration and the services it is made of, so the
+   * panel answers "how long is this and what is in it" without scrolling to the
+   * breakdown below. The duration is the wall-clock span, matching the single control
+   * the visit is edited by, not the sum of the services (those differ whenever a
+   * service's buffer or processing gap sits between two of them).
+   */
+  if (visitSpan) {
+    bookingMetaSegments.push({
+      key: 'visit-duration',
+      node: (
+        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+          <span className="font-medium text-slate-500">Duration</span>
+          <span className="font-semibold tabular-nums text-slate-800">
+            {formatDurationMinutesLabel(visitSpan.totalMinutes)}
+          </span>
+        </span>
+      ),
+    });
+  }
+
+  if (visitSpan && multiServiceVisitSegmentsForDisplay.length > 0) {
+    const visitServiceNames = multiServiceVisitSegmentsForDisplay.map(
+      (seg) =>
+        expandedBookingOfferingLine({
+          serviceName: seg.booking_item_name,
+          variantName: seg.service_variant_name,
+          addonLabels: seg.booking_addon_labels,
+        }) ?? 'Service',
+    );
+    bookingMetaSegments.push({
+      key: 'visit-services',
+      node: (
+        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
+          <span className="font-medium text-slate-500">
+            {visitServiceNames.length === 1 ? 'Service' : 'Services'}
+          </span>
+          <span className="break-words font-semibold text-slate-800 [overflow-wrap:anywhere]">
+            {visitServiceNames.join(', ')}
           </span>
         </span>
       ),
@@ -2280,6 +2342,24 @@ export function ExpandedBookingContent({
           tableManagementEnabled={tableManagementEnabled}
           linkedAct={linkedAct}
           booking={booking}
+          /**
+           * A multi-service visit is modified as one booking: the clicked row is
+           * one service of it, and editing that row alone is what left a hole in
+           * the reported visit.
+           */
+          visit={
+            resolvedGroupBookingId && multiServiceVisitSegments.length > 1
+              ? {
+                  groupBookingId: resolvedGroupBookingId,
+                  segments: multiServiceVisitSegments.map((seg) => ({
+                    id: seg.id,
+                    booking_time: seg.booking_time,
+                    booking_end_time: seg.booking_end_time,
+                    booking_item_name: seg.booking_item_name,
+                  })),
+                }
+              : null
+          }
           detail={
             activeDetail
               ? {

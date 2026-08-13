@@ -7,7 +7,10 @@ import {
   ModifyTableBookingModal,
   expandedRowToEditSnapshot,
 } from '@/components/booking/ModifyTableBookingModal';
-import { StaffAppointmentModifyForm } from '@/components/booking/StaffAppointmentModifyForm';
+import {
+  StaffAppointmentModifyForm,
+  type StaffVisitModifySegment,
+} from '@/components/booking/StaffAppointmentModifyForm';
 import { StaffResourceBookingModifyForm } from '@/components/booking/StaffResourceBookingModifyForm';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import type { CountryCode } from 'libphonenumber-js';
@@ -281,6 +284,7 @@ export function StaffExpandedBookingModifyModal({
   booking,
   detail,
   linkedAct,
+  visit,
   focusResourceSlotChange = false,
 }: {
   open: boolean;
@@ -292,6 +296,12 @@ export function StaffExpandedBookingModifyModal({
   booking: StaffExpandedBookingModifySource;
   detail: StaffExpandedBookingModifyDetailLite | undefined;
   linkedAct?: import('@/lib/linked-accounts/types').LinkActionLevel;
+  /**
+   * Every service of this booking's multi-service visit, when it is one. The
+   * appointment form then edits the visit rather than the clicked row, which is
+   * the only row the caller would otherwise hand it.
+   */
+  visit?: { groupBookingId: string; segments: StaffVisitModifySegment[] } | null;
   /** When true, resource bookings open with the slot picker expanded. */
   focusResourceSlotChange?: boolean;
 }) {
@@ -343,9 +353,12 @@ export function StaffExpandedBookingModifyModal({
     );
   }
 
+  const isVisitModify = branch === 'appointment' && (visit?.segments.length ?? 0) > 1;
   const shellTitle =
     branch === 'appointment'
-      ? 'Modify appointment'
+      ? isVisitModify
+        ? 'Modify visit'
+        : 'Modify appointment'
       : branch === 'resource'
         ? 'Modify resource booking'
         : 'Modify booking details';
@@ -378,6 +391,7 @@ export function StaffExpandedBookingModifyModal({
                 booking={booking}
                 ownerVenueId={venueId}
                 catalogOwnerVenueId={catalogOwnerVenueId}
+                visit={visit}
                 onSaved={onSaved}
                 onClose={onClose}
               />

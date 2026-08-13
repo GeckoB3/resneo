@@ -30,6 +30,7 @@ import { computePopoverPanelStyle } from '@/lib/ui/clamped-floating-styles';
 import { isBookingDetailPopoverDismissExempt } from '@/lib/ui/booking-detail-popover-dismiss';
 import { useViewportBounds } from '@/lib/ui/use-viewport-bounds';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { ProcessingTimeTimelineEditor } from '@/components/dashboard/appointment-services/ProcessingTimeTimelineEditor';
 import { formatGuestDisplayName, splitLegacyGuestName } from '@/lib/guests/name';
@@ -198,17 +199,21 @@ export function BookingDetailPanel({
     return isAppointment ? 'cde' : 'table';
   }, [displayDetail?.inferred_booking_model, isAppointment]);
 
+  /**
+   * The booking's own core duration, via the canonical reader so this panel
+   * agrees with the server. Its own arithmetic here lacked the midnight wrap, so
+   * a 23:30 to 00:30 appointment measured as "15 min" and the processing editor
+   * offered a 15-minute timeline that rejected every block on save.
+   */
   const appointmentCoreMinutesForProcessing = useMemo(() => {
     const det = displayDetail;
     if (!det) return 15;
-    const st = det.booking_time?.slice(0, 5) ?? '00:00';
-    const et = endHHMMOrFallback(det.estimated_end_time, st, 90);
-    const durationMins = Math.max(15, timeToMinutes(et) - timeToMinutes(st));
-    const bt = det.booking_end_time;
-    if (typeof bt === 'string' && bt.trim().length >= 5) {
-      return Math.max(15, timeToMinutes(bt.slice(0, 5)) - timeToMinutes(st));
-    }
-    return Math.max(15, durationMins);
+    const resolved = resolveBookingCoreDurationMinutes({
+      booking_time: det.booking_time ?? '00:00',
+      booking_end_time: det.booking_end_time ?? null,
+      estimated_end_time: det.estimated_end_time ?? null,
+    });
+    return Math.max(15, resolved ?? 90);
   }, [displayDetail]);
 
   const guestHistoryRebookPrefill = useMemo((): StaffRebookGuestPrefill | undefined => {
@@ -588,6 +593,27 @@ export function BookingDetailPanel({
 
   const persistProcessingBlocks = useCallback(async () => {
     if (!detail) return;
+    /**
+     * A NULL snapshot means "no per-booking override", and the server and the
+     * calendar both fall back to the SERVICE template for those. The editor
+     * cannot show that (it seeds from the row alone), so it renders an empty
+     * timeline for a booking that really does have a gap. Saving that untouched
+     * empty draft wrote `[]`, which the server treats as an authoritative
+     * "deliberately no gap" and the template gap was destroyed.
+     *
+     * Sending nothing when the draft still matches what was loaded keeps an
+     * accidental save harmless. A staff member who actually edits the timeline
+     * still gets exactly what they asked for.
+     */
+    const loaded = parseProcessingTimeBlocksFromDb(detail.processing_time_blocks);
+    const unchanged =
+      loaded.length === processingBlocksDraft.length &&
+      loaded.every((b, i) => {
+        const d = processingBlocksDraft[i];
+        return d != null && d.start_minute === b.start_minute && d.duration_minutes === b.duration_minutes;
+      });
+    if (unchanged) return;
+
     setActionLoading(true);
     setError(null);
     try {
@@ -834,9 +860,19 @@ export function BookingDetailPanel({
     optimisticTableLabel ??
     (assignedTables.length > 0 ? assignedTables.map((table) => table.name).join(' + ') : null);
   const hasAssignedTable = Boolean(tableLine);
+  /**
+   * Most specific name first: the chosen option, then the service itself.
+   *
+   * Without the service-name fallback a plain service (no options) had nothing
+   * of its own to show and depended entirely on the name seeded from the list
+   * row, so opening the same booking without that seed left the line blank.
+   */
   const serviceLine =
     d.service_variant_name ??
     d.cde_context?.title ??
+    (typeof d.service_name_snapshot === 'string' && d.service_name_snapshot.trim()
+      ? d.service_name_snapshot.trim()
+      : null) ??
     initialSnapshot?.serviceName ??
     null;
   const panelBodySpacing = isPopover ? 'space-y-1.5 p-2' : 'space-y-3 p-4';

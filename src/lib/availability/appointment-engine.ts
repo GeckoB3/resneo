@@ -13,8 +13,8 @@ import type {
   ProcessingTimeBlock,
 } from '@/types/booking-models';
 import {
-  busyIntervalsOverlap,
   effectiveProcessingBlocksForTemplate,
+  fitProcessingBlocksToDuration,
   parseProcessingTimeBlocksFromDb,
   practitionerBusyMinuteOffsets,
   validateProcessingTimeBlocks,
@@ -39,6 +39,10 @@ import type { AvailabilityBlock } from '@/types/availability';
 import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 import { intersectEffectiveRangesWithServiceCustom, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { fetchScheduledSessionBlocksForCalendar } from '@/lib/availability/calendar-session-blocks';
+import {
+  VENUE_BOOKING_MODEL_COLUMNS,
+  blockSourcesFromVenueRow,
+} from '@/lib/availability/blocked-range-models';
 
 // Types
 
@@ -59,9 +63,10 @@ export interface PractitionerCalendarBlockedRange {
   /**
    * Source of the block, used to give a specific conflict reason. Defaults to a generic
    * "Blocked time" when omitted. `scheduled_session` = a class/event on this calendar column;
-   * `leave` = a partial staff-leave window.
+   * `leave` = a partial staff-leave window; `resource` = a bookable resource occupying the
+   * calendar it is displayed on.
    */
-  kind?: 'blocked_time' | 'scheduled_session' | 'leave';
+  kind?: 'blocked_time' | 'scheduled_session' | 'leave' | 'resource';
 }
 
 export interface AppointmentEngineInput {
@@ -224,6 +229,7 @@ function overlaps(startA: number, endA: number, startB: number, endB: number): b
 function blockedRangeReason(kind?: PractitionerCalendarBlockedRange['kind']): string {
   if (kind === 'scheduled_session') return 'Overlaps a scheduled class or event';
   if (kind === 'leave') return 'Staff is on leave at this time';
+  if (kind === 'resource') return 'Overlaps a resource booking';
   return 'Blocked time';
 }
 
@@ -314,29 +320,63 @@ function wallBusyIntervalsForServiceSlot(
   return offsets.map((o) => ({ start: startMin + o.start, end: startMin + o.end }));
 }
 
-function countOverlappingBookings(
+/**
+ * The most bookings running AT ONCE anywhere the candidate would be present.
+ *
+ * `parallel_clients` caps how many clients a calendar handles simultaneously, so
+ * this counts concurrency, not how many rows the candidate happens to touch. The
+ * old count refused a candidate that merely spanned two back-to-back bookings:
+ * with a cap of 2 and bookings at 09:00-10:00 and 10:00-11:00, a 09:30 candidate
+ * touched both and was rejected even though only two clients are ever in the
+ * room at once. That silently cost capacity on every calendar with a cap above 1.
+ *
+ * Each booking contributes at most 1 at any instant, because its own busy
+ * intervals are disjoint (a processing gap splits them but they never overlap).
+ */
+function peakConcurrentBookings(
   bookings: AppointmentBooking[],
+  phantoms: PhantomBooking[],
   candidateBusyWall: Array<{ start: number; end: number }>,
   excludeBookingId?: string,
 ): number {
   const excludeLc = excludeBookingId?.toLowerCase();
-  let n = 0;
+  const busyPerEntity: Array<Array<{ start: number; end: number }>> = [];
   for (const b of bookings) {
     if (excludeLc && b.id.toLowerCase() === excludeLc) continue;
-    if (busyIntervalsOverlap(candidateBusyWall, wallBusyIntervalsForBooking(b))) n++;
+    busyPerEntity.push(wallBusyIntervalsForBooking(b));
   }
-  return n;
-}
-
-function countOverlappingPhantoms(
-  phantoms: PhantomBooking[],
-  candidateBusyWall: Array<{ start: number; end: number }>,
-): number {
-  let n = 0;
   for (const p of phantoms) {
-    if (busyIntervalsOverlap(candidateBusyWall, wallBusyIntervalsForPhantom(p))) n++;
+    busyPerEntity.push(wallBusyIntervalsForPhantom(p));
   }
-  return n;
+
+  // Clip every existing interval to the candidate's own busy span: concurrency
+  // outside the candidate is irrelevant to whether the candidate fits.
+  const events: Array<{ at: number; delta: number }> = [];
+  for (const entity of busyPerEntity) {
+    for (const iv of entity) {
+      for (const c of candidateBusyWall) {
+        const start = Math.max(iv.start, c.start);
+        const end = Math.min(iv.end, c.end);
+        if (start < end) {
+          events.push({ at: start, delta: 1 });
+          events.push({ at: end, delta: -1 });
+        }
+      }
+    }
+  }
+  if (events.length === 0) return 0;
+
+  // Ends before starts at the same instant, matching the half-open intervals
+  // used everywhere else: a booking ending at 11:00 does not overlap one
+  // starting at 11:00.
+  events.sort((a, b) => a.at - b.at || a.delta - b.delta);
+  let current = 0;
+  let peak = 0;
+  for (const ev of events) {
+    current += ev.delta;
+    if (current > peak) peak = current;
+  }
+  return peak;
 }
 
 function parallelCapacityFor(practitioner: Practitioner): number {
@@ -366,15 +406,58 @@ function intersectMinuteRanges(
   return out.sort((x, y) => x.start - y.start);
 }
 
+/** Whole days from `fromYmd` to `toYmd`, negative when `toYmd` is earlier. */
+function wholeDaysBetweenYmd(fromYmd: string, toYmd: string): number {
+  const [fy, fm, fd] = fromYmd.split('-').map(Number);
+  const [ty, tm, td] = toYmd.split('-').map(Number);
+  const from = Date.UTC(fy!, fm! - 1, fd!);
+  const to = Date.UTC(ty!, tm! - 1, td!);
+  return Math.round((to - from) / 86_400_000);
+}
+
+/**
+ * How far ahead a slot is, in venue-local wall-clock minutes.
+ *
+ * The minimum-notice gate used to be written as minutes-since-midnight and
+ * applied only when the requested date WAS today, so it could never express
+ * notice that crosses midnight: a service asking for 48 hours accepted a 09:00
+ * booking made at 23:00 the night before, and above 24 hours the rule was inert
+ * for every date except today. Measuring from the date as well as the clock
+ * makes one comparison work for every date.
+ *
+ * Deliberately wall-clock rather than elapsed real time: a venue promising "48
+ * hours notice" means the calendar, and matching that keeps the rule stable
+ * across a DST boundary.
+ */
+function slotMinutesFromNow(params: {
+  dateStr: string;
+  todayStr: string;
+  slotMinute: number;
+  currentMinute: number;
+}): number {
+  const { dateStr, todayStr, slotMinute, currentMinute } = params;
+  return wholeDaysBetweenYmd(todayStr, dateStr) * 24 * 60 + slotMinute - currentMinute;
+}
+
+/**
+ * The exception that governs `dateStr`. A CLOSURE always wins over amended
+ * hours that happen to span the same date.
+ *
+ * This used to return the first match in list order, and the adapter sorts by
+ * `date_start`, so a long "summer hours" block saved in July beat a one-day bank
+ * holiday closure saved for August: appointments were offered on a day the venue
+ * had explicitly closed. Nothing prevents the two from overlapping, and the
+ * venue-wide resolver used by classes, events and resources already partitions
+ * closures from amendments this way.
+ */
 function findApplicableVenueOpeningException(
   exceptions: VenueOpeningException[] | null | undefined,
   dateStr: string,
 ): VenueOpeningException | null {
   if (!exceptions?.length) return null;
-  for (const ex of exceptions) {
-    if (ex.date_start <= dateStr && dateStr <= ex.date_end) return ex;
-  }
-  return null;
+  const applicable = exceptions.filter((ex) => ex.date_start <= dateStr && dateStr <= ex.date_end);
+  if (applicable.length === 0) return null;
+  return applicable.find((ex) => ex.closed) ?? applicable[0]!;
 }
 
 /**
@@ -483,7 +566,6 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     currentMinute = nowMinutes ?? (now.getHours() * 60 + now.getMinutes());
   }
-  const isToday = date === todayStr;
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
 
   const result: AppointmentAvailabilityResult = { practitioners: [] };
@@ -557,8 +639,15 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
       });
 
       for (const t of candidateStarts) {
-        // Guest flow: venue-local “now” + minimum notice (hours). Staff reschedule uses skipPastSlotFilter.
-        if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) continue;
+        // Guest flow: venue-local “now” + minimum notice (hours), on ANY date.
+        // Staff reschedule uses skipPastSlotFilter.
+        if (
+          !skipPastSlotFilter &&
+          slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) <
+            minNoticeMinutes
+        ) {
+          continue;
+        }
 
         const slotEnd = t + totalSpan;
         const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
@@ -572,10 +661,12 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
         if (hitsCalendarBlock) continue;
 
         // Existing + phantom bookings vs parallel_clients (USE / unified_calendars)
-        const overlapping =
-          countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
-          countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
-        if (overlapping >= parallelCap) continue;
+        const concurrent = peakConcurrentBookings(
+          practitionerBookings,
+          practitionerPhantoms,
+          candidateBusy,
+        );
+        if (concurrent >= parallelCap) continue;
 
         serviceSlots.push({
           practitioner_id: practitioner.id,
@@ -646,7 +737,6 @@ export function validateExactAppointmentStart(
     todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     currentMinute = now.getHours() * 60 + now.getMinutes();
   }
-  const isToday = date === todayStr;
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
 
   const practitioner = practitioners.find((p) => p.id === practitionerId && p.is_active);
@@ -695,7 +785,10 @@ export function validateExactAppointmentStart(
     return { ok: false, reason: 'Outside working hours' };
   }
 
-  if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) {
+  if (
+    !skipPastSlotFilter &&
+    slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) < minNoticeMinutes
+  ) {
     return { ok: false, reason: 'Past minimum notice window' };
   }
 
@@ -716,17 +809,15 @@ export function validateExactAppointmentStart(
 
   const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
   const parallelCap = parallelCapacityFor(practitioner);
-  const overlapping =
-    countOverlappingBookings(practitionerBookings, candidateBusy, undefined) +
-    countOverlappingPhantoms(practitionerPhantoms, candidateBusy);
-  if (overlapping >= parallelCap) {
+  const concurrent = peakConcurrentBookings(practitionerBookings, practitionerPhantoms, candidateBusy);
+  if (concurrent >= parallelCap) {
     return { ok: false, reason: 'Conflicts with another booking' };
   }
 
   return { ok: true };
 }
 
-const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
+export const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
 /**
  * Shortest bookable appointment, in minutes.
  *
@@ -802,7 +893,6 @@ export function validateAppointmentCustomInterval(
     todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     currentMinute = now.getHours() * 60 + now.getMinutes();
   }
-  const isToday = date === todayStr;
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
 
   const practitioner = practitioners.find((p) => p.id === practitionerId && p.is_active);
@@ -830,14 +920,34 @@ export function validateAppointmentCustomInterval(
     return { ok: false, reason: 'Appointment duration is too long' };
   }
 
-  const templateBlocks = options?.processingTimeBlocks !== undefined && options.processingTimeBlocks !== null
-    ? options.processingTimeBlocks
-    : (svc.processing_time_blocks ?? []);
-  const blockCheck = validateProcessingTimeBlocks(templateBlocks, coreDuration);
-  if (!blockCheck.ok) {
-    return { ok: false, reason: blockCheck.error ?? 'Invalid processing time for this duration' };
+  const callerBlocks =
+    options?.processingTimeBlocks !== undefined && options.processingTimeBlocks !== null
+      ? options.processingTimeBlocks
+      : null;
+
+  let useBlocks: ProcessingTimeBlock[];
+  if (callerBlocks) {
+    /**
+     * The caller asserted a specific pattern for THIS booking, so an overrun is
+     * a real contradiction and is still refused.
+     */
+    const blockCheck = validateProcessingTimeBlocks(callerBlocks, coreDuration);
+    if (!blockCheck.ok) {
+      return { ok: false, reason: blockCheck.error ?? 'Invalid processing time for this duration' };
+    }
+    useBlocks = blockCheck.normalized ?? [];
+  } else {
+    /**
+     * No assertion, so this is the service TEMPLATE being applied to whatever
+     * duration was asked about. Fit it rather than refusing: the availability
+     * routes pass a custom duration and no blocks, so a template that overran
+     * failed identically for every candidate start and returned an empty day and
+     * an empty month with nothing explaining why. Whether a booking may PERSIST
+     * a given pattern is a separate question, still answered strictly on the
+     * write path.
+     */
+    useBlocks = fitProcessingBlocksToDuration(svc.processing_time_blocks ?? [], coreDuration).blocks;
   }
-  const useBlocks = blockCheck.normalized ?? [];
   const legacyTail = useBlocks.length > 0 ? 0 : (svc.processing_time_minutes ?? 0);
   const busyOffsets = practitionerBusyMinuteOffsets({
     durationMinutes: coreDuration,
@@ -881,9 +991,8 @@ export function validateAppointmentCustomInterval(
 
   if (
     !options?.allowInsideNoticeWindow &&
-    isToday &&
     !skipPastSlotFilter &&
-    t < currentMinute + minNoticeMinutes
+    slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) < minNoticeMinutes
   ) {
     return { ok: false, reason: 'Past minimum notice window' };
   }
@@ -908,10 +1017,13 @@ export function validateAppointmentCustomInterval(
 
     const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
     const parallelCap = parallelCapacityFor(practitioner);
-    const overlapping =
-      countOverlappingBookings(practitionerBookings, busyWall, excludeBookingId) +
-      countOverlappingPhantoms(practitionerPhantoms, busyWall);
-    if (overlapping >= parallelCap) {
+    const concurrent = peakConcurrentBookings(
+      practitionerBookings,
+      practitionerPhantoms,
+      busyWall,
+      excludeBookingId,
+    );
+    if (concurrent >= parallelCap) {
       return { ok: false, reason: 'Conflicts with another booking' };
     }
   }
@@ -931,6 +1043,94 @@ export function resolveEngineBookingProcessingBlocks(params: {
     parentBlocks: params.mergedService?.processing_time_blocks ?? [],
     variantBlocks: params.variantBlocks,
   });
+}
+
+/** The booking columns both fetchers select, before any engine interpretation. */
+export interface EngineBookingRow {
+  id: string;
+  booking_time: string;
+  status: string;
+  practitioner_id?: string | null;
+  calendar_id?: string | null;
+  appointment_service_id?: string | null;
+  service_item_id?: string | null;
+  service_variant_id?: string | null;
+  processing_time_blocks?: unknown;
+  booking_end_time?: string | null;
+}
+
+/**
+ * One row of `bookings` as the engine sees it: how much of the calendar it holds.
+ *
+ * Shared by both fetchers on purpose. These were duplicated blocks that drifted:
+ * the unified one resolved neighbour services against a list narrowed to the
+ * service being browsed, so every booking of a DIFFERENT service came back with
+ * no buffer and a 30-minute default, and the engine handed out slots that ran
+ * into it. Keeping one implementation is what stops that recurring.
+ *
+ * `serviceMap` must therefore cover the whole catalogue, not just the requested
+ * service.
+ *
+ * `forPractitionerId` pins both the returned anchor and the service-link lookup
+ * to the calendar the rows were fetched for. The unified fetcher passes it
+ * because its rows are already scoped by `calendar_id.eq` / `practitioner_id.eq`
+ * and its links are keyed by calendar: a row carrying a stale foreign
+ * `practitioner_id` would otherwise miss its link (losing the calendar's custom
+ * duration) and be filed under a practitioner the engine is not evaluating.
+ */
+export function mapRowToAppointmentBooking(params: {
+  row: EngineBookingRow;
+  serviceMap: Map<string, AppointmentService>;
+  practitionerServices: PractitionerService[];
+  variantBlocksById: Map<string, ProcessingTimeBlock[]>;
+  forPractitionerId?: string;
+}): AppointmentBooking {
+  const { row, serviceMap, practitionerServices, variantBlocksById, forPractitionerId } = params;
+
+  const sid = row.service_item_id ?? row.appointment_service_id ?? null;
+  const svc = sid ? serviceMap.get(sid) : null;
+  const practId = forPractitionerId ?? row.practitioner_id ?? row.calendar_id;
+  const ps =
+    sid && practId
+      ? practitionerServices.find((p) => p.practitioner_id === practId && p.service_id === sid)
+      : undefined;
+  const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
+
+  const startMin = timeToMinutes(row.booking_time.slice(0, 5));
+  let coreDuration = merged?.duration_minutes ?? 30;
+  const rawBet = row.booking_end_time;
+  if (rawBet != null && String(rawBet).trim() !== '') {
+    const endMin = timeToMinutes(String(rawBet).slice(0, 5));
+    /**
+     * Deliberately NOT wrapped past midnight. An end before the start is far
+     * more often a stale row (a reschedule that moved `booking_time` and left
+     * `booking_end_time` behind) than a real overnight appointment, and wrapping
+     * would turn that into a 23-hour block that swallows the practitioner's day.
+     * Falling through to the catalogue duration keeps a corrupt row survivable.
+     * Revisit once every writer maintains `booking_end_time`.
+     */
+    const d = endMin - startMin;
+    // Trust the row's OWN end time down to the same floor a booking may be
+    // created at. Pinned at 15 this silently replaced a shorter booking's real
+    // span with the service's default duration, so a 10-minute appointment
+    // would hold 30 minutes of the calendar against every conflict check.
+    if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
+  }
+
+  return {
+    id: row.id,
+    practitioner_id: practId!,
+    booking_time: row.booking_time.slice(0, 5),
+    duration_minutes: coreDuration,
+    buffer_minutes: merged?.buffer_minutes ?? 0,
+    processing_time_minutes: merged?.processing_time_minutes ?? 0,
+    processing_time_blocks: resolveEngineBookingProcessingBlocks({
+      snapshotRaw: row.processing_time_blocks,
+      mergedService: merged,
+      variantBlocks: row.service_variant_id ? variantBlocksById.get(row.service_variant_id) : undefined,
+    }),
+    status: row.status,
+  };
 }
 
 // Fetcher
@@ -1004,7 +1204,11 @@ export async function fetchAppointmentInput(params: {
       .eq('venue_id', venueId)
       .lte('start_date', date)
       .gte('end_date', date),
-    supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
+    supabase
+      .from('venues')
+      .select(`opening_hours, venue_opening_exceptions, ${VENUE_BOOKING_MODEL_COLUMNS}`)
+      .eq('id', venueId)
+      .single(),
     supabase
       .from('availability_blocks')
       .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
@@ -1014,6 +1218,9 @@ export async function fetchAppointmentInput(params: {
       .lte('date_start', date)
       .gte('date_end', date),
   ]);
+
+  /** A model that is switched off must not block; see `blocked-range-models.ts`. */
+  const blockSources = blockSourcesFromVenueRow(venueRes.error ? null : venueRes.data);
 
   let practitioners = (practitionersRes.data ?? []) as Practitioner[];
 
@@ -1103,54 +1310,14 @@ export async function fetchAppointmentInput(params: {
     );
   }
 
-  const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
-    const row = b as {
-      practitioner_id: string | null;
-      calendar_id?: string | null;
-      appointment_service_id: string | null;
-      service_item_id: string | null;
-      service_variant_id?: string | null;
-      processing_time_blocks?: unknown;
-      booking_end_time?: string | null;
-    };
-    const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
-    const svc = sid ? serviceMapForBookings.get(sid) : null;
-    const practId = row.practitioner_id ?? row.calendar_id;
-    const ps = sid && practId
-      ? practitionerServices.find((pRow) => pRow.practitioner_id === practId && pRow.service_id === sid)
-      : undefined;
-    const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
-    const startMin = timeToMinutes((b.booking_time as string).slice(0, 5));
-    let coreDuration = merged?.duration_minutes ?? 30;
-    const rawBet = row.booking_end_time;
-    if (rawBet != null && String(rawBet).trim() !== '') {
-      const endMin = timeToMinutes(String(rawBet).slice(0, 5));
-      const d = endMin - startMin;
-      // Trust the row's OWN end time down to the same floor a booking may be
-      // created at. Pinned at 15 this silently replaced a shorter booking's real
-      // span with the service's default duration, so a 10-minute appointment
-      // would hold 30 minutes of the calendar against every conflict check.
-      if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
-    }
-    const variantBl = row.service_variant_id
-      ? variantBlocksById.get(row.service_variant_id)
-      : undefined;
-    const processingBlocks = resolveEngineBookingProcessingBlocks({
-      snapshotRaw: row.processing_time_blocks,
-      mergedService: merged,
-      variantBlocks: variantBl,
-    });
-    return {
-      id: b.id,
-      practitioner_id: practId!,
-      booking_time: (b.booking_time as string).slice(0, 5),
-      duration_minutes: coreDuration,
-      buffer_minutes: merged?.buffer_minutes ?? 0,
-      processing_time_minutes: merged?.processing_time_minutes ?? 0,
-      processing_time_blocks: processingBlocks,
-      status: b.status,
-    };
-  });
+  const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) =>
+    mapRowToAppointmentBooking({
+      row: b as unknown as EngineBookingRow,
+      serviceMap: serviceMapForBookings,
+      practitionerServices,
+      variantBlocksById,
+    }),
+  );
 
   const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = [
     ...(blocksRes.error
@@ -1172,7 +1339,7 @@ export async function fetchAppointmentInput(params: {
    */
   const sessionRangesByPractitioner = await Promise.all(
     practitioners.map((p) =>
-      fetchScheduledSessionBlocksForCalendar(supabase, venueId, p.id, date).then((ranges) => ({
+      fetchScheduledSessionBlocksForCalendar(supabase, venueId, p.id, date, blockSources).then((ranges) => ({
         practitioner_id: p.id,
         ranges,
       })),
@@ -1284,22 +1451,36 @@ export async function fetchCalendarAppointmentInput(params: {
     assignList.map((a) => [(a as { service_item_id: string }).service_item_id, a]),
   );
 
-  let services: AppointmentService[] = (svcRows ?? []).map((raw) => {
+  const allServices: AppointmentService[] = (svcRows ?? []).map((raw) => {
     const s = raw as Record<string, unknown>;
     const a = assignMap.get(s.id as string) as
       | { custom_duration_minutes?: number | null; custom_price_pence?: number | null }
       | undefined;
     const customDur = a?.custom_duration_minutes;
     const customPrice = a?.custom_price_pence;
+    const effectiveDuration = (customDur ?? s.duration_minutes) as number;
+    /**
+     * A calendar's `custom_duration_minutes` shortens the service without
+     * touching its processing pattern, so the catalogue's blocks can fall
+     * outside the duration this calendar actually books. Unfitted, they failed
+     * validation downstream and were dropped wholesale, which silently held the
+     * practitioner busy for the entire appointment and lost the parallel-booking
+     * capacity the venue had deliberately configured. Trimming keeps as much of
+     * the gap as still fits.
+     */
+    const fittedBlocks = fitProcessingBlocksToDuration(
+      parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+      effectiveDuration,
+    ).blocks;
     return {
       id: s.id as string,
       venue_id: venueId,
       name: s.name as string,
       description: (s.description as string) ?? null,
-      duration_minutes: (customDur ?? s.duration_minutes) as number,
+      duration_minutes: effectiveDuration,
       buffer_minutes: (s.buffer_minutes as number) ?? 0,
       processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
-      processing_time_blocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+      processing_time_blocks: fittedBlocks,
       price_pence: (customPrice ?? s.price_pence) as number | null,
       payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
       deposit_pence: (s.deposit_pence as number | null) ?? null,
@@ -1314,9 +1495,15 @@ export async function fetchCalendarAppointmentInput(params: {
       custom_working_hours: parseCustomWorkingHoursFromDb(s.custom_working_hours),
     };
   });
-  if (serviceId) {
-    services = services.filter((s) => s.id === serviceId);
-  }
+  /**
+   * Narrowed for SLOT GENERATION only. Existing bookings on this calendar can be
+   * for any service, so their duration and buffer must resolve against the full
+   * catalogue (see `serviceMapForBookings` below). Building that map from the
+   * narrowed list left every neighbouring booking of a different service with
+   * `buffer_minutes: 0` and a 30-minute default, which handed out slots that ran
+   * straight into them. The legacy sibling keeps the same split deliberately.
+   */
+  const services = serviceId ? allServices.filter((s) => s.id === serviceId) : allServices;
 
   const practitionerServices: PractitionerService[] = assignList.map((a) => {
     const row = a as {
@@ -1329,7 +1516,19 @@ export async function fetchCalendarAppointmentInput(params: {
       id: row.id,
       practitioner_id: calendarId,
       service_id: row.service_item_id,
-      custom_duration_minutes: row.custom_duration_minutes,
+      /**
+       * Deliberately NOT carried: `custom_duration_minutes` is already baked
+       * into `allServices[].duration_minutes` above. Carrying it here too made
+       * `getOfferedAppointmentServicesForPractitioner` re-apply it on top of any
+       * duration a caller had deliberately set, silently reverting a chosen
+       * variant's length and any add-on minutes back to the override. The slot
+       * was then validated for a shorter appointment than the one being booked.
+       *
+       * Callers that need to force a duration still set this on their own copy
+       * (see `unified-availability.ts`), which keeps working because the merge
+       * itself is unchanged.
+       */
+      custom_duration_minutes: null,
       custom_price_pence: row.custom_price_pence,
     };
   });
@@ -1383,7 +1582,11 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('venue_id', venueId)
       .eq('calendar_id', calendarId)
       .eq('block_date', date),
-    supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
+    supabase
+      .from('venues')
+      .select(`opening_hours, venue_opening_exceptions, ${VENUE_BOOKING_MODEL_COLUMNS}`)
+      .eq('id', venueId)
+      .single(),
     supabase
       .from('unified_calendars')
       .select('*')
@@ -1401,7 +1604,7 @@ export async function fetchCalendarAppointmentInput(params: {
       .gte('date_end', date),
   ]);
 
-  const serviceMapForBookings = new Map(services.map((s) => [s.id, s]));
+  const serviceMapForBookings = new Map(allServices.map((s) => [s.id, s]));
 
   const calVariantIds = [
     ...new Set(
@@ -1425,50 +1628,13 @@ export async function fetchCalendarAppointmentInput(params: {
   }
 
   const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
-    const row = b as {
-      practitioner_id: string | null;
-      calendar_id?: string | null;
-      appointment_service_id: string | null;
-      service_item_id: string | null;
-      service_variant_id?: string | null;
-      processing_time_blocks?: unknown;
-      booking_end_time?: string | null;
-    };
-    const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
-    const svc = sid ? serviceMapForBookings.get(sid) : null;
-    const practKey = row.practitioner_id ?? row.calendar_id ?? calendarId;
-    const ps = sid
-      ? practitionerServices.find((pRow) => pRow.practitioner_id === calendarId && pRow.service_id === sid)
-      : undefined;
-    const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
-    const startMin = timeToMinutes((b.booking_time as string).slice(0, 5));
-    let coreDuration = merged?.duration_minutes ?? 30;
-    const rawBet = row.booking_end_time;
-    if (rawBet != null && String(rawBet).trim() !== '') {
-      const endMin = timeToMinutes(String(rawBet).slice(0, 5));
-      const d = endMin - startMin;
-      // Trust the row's OWN end time down to the same floor a booking may be
-      // created at. Pinned at 15 this silently replaced a shorter booking's real
-      // span with the service's default duration, so a 10-minute appointment
-      // would hold 30 minutes of the calendar against every conflict check.
-      if (d >= MIN_APPOINTMENT_CORE_DURATION_MINUTES) coreDuration = d;
-    }
-    const variantBl = row.service_variant_id ? calVariantBlocksById.get(row.service_variant_id) : undefined;
-    const processingBlocks = resolveEngineBookingProcessingBlocks({
-      snapshotRaw: row.processing_time_blocks,
-      mergedService: merged,
-      variantBlocks: variantBl,
+    return mapRowToAppointmentBooking({
+      row: b as unknown as EngineBookingRow,
+      serviceMap: serviceMapForBookings,
+      practitionerServices,
+      variantBlocksById: calVariantBlocksById,
+      forPractitionerId: calendarId,
     });
-    return {
-      id: b.id,
-      practitioner_id: practKey,
-      booking_time: (b.booking_time as string).slice(0, 5),
-      duration_minutes: coreDuration,
-      buffer_minutes: merged?.buffer_minutes ?? 0,
-      processing_time_minutes: merged?.processing_time_minutes ?? 0,
-      processing_time_blocks: processingBlocks,
-      status: b.status,
-    };
   });
 
   const legacyBlockRanges: PractitionerCalendarBlockedRange[] = blocksRes.error
@@ -1490,8 +1656,16 @@ export async function fetchCalendarAppointmentInput(params: {
       }))
       .filter((b) => b.end > b.start);
 
+  /**
+   * A model that is switched off must not block; see `blocked-range-models.ts`. The sibling
+   * query above still runs because it shares the venue row's round-trip, but its windows are
+   * dropped rather than folded in: with the resource model off they held time on a column
+   * that drew nothing there, and the engine refused every appointment as "Blocked time".
+   */
+  const blockSources = blockSourcesFromVenueRow(venueRes.error ? null : venueRes.data);
+
   let resourceHostBlockRanges: PractitionerCalendarBlockedRange[] = [];
-  if (!siblingResourcesRes.error && (siblingResourcesRes.data?.length ?? 0) > 0) {
+  if (blockSources.resources && !siblingResourcesRes.error && (siblingResourcesRes.data?.length ?? 0) > 0) {
     let siblings = (siblingResourcesRes.data ?? []).map((r) =>
       mapCalendarToResource(r as Record<string, unknown>),
     );
@@ -1501,6 +1675,7 @@ export async function fetchCalendarAppointmentInput(params: {
       practitioner_id: calendarId,
       start: r.start,
       end: r.end,
+      kind: 'resource' as const,
     }));
   }
 
@@ -1509,7 +1684,13 @@ export async function fetchCalendarAppointmentInput(params: {
    * not via `calendar_blocks`. Treat them as blocks so appointments cannot overlap a
    * class/event even before any tickets have been booked.
    */
-  const sessionRanges = await fetchScheduledSessionBlocksForCalendar(supabase, venueId, calendarId, date);
+  const sessionRanges = await fetchScheduledSessionBlocksForCalendar(
+    supabase,
+    venueId,
+    calendarId,
+    date,
+    blockSources,
+  );
   const scheduledSessionBlockRanges: PractitionerCalendarBlockedRange[] = sessionRanges.map((r) => ({
     practitioner_id: calendarId,
     start: r.start,

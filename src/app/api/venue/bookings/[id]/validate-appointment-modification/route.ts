@@ -19,6 +19,13 @@ const bodySchema = z.object({
   duration_minutes: z.number().int().min(MIN_APPOINTMENT_CORE_DURATION_MINUTES).max(14 * 60).optional().nullable(),
   booking_end_time: z.string().optional().nullable(),
   service_variant_id: z.string().uuid().optional().nullable(),
+  /**
+   * Blocks the modify form has already fitted to `duration_minutes`. Kept loose
+   * on purpose: `parseProcessingTimeBlocksFromDb` is the real gate here and on
+   * the PATCH that follows, so both paths judge the same payload the same way.
+   * Omit the key to fall back to the booking's stored snapshot.
+   */
+  processing_time_blocks: z.array(z.unknown()).max(20).optional(),
   allow_manual_overlap: z.boolean().optional(),
 });
 
@@ -110,6 +117,7 @@ export async function POST(
       serviceVariantId: parsed.data.service_variant_id,
       bookingServiceVariantId: (booking as { service_variant_id?: string | null }).service_variant_id ?? null,
       bookingProcessingSnapshot: (booking as { processing_time_blocks?: unknown }).processing_time_blocks,
+      processingTimeBlocksOverride: parsed.data.processing_time_blocks,
       allowManualOverlap: parsed.data.allow_manual_overlap === true,
     });
 

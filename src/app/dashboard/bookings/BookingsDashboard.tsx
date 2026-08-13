@@ -1487,13 +1487,23 @@ export function BookingsDashboard({
     });
   }, [bookings, bulkDeleteEligibleIds, executeBulkDelete, selectedIds.length]);
 
+  /**
+   * Always shifts from the LATEST anchor date, never the one this render closed
+   * over. Reading `anchorDate` here meant a burst of rapid arrow clicks all
+   * computed from the same value: React can process several clicks before
+   * committing a re-render of a list this size, so the page landed short of
+   * where the user had clicked to and the date they stopped on was not the date
+   * they saw.
+   */
   const navigate = (direction: -1 | 1) => {
-    if (viewMode === 'day') setAnchorDate(addDays(anchorDate, direction));
-    else if (viewMode === 'week') setAnchorDate(addDays(anchorDate, direction * 7));
+    if (viewMode === 'day') setAnchorDate((previous) => addDays(previous, direction));
+    else if (viewMode === 'week') setAnchorDate((previous) => addDays(previous, direction * 7));
     else if (viewMode === 'month') {
-      const d = new Date(anchorDate + 'T12:00:00');
-      d.setMonth(d.getMonth() + direction);
-      setAnchorDate(d.toISOString().slice(0, 10));
+      setAnchorDate((previous) => {
+        const d = new Date(previous + 'T12:00:00');
+        d.setMonth(d.getMonth() + direction);
+        return d.toISOString().slice(0, 10);
+      });
     }
   };
 

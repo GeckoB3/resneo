@@ -24,9 +24,20 @@ export function pickInfoRowCount(
   itemCount: 4 | 5 = 5,
   density: BookingCardDensity = 'comfortable',
 ): number {
+  /**
+   * Each threshold is the height at which one MORE row starts fitting, and must
+   * be at least what that row count actually occupies: 39px for two rows, 58 for
+   * three, 77 for four, 100 for five (measured against the real styles; see the
+   * fit test in `BookingCardInfo.test.ts`).
+   *
+   * Compact still packs tighter than comfortable, it just no longer promises
+   * room it does not have. Every compact threshold used to sit BELOW its row
+   * count's real height, so short and overlapping bars quietly clipped their
+   * last line.
+   */
   const t =
     density === 'compact'
-      ? { one: 40, two: 56, three: 72, four: 92 }
+      ? { one: 39, two: 58, three: 77, four: 100 }
       : { one: 48, two: 66, three: 88, four: 108 };
   let raw: number;
   if (contentHeightPx < t.one) raw = 1;
@@ -79,9 +90,14 @@ function metaTextClass(micro: boolean): string {
   // Colour is inherited from the bar's palette (`color: p.text` on the card shell) so meta
   // reads white on saturated fills and dark on the light amber/cancelled fills. Slight opacity
   // gives the secondary hierarchy beneath the full-strength contact name.
+  // 0.95, not 0.85. The secondary hierarchy still reads, but 0.85 composited the
+  // meta lines toward the fill hard enough to cost ~1 whole contrast point: it
+  // put Booked meta at 3.58:1 and Pending/Seated near 2.5:1, under the 4.5:1 AA
+  // floor at 11px. The name row above is already full-strength and bolder, so the
+  // hierarchy never depended on the extra fade.
   return micro
-    ? 'text-[10px] font-medium leading-snug opacity-[0.85]'
-    : 'text-[11px] font-medium leading-snug opacity-[0.85]';
+    ? 'text-[10px] font-medium leading-snug opacity-95'
+    : 'text-[11px] font-medium leading-snug opacity-95';
 }
 
 export function groupInfoRows(

@@ -1,7 +1,15 @@
-import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
+import {
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
+  minutesBetweenStartAndEndHM,
+} from '@/lib/booking/validate-appointment-modification';
 
-/** Shortest bookable segment the appointment engine accepts. */
-export const MIN_CORE_DURATION_MINUTES = 15;
+/**
+ * Shortest bookable segment the appointment engine accepts.
+ *
+ * Was its own 15 while the engine allowed 5, so this clamp silently rounded a
+ * short appointment back up: the modify form opened a 5 minute booking showing 15.
+ */
+export const MIN_CORE_DURATION_MINUTES = MIN_APPOINTMENT_CORE_DURATION_MINUTES;
 
 export interface BookingCoreDurationSource {
   /** Venue-local start, HH:mm or HH:mm:ss. */

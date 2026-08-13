@@ -66,6 +66,8 @@ export function BookingModifyNotifyFollowUp({
   // including the unmount fallback send.
   const settledRef = useRef(false);
   const notifyInFlightRef = useRef(false);
+  /** Pending dismissal send, cancelled if the component comes straight back. */
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const notify = useCallback(async (): Promise<void> => {
     if (settledRef.current || notifyInFlightRef.current) return;
@@ -120,17 +122,35 @@ export function BookingModifyNotifyFollowUp({
     return () => clearInterval(interval);
   }, [phase, notify]);
 
-  // Dismissed without choosing (modal closed, navigation): send, fire and
-  // forget. settledRef guards every explicit choice.
+  /**
+   * Dismissed without choosing (modal closed, navigation): send, fire and
+   * forget. settledRef guards every explicit choice.
+   *
+   * The send is SCHEDULED on teardown rather than fired inline, and the next
+   * setup cancels it. React StrictMode mounts, tears down and immediately
+   * remounts every component once in development, and refs survive that
+   * remount, so firing inline marked the panel settled before staff could touch
+   * it: Notify now, Skip notify and Undo change each hit `settledRef` and
+   * returned, leaving a panel whose only working control was the modal's own
+   * close button. It also sent the guest their "time changed" message the
+   * instant the panel appeared, with no way to skip or undo it.
+   */
   useEffect(() => {
+    if (dismissTimerRef.current != null) {
+      clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = null;
+    }
     return () => {
-      if (settledRef.current) return;
-      settledRef.current = true;
-      void fetch(`/api/venue/bookings/${bookingId}/guest-modification-notify`, {
-        method: 'POST',
-      }).catch(() => {
-        /* best effort; the change itself is already saved */
-      });
+      dismissTimerRef.current = setTimeout(() => {
+        dismissTimerRef.current = null;
+        if (settledRef.current) return;
+        settledRef.current = true;
+        void fetch(`/api/venue/bookings/${bookingId}/guest-modification-notify`, {
+          method: 'POST',
+        }).catch(() => {
+          /* best effort; the change itself is already saved */
+        });
+      }, 0);
     };
   }, [bookingId]);
 

@@ -39,6 +39,9 @@ import {
 } from "@/lib/availability/appointment-engine";
 import { mergeAppointmentServiceWithPractitionerLink } from "@/lib/appointments/merge-service-with-overrides";
 import { cancellationDeadlineHoursBefore } from "@/lib/booking/cancellation-deadline";
+import { bookingEndFieldsForStorage } from "@/lib/booking/booking-end-time";
+import { loadActiveVariantForService } from "@/lib/venue/service-variants";
+import { snapshotProcessingTimeBlocksFromCatalog } from "@/lib/appointments/processing-time";
 import { isUnifiedSchedulingVenue } from "@/lib/booking/unified-scheduling";
 import {
   isGuestBookingDateAllowed,
@@ -58,7 +61,6 @@ import {
 import { offerAppointmentWaitlistOnCancel } from "@/lib/booking/offer-appointment-waitlist-on-cancel";
 import { validateResourceBookingModification } from "@/lib/booking/validate-resource-booking-modification";
 import { validateClassModification } from "@/lib/booking/validate-class-modification";
-import { venueLocalDateTimeToUtcMs } from "@/lib/venue/venue-local-clock";
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -413,7 +415,7 @@ export async function POST(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from("bookings")
       .select(
-        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
+        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
       )
       .eq("id", bookingId)
       .single();
@@ -1018,10 +1020,11 @@ export async function POST(request: NextRequest) {
           // estimated_end_time must be a true UTC instant: resolve the
           // venue-local start to UTC, then add the booking duration (DST/midnight
           // safe). booking_end_time keeps the venue-local wall-clock HH:mm.
-          const startUtcMs = venueLocalDateTimeToUtcMs(newDate, timeStr, venueTimezone);
-          const estimatedEnd = new Date(
-            startUtcMs + validation.durationMinutes * 60_000,
-          );
+          const resourceEndFields = bookingEndFieldsForStorage({
+            dateYmd: newDate,
+            startHHmm: timeStr,
+            durationMinutes: validation.durationMinutes,
+          });
           const newTime = timeStr.length === 5 ? `${timeStr}:00` : timeStr;
 
           const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
@@ -1044,7 +1047,7 @@ export async function POST(request: NextRequest) {
               booking_date: newDate,
               booking_time: newTime,
               booking_end_time: `${validation.endHHmm}:00`,
-              estimated_end_time: estimatedEnd.toISOString(),
+              estimated_end_time: resourceEndFields.estimated_end_time,
               cancellation_deadline,
               updated_at: nowIso,
             })
@@ -1210,15 +1213,18 @@ export async function POST(request: NextRequest) {
           validation.startTime.length === 5
             ? `${validation.startTime}:00`
             : validation.startTime;
-        // estimated_end_time as a true UTC instant for the new venue-local start.
-        const startUtcMs = venueLocalDateTimeToUtcMs(
-          validation.instanceDate,
-          validation.startTime,
-          venueTimezone,
-        );
-        const estimatedEnd = new Date(
-          startUtcMs + validation.durationMinutes * 60_000,
-        );
+        /**
+         * Venue-local wall clock encoded as UTC, matching the class create
+         * paths. Writing a true instant here left a rescheduled class reading
+         * back an hour early under BST, and because class rows carried no
+         * `booking_end_time` at all there was nothing to fall back to: the list
+         * bar rendered "18:00-18:00" and wrapped the duration to "24 hr".
+         */
+        const classEndFields = bookingEndFieldsForStorage({
+          dateYmd: validation.instanceDate,
+          startHHmm: validation.startTime,
+          durationMinutes: validation.durationMinutes,
+        });
         const cancellation_deadline = cancellationDeadlineHoursBefore(
           validation.instanceDate,
           newTime,
@@ -1237,7 +1243,8 @@ export async function POST(request: NextRequest) {
             class_instance_id: targetInstanceId,
             booking_date: validation.instanceDate,
             booking_time: newTime,
-            estimated_end_time: estimatedEnd.toISOString(),
+            estimated_end_time: classEndFields.estimated_end_time,
+            booking_end_time: classEndFields.booking_end_time,
             cancellation_deadline,
             updated_at: nowIso,
           })
@@ -1450,13 +1457,71 @@ export async function POST(request: NextRequest) {
           ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps)
           : undefined;
 
+        /**
+         * A self-reschedule may land on a DIFFERENT service. The row's variant
+         * and processing snapshot belong to the service they were taken from, so
+         * carrying them across left the booking pointing at a variant of another
+         * service: staff then got "Invalid or inactive variant for this service"
+         * on every later edit, and the old service's gap sat inside the new
+         * service's duration.
+         */
+        const previousServiceId =
+          (booking.service_item_id as string | null) ??
+          (booking.appointment_service_id as string | null);
+        const serviceChanged = bodyAppointmentServiceId !== previousServiceId;
+        const previousVariantId = serviceChanged
+          ? null
+          : ((booking.service_variant_id as string | null) ?? null);
+
+        // An inactive or deleted variant is dropped rather than carried, for the
+        // same reason: a variant the server can no longer resolve makes the
+        // booking permanently uneditable.
+        const keptVariant = previousVariantId
+          ? await loadActiveVariantForService({
+              admin: supabase,
+              venueId: booking.venue_id as string,
+              serviceId: bodyAppointmentServiceId as string,
+              variantId: previousVariantId,
+            })
+          : null;
+        const nextVariantId = keptVariant?.id ?? null;
+
+        /**
+         * The variant's own duration, not the parent's. Recomputing from the
+         * parent silently shrank a 150-minute variant booking to the 60-minute
+         * service default on every guest reschedule.
+         */
+        const rescheduleDurationMinutes =
+          keptVariant?.duration_minutes ?? svc?.duration_minutes ?? null;
+
         let estimatedEndTime: string | null = null;
-        if (svc) {
-          const [y, mo, d] = newDate.split("-").map(Number);
-          const [hh, mm] = timeStr.split(":").map(Number);
-          const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-          endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
-          estimatedEndTime = endDate.toISOString();
+        let rescheduleBookingEndTime: string | null = null;
+        if (svc && rescheduleDurationMinutes != null) {
+          /**
+           * Both columns, from one helper. Writing only `estimated_end_time`
+           * left `booking_end_time` pinned to the OLD start's clock, and the
+           * engine trusts that column: a 60-minute booking moved from 15:00 to
+           * 09:00 was read as a seven-hour appointment and swallowed the rest of
+           * the practitioner's bookable day.
+           */
+          const endFields = bookingEndFieldsForStorage({
+            dateYmd: newDate,
+            startHHmm: timeStr,
+            durationMinutes: rescheduleDurationMinutes,
+          });
+          estimatedEndTime = endFields.estimated_end_time;
+          rescheduleBookingEndTime = endFields.booking_end_time;
+        }
+
+        /** Re-snapshotted from the new service when the service changed. */
+        let rescheduleProcessingBlocks: ReturnType<
+          typeof snapshotProcessingTimeBlocksFromCatalog
+        > | null = null;
+        if (serviceChanged && baseSvc) {
+          rescheduleProcessingBlocks = snapshotProcessingTimeBlocksFromCatalog({
+            service: baseSvc,
+            variant: null,
+          });
         }
 
         const refundWindowHours = await resolveCancellationNoticeHoursForCreate(
@@ -1526,6 +1591,13 @@ export async function POST(request: NextRequest) {
                   service_item_id: null,
                 }),
             estimated_end_time: estimatedEndTime,
+            ...(rescheduleBookingEndTime
+              ? { booking_end_time: rescheduleBookingEndTime }
+              : {}),
+            service_variant_id: nextVariantId,
+            ...(rescheduleProcessingBlocks
+              ? { processing_time_blocks: rescheduleProcessingBlocks }
+              : {}),
             cancellation_deadline,
             cancellation_policy_snapshot,
             updated_at: nowIso,

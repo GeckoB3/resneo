@@ -38,6 +38,7 @@ import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/proc
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
@@ -232,6 +233,7 @@ export async function POST(request: NextRequest) {
       /** No-show fee (pence) when this service's requirement is 'card_hold' (spec 7.1). */
       card_hold_fee_pence: number | null;
       estimated_end_time: string | null;
+      booking_end_time: string | null;
       service_display_name: string;
       service_price_pence: number | null;
       processing_time_blocks: ProcessingTimeBlock[];
@@ -282,17 +284,26 @@ export async function POST(request: NextRequest) {
       // Validate this segment's add-ons BEFORE the slot check.
       let segAddonSnapshots: BookingAddonSnapshot[] = [];
       let segAddonTotals = { total_price_pence: 0, total_duration_minutes: 0 };
-      if (seg.addons && seg.addons.length > 0) {
-        const { groups, groupsById } = await loadAddonsForBooking({
-          admin: supabase,
-          venueId: venue_id,
-          schema: addonSchema,
-          parentId: seg.service_id,
-          includeHidden:
-            source !== 'online' && source !== 'widget' && source !== 'booking_page',
-        });
+      /**
+       * Always load the linked groups, so a REQUIRED group (`min_select`) is
+       * enforced even when the client omits `addons` entirely. Gating this whole
+       * block on the client having sent something meant a service that cannot be
+       * booked on its own without choosing an option could be booked without one
+       * simply by being a segment of a multi-service visit, arriving with no
+       * add-on, no charge and the segment chain laid out short. The
+       * single-service route has always done it this way.
+       */
+      const { groups, groupsById } = await loadAddonsForBooking({
+        admin: supabase,
+        venueId: venue_id,
+        schema: addonSchema,
+        parentId: seg.service_id,
+        includeHidden:
+          source !== 'online' && source !== 'widget' && source !== 'booking_page',
+      });
+      if (groups.length > 0) {
         const validation = validateAddonSelections({
-          selections: seg.addons,
+          selections: seg.addons ?? [],
           groupsForService: groups,
           source:
             source === 'online' || source === 'widget' || source === 'booking_page'
@@ -363,15 +374,20 @@ export async function POST(request: NextRequest) {
       }
 
       let estimatedEndTime: string | null = null;
+      let segBookingEndTime: string | null = null;
       let depositPence = 0;
       let segCardHoldFeePence: number | null = null;
       if (svc) {
-        const [y, mo, d] = booking_date.split('-').map(Number);
-        const [hh, mm] = timeStr.split(':').map(Number);
-        const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-        // durationMins includes add-on minutes; use it (not svc.duration_minutes) for the end time.
-        endDate.setMinutes(endDate.getMinutes() + durationMins);
-        estimatedEndTime = endDate.toISOString();
+        // durationMins includes add-on minutes; use it (not svc.duration_minutes)
+        // for the end time. Both end columns come from one helper so the engine
+        // (which trusts `booking_end_time`) and the UI cannot disagree.
+        const endFields = bookingEndFieldsForStorage({
+          dateYmd: booking_date,
+          startHHmm: timeStr,
+          durationMinutes: durationMins,
+        });
+        estimatedEndTime = endFields.estimated_end_time;
+        segBookingEndTime = endFields.booking_end_time;
         // Full payment rolls add-on price into the charge; deposit stays on base+variant.
         const online = resolveAppointmentServiceOnlineChargeWithAddons({
           svc,
@@ -411,6 +427,7 @@ export async function POST(request: NextRequest) {
         deposit_pence: depositPence,
         card_hold_fee_pence: segCardHoldFeePence,
         estimated_end_time: estimatedEndTime,
+        booking_end_time: segBookingEndTime,
         service_display_name: svc?.name ?? 'Treatment',
         service_price_pence: svc?.price_pence ?? null,
         processing_time_blocks: processingSnap,
@@ -644,6 +661,7 @@ export async function POST(request: NextRequest) {
         cancellation_deadline: deadline,
         cancellation_policy_snapshot: policySnapshot,
         estimated_end_time: seg.estimated_end_time,
+        booking_end_time: seg.booking_end_time,
         practitioner_id: useUnifiedBookingRows ? null : seg.practitioner_id,
         appointment_service_id: useUnifiedBookingRows ? null : seg.appointment_service_id,
         service_variant_id: seg.service_variant_id,

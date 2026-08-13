@@ -74,6 +74,26 @@ jobs:
       - name: Run tests
         run: npm run test
 
+  # NOTE: there is deliberately no job here for `npm run check:function-grants`,
+  # which fails if a client role can execute a non-allowlisted SECURITY DEFINER
+  # function in `public`. Two reasons, in order of weight:
+  #
+  #  1. Wrong trigger. Migrations in this project are applied by hand, so the
+  #     moment that check matters is when someone applies one, not when code is
+  #     pushed. On push it would mostly re-verify an unchanged database, and
+  #     would report green while a migration sat unapplied. It is part of the
+  #     migration ritual instead: see the verification block in
+  #     supabase/migrations/20270109120000.
+  #  2. Credential. It needs SUPABASE_SECRET_KEY, which is full database access
+  #     and bypasses RLS. This repository is public and currently holds no
+  #     Actions secrets at all. Adding that key here to guard against a future
+  #     exposure is a poor trade against C0, the exposure it descends from.
+  #
+  # The right home for it in CI is a local Supabase instance built from the
+  # migrations, which needs no production credential and would catch a bad
+  # migration before it reaches any environment. That is the same infrastructure
+  # D1/A5 needs for pgTAP, and should be done once, for both.
+
   e2e-smoke:
     name: E2E smoke (Playwright)
     runs-on: ubuntu-latest

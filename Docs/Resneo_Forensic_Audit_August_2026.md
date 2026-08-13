@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-Nothing has been implemented. This is a report only.
+**Implementation status, updated 2026-08-13.** C0, C1 and C2 are closed on staging *and* production. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -17,9 +17,9 @@ Each review round found fixes that would have broken production. They have been 
 
 Three items are hard blockers on the whole plan:
 
-0. **C0 — DONE, 2026-08-13.** `admin_hard_delete_venue` and 14 other functions were callable by anyone holding the publishable key. Migration `20270106120000` closed them on **both** environments, verified. Two carry-overs remain: the 4 report RPCs (pending C1) and the **exploitation log check**, which is the only item here with an expiring deadline. See C0.
+0. **C0 — DONE, 2026-08-13.** `admin_hard_delete_venue` and 14 other functions were callable by anyone holding the publishable key. Migration `20270106120000` closed them on **both** environments, verified. Both carry-overs are now settled: the 4 report RPCs closed with C1, and the exploitation log check was run and returned nothing within the retention window. See C0.
 
-1. **C1's `REVOKE ... FROM PUBLIC` is not enough on Supabase — the fix as first written leaves the exploit open. NOW CONFIRMED ON A LIVE DATABASE.** Hosted Supabase grants `anon`/`authenticated` a direct EXECUTE on `public` functions via default privileges, which `REVOKE FROM PUBLIC` does not touch; the repo's own hardened import migrations revoke from all three roles for exactly this reason. The corrected C1 revokes from `PUBLIC, anon, authenticated`. This also resolves N1: the likeliest state is that `report_deposit_summary`'s existing `FROM PUBLIC`-only revoke is *applied but ineffective*, so the reports page works **and** the function stays exposed. Settle the live grant state with `information_schema.role_routine_grants` first — but do not stop investigating at "migration applied." See C1 and N1.
+1. **C1 and C2 — DONE, 2026-08-13, on both environments.** Retained in full below because the root cause generalises to every future migration: **`REVOKE ... FROM PUBLIC` is not enough on Supabase.** Hosted Supabase grants `anon`/`authenticated` a direct EXECUTE on `public` functions via default privileges, which `REVOKE FROM PUBLIC` does not touch; the repo's own hardened import migrations revoke from all three roles for exactly this reason. Every revoke must name `PUBLIC, anon, authenticated`. This also resolved N1: `report_deposit_summary`'s `FROM PUBLIC`-only revoke was *applied but ineffective*, so the reports page worked **and** the function stayed exposed. The lesson to carry: never stop investigating at "migration applied." See C1 and N1.
 2. **C3 has no viable database-level fix yet.** Round two's "extend `enforce_cde_capacity`" is struck: the trigger's firing list omits `practitioner_id`/`calendar_id` (so it would not fire on the calendar-move double-book), and it inherits the full engine-semantics duplication problem — a naive branch rejects legitimate `parallel_clients > 1` bookings, gap-interleaved bookings, and a visit's own second segment. Ship only the re-validate-before-insert interim near-term. See C3.
 3. **D1's column-grant fix is sound but must be smoke-tested against live Realtime before shipping.** Analysis (WALRUS keys its visibility probe on the primary key, which is granted) says delivery survives and PII is stripped from the payload — the desired outcome. But WALRUS internals are version-specific; verify on a live instance with `REPLICA IDENTITY FULL`, A6 poll fallback ready. See D1.
 
@@ -48,7 +48,7 @@ The helper layer is careful and the comments are unusually honest. The problem i
 4. **Client-side enforcement of server-side invariants** — `source`, `person_label` non-emptiness, add-on `min_select` on modify, target-calendar authorisation.
 5. **Two paths for every operation, and they disagree** — staff vs guest, single vs visit, own-venue vs linked, per-booking vs group.
 
-**The most urgent item remains outside the appointment flow**: `SECURITY DEFINER` reporting RPCs callable by anonymous users with the publishable key that ships in every public booking page.
+**The most urgent item was outside the appointment flow**: `SECURITY DEFINER` functions callable by anonymous users with the publishable key that ships in every public booking page. That is now closed (C0, C1, C2), but note what it cost to find: the static audit missed it entirely, and three rounds of adversarial review had not caught that the repo's own remediation pattern was a no-op. It took one query against a live database. **The remaining findings below have not had that treatment.**
 
 ---
 
@@ -59,7 +59,7 @@ The helper layer is careful and the comments are unusually honest. The problem i
 
 > **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-13.** Migration `20270106120000_revoke_definer_function_client_grants.sql` applied to **staging and production**. Staging verification returned **exactly the expected 16 rows** (8 RLS helpers, 4 report RPCs awaiting C1, 4 `auth.uid()`-scoped), and the staging smoke test passed: bookings visible (RLS helpers resolve), reports accurate (`report_client_summary` via `staff.db`), SMS sends and the allowance increments (`increment_sms_usage`). All 15 targeted functions are closed to `anon`/`authenticated` on both databases, including `admin_hard_delete_venue`, `lookup_auth_user_id_by_email`, `merge_guests_into` and both `linked_apply_booking_*`.
 >
-> **Two items remain from C0.** (1) The 4 report RPCs still leak per-venue *aggregates* (covers, no-show rates, cancellations, deposit totals) to `anon` until C1's `staff.db` switch ships — the guest-PII function `report_frequent_visitors` is already closed. (2) **The exploitation log check has not been done**, and log retention expires on its own — see "Was it exploited?" below. This is the only outstanding item in this document with a clock on it.
+> **Both C0 carry-overs are now settled (2026-08-13).** (1) The 4 report RPCs were closed by C1; see that finding. (2) The exploitation log check was run against production and returned no `/rest/v1/rpc/` hits naming any revoked function. **Read that result narrowly:** Supabase log retention covers days to weeks depending on plan, while `report_frequent_visitors` had existed since `20260325100000`, roughly four and a half months. The search therefore covered a small slice of the exposure window. A hit would have been decisive; the absence of one is not evidence of no access, and no further forensic artefact exists outside those logs. Recorded as "nothing found within retention," not as "not exploited." The operator judged the residual risk acceptable and elected not to notify.
 
 The step-0 sweep returned 31 `SECURITY DEFINER` functions in `public` with `has_function_privilege('anon', …, 'EXECUTE') = true`. Every ACL shows the same shape — `anon=X/postgres, authenticated=X/postgres` — i.e. **direct per-role grants from Supabase's default privileges**, which no `REVOKE … FROM PUBLIC` has ever touched.
 
@@ -93,12 +93,17 @@ Three tiers:
 - **Revoke from `anon` only, keep `authenticated`:** `claim_user_account`, `request_account_deletion`, `cancel_account_deletion`, `touch_user_last_active`, `guest_email_collides_for_user_change` — these are `auth.uid()`-scoped and legitimately called by signed-in users. Verify each is a genuine no-op for a null `uid` before relying on that.
 - **Leave alone:** the eight RLS helpers above.
 
-**Durable fix, so new functions stop inheriting this:**
+**Durable fix — the statement below DOES NOT WORK. Tried, measured, corrected 2026-08-13. See step 1b.**
 ```sql
+-- Does NOT make new functions fail closed on this platform:
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
 ```
-This makes future migrations fail closed — any function genuinely needing client access must then grant it explicitly, which is the correct posture. It is a behaviour change: audit existing client-called RPCs before applying it.
+It was applied (`20270108120000`) and a function created immediately afterwards, owned by `postgres` in `public`, still came back anon-executable: `{=X/postgres,postgres=X/postgres,service_role=X/postgres}`, `has_function_privilege('anon', …) = true`. `pg_default_acl` for `postgres`/`public` correctly showed no PUBLIC entry, and new functions received one anyway, so the stored default adds to PostgreSQL's built-in `EXECUTE`-to-`PUBLIC` rather than replacing it. Naming `PUBLIC` explicitly does not help; that was the second attempt.
+
+**What it does buy, which is worth keeping:** `anon` and `authenticated` no longer get *direct* grants on new functions, only PUBLIC membership. So a plain `REVOKE ALL ON FUNCTION x FROM PUBLIC` now genuinely closes a new function. That is exactly the pattern the ~28 historical migrations used, and the direct grants this removes are the reason it closed nothing. The repo's existing instinct is correct going forward.
+
+**Prevention is therefore unavailable at the schema level here, and the control is detection.** See step 1b for what shipped instead.
 
 **Also verified live (both environments):** `anon` holds SELECT on `unified_calendars` under `USING (is_active = true)`, so the venue-id harvest leg of the C1 exploit chain is confirmed reachable. The full chain works end to end on production.
 
@@ -108,6 +113,12 @@ This makes future migrations fail closed — any function genuinely needing clie
 
 ### C1. Anonymous cross-tenant PII dump via `SECURITY DEFINER` report RPCs
 **CONFIRMED — and worse than first stated.**
+
+> **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-13.** Shipped as two deploys, in the order this finding prescribes. Commit `13695d00` moved the four session-client RPCs onto `staff.db` at `reports/route.ts:611-614`; once that was verified returning unchanged figures, migration `20270107120000_revoke_report_rpcs_and_waitlist_anon.sql` revoked all four from `PUBLIC, anon, authenticated` and granted `service_role`. PR #136.
+>
+> **Verified, staging then production.** Before: all four returned **200** to the anon publishable key over PostgREST. After: all four return **`42501 permission denied`** to `anon` and **200** to `service_role`. The C0 sweep dropped from 16 anon-executable `SECURITY DEFINER` functions to **12**, with no `report_*` remaining. Reports page figures unchanged throughout.
+>
+> Two notes for whoever reads this next. `staff.db` was confirmed to be `getSupabaseAdminClient()` on every return path in `venue-auth.ts` before the switch, since the whole two-deploy ordering rests on `service_role` retaining EXECUTE. And **H43 was already closed by C0**, not here: `consume_class_credits_atomically` was revoked in `20270106120000:107-108`, so the "Revised implementation order" step 1 is stale in naming it.
 
 Six RPCs are `SECURITY DEFINER`, take a caller-supplied `p_venue_id`, perform no authorisation check, and retain default `PUBLIC` EXECUTE: `report_frequent_visitors`, `report_client_summary`, `report_booking_final_statuses`, `report_booking_summary`, `report_cancellation`, `report_no_show_series`. `report_client_summary`'s `GRANT … TO authenticated, service_role` does not remove PUBLIC's grant.
 
@@ -145,9 +156,15 @@ Then switch `reports/route.ts:605-608` from the session client to `staff.db`. **
 **Do not** add an in-function `current_staff_venue_ids()` guard *and* switch to `staff.db` — mutually exclusive (`service_role` carries no JWT email, so the guard raises), and five of the six are `LANGUAGE sql` so the guard isn't writable without a plpgsql rewrite. The `staff.db` switch is sufficient because the route already gates `requireAdmin` at `:578` and passes `staff.venue_id`.
 
 ### C2. `waitlist_entries` is anon-readable across every venue
-**CONFIRMED.** `public_read_own_waitlist … TO anon USING (true)` at `20260308000001_availability_engine_overhaul.sql:292-295`; `public_insert_waitlist … WITH CHECK (true)` at `:287`. The table holds `guest_name`, `guest_email`, `guest_phone`, `notes`, and the appointment waitlist reuses it.
+**CONFIRMED.** `public_read_own_waitlist … TO anon USING (true)` at `20260308000001_availability_engine_overhaul.sql:292-295`; `public_insert_waitlist … WITH CHECK (true)` at `:287`. The table holds `guest_email`, `guest_phone`, `notes` and the guest's name, and the appointment waitlist reuses it.
+
+> **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-13.** Both policies dropped by `20270107120000`, riding with C1 as step 1 prescribes. PR #136. Verified: `anon` now reads `waitlist_entries` as **200 with 0 rows** (RLS filters rather than errors, which is the expected shape), `service_role` still reads normally, and `pg_policies` shows exactly one remaining policy, `staff_manage_waitlist`. Dashboard waitlist and guest waitlist join both confirmed working.
+>
+> **Correction to this finding's own text:** it originally listed `guest_name` as a column. That column was dropped by `20260810120000_guest_first_last_names.sql:61` three days before this audit was written, when names were split into first/last. Corrected above. The severity is unchanged, the table still carries emails, phones and free-text notes, but it is a reminder that the schema claims throughout this document are a snapshot rather than live truth.
 
 **Fix — VERIFIED SAFE, unchanged.** Drop both anon policies. All 28 references in `src/` go through `getSupabaseAdminClient()`; the only client-side use is a realtime subscription in `WaitlistPageClient.tsx:384` covered by `staff_manage_waitlist`. No embed or widget surface touches the table. Nothing breaks.
+
+Re-verified independently before shipping: both guest-facing writers (`/api/booking/waitlist`, `/api/booking/appointment-waitlist`) import only `getSupabaseAdminClient` with no second client in either file, so they bypass RLS entirely. And `staff_manage_waitlist` is `FOR ALL` with **no `TO` clause**, so it applies to every role and is what serves staff as `authenticated`; for `anon` its staff-email subquery is empty. That makes these two policies the whole of the anonymous exposure.
 
 ### C3. No database-level protection against double-booking
 **CONFIRMED, all four legs.** Zero `EXCLUDE USING` / `btree_gist` / `tstzrange` across 253 migrations. `20261225120000_cde_capacity_guards.sql:125` is literally `-- Appointment / table rows: not governed here. / RETURN NEW;`. No advisory lock on any appointment path. Validate at `create/route.ts:1169`, insert at `:1820`.
@@ -418,11 +435,29 @@ The first pass also over-claimed that `security_invoker` proves the spec is wron
 
 ## Revised implementation order
 
-**0. DONE (staging, 2026-08-13).** Grants verified live. Result: C0 opened, C1/H43 confirmed live, N1 resolved as state (c). **Re-run the same three queries against production before acting** — the whole point of step 0 was that applied-migration state can differ per environment, and only staging has been checked.
+**0. DONE (staging and production, 2026-08-13).** Grants verified live on both. Result: C0 opened, C1/H43 confirmed live, N1 resolved as state (c). Both environments returned the same 31 anon-executable functions, so the per-environment divergence this step guarded against did not materialise here, but the step still earned its place: it is what found C0.
 
-**0b. C0 — revoke the destructive and high-value functions from `anon`/`authenticated`, starting with `admin_hard_delete_venue`.** Pure grant changes, no app code, instantly reversible, and they cannot break the dashboard provided the eight RLS helpers are left alone. This precedes everything, including C1, and it is a prerequisite for D1/A1.
+**0b. C0 — DONE, both environments, 2026-08-13.** Migration `20270106120000`. Verified at exactly the expected 16 remaining rows, smoke test passed.
 
-**1. C1 + H43 + C2 — code-first, then migration (two deploys, not one).** Deploy the `reports/route.ts:605-608 → staff.db` switch first and verify `/api/venue/reports` returns 200; *then* apply the migration that `REVOKE`s the six report RPCs **from `PUBLIC, anon, authenticated`** (dropping `report_frequent_visitors`, adding `report_deposit_summary`), `REVOKE`s `consume_class_credits_atomically` from all three roles, and drops the two `waitlist_entries` anon policies. Bundling the REVOKE with the code switch risks a rolling-deploy window where the grant is gone but old lambdas still call on the session client → 500s. This is the entire anonymous-exposure surface.
+**1. C1 + C2 — DONE, both environments, 2026-08-13.** Shipped as two deploys in the prescribed order: commit `13695d00` (`reports/route.ts:611-614 → staff.db`), verified, then migration `20270107120000` revoking the four report RPCs from `PUBLIC, anon, authenticated` and dropping the two `waitlist_entries` anon policies. PR #136. Anon-executable `SECURITY DEFINER` functions now stand at 12, down from 16.
+
+> **H43 was not part of this step, contrary to the line that stood here.** C0 had already revoked `consume_class_credits_atomically` at `20270106120000:107-108`. Also note the original step-1 text named "the six report RPCs": by the time C1 shipped, `report_frequent_visitors` and `report_booking_final_statuses` were already closed by C0, leaving four.
+
+**1b. Stopping this class of bug recurring — DONE on staging, 2026-08-13, but NOT the way this document originally prescribed.**
+
+C0 and C1 closed 19 individual functions. Neither touched the mechanism, so the next `CREATE FUNCTION` in `public` inherits the same exposure. The fix proposed for this was `ALTER DEFAULT PRIVILEGES`. **It does not work on this platform.** It was applied as `20270108120000` and measured three times: a function created immediately afterwards, owned by `postgres` in `public`, is still anon-executable, because PostgreSQL's built-in `EXECUTE`-to-`PUBLIC` grant survives it. Naming `PUBLIC` explicitly does not help either. Details in C0's "Durable fix" paragraph and in the migration's own header.
+
+Keep the migration regardless: it removes the *direct* `anon`/`authenticated` default grants, which means a plain `REVOKE ALL ON FUNCTION x FROM PUBLIC` now closes a new function. That is the pattern the ~28 historical migrations used and the reason it failed. The repo's instinct is now correct going forward. It cannot break anything, since it only affects functions created after it.
+
+**The guarantee comes from detection instead**, which turned out to be the better control rather than merely the achievable one:
+
+- `20270109120000` adds `audit_client_executable_functions()`, returning the `SECURITY DEFINER` functions in `public` that `anon` or `authenticated` can execute. `SECURITY INVOKER` deliberately: `pg_catalog` is world-readable and `has_function_privilege()` answers for any role, so policing definer functions needs no definer function of its own.
+- `scripts/check-client-executable-functions.mjs` compares the live set against a committed allowlist of 12 and fails on drift **in either direction**. `UNEXPECTED` is a new C0/C1. `MISSING` is the `DROP`+`CREATE` hazard, where re-creating one of the 8 RLS helpers resets its ACL and strips the `authenticated` grant every policy referencing it needs, making the dashboard return empty rather than error. No default-privileges approach could have caught that second case at all.
+- It runs as part of the **migration ritual**, not in CI: `npm run check:function-grants`, after applying any migration, against the environment just changed. Both failure branches were exercised before shipping, not just the passing one.
+
+**Why not CI, since that was the original plan.** A `function-grants` job was written and then removed. The weaker reason is credential: it needs `SUPABASE_SECRET_KEY`, which is full database access, and this repository is public and holds no Actions secrets at all (the `e2e-smoke` job references some, but it is gated behind `vars.RUN_E2E_SMOKE` and has never run, so those references were not evidence the secrets existed). The stronger reason is that push is the wrong trigger: migrations here are applied by hand, so the check matters when someone applies one, and on push it would mostly re-verify an unchanged database while reporting green with a migration sitting unapplied. **The right CI home is a local Supabase instance built from the migrations** — no production credential, and it would catch a bad migration before it reaches any environment. That is the same infrastructure D1/A5 needs for pgTAP; do it once, for both.
+
+**Method note worth carrying forward.** The original prescription was wrong, and it was wrong in exactly the way the rest of this document warns about: a grant statement that returns success while changing nothing. It was caught only because the migration shipped with a probe that creates a function and asks whether `anon` can execute it, rather than a query confirming the statement had been recorded. Prefer checks that test the behaviour you want over checks that confirm the change you made.
 
 **2. C4 via the immutability trigger.** One trigger, protects admin routes too, no realtime impact, no test churn.
 
@@ -462,9 +497,9 @@ Two inter-agent disagreements were resolved by direct inspection: the import-too
 
 **What this document still cannot tell you** — settle each with a live database or a running app before scheduling the work:
 - ~~Production grant state.~~ **RESOLVED 2026-08-13: production verified and identically exposed** — same 31 anon-executable functions as staging, same anon-readable `unified_calendars` harvest leg. The only divergence is a cosmetic PUBLIC-grant difference on `admin_hard_delete_venue` that does not affect reachability. What remains open is whether the exposure was ever *used* — see C0's "Was it exploited?" note.
-- Whether the five `auth.uid()`-scoped functions in C0's middle tier are genuine no-ops for a null `uid`, and whether `merge_guests_into` / `increment_sms_usage` / `refresh_guest_booking_aggregates` carry internal guards — their bodies were not read.
+- ~~Whether the five `auth.uid()`-scoped functions in C0's middle tier are genuine no-ops for a null `uid`.~~ **RESOLVED 2026-08-13: there are four, not five, and all four are safe.** `claim_user_account`, `request_account_deletion`, `cancel_account_deletion` and `touch_user_last_active` each take **zero parameters** and derive their target solely from `auth.uid()`, with an explicit null check (the first three raise, `touch_user_last_active` returns early). There is no argument through which a signed-in user could name another account. The fifth, `guest_email_collides_for_user_change(text, uuid)`, takes parameters and is therefore not uid-scoped at all; whoever wrote `20270106120000` caught that and revoked it from all three roles rather than keeping `authenticated`, so C0's middle-tier list in this document is wrong and the migration is right. Still unread: whether `merge_guests_into` / `increment_sms_usage` / `refresh_guest_booking_aggregates` carry internal guards. They are revoked from the client roles, so this is now defence-in-depth rather than exposure.
 - Whether Supabase Realtime with `REPLICA IDENTITY FULL` delivers column-filtered payloads under A2's narrowed grant (analysis says yes; smoke-test before shipping D1).
 - Whether the row shapes D2's backfill would misclassify actually exist in your data.
 - The four Probable/Speculative findings (H12, H17's residual, `enforce_cde_capacity` NULL capacity, `estimateSmsSegments`).
 
-No code was changed in any of the three rounds.
+No code was changed in any of the three review rounds. Implementation began afterwards; see the implementation status at the top of this document, and the per-finding status blocks on C0, C1 and C2.

@@ -1,0 +1,175 @@
+-- Step 1b from Docs/Resneo_Forensic_Audit_August_2026.md: the durable fix.
+--
+-- C0 and C1 closed 19 individual functions that anon could execute. Neither
+-- touched the mechanism that exposed them. Hosted Supabase ships default
+-- privileges granting anon and authenticated a direct EXECUTE on every function
+-- created in `public`, so the next CREATE FUNCTION inherits exactly the same
+-- exposure, and the ~28 migrations in this repo that used the REVOKE ... FROM
+-- PUBLIC pattern show how easily that goes unnoticed for months.
+--
+-- WHAT THIS ACHIEVES, MEASURED ON STAGING 2026-08-13. Read this before relying
+-- on it: it is less than it first appears, and the shortfall is the point.
+--
+-- It does NOT make new functions fail closed. It was written expecting that and
+-- the expectation was wrong. After applying, a function created in `public` by
+-- postgres comes out as:
+--
+--   {=X/postgres, postgres=X/postgres, service_role=X/postgres}
+--
+-- and `has_function_privilege('anon', ..., 'EXECUTE')` is still **true**. The
+-- leading `=X` is PostgreSQL's own built-in default grant of EXECUTE to PUBLIC,
+-- and anon is a member of PUBLIC. Verified: pg_default_acl for postgres/public
+-- reads {postgres=X/postgres,service_role=X/postgres} with no PUBLIC entry, and
+-- a function created under it still receives one. The stored default adds to the
+-- built-in default rather than replacing it, so the built-in PUBLIC grant is not
+-- removable this way on this database. Do not "fix" this by re-running the
+-- statement or by naming PUBLIC differently; both were tried.
+--
+-- What it DOES achieve, and this is worth keeping: anon and authenticated no
+-- longer hold *direct* grants on new functions, only membership of PUBLIC. So
+-- a plain
+--
+--   REVOKE ALL ON FUNCTION public.new_fn(args) FROM PUBLIC;
+--
+-- now genuinely closes a new function. That is precisely the pattern the ~28
+-- migrations above used, and the reason it achieved nothing was the direct
+-- grants this migration removes. The repo's existing instinct is now correct
+-- going forward. Naming all three roles remains the safer habit, and remains
+-- required for any function that predates this migration.
+--
+-- The actual guarantee therefore has to come from detection, not prevention:
+-- an allowlist check over pg_proc that fails when the set of anon-executable
+-- functions in `public` changes. See the audit document, step 1b.
+--
+-- PREREQUISITE, now satisfied. C0 deferred this pending an audit of genuinely
+-- client-called RPCs. After C1 that set is exactly 12 and every member is
+-- accounted for: the 8 RLS helpers, which must keep their grants, and the 4
+-- auth.uid()-scoped functions, whose bodies were read on 2026-08-13 and
+-- confirmed parameterless and uid-derived.
+
+-- ---------------------------------------------------------------------------
+-- PRE-FLIGHT. Run this BEFORE applying, and stop if the answer is not postgres.
+--
+-- ALTER DEFAULT PRIVILEGES FOR ROLE x governs only objects created BY x. The
+-- evidence says postgres: every ACL in the C0 sweep read `anon=X/postgres`, so
+-- postgres is the grantor. Confirm it is also the owner. If migrations here run
+-- as some other role, this statement would apply to the wrong one and silently
+-- achieve nothing, which is the same failure mode as REVOKE ... FROM PUBLIC.
+--
+--   SELECT pg_get_userbyid(p.proowner) AS function_owner, count(*)
+--   FROM pg_proc p
+--   JOIN pg_namespace n ON n.oid = p.pronamespace
+--   WHERE n.nspname = 'public'
+--   GROUP BY 1
+--   ORDER BY 2 DESC;
+-- ---------------------------------------------------------------------------
+
+-- PUBLIC must be named alongside the two client roles, for the same reason
+-- every REVOKE in C0 and C1 names all three. PostgreSQL grants EXECUTE on
+-- functions to PUBLIC by default (a built-in default, not a Supabase one), and
+-- anon and authenticated are members of PUBLIC, so revoking only the two direct
+-- role grants leaves a new function just as reachable as before. Verified on
+-- staging 2026-08-13: with only `FROM anon, authenticated`, a freshly created
+-- function's ACL was {=X/postgres,postgres=X/postgres,service_role=X/postgres},
+-- where the leading `=X` is the PUBLIC grant. Reachability was unchanged. This
+-- is the mirror image of the bug in the ~28 migrations that revoked from PUBLIC
+-- alone; the lesson survives being turned around.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- WHAT THIS DOES NOT DO
+--
+--  * It does not change any existing function. Default privileges apply only to
+--    objects created after this statement. The 12 legitimately client-callable
+--    functions keep their grants untouched, so nothing breaks on apply.
+--  * It does not affect service_role, despite naming PUBLIC. service_role holds
+--    its own explicit default grant (`service_role=X/postgres`, visible as a
+--    separate ACL entry), which a PUBLIC revoke does not touch. Server code
+--    goes through getSupabaseAdminClient() / staff.db and is unaffected. Nor
+--    does it affect postgres, which has EXECUTE as owner regardless.
+--  * It does not affect trigger functions. Firing a trigger does not check
+--    EXECUTE on its function, so the C4 work and anything like it needs no
+--    grant. Only functions called *by name* by a client are in scope.
+--
+-- TWO HAZARDS FOR FUTURE AUTHORS
+--
+--  1. CREATE OR REPLACE on an EXISTING function preserves its ACL. DROP then
+--     CREATE resets it to the defaults, which after this migration means no
+--     client grant at all. This repo already does DROP+CREATE (20260518120000
+--     on admin_hard_delete_venue, which is why its PUBLIC grant diverged
+--     between environments). If anyone ever DROP+CREATEs one of the 8 RLS
+--     helpers below, the dashboard locks out for every user, because those are
+--     invoked inside policy evaluation as the querying role. Re-grant in the
+--     same migration:
+--
+--       current_staff_venue_ids, caller_staff_venue_ids,
+--       caller_staff_admin_venue_ids, link_action_grant, link_calendar_grant,
+--       link_pii_grant, link_calendar_allows, get_linked_booking_source
+--
+--  2. A new function is still anon-reachable through PUBLIC on creation, per
+--     the note at the top. Every new function in `public` needs an explicit
+--     line in its own migration:
+--
+--       -- client-callable, and it authorises the caller itself:
+--       REVOKE ALL ON FUNCTION public.your_new_fn(args) FROM PUBLIC;
+--       GRANT EXECUTE ON FUNCTION public.your_new_fn(args) TO authenticated;
+--
+--       -- server-only:
+--       REVOKE ALL ON FUNCTION public.your_new_fn(args) FROM PUBLIC, anon, authenticated;
+--       GRANT EXECUTE ON FUNCTION public.your_new_fn(args) TO service_role;
+--
+--     Before writing the GRANT, check the function does its own authorisation.
+--     A SECURITY DEFINER function taking a caller-supplied venue_id with no
+--     guard is C1 all over again.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- VERIFICATION
+--
+-- 1. The default ACL is recorded. Expect one row for schema public showing the
+--    revoke, i.e. no =X entries for anon or authenticated:
+--
+--      SELECT n.nspname AS schema, pg_get_userbyid(d.defaclrole) AS for_role,
+--             d.defaclobjtype AS obj_type, d.defaclacl AS default_acl
+--      FROM pg_default_acl d
+--      JOIN pg_namespace n ON n.oid = d.defaclnamespace
+--      WHERE n.nspname = 'public' AND d.defaclobjtype = 'f';
+--
+-- 2. Nothing existing changed. The C0 sweep must still return 12, unchanged:
+--
+--      SELECT count(*) FROM pg_proc p
+--      JOIN pg_namespace n ON n.oid = p.pronamespace
+--      WHERE n.nspname = 'public' AND p.prosecdef
+--        AND p.prorettype <> 'trigger'::regtype
+--        AND has_function_privilege('anon', p.oid, 'EXECUTE');
+--
+-- 3. End-to-end proof, the one that actually falsifies this. Ask whether anon
+--    can execute a brand new function, rather than reading an ACL string and
+--    reasoning about role membership. Run all three statements together.
+--
+--      CREATE FUNCTION public._defacl_probe() RETURNS int LANGUAGE sql AS 'SELECT 1';
+--      SELECT proacl,
+--             has_function_privilege('anon', '_defacl_probe()'::regprocedure, 'EXECUTE') AS anon_can_execute
+--      FROM pg_proc WHERE proname = '_defacl_probe';
+--      DROP FUNCTION public._defacl_probe();
+--
+--    Expect `{=X/postgres,postgres=X/postgres,service_role=X/postgres}` and
+--    `anon_can_execute = true`. That is the CORRECT post-migration result, not
+--    a failure: see the note at the top. What this check confirms is the narrow
+--    win, that `anon=X` and `authenticated=X` are absent as direct entries, so
+--    a subsequent `REVOKE ... FROM PUBLIC` on a given function will close it.
+--
+--    Read the ACL carefully, because this is where the earlier reading went
+--    wrong. `grantee=privs/grantor`, and an EMPTY grantee is PUBLIC. Before
+--    this migration the list was {=X/postgres, anon=X/postgres,
+--    authenticated=X/postgres, postgres=..., service_role=...}: the two named
+--    roles were Supabase's project default privileges, the bare `=X` is
+--    PostgreSQL's own built-in. This migration removes the first two. The third
+--    cannot be removed via ALTER DEFAULT PRIVILEGES here, which is why the
+--    guarantee has to come from the allowlist check instead.
+--
+-- 4. Smoke test: load the dashboard. If the RLS helpers were disturbed the
+--    booking lists come back empty rather than erroring, so check that bookings
+--    are actually visible, not merely that the page renders.
+-- ---------------------------------------------------------------------------

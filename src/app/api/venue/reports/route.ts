@@ -602,10 +602,16 @@ export async function GET(request: NextRequest) {
       { data: clientSummaryRaw, error: eClient },
       { data: firstAdmin },
     ] = await Promise.all([
-      supabase.rpc('report_booking_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
-      supabase.rpc('report_no_show_series', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd, p_granularity: 'day' }),
-      supabase.rpc('report_cancellation', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
-      supabase.rpc('report_deposit_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
+      // These four are SECURITY DEFINER and take a caller-supplied p_venue_id with
+      // no authorisation check of their own, so they must not be reachable by the
+      // client roles. They run on staff.db (service_role) for the same reason
+      // report_client_summary below does. This route is their only caller, so the
+      // follow-up migration revokes EXECUTE from anon and authenticated. Venue
+      // scoping comes from staff.venue_id above, gated by requireAdmin.
+      staff.db.rpc('report_booking_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
+      staff.db.rpc('report_no_show_series', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd, p_granularity: 'day' }),
+      staff.db.rpc('report_cancellation', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
+      staff.db.rpc('report_deposit_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       staff.db
         .from('venues')
         .select('table_management_enabled, booking_model, pricing_tier, enabled_models, daily_booking_log_email_config')

@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C13, C12 and C10 are implemented on staging, production pending** (all code-only: no migration). **H8 is NOT done and must not be read as closed** — its text is not in this repo; see C10's status block. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C13, C12, C10 and H8 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -313,7 +313,23 @@ No test breaks — there is no test for this PATCH route.
 >
 > Three tests added to `StaffAppointmentModifyForm.visit.test.tsx`, asserting the dry run anchors on 11:00 when the 10:00 segment is cancelled, on 10:00 when it is not, and on 10:00 for statusless fixtures. Removing the filter fails exactly the first and leaves both controls green. Baseline: `tsc` clean, lint 0 errors, **331 files / 3126 tests** green (the 14 visit tests stayed green throughout, as predicted).
 >
-> ⚠️ **H8 did not ship with this, and the sequencing constraint's warning is now live: "C10 must land with H8 or H8 will look closed and will not be."** H8 is referenced twice in this document — in step 7 and in the sequencing constraints — and **its finding text does not exist anywhere in this repository**. Only H1, H6, H13, H17, H38, H44 and H49 are written out here; the rest of the 167 findings, H8 among them, live only in the original audit agents' output. It was not implemented, because implementing a finding whose content has to be guessed is exactly the failure this document warns about. **Do not treat H8 as closed.** Recover its text from the original audit output, then re-read C10's fix: the shared root ("filter at point of use, never at the fetch") means part of it may already be covered by the memo filter above, but which part cannot be established without the finding.
+> **H8 shipped separately, later the same day — see the H8 entry below.** It was initially held back because its finding text is not in this document (only H1, H6, H13, H17, H38, H44 and H49 are written out; the other ~160 live in the original agents' output). It was recovered from the audit session's own transcript and then re-derived from the code before being fixed.
+
+### H8. One cancelled service marks a whole visit cancelled
+
+**RECOVERED 2026-08-14 and CONFIRMED against the code.** This finding had no text in this document — only two references, in step 7 and in the sequencing constraints. It was recovered from the original audit session transcript, which describes C10 and H8 as *"cancelled rows in the visit set, status-rank anchor… a missing status filter and a bad rank order"*, and warns *"C10 → H8. C10 makes H8 invisible without fixing it."* The defect below was then verified directly in the code rather than taken from that transcript.
+
+`VISIT_STATUS_RANK` (`group-visit-bookings.ts:97`) scores `Cancelled: 6` — the **highest value in the table**, above `No-Show: 5` and `Completed: 4`. `preferLaterBookingStatus` keeps the higher rank, and `resolveVisitPillAnchorStatus` folds every segment's status into one visit-wide anchor through it; `groupVisitSegmentPillStatus` then floors each pill at that anchor. So **one cancelled service drove the whole visit's anchor to `Cancelled` and every still-live service in that visit rendered as Cancelled.** One no-show did the same one rank down. The seed was equally affected: it is the expanded row's own status, so merely opening a visit on a segment that happened to be cancelled marked every sibling Cancelled with no cancelled sibling present.
+
+The rank table is not wrong for its original job — reconciling the same booking seen at two freshnesses, where "furthest along wins" stops a stale list seed regressing Confirmed to Booked. It is wrong as a **visit-wide fold**, because cancellation is not a later stage of the same journey. It is a different axis, and a fact about one segment that says nothing about its siblings.
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Terminal outcomes (`Cancelled`, `No-Show`) are excluded from both the seed and the fold, so the anchor now carries only lifecycle progress; `resolveVisitPillAnchorStatus` returns `string | null`, null meaning "no lifecycle status worth flooring pills at", in which case each pill shows its own status. `groupVisitSegmentPillStatus` also returns a terminal segment's status unchanged, so neither the attendance lifts nor the anchor can resurrect a cancelled row into a live-looking one. One production caller.
+>
+> **`Completed` was deliberately left in the fold.** Propagating it across segments is questionable for the same reason, but it does not make a live appointment claim to be dead. Changing it is a display-policy decision rather than a defect fix, and is not in this finding.
+>
+> **The sequencing warning turned out not to have bitten.** It existed because the *original* C10 fix filtered `fetchGroupVisitBookings`, which would have stopped cancelled rows reaching the anchor at all and hidden this without fixing it. Round three rewrote C10 to filter at the point of use, and that is what shipped: the filter lives in the modify form's `visitSegments` memo, while the pill path reads `multiServiceVisitSegments` directly and was untouched. H8 stayed observable.
+>
+> Six tests added; removing the terminal exclusion fails four of them and leaves the "still floors live siblings at the furthest-along live status" control green, which is the behaviour the anchor exists for. Baseline: `tsc` clean, lint 0 errors, **331 files / 3132 tests**.
 
 **CONFIRMED on the primary limb. Two framing claims WRONG; second limb downgraded to Speculative.**
 
@@ -562,7 +578,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **6. C12 — DONE on staging, 2026-08-14; production pending.** Via `class_instance_id`. `cancelStaffBookingWithNotify` applies the resolver's exported predicate to its own sibling rows rather than calling the resolver, which avoids a second query and keeps `staff-cancel-booking.test.ts:123` green. Code-only, no migration. See C12's status block.
 
-**7. C10 — DONE on staging, 2026-08-14; production pending. H8 STILL OPEN.** C10 shipped as the derivation fix: filter at point of use, never at the fetch. **H8 did not**, because its finding text exists nowhere in this repo (see the warning in C10's status block). The constraint on this step, that H8 would otherwise *look* closed, is therefore live: recover H8's text before anyone ticks it off.
+**7. C10 and H8 — both DONE on staging, 2026-08-14; production pending.** C10 shipped as the derivation fix: filter at point of use, never at the fetch. H8's finding text was missing from this document and was recovered from the original audit session transcript, then re-derived from the code before being fixed; it now has a full entry above. The constraint on this step did not bite, because C10 shipped as the round-three rewrite rather than as the fetch-level filter that would have masked H8.
 
 **8. N2, N3, N4** — the linked write and guest-scope holes, independently of D1.
 

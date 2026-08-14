@@ -23,6 +23,7 @@ import {
 } from "@/lib/booking/guest-card-hold-summary";
 import { settleCardHoldsOnCancellation } from "@/lib/booking/card-hold-cancellation";
 import { cancelOpenDepositIntentForBookings } from "@/lib/booking/cancel-open-deposit-intent";
+import { planSharedDepositRefund } from "@/lib/booking/shared-deposit-refund";
 import { formatCardHoldFeePence } from "@/lib/booking/card-hold-terms";
 import { verifyBookingHmac } from "@/lib/short-manage-link";
 import {
@@ -589,9 +590,27 @@ export async function POST(request: NextRequest) {
           .single();
         if (venue?.stripe_connected_account_id) {
           try {
+            // C11 — a group booking, visit or class cart puts EVERY row on one
+            // PaymentIntent, and this route cancels only the row the guest
+            // clicked. Refunding that intent without an amount therefore handed
+            // back the whole party's deposits on one attendee's cancel, and the
+            // charge.refunded webhook then stamped every sibling 'Refunded'
+            // while they were still Booked. Refund only this row's share; when
+            // it is the only paid row left on the intent this still refunds the
+            // full remaining balance, exactly as before.
+            const refundPlan = await planSharedDepositRefund(supabase, {
+              paymentIntentId: booking.stripe_payment_intent_id as string,
+              settlingBookingIds: [bookingId],
+            });
             await stripe.refunds.create(
-              { payment_intent: booking.stripe_payment_intent_id },
-              { stripeAccount: venue.stripe_connected_account_id },
+              {
+                payment_intent: booking.stripe_payment_intent_id as string,
+                ...(refundPlan.amountPence != null ? { amount: refundPlan.amountPence } : {}),
+              },
+              {
+                stripeAccount: venue.stripe_connected_account_id,
+                idempotencyKey: refundPlan.idempotencyKey,
+              },
             );
             refundSucceeded = true;
           } catch (refundErr) {
@@ -599,6 +618,14 @@ export async function POST(request: NextRequest) {
             // money is back with the guest, so converge instead of failing. This
             // also lets a retry succeed after a previous cancel-update failure
             // left the booking uncancelled but the refund already issued.
+            //
+            // Still correct now that refunds can be partial. Stripe raises this
+            // only when the CHARGE is fully refunded, and the charge total is
+            // the sum of every row's deposit, so a fully-refunded charge means
+            // this row's money is necessarily back too. The idempotency key
+            // above handles the other convergence case (a crash-retry of this
+            // exact refund), which replays the original result rather than
+            // raising at all.
             const code = (refundErr as { code?: string } | null)?.code;
             if (code === 'charge_already_refunded') {
               refundSucceeded = true;

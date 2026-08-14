@@ -505,7 +505,13 @@ describe('refund (§9.2e)', () => {
     expect(res.status).toBe(200);
     expect(mockRefundCreate).toHaveBeenCalledWith(
       { payment_intent: 'pi_fee' },
-      { stripeAccount: 'acct_snapshot' }, // NOT the venue row's current account
+      {
+        stripeAccount: 'acct_snapshot', // NOT the venue row's current account
+        // C11 — keyed on the FEE intent and namespaced away from the deposit
+        // refund. Same booking, different PaymentIntent: a key templated on the
+        // booking id would collide and make Stripe replay the wrong refund.
+        idempotencyKey: 'hold_fee_refund:pi_fee',
+      },
     );
     expect(mockRefundApply).toHaveBeenCalledWith(expect.anything(), {
       bookingId: BOOKING_ID,

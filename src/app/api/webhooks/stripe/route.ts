@@ -826,6 +826,24 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ received: true });
         }
 
+        // C11 — this branch stamps EVERY booking on the intent 'Refunded' and
+        // frees their class seats. That is only ever right for a full refund.
+        // Once a cancel can refund one member's share of a shared group PI
+        // (see `planSharedDepositRefund`), a partial refund arriving here would
+        // mark the surviving members refunded while they are still Booked, and
+        // `restoreAndReleaseClassBookings` below would release their seats too.
+        // The cancelled row's own 'Refunded' stamp is not orphaned by this:
+        // all four settle paths stamp their own rows directly
+        // (staff-cancel-booking.ts:153, venue/bookings/[id]/route.ts:1005,
+        // confirm/route.ts:632, deposit/route.ts:360). Mirrors the card-hold
+        // fee and balance-PI branches above, which already bail the same way.
+        if (!chargeFullyRefunded) {
+          console.warn('[Stripe webhook] partial refund on a deposit PI; leaving sibling bookings untouched', {
+            paymentIntentId,
+          });
+          return NextResponse.json({ received: true });
+        }
+
         const { data: bookings, error: bookingsErr } = await supabase
           .from('bookings')
           .select('id, deposit_status, venue_id, guest_id, status')

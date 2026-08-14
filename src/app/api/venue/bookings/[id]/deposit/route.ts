@@ -10,6 +10,7 @@ import {
 } from '@/lib/communications/send-templated';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
+import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import {
   linkedGrantAllowsMutation,
@@ -297,7 +298,14 @@ export async function POST(
       try {
         await stripe.refunds.create(
           { payment_intent: hold.charge_payment_intent_id },
-          { stripeAccount: hold.stripe_connected_account_id },
+          {
+            stripeAccount: hold.stripe_connected_account_id,
+            // Namespaced away from the deposit refund below. This is the SAME
+            // booking but a DIFFERENT PaymentIntent (the hold's fee charge), so
+            // a key templated on the booking id alone would collide with it and
+            // make Stripe replay the wrong refund inside its 24h window.
+            idempotencyKey: `hold_fee_refund:${hold.charge_payment_intent_id}`,
+          },
         );
       } catch (refundErr) {
         // Already fully refunded in Stripe (for example via the dashboard):
@@ -345,6 +353,21 @@ export async function POST(
     if (!booking.stripe_payment_intent_id) {
       return NextResponse.json({ error: 'No Stripe payment intent found' }, { status: 400 });
     }
+    // C11 — re-entry guard, mirroring the hold branch's 'Charged' check above.
+    // Without it, pressing Refund twice issued a second refund against the same
+    // intent. That was previously self-limiting because the whole intent was
+    // refunded and Stripe rejected the repeat; now that a refund can be for one
+    // member's share of a shared intent, a repeat would silently succeed and
+    // hand back a sibling's money too.
+    if (booking.deposit_status !== 'Paid') {
+      return NextResponse.json(
+        {
+          error: 'There is no paid deposit to refund for this booking.',
+          code: 'invalid_state',
+        },
+        { status: 409 },
+      );
+    }
     const { data: venue } = await admin
       .from('venues')
       .select('stripe_connected_account_id')
@@ -353,10 +376,36 @@ export async function POST(
     if (!venue?.stripe_connected_account_id) {
       return NextResponse.json({ error: 'Venue payment account not connected' }, { status: 400 });
     }
-    await stripe.refunds.create(
-      { payment_intent: booking.stripe_payment_intent_id },
-      { stripeAccount: venue.stripe_connected_account_id }
-    );
+    try {
+      // Only this booking is being refunded, so on a group/visit intent this
+      // resolves to that row's share rather than the whole party's money.
+      const refundPlan = await planSharedDepositRefund(admin, {
+        paymentIntentId: booking.stripe_payment_intent_id as string,
+        settlingBookingIds: [id],
+      });
+      await stripe.refunds.create(
+        {
+          payment_intent: booking.stripe_payment_intent_id as string,
+          ...(refundPlan.amountPence != null ? { amount: refundPlan.amountPence } : {}),
+        },
+        {
+          stripeAccount: venue.stripe_connected_account_id,
+          idempotencyKey: refundPlan.idempotencyKey,
+        },
+      );
+    } catch (refundErr) {
+      // Already fully refunded in Stripe (for example via the dashboard):
+      // converge so our state matches Stripe's. Anything else fails, rather
+      // than stamping a row 'Refunded' whose money never moved.
+      const code = (refundErr as { code?: string } | null)?.code;
+      if (code !== 'charge_already_refunded') {
+        console.error('[deposit route] deposit refund failed:', refundErr, { bookingId: id });
+        return NextResponse.json(
+          { error: 'The refund could not be completed. Please try again.' },
+          { status: 502 },
+        );
+      }
+    }
     await admin.from('bookings').update({ deposit_status: 'Refunded', updated_at: new Date().toISOString() }).eq('id', id);
     return NextResponse.json({ success: true });
   }

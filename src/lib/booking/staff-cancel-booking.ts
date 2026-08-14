@@ -9,6 +9,7 @@ import { sendCancellationNotification } from '@/lib/communications/send-template
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
+import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -89,6 +90,12 @@ export async function cancelStaffBookingWithNotify(
   let depositPenceForMessage: number | null =
     typeof booking.deposit_amount_pence === 'number' ? booking.deposit_amount_pence : null;
   let hadPaidDeposit = booking.deposit_status === 'Paid';
+  // C11 — only rows that actually held a paid deposit may be stamped
+  // 'Refunded'. A 'Card Held' sibling shares the PI but was never charged, and
+  // once the refund covers only the paid rows' share, stamping the rest
+  // 'Refunded' would assert money moved that did not. Mirrors the same split in
+  // venue/bookings/[id]/route.ts.
+  let paidDepositIds = new Set<string>(booking.deposit_status === 'Paid' ? [bookingId] : []);
 
   if (groupBookingId) {
     const { data: groupRows } = await staffDb
@@ -102,6 +109,11 @@ export async function cancelStaffBookingWithNotify(
     if (idsToCancel.length === 0) {
       idsToCancel = [bookingId];
     }
+    paidDepositIds = new Set(
+      (groupRows ?? [])
+        .filter((r: { deposit_status?: string | null }) => r.deposit_status === 'Paid')
+        .map((r: { id: string }) => r.id),
+    );
     const withPi = (groupRows ?? []).find(
       (r: { stripe_payment_intent_id?: string | null }) => r.stripe_payment_intent_id,
     );
@@ -130,9 +142,22 @@ export async function cancelStaffBookingWithNotify(
       .single();
     if (venueStripe?.stripe_connected_account_id) {
       try {
+        // C11 — the group shares one PaymentIntent, so refund only the share
+        // the rows being cancelled actually paid. When they are all of it this
+        // still refunds the whole remaining balance, unchanged.
+        const refundPlan = await planSharedDepositRefund(admin, {
+          paymentIntentId: paymentIntentForRefund,
+          settlingBookingIds: idsToCancel,
+        });
         await stripe.refunds.create(
-          { payment_intent: paymentIntentForRefund },
-          { stripeAccount: venueStripe.stripe_connected_account_id },
+          {
+            payment_intent: paymentIntentForRefund,
+            ...(refundPlan.amountPence != null ? { amount: refundPlan.amountPence } : {}),
+          },
+          {
+            stripeAccount: venueStripe.stripe_connected_account_id,
+            idempotencyKey: refundPlan.idempotencyKey,
+          },
         );
         refundSucceeded = true;
       } catch (refundErr) {
@@ -151,19 +176,40 @@ export async function cancelStaffBookingWithNotify(
     .in('id', idsToCancel);
 
   if (refundSucceeded) {
-    const { error: cancelErr } = await staffDb
-      .from('bookings')
-      .update({
-        status: 'Cancelled',
-        deposit_status: 'Refunded',
-        cancelled_by_staff_id: options.actorId,
-        cancellation_actor_type: options.actorId ? 'staff' : 'system',
-        updated_at: new Date().toISOString(),
-      })
-      .in('id', idsToCancel);
-    if (cancelErr) {
-      console.error('[staff-cancel-booking] cancel update failed after refund:', cancelErr, { bookingId });
-      return { cancelled: false, reason: 'not_found' };
+    // Flip only the actually-paid rows to 'Refunded'; cancel the rest with
+    // status only, so a shared-PI refund never mislabels an uncharged hold.
+    const refundedIds = idsToCancel.filter((cid) => paidDepositIds.has(cid));
+    const cancelOnlyIds = idsToCancel.filter((cid) => !paidDepositIds.has(cid));
+    if (refundedIds.length > 0) {
+      const { error: cancelErr } = await staffDb
+        .from('bookings')
+        .update({
+          status: 'Cancelled',
+          deposit_status: 'Refunded',
+          cancelled_by_staff_id: options.actorId,
+          cancellation_actor_type: options.actorId ? 'staff' : 'system',
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', refundedIds);
+      if (cancelErr) {
+        console.error('[staff-cancel-booking] cancel update failed after refund:', cancelErr, { bookingId });
+        return { cancelled: false, reason: 'not_found' };
+      }
+    }
+    if (cancelOnlyIds.length > 0) {
+      const { error: cancelOnlyErr } = await staffDb
+        .from('bookings')
+        .update({
+          status: 'Cancelled',
+          cancelled_by_staff_id: options.actorId,
+          cancellation_actor_type: options.actorId ? 'staff' : 'system',
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', cancelOnlyIds);
+      if (cancelOnlyErr) {
+        console.error('[staff-cancel-booking] cancel update failed for unpaid siblings:', cancelOnlyErr, { bookingId });
+        return { cancelled: false, reason: 'not_found' };
+      }
     }
   } else {
     const { error: cancelErr } = await staffDb

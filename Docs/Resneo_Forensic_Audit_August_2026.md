@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C13 and C12 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C13, C12 and C10 are implemented on staging, production pending** (all code-only: no migration). **H8 is NOT done and must not be read as closed** — its text is not in this repo; see C10's status block. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -302,6 +302,19 @@ No test breaks — there is no test for this PATCH route.
 **Fix — NEW.** Make the no-target case a no-op: `if (!target || target.invalid) return;` at `PractitionerCalendarView.tsx:5362`. Strictly safer than a delta-based guard, which would still let a 1px twitch through the `CALENDAR_MOVE_INCREMENT_MINUTES = 1` path. No test breaks.
 
 ### C10. Pressing Save on an untouched Modify form moves the visit
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14. H8 NOT DONE — see the warning below.** Built exactly as the rewritten fix prescribes: an **optional** `status` on `StaffVisitModifySegment` (optional so the statusless visit fixtures still typecheck), populated at the one build site, and filtered **inside the `visitSegments` memo** rather than in the two named derivations, so `notifyBookingId` and both duration baselines get the filtered list too. `VISIT_SCHEDULED_STATUSES` mirrors the server's list verbatim (`visits/[groupBookingId]/schedule/route.ts:38`), and an absent status counts as scheduled. `fetchGroupVisitBookings` is untouched, so the "Services in this visit" card still shows the segment staff just cancelled.
+>
+> One detail worth recording: the build site had to read `multiServiceVisitSegments`, **not** `multiServiceVisitSegmentsForDisplay`, whose `status` is a derived pill label rather than the row's own value. Wiring the display variant would have fed the filter a value that means something else entirely.
+>
+> `visitRelayNotice` now names the move. It reports the dead time as before and appends the new start when the plan differs from the current one, which matters because that notice is the sole reason Save is enabled on a form nobody has touched.
+>
+> The deliberate consequence the fix text flags is accepted and commented in place: a visit reduced to one scheduled segment now has `isVisit === false` and opens in single-booking mode.
+>
+> Three tests added to `StaffAppointmentModifyForm.visit.test.tsx`, asserting the dry run anchors on 11:00 when the 10:00 segment is cancelled, on 10:00 when it is not, and on 10:00 for statusless fixtures. Removing the filter fails exactly the first and leaves both controls green. Baseline: `tsc` clean, lint 0 errors, **331 files / 3126 tests** green (the 14 visit tests stayed green throughout, as predicted).
+>
+> ⚠️ **H8 did not ship with this, and the sequencing constraint's warning is now live: "C10 must land with H8 or H8 will look closed and will not be."** H8 is referenced twice in this document — in step 7 and in the sequencing constraints — and **its finding text does not exist anywhere in this repository**. Only H1, H6, H13, H17, H38, H44 and H49 are written out here; the rest of the 167 findings, H8 among them, live only in the original audit agents' output. It was not implemented, because implementing a finding whose content has to be guessed is exactly the failure this document warns about. **Do not treat H8 as closed.** Recover its text from the original audit output, then re-read C10's fix: the shared root ("filter at point of use, never at the fetch") means part of it may already be covered by the memo filter above, but which part cannot be established without the finding.
+
 **CONFIRMED on the primary limb. Two framing claims WRONG; second limb downgraded to Speculative.**
 
 Every mechanical leg checks out: `fetchGroupVisitBookings` sends only the group id; the list route drops cancelled rows only for `view=calendar`; cancelled rows reach `visit.segments` unfiltered; `StaffVisitModifySegment` carries no status so the form *cannot* filter; `scheduleChanged` goes false; the server re-plans from `SCHEDULED_STATUSES` and emails on `visitStartChanged`.
@@ -549,7 +562,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **6. C12 — DONE on staging, 2026-08-14; production pending.** Via `class_instance_id`. `cancelStaffBookingWithNotify` applies the resolver's exported predicate to its own sibling rows rather than calling the resolver, which avoids a second query and keeps `staff-cancel-booking.test.ts:123` green. Code-only, no migration. See C12's status block.
 
-**7. C10 and H8 together**, as a derivation fix — filter at point of use, never at the fetch.
+**7. C10 — DONE on staging, 2026-08-14; production pending. H8 STILL OPEN.** C10 shipped as the derivation fix: filter at point of use, never at the fetch. **H8 did not**, because its finding text exists nowhere in this repo (see the warning in C10's status block). The constraint on this step, that H8 would otherwise *look* closed, is therefore live: recover H8's text before anyone ticks it off.
 
 **8. N2, N3, N4** — the linked write and guest-scope holes, independently of D1.
 

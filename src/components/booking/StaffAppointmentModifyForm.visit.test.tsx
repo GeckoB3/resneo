@@ -364,3 +364,56 @@ describe('StaffAppointmentModifyForm on a multi-service visit', () => {
     expect(visitCalls).toHaveLength(0);
   });
 });
+
+describe('StaffAppointmentModifyForm with a cancelled segment (C10)', () => {
+  /** The same visit, but the FIRST service was cancelled. */
+  const WITH_CANCELLED_FIRST = [
+    { ...SEGMENTS[0]!, status: 'Cancelled' },
+    { ...SEGMENTS[1]!, status: 'Booked' },
+    { ...SEGMENTS[2]!, status: 'Booked' },
+  ];
+
+  function renderWith(segments: typeof WITH_CANCELLED_FIRST) {
+    return render(
+      <StaffAppointmentModifyForm
+        bookingId="b"
+        booking={baseBooking}
+        ownerVenueId="v1"
+        visit={{ groupBookingId: 'g1', segments }}
+        onSaved={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+  }
+
+  it('anchors the visit on the first SCHEDULED segment, not a cancelled one', async () => {
+    // The defect: fetchGroupVisitBookings sends only the group id and the list
+    // route drops cancelled rows only for view=calendar, so the cancelled 10:00
+    // row arrived here and anchored the visit. The server re-plans from its own
+    // scheduled-only list and starts at 11:00, so the form and the server
+    // disagreed and Save on an untouched form moved the whole visit.
+    renderWith(WITH_CANCELLED_FIRST);
+
+    await waitFor(() => expect(visitCalls.length).toBeGreaterThan(0));
+    expect(visitCalls[0]!.booking_time).toBe('11:00');
+  });
+
+  it('still anchors on 10:00 when every segment is scheduled', async () => {
+    // The control: without a cancelled row nothing changes.
+    renderWith([
+      { ...SEGMENTS[0]!, status: 'Booked' },
+      { ...SEGMENTS[1]!, status: 'Booked' },
+      { ...SEGMENTS[2]!, status: 'Booked' },
+    ]);
+
+    await waitFor(() => expect(visitCalls.length).toBeGreaterThan(0));
+    expect(visitCalls[0]!.booking_time).toBe('10:00');
+  });
+
+  it('treats a segment with no status as scheduled, so statusless fixtures are unaffected', async () => {
+    renderWith(SEGMENTS as typeof WITH_CANCELLED_FIRST);
+
+    await waitFor(() => expect(visitCalls.length).toBeGreaterThan(0));
+    expect(visitCalls[0]!.booking_time).toBe('10:00');
+  });
+});

@@ -2356,6 +2356,11 @@ export function ExpandedBookingContent({
                     booking_time: seg.booking_time,
                     booking_end_time: seg.booking_end_time,
                     booking_item_name: seg.booking_item_name,
+                    // C10 — the raw row status, so the modify form can drop
+                    // cancelled segments from the schedule it plans against.
+                    // Deliberately NOT `multiServiceVisitSegmentsForDisplay`,
+                    // whose `status` is a derived pill label, not the row's.
+                    status: seg.status,
                   })),
                 }
               : null

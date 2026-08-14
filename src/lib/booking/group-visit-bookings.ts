@@ -115,26 +115,67 @@ export function preferLaterBookingStatus(a: string, b: string): string {
   return rb > ra ? b : a;
 }
 
+/**
+ * Terminal OUTCOMES, as opposed to lifecycle progress.
+ *
+ * H8 — `VISIT_STATUS_RANK` scores these highest of all (`Cancelled: 6`,
+ * `No-Show: 5`, above `Completed: 4`), and the visit anchor folds every
+ * segment's status together with `preferLaterBookingStatus`, which keeps the
+ * higher rank. So a single cancelled service drove the whole visit's anchor to
+ * `Cancelled`, and because each pill is then floored at that anchor, every
+ * still-live service in the visit rendered as Cancelled. One no-show did the
+ * same one rank down.
+ *
+ * The rank table is not wrong for what it was built for — resolving the same
+ * booking seen at two different freshnesses, where "furthest along wins" stops
+ * a stale list seed regressing Confirmed back to Booked. It is wrong as a
+ * VISIT-WIDE fold, because cancellation is not a later stage of the same
+ * journey: it is a different axis, and it is a fact about one segment that says
+ * nothing about its siblings.
+ *
+ * `Completed` is deliberately NOT in this set. Propagating it across segments is
+ * questionable for the same reason, but it does not make a live appointment
+ * claim to be dead, and changing it is a display-policy decision rather than a
+ * defect fix.
+ */
+const VISIT_TERMINAL_STATUSES: ReadonlySet<string> = new Set(['Cancelled', 'No-Show']);
+
+export function isTerminalVisitStatus(status: string | null | undefined): boolean {
+  return status != null && VISIT_TERMINAL_STATUSES.has(status);
+}
+
 /** Status shown on visit segment pills — never below the expanded row’s effective status. */
 export function resolveGroupVisitSegmentDisplayStatus(
   segmentStatus: string,
-  anchorStatus: string,
+  anchorStatus: string | null,
 ): string {
+  // A visit with nothing but terminal segments has no lifecycle anchor at all;
+  // each pill then simply shows its own status, which is already correct.
+  if (!anchorStatus) return segmentStatus;
   return preferLaterBookingStatus(segmentStatus, anchorStatus);
 }
 
-/** Visit-wide anchor for segment pills (expanded row + every loaded segment). */
+/**
+ * Visit-wide anchor for segment pills (expanded row + every loaded segment), or
+ * null when the visit carries no lifecycle status worth flooring pills at.
+ *
+ * H8 — terminal outcomes are excluded from BOTH the seed and the fold. The seed
+ * matters as much as the fold: it is the expanded row's own status, so opening a
+ * visit on a segment that happens to be cancelled would otherwise mark every
+ * sibling pill Cancelled without a single cancelled sibling existing.
+ */
 export function resolveVisitPillAnchorStatus(
   anchorStatus: string,
   segments: ReadonlyArray<Pick<GroupVisitBookingRow, 'status'>>,
   visitAttendanceConfirmed: boolean,
-): string {
-  let anchor = anchorStatus;
+): string | null {
+  let anchor: string | null = isTerminalVisitStatus(anchorStatus) ? null : anchorStatus;
   if (visitAttendanceConfirmed) {
-    anchor = preferLaterBookingStatus(anchor, 'Confirmed');
+    anchor = anchor == null ? 'Confirmed' : preferLaterBookingStatus(anchor, 'Confirmed');
   }
   for (const seg of segments) {
-    anchor = preferLaterBookingStatus(anchor, seg.status);
+    if (isTerminalVisitStatus(seg.status)) continue;
+    anchor = anchor == null ? seg.status : preferLaterBookingStatus(anchor, seg.status);
   }
   return anchor;
 }
@@ -145,9 +186,15 @@ export function groupVisitSegmentPillStatus(
     GroupVisitBookingRow,
     'status' | 'guest_attendance_confirmed_at' | 'staff_attendance_confirmed_at'
   >,
-  visitAnchorStatus: string,
+  visitAnchorStatus: string | null,
   visitAttendanceConfirmed: boolean,
 ): string {
+  // H8 — a segment that has itself reached a terminal outcome keeps it. Neither
+  // the attendance lifts below nor the visit anchor may raise a cancelled or
+  // no-show row back into a live-looking status.
+  if (isTerminalVisitStatus(segment.status)) {
+    return segment.status;
+  }
   let status = segment.status;
   if (isAttendanceConfirmed(segment)) {
     status = preferLaterBookingStatus(status, 'Confirmed');

@@ -1,11 +1,11 @@
 # ResNeo forensic audit and adversarial review — August 2026
 
 **Date:** 2026-08-13
-**Branch:** `staging` at `73a40a27`; **anchors re-verified at `509242b4`, 2026-08-14** (see the anchor note below)
+**Branch:** `staging` at `73a40a27` when written. **Anchors for the still-open findings re-verified at `cc787bbe`, 2026-08-14** (see the anchor note below)
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2 and **C4** are closed on staging *and* production. **C11 is implemented on staging, production pending** (code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C13, C12, C10 and H8 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -15,12 +15,18 @@ Each review round found fixes that would have broken production. They have been 
 
 **LIVE DATABASE VERIFICATION, 2026-08-13 — STAGING *AND* PRODUCTION.** The step-0 queries were run against both. They confirm C1, H43 and N1, and found something the static audit missed entirely: **31 `SECURITY DEFINER` functions are executable by `anon` — on production as well as staging — including `admin_hard_delete_venue(uuid)`, which has no authorisation check in its body.** The two environments return the *same 31 functions*; production is exposed exactly as staging is. See C0 — it outranks every other item in this document. **Production customer data is in scope; see C0's "Was it exploited?" note.**
 
-**ANCHOR NOTE — re-verified 2026-08-14 at `509242b4`.** Every `file:line` in the Critical findings and D1 was re-checked against the tree. Only `src/app/api/venue/reports/route.ts` has changed in `src/` since `73a40a27`, so the anchors have not drifted; those that resolved were exact. Two things cost time and are recorded here once:
+**ANCHOR NOTE — last re-verified 2026-08-14 at `cc787bbe`.**
+
+**Line numbers in the IMPLEMENTED findings are historical.** They were exact when written and were checked again at `509242b4`, but the fixes themselves have since moved lines in `confirm/route.ts`, `venue/bookings/[id]/route.ts`, `staff-cancel-booking.ts`, `group-booking-status-sync.ts`, `group-visit-bookings.ts`, `StaffAppointmentModifyForm.tsx`, `ExpandedBookingContent.tsx`, `BookingDetailPanel.tsx`, `PractitionerCalendarView.tsx`, `summary/route.ts`, `deposit/route.ts` and `webhooks/stripe/route.ts`. Read those anchors as a record of where the defect was, not as a current pointer.
+
+**Anchors in the still-open findings were re-verified at `cc787bbe` and all resolve exactly**: C3 (`create/route.ts:1169/1820/1845`, `create-multi-service/route.ts:638`, `venue/bookings/route.ts:444/664/913`), C5 and D1 (`PractitionerCalendarView.tsx:3556`), C7 (`permissions.ts:319`). Nothing implemented so far has disturbed them.
+
+Two things cost time and are recorded here once:
 
 - **Bare filenames.** The four UI files are cited by basename only. They are `src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`, `src/app/dashboard/bookings/BookingDetailPanel.tsx`, `src/app/dashboard/bookings/ExpandedBookingContent.tsx`, `src/components/booking/StaffAppointmentModifyForm.tsx`. Each is unique in the tree.
-- **Bare `route.ts`.** In C8 and C13 this means `src/app/api/venue/bookings/[id]/route.ts` (3020 lines), **not** its sibling `src/app/api/venue/bookings/route.ts` (1996 lines). Read literally against the sibling, C8's `:2482` does not exist.
+- **Bare `route.ts`.** In C8 and C13 this means `src/app/api/venue/bookings/[id]/route.ts` (3097 lines), **not** its sibling `src/app/api/venue/bookings/route.ts` (1995 lines). Read literally against the sibling, C8's `:2482` never existed.
 
-Migration count is now **257**, not the 253 stated throughout; the four added are C0/C1's. Baseline re-measured and unchanged: `tsc --noEmit` clean, **328 files / 3084 tests** green, 4 Playwright specs, pgTAP still wired nowhere. `npm run check:function-grants` against staging returns **PASS, 12 matching the allowlist**.
+Migration count is now **258**, not the 253 stated throughout; the five added are C0/C1's four plus C4's trigger. Both environments are level: a `supabase migration list` against staging and production each returns 258 rows with nothing local-only or remote-only. `npm run check:function-grants` against staging returns **PASS, 12 matching the allowlist**.
 
 Three items are hard blockers on the whole plan:
 
@@ -34,14 +40,17 @@ Three items are hard blockers on the whole plan:
 
 ## Baseline
 
-| Check | Result |
-|---|---|
-| `tsc --noEmit` | Clean |
-| `vitest run` | 328 files, 3084 tests, all passing |
-| Playwright e2e | 4 specs, single-appointment happy paths only |
-| **pgTAP (`supabase/tests/`)** | **Runs nowhere.** No `pg_prove` in `.github/workflows/ci.yml`, `package.json` or `scripts/` |
+| Check | At audit time (2026-08-13) | Now (`cc787bbe`, 2026-08-14) |
+|---|---|---|
+| `tsc --noEmit` | Clean | Clean |
+| `vitest run` | 328 files, 3084 tests, all passing | **331 files, 3132 tests**, all passing |
+| `npm run lint` | not recorded | 0 errors, 104 warnings (all pre-existing, unrelated files) |
+| Playwright e2e | 4 specs, single-appointment happy paths only | unchanged |
+| **pgTAP (`supabase/tests/`)** | **Runs nowhere.** No `pg_prove` in `.github/workflows/ci.yml`, `package.json` or `scripts/` | **Still runs nowhere** |
 
-That last row matters: the RLS security suite has never been continuously verified, and the "green suite" figure covers none of it.
+That last row matters: the RLS security suite has never been continuously verified, and the "green suite" figure covers none of it. **It is still true after C0-C13**, which is the single largest residual risk in this document: every RLS-touching change so far has been verified by reasoning, targeted probes and unit tests, never by the suite written for exactly that purpose.
+
+The +3 files and +48 tests are the suites added by the fixes: `shared-deposit-refund` (C11), `summary/route` (C6), `reschedule-cancellation-deadline` (C13), plus cases added to `staff-cancel-booking`, `group-booking-status-sync`, `group-visit-bookings`, `StaffAppointmentModifyForm.visit` and `deposit/route.card-hold`.
 
 ---
 
@@ -203,7 +212,9 @@ Why the RPC is impossible as described:
 >
 > **Verified by behaviour, not by inspecting the catalogue** (the C0 lesson: 28 migrations returned success and changed nothing). Probed through the **`service_role` client**, which is the path RLS never covered and the reason this is a trigger rather than a policy change: (1) re-parenting a real staging booking to another venue is rejected with **`42501 bookings.venue_id is immutable`**; (2) the row's `venue_id` is unchanged afterwards; (3) an ordinary `updated_at` update still succeeds, which is the regression that would have mattered; (4) a payload naming `venue_id` with its *existing* value passes rather than raising, confirming `IS DISTINCT FROM` behaves; (5) the trigger function does not enter the client-executable set. A `service_role` rejection implies the `authenticated` linked-venue path is closed too, since the trigger contains no role logic.
 >
-> Baseline after: `tsc --noEmit` clean, **328 files / 3084 tests** green, `npm run check:function-grants` **PASS at 12** (trigger functions are out of that function's scope by its own `prorettype <> 'trigger'` clause, so the allowlist is deliberately unmoved). `WITH CHECK`'s first disjunct passes once `venue_id` is B's. No trigger blocks it — notably `trg_enforce_cde_capacity` is `BEFORE INSERT OR UPDATE **OF** status, party_size, booking_date, booking_time, booking_end_time`, so a `venue_id` change does not even fire it. The audit trigger's early return (`20260920120000:51-54`) waves it past.
+> Baseline after: `tsc --noEmit` clean, **328 files / 3084 tests** green at the time (the figure has since risen with later fixes), `npm run check:function-grants` **PASS at 12** (trigger functions are out of that function's scope by its own `prorettype <> 'trigger'` clause, so the allowlist is deliberately unmoved).
+
+`WITH CHECK`'s first disjunct passes once `venue_id` is B's. No trigger blocks it — notably `trg_enforce_cde_capacity` is `BEFORE INSERT OR UPDATE **OF** status, party_size, booking_date, booking_time, booking_end_time`, so a `venue_id` change does not even fire it. The audit trigger's early return (`20260920120000:51-54`) waves it past.
 
 **Qualification:** the `USING` clause requires `link_action_grant(venue_id) IN ('edit_existing','create_edit_cancel')`. A `time_only` or `act: none` partner cannot do this. The original headline implied any linked venue could.
 
@@ -235,6 +246,13 @@ Verified safe: `linked_apply_booking_update` writes a fixed column list excludin
 **Raised because the app itself opens the leak.** `PractitionerCalendarView.tsx:3556-3574` subscribes to `postgres_changes` on `bookings` filtered to the **linked** venue. Realtime delivers the **whole row**. A `time_only` partner's dashboard is already receiving guest emails, phones, `special_requests`, `dietary_notes` and `internal_notes` over the WebSocket on every change to the owner's diary, with no action taken. **API-layer redaction cannot close this.** See D1.
 
 ### C6. `/summary` returns un-redacted bookings and the UI prefers it
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Both gates added to `summary/route.ts`, mirroring the sibling GET exactly: the `linkedGrantHasFullDetails` 403 and the `linkedViewerMustNotSeePii` redaction of **both** the joined guest and the booking row's own copy of the client's details (via the existing `redactBookingPiiFields`, so a new PII column still needs adding in only one place). Confirmed before the change that the route destructured only `{ booking, ownerVenueId }` and referenced neither `isOwnVenue` nor `linkedGrant` anywhere.
+>
+> **The swallowed 403 is fixed too**, as the finding requires. `BookingDetailPanel.tsx` discarded a 403 from the full GET whenever the summary had answered 200 — which is exactly how the two routes drifted apart unnoticed. It now surfaces the refusal and clears the summary-seeded detail. Recorded honestly: the shared detail cache exposes only peek/prime/warm with **no evict**, so the route gate is the real control and the panel change is what stops the *next* divergence being invisible, not what closes this one.
+>
+> **Test added, and checked that it can fail.** `summary/route.test.ts` is new (4 cases: time_only refused, full_details-without-PII redacted in both the row and the guest while operational fields survive, full_details-with-PII untouched, own-venue never redacted). It mocks only the loader, leaving `linkedGrantHasFullDetails` and the whole redaction module real, so the gate under test is the actual one. Both gates were then removed and the suite re-run: exactly the two asserting them failed and the two un-redacted controls passed, then restored to green. The finding notes no test covered either file; one now covers the route.
+
 **CONFIRMED verbatim, both halves**, with one aggravation the first pass missed: `BookingDetailPanel.tsx:262` also calls `primeVenueBookingDetail`, so the un-redacted payload is written into the shared cache and re-served on the next open with no further fetch.
 
 **Bounded correctly:** reachable only by partners holding an accepted link covering that calendar, not "anyone".
@@ -247,6 +265,11 @@ Verified safe: `linked_apply_booking_update` writes a fixed column list excludin
 **Fix — NEW (the first pass proposed none), verified sound with one added guard.** Use machinery that already exists: on `accept_with_changes`, apply only `mine` to the accepter's own columns; if `theirs` differs from the requester's original, write it to `pending_change` — the exact shape `propose_change` already uses (`route.ts:311-319`), which requires the counterparty's `accept_change`. `EditPermissionsModal` already implements this same asymmetry mid-link, so the accept flow just becomes consistent with it. **Added guard (round three):** validate `isLinkConfigurationValid` on the *interim* pair (new `mine`, requester's original `theirs`), not only the proposed pair — otherwise an accepter can lower `mine` to `none` while deferring `theirs`, leaving the live link none/none (and permanently so if the requester later rejects). Also fix the email to diff the requester-facing direction. No test covers this route.
 
 ### C8. Non-admin staff can move any booking onto a colleague's calendar
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Only the own-venue non-admin leg was written, since the cross-venue leg was already live (see the correction below the fix snippet). It sits inside the existing `if (body.practitioner_id && isAppointment)` block, ahead of the §18 check, and calls `requireManagedCalendarAccess` with the message the fix text specifies.
+>
+> Both traps the rewritten fix warns about are avoided by construction and the reasons are now in the code: it is inside that block so `practitioner_id` is always present (`requireManagedCalendarAccess` fails closed on a null calendar id **before** its admin bypass, so hoisting it would 403 every status change, note edit and deposit edit for every role), and it is gated on `isOwnVenue` because `scopeVenueId` is the owner venue where a partner's staff hold no calendars at all. Shape mirrors `validate-appointment-modification/route.ts:71-88`, which already gates the same field.
+
 **CONFIRMED, and more reachable than first stated.** `practitioners/route.ts:326` filters to managed calendars only when `roster` is absent — and the calendar fetches `?roster=1`. So all columns render and the drag is a normal gesture, not a crafted request.
 
 **Fix — REWRITTEN. The original would have 403'd almost every PATCH.** `venue-auth.ts:415-417` returns failure *before* the admin bypass when no calendar id is passed, so status changes, notes edits and deposit edits would all break for every role. It would also 403 every non-admin cross-venue move, because `scopeVenueId` is the **owner** venue where venue B's staff hold no calendars.
@@ -273,6 +296,11 @@ if (body.practitioner_id && isAppointment) {
 No test breaks — there is no test for this PATCH route.
 
 ### C9. Press-and-hold on a booking reschedules it to the slot under your finger
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** `handleDragEnd` now returns early on `!target`, before the `target.invalid` toast, and `targetStartMins` reads `target.startMin` directly rather than falling back to `slotStartMins`. The no-op is silent by design: from the user's side nothing happened.
+>
+> **The finding's central claim was re-measured rather than re-read**, because it looks contradictory on its face: it says `over` IS populated at drag start yet `target` is null. Both are true, and the reason is that they come from different places. The `DndContext` wires `onDragStart`, `onDragMove`, `onDragCancel` and `onDragEnd` and has **no `onDragOver`**, so `calendarDragTargetRef` is written only by `handleDragMove`, which requires actual pointer movement. `e.over` comes from dnd-kit's own collision detection and is populated regardless. A press-and-hold therefore reaches `handleDragEnd` with a populated `over` and a null `target`, `target?.invalid` evaluates to `undefined`, and the availability gate is skipped. Confirmed.
+
 **CONFIRMED on all three legs, against the dnd-kit 6.3.1 source. Framing OVERSTATED — it is not silent.**
 
 - Timer activation with no movement: `core.cjs.development.js:1464-1468` — `setTimeout(this.handleStart, delay)`. Confirmed.
@@ -285,6 +313,35 @@ No test breaks — there is no test for this PATCH route.
 **Fix — NEW.** Make the no-target case a no-op: `if (!target || target.invalid) return;` at `PractitionerCalendarView.tsx:5362`. Strictly safer than a delta-based guard, which would still let a 1px twitch through the `CALENDAR_MOVE_INCREMENT_MINUTES = 1` path. No test breaks.
 
 ### C10. Pressing Save on an untouched Modify form moves the visit
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14. H8 NOT DONE — see the warning below.** Built exactly as the rewritten fix prescribes: an **optional** `status` on `StaffVisitModifySegment` (optional so the statusless visit fixtures still typecheck), populated at the one build site, and filtered **inside the `visitSegments` memo** rather than in the two named derivations, so `notifyBookingId` and both duration baselines get the filtered list too. `VISIT_SCHEDULED_STATUSES` mirrors the server's list verbatim (`visits/[groupBookingId]/schedule/route.ts:38`), and an absent status counts as scheduled. `fetchGroupVisitBookings` is untouched, so the "Services in this visit" card still shows the segment staff just cancelled.
+>
+> One detail worth recording: the build site had to read `multiServiceVisitSegments`, **not** `multiServiceVisitSegmentsForDisplay`, whose `status` is a derived pill label rather than the row's own value. Wiring the display variant would have fed the filter a value that means something else entirely.
+>
+> `visitRelayNotice` now names the move. It reports the dead time as before and appends the new start when the plan differs from the current one, which matters because that notice is the sole reason Save is enabled on a form nobody has touched.
+>
+> The deliberate consequence the fix text flags is accepted and commented in place: a visit reduced to one scheduled segment now has `isVisit === false` and opens in single-booking mode.
+>
+> Three tests added to `StaffAppointmentModifyForm.visit.test.tsx`, asserting the dry run anchors on 11:00 when the 10:00 segment is cancelled, on 10:00 when it is not, and on 10:00 for statusless fixtures. Removing the filter fails exactly the first and leaves both controls green. Baseline: `tsc` clean, lint 0 errors, **331 files / 3126 tests** green (the 14 visit tests stayed green throughout, as predicted).
+>
+> **H8 shipped separately, later the same day — see the H8 entry below.** It was initially held back because its finding text is not in this document (only H1, H6, H13, H17, H38, H44 and H49 are written out; the other ~160 live in the original agents' output). It was recovered from the audit session's own transcript and then re-derived from the code before being fixed.
+
+### H8. One cancelled service marks a whole visit cancelled
+
+**RECOVERED 2026-08-14 and CONFIRMED against the code.** This finding had no text in this document — only two references, in step 7 and in the sequencing constraints. It was recovered from the original audit session transcript, which describes C10 and H8 as *"cancelled rows in the visit set, status-rank anchor… a missing status filter and a bad rank order"*, and warns *"C10 → H8. C10 makes H8 invisible without fixing it."* The defect below was then verified directly in the code rather than taken from that transcript.
+
+`VISIT_STATUS_RANK` (`group-visit-bookings.ts:97`) scores `Cancelled: 6` — the **highest value in the table**, above `No-Show: 5` and `Completed: 4`. `preferLaterBookingStatus` keeps the higher rank, and `resolveVisitPillAnchorStatus` folds every segment's status into one visit-wide anchor through it; `groupVisitSegmentPillStatus` then floors each pill at that anchor. So **one cancelled service drove the whole visit's anchor to `Cancelled` and every still-live service in that visit rendered as Cancelled.** One no-show did the same one rank down. The seed was equally affected: it is the expanded row's own status, so merely opening a visit on a segment that happened to be cancelled marked every sibling Cancelled with no cancelled sibling present.
+
+The rank table is not wrong for its original job — reconciling the same booking seen at two freshnesses, where "furthest along wins" stops a stale list seed regressing Confirmed to Booked. It is wrong as a **visit-wide fold**, because cancellation is not a later stage of the same journey. It is a different axis, and a fact about one segment that says nothing about its siblings.
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Terminal outcomes (`Cancelled`, `No-Show`) are excluded from both the seed and the fold, so the anchor now carries only lifecycle progress; `resolveVisitPillAnchorStatus` returns `string | null`, null meaning "no lifecycle status worth flooring pills at", in which case each pill shows its own status. `groupVisitSegmentPillStatus` also returns a terminal segment's status unchanged, so neither the attendance lifts nor the anchor can resurrect a cancelled row into a live-looking one. One production caller.
+>
+> **`Completed` was deliberately left in the fold.** Propagating it across segments is questionable for the same reason, but it does not make a live appointment claim to be dead. Changing it is a display-policy decision rather than a defect fix, and is not in this finding.
+>
+> **The sequencing warning turned out not to have bitten.** It existed because the *original* C10 fix filtered `fetchGroupVisitBookings`, which would have stopped cancelled rows reaching the anchor at all and hidden this without fixing it. Round three rewrote C10 to filter at the point of use, and that is what shipped: the filter lives in the modify form's `visitSegments` memo, while the pill path reads `multiServiceVisitSegments` directly and was untouched. H8 stayed observable.
+>
+> Six tests added; removing the terminal exclusion fails four of them and leaves the "still floors live siblings at the furthest-along live status" control green, which is the behaviour the anchor exists for. Baseline: `tsc` clean, lint 0 errors, **331 files / 3132 tests**.
+
 **CONFIRMED on the primary limb. Two framing claims WRONG; second limb downgraded to Speculative.**
 
 Every mechanical leg checks out: `fetchGroupVisitBookings` sends only the group id; the list route drops cancelled rows only for `view=calendar`; cancelled rows reach `visit.segments` unfiltered; `StaffVisitModifySegment` carries no status so the form *cannot* filter; `scheduleChanged` goes false; the server re-plans from `SCHEDULED_STATUSES` and emails on `visitStartChanged`.
@@ -298,7 +355,7 @@ Every mechanical leg checks out: `fetchGroupVisitBookings` sends only the group 
 ### C11. Cancelling one group attendee refunds the entire group's deposit
 **CONFIRMED. One claim WRONG, and the original fix would have caused a worse bug.**
 
-> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14. Not yet applied to production.** All four parts landed in the prescribed order, behind one new helper, `src/lib/booking/shared-deposit-refund.ts` (`planSharedDepositRefund`), used by every settle path so this cannot drift apart again.
+> **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-14** (code-only, no migration; merged as PR #139). All four parts landed in the prescribed order, behind one new helper, `src/lib/booking/shared-deposit-refund.ts` (`planSharedDepositRefund`), used by every settle path so this cannot drift apart again.
 >
 > **Part 1, first:** the `charge.refunded` bookings branch now bails on `!chargeFullyRefunded`, matching the fee and balance branches. **Part 2:** the three cancel sites pass an amount derived from the paid rows actually settling. **Part 3:** `deposit/route.ts` gained the amount, a `deposit_status !== 'Paid'` re-entry guard, and a try/catch with `charge_already_refunded` convergence; it previously had **none of the four**, so a second press of Refund threw an unhandled error. **Part 4:** deterministic keys, `deposit_refund:${pi}:${sha256(sorted ids)}`, with the card-hold fee refund given its own `hold_fee_refund:${feePi}` namespace so the two can never collide.
 >
@@ -330,6 +387,19 @@ Shared PI confirmed (`create-group/route.ts:726-750`, one intent for the total, 
 **C11 does not depend on D2, but it is coupled to C12** — both rewrite the refund/cascade block in `staff-cancel-booking.ts`. Deriving the amount from the resolver's `idsToCancel` (paid rows) makes them compose in either order; hardcoding "whole intent" for visits does not, because C12 later narrows the cascade and would resurrect the over-refund for a party.
 
 ### C12. Class-cart purchases are misclassified as visits
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** `class_instance_id` added to the `loadGroupBookingSiblings` projection and to `GroupBookingStatusRow`, and the predicate tightened to `!r.person_label?.trim() && !r.class_instance_id`. No migration, no backfill, no column.
+>
+> **The predicate was verified by measurement, not accepted.** The finding says "no legitimate visit or party row ever carries `class_instance_id` (verified across all five group-id writers)". There are **seven** writers of `bookings.group_booking_id`, not five. Checked individually: the four party/visit writers (`create-group`, `create-multi-service`, `visits/[groupBookingId]/schedule`, `visits/[groupBookingId]/services`) contain **no reference to `class_instance_id` at all**, so they cannot set it; both class inserters set it unconditionally, and the cart orchestrator routes through them. The import is the interesting one: it **does** write `class_instance_id` for class rows, but never writes `bookings.group_booking_id` (its `group_booking_id` goes into a `booking_external_refs` payload, exactly as D2 records), so its rows never reach the predicate. The discriminator holds.
+>
+> **The predicted test failure did not happen, and that is a real divergence from the fix text.** The finding states that routing `cancelStaffBookingWithNotify` through the resolver turns `staff-cancel-booking.test.ts:123` red, because the resolver issues a second, shorter query the mock does not satisfy. Shipped differently: the predicate is exported as `isCascadingVisitGroup` and applied to the helper's **own** sibling rows, which already carry the money columns the resolver's projection lacks. One query, one canonical rule, no second round trip, and `:123` stays green on its own merits (two rows, no label, no class link, which is a genuine visit and should cascade). The finding's two traps still applied and are handled: that query gained **both** `person_label` and `class_instance_id`, without which the tightened predicate would read every row as `undefined` and cascade *parties* — which, with C11's summed amount, would refund a whole party's deposits on one attendee's cancel.
+>
+> **The under-stated half is fixed too:** this helper previously skipped the cascade decision entirely and cancelled every sibling sharing the group id, so a venue-initiated cancel took out a whole multi-person party. It now discriminates.
+>
+> **Tests, checked against their own removal.** The resolver file gained a class-cart fixture, a mixed visit/cart row, and a case pinning that the discriminator keys on a real class link rather than the column merely being present. The cancel helper gained cart and party fixtures plus the C11/C12 interaction case, asserting that one attendee's cancel refunds £10 and not the party's £20. Removing `&& !r.class_instance_id` fails exactly three of them and leaves the `person_label` cases passing, which is the expected shape. Baseline: `tsc` clean, lint 0 errors, **331 files / 3123 tests** green.
+>
+> **Not addressed here, and still true:** `loadGroupBookingSiblings` applies no status and no date filter. For carts that no longer matters, since they no longer cascade at all, but a genuine visit still cascades across every row regardless of date. Left alone deliberately: a multi-service visit is same-day by construction, so there is no known way to reach it.
+
 **CONFIRMED, and broader than first stated.** Cart rows share one group id and carry no `person_label`, so `resolveCascadingVisitGroupId` returns the cart id. The no-show cascade hits **future** sessions — `loadGroupBookingSiblings` applies no status and no date filter. `class_booking_groups` has exactly two non-test references in the codebase, both in the writer (`orchestrate-class-cart-checkout.ts:97` insert, `:138` rollback delete; two further references are in that file's own test); nothing reads it.
 
 **Under-stated:** `cancelStaffBookingWithNotify` skips the resolver entirely, so it also cascades across a genuine **multi-person party** — the exact class of bug the resolver exists to stop.
@@ -349,6 +419,19 @@ Existing resolver-test fixtures carry no `class_instance_id`, so `group-booking-
 Add a class-cart fixture (`class_instance_id` set) so the discriminator is actually exercised.
 
 ### C13. Guest self-reschedule launders a non-refundable deposit
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Behind one helper, `resolveRescheduleCancellationDeadline` (`src/lib/booking/reschedule-cancellation-deadline.ts`): once the deadline has passed on a booking with money at stake it is fixed; a deadline still in the future re-pins exactly as before, so ordinary within-window reschedules are untouched.
+>
+> **Broader again: there are SIX reschedule sites, not the four this finding names.** The three guest branches are right (`confirm/route.ts`, resource / class / appointment), but the staff side has three deadline re-pins, not one: the resource branch, the class branch, and the appointment/table branch this finding cites. All six now route through the helper, and a grep for `cancellation_deadline` writes confirms none bypass it.
+>
+> **Caveat 1 is handled by omission rather than by copying.** Where a site also writes `cancellation_policy_snapshot`, a preserved deadline **skips that write entirely**, leaving the stored snapshot that already matches it. That is safer than recomputing the snapshot to match, and the staff route had independently learned the same lesson — its existing comment records a bug where re-pinning the deadline without the snapshot made a row promise a 24 hour window while enforcing 48.
+>
+> **Caveat 2, the policy call: decided to mirror at staff.** The operator chose this. Without it the control is bypassed by a phone call: the guest asks the venue to perform the reschedule and gets the same laundering. The cost is lower than the caveat implies, because a venue that genuinely wants to refund a post-deadline booking still can, through the deposit route's explicit Refund action, which is an audited, deliberate act rather than an invisible side effect of moving a booking.
+>
+> **Scope, and one addition to this finding.** The fix text says to scope preservation to rows with a "refundable deposit". Preservation is scoped to `deposit_status IN ('Paid', 'Card Held')`. `Card Held` is the addition: a post-deadline cancel **keeps** a hold chargeable while a pre-deadline one releases it (§9.3 amended), so re-pinning the deadline lets a guest escape a no-show fee by exactly the same manoeuvre. It is the same defect with a different instrument, and scoping only to `Paid` would have left it open. The remaining states are either settled (`Refunded`, `Forfeited`, `Charged`) or have nothing riding on the deadline (`Not Required`, `Pending`, `Waived`, `Failed`), and re-pin freely, which is also what stops a depositless booking displaying a stale past deadline.
+>
+> `reschedule-cancellation-deadline.test.ts` is new (14 cases), including the repeated-reschedule case — the attack is repeatable, so the preserved value is fed back in as the previous deadline to confirm it cannot be walked forward on a second pass. Baseline: `tsc` clean, lint 0 errors, **331 files / 3117 tests** green.
+
 **CONFIRMED end to end, and broader. One sentence WRONG.**
 
 `guest_self_reschedule` is default-on (`resolve.ts:20-22`). No guard blocks the reschedule: the only status gate is `modifiableStatuses`, and the route's own comment states *"there is no per-booking modify window"*. The manage link survives — `confirm_token_used_at` is set by confirm and cancel, never by modify. The refund then succeeds.
@@ -480,7 +563,7 @@ The first pass also over-claimed that `security_invoker` proves the spec is wron
 
 > **H43 was not part of this step, contrary to the line that stood here.** C0 had already revoked `consume_class_credits_atomically` at `20270106120000:107-108`. Also note the original step-1 text named "the six report RPCs": by the time C1 shipped, `report_frequent_visitors` and `report_booking_final_statuses` were already closed by C0, leaving four.
 
-**1b. Stopping this class of bug recurring — DONE on staging, 2026-08-13, but NOT the way this document originally prescribed.**
+**1b. Stopping this class of bug recurring — DONE on both environments (`20270108120000` and `20270109120000` verified present on staging and production), but NOT the way this document originally prescribed.**
 
 C0 and C1 closed 19 individual functions. Neither touched the mechanism, so the next `CREATE FUNCTION` in `public` inherits the same exposure. The fix proposed for this was `ALTER DEFAULT PRIVILEGES`. **It does not work on this platform.** It was applied as `20270108120000` and measured three times: a function created immediately afterwards, owned by `postgres` in `public`, is still anon-executable, because PostgreSQL's built-in `EXECUTE`-to-`PUBLIC` grant survives it. Naming `PUBLIC` explicitly does not help either. Details in C0's "Durable fix" paragraph and in the migration's own header.
 
@@ -498,15 +581,15 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **2. C4 via the immutability trigger — DONE on both environments, 2026-08-14 (PR #138).** One trigger, protects admin routes too, no realtime impact, no test churn. All three predictions held: `20270110120000` applied, no test moved, and the `service_role` probe confirms the admin-client path is closed. See C4's status block.
 
-**3. C11 — DONE on staging, 2026-08-14; production pending.** Three parts in order (webhook gate → amount → idempotency key), plus the fourth refund site. Money leaving the account; do not gate behind a schema project. Shipped behind `planSharedDepositRefund`, with the amount passed only on genuine partial settlements, and the guest cancel's *cascade* deliberately left to C10/C12. See C11's status block.
+**3. C11 — DONE on both environments, 2026-08-14 (PR #139).** Three parts in order (webhook gate → amount → idempotency key), plus the fourth refund site. Money leaving the account; do not gate behind a schema project. Shipped behind `planSharedDepositRefund`, with the amount passed only on genuine partial settlements, and the guest cancel's *cascade* deliberately left to C10/C12. See C11's status block.
 
-**4. C6, C8, C9** — three small, well-understood, loudly-failing fixes.
+**4. C6, C8, C9 — DONE on staging, 2026-08-14; production pending.** Three small, well-understood, loudly-failing fixes. All code-only, no migration. C8 was smaller than written (half already live); C6 gained the route's first test, checked by removing the gates and watching it fail. See each finding's status block.
 
-**5. C13** across all three guest branches plus the staff mirror.
+**5. C13 — DONE on staging, 2026-08-14; production pending.** Across all three guest branches plus the staff mirror — which turned out to be **three** staff sites, not one. Code-only, no migration. The staff mirror was taken as a deliberate policy decision; see C13's status block.
 
-**6. C12** via `class_instance_id`, plus routing `cancelStaffBookingWithNotify` through the resolver.
+**6. C12 — DONE on staging, 2026-08-14; production pending.** Via `class_instance_id`. `cancelStaffBookingWithNotify` applies the resolver's exported predicate to its own sibling rows rather than calling the resolver, which avoids a second query and keeps `staff-cancel-booking.test.ts:123` green. Code-only, no migration. See C12's status block.
 
-**7. C10 and H8 together**, as a derivation fix — filter at point of use, never at the fetch.
+**7. C10 and H8 — both DONE on staging, 2026-08-14; production pending.** C10 shipped as the derivation fix: filter at point of use, never at the fetch. H8's finding text was missing from this document and was recovered from the original audit session transcript, then re-derived from the code before being fixed; it now has a full entry above. The constraint on this step did not bite, because C10 shipped as the round-three rewrite rather than as the fetch-level filter that would have masked H8.
 
 **8. N2, N3, N4** — the linked write and guest-scope holes, independently of D1.
 
@@ -539,4 +622,22 @@ Two inter-agent disagreements were resolved by direct inspection: the import-too
 - Whether the row shapes D2's backfill would misclassify actually exist in your data.
 - The four Probable/Speculative findings (H12, H17's residual, `enforce_cde_capacity` NULL capacity, `estimateSmsSegments`).
 
-No code was changed in any of the three review rounds. Implementation began afterwards; see the implementation status at the top of this document, and the per-finding status blocks on C0, C1 and C2.
+No code was changed in any of the three review rounds. Implementation began afterwards; see the implementation status at the top of this document, and the per-finding status blocks, which now exist on **C0, C1, C2, C4, C6, C8, C9, C10, C11, C12, C13 and H8**.
+
+---
+
+### What implementation has itself corrected, 2026-08-14
+
+Seven findings were materially wrong or incomplete in ways only discovered while fixing them. Recorded together because the pattern is consistent: **this document undercounts call sites.** Anyone implementing a remaining item should assume the same and enumerate before trusting a count.
+
+| Finding | What the document said | What was true |
+|---|---|---|
+| C8 | The fix snippet is new code | Half was already live at `[id]/route.ts:2487`; only the own-venue leg was missing |
+| C11 | Four refund sites | **Eight** non-test `stripe.refunds.create` sites; the four unnamed are correct and two are the house pattern the fix adopted |
+| C12 | "Five group-id writers" | **Seven**; and the import writes `class_instance_id` but never `bookings.group_booking_id`, so it cannot reach the predicate |
+| C12 | Routing through the resolver turns `staff-cancel-booking.test.ts:123` red | It stays green when the predicate is applied to the helper's own rows instead of issuing a second query |
+| C13 | Three guest branches plus **one** staff mirror | **Six** sites: the staff route re-pins the deadline in three branches |
+| C13 | Scope preservation to a "refundable deposit" | `Card Held` needs it too: a post-deadline cancel keeps a hold chargeable, so re-pinning escaped the no-show fee by the same manoeuvre |
+| H8 | *(no text at all in this document)* | Recovered from the audit session transcript, then re-derived from code; now written up in full above |
+
+Two fixes were also deliberately narrowed against the document's prescription, both recorded in their status blocks: C11 passes an explicit refund `amount` only on genuine partial settlements rather than always, and C10's guest-path cascade was left to C12 rather than rebuilt inside `/api/confirm`.

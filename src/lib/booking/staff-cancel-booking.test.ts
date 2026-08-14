@@ -250,3 +250,77 @@ describe('cancelStaffBookingWithNotify shared-deposit refund amount (C11)', () =
     expect(result.refundFailed).toBe(true);
   });
 });
+
+describe('cancelStaffBookingWithNotify cascade discrimination (C12)', () => {
+  it('does NOT cascade across a class cart', async () => {
+    // Cart rows share a group id and carry no person_label, so before C12 this
+    // helper read them as a visit and cancelled the whole basket — including
+    // sessions weeks in the future, since the sibling query has no date filter.
+    const booking = baseBooking({ id: 'b1', group_booking_id: 'cart-1', class_instance_id: 'ci-1' });
+    const groupRows = [
+      baseBooking({ id: 'b1', group_booking_id: 'cart-1', class_instance_id: 'ci-1' }),
+      baseBooking({ id: 'b2', group_booking_id: 'cart-1', class_instance_id: 'ci-2' }),
+      baseBooking({ id: 'b3', group_booking_id: 'cart-1', class_instance_id: 'ci-3' }),
+    ];
+    const admin = makeDb({ booking, groupRows });
+    const staffDb = makeDb({ booking, groupRows });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(releaseMock).toHaveBeenCalledWith(admin, ['b1'], 'cancelled');
+  });
+
+  it('does NOT cascade across a multi-person party', async () => {
+    // This helper skipped the cascade decision entirely, so a venue-initiated
+    // cancel of one attendee cancelled the whole party. With C11's summed refund
+    // that would also have returned every attendee's deposit.
+    const booking = baseBooking({ id: 'b1', group_booking_id: 'grp-1', person_label: 'Mum' });
+    const groupRows = [
+      baseBooking({ id: 'b1', group_booking_id: 'grp-1', person_label: 'Mum' }),
+      baseBooking({ id: 'b2', group_booking_id: 'grp-1', person_label: 'Dad' }),
+    ];
+    const admin = makeDb({ booking, groupRows });
+    const staffDb = makeDb({ booking, groupRows });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(releaseMock).toHaveBeenCalledWith(admin, ['b1'], 'cancelled');
+  });
+
+  it('does not refund a party sibling deposit on one attendee cancel', async () => {
+    // The C11/C12 interaction the audit warns about: if the cascade decision is
+    // wrong here, the summed refund amount is computed over the whole party.
+    const FUTURE = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    const attendee = (id: string, label: string) =>
+      baseBooking({
+        id,
+        group_booking_id: 'grp-1',
+        person_label: label,
+        stripe_payment_intent_id: 'pi_party',
+        deposit_status: 'Paid',
+        deposit_amount_pence: 1000,
+        cancellation_deadline: FUTURE,
+      });
+    const booking = attendee('b1', 'Mum');
+    const groupRows = [attendee('b1', 'Mum'), attendee('b2', 'Dad')];
+    const admin = makeDb({ booking, groupRows, piRows: groupRows });
+    const staffDb = makeDb({ booking, groupRows, piRows: groupRows });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(refundCreateMock).toHaveBeenCalledTimes(1);
+    const [params] = refundCreateMock.mock.calls[0]!;
+    // Only Mum's £10, never the party's £20.
+    expect(params).toMatchObject({ payment_intent: 'pi_party', amount: 1000 });
+    expect(releaseMock).toHaveBeenCalledWith(admin, ['b1'], 'cancelled');
+  });
+});

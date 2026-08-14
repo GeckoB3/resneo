@@ -5350,16 +5350,32 @@ export function PractitionerCalendarView({
     const target = calendarDragTargetRef.current;
     clearCalendarDragUi();
     if ((!b && !bl) || !over?.data?.current) return;
-    if (target?.invalid) {
+    // C9 — no resolved target means the pointer never moved, so this was a
+    // press-and-hold, not a drag. dnd-kit's delay activation starts a drag on a
+    // TIMER with no movement required (core 6.3.1), and its 10px tolerance is
+    // Euclidean, so ordinary tremor does not cancel it. `onDragMove` is the only
+    // handler wired to `calendarDragTargetRef` (there is no `onDragOver`), so it
+    // never fired and the ref is still null.
+    //
+    // This used to fall through: `target?.invalid` was `undefined`, i.e. falsy,
+    // so the availability gate was skipped, and `target?.startMin ?? slotStartMins`
+    // then took the slot that happened to sit under the finger. The booking was
+    // written there immediately with `allow_manual_overlap: true`, which disables
+    // the server-side conflict check too, leaving only a 60-second undo window.
+    //
+    // A no-op is strictly safer than a distance-based guard, which would still
+    // let a 1px twitch through the CALENDAR_MOVE_INCREMENT_MINUTES = 1 path.
+    // Silent by design: from the user's point of view nothing happened.
+    if (!target) return;
+    if (target.invalid) {
       addToast('That time is not available', 'error');
       return;
     }
-    const { pracId, dateStr, slotStartMins } = over.data.current as {
+    const { pracId, dateStr } = over.data.current as {
       pracId: string;
       dateStr: string;
-      slotStartMins: number;
     };
-    const targetStartMins = target?.startMin ?? slotStartMins;
+    const targetStartMins = target.startMin;
     const newTime = minutesToTime(targetStartMins);
     if (bl) {
       if (

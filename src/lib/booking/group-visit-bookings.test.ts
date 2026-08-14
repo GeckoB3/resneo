@@ -279,3 +279,64 @@ describe('group-visit-bookings cache', () => {
     expect(multiServiceVisitDatePhrase('2020-06-15')).toMatch(/^on /);
   });
 });
+
+describe('visit pill anchor and terminal outcomes (H8)', () => {
+  const seg = (status: string) => ({ id: status, status });
+  const pill = (status: string, anchor: string | null, visitConfirmed = false) =>
+    groupVisitSegmentPillStatus(
+      { status, staff_attendance_confirmed_at: null, guest_attendance_confirmed_at: null },
+      anchor,
+      visitConfirmed,
+    );
+
+  it('one cancelled service does not mark the rest of the visit cancelled', () => {
+    // The defect: Cancelled ranks highest of all, the anchor folds every segment
+    // through "furthest along wins", and each pill is floored at that anchor, so
+    // a single cancelled service rendered every live service as Cancelled.
+    const anchor = resolveVisitPillAnchorStatus(
+      'Booked',
+      [seg('Cancelled'), seg('Booked'), seg('Confirmed')],
+      false,
+    );
+    expect(anchor).toBe('Confirmed');
+    expect(pill('Booked', anchor)).toBe('Confirmed');
+  });
+
+  it('one no-show does not mark the rest of the visit a no-show', () => {
+    const anchor = resolveVisitPillAnchorStatus('Booked', [seg('No-Show'), seg('Booked')], false);
+    expect(anchor).toBe('Booked');
+    expect(pill('Booked', anchor)).toBe('Booked');
+  });
+
+  it('opening the visit on a cancelled segment does not cancel its siblings', () => {
+    // The seed matters as much as the fold: it is the expanded row's own status.
+    const anchor = resolveVisitPillAnchorStatus('Cancelled', [seg('Booked'), seg('Booked')], false);
+    expect(anchor).toBe('Booked');
+    expect(pill('Booked', anchor)).toBe('Booked');
+  });
+
+  it('keeps a cancelled segment cancelled, whatever the anchor says', () => {
+    expect(pill('Cancelled', 'Confirmed')).toBe('Cancelled');
+    expect(pill('No-Show', 'Seated')).toBe('No-Show');
+    // Attendance lifts must not resurrect a terminal row either.
+    expect(pill('Cancelled', 'Booked', true)).toBe('Cancelled');
+  });
+
+  it('has no anchor at all when every segment is terminal, so pills show their own status', () => {
+    const anchor = resolveVisitPillAnchorStatus(
+      'Cancelled',
+      [seg('Cancelled'), seg('Cancelled')],
+      false,
+    );
+    expect(anchor).toBeNull();
+    expect(pill('Cancelled', anchor)).toBe('Cancelled');
+  });
+
+  it('still floors live siblings at the furthest-along live status', () => {
+    // The behaviour the anchor exists for must survive: a stale Booked seed is
+    // still lifted to Confirmed by a sibling that has got further.
+    const anchor = resolveVisitPillAnchorStatus('Booked', [seg('Booked'), seg('Seated')], false);
+    expect(anchor).toBe('Seated');
+    expect(pill('Booked', anchor)).toBe('Seated');
+  });
+});

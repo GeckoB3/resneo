@@ -10,6 +10,7 @@ import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
 import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
+import { isCascadingVisitGroup } from '@/lib/booking/group-booking-status-sync';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
@@ -98,35 +99,56 @@ export async function cancelStaffBookingWithNotify(
   let paidDepositIds = new Set<string>(booking.deposit_status === 'Paid' ? [bookingId] : []);
 
   if (groupBookingId) {
+    // C12 — `person_label` and `class_instance_id` are the discriminator, and
+    // this query selected NEITHER. Without them the tightened predicate would
+    // read every row as undefined and cascade across a genuine multi-person
+    // party, which with C11's summed refund amount would return a whole party's
+    // deposits on one attendee's cancel.
     const { data: groupRows } = await staffDb
       .from('bookings')
-      .select('id, stripe_payment_intent_id, deposit_status, deposit_amount_pence, guest_id, status')
+      .select(
+        'id, stripe_payment_intent_id, deposit_status, deposit_amount_pence, guest_id, status, person_label, class_instance_id',
+      )
       .eq('venue_id', venueId)
       .eq('group_booking_id', groupBookingId)
       .in('status', CANCELLABLE);
 
-    idsToCancel = (groupRows ?? []).map((r: { id: string }) => r.id);
-    if (idsToCancel.length === 0) {
-      idsToCancel = [bookingId];
+    const rows = (groupRows ?? []) as Array<{
+      id: string;
+      person_label?: string | null;
+      class_instance_id?: string | null;
+      deposit_status?: string | null;
+      deposit_amount_pence?: number | null;
+      stripe_payment_intent_id?: string | null;
+    }>;
+
+    // This helper skipped the cascade decision entirely and cancelled every
+    // sibling sharing the group id — the exact bug the resolver exists to stop,
+    // reached here through the venue-initiated class and event cancel cascades.
+    // It applies the resolver's own predicate rather than calling
+    // `resolveCascadingVisitGroupId`, because this query already carries the
+    // money columns that the resolver's projection omits; one query, one rule.
+    //
+    // When it does not cascade — a party, a class cart, or a group whose only
+    // cancellable row is this one — every field below simply keeps the
+    // single-booking value already read from `booking`, so the rest of this
+    // function runs its ordinary one-row path.
+    if (rows.length > 1 && isCascadingVisitGroup(rows)) {
+      idsToCancel = rows.map((r) => r.id);
+      paidDepositIds = new Set(
+        rows.filter((r) => r.deposit_status === 'Paid').map((r) => r.id),
+      );
+      const withPi = rows.find((r) => r.stripe_payment_intent_id);
+      paymentIntentForRefund =
+        typeof withPi?.stripe_payment_intent_id === 'string'
+          ? withPi.stripe_payment_intent_id
+          : paymentIntentForRefund;
+      const totalPence = rows.reduce((sum, r) => sum + (r.deposit_amount_pence ?? 0), 0);
+      if (totalPence > 0) {
+        depositPenceForMessage = totalPence;
+      }
+      hadPaidDeposit = rows.some((r) => r.deposit_status === 'Paid');
     }
-    paidDepositIds = new Set(
-      (groupRows ?? [])
-        .filter((r: { deposit_status?: string | null }) => r.deposit_status === 'Paid')
-        .map((r: { id: string }) => r.id),
-    );
-    const withPi = (groupRows ?? []).find(
-      (r: { stripe_payment_intent_id?: string | null }) => r.stripe_payment_intent_id,
-    );
-    paymentIntentForRefund =
-      typeof withPi?.stripe_payment_intent_id === 'string' ? withPi.stripe_payment_intent_id : paymentIntentForRefund;
-    const totalPence = (groupRows ?? []).reduce(
-      (sum: number, r: { deposit_amount_pence?: number | null }) => sum + (r.deposit_amount_pence ?? 0),
-      0,
-    );
-    if (totalPence > 0) {
-      depositPenceForMessage = totalPence;
-    }
-    hadPaidDeposit = (groupRows ?? []).some((r: { deposit_status?: string | null }) => r.deposit_status === 'Paid');
   }
 
   const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;

@@ -141,6 +141,23 @@ export interface StaffVisitModifySegment {
   booking_time: string;
   booking_end_time: string | null;
   booking_item_name: string | null;
+  /**
+   * C10 — optional deliberately. Statusless fixtures exist in the visit tests,
+   * and an absent status is treated as scheduled so they keep passing; the one
+   * real build site populates it.
+   */
+  status?: string | null;
+}
+
+/**
+ * C10 — the server's own list, mirrored exactly
+ * (`visits/[groupBookingId]/schedule/route.ts:38`). A segment outside it is not
+ * part of the schedule the save will re-plan.
+ */
+const VISIT_SCHEDULED_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
+
+function isScheduledVisitSegment(segment: StaffVisitModifySegment): boolean {
+  return segment.status == null || VISIT_SCHEDULED_STATUSES.includes(segment.status);
 }
 
 /** What the visit endpoints say the save will do, per service. */
@@ -218,9 +235,35 @@ export function StaffAppointmentModifyForm({
   const initialPractitionerId = (booking.calendar_id ?? booking.practitioner_id) as string;
   const initialServiceId = (booking.appointment_service_id ?? booking.service_item_id) as string;
 
+  /**
+   * C10 — cancelled segments are filtered HERE, at the point of use, and
+   * deliberately not at the fetch.
+   *
+   * `fetchGroupVisitBookings` sends only the group id, and the list route drops
+   * cancelled rows only for `view=calendar`, so cancelled segments arrive in
+   * `visit.segments`. The form then planned around them while the server
+   * re-plans from its own scheduled-only list, and the two disagreed: pressing
+   * Save on a form nobody had touched moved the whole visit, because the
+   * cancelled row was still acting as the visit's anchor.
+   *
+   * Filtering `fetchGroupVisitBookings` instead would be wrong. The "Services in
+   * this visit" card deliberately shows cancelled segments and re-fetches after
+   * every cancel, so filtering at the fetch makes the segment staff just
+   * cancelled vanish from the screen.
+   *
+   * It has to be the memo rather than the two obvious derivations, because
+   * `notifyBookingId` and both duration baselines below read this same list —
+   * and anchoring the guest's notification to a cancelled row is its own bug.
+   *
+   * One deliberate consequence: a visit reduced to a single scheduled segment
+   * now has `isVisit === false` and opens in single-booking mode, which is the
+   * honest description of what it has become.
+   */
   const visitSegments = useMemo(
     () =>
-      [...(visit?.segments ?? [])].sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
+      [...(visit?.segments ?? [])]
+        .filter(isScheduledVisitSegment)
+        .sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
     [visit],
   );
   const isVisit = visitSegments.length > 1 && Boolean(visit?.groupBookingId);
@@ -858,16 +901,29 @@ export function StaffAppointmentModifyForm({
     }));
   }, [visitPlan, visitSegments]);
 
-  /** Dead time the rows carry that saving will close, in words. */
+  /**
+   * What saving will actually do, in words.
+   *
+   * C10 — this notice is the only reason Save is enabled on a form nobody has
+   * touched, so it has to name the consequence. It used to describe the dead
+   * time being closed and never mentioned that the visit MOVES, which is the
+   * part staff needed to see before pressing a button they had not armed.
+   */
   const visitRelayNotice = useMemo(() => {
     if (!visitRelayNeeded) return null;
     const rawSpan = visitSpanMinutes(visitSegments);
     const planned = visitPlan?.total_minutes ?? baselineDuration;
     const gap = rawSpan != null && planned != null ? rawSpan - planned : 0;
+    const plannedStart = visitPlan?.start_time ?? visitPlan?.services?.[0]?.booking_time ?? null;
+    const currentStart = visitSegments[0]?.booking_time ?? null;
+    const movesTo =
+      plannedStart && currentStart && hm(plannedStart) !== hm(currentStart)
+        ? ` The visit will start at ${hm(plannedStart)} instead of ${hm(currentStart)}.`
+        : '';
     if (gap > 0) {
-      return `This visit has ${gap} minutes of dead time in it. Saving closes it, so the services run back to back.`;
+      return `This visit has ${gap} minutes of dead time in it. Saving closes it, so the services run back to back.${movesTo}`;
     }
-    return 'Saving will re-lay this visit so its services run back to back.';
+    return `Saving will re-lay this visit so its services run back to back.${movesTo}`;
   }, [visitRelayNeeded, visitSegments, visitPlan, baselineDuration]);
 
   const endPreview = useMemo(() => {

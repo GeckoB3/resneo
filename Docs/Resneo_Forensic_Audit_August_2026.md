@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2 and **C4** are closed on staging *and* production. **C11 is implemented on staging, production pending** (code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8 and C9 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -235,6 +235,13 @@ Verified safe: `linked_apply_booking_update` writes a fixed column list excludin
 **Raised because the app itself opens the leak.** `PractitionerCalendarView.tsx:3556-3574` subscribes to `postgres_changes` on `bookings` filtered to the **linked** venue. Realtime delivers the **whole row**. A `time_only` partner's dashboard is already receiving guest emails, phones, `special_requests`, `dietary_notes` and `internal_notes` over the WebSocket on every change to the owner's diary, with no action taken. **API-layer redaction cannot close this.** See D1.
 
 ### C6. `/summary` returns un-redacted bookings and the UI prefers it
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Both gates added to `summary/route.ts`, mirroring the sibling GET exactly: the `linkedGrantHasFullDetails` 403 and the `linkedViewerMustNotSeePii` redaction of **both** the joined guest and the booking row's own copy of the client's details (via the existing `redactBookingPiiFields`, so a new PII column still needs adding in only one place). Confirmed before the change that the route destructured only `{ booking, ownerVenueId }` and referenced neither `isOwnVenue` nor `linkedGrant` anywhere.
+>
+> **The swallowed 403 is fixed too**, as the finding requires. `BookingDetailPanel.tsx` discarded a 403 from the full GET whenever the summary had answered 200 — which is exactly how the two routes drifted apart unnoticed. It now surfaces the refusal and clears the summary-seeded detail. Recorded honestly: the shared detail cache exposes only peek/prime/warm with **no evict**, so the route gate is the real control and the panel change is what stops the *next* divergence being invisible, not what closes this one.
+>
+> **Test added, and checked that it can fail.** `summary/route.test.ts` is new (4 cases: time_only refused, full_details-without-PII redacted in both the row and the guest while operational fields survive, full_details-with-PII untouched, own-venue never redacted). It mocks only the loader, leaving `linkedGrantHasFullDetails` and the whole redaction module real, so the gate under test is the actual one. Both gates were then removed and the suite re-run: exactly the two asserting them failed and the two un-redacted controls passed, then restored to green. The finding notes no test covered either file; one now covers the route.
+
 **CONFIRMED verbatim, both halves**, with one aggravation the first pass missed: `BookingDetailPanel.tsx:262` also calls `primeVenueBookingDetail`, so the un-redacted payload is written into the shared cache and re-served on the next open with no further fetch.
 
 **Bounded correctly:** reachable only by partners holding an accepted link covering that calendar, not "anyone".
@@ -247,6 +254,11 @@ Verified safe: `linked_apply_booking_update` writes a fixed column list excludin
 **Fix — NEW (the first pass proposed none), verified sound with one added guard.** Use machinery that already exists: on `accept_with_changes`, apply only `mine` to the accepter's own columns; if `theirs` differs from the requester's original, write it to `pending_change` — the exact shape `propose_change` already uses (`route.ts:311-319`), which requires the counterparty's `accept_change`. `EditPermissionsModal` already implements this same asymmetry mid-link, so the accept flow just becomes consistent with it. **Added guard (round three):** validate `isLinkConfigurationValid` on the *interim* pair (new `mine`, requester's original `theirs`), not only the proposed pair — otherwise an accepter can lower `mine` to `none` while deferring `theirs`, leaving the live link none/none (and permanently so if the requester later rejects). Also fix the email to diff the requester-facing direction. No test covers this route.
 
 ### C8. Non-admin staff can move any booking onto a colleague's calendar
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Only the own-venue non-admin leg was written, since the cross-venue leg was already live (see the correction below the fix snippet). It sits inside the existing `if (body.practitioner_id && isAppointment)` block, ahead of the §18 check, and calls `requireManagedCalendarAccess` with the message the fix text specifies.
+>
+> Both traps the rewritten fix warns about are avoided by construction and the reasons are now in the code: it is inside that block so `practitioner_id` is always present (`requireManagedCalendarAccess` fails closed on a null calendar id **before** its admin bypass, so hoisting it would 403 every status change, note edit and deposit edit for every role), and it is gated on `isOwnVenue` because `scopeVenueId` is the owner venue where a partner's staff hold no calendars at all. Shape mirrors `validate-appointment-modification/route.ts:71-88`, which already gates the same field.
+
 **CONFIRMED, and more reachable than first stated.** `practitioners/route.ts:326` filters to managed calendars only when `roster` is absent — and the calendar fetches `?roster=1`. So all columns render and the drag is a normal gesture, not a crafted request.
 
 **Fix — REWRITTEN. The original would have 403'd almost every PATCH.** `venue-auth.ts:415-417` returns failure *before* the admin bypass when no calendar id is passed, so status changes, notes edits and deposit edits would all break for every role. It would also 403 every non-admin cross-venue move, because `scopeVenueId` is the **owner** venue where venue B's staff hold no calendars.
@@ -273,6 +285,11 @@ if (body.practitioner_id && isAppointment) {
 No test breaks — there is no test for this PATCH route.
 
 ### C9. Press-and-hold on a booking reschedules it to the slot under your finger
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** `handleDragEnd` now returns early on `!target`, before the `target.invalid` toast, and `targetStartMins` reads `target.startMin` directly rather than falling back to `slotStartMins`. The no-op is silent by design: from the user's side nothing happened.
+>
+> **The finding's central claim was re-measured rather than re-read**, because it looks contradictory on its face: it says `over` IS populated at drag start yet `target` is null. Both are true, and the reason is that they come from different places. The `DndContext` wires `onDragStart`, `onDragMove`, `onDragCancel` and `onDragEnd` and has **no `onDragOver`**, so `calendarDragTargetRef` is written only by `handleDragMove`, which requires actual pointer movement. `e.over` comes from dnd-kit's own collision detection and is populated regardless. A press-and-hold therefore reaches `handleDragEnd` with a populated `over` and a null `target`, `target?.invalid` evaluates to `undefined`, and the availability gate is skipped. Confirmed.
+
 **CONFIRMED on all three legs, against the dnd-kit 6.3.1 source. Framing OVERSTATED — it is not silent.**
 
 - Timer activation with no movement: `core.cjs.development.js:1464-1468` — `setTimeout(this.handleStart, delay)`. Confirmed.
@@ -298,7 +315,7 @@ Every mechanical leg checks out: `fetchGroupVisitBookings` sends only the group 
 ### C11. Cancelling one group attendee refunds the entire group's deposit
 **CONFIRMED. One claim WRONG, and the original fix would have caused a worse bug.**
 
-> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14. Not yet applied to production.** All four parts landed in the prescribed order, behind one new helper, `src/lib/booking/shared-deposit-refund.ts` (`planSharedDepositRefund`), used by every settle path so this cannot drift apart again.
+> **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-14** (code-only, no migration; merged as PR #139). All four parts landed in the prescribed order, behind one new helper, `src/lib/booking/shared-deposit-refund.ts` (`planSharedDepositRefund`), used by every settle path so this cannot drift apart again.
 >
 > **Part 1, first:** the `charge.refunded` bookings branch now bails on `!chargeFullyRefunded`, matching the fee and balance branches. **Part 2:** the three cancel sites pass an amount derived from the paid rows actually settling. **Part 3:** `deposit/route.ts` gained the amount, a `deposit_status !== 'Paid'` re-entry guard, and a try/catch with `charge_already_refunded` convergence; it previously had **none of the four**, so a second press of Refund threw an unhandled error. **Part 4:** deterministic keys, `deposit_refund:${pi}:${sha256(sorted ids)}`, with the card-hold fee refund given its own `hold_fee_refund:${feePi}` namespace so the two can never collide.
 >
@@ -498,9 +515,9 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **2. C4 via the immutability trigger — DONE on both environments, 2026-08-14 (PR #138).** One trigger, protects admin routes too, no realtime impact, no test churn. All three predictions held: `20270110120000` applied, no test moved, and the `service_role` probe confirms the admin-client path is closed. See C4's status block.
 
-**3. C11 — DONE on staging, 2026-08-14; production pending.** Three parts in order (webhook gate → amount → idempotency key), plus the fourth refund site. Money leaving the account; do not gate behind a schema project. Shipped behind `planSharedDepositRefund`, with the amount passed only on genuine partial settlements, and the guest cancel's *cascade* deliberately left to C10/C12. See C11's status block.
+**3. C11 — DONE on both environments, 2026-08-14 (PR #139).** Three parts in order (webhook gate → amount → idempotency key), plus the fourth refund site. Money leaving the account; do not gate behind a schema project. Shipped behind `planSharedDepositRefund`, with the amount passed only on genuine partial settlements, and the guest cancel's *cascade* deliberately left to C10/C12. See C11's status block.
 
-**4. C6, C8, C9** — three small, well-understood, loudly-failing fixes.
+**4. C6, C8, C9 — DONE on staging, 2026-08-14; production pending.** Three small, well-understood, loudly-failing fixes. All code-only, no migration. C8 was smaller than written (half already live); C6 gained the route's first test, checked by removing the gates and watching it fail. See each finding's status block.
 
 **5. C13** across all three guest branches plus the staff mirror.
 

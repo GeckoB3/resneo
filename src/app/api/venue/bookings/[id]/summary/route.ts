@@ -4,7 +4,14 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { loadStaffBookingDetailBundle } from '@/lib/booking/load-booking-detail-bundle';
-import { loadStaffAccessibleBooking } from '@/lib/booking/staff-booking-access';
+import {
+  linkedGrantHasFullDetails,
+  loadStaffAccessibleBooking,
+} from '@/lib/booking/staff-booking-access';
+import {
+  linkedViewerMustNotSeePii,
+  redactBookingPiiFields,
+} from '@/lib/linked-accounts/redact-booking-pii';
 import { resolveBookingServicePaymentRequirement } from '@/lib/booking/booking-service-payment-requirement';
 import { loadVisitPaymentPicture, visitAnchorFromBooking } from '@/lib/booking/payment-summary';
 import type { BookingModel } from '@/types/booking-models';
@@ -30,7 +37,24 @@ export async function GET(
     if (!loaded.ok) {
       return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
-    const { booking, ownerVenueId: scopeVenueId } = loaded.ctx;
+    const { booking, ownerVenueId: scopeVenueId, isOwnVenue, linkedGrant } = loaded.ctx;
+    // C6 — this route is the first-paint sibling of GET /api/venue/bookings/[id]
+    // and returns the same booking row, so it needs the same two gates. It had
+    // neither, and the client PREFERS it: BookingDetailPanel renders from the
+    // summary and primes the shared detail cache with it, so an un-redacted
+    // payload here was re-served on every later open without a further fetch.
+    //
+    // §5.1 — a time_only link shows anonymous busy blocks only; full booking
+    // detail is reserved for full_details links.
+    if (!isOwnVenue && !linkedGrantHasFullDetails(linkedGrant, false)) {
+      return NextResponse.json(
+        { error: 'This link shows busy times only, not booking details.' },
+        { status: 403 },
+      );
+    }
+    // §5.2 — without the PII grant the guest row and the booking row's own copy
+    // of the client's details both stay hidden. Both must move in step.
+    const redactPii = linkedViewerMustNotSeePii(isOwnVenue, linkedGrant);
 
     const bookingTimeStr =
       typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
@@ -63,7 +87,20 @@ export async function GET(
         : '';
     const service_variant_name = variantSnapshot || detailBundle.service_variant_name;
     const service_variant_price_pence = detailBundle.service_variant_price_pence;
-    const guest = detailBundle.guest;
+    let guest = detailBundle.guest;
+    if (redactPii && guest) {
+      guest = {
+        ...guest,
+        first_name: null,
+        last_name: null,
+        email: null,
+        phone: null,
+        visit_count: null,
+        last_visit_date: null,
+        customer_profile_notes: null,
+        tags: [],
+      };
+    }
     const assignedTables = detailBundle.table_assignments;
 
     const inferred_booking_model = inferBookingRowModel(
@@ -96,7 +133,9 @@ export async function GET(
     );
 
     return NextResponse.json({
-      ...booking,
+      ...(redactPii
+        ? redactBookingPiiFields(booking as unknown as Record<string, unknown>)
+        : booking),
       area_name,
       booking_time: bookingTimeStr,
       guest: guest ?? null,

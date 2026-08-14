@@ -266,6 +266,24 @@ export function BookingDetailPanel({
       const bookingRes = await fetch(`/api/venue/bookings/${bookingId}`, { credentials: 'same-origin' });
 
       if (!bookingRes.ok) {
+        // C6 — a 403 here means this viewer is not entitled to booking detail at
+        // all (a time_only link, or one without the PII grant). It used to be
+        // swallowed whenever the summary had returned 200, and that is precisely
+        // how the two routes drifted apart unnoticed: the summary carried no
+        // gates, so it answered 200, the refusal from this route was discarded,
+        // and the panel rendered the un-redacted payload anyway. Surface it even
+        // when the summary succeeded, and drop what the summary seeded so a
+        // refused booking cannot stay on screen.
+        //
+        // The shared detail cache has no evict method, so the gate on the
+        // summary route itself is the real control; this is what stops the next
+        // divergence being invisible rather than what closes this one.
+        if (bookingRes.status === 403) {
+          setDetail(null);
+          setAssignedTables([]);
+          setError('This link shows busy times only, not booking details.');
+          return null;
+        }
         if (!summaryRes.ok) {
           setError(bookingRes.status === 404 ? 'Booking not found' : 'Failed to load booking');
         }

@@ -1,11 +1,11 @@
 # ResNeo forensic audit and adversarial review — August 2026
 
 **Date:** 2026-08-13
-**Branch:** `staging` at `73a40a27`
+**Branch:** `staging` at `73a40a27`; **anchors re-verified at `509242b4`, 2026-08-14** (see the anchor note below)
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-13.** C0, C1 and C2 are closed on staging *and* production. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1 and C2 are closed on staging *and* production. **C4 is closed on staging, production pending.** Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -14,6 +14,13 @@
 Each review round found fixes that would have broken production. They have been corrected, but the lesson generalises: **do not implement any item here without reading its "Fix" paragraph in full.** Several fixes that look like one-liners are not.
 
 **LIVE DATABASE VERIFICATION, 2026-08-13 — STAGING *AND* PRODUCTION.** The step-0 queries were run against both. They confirm C1, H43 and N1, and found something the static audit missed entirely: **31 `SECURITY DEFINER` functions are executable by `anon` — on production as well as staging — including `admin_hard_delete_venue(uuid)`, which has no authorisation check in its body.** The two environments return the *same 31 functions*; production is exposed exactly as staging is. See C0 — it outranks every other item in this document. **Production customer data is in scope; see C0's "Was it exploited?" note.**
+
+**ANCHOR NOTE — re-verified 2026-08-14 at `509242b4`.** Every `file:line` in the Critical findings and D1 was re-checked against the tree. Only `src/app/api/venue/reports/route.ts` has changed in `src/` since `73a40a27`, so the anchors have not drifted; those that resolved were exact. Two things cost time and are recorded here once:
+
+- **Bare filenames.** The four UI files are cited by basename only. They are `src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`, `src/app/dashboard/bookings/BookingDetailPanel.tsx`, `src/app/dashboard/bookings/ExpandedBookingContent.tsx`, `src/components/booking/StaffAppointmentModifyForm.tsx`. Each is unique in the tree.
+- **Bare `route.ts`.** In C8 and C13 this means `src/app/api/venue/bookings/[id]/route.ts` (3020 lines), **not** its sibling `src/app/api/venue/bookings/route.ts` (1996 lines). Read literally against the sibling, C8's `:2482` does not exist.
+
+Migration count is now **257**, not the 253 stated throughout; the four added are C0/C1's. Baseline re-measured and unchanged: `tsc --noEmit` clean, **328 files / 3084 tests** green, 4 Playwright specs, pgTAP still wired nowhere. `npm run check:function-grants` against staging returns **PASS, 12 matching the allowlist**.
 
 Three items are hard blockers on the whole plan:
 
@@ -190,7 +197,13 @@ Why the RPC is impossible as described:
 **If a real guard is pursued later** it must (a) add `practitioner_id, calendar_id, appointment_service_id` to the trigger's `UPDATE OF` list, (b) port the engine's occupancy semantics into plpgsql, and (c) add appointment-branch `23P01→409` mapping at every write site. That is a scoped project, not a step in this plan. (The bullet above lists nine route-level insert sites plus `linked_apply_booking_insert`, not "seven" — the round-two count was wrong.)
 
 ### C4. A linked venue can steal the owner's bookings by re-parenting `venue_id`
-**CONFIRMED, severity qualified.** `WITH CHECK`'s first disjunct passes once `venue_id` is B's. No trigger blocks it — notably `trg_enforce_cde_capacity` is `BEFORE INSERT OR UPDATE **OF** status, party_size, booking_date, booking_time, booking_end_time`, so a `venue_id` change does not even fire it. The audit trigger's early return (`20260920120000:51-54`) waves it past.
+**CONFIRMED, severity qualified.**
+
+> **STATUS — CLOSED ON STAGING, 2026-08-14. Production pending.** Migration `20270110120000_bookings_venue_id_immutable.sql` applied to staging. Trigger `trg_bookings_venue_id_immutable` (`BEFORE UPDATE OF venue_id`, `FOR EACH ROW`) calling `public.bookings_venue_id_is_immutable()`, `SECURITY INVOKER`.
+>
+> **Verified by behaviour, not by inspecting the catalogue** (the C0 lesson: 28 migrations returned success and changed nothing). Probed through the **`service_role` client**, which is the path RLS never covered and the reason this is a trigger rather than a policy change: (1) re-parenting a real staging booking to another venue is rejected with **`42501 bookings.venue_id is immutable`**; (2) the row's `venue_id` is unchanged afterwards; (3) an ordinary `updated_at` update still succeeds, which is the regression that would have mattered; (4) a payload naming `venue_id` with its *existing* value passes rather than raising, confirming `IS DISTINCT FROM` behaves; (5) the trigger function does not enter the client-executable set. A `service_role` rejection implies the `authenticated` linked-venue path is closed too, since the trigger contains no role logic.
+>
+> Baseline after: `tsc --noEmit` clean, **328 files / 3084 tests** green, `npm run check:function-grants` **PASS at 12** (trigger functions are out of that function's scope by its own `prorettype <> 'trigger'` clause, so the allowlist is deliberately unmoved). `WITH CHECK`'s first disjunct passes once `venue_id` is B's. No trigger blocks it — notably `trg_enforce_cde_capacity` is `BEFORE INSERT OR UPDATE **OF** status, party_size, booking_date, booking_time, booking_end_time`, so a `venue_id` change does not even fire it. The audit trigger's early return (`20260920120000:51-54`) waves it past.
 
 **Qualification:** the `USING` clause requires `link_action_grant(venue_id) IN ('edit_existing','create_edit_cancel')`. A `time_only` or `act: none` partner cannot do this. The original headline implied any linked venue could.
 
@@ -214,6 +227,8 @@ CREATE TRIGGER trg_bookings_venue_id_immutable
 
 Verified safe: `linked_apply_booking_update` writes a fixed column list excluding `venue_id`; no update payload in `src/` contains `venue_id`; no migration sets it. Unlike D1 this **also protects the admin-client routes**, which bypass RLS entirely — and it touches no realtime consumer and breaks no test.
 
+> **RE-MEASURED, verification pass 2026-08-14 — all three safety legs hold, and the mechanism is confirmed.** (1) The current definition of `linked_apply_booking_update` is `20260923140000_linked_calendar_update_calendar_id.sql:29-56` (not `20260919120000`, which it supersedes); its `SET` list is 13 fixed columns and `venue_id` is not among them. (2) All 78 `bookings` update sites in `src/` were scanned: six carry `venue_id` within the call, every one of them in a `.eq('venue_id', …)` **filter** or a following `events` insert, none in a payload. The one dynamically-built payload, `venue/bookings/[id]/route.ts:1595`, is a closed literal over four keys (`staff_attendance_confirmed_at`, `updated_at`, `status`, `guest_attendance_confirmed_at`). There are **no `bookings` upserts anywhere**, so no `ON CONFLICT DO UPDATE` can name `venue_id` implicitly. (3) No migration has `venue_id` in any `SET` list. (4) The vulnerability itself re-confirmed: `linked_venue_can_edit_bookings` (`20260930120000:76-90`) has `WITH CHECK` whose **first disjunct** is `venue_id IN (SELECT current_staff_venue_ids())`, which the re-parented NEW row satisfies outright, while `USING` requires the `edit_existing`/`create_edit_cancel` grant on the OLD row exactly as the qualification states.
+
 ### C5. `time_only` and `pii=false` linked venues can read every booking column
 **CONFIRMED, and severity RAISED.** The base SELECT policy has no column restriction; `link_pii_grant` is consulted only for `guests`, never for `bookings`. The anonymised view is `security_invoker = true`, so it grants nothing beyond base-table RLS, and has zero application references.
 
@@ -236,7 +251,9 @@ Verified safe: `linked_apply_booking_update` writes a fixed column list excludin
 
 **Fix — REWRITTEN. The original would have 403'd almost every PATCH.** `venue-auth.ts:415-417` returns failure *before* the admin bypass when no calendar id is passed, so status changes, notes edits and deposit edits would all break for every role. It would also 403 every non-admin cross-venue move, because `scopeVenueId` is the **owner** venue where venue B's staff hold no calendars.
 
-Correct placement is inside the existing `if (body.practitioner_id && isAppointment)` block at `route.ts:2482`, mirroring the validate route:
+Correct placement is inside the existing `if (body.practitioner_id && isAppointment)` block at `venue/bookings/[id]/route.ts:2482`, mirroring the validate route:
+
+> **CORRECTION — verification pass, 2026-08-14. Half of the snippet below is already live; do not re-add it.** The cross-venue leg exists at `:2487-2495` as `if (!isOwnVenue && !linkedGrantAllowsCalendar(linkedGrant, false, body.practitioner_id as string))` returning 403 `'This link does not include that calendar.'`, under a `§18` comment. It is logically identical to the `else if` written here. **The only missing leg is the own-venue non-admin one** — the `isOwnVenue && staff.role !== 'admin'` branch calling `requireManagedCalendarAccess`. Add that inside the existing block, ahead of the live cross-venue check; the finding itself is unaffected, since a non-admin moving a booking within their *own* venue is exactly what is unguarded.
 
 ```ts
 if (body.practitioner_id && isAppointment) {
@@ -297,7 +314,7 @@ Shared PI confirmed (`create-group/route.ts:726-750`, one intent for the total, 
 **C11 does not depend on D2, but it is coupled to C12** — both rewrite the refund/cascade block in `staff-cancel-booking.ts`. Deriving the amount from the resolver's `idsToCancel` (paid rows) makes them compose in either order; hardcoding "whole intent" for visits does not, because C12 later narrows the cascade and would resurrect the over-refund for a party.
 
 ### C12. Class-cart purchases are misclassified as visits
-**CONFIRMED, and broader than first stated.** Cart rows share one group id and carry no `person_label`, so `resolveCascadingVisitGroupId` returns the cart id. The no-show cascade hits **future** sessions — `loadGroupBookingSiblings` applies no status and no date filter. `class_booking_groups` has exactly two references in the codebase, both in the writer; nothing reads it.
+**CONFIRMED, and broader than first stated.** Cart rows share one group id and carry no `person_label`, so `resolveCascadingVisitGroupId` returns the cart id. The no-show cascade hits **future** sessions — `loadGroupBookingSiblings` applies no status and no date filter. `class_booking_groups` has exactly two non-test references in the codebase, both in the writer (`orchestrate-class-cart-checkout.ts:97` insert, `:138` rollback delete; two further references are in that file's own test); nothing reads it.
 
 **Under-stated:** `cancelStaffBookingWithNotify` skips the resolver entirely, so it also cascades across a genuine **multi-person party** — the exact class of bug the resolver exists to stop.
 
@@ -309,7 +326,11 @@ rows.every((r) => !r.person_label?.trim() && !r.class_instance_id)
 
 Existing resolver-test fixtures carry no `class_instance_id`, so `group-booking-status-sync.test.ts` stays green. The predicate is falsification-proof: no legitimate visit or party row ever carries `class_instance_id` (verified across all five group-id writers), and cart rows always set it (both class inserters take it as a required param and 404 before insert without it).
 
-**Correction to the round-two claim (round three):** routing `cancelStaffBookingWithNotify` through the resolver does **not** keep `staff-cancel-booking.test.ts:123` green — that helper has its own inline sibling query (not `loadGroupBookingSiblings`), and the test's mock only resolves at `.in()`, so the resolver's shorter chain returns `undefined` and the cascade collapses. The behaviour is correct; the *test* must be extended in the same commit. Two further traps: the helper's own query at `staff-cancel-booking.ts:96` selects **neither `class_instance_id` nor `person_label`**, so it must gain both columns or the tightened predicate reads every row as `undefined` and cascades *parties* — which, with C11's summed amount, refunds a whole party's PI on one attendee's cancel. And it selects no `stripe_payment_intent_id`/`deposit_amount_pence`, so use the resolver only for the *cascade decision* and keep the inline money query for the refund. Add a class-cart fixture (`class_instance_id` set) so the discriminator is actually exercised.
+**Correction to the round-two claim (round three):** routing `cancelStaffBookingWithNotify` through the resolver does **not** keep `staff-cancel-booking.test.ts:123` green — that helper has its own inline sibling query (not `loadGroupBookingSiblings`), and the test's mock only resolves at `.in()`, so the resolver's shorter chain returns `undefined` and the cascade collapses. The behaviour is correct; the *test* must be extended in the same commit. Two further traps: the helper's own query at `staff-cancel-booking.ts:96` selects **neither `class_instance_id` nor `person_label`**, so it must gain both columns or the tightened predicate reads every row as `undefined` and cascades *parties* — which, with C11's summed amount, refunds a whole party's PI on one attendee's cancel. And **`loadGroupBookingSiblings`** selects no `stripe_payment_intent_id`/`deposit_amount_pence`, so use the resolver only for the *cascade decision* and keep the inline money query for the refund.
+
+> **CORRECTION — verification pass, 2026-08-14.** That last sentence originally read "And *it* selects no `stripe_payment_intent_id`/`deposit_amount_pence`", whose antecedent is the helper's own query at `:96`. That is **false**: `:96` selects `id, stripe_payment_intent_id, deposit_status, deposit_amount_pence, guest_id, status` — both money columns are already there. The claim is true of the **resolver's** projection (`group-booking-status-sync.ts:23` = `id, status, practitioner_id, calendar_id, deposit_status, guest_id, person_label`), which is what makes the prescription correct. Both halves of the finding stand as verified: `:96` genuinely lacks `class_instance_id` **and** `person_label` and must gain both, and `loadGroupBookingSiblings` genuinely lacks `class_instance_id`.
+
+Add a class-cart fixture (`class_instance_id` set) so the discriminator is actually exercised.
 
 ### C13. Guest self-reschedule launders a non-refundable deposit
 **CONFIRMED end to end, and broader. One sentence WRONG.**
@@ -459,7 +480,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **Method note worth carrying forward.** The original prescription was wrong, and it was wrong in exactly the way the rest of this document warns about: a grant statement that returns success while changing nothing. It was caught only because the migration shipped with a probe that creates a function and asks whether `anon` can execute it, rather than a query confirming the statement had been recorded. Prefer checks that test the behaviour you want over checks that confirm the change you made.
 
-**2. C4 via the immutability trigger.** One trigger, protects admin routes too, no realtime impact, no test churn.
+**2. C4 via the immutability trigger — DONE on staging, 2026-08-14; production pending.** One trigger, protects admin routes too, no realtime impact, no test churn. All three predictions held: `20270110120000` applied, no test moved, and the `service_role` probe confirms the admin-client path is closed. See C4's status block.
 
 **3. C11**, three parts in order (webhook gate → amount → idempotency key). Money leaving the account; do not gate behind a schema project.
 

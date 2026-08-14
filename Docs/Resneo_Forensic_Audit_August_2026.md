@@ -1,7 +1,7 @@
 # ResNeo forensic audit and adversarial review — August 2026
 
 **Date:** 2026-08-13
-**Branch:** `staging` at `73a40a27`; **anchors re-verified at `509242b4`, 2026-08-14** (see the anchor note below)
+**Branch:** `staging` at `73a40a27` when written. **Anchors for the still-open findings re-verified at `cc787bbe`, 2026-08-14** (see the anchor note below)
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
@@ -15,12 +15,18 @@ Each review round found fixes that would have broken production. They have been 
 
 **LIVE DATABASE VERIFICATION, 2026-08-13 — STAGING *AND* PRODUCTION.** The step-0 queries were run against both. They confirm C1, H43 and N1, and found something the static audit missed entirely: **31 `SECURITY DEFINER` functions are executable by `anon` — on production as well as staging — including `admin_hard_delete_venue(uuid)`, which has no authorisation check in its body.** The two environments return the *same 31 functions*; production is exposed exactly as staging is. See C0 — it outranks every other item in this document. **Production customer data is in scope; see C0's "Was it exploited?" note.**
 
-**ANCHOR NOTE — re-verified 2026-08-14 at `509242b4`.** Every `file:line` in the Critical findings and D1 was re-checked against the tree. Only `src/app/api/venue/reports/route.ts` has changed in `src/` since `73a40a27`, so the anchors have not drifted; those that resolved were exact. Two things cost time and are recorded here once:
+**ANCHOR NOTE — last re-verified 2026-08-14 at `cc787bbe`.**
+
+**Line numbers in the IMPLEMENTED findings are historical.** They were exact when written and were checked again at `509242b4`, but the fixes themselves have since moved lines in `confirm/route.ts`, `venue/bookings/[id]/route.ts`, `staff-cancel-booking.ts`, `group-booking-status-sync.ts`, `group-visit-bookings.ts`, `StaffAppointmentModifyForm.tsx`, `ExpandedBookingContent.tsx`, `BookingDetailPanel.tsx`, `PractitionerCalendarView.tsx`, `summary/route.ts`, `deposit/route.ts` and `webhooks/stripe/route.ts`. Read those anchors as a record of where the defect was, not as a current pointer.
+
+**Anchors in the still-open findings were re-verified at `cc787bbe` and all resolve exactly**: C3 (`create/route.ts:1169/1820/1845`, `create-multi-service/route.ts:638`, `venue/bookings/route.ts:444/664/913`), C5 and D1 (`PractitionerCalendarView.tsx:3556`), C7 (`permissions.ts:319`). Nothing implemented so far has disturbed them.
+
+Two things cost time and are recorded here once:
 
 - **Bare filenames.** The four UI files are cited by basename only. They are `src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`, `src/app/dashboard/bookings/BookingDetailPanel.tsx`, `src/app/dashboard/bookings/ExpandedBookingContent.tsx`, `src/components/booking/StaffAppointmentModifyForm.tsx`. Each is unique in the tree.
-- **Bare `route.ts`.** In C8 and C13 this means `src/app/api/venue/bookings/[id]/route.ts` (3020 lines), **not** its sibling `src/app/api/venue/bookings/route.ts` (1996 lines). Read literally against the sibling, C8's `:2482` does not exist.
+- **Bare `route.ts`.** In C8 and C13 this means `src/app/api/venue/bookings/[id]/route.ts` (3097 lines), **not** its sibling `src/app/api/venue/bookings/route.ts` (1995 lines). Read literally against the sibling, C8's `:2482` never existed.
 
-Migration count is now **257**, not the 253 stated throughout; the four added are C0/C1's. Baseline re-measured and unchanged: `tsc --noEmit` clean, **328 files / 3084 tests** green, 4 Playwright specs, pgTAP still wired nowhere. `npm run check:function-grants` against staging returns **PASS, 12 matching the allowlist**.
+Migration count is now **258**, not the 253 stated throughout; the five added are C0/C1's four plus C4's trigger. Both environments are level: a `supabase migration list` against staging and production each returns 258 rows with nothing local-only or remote-only. `npm run check:function-grants` against staging returns **PASS, 12 matching the allowlist**.
 
 Three items are hard blockers on the whole plan:
 
@@ -34,14 +40,17 @@ Three items are hard blockers on the whole plan:
 
 ## Baseline
 
-| Check | Result |
-|---|---|
-| `tsc --noEmit` | Clean |
-| `vitest run` | 328 files, 3084 tests, all passing |
-| Playwright e2e | 4 specs, single-appointment happy paths only |
-| **pgTAP (`supabase/tests/`)** | **Runs nowhere.** No `pg_prove` in `.github/workflows/ci.yml`, `package.json` or `scripts/` |
+| Check | At audit time (2026-08-13) | Now (`cc787bbe`, 2026-08-14) |
+|---|---|---|
+| `tsc --noEmit` | Clean | Clean |
+| `vitest run` | 328 files, 3084 tests, all passing | **331 files, 3132 tests**, all passing |
+| `npm run lint` | not recorded | 0 errors, 104 warnings (all pre-existing, unrelated files) |
+| Playwright e2e | 4 specs, single-appointment happy paths only | unchanged |
+| **pgTAP (`supabase/tests/`)** | **Runs nowhere.** No `pg_prove` in `.github/workflows/ci.yml`, `package.json` or `scripts/` | **Still runs nowhere** |
 
-That last row matters: the RLS security suite has never been continuously verified, and the "green suite" figure covers none of it.
+That last row matters: the RLS security suite has never been continuously verified, and the "green suite" figure covers none of it. **It is still true after C0-C13**, which is the single largest residual risk in this document: every RLS-touching change so far has been verified by reasoning, targeted probes and unit tests, never by the suite written for exactly that purpose.
+
+The +3 files and +48 tests are the suites added by the fixes: `shared-deposit-refund` (C11), `summary/route` (C6), `reschedule-cancellation-deadline` (C13), plus cases added to `staff-cancel-booking`, `group-booking-status-sync`, `group-visit-bookings`, `StaffAppointmentModifyForm.visit` and `deposit/route.card-hold`.
 
 ---
 
@@ -203,7 +212,9 @@ Why the RPC is impossible as described:
 >
 > **Verified by behaviour, not by inspecting the catalogue** (the C0 lesson: 28 migrations returned success and changed nothing). Probed through the **`service_role` client**, which is the path RLS never covered and the reason this is a trigger rather than a policy change: (1) re-parenting a real staging booking to another venue is rejected with **`42501 bookings.venue_id is immutable`**; (2) the row's `venue_id` is unchanged afterwards; (3) an ordinary `updated_at` update still succeeds, which is the regression that would have mattered; (4) a payload naming `venue_id` with its *existing* value passes rather than raising, confirming `IS DISTINCT FROM` behaves; (5) the trigger function does not enter the client-executable set. A `service_role` rejection implies the `authenticated` linked-venue path is closed too, since the trigger contains no role logic.
 >
-> Baseline after: `tsc --noEmit` clean, **328 files / 3084 tests** green, `npm run check:function-grants` **PASS at 12** (trigger functions are out of that function's scope by its own `prorettype <> 'trigger'` clause, so the allowlist is deliberately unmoved). `WITH CHECK`'s first disjunct passes once `venue_id` is B's. No trigger blocks it — notably `trg_enforce_cde_capacity` is `BEFORE INSERT OR UPDATE **OF** status, party_size, booking_date, booking_time, booking_end_time`, so a `venue_id` change does not even fire it. The audit trigger's early return (`20260920120000:51-54`) waves it past.
+> Baseline after: `tsc --noEmit` clean, **328 files / 3084 tests** green at the time (the figure has since risen with later fixes), `npm run check:function-grants` **PASS at 12** (trigger functions are out of that function's scope by its own `prorettype <> 'trigger'` clause, so the allowlist is deliberately unmoved).
+
+`WITH CHECK`'s first disjunct passes once `venue_id` is B's. No trigger blocks it — notably `trg_enforce_cde_capacity` is `BEFORE INSERT OR UPDATE **OF** status, party_size, booking_date, booking_time, booking_end_time`, so a `venue_id` change does not even fire it. The audit trigger's early return (`20260920120000:51-54`) waves it past.
 
 **Qualification:** the `USING` clause requires `link_action_grant(venue_id) IN ('edit_existing','create_edit_cancel')`. A `time_only` or `act: none` partner cannot do this. The original headline implied any linked venue could.
 
@@ -552,7 +563,7 @@ The first pass also over-claimed that `security_invoker` proves the spec is wron
 
 > **H43 was not part of this step, contrary to the line that stood here.** C0 had already revoked `consume_class_credits_atomically` at `20270106120000:107-108`. Also note the original step-1 text named "the six report RPCs": by the time C1 shipped, `report_frequent_visitors` and `report_booking_final_statuses` were already closed by C0, leaving four.
 
-**1b. Stopping this class of bug recurring — DONE on staging, 2026-08-13, but NOT the way this document originally prescribed.**
+**1b. Stopping this class of bug recurring — DONE on both environments (`20270108120000` and `20270109120000` verified present on staging and production), but NOT the way this document originally prescribed.**
 
 C0 and C1 closed 19 individual functions. Neither touched the mechanism, so the next `CREATE FUNCTION` in `public` inherits the same exposure. The fix proposed for this was `ALTER DEFAULT PRIVILEGES`. **It does not work on this platform.** It was applied as `20270108120000` and measured three times: a function created immediately afterwards, owned by `postgres` in `public`, is still anon-executable, because PostgreSQL's built-in `EXECUTE`-to-`PUBLIC` grant survives it. Naming `PUBLIC` explicitly does not help either. Details in C0's "Durable fix" paragraph and in the migration's own header.
 
@@ -611,4 +622,22 @@ Two inter-agent disagreements were resolved by direct inspection: the import-too
 - Whether the row shapes D2's backfill would misclassify actually exist in your data.
 - The four Probable/Speculative findings (H12, H17's residual, `enforce_cde_capacity` NULL capacity, `estimateSmsSegments`).
 
-No code was changed in any of the three review rounds. Implementation began afterwards; see the implementation status at the top of this document, and the per-finding status blocks on C0, C1 and C2.
+No code was changed in any of the three review rounds. Implementation began afterwards; see the implementation status at the top of this document, and the per-finding status blocks, which now exist on **C0, C1, C2, C4, C6, C8, C9, C10, C11, C12, C13 and H8**.
+
+---
+
+### What implementation has itself corrected, 2026-08-14
+
+Seven findings were materially wrong or incomplete in ways only discovered while fixing them. Recorded together because the pattern is consistent: **this document undercounts call sites.** Anyone implementing a remaining item should assume the same and enumerate before trusting a count.
+
+| Finding | What the document said | What was true |
+|---|---|---|
+| C8 | The fix snippet is new code | Half was already live at `[id]/route.ts:2487`; only the own-venue leg was missing |
+| C11 | Four refund sites | **Eight** non-test `stripe.refunds.create` sites; the four unnamed are correct and two are the house pattern the fix adopted |
+| C12 | "Five group-id writers" | **Seven**; and the import writes `class_instance_id` but never `bookings.group_booking_id`, so it cannot reach the predicate |
+| C12 | Routing through the resolver turns `staff-cancel-booking.test.ts:123` red | It stays green when the predicate is applied to the helper's own rows instead of issuing a second query |
+| C13 | Three guest branches plus **one** staff mirror | **Six** sites: the staff route re-pins the deadline in three branches |
+| C13 | Scope preservation to a "refundable deposit" | `Card Held` needs it too: a post-deadline cancel keeps a hold chargeable, so re-pinning escaped the no-show fee by the same manoeuvre |
+| H8 | *(no text at all in this document)* | Recovered from the audit session transcript, then re-derived from code; now written up in full above |
+
+Two fixes were also deliberately narrowed against the document's prescription, both recorded in their status blocks: C11 passes an explicit refund `amount` only on genuine partial settlements rather than always, and C10's guest-path cascade was left to C12 rather than rebuilt inside `/api/confirm`.

@@ -24,6 +24,7 @@ import {
 import { settleCardHoldsOnCancellation } from "@/lib/booking/card-hold-cancellation";
 import { cancelOpenDepositIntentForBookings } from "@/lib/booking/cancel-open-deposit-intent";
 import { planSharedDepositRefund } from "@/lib/booking/shared-deposit-refund";
+import { resolveRescheduleCancellationDeadline } from "@/lib/booking/reschedule-cancellation-deadline";
 import { formatCardHoldFeePence } from "@/lib/booking/card-hold-terms";
 import { verifyBookingHmac } from "@/lib/short-manage-link";
 import {
@@ -1060,11 +1061,17 @@ export async function POST(request: NextRequest) {
             effectiveModel: "resource_booking",
             resourceCalendarId: resourceId,
           });
-          const cancellation_deadline = cancellationDeadlineHoursBefore(
-            newDate,
-            newTime,
-            refundWindowHours,
-          );
+          // C13 — a deadline that has already passed stays put, so rescheduling
+          // cannot make a forfeited deposit refundable again.
+          const { deadline: cancellation_deadline } = resolveRescheduleCancellationDeadline({
+            previousDeadline: booking.cancellation_deadline as string | null,
+            depositStatus: booking.deposit_status as string | null,
+            recomputedDeadline: cancellationDeadlineHoursBefore(
+              newDate,
+              newTime,
+              refundWindowHours,
+            ),
+          });
 
           const nowIso = new Date().toISOString();
           const prevUpdatedAt = booking.updated_at as string;
@@ -1252,11 +1259,16 @@ export async function POST(request: NextRequest) {
           startHHmm: validation.startTime,
           durationMinutes: validation.durationMinutes,
         });
-        const cancellation_deadline = cancellationDeadlineHoursBefore(
-          validation.instanceDate,
-          newTime,
-          validation.cancellationNoticeHours,
-        );
+        // C13 — see the resource branch above; a passed deadline is fixed.
+        const { deadline: cancellation_deadline } = resolveRescheduleCancellationDeadline({
+          previousDeadline: booking.cancellation_deadline as string | null,
+          depositStatus: booking.deposit_status as string | null,
+          recomputedDeadline: cancellationDeadlineHoursBefore(
+            validation.instanceDate,
+            newTime,
+            validation.cancellationNoticeHours,
+          ),
+        });
 
         const nowIso = new Date().toISOString();
         const prevUpdatedAt = booking.updated_at as string;
@@ -1561,11 +1573,20 @@ export async function POST(request: NextRequest) {
               : { appointmentServiceId: bodyAppointmentServiceId }),
           },
         );
-        const cancellation_deadline = cancellationDeadlineHoursBefore(
-          newDate,
-          newTime,
-          refundWindowHours,
-        );
+        // C13 — a passed deadline is fixed, so a late reschedule cannot restore
+        // a refund the guest has already forfeited. When it is preserved the
+        // stored policy snapshot must be preserved with it (below), or the row
+        // would advertise a window its own deadline refuses to honour.
+        const { deadline: cancellation_deadline, preserved: deadlinePreserved } =
+          resolveRescheduleCancellationDeadline({
+            previousDeadline: booking.cancellation_deadline as string | null,
+            depositStatus: booking.deposit_status as string | null,
+            recomputedDeadline: cancellationDeadlineHoursBefore(
+              newDate,
+              newTime,
+              refundWindowHours,
+            ),
+          });
         const cancellation_policy_snapshot = {
           refund_window_hours: refundWindowHours,
           policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
@@ -1626,7 +1647,9 @@ export async function POST(request: NextRequest) {
               ? { processing_time_blocks: rescheduleProcessingBlocks }
               : {}),
             cancellation_deadline,
-            cancellation_policy_snapshot,
+            // Skipped when the deadline was preserved: the row's existing
+            // snapshot is the one that matches it.
+            ...(deadlinePreserved ? {} : { cancellation_policy_snapshot }),
             updated_at: nowIso,
           })
           .eq("id", bookingId)

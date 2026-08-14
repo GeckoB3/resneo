@@ -74,6 +74,7 @@ import {
 import { applyAcceptUnpaidSideEffects } from '@/lib/booking/accept-unpaid-booking';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
 import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
+import { resolveRescheduleCancellationDeadline } from '@/lib/booking/reschedule-cancellation-deadline';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
@@ -1904,11 +1905,21 @@ export async function PATCH(
           effectiveModel: 'resource_booking',
           resourceCalendarId: resourceId,
         });
-        const cancellation_deadline = cancellationDeadlineHoursBefore(
-          newDate,
-          newTime,
-          refundWindowHours,
-        );
+        // C13 — mirrored from the guest path deliberately. Without it a guest
+        // simply phones the venue and has staff perform the same reschedule,
+        // which restores a refund the cancellation policy had already forfeited.
+        // A venue that wants to be generous still can: the deposit route's
+        // Refund action does it explicitly, and leaves an audit trail that this
+        // side effect never did.
+        const { deadline: cancellation_deadline } = resolveRescheduleCancellationDeadline({
+          previousDeadline: booking.cancellation_deadline as string | null,
+          depositStatus: booking.deposit_status as string | null,
+          recomputedDeadline: cancellationDeadlineHoursBefore(
+            newDate,
+            newTime,
+            refundWindowHours,
+          ),
+        });
 
         const bookingUpdate: Record<string, unknown> = {
           booking_date: newDate,
@@ -2119,11 +2130,16 @@ export async function PATCH(
           startHHmm: validation.startTime,
           durationMinutes: validation.durationMinutes,
         });
-        const cancellation_deadline = cancellationDeadlineHoursBefore(
-          validation.instanceDate,
-          newTime,
-          validation.cancellationNoticeHours,
-        );
+        // C13 — see the resource branch above.
+        const { deadline: cancellation_deadline } = resolveRescheduleCancellationDeadline({
+          previousDeadline: booking.cancellation_deadline as string | null,
+          depositStatus: booking.deposit_status as string | null,
+          recomputedDeadline: cancellationDeadlineHoursBefore(
+            validation.instanceDate,
+            newTime,
+            validation.cancellationNoticeHours,
+          ),
+        });
 
         const beforeTime =
           typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00';
@@ -2468,24 +2484,42 @@ export async function PATCH(
           : {}),
       });
 
+      // C13 — a deadline that has already passed is fixed, on the staff path as
+      // much as the guest one: otherwise the guest just phones the venue and has
+      // staff perform the reschedule for them. A venue that genuinely wants to
+      // refund a post-deadline booking still can, through the deposit route's
+      // explicit Refund action, which is audited where this side effect was not.
+      const { deadline: modifyCancellationDeadline, preserved: deadlinePreserved } =
+        resolveRescheduleCancellationDeadline({
+          previousDeadline: booking.cancellation_deadline as string | null,
+          depositStatus: booking.deposit_status as string | null,
+          recomputedDeadline: cancellationDeadlineHoursBefore(
+            newDate,
+            newTime,
+            modifyRefundWindowHours,
+          ),
+        });
+
       const bookingUpdate: Record<string, unknown> = {
         booking_date: newDate,
         booking_time: newTime,
         party_size: newPartySize,
         updated_at: new Date().toISOString(),
-        cancellation_deadline: cancellationDeadlineHoursBefore(
-          newDate,
-          newTime,
-          modifyRefundWindowHours,
-        ),
+        cancellation_deadline: modifyCancellationDeadline,
         /**
          * Kept in step with the deadline above. Re-pinning one without the other
-         * is what let a booking promise a 24 hour window while enforcing 48.
+         * is what let a booking promise a 24 hour window while enforcing 48 —
+         * which is also why a PRESERVED deadline skips this write entirely and
+         * leaves the stored snapshot that matches it in place.
          */
-        cancellation_policy_snapshot: {
-          refund_window_hours: modifyRefundWindowHours,
-          policy: `Full refund if cancelled ${modifyRefundWindowHours}+ hours before the booking start. No refund within ${modifyRefundWindowHours} hours of the booking or for no-shows.`,
-        },
+        ...(deadlinePreserved
+          ? {}
+          : {
+              cancellation_policy_snapshot: {
+                refund_window_hours: modifyRefundWindowHours,
+                policy: `Full refund if cancelled ${modifyRefundWindowHours}+ hours before the booking start. No refund within ${modifyRefundWindowHours} hours of the booking or for no-shows.`,
+              },
+            }),
       };
 
       if (!isAppointment && tableRescheduleServiceId) {

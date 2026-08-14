@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8 and C9 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9 and C13 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -366,6 +366,19 @@ Existing resolver-test fixtures carry no `class_instance_id`, so `group-booking-
 Add a class-cart fixture (`class_instance_id` set) so the discriminator is actually exercised.
 
 ### C13. Guest self-reschedule launders a non-refundable deposit
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** Behind one helper, `resolveRescheduleCancellationDeadline` (`src/lib/booking/reschedule-cancellation-deadline.ts`): once the deadline has passed on a booking with money at stake it is fixed; a deadline still in the future re-pins exactly as before, so ordinary within-window reschedules are untouched.
+>
+> **Broader again: there are SIX reschedule sites, not the four this finding names.** The three guest branches are right (`confirm/route.ts`, resource / class / appointment), but the staff side has three deadline re-pins, not one: the resource branch, the class branch, and the appointment/table branch this finding cites. All six now route through the helper, and a grep for `cancellation_deadline` writes confirms none bypass it.
+>
+> **Caveat 1 is handled by omission rather than by copying.** Where a site also writes `cancellation_policy_snapshot`, a preserved deadline **skips that write entirely**, leaving the stored snapshot that already matches it. That is safer than recomputing the snapshot to match, and the staff route had independently learned the same lesson — its existing comment records a bug where re-pinning the deadline without the snapshot made a row promise a 24 hour window while enforcing 48.
+>
+> **Caveat 2, the policy call: decided to mirror at staff.** The operator chose this. Without it the control is bypassed by a phone call: the guest asks the venue to perform the reschedule and gets the same laundering. The cost is lower than the caveat implies, because a venue that genuinely wants to refund a post-deadline booking still can, through the deposit route's explicit Refund action, which is an audited, deliberate act rather than an invisible side effect of moving a booking.
+>
+> **Scope, and one addition to this finding.** The fix text says to scope preservation to rows with a "refundable deposit". Preservation is scoped to `deposit_status IN ('Paid', 'Card Held')`. `Card Held` is the addition: a post-deadline cancel **keeps** a hold chargeable while a pre-deadline one releases it (§9.3 amended), so re-pinning the deadline lets a guest escape a no-show fee by exactly the same manoeuvre. It is the same defect with a different instrument, and scoping only to `Paid` would have left it open. The remaining states are either settled (`Refunded`, `Forfeited`, `Charged`) or have nothing riding on the deadline (`Not Required`, `Pending`, `Waived`, `Failed`), and re-pin freely, which is also what stops a depositless booking displaying a stale past deadline.
+>
+> `reschedule-cancellation-deadline.test.ts` is new (14 cases), including the repeated-reschedule case — the attack is repeatable, so the preserved value is fed back in as the previous deadline to confirm it cannot be walked forward on a second pass. Baseline: `tsc` clean, lint 0 errors, **331 files / 3117 tests** green.
+
 **CONFIRMED end to end, and broader. One sentence WRONG.**
 
 `guest_self_reschedule` is default-on (`resolve.ts:20-22`). No guard blocks the reschedule: the only status gate is `modifiableStatuses`, and the route's own comment states *"there is no per-booking modify window"*. The manage link survives — `confirm_token_used_at` is set by confirm and cancel, never by modify. The refund then succeeds.
@@ -519,7 +532,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **4. C6, C8, C9 — DONE on staging, 2026-08-14; production pending.** Three small, well-understood, loudly-failing fixes. All code-only, no migration. C8 was smaller than written (half already live); C6 gained the route's first test, checked by removing the gates and watching it fail. See each finding's status block.
 
-**5. C13** across all three guest branches plus the staff mirror.
+**5. C13 — DONE on staging, 2026-08-14; production pending.** Across all three guest branches plus the staff mirror — which turned out to be **three** staff sites, not one. Code-only, no migration. The staff mirror was taken as a deliberate policy decision; see C13's status block.
 
 **6. C12** via `class_instance_id`, plus routing `cancelStaffBookingWithNotify` through the resolver.
 

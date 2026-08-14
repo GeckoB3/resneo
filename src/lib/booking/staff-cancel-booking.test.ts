@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
+import { stripe } from '@/lib/stripe';
 import { cancelStaffBookingWithNotify } from './staff-cancel-booking';
 
 vi.mock('@/lib/stripe', () => ({
@@ -37,6 +38,7 @@ vi.mock('@/lib/communications/send-class-commerce', () => ({
 }));
 
 const releaseMock = releaseCardHoldsForBookings as unknown as Mock;
+const refundCreateMock = stripe.refunds.create as unknown as Mock;
 
 type BookingRow = Record<string, unknown>;
 
@@ -59,7 +61,17 @@ function baseBooking(overrides: BookingRow = {}): BookingRow {
 }
 
 /** Chain double for the staffDb/admin usage in cancelStaffBookingWithNotify. */
-function makeDb(opts: { booking: BookingRow; groupRows?: BookingRow[] }): SupabaseClient {
+function makeDb(opts: {
+  booking: BookingRow;
+  groupRows?: BookingRow[];
+  /**
+   * Rows sharing the booking's PaymentIntent, as `planSharedDepositRefund`
+   * reads them. Distinct from `groupRows`, which the helper narrows to
+   * cancellable statuses: a sibling that is already Completed still holds its
+   * paid deposit on the shared intent and must not be refunded.
+   */
+  piRows?: BookingRow[];
+}): SupabaseClient {
   return {
     from(table: string) {
       if (table === 'events') {
@@ -68,6 +80,7 @@ function makeDb(opts: { booking: BookingRow; groupRows?: BookingRow[] }): Supaba
       const builder = {
         select: () => builder,
         eq: () => builder,
+        limit: async () => ({ data: opts.piRows ?? opts.groupRows ?? [], error: null }),
         in: async () => ({ data: opts.groupRows ?? [], error: null }),
         update: () => ({ in: async () => ({ error: null }) }),
         single: async () => {
@@ -161,5 +174,79 @@ describe('cancelStaffBookingWithNotify card-hold release', () => {
 
     expect(result.cancelled).toBe(false);
     expect(releaseMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancelStaffBookingWithNotify shared-deposit refund amount (C11)', () => {
+  const FUTURE = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+
+  function refundableRow(overrides: BookingRow = {}): BookingRow {
+    return baseBooking({
+      stripe_payment_intent_id: 'pi_shared',
+      deposit_status: 'Paid',
+      deposit_amount_pence: 1000,
+      cancellation_deadline: FUTURE,
+      ...overrides,
+    });
+  }
+
+  it('refunds only the cancelled rows share when a paid sibling survives', async () => {
+    // Two attendees on one £20 intent. The sibling is already Completed, so it
+    // is not cancellable and keeps its deposit; refunding the whole intent
+    // would hand back money that was earned.
+    const booking = refundableRow({ id: 'b1', group_booking_id: 'grp-1' });
+    const groupRows = [refundableRow({ id: 'b1', group_booking_id: 'grp-1' })];
+    const piRows = [
+      refundableRow({ id: 'b1' }),
+      refundableRow({ id: 'b2', status: 'Completed' }),
+    ];
+    const admin = makeDb({ booking, groupRows, piRows });
+    const staffDb = makeDb({ booking, groupRows, piRows });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(refundCreateMock).toHaveBeenCalledTimes(1);
+    const [params, options] = refundCreateMock.mock.calls[0]!;
+    expect(params).toMatchObject({ payment_intent: 'pi_shared', amount: 1000 });
+    expect(options.idempotencyKey).toMatch(/^deposit_refund:pi_shared:/);
+  });
+
+  it('omits the amount when every paid row on the intent is being cancelled', async () => {
+    // A full group cancel must stay byte-identical to the old behaviour: no
+    // amount, so Stripe returns the whole remaining balance.
+    const booking = refundableRow({ id: 'b1', group_booking_id: 'grp-1' });
+    const rows = [
+      refundableRow({ id: 'b1', group_booking_id: 'grp-1' }),
+      refundableRow({ id: 'b2', group_booking_id: 'grp-1' }),
+    ];
+    const admin = makeDb({ booking, groupRows: rows, piRows: rows });
+    const staffDb = makeDb({ booking, groupRows: rows, piRows: rows });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(refundCreateMock).toHaveBeenCalledTimes(1);
+    const [params] = refundCreateMock.mock.calls[0]!;
+    expect(params).toEqual({ payment_intent: 'pi_shared' });
+    expect(params).not.toHaveProperty('amount');
+  });
+
+  it('leaves the booking uncancelled when the refund fails', async () => {
+    refundCreateMock.mockRejectedValueOnce(new Error('card_declined'));
+    const booking = refundableRow({ id: 'b1' });
+    const admin = makeDb({ booking, groupRows: [booking], piRows: [booking] });
+    const staffDb = makeDb({ booking, groupRows: [booking], piRows: [booking] });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.refundFailed).toBe(true);
   });
 });

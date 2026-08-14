@@ -73,6 +73,7 @@ import {
 } from '@/lib/booking/booking-owes-capture';
 import { applyAcceptUnpaidSideEffects } from '@/lib/booking/accept-unpaid-booking';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
+import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
@@ -972,9 +973,24 @@ export async function PATCH(
           const { data: venue } = await admin.from('venues').select('stripe_connected_account_id').eq('id', scopeVenueId).single();
           if (venue?.stripe_connected_account_id) {
             try {
+              // C11 — a party, visit or cart shares ONE PaymentIntent across
+              // every row, so an amount-less refund here returned the whole
+              // group's money when only some rows were being cancelled. Refund
+              // only the share the settling rows actually paid; when they are
+              // all of it, this still refunds the full remaining balance.
+              const refundPlan = await planSharedDepositRefund(admin, {
+                paymentIntentId: paymentIntentForRefund,
+                settlingBookingIds: idsToCancel,
+              });
               await stripe.refunds.create(
-                { payment_intent: paymentIntentForRefund },
-                { stripeAccount: venue.stripe_connected_account_id },
+                {
+                  payment_intent: paymentIntentForRefund,
+                  ...(refundPlan.amountPence != null ? { amount: refundPlan.amountPence } : {}),
+                },
+                {
+                  stripeAccount: venue.stripe_connected_account_id,
+                  idempotencyKey: refundPlan.idempotencyKey,
+                },
               );
               refundSucceeded = true;
             } catch (refundErr) {

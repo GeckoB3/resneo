@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1 and C2 are closed on staging *and* production. **C4 is closed on staging, production pending.** Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2 and **C4** are closed on staging *and* production. **C11 is implemented on staging, production pending** (code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -199,7 +199,7 @@ Why the RPC is impossible as described:
 ### C4. A linked venue can steal the owner's bookings by re-parenting `venue_id`
 **CONFIRMED, severity qualified.**
 
-> **STATUS — CLOSED ON STAGING, 2026-08-14. Production pending.** Migration `20270110120000_bookings_venue_id_immutable.sql` applied to staging. Trigger `trg_bookings_venue_id_immutable` (`BEFORE UPDATE OF venue_id`, `FOR EACH ROW`) calling `public.bookings_venue_id_is_immutable()`, `SECURITY INVOKER`.
+> **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-14.** Migration `20270110120000_bookings_venue_id_immutable.sql` applied to staging, verified, then to production; merged as PR #138. Trigger `trg_bookings_venue_id_immutable` (`BEFORE UPDATE OF venue_id`, `FOR EACH ROW`) calling `public.bookings_venue_id_is_immutable()`, `SECURITY INVOKER`.
 >
 > **Verified by behaviour, not by inspecting the catalogue** (the C0 lesson: 28 migrations returned success and changed nothing). Probed through the **`service_role` client**, which is the path RLS never covered and the reason this is a trigger rather than a policy change: (1) re-parenting a real staging booking to another venue is rejected with **`42501 bookings.venue_id is immutable`**; (2) the row's `venue_id` is unchanged afterwards; (3) an ordinary `updated_at` update still succeeds, which is the regression that would have mattered; (4) a payload naming `venue_id` with its *existing* value passes rather than raising, confirming `IS DISTINCT FROM` behaves; (5) the trigger function does not enter the client-executable set. A `service_role` rejection implies the `authenticated` linked-venue path is closed too, since the trigger contains no role logic.
 >
@@ -297,6 +297,22 @@ Every mechanical leg checks out: `fetchGroupVisitBookings` sends only the group 
 
 ### C11. Cancelling one group attendee refunds the entire group's deposit
 **CONFIRMED. One claim WRONG, and the original fix would have caused a worse bug.**
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14. Not yet applied to production.** All four parts landed in the prescribed order, behind one new helper, `src/lib/booking/shared-deposit-refund.ts` (`planSharedDepositRefund`), used by every settle path so this cannot drift apart again.
+>
+> **Part 1, first:** the `charge.refunded` bookings branch now bails on `!chargeFullyRefunded`, matching the fee and balance branches. **Part 2:** the three cancel sites pass an amount derived from the paid rows actually settling. **Part 3:** `deposit/route.ts` gained the amount, a `deposit_status !== 'Paid'` re-entry guard, and a try/catch with `charge_already_refunded` convergence; it previously had **none of the four**, so a second press of Refund threw an unhandled error. **Part 4:** deterministic keys, `deposit_refund:${pi}:${sha256(sorted ids)}`, with the card-hold fee refund given its own `hold_fee_refund:${feePi}` namespace so the two can never collide.
+>
+> **One deliberate deviation from the fix text, and the reason.** The doc prescribes always passing `amount`. Shipped instead: pass `amount` **only when this is a partial settlement of the intent**, and refund amount-less when every still-Paid row on it is being settled. The invariant the prescription rests on (`Σ deposit_amount_pence === PI amount`, verified true at creation: `create-group/route.ts:448`, `:728`, `:636`) is written once and never reconciled, so a later edit to `deposit_amount_pence` or a dashboard refund breaks it silently. Always passing a computed amount would change the wire behaviour of every refund in the system, including the many correct today, and a mismatch turns a working refund into a Stripe error, which at these sites means a 502 and a booking left uncancelled. The narrow version fixes the defect and leaves every non-defective path byte-identical.
+>
+> **The guest path: money closed, cascade deliberately not attempted.** `/api/confirm` now refunds only the clicked row's share, which fully closes C11 there: a guest cancelling one attendee no longer returns the party's deposits. What was **not** done is rewriting the guest cancel to cascade a visit, because reading it showed the fix text understates the work: every post-cancel step (`applyBookingLifecycleStatusEffects`, `cancelOpenDepositIntentForBookings`, `settleCardHoldsOnCancellation`, the class-credit and membership restores, and the comms) is keyed to a single `bookingId` and would each need per-row rework. That is cascade semantics, which is C10/C12's subject, not a money defect. Money is correct either way: post-fix, cancelling one segment refunds one segment. Flagged as a scoped follow-up, not silently dropped.
+>
+> **The `charge_already_refunded` convergence was re-derived, not redesigned.** The fix text says it must be reworked for partial refunds. It does not need to be: Stripe raises that code only when the *charge* is fully refunded, and the charge total is the sum of every row's deposit, so a fully-refunded charge means this row's money is necessarily back. The crash-retry case it also covered is now handled by the idempotency key, which replays the original result instead of raising.
+>
+> **Correction to this finding's site count.** It names four refund call sites. There are **eight** non-test `stripe.refunds.create` calls in `src/`. The four unnamed ones are fine and two of them are the house precedent this fix follows: `account/courses/cancel/route.ts:144` and `class-course-products/[id]/enrollments/[enrId]/cancel/route.ts:143` already pass an explicit `amount` **and** a deterministic `course_refund:${enrollmentId}` key; `charge/route.ts:327` is a per-payment balance PI keyed `refund:${pi}`; `card-hold-charge.ts:532,547` are hold internals.
+>
+> **Falsifiability, as the finding demands.** `shared-deposit-refund.test.ts` is new (12 cases: the one-of-three partial, multi-row partial, full coverage, single booking, non-Paid siblings ignored, the unpriced-row case asserting it does **not** fall back to a full refund, a read failure throwing rather than guessing, and key stability/namespacing/length). `staff-cancel-booking.test.ts` gained the fixture the finding asks for, asserting `amount: 1000` and the `deposit_refund:` key reach Stripe, plus a full-cancel case asserting **no** `amount` key is sent. Its `makeDb` double gained a `limit` terminal for the intent query. `deposit/route.card-hold.test.ts:506` was updated in the same commit for the new fee key, which is the one existing assertion this changes.
+>
+> Baseline after: `tsc --noEmit` clean, **329 files / 3099 tests** green (was 328 / 3084).
 
 Shared PI confirmed (`create-group/route.ts:726-750`, one intent for the total, linked to every row). Amount-less refund confirmed. The per-row deadline variant holds.
 
@@ -480,9 +496,9 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **Method note worth carrying forward.** The original prescription was wrong, and it was wrong in exactly the way the rest of this document warns about: a grant statement that returns success while changing nothing. It was caught only because the migration shipped with a probe that creates a function and asks whether `anon` can execute it, rather than a query confirming the statement had been recorded. Prefer checks that test the behaviour you want over checks that confirm the change you made.
 
-**2. C4 via the immutability trigger — DONE on staging, 2026-08-14; production pending.** One trigger, protects admin routes too, no realtime impact, no test churn. All three predictions held: `20270110120000` applied, no test moved, and the `service_role` probe confirms the admin-client path is closed. See C4's status block.
+**2. C4 via the immutability trigger — DONE on both environments, 2026-08-14 (PR #138).** One trigger, protects admin routes too, no realtime impact, no test churn. All three predictions held: `20270110120000` applied, no test moved, and the `service_role` probe confirms the admin-client path is closed. See C4's status block.
 
-**3. C11**, three parts in order (webhook gate → amount → idempotency key). Money leaving the account; do not gate behind a schema project.
+**3. C11 — DONE on staging, 2026-08-14; production pending.** Three parts in order (webhook gate → amount → idempotency key), plus the fourth refund site. Money leaving the account; do not gate behind a schema project. Shipped behind `planSharedDepositRefund`, with the amount passed only on genuine partial settlements, and the guest cancel's *cascade* deliberately left to C10/C12. See C11's status block.
 
 **4. C6, C8, C9** — three small, well-understood, loudly-failing fixes.
 

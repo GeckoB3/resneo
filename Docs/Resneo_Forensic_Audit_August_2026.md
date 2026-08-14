@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9 and C13 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C13 and C12 are implemented on staging, production pending** (all code-only: no migration). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -347,6 +347,19 @@ Shared PI confirmed (`create-group/route.ts:726-750`, one intent for the total, 
 **C11 does not depend on D2, but it is coupled to C12** — both rewrite the refund/cascade block in `staff-cancel-booking.ts`. Deriving the amount from the resolver's `idsToCancel` (paid rows) makes them compose in either order; hardcoding "whole intent" for visits does not, because C12 later narrows the cascade and would resurrect the over-refund for a party.
 
 ### C12. Class-cart purchases are misclassified as visits
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** `class_instance_id` added to the `loadGroupBookingSiblings` projection and to `GroupBookingStatusRow`, and the predicate tightened to `!r.person_label?.trim() && !r.class_instance_id`. No migration, no backfill, no column.
+>
+> **The predicate was verified by measurement, not accepted.** The finding says "no legitimate visit or party row ever carries `class_instance_id` (verified across all five group-id writers)". There are **seven** writers of `bookings.group_booking_id`, not five. Checked individually: the four party/visit writers (`create-group`, `create-multi-service`, `visits/[groupBookingId]/schedule`, `visits/[groupBookingId]/services`) contain **no reference to `class_instance_id` at all**, so they cannot set it; both class inserters set it unconditionally, and the cart orchestrator routes through them. The import is the interesting one: it **does** write `class_instance_id` for class rows, but never writes `bookings.group_booking_id` (its `group_booking_id` goes into a `booking_external_refs` payload, exactly as D2 records), so its rows never reach the predicate. The discriminator holds.
+>
+> **The predicted test failure did not happen, and that is a real divergence from the fix text.** The finding states that routing `cancelStaffBookingWithNotify` through the resolver turns `staff-cancel-booking.test.ts:123` red, because the resolver issues a second, shorter query the mock does not satisfy. Shipped differently: the predicate is exported as `isCascadingVisitGroup` and applied to the helper's **own** sibling rows, which already carry the money columns the resolver's projection lacks. One query, one canonical rule, no second round trip, and `:123` stays green on its own merits (two rows, no label, no class link, which is a genuine visit and should cascade). The finding's two traps still applied and are handled: that query gained **both** `person_label` and `class_instance_id`, without which the tightened predicate would read every row as `undefined` and cascade *parties* — which, with C11's summed amount, would refund a whole party's deposits on one attendee's cancel.
+>
+> **The under-stated half is fixed too:** this helper previously skipped the cascade decision entirely and cancelled every sibling sharing the group id, so a venue-initiated cancel took out a whole multi-person party. It now discriminates.
+>
+> **Tests, checked against their own removal.** The resolver file gained a class-cart fixture, a mixed visit/cart row, and a case pinning that the discriminator keys on a real class link rather than the column merely being present. The cancel helper gained cart and party fixtures plus the C11/C12 interaction case, asserting that one attendee's cancel refunds £10 and not the party's £20. Removing `&& !r.class_instance_id` fails exactly three of them and leaves the `person_label` cases passing, which is the expected shape. Baseline: `tsc` clean, lint 0 errors, **331 files / 3123 tests** green.
+>
+> **Not addressed here, and still true:** `loadGroupBookingSiblings` applies no status and no date filter. For carts that no longer matters, since they no longer cascade at all, but a genuine visit still cascades across every row regardless of date. Left alone deliberately: a multi-service visit is same-day by construction, so there is no known way to reach it.
+
 **CONFIRMED, and broader than first stated.** Cart rows share one group id and carry no `person_label`, so `resolveCascadingVisitGroupId` returns the cart id. The no-show cascade hits **future** sessions — `loadGroupBookingSiblings` applies no status and no date filter. `class_booking_groups` has exactly two non-test references in the codebase, both in the writer (`orchestrate-class-cart-checkout.ts:97` insert, `:138` rollback delete; two further references are in that file's own test); nothing reads it.
 
 **Under-stated:** `cancelStaffBookingWithNotify` skips the resolver entirely, so it also cascades across a genuine **multi-person party** — the exact class of bug the resolver exists to stop.
@@ -534,7 +547,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **5. C13 — DONE on staging, 2026-08-14; production pending.** Across all three guest branches plus the staff mirror — which turned out to be **three** staff sites, not one. Code-only, no migration. The staff mirror was taken as a deliberate policy decision; see C13's status block.
 
-**6. C12** via `class_instance_id`, plus routing `cancelStaffBookingWithNotify` through the resolver.
+**6. C12 — DONE on staging, 2026-08-14; production pending.** Via `class_instance_id`. `cancelStaffBookingWithNotify` applies the resolver's exported predicate to its own sibling rows rather than calling the resolver, which avoids a second query and keeps `staff-cancel-booking.test.ts:123` green. Code-only, no migration. See C12's status block.
 
 **7. C10 and H8 together**, as a derivation fix — filter at point of use, never at the fetch.
 

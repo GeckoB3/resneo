@@ -22,6 +22,11 @@ import {
   computeAppointmentAvailability,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
+import {
+  createAppointmentSlotRecheck,
+  SLOT_TAKEN_RESPONSE,
+  type AppointmentSlotRecheck,
+} from '@/lib/booking/revalidate-appointment-slot';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointments/appointment-service-payment';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
@@ -236,6 +241,14 @@ export async function POST(request: NextRequest) {
 
     const phantoms: PhantomBooking[] = [];
 
+    /**
+     * C3 interim — one re-check per party member, all re-run immediately before
+     * the first insert. A group create validates every member up front and then
+     * does a great deal of work (deposit maths, a shared Stripe PaymentIntent)
+     * before writing any row, so the window here is among the widest in the app.
+     */
+    const groupSlotRechecks: AppointmentSlotRecheck[] = [];
+
     for (let i = 0; i < people.length; i++) {
       const person = people[i]!;
       const timeStr = person.booking_time.slice(0, 5);
@@ -352,6 +365,19 @@ export async function POST(request: NextRequest) {
           { status: 409 }
         );
       }
+      groupSlotRechecks.push(
+        createAppointmentSlotRecheck({
+          supabase,
+          venueId: venue_id,
+          // Each member carries their own date; a group is not necessarily
+          // same-day.
+          date: person.booking_date,
+          practitionerId: person.practitioner_id,
+          serviceId: person.appointment_service_id,
+          timeHm: timeStr,
+          input,
+        }),
+      );
 
       let estimatedEndTime: string | null = null;
       let personBookingEndTime: string | null = null;
@@ -598,6 +624,15 @@ export async function POST(request: NextRequest) {
     // The unit shares one consent text but each row keeps its own deadline;
     // the consent quotes the LONGEST notice so it never under-warns a member.
     let maxCardHoldNoticeHours = groupCancellationNoticeHours;
+
+    // C3 interim — re-check every member's slot immediately before the first
+    // insert. If any one has gone, none of the party is written: a group is
+    // booked together or not at all. Narrows the race, does not close it.
+    for (const recheck of groupSlotRechecks) {
+      if (!(await recheck.stillAvailable())) {
+        return NextResponse.json(SLOT_TAKEN_RESPONSE, { status: 409 });
+      }
+    }
 
     for (const person of validatedPeople) {
       const refundWindowHours = await resolveCancellationNoticeHoursForCreate({

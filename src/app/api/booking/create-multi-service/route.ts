@@ -22,6 +22,11 @@ import {
   validateExactAppointmentStart,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
+import {
+  createAppointmentSlotRecheck,
+  SLOT_TAKEN_RESPONSE,
+  type AppointmentSlotRecheck,
+} from '@/lib/booking/revalidate-appointment-slot';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineChargeWithAddons } from '@/lib/appointments/appointment-service-payment';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
@@ -243,6 +248,8 @@ export async function POST(request: NextRequest) {
     };
 
     const validated: ValidatedSeg[] = [];
+    /** C3 interim — one per segment, all re-run before the first insert. */
+    const visitSlotRechecks: AppointmentSlotRecheck[] = [];
     const phantoms: PhantomBooking[] = [];
     const useUnifiedForAddons = await venueUsesUnifiedAppointmentServiceData(supabase, venue_id);
     const addonSchema = useUnifiedForAddons ? 'service_item' : 'appointment_service';
@@ -356,6 +363,22 @@ export async function POST(request: NextRequest) {
           { status: 409 },
         );
       }
+      // C3 interim — a visit validates every segment up front and writes them
+      // in a later loop, so each segment's slot can be taken in between.
+      // `exact` mode: a visit books off-grid starts, so the grid check would
+      // refuse starts this route legitimately allows.
+      visitSlotRechecks.push(
+        createAppointmentSlotRecheck({
+          supabase,
+          venueId: venue_id,
+          date: booking_date,
+          practitionerId,
+          serviceId: seg.service_id,
+          timeHm: timeStr,
+          input,
+          mode: 'exact',
+        }),
+      );
 
       if (i > 0) {
         const prev = validated[i - 1]!;
@@ -632,6 +655,15 @@ export async function POST(request: NextRequest) {
       if (membership) {
         collectiveIdForInsert = collective_id;
         collectiveServiceItemIdForInsert = collective_service_item_id ?? null;
+      }
+    }
+
+    // C3 interim — re-check every segment immediately before the first insert.
+    // A visit is written whole or not at all, so one taken segment refuses the
+    // lot. Narrows the race, does not close it.
+    for (const recheck of visitSlotRechecks) {
+      if (!(await recheck.stillAvailable())) {
+        return NextResponse.json(SLOT_TAKEN_RESPONSE, { status: 409 });
       }
     }
 

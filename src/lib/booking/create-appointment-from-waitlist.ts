@@ -8,6 +8,10 @@ import {
   fetchAppointmentInput,
   validateAppointmentCustomInterval,
 } from '@/lib/availability/appointment-engine';
+import {
+  createAppointmentSlotRecheck,
+  SLOT_TAKEN_RESPONSE,
+} from '@/lib/booking/revalidate-appointment-slot';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
@@ -292,6 +296,31 @@ export async function createAppointmentBookingFromWaitlistEntry(
   } else {
     apptInsert.practitioner_id = practitionerId;
     apptInsert.appointment_service_id = serviceId;
+  }
+
+  // C3 interim — `resolvePractitionerForSlot` picked this practitioner because
+  // they had the slot free; everything since (venue mode, guest resolution,
+  // deposit and policy work) is time in which someone else could have taken it.
+  // Re-check immediately before the write. Narrows the race, does not close it.
+  // This path's engine input carries no caller mutations, so the recheck can
+  // rebuild it from scratch.
+  const waitlistRecheck = createAppointmentSlotRecheck({
+    supabase: admin,
+    venueId,
+    date: bookingDate,
+    practitionerId,
+    serviceId,
+    timeHm: timeStr,
+    input: await fetchAppointmentInput({
+      supabase: admin,
+      venueId,
+      date: bookingDate,
+      practitionerId,
+      serviceId,
+    }),
+  });
+  if (!(await waitlistRecheck.stillAvailable())) {
+    return { ok: false, error: SLOT_TAKEN_RESPONSE.error, status: 409 };
   }
 
   const { data: booking, error: insertErr } = await admin

@@ -162,6 +162,8 @@ export async function PATCH(
       }
 
       let updateColumns: Record<string, unknown> = {};
+      let deferredToRequester: PendingChange | null = null;
+      let deferredBullets: string[] = [];
       let withChanges = false;
       if (action === 'accept_with_changes') {
         if (!parsed.data.grants) {
@@ -178,7 +180,98 @@ export async function PATCH(
             { status: 400 },
           );
         }
-        updateColumns = callerGrantsToColumns(link, ctx.venueId, { mine, theirs });
+
+        /**
+         * C7 — a grant is authored BY each venue: it says what that venue
+         * exposes to the other (`permissions.ts:319`). The accepter used to
+         * write both directions and activate the link in the same update, so
+         * "accept with changes" could raise what the REQUESTER exposes and go
+         * live without the requester ever agreeing. `respondLinkSchema` imposes
+         * no ceiling, so the accepter could name any level.
+         *
+         * Only the accepter's own side is applied. A change to the requester's
+         * side becomes a `pending_change` — the exact shape `propose_change`
+         * already writes, requiring the requester's `accept_change`. That is
+         * also what `EditPermissionsModal` already does mid-link, so the accept
+         * flow simply becomes consistent with the rest of the negotiation.
+         */
+        const accepterIsLowSide = link.venue_low_id === ctx.venueId;
+        const proposedCols = callerGrantsToColumns(link, ctx.venueId, { mine, theirs });
+
+        /** What the requester originally offered to expose to us. */
+        const requesterOriginal: LinkGrant = accepterIsLowSide
+          ? {
+              calendar: link.high_grants_calendar,
+              pii: link.high_grants_pii,
+              act: link.high_grants_act,
+              calendarIds: normaliseCalendarIds(link.high_grants_calendar_ids),
+            }
+          : {
+              calendar: link.low_grants_calendar,
+              pii: link.low_grants_pii,
+              act: link.low_grants_act,
+              calendarIds: normaliseCalendarIds(link.low_grants_calendar_ids),
+            };
+
+        /**
+         * The INTERIM pair is what actually goes live: the accepter's new grant
+         * against the requester's untouched one. Validating only the proposed
+         * pair would let an accepter drop `mine` to none while deferring a rise
+         * in `theirs`, activating a none/none link — and permanently so if the
+         * requester later rejects the pending change.
+         */
+        if (!isLinkConfigurationValid(mine, requesterOriginal)) {
+          return NextResponse.json(
+            {
+              error:
+                'That would leave the link granting nothing in either direction. Raise what your venue shares, or decline the request instead.',
+            },
+            { status: 400 },
+          );
+        }
+
+        updateColumns = accepterIsLowSide
+          ? {
+              low_grants_calendar: proposedCols.low_grants_calendar,
+              low_grants_pii: proposedCols.low_grants_pii,
+              low_grants_act: proposedCols.low_grants_act,
+              low_grants_calendar_ids: proposedCols.low_grants_calendar_ids,
+            }
+          : {
+              high_grants_calendar: proposedCols.high_grants_calendar,
+              high_grants_pii: proposedCols.high_grants_pii,
+              high_grants_act: proposedCols.high_grants_act,
+              high_grants_calendar_ids: proposedCols.high_grants_calendar_ids,
+            };
+
+        const requesterSideChanged = accepterIsLowSide
+          ? proposedCols.high_grants_calendar !== link.high_grants_calendar ||
+            proposedCols.high_grants_pii !== link.high_grants_pii ||
+            proposedCols.high_grants_act !== link.high_grants_act ||
+            !calendarIdsEqual(
+              proposedCols.high_grants_calendar_ids,
+              normaliseCalendarIds(link.high_grants_calendar_ids),
+            )
+          : proposedCols.low_grants_calendar !== link.low_grants_calendar ||
+            proposedCols.low_grants_pii !== link.low_grants_pii ||
+            proposedCols.low_grants_act !== link.low_grants_act ||
+            !calendarIdsEqual(
+              proposedCols.low_grants_calendar_ids,
+              normaliseCalendarIds(link.low_grants_calendar_ids),
+            );
+
+        if (requesterSideChanged) {
+          // Carries the whole proposed pair, so `accept_change` applies it in
+          // one go. Re-applying the accepter's own side is a no-op by then.
+          deferredToRequester = {
+            by_venue_id: ctx.venueId,
+            proposed_at: new Date().toISOString(),
+            ...proposedCols,
+          };
+          deferredBullets = describeGrant(theirs).map(
+            (line) => `Your venue would ${line}`,
+          );
+        }
         withChanges = true;
       }
 
@@ -186,6 +279,7 @@ export async function PATCH(
         .from('account_links')
         .update({
           ...updateColumns,
+          ...(deferredToRequester ? { pending_change: deferredToRequester } : {}),
           status: 'accepted',
           responded_at: new Date().toISOString(),
           responded_by_user_id: ctx.userId,
@@ -237,6 +331,18 @@ export async function PATCH(
         acceptedBullets,
         bulletsAreDiff,
       );
+      // C7 — the accepter also asked the requester to expose more than they
+      // offered. That is now a pending change rather than a fait accompli, so
+      // the requester has to be told it is waiting on them; otherwise it sits
+      // on the link unannounced and the accepter appears to have been refused.
+      if (deferredToRequester) {
+        await notifyPermissionChangeProposed(
+          ctx.admin,
+          otherVenueId,
+          ctx.venue.name,
+          deferredBullets,
+        );
+      }
       return NextResponse.json({ link: await singleLinkView(ctx.admin, ctx.venueId, id) });
     }
 

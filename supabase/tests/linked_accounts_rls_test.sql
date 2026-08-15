@@ -38,12 +38,16 @@ VALUES
   ('00000000-0000-0000-0000-0000000000b6',
    '00000000-0000-0000-0000-0000000000b1', 'admin-b@rls.test', 'Admin B', 'admin');
 
-INSERT INTO guests (id, venue_id, name, email, phone)
+-- `guests.name` was split into first_name/last_name and DROPPED by
+-- 20260810120000, three days before the forensic audit was written. This
+-- fixture still referenced it, so the suite errored here during setup, before
+-- a single assertion ran -- which is why nobody noticed: it was never executed.
+INSERT INTO guests (id, venue_id, first_name, last_name, email, phone)
 VALUES
   ('00000000-0000-0000-0000-0000000000a2',
-   '00000000-0000-0000-0000-0000000000a1', 'Guest A', 'guest-a@rls.test', '+447000000001'),
+   '00000000-0000-0000-0000-0000000000a1', 'Guest', 'A', 'guest-a@rls.test', '+447000000001'),
   ('00000000-0000-0000-0000-0000000000b2',
-   '00000000-0000-0000-0000-0000000000b1', 'Guest B', 'guest-b@rls.test', '+447000000002');
+   '00000000-0000-0000-0000-0000000000b1', 'Guest', 'B', 'guest-b@rls.test', '+447000000002');
 
 INSERT INTO practitioners (id, venue_id, name)
 VALUES
@@ -113,17 +117,24 @@ SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.te
 -- longer permitted at all. `linked_apply_booking_update` is the sole
 -- cross-venue write path, so the grant now governs what that RPC will do, not
 -- what a browser can do to the table.
-SELECT is(
-  (WITH upd AS (
-     UPDATE bookings SET party_size = 3
-     WHERE id = '00000000-0000-0000-0000-0000000000a5' RETURNING 1)
-   SELECT count(*) FROM upd)::int,
-  0, 'Venue B staff cannot UPDATE a venue A booking directly, even with an edit_existing grant');
+-- The UPDATE runs as its own statement: a data-modifying CTE is only legal at
+-- the top level, so the original `WITH upd AS (UPDATE ...)` inside a scalar
+-- subquery was a hard SQL error. It aborted the file rather than failing a
+-- test, and went unnoticed for as long as nothing ran this suite.
+-- RLS refuses the row silently, so this affects nothing and does not raise.
+UPDATE bookings SET party_size = 3
+WHERE id = '00000000-0000-0000-0000-0000000000a5';
 
 RESET ROLE;
 SELECT is(
   (SELECT party_size FROM bookings WHERE id = '00000000-0000-0000-0000-0000000000a5')::int,
-  1, 'The venue A booking is unchanged after the refused direct cross-venue UPDATE');
+  1, 'Venue B staff cannot UPDATE a venue A booking directly, even with an edit_existing grant');
+
+SELECT is(
+  (SELECT count(*) FROM account_link_audit_log
+   WHERE owning_venue_id = '00000000-0000-0000-0000-0000000000a1'
+     AND action_type = 'edited_booking')::int,
+  0, 'A refused direct cross-venue UPDATE writes no audit row, because it never happened');
 
 -- =============================================================================
 -- Test 6-7 — act = none removes write access but leaves calendar visibility.
@@ -136,11 +147,12 @@ WHERE id = '00000000-0000-0000-0000-0000000000c1';
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
 
+UPDATE bookings SET party_size = 5
+WHERE id = '00000000-0000-0000-0000-0000000000a5';
+
 SELECT is(
-  (WITH upd AS (
-     UPDATE bookings SET party_size = 5
-     WHERE id = '00000000-0000-0000-0000-0000000000a5' RETURNING 1)
-   SELECT count(*) FROM upd)::int,
+  (SELECT count(*) FROM bookings
+   WHERE id = '00000000-0000-0000-0000-0000000000a5' AND party_size = 5)::int,
   0, 'Venue B staff cannot UPDATE a venue A booking once act is reduced to none');
 
 SELECT is(

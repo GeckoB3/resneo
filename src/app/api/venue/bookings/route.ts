@@ -2,6 +2,11 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  createAppointmentSlotRecheck,
+  SLOT_TAKEN_RESPONSE,
+  type AppointmentSlotRecheck,
+} from '@/lib/booking/revalidate-appointment-slot';
 import { stripe } from '@/lib/stripe';
 import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
 import { findOrCreateGuest } from '@/lib/guests';
@@ -1085,6 +1090,10 @@ export async function POST(request: NextRequest) {
       }
 
       let matchingSlot: { duration_minutes: number; start_time: string; service_id: string } | null = null;
+      // C3 interim — set by whichever validation branch runs, consumed just
+      // before the insert ~250 lines below. Null for a staff walk-in, which is
+      // deliberately not grid-validated at all (the guest is already present).
+      let apptSlotRecheck: AppointmentSlotRecheck | null = null;
 
       if (!staffWalkIn) {
         if (parsed.data.duration_minutes != null) {
@@ -1103,6 +1112,17 @@ export async function POST(request: NextRequest) {
               { status: 409 },
             );
           }
+          apptSlotRecheck = createAppointmentSlotRecheck({
+            supabase: admin,
+            venueId,
+            date: booking_date,
+            practitionerId: practitioner_id,
+            serviceId: appointment_service_id,
+            timeHm: timeStr,
+            input: appointmentInput,
+            mode: 'interval',
+            endHm: endHHmmFromDuration(timeStr, totalEndMinutes),
+          });
         } else {
           const availResult = computeAppointmentAvailability(appointmentInput);
           const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
@@ -1114,6 +1134,15 @@ export async function POST(request: NextRequest) {
           if (!matchingSlot) {
             return NextResponse.json({ error: 'Selected time is not available for this practitioner and service' }, { status: 409 });
           }
+          apptSlotRecheck = createAppointmentSlotRecheck({
+            supabase: admin,
+            venueId,
+            date: booking_date,
+            practitionerId: practitioner_id,
+            serviceId: appointment_service_id,
+            timeHm: timeStr,
+            input: appointmentInput,
+          });
         }
       }
 
@@ -1355,6 +1384,12 @@ export async function POST(request: NextRequest) {
           },
           { status: 409 },
         );
+      }
+
+      // C3 interim — last check before the write. Narrows the race, does not
+      // close it. See `createAppointmentSlotRecheck`.
+      if (apptSlotRecheck && !(await apptSlotRecheck.stillAvailable())) {
+        return NextResponse.json(SLOT_TAKEN_RESPONSE, { status: 409 });
       }
 
       const { data: apptBooking, error: apptErr } = await admin

@@ -38,12 +38,16 @@ VALUES
   ('00000000-0000-0000-0000-0000000000b6',
    '00000000-0000-0000-0000-0000000000b1', 'admin-b@rls.test', 'Admin B', 'admin');
 
-INSERT INTO guests (id, venue_id, name, email, phone)
+-- `guests.name` was split into first_name/last_name and DROPPED by
+-- 20260810120000, three days before the forensic audit was written. This
+-- fixture still referenced it, so the suite errored here during setup, before
+-- a single assertion ran -- which is why nobody noticed: it was never executed.
+INSERT INTO guests (id, venue_id, first_name, last_name, email, phone)
 VALUES
   ('00000000-0000-0000-0000-0000000000a2',
-   '00000000-0000-0000-0000-0000000000a1', 'Guest A', 'guest-a@rls.test', '+447000000001'),
+   '00000000-0000-0000-0000-0000000000a1', 'Guest', 'A', 'guest-a@rls.test', '+447000000001'),
   ('00000000-0000-0000-0000-0000000000b2',
-   '00000000-0000-0000-0000-0000000000b1', 'Guest B', 'guest-b@rls.test', '+447000000002');
+   '00000000-0000-0000-0000-0000000000b1', 'Guest', 'B', 'guest-b@rls.test', '+447000000002');
 
 INSERT INTO practitioners (id, venue_id, name)
 VALUES

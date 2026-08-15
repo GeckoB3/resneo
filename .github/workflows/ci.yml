@@ -74,6 +74,42 @@ jobs:
       - name: Run tests
         run: npm run test
 
+  rls-pgtap:
+    name: RLS suite (pgTAP)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # D1/A5 — the RLS security suite exists at supabase/tests/ and, until this
+      # job, ran nowhere. Four RLS-touching changes reached production (C0, C1,
+      # C2, N2/N3/N4) verified by reasoning and targeted probes but never by the
+      # suite written for exactly that purpose. That was the largest residual
+      # risk in the forensic audit.
+      #
+      # It runs against a LOCAL Supabase built from supabase/migrations, so it
+      # needs no production credential and this repository can stay public. It
+      # also catches a bad migration before it reaches any environment, which a
+      # check pointed at a live project cannot do.
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Starts Postgres and applies every migration in order. Slow (image
+      # pulls), so it is its own job rather than a step on an existing one.
+      - name: Start local Supabase
+        run: supabase start
+
+      # Each test file runs in a transaction that is rolled back, so the suite
+      # seeds its own fixtures and leaves nothing behind.
+      - name: Run pgTAP suite
+        run: supabase test db
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup
+
   # NOTE: there is deliberately no job here for `npm run check:function-grants`,
   # which fails if a client role can execute a non-allowlisted SECURITY DEFINER
   # function in `public`. Two reasons, in order of weight:
@@ -89,10 +125,14 @@ jobs:
   #     Actions secrets at all. Adding that key here to guard against a future
   #     exposure is a poor trade against C0, the exposure it descends from.
   #
-  # The right home for it in CI is a local Supabase instance built from the
-  # migrations, which needs no production credential and would catch a bad
-  # migration before it reaches any environment. That is the same infrastructure
-  # D1/A5 needs for pgTAP, and should be done once, for both.
+  # The right home for it in CI is the local Supabase instance the rls-pgtap job
+  # above now starts, which needs no production credential. It is NOT wired
+  # there yet, and deliberately so: C0's root cause was that HOSTED Supabase
+  # grants anon/authenticated EXECUTE via project-level default privileges. It
+  # has not been established that a local instance reproduces those defaults, so
+  # the allowlist of 13 may simply not hold locally. Verify that against a
+  # running local instance before adding it, rather than assuming the two
+  # environments agree -- assuming exactly that is what produced C0.
 
   e2e-smoke:
     name: E2E smoke (Playwright)

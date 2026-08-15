@@ -569,6 +569,39 @@ Add a class-cart fixture (`class_instance_id` set) so the discriminator is actua
 
 ---
 
+### The re-verification pass cannot be done as scoped, 2026-08-14
+
+**The finding texts for H11, H16, H24, H25, H32-H37, H39 and H41 do not exist in this repository**, exactly as with H8. This document writes out only H1, H6, H13, H17, H38, H44 and H49 in full; the rest of the 167 live solely in the original discovery agents' output.
+
+Worse, the original audit session's own status table records `H16 | Not examined (Tier 3)` and `H32-H37, H39, H41 | Not examined`. So these were never derived in the first place, which is a weaker claim than "not individually re-verified" and should be read as such: there is nothing to re-verify, only names.
+
+**Do not schedule this pass against the finding numbers.** Either recover the discovery output, or replace the pass with the control-based sweep below, which needs no recovered text.
+
+#### What the recovery did surface, and it is live
+
+One line of the original session groups three findings as instances of a single control failure:
+
+> "C6 (`/summary`), H24 (visit routes), H36 (`bookings/list` guest-history branch)"
+
+That is the linked-venue redaction control — the one C6 fixed on `/summary` alone. Checked against the code rather than inferred:
+
+| Route | Redaction gates present | Cross-venue reachable |
+|---|---|---|
+| `venue/bookings/[id]/summary` | **yes** (C6, PR merged) | yes |
+| `venue/visits/[groupBookingId]/services` | **none** | yes — `loadStaffAccessibleBooking` at `:215` |
+| `venue/visits/[groupBookingId]/schedule` | **none** | yes — `loadStaffAccessibleBooking` at `:170` |
+| `venue/bookings/list` | **none** | yes — documented `owner_venue_id` + `guest_history=1` path at `:21-22` |
+
+None of the three carries `linkedGrantHasFullDetails`, `linkedViewerMustNotSeePii` or `redactBookingPiiFields`. The visits routes do gate *access* (they import `linkedGrantAllowsCalendar` / `linkedGrantAllowsMutation`), so what is missing is specifically **redaction**: a `full_details` partner without the PII grant is served un-redacted data. That is C6's exact shape on two more surfaces, and `bookings/list` documents a guest-history branch for linked venues at line 21.
+
+**This has not been fixed** — it is recorded here as a verified lead, not as work done.
+
+#### The pass that should replace it
+
+Sweep the **control**, not the finding numbers: enumerate every route reachable cross-venue (anything calling `loadStaffAccessibleBooking`, or accepting `owner_venue_id`) and check each against the two gates C6 established. It is derivable entirely from code, needs no recovered text, and on the one sample taken it found two live instances out of three routes checked. C5/N5's column grants close the *realtime* leg of this structurally, but not what these routes return over HTTP.
+
+---
+
 ## Two design decisions
 
 ### D1. The linked-venue RLS boundary — REVISED, was UNSAFE
@@ -735,7 +768,7 @@ Steps 0 to 8 of the order above are closed on **both environments**. This is the
 | ~~5~~ | **H38 — DONE on staging, 2026-08-14** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |
 | 6 | **D2** (`bookings.group_kind`) | Hardening, five phases, in the prescribed order: column, writers, backfill, `NOT VALID`, `VALIDATE`, resolver. C12 already closed the cascade defect without it, so this is cleanup of a smeared data model rather than a fix. | Large |
 | 7 | **H7 as a trust boundary** | A feature, not a hardening patch: resolve the staff session in all three create routes, derive `isStaffContext`, and drive the gates off it. The `source` enum stays a label. | Medium |
-| 8 | **Re-verification pass on the untouched Highs** | H11, H16, H24, H25, H32–H37, H39 and H41 were never individually re-verified and remain first-pass confidence. Given that every Critical implemented so far turned out to undercount its call sites, these should be re-derived before being trusted or scheduled. | Medium |
+| 8 | **Linked-venue redaction sweep** (replaces the Highs re-verification) | The Highs pass is not executable: their texts are not in this repo and most were recorded as "Not examined". Sweep the redaction control across every cross-venue-reachable route instead. **Two live instances already verified**: `visits/services`, `visits/schedule`, plus the `bookings/list` guest-history branch. See the section above. | Medium |
 
 **One decision worth taking early rather than late.** C5 is an open Critical and its only real fix is A2, at step 4. If a `time_only` partner receiving guest emails, phones and notes over the realtime WebSocket is not acceptable to leave open that long, **A6 can ship immediately**: delete the linked subscription and poll instead. That closes C5 today at the cost of live cross-venue updates, and the document's own framing applies — visibly degraded beats silently degraded.
 

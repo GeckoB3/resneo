@@ -1,11 +1,11 @@
 # ResNeo forensic audit and adversarial review — August 2026
 
 **Date:** 2026-08-13
-**Branch:** `staging` at `73a40a27` when written. **Anchors for the still-open findings re-verified at `cc787bbe`, 2026-08-14** (see the anchor note below)
+**Branch:** `staging` at `73a40a27` when written. **Anchors for the still-open findings re-verified at `e41d7890`, 2026-08-14** (see the anchor note below)
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C13, C12, C10, H8 and N2/N3/N4 are implemented on staging, production pending** (all code-only except N2/N3/N4, which adds migration `20270111120000`). Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C10, C12, C13, H8 and N2/N3/N4 are closed on both environments too.** The only Criticals still open are **C3**, **C5** and **C7**; see the remaining-work section at the end. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -15,18 +15,18 @@ Each review round found fixes that would have broken production. They have been 
 
 **LIVE DATABASE VERIFICATION, 2026-08-13 — STAGING *AND* PRODUCTION.** The step-0 queries were run against both. They confirm C1, H43 and N1, and found something the static audit missed entirely: **31 `SECURITY DEFINER` functions are executable by `anon` — on production as well as staging — including `admin_hard_delete_venue(uuid)`, which has no authorisation check in its body.** The two environments return the *same 31 functions*; production is exposed exactly as staging is. See C0 — it outranks every other item in this document. **Production customer data is in scope; see C0's "Was it exploited?" note.**
 
-**ANCHOR NOTE — last re-verified 2026-08-14 at `cc787bbe`.**
+**ANCHOR NOTE — last re-verified 2026-08-14 at `e41d7890`.**
 
 **Line numbers in the IMPLEMENTED findings are historical.** They were exact when written and were checked again at `509242b4`, but the fixes themselves have since moved lines in `confirm/route.ts`, `venue/bookings/[id]/route.ts`, `staff-cancel-booking.ts`, `group-booking-status-sync.ts`, `group-visit-bookings.ts`, `StaffAppointmentModifyForm.tsx`, `ExpandedBookingContent.tsx`, `BookingDetailPanel.tsx`, `PractitionerCalendarView.tsx`, `summary/route.ts`, `deposit/route.ts` and `webhooks/stripe/route.ts`. Read those anchors as a record of where the defect was, not as a current pointer.
 
-**Anchors in the still-open findings were re-verified at `cc787bbe` and all resolve exactly**: C3 (`create/route.ts:1169/1820/1845`, `create-multi-service/route.ts:638`, `venue/bookings/route.ts:444/664/913`), C5 and D1 (`PractitionerCalendarView.tsx:3556`), C7 (`permissions.ts:319`). Nothing implemented so far has disturbed them.
+**Anchors in the still-open findings were re-verified at `e41d7890` and all resolve exactly**: C3 (`create/route.ts:1169/1820/1845`, `create-multi-service/route.ts:638`, `venue/bookings/route.ts:444/664/913`), C5 and D1 (`PractitionerCalendarView.tsx:3556`), C7 (`permissions.ts:319`). Nothing implemented so far has disturbed them.
 
 Two things cost time and are recorded here once:
 
 - **Bare filenames.** The four UI files are cited by basename only. They are `src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`, `src/app/dashboard/bookings/BookingDetailPanel.tsx`, `src/app/dashboard/bookings/ExpandedBookingContent.tsx`, `src/components/booking/StaffAppointmentModifyForm.tsx`. Each is unique in the tree.
 - **Bare `route.ts`.** In C8 and C13 this means `src/app/api/venue/bookings/[id]/route.ts` (3097 lines), **not** its sibling `src/app/api/venue/bookings/route.ts` (1995 lines). Read literally against the sibling, C8's `:2482` never existed.
 
-Migration count is now **258**, not the 253 stated throughout; the five added are C0/C1's four plus C4's trigger. Both environments are level: a `supabase migration list` against staging and production each returns 258 rows with nothing local-only or remote-only. `npm run check:function-grants` against staging returns **PASS, 12 matching the allowlist**.
+Migration count is now **259**, not the 253 stated throughout; the six added are C0/C1's four, C4's trigger and N2/N3/N4's policy migration. Both environments are level: a `supabase migration list` against staging and production each returns 259 rows with nothing local-only or remote-only. `npm run check:function-grants` against staging returns **PASS, 13 matching the allowlist** (the thirteenth is N4's `link_guest_calendar_allows`).
 
 Three items are hard blockers on the whole plan:
 
@@ -40,7 +40,7 @@ Three items are hard blockers on the whole plan:
 
 ## Baseline
 
-| Check | At audit time (2026-08-13) | Now (`cc787bbe`, 2026-08-14) |
+| Check | At audit time (2026-08-13) | Now (`e41d7890`, 2026-08-14) |
 |---|---|---|
 | `tsc --noEmit` | Clean | Clean |
 | `vitest run` | 328 files, 3084 tests, all passing | **331 files, 3132 tests**, all passing |
@@ -48,7 +48,7 @@ Three items are hard blockers on the whole plan:
 | Playwright e2e | 4 specs, single-appointment happy paths only | unchanged |
 | **pgTAP (`supabase/tests/`)** | **Runs nowhere.** No `pg_prove` in `.github/workflows/ci.yml`, `package.json` or `scripts/` | **Still runs nowhere** |
 
-That last row matters: the RLS security suite has never been continuously verified, and the "green suite" figure covers none of it. **It is still true after C0-C13**, which is the single largest residual risk in this document: every RLS-touching change so far has been verified by reasoning, targeted probes and unit tests, never by the suite written for exactly that purpose.
+That last row matters: the RLS security suite has never been continuously verified, and the "green suite" figure covers none of it. **It is still true after C0-C13 and N2/N3/N4**, which is the single largest residual risk in this document: four RLS-touching changes have now shipped to production verified by reasoning, targeted probes and unit tests, never by the suite written for exactly that purpose. Wiring it up is step 3 of the remaining work.
 
 The +3 files and +48 tests are the suites added by the fixes: `shared-deposit-refund` (C11), `summary/route` (C6), `reschedule-cancellation-deadline` (C13), plus cases added to `staff-cancel-booking`, `group-booking-status-sync`, `group-visit-bookings`, `StaffAppointmentModifyForm.visit` and `deposit/route.card-hold`.
 
@@ -448,7 +448,7 @@ Add a class-cart fixture (`class_instance_id` set) so the discriminator is actua
 
 **N1. RESOLVED by live query, 2026-08-13 — state (c) confirmed.** `report_deposit_summary`'s ACL on staging is `{postgres=X/postgres, anon=X/postgres, authenticated=X/postgres, service_role=X/postgres}` — uniquely among the eight, it has **no `=X/postgres` (PUBLIC) entry**. So `20270101120400` was applied, its `REVOKE … FROM PUBLIC` worked exactly as written, and it achieved **nothing**: `authenticated` and `anon` keep direct default-privilege grants. Consequences: `/api/venue/reports` is **not** 500ing (no P0 there), the function **is** still anon-exposed, and this row is the proof of the systemic root cause in C0. Closed by the C0/C1 revoke pattern.
 
-> **N2, N3 and N4 — IMPLEMENTED ON STAGING, 2026-08-14** (migration `20270111120000_linked_write_paths_and_guest_calendar_scope.sql`; production pending). This is step 8, and it lands D1's **A1** (write policies), **A3** (audit the DELETE) and **A4** (calendar-scope the guest read). D1's **A2**, the column grant on the read path, deliberately did NOT land: it still needs the live Realtime smoke test against `REPLICA IDENTITY FULL`.
+> **N2, N3 and N4 — CLOSED ON BOTH ENVIRONMENTS, 2026-08-14** (migration `20270111120000_linked_write_paths_and_guest_calendar_scope.sql`, PR #141; production verified at 259 migrations with nothing unapplied). This is step 8, and it lands D1's **A1** (write policies), **A3** (audit the DELETE) and **A4** (calendar-scope the guest read). D1's **A2**, the column grant on the read path, deliberately did NOT land: it still needs the live Realtime smoke test against `REPLICA IDENTITY FULL`.
 >
 > **N3 and N2's exposure** are closed by dropping the linked disjunct from all three write policies, leaving the own-venue disjunct untouched, so `linked_apply_booking_*` becomes the sole cross-venue write path as the architecture already intended. **Verified safe by enumeration first:** every file importing the browser Supabase client was scanned and `bookings` appears in exactly two places, both **reads**, in `useVenueLiveSync.ts`. There is no browser write to `bookings` anywhere in `src/`; the staff routes write through `service_role`, which bypasses RLS entirely. `linked_venue_can_view_bookings` is untouched, because realtime delivery depends on it.
 >
@@ -605,7 +605,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **7. C10 and H8 — both DONE on staging, 2026-08-14; production pending.** C10 shipped as the derivation fix: filter at point of use, never at the fetch. H8's finding text was missing from this document and was recovered from the original audit session transcript, then re-derived from the code before being fixed; it now has a full entry above. The constraint on this step did not bite, because C10 shipped as the round-three rewrite rather than as the fetch-level filter that would have masked H8.
 
-**8. N2, N3, N4 — DONE on staging, 2026-08-14; production pending.** The linked write and guest-scope holes. Landed as D1's A1, A3 and A4 so D1 subsumes rather than repeats them; A2 (the column grant) is still outstanding and still needs the Realtime smoke test. Migration `20270111120000`. See the status block above N2.
+**8. N2, N3, N4 — DONE on both environments, 2026-08-14 (PR #141).** The linked write and guest-scope holes. Landed as D1's A1, A3 and A4 so D1 subsumes rather than repeats them; A2 (the column grant) is still outstanding and still needs the Realtime smoke test. Migration `20270111120000`. See the status block above N2.
 
 **9. C7** via `pending_change`.
 
@@ -637,6 +637,27 @@ Two inter-agent disagreements were resolved by direct inspection: the import-too
 - The four Probable/Speculative findings (H12, H17's residual, `enforce_cde_capacity` NULL capacity, `estimateSmsSegments`).
 
 No code was changed in any of the three review rounds. Implementation began afterwards; see the implementation status at the top of this document, and the per-finding status blocks, which now exist on **C0, C1, C2, C4, C6, C8, C9, C10, C11, C12, C13 and H8**.
+
+---
+
+### What remains, 2026-08-14
+
+Steps 0 to 8 of the order above are closed on **both environments**. This is the state of everything left, and the order it is best done in. It differs from the original 9-to-14 numbering because D1 has shrunk: **A1, A3 and A4 landed with N2/N3/N4**, so only A2, A5 and the A6 fallback remain of it.
+
+| # | Item | Why here | Size |
+|---|---|---|---|
+| 1 | **C3 interim** | The only item on this list causing user-visible harm today: a live double-booking race on every appointment write. Re-validate `computeAppointmentAvailability` immediately before insert at all nine write sites, and narrow the create rate limit. Touches no schema and no RLS, so nothing else has to precede it. | Medium |
+| 2 | **C7** | An open authorisation hole: the accepter of a link writes `theirs` and the link goes live in the same update. Self-contained, reuses the `pending_change` machinery `propose_change` already has, and no test covers the route. | Small |
+| 3 | **pgTAP on a local Supabase, wired into CI** (D1/A5) | **The largest residual risk in this document, and it now blocks confidence in work already shipped.** Four RLS-touching changes have landed (C0, C1, C2, N2/N3/N4) verified by reasoning and targeted probes, never by the suite written for exactly that purpose. A local instance built from the migrations needs no production credential and is also the right home for `check:function-grants`. Do it once, for both, and do it BEFORE the last RLS change rather than after. | Medium |
+| 4 | **D1 remainder: A2 + the Realtime smoke test, A6 as fallback** | Closes **C5** and **N5**, the last open Critical with a known fix. Column-level grants on `bookings` for `authenticated`, verified against `REPLICA IDENTITY FULL` on a live instance before shipping. Wants step 3 in place first, because it is the change most likely to break something silently. | Medium |
+| 5 | **H38** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |
+| 6 | **D2** (`bookings.group_kind`) | Hardening, five phases, in the prescribed order: column, writers, backfill, `NOT VALID`, `VALIDATE`, resolver. C12 already closed the cascade defect without it, so this is cleanup of a smeared data model rather than a fix. | Large |
+| 7 | **H7 as a trust boundary** | A feature, not a hardening patch: resolve the staff session in all three create routes, derive `isStaffContext`, and drive the gates off it. The `source` enum stays a label. | Medium |
+| 8 | **Re-verification pass on the untouched Highs** | H11, H16, H24, H25, H32–H37, H39 and H41 were never individually re-verified and remain first-pass confidence. Given that every Critical implemented so far turned out to undercount its call sites, these should be re-derived before being trusted or scheduled. | Medium |
+
+**One decision worth taking early rather than late.** C5 is an open Critical and its only real fix is A2, at step 4. If a `time_only` partner receiving guest emails, phones and notes over the realtime WebSocket is not acceptable to leave open that long, **A6 can ship immediately**: delete the linked subscription and poll instead. That closes C5 today at the cost of live cross-venue updates, and the document's own framing applies — visibly degraded beats silently degraded.
+
+**Still unsettled, unchanged:** whether Realtime with `REPLICA IDENTITY FULL` delivers under A2's narrowed grant (analysis says yes, verify before shipping); whether D2's misclassifiable row shapes exist in the data; and the four Probable/Speculative findings (H12, H17's residual, `enforce_cde_capacity` NULL capacity, `estimateSmsSegments`).
 
 ---
 

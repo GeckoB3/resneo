@@ -36,6 +36,11 @@ import {
   fetchAppointmentInput,
   computeAppointmentAvailability,
 } from '@/lib/availability/appointment-engine';
+import {
+  createAppointmentSlotRecheck,
+  SLOT_TAKEN_RESPONSE,
+  type AppointmentSlotRecheck,
+} from '@/lib/booking/revalidate-appointment-slot';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
@@ -857,6 +862,13 @@ async function handleNonTableBooking(
   }
 
   let activeWaitlistOffer: ActiveWaitlistOfferRow | null = null;
+  /**
+   * C3 interim — set by the appointment branch once it has validated the slot,
+   * and consumed immediately before the insert some 650 lines later. Null for
+   * every other booking model: events, classes and resources are governed by
+   * `enforce_cde_capacity`, which raises 23P01 and is handled below.
+   */
+  let appointmentSlotRecheck: AppointmentSlotRecheck | null = null;
 
   if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, effectiveModel)) {
     return NextResponse.json(
@@ -1172,6 +1184,18 @@ async function handleNonTableBooking(
     if (!slotAvailable) {
       return NextResponse.json({ error: 'This appointment slot is no longer available' }, { status: 409 });
     }
+    // C3 interim — capture the validated input so the same check can be re-run
+    // immediately before the insert. Everything between here and there (add-ons,
+    // compliance, deposit intent, Stripe) is time a competing booking can use.
+    appointmentSlotRecheck = createAppointmentSlotRecheck({
+      supabase,
+      venueId: venue_id,
+      date: booking_date,
+      practitionerId: practitioner_id,
+      serviceId: appointment_service_id,
+      timeHm: timeStr,
+      input,
+    });
     const baseSvc = input.services.find((s) => s.id === appointment_service_id);
     const ps = input.practitionerServices.find(
       (row) => row.practitioner_id === practitioner_id && row.service_id === appointment_service_id,
@@ -1815,6 +1839,12 @@ async function handleNonTableBooking(
       },
       { status: 409 },
     );
+  }
+
+  // C3 interim — the last thing before the write. Narrows the race; does not
+  // close it. See `createAppointmentSlotRecheck`.
+  if (appointmentSlotRecheck && !(await appointmentSlotRecheck.stillAvailable())) {
+    return NextResponse.json(SLOT_TAKEN_RESPONSE, { status: 409 });
   }
 
   const { data: booking, error: bookErr } = await supabase

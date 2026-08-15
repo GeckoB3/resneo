@@ -109,21 +109,21 @@ SELECT is(
 -- =============================================================================
 
 SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
+-- N3/D1-A1 (20270111120000): a direct cross-venue UPDATE over PostgREST is no
+-- longer permitted at all. `linked_apply_booking_update` is the sole
+-- cross-venue write path, so the grant now governs what that RPC will do, not
+-- what a browser can do to the table.
 SELECT is(
   (WITH upd AS (
      UPDATE bookings SET party_size = 3
      WHERE id = '00000000-0000-0000-0000-0000000000a5' RETURNING 1)
    SELECT count(*) FROM upd)::int,
-  1, 'Venue B staff can UPDATE a venue A booking with an edit_existing grant');
+  0, 'Venue B staff cannot UPDATE a venue A booking directly, even with an edit_existing grant');
 
 RESET ROLE;
-SELECT cmp_ok(
-  (SELECT count(*) FROM account_link_audit_log
-   WHERE owning_venue_id = '00000000-0000-0000-0000-0000000000a1'
-     AND acting_venue_id = '00000000-0000-0000-0000-0000000000b1'
-     AND action_type = 'edited_booking')::int,
-  '>=', 1,
-  'A direct cross-venue UPDATE (no RPC) still wrote a cross-venue audit row');
+SELECT is(
+  (SELECT party_size FROM bookings WHERE id = '00000000-0000-0000-0000-0000000000a5')::int,
+  1, 'The venue A booking is unchanged after the refused direct cross-venue UPDATE');
 
 -- =============================================================================
 -- Test 6-7 — act = none removes write access but leaves calendar visibility.
@@ -286,13 +286,17 @@ WHERE id = '00000000-0000-0000-0000-0000000000c1';
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
 
-SELECT lives_ok(
+-- N3/D1-A1 (20270111120000): create_edit_cancel no longer buys a direct table
+-- INSERT either. It authorises `linked_apply_booking_insert`, which applies the
+-- availability, deposit, compliance and capacity checks a raw INSERT skipped.
+SELECT throws_ok(
   $$ INSERT INTO bookings
        (venue_id, guest_id, booking_date, booking_time, party_size, source, booking_model)
      VALUES ('00000000-0000-0000-0000-0000000000a1',
              '00000000-0000-0000-0000-0000000000a2',
              '2026-06-03', '09:00', 1, 'phone', 'practitioner_appointment') $$,
-  'Venue B staff can INSERT a venue A booking with create_edit_cancel');
+  '42501', NULL,
+  'Venue B staff cannot INSERT a venue A booking directly, even with create_edit_cancel');
 
 -- =============================================================================
 -- Test 22 — a cross-venue write audit row creates an owning-venue notification.

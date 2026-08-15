@@ -44,7 +44,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '.env.local') });
 
 /**
- * The 12 functions a client role is allowed to execute, verified 2026-08-13.
+ * The 13 functions a client role is allowed to execute. The first 12 were
+ * verified 2026-08-13; `link_guest_calendar_allows` was added 2026-08-14 with
+ * the N4 migration.
  *
  * The 8 RLS helpers are invoked inside policy evaluation as the querying role,
  * so revoking them locks every user out of the dashboard. They are parameterised
@@ -67,6 +69,10 @@ const ALLOWLIST = new Set([
   'link_action_grant',
   'link_calendar_allows',
   'link_calendar_grant',
+  // N4 (20270111120000): scopes `linked_venue_can_view_guests` to guests with a
+  // booking on a calendar the link covers. Same shape as the helpers above --
+  // parameterised on the caller's own identity, returns false for anon.
+  'link_guest_calendar_allows',
   'link_pii_grant',
   // auth.uid()-scoped, zero-parameter, called by signed-in users
   'cancel_account_deletion',

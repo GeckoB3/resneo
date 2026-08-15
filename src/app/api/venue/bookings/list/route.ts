@@ -13,6 +13,7 @@ import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { resolveBookingListRowLabels } from '@/lib/booking/booking-list-row-label';
 import { calendarDateInTimeZone } from '@/lib/guests/guest-contacts-list';
+import { redactBookingPiiFields } from '@/lib/linked-accounts/redact-booking-pii';
 
 /**
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Pending|Seated|...
@@ -328,6 +329,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    /** Same predicate as `canSeeLinkedPii` inside the map, hoisted for the row-level redaction below. */
+    const canSeeLinkedRowPii = !linkedGuestHistoryGrant || linkedGuestHistoryGrant.pii;
+
     let bookings = rawRows.map((r) => {
       const guest = guestsMap.get(r.guest_id);
       const aid = r.area_id as string | null | undefined;
@@ -357,6 +361,15 @@ export async function GET(request: NextRequest) {
         source: r.source ?? null,
         deposit_status: r.deposit_status,
         deposit_amount_pence: r.deposit_amount_pence,
+        // H36 — these four are gated by the redaction applied to the finished
+        // row below, NOT here. `canSeeLinkedPii` covered the guest's name,
+        // email and phone and stopped there, so a full_details partner without
+        // the PII grant received `special_requests`, `internal_notes`,
+        // `dietary_notes` and `occasion` in full. All four are in
+        // BOOKING_PII_FIELDS: the first three are client-authored free text
+        // that routinely carries names and, for dietary notes, health and
+        // religious information; `internal_notes` is the host's private staff
+        // commentary.
         dietary_notes: calendarView ? null : r.dietary_notes,
         occasion: calendarView ? null : r.occasion,
         special_requests: r.special_requests ?? null,
@@ -427,6 +440,26 @@ export async function GET(request: NextRequest) {
             : null),
       };
     });
+
+    /**
+     * H36 — one redaction for the whole row, applied last.
+     *
+     * The per-field `canSeeLinkedPii` ternaries above cover the guest's name,
+     * email and phone. They did not cover the booking row's own copy of the
+     * client's details, which is the exact drift `redactBookingPiiFields`
+     * exists to prevent: its docblock records that the two surfaces serving
+     * linked viewers "each redacted a derived object (the joined guest record)
+     * and then returned the raw booking row alongside it".
+     *
+     * Using the shared field list rather than four more ternaries means a new
+     * PII column on `bookings` is covered here by adding it in one place, which
+     * is the point of that constant. Idempotent over the fields already nulled.
+     */
+    if (!canSeeLinkedRowPii) {
+      bookings = bookings.map((b) =>
+        redactBookingPiiFields(b as unknown as Record<string, unknown>),
+      ) as typeof bookings;
+    }
 
     // The same status/attendance predicate is now also pushed into the DB query
     // above (so it runs before any row cap — see F9). This JS pass is a backstop

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
 
 vi.mock('@/lib/supabase/server', () => ({
   createRouteHandlerClientFromHeaders: vi.fn(),
@@ -25,6 +26,12 @@ vi.mock('@/lib/linked-accounts/notifications', () => ({
   notifyCrossVenueBookingWrite: vi.fn(),
 }));
 
+// H38 — the overlap check is unconditional now, so it runs in these tests too.
+// This suite is about card-hold rejection, not availability, so the validator is
+// stubbed to "available"; its own behaviour is covered where it lives.
+vi.mock('@/lib/booking/validate-appointment-modification', () => ({
+  validateAppointmentModificationInterval: vi.fn(async () => ({ ok: true })),
+}));
 vi.mock('@/lib/booking/card-hold-cancellation', () => ({
   settleCardHoldsOnCancellation: vi.fn(async () => ({
     releasedBookingIds: [],
@@ -50,6 +57,9 @@ const ACTING_VENUE_ID = 'a0000000-0000-4000-8000-000000000001';
 const OWNER_VENUE_ID = 'a0000000-0000-4000-8000-000000000002';
 const GUEST_ID = 'f0000000-0000-4000-8000-000000000001';
 const SERVICE_ID = 'f0000000-0000-4000-8000-000000000002';
+// H38 — the calendar is required now. This fixture used to omit it, which is
+// itself telling: the unvalidated shape was normal enough to be the default.
+const PRACTITIONER_ID = 'f0000000-0000-4000-8000-000000000003';
 
 function mockAdmin(opts: {
   service: Record<string, unknown> | null;
@@ -72,6 +82,15 @@ function mockAdmin(opts: {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
           maybeSingle: vi.fn().mockResolvedValue({ data: opts.service, error: null }),
+        };
+      }
+      if (table === 'practitioners' || table === 'unified_calendars') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi
+            .fn()
+            .mockResolvedValue({ data: { id: PRACTITIONER_ID, venue_id: OWNER_VENUE_ID }, error: null }),
         };
       }
       if (table === 'venues') {
@@ -98,6 +117,7 @@ function postRequest(): NextRequest {
     body: JSON.stringify({
       ownerVenueId: OWNER_VENUE_ID,
       guestId: GUEST_ID,
+      practitionerId: PRACTITIONER_ID,
       appointmentServiceId: SERVICE_ID,
       bookingDate: '2026-07-10',
       bookingTime: '10:00',
@@ -284,5 +304,58 @@ describe('PATCH /api/venue/linked-calendar/booking card-hold settle on cancel (s
     expect(res.status).toBe(200);
     expect(rpc).toHaveBeenCalledWith('linked_apply_booking_update', expect.anything());
     expect(settleCardHoldsOnCancellation).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/venue/linked-calendar/booking availability gating (H38)', () => {
+  /** The same body, minus whichever id the caller chooses to leave out. */
+  function postWithout(omit: 'practitionerId' | 'appointmentServiceId'): NextRequest {
+    const body: Record<string, unknown> = {
+      ownerVenueId: OWNER_VENUE_ID,
+      guestId: GUEST_ID,
+      practitionerId: PRACTITIONER_ID,
+      appointmentServiceId: SERVICE_ID,
+      bookingDate: '2026-07-10',
+      bookingTime: '10:00',
+    };
+    delete body[omit];
+    return new NextRequest('https://app.test/api/venue/linked-calendar/booking', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  it('refuses a cross-venue create with no calendar', async () => {
+    // Every guard on this route was conditional on these two ids, and both were
+    // optional, so omitting one skipped the calendar check, the service check
+    // AND the overlap check while the RPC still wrote the row. A booking with no
+    // calendar also escapes calendar scoping, because link_calendar_allows
+    // returns true when the calendar is NULL.
+    const { rpc } = mockAdmin({ service: { id: SERVICE_ID, venue_id: OWNER_VENUE_ID } });
+    const res = await POST(postWithout('practitionerId'));
+    expect(res.status).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('refuses a cross-venue create with no service', async () => {
+    const { rpc } = mockAdmin({ service: { id: SERVICE_ID, venue_id: OWNER_VENUE_ID } });
+    const res = await POST(postWithout('appointmentServiceId'));
+    expect(res.status).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('runs the overlap check on every create, and refuses when it fails', async () => {
+    const { rpc } = mockAdmin({ service: { id: SERVICE_ID, venue_id: OWNER_VENUE_ID } });
+    vi.mocked(validateAppointmentModificationInterval).mockResolvedValueOnce({
+      ok: false,
+      reason: 'That slot is already taken.',
+    } as never);
+
+    const res = await POST(postRequest());
+
+    expect(validateAppointmentModificationInterval).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(409);
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

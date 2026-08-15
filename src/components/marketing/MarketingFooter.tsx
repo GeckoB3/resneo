@@ -117,6 +117,20 @@ export function MarketingFooter() {
             >
               Privacy Policy
             </Link>
+            {/*
+              The help centre is ~66 live articles that had no crawl path at all:
+              every other link to /help sits inside /help itself, or under
+              /account and /dashboard, both of which robots.txt disallows. A
+              sitemap entry tells a crawler the URL exists; this is what gives it
+              standing, and it is also simply useful to a visitor deciding
+              whether the product does what they need.
+            */}
+            <Link
+              href="/help"
+              className="inline-flex min-h-11 items-center transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+            >
+              Help Centre
+            </Link>
             <a
               href="mailto:hello@resneo.com"
               className="inline-flex min-h-11 items-center transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"

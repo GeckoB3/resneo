@@ -9,8 +9,10 @@ import { normalizePublicBaseUrl } from "@/lib/public-base-url";
  * Note: robots.txt is an advisory standard for compliant crawlers, not an access control. Private
  * data is protected by authentication, not by these rules.
  *
- * `/p/` and `/b/` keep their trailing slash on purpose: a bare `/b` prefix would also match
- * `/beauty-booking-software`, and `/p` would match `/privacy`.
+ * `/p/`, `/b/` and `/embed/` keep their trailing slash on purpose: a bare `/b` prefix would also
+ * match `/beauty-booking-software`, `/p` would match `/privacy`, and a bare `/embed` would match
+ * `/embed-test-page` (harmless here, but the slash keeps the intent explicit). `/confirm` needs no
+ * slash: nothing else starts with it.
  */
 const DISALLOW = [
   "/api/",
@@ -24,6 +26,16 @@ const DISALLOW = [
   "/signup",
   "/pay",
   "/manage",
+  // Per-booking transactional pages. The comment above already claims these are
+  // kept out of search; /confirm was simply missing from the list, so URLs
+  // carrying a booking id (and, on the token route, a confirm token) were
+  // crawlable. Neither route sets `noindex`, so this list was the only control.
+  "/confirm",
+  // The embed renders the same booking page as /book/<slug>. Indexing it would
+  // compete with the real page for the same content. /embed-test-page was
+  // already disallowed, which makes the omission of /embed/ look like an
+  // oversight rather than a decision.
+  "/embed/",
   "/p/",
   "/b/",
   "/ember-steakhouse",

@@ -817,6 +817,18 @@ export function CreateLinkedBookingModal({
       setError('Choose a client for the booking.');
       return;
     }
+    // H38 — the server requires both now, because every guard on that route was
+    // conditional on them and a booking with no calendar escapes calendar
+    // scoping entirely. Checked here too so the gap is a clear message rather
+    // than a 400 from the API.
+    if (!practitionerId) {
+      setError('Choose a calendar for the booking.');
+      return;
+    }
+    if (!serviceId) {
+      setError('Choose a service for the booking.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -826,8 +838,8 @@ export function CreateLinkedBookingModal({
         body: JSON.stringify({
           ownerVenueId: venue.venueId,
           guestId: guest.id,
-          practitionerId: practitionerId || null,
-          appointmentServiceId: serviceId || null,
+          practitionerId,
+          appointmentServiceId: serviceId,
           bookingDate,
           bookingTime: time,
           bookingEndTime: endTime || undefined,

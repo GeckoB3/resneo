@@ -1,11 +1,11 @@
 # ResNeo forensic audit and adversarial review — August 2026
 
 **Date:** 2026-08-13
-**Branch:** `staging` at `73a40a27` when written. **Anchors for the still-open findings re-verified at `e41d7890`, 2026-08-14** (see the anchor note below)
+**Branch:** `staging` at `73a40a27` when written. **Anchors for the still-open findings re-verified at `9f175bc7`, 2026-08-14** (see the anchor note below)
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C10, C12, C13, H8 and N2/N3/N4 are closed on both environments too.** **C3's interim, C7 and the pgTAP CI job are on staging** (C3's race is narrowed, not closed; the RLS suite now runs in CI and passes 22/22). The only Criticals still open are **C3**, **C5** and **C7**; see the remaining-work section at the end. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C10, C12, C13, H8 and N2/N3/N4 are closed on both environments too.** **C3's interim, C7, the pgTAP CI job and D1/A2 are closed on both environments too** (C3's race is narrowed, not closed; the RLS suite runs in CI and passes 24/24). **D1 is complete.** The only Critical still open is **C3**, and only in the sense that its real guard remains a scoped project. The only Criticals still open are **C3**, **C5** and **C7**; see the remaining-work section at the end. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -15,18 +15,18 @@ Each review round found fixes that would have broken production. They have been 
 
 **LIVE DATABASE VERIFICATION, 2026-08-13 — STAGING *AND* PRODUCTION.** The step-0 queries were run against both. They confirm C1, H43 and N1, and found something the static audit missed entirely: **31 `SECURITY DEFINER` functions are executable by `anon` — on production as well as staging — including `admin_hard_delete_venue(uuid)`, which has no authorisation check in its body.** The two environments return the *same 31 functions*; production is exposed exactly as staging is. See C0 — it outranks every other item in this document. **Production customer data is in scope; see C0's "Was it exploited?" note.**
 
-**ANCHOR NOTE — last re-verified 2026-08-14 at `e41d7890`.**
+**ANCHOR NOTE — last re-verified 2026-08-14 at `9f175bc7`.**
 
 **Line numbers in the IMPLEMENTED findings are historical.** They were exact when written and were checked again at `509242b4`, but the fixes themselves have since moved lines in `confirm/route.ts`, `venue/bookings/[id]/route.ts`, `staff-cancel-booking.ts`, `group-booking-status-sync.ts`, `group-visit-bookings.ts`, `StaffAppointmentModifyForm.tsx`, `ExpandedBookingContent.tsx`, `BookingDetailPanel.tsx`, `PractitionerCalendarView.tsx`, `summary/route.ts`, `deposit/route.ts` and `webhooks/stripe/route.ts`. Read those anchors as a record of where the defect was, not as a current pointer.
 
-**Anchors in the still-open findings were re-verified at `e41d7890` and all resolve exactly**: C3 (`create/route.ts:1169/1820/1845`, `create-multi-service/route.ts:638`, `venue/bookings/route.ts:444/664/913`), C5 and D1 (`PractitionerCalendarView.tsx:3556`), C7 (`permissions.ts:319`). Nothing implemented so far has disturbed them.
+**Anchors in the still-open findings were re-verified at `9f175bc7` and all resolve exactly**: C3 (`create/route.ts:1169/1820/1845`, `create-multi-service/route.ts:638`, `venue/bookings/route.ts:444/664/913`), C5 and D1 (`PractitionerCalendarView.tsx:3556`), C7 (`permissions.ts:319`). Nothing implemented so far has disturbed them.
 
 Two things cost time and are recorded here once:
 
 - **Bare filenames.** The four UI files are cited by basename only. They are `src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`, `src/app/dashboard/bookings/BookingDetailPanel.tsx`, `src/app/dashboard/bookings/ExpandedBookingContent.tsx`, `src/components/booking/StaffAppointmentModifyForm.tsx`. Each is unique in the tree.
 - **Bare `route.ts`.** In C8 and C13 this means `src/app/api/venue/bookings/[id]/route.ts` (3097 lines), **not** its sibling `src/app/api/venue/bookings/route.ts` (1995 lines). Read literally against the sibling, C8's `:2482` never existed.
 
-Migration count is now **259**, not the 253 stated throughout; the six added are C0/C1's four, C4's trigger and N2/N3/N4's policy migration. Both environments are level: a `supabase migration list` against staging and production each returns 259 rows with nothing local-only or remote-only. `npm run check:function-grants` against staging returns **PASS, 13 matching the allowlist** (the thirteenth is N4's `link_guest_calendar_allows`).
+Migration count is now **260**, not the 253 stated throughout; the seven added are C0/C1's four, C4's trigger, N2/N3/N4's policy migration and D1/A2's column grants. Both environments are level and both carry all 260. `npm run check:function-grants` against staging returns **PASS, 13 matching the allowlist** (the thirteenth is N4's `link_guest_calendar_allows`).
 
 Three items are hard blockers on the whole plan:
 
@@ -257,6 +257,20 @@ CREATE TRIGGER trg_bookings_venue_id_immutable
 Verified safe: `linked_apply_booking_update` writes a fixed column list excluding `venue_id`; no update payload in `src/` contains `venue_id`; no migration sets it. Unlike D1 this **also protects the admin-client routes**, which bypass RLS entirely — and it touches no realtime consumer and breaks no test.
 
 > **RE-MEASURED, verification pass 2026-08-14 — all three safety legs hold, and the mechanism is confirmed.** (1) The current definition of `linked_apply_booking_update` is `20260923140000_linked_calendar_update_calendar_id.sql:29-56` (not `20260919120000`, which it supersedes); its `SET` list is 13 fixed columns and `venue_id` is not among them. (2) All 78 `bookings` update sites in `src/` were scanned: six carry `venue_id` within the call, every one of them in a `.eq('venue_id', …)` **filter** or a following `events` insert, none in a payload. The one dynamically-built payload, `venue/bookings/[id]/route.ts:1595`, is a closed literal over four keys (`staff_attendance_confirmed_at`, `updated_at`, `status`, `guest_attendance_confirmed_at`). There are **no `bookings` upserts anywhere**, so no `ON CONFLICT DO UPDATE` can name `venue_id` implicitly. (3) No migration has `venue_id` in any `SET` list. (4) The vulnerability itself re-confirmed: `linked_venue_can_edit_bookings` (`20260930120000:76-90`) has `WITH CHECK` whose **first disjunct** is `venue_id IN (SELECT current_staff_venue_ids())`, which the re-parented NEW row satisfies outright, while `USING` requires the `edit_existing`/`create_edit_cancel` grant on the OLD row exactly as the qualification states.
+
+### C5. `time_only` and `pii=false` linked venues can read every booking column
+
+> **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-14** (migration `20270112120000_bookings_column_grants.sql`, PR #143). Closed together with **N5**, which is the same hole reached through Realtime. D1's **A2** as prescribed: `REVOKE ALL ON public.bookings FROM authenticated`, then column-level `SELECT` on the nine operational columns (`id, venue_id, calendar_id, practitioner_id, booking_date, booking_time, booking_end_time, status, updated_at`). Writes stay table-level so RLS remains what gates them. `linked_venue_can_view_bookings` is untouched, because Realtime delivery depends on it.
+>
+> **Column privileges are checked before RLS and cannot be forgotten at a call site.** That is what makes this structural rather than another redaction someone has to remember, and it is why an API-layer fix could never have closed N5: Realtime delivers the whole row.
+>
+> **A5's claim about the anonymised view was checked, not trusted.** `bookings_linked_anonymised` (20260922120000) is `security_invoker` and reads exactly `id, venue_id, practitioner_id, calendar_id, booking_date, booking_time, booking_end_time, status`, aliasing every PII field as a `NULL::` literal rather than reading it. All eight are granted, so the view keeps returning rows and tests 10-13 pass genuinely, exactly as A5 predicted.
+>
+> **Safety established by enumeration.** `authenticated` reaches `bookings` in exactly two ways: `useVenueLiveSync.ts:85-86`, a `select('id')` filtered on `venue_id` and `booking_date` and the only browser query against this table in `src/`; and Realtime delivery. Every server path uses `service_role` and bypasses grants entirely.
+>
+> **A trap worth recording, because it will recur.** The CI baseline-grants file added with A5 runs *after* the migrations and did `GRANT SELECT ... ON ALL TABLES`, which would have handed these columns straight back and left CI validating a permission environment that exists nowhere. `bookings` is now excluded from it. Any future column-level work must do the same or it will be silently undone in CI.
+>
+> **The suite proves it, and keeps proving it.** Two assertions were added: a linked venue can still read a booking as a time block, and no linked venue — even `full_details` with PII — can read `special_requests` from the base table (`42501`). This is the first change where the pgTAP job earned its keep; it now runs 24/24 on every push. The Realtime delivery gate was verified manually on staging before production, as D1 requires.
 
 ### C5. `time_only` and `pii=false` linked venues can read every booking column
 **CONFIRMED, and severity RAISED.** The base SELECT policy has no column restriction; `link_pii_grant` is consulted only for `guests`, never for `bookings`. The anonymised view is `security_invoker = true`, so it grants nothing beyond base-table RLS, and has zero application references.
@@ -498,7 +512,7 @@ Add a class-cart fixture (`class_instance_id` set) so the discriminator is actua
 
 **N4. `linked_venue_can_view_guests` is not calendar-scoped.** It checks `link_calendar_grant = 'full_details' AND link_pii_grant` but **omits `link_calendar_allows`**. The §18 migration updated all four `bookings` policies and left `guests`, `practitioners` and `appointment_services` unscoped. A chair-rental link scoped to one calendar with PII on exposes **every guest of the host venue**. **High.**
 
-**N5. Realtime delivers full booking rows to `time_only` partners.** See C5. **High.**
+**N5. Realtime delivers full booking rows to `time_only` partners.** See C5. **High.** — **CLOSED with C5 by A2, 2026-08-14.**
 
 **N6. The un-redacted `/summary` payload is primed into a shared client cache.** See C6. **Medium.**
 
@@ -522,7 +536,7 @@ Add a class-cart fixture (`class_instance_id` set) so the discriminator is actua
 
 | ID | From | To | Reason |
 |---|---|---|---|
-| **H38** | High | **Critical-adjacent** | Because the overlap check is gated on `appointmentServiceId`, every cross-venue booking creatable today is written with **no availability validation at all**. A live double-booking path with an identified trigger, unlike C3's race. |
+| **H38** | High | **Critical-adjacent** | Because the overlap check is gated on `appointmentServiceId`, every cross-venue booking creatable today is written with **no availability validation at all**. A live double-booking path with an identified trigger, unlike C3's race. **DONE on staging, 2026-08-14 — and broader than stated; see below.** |
 | H5 | High | Medium | Off-grid start times only; fixed start times and all availability gates still apply. |
 | H10 | High | Medium | "Always fails" is wrong — only shrinks past the last gap's end. |
 | H23 | High | Medium | Paid rows are already blocked from removal by an explicit money check. |
@@ -530,6 +544,74 @@ Add a class-cart fixture (`class_instance_id` set) so the discriminator is actua
 | H43 | High | High | Unchanged, but fold into the C1 pass — same one-line `REVOKE`, no application caller. |
 
 **Corrections to secondary claims:** H3 is 21 external call sites, not 24, and `formatRefundDeadlineIso` *also* hardcodes `Europe/London` (so display and computation are consistently wrong together). H4's contrast is false — the legacy fetcher filters `is_active` too; the unified one additionally narrows to `calendar_service_assignments`, so unassigning a service from a column has the same effect. H14 is **three separate defects**, not one root cause found four times: a client omission (the staff **server** already re-validates correctly), a route with no add-on concept at all (`/api/confirm`), and the visit swap. H21's helper never claimed to be a modify-path refresher. H29's line has drifted to `:75`.
+
+---
+
+### H38. Cross-venue creates skipped every guard, not just availability
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14. Broader than the register row states.**
+>
+> The row names the overlap check. In `venue/linked-calendar/booking/route.ts` **all three** guards were conditional on the same two ids, and `linkedBookingCreateSchema` had both as `.nullable().optional()`:
+>
+> - `if (input.practitionerId)` — the calendar-belongs-to-owner check
+> - `if (input.appointmentServiceId)` — the service-belongs-to-owner check
+> - `if (input.practitionerId && input.appointmentServiceId && ownerServiceRow)` — the overlap and working-hours check
+>
+> Omit either id and all three are skipped while `linked_apply_booking_insert` still writes the row. So a partner could put a booking on the owner's diary with no validation of any kind.
+>
+> **It was reachable from the ordinary UI, not a crafted request.** `LinkedCalendarView`'s Save gated on `!guest` alone and posted `practitionerId || null` / `appointmentServiceId || null`, so a user who simply did not pick a calendar or a service created exactly that row. The route's existing test fixture omitted `practitionerId` too, which is the clearest sign of how normal the unvalidated shape had become.
+>
+> **A second consequence the register does not mention.** A booking with a NULL calendar escapes calendar scoping entirely: `link_calendar_allows` returns true when the calendar is NULL, so such a row is visible to **every** link on that venue regardless of the calendars each link is scoped to. Creating one was a way to plant a row outside §18's scope.
+>
+> **Fix.** Both ids are required in `linkedBookingCreateSchema`, which is the enforcing layer, and the three guards are unconditional. `ownerServiceRow` is non-null whenever the id is supplied, because the lookup 400s otherwise — and that lookup already handled unified vs legacy correctly, so the register's implied cause (a service that cannot be found) was not it. The client gained its own precondition so the gap is a clear message rather than a 400.
+>
+> Three tests added: a create with no calendar is refused and the RPC is never reached, likewise with no service, and the overlap check runs on every create and returns 409 when it fails. Baseline: `tsc` clean, lint 0 errors, **333 files / 3148 tests** green.
+
+---
+
+### The re-verification pass cannot be done as scoped, 2026-08-14
+
+**The finding texts for H11, H16, H24, H25, H32-H37, H39 and H41 do not exist in this repository**, exactly as with H8. This document writes out only H1, H6, H13, H17, H38, H44 and H49 in full; the rest of the 167 live solely in the original discovery agents' output.
+
+Worse, the original audit session's own status table records `H16 | Not examined (Tier 3)` and `H32-H37, H39, H41 | Not examined`. So these were never derived in the first place, which is a weaker claim than "not individually re-verified" and should be read as such: there is nothing to re-verify, only names.
+
+**Do not schedule this pass against the finding numbers.** Either recover the discovery output, or replace the pass with the control-based sweep below, which needs no recovered text.
+
+#### CORRECTION to this section, 2026-08-14: two of the three claims below were wrong
+
+The table below was written from a grep for three helper names plus the presence of PII identifiers, without checking what each route actually **returns**. That is inference from adjacent evidence, the exact error this document warns about, and it produced two false positives:
+
+- **`visits/services` and `visits/schedule` are PATCH-only.** They expose no GET and return ids and plans, not booking detail. The guest fields in `visits/services` are copied into a NEW booking row's insert payload, not sent to the caller. They need *authorisation* gates, which they have (`linkedGrantAllowsMutation`, `linkedGrantAllowsCalendar`), not redaction. **H24 is not a redaction leak on the evidence available.**
+- **`bookings/list` does gate linked PII**, via `resolveCallerGrantOverVenue` and a local `canSeeLinkedPii`, not via the helper names grepped for.
+
+**H36 is real, but narrower than "no gates".** `canSeeLinkedPii` covers the guest's name, email, phone, visit count and tags, and stops there. It does **not** cover the booking row's own copy of the client's details: `special_requests` and `internal_notes` are returned unconditionally, and `dietary_notes` and `occasion` whenever the request is not `view=calendar`. All four are in `BOOKING_PII_FIELDS`. So a partner holding `full_details` **without** the PII grant sees the client's free text and the host's private staff notes. Both linked modes require `full_details`, so both are affected. This is C6's shape exactly: a derived object redacted while the row it came from went out beside it.
+
+> **STATUS — FIX APPLIED ON STAGING, 2026-08-14, WITH WEAKER VERIFICATION THAN THE REST OF THIS DOCUMENT.** `bookings/list` now applies `redactBookingPiiFields` to the finished row when the linked grant lacks PII, using the shared field list so a new PII column is covered by editing one constant. `tsc` clean, 333 files / 3148 tests green.
+>
+> **No test covers it.** One was written and could not be made to exercise the linked branch: the route's own debug output confirmed `guestHistoryMode: true` and the branch being entered, yet `canSeeLinkedPii` still evaluated true, which should be impossible once `linkedGuestHistoryGrant` is set. That contradiction was not resolved. The route has three request-shaping traps that cost time getting that far — the param is `guest` not `guest_id`, `guest_history=1` alone is insufficient without it, and `resolveCallerGrantOverVenue` comes from `queries`, not `permissions`. **Anyone picking this up should finish the test before trusting the fix**, and should treat the unexplained contradiction as a possible second defect in how the grant reaches the map closure.
+
+#### The original leads, as first written (see the correction above)
+
+One line of the original session groups three findings as instances of a single control failure:
+
+> "C6 (`/summary`), H24 (visit routes), H36 (`bookings/list` guest-history branch)"
+
+That is the linked-venue redaction control — the one C6 fixed on `/summary` alone. Checked against the code rather than inferred:
+
+| Route | Redaction gates present | Cross-venue reachable |
+|---|---|---|
+| `venue/bookings/[id]/summary` | **yes** (C6, PR merged) | yes |
+| `venue/visits/[groupBookingId]/services` | **none** | yes — `loadStaffAccessibleBooking` at `:215` |
+| `venue/visits/[groupBookingId]/schedule` | **none** | yes — `loadStaffAccessibleBooking` at `:170` |
+| `venue/bookings/list` | **none** | yes — documented `owner_venue_id` + `guest_history=1` path at `:21-22` |
+
+None of the three carries `linkedGrantHasFullDetails`, `linkedViewerMustNotSeePii` or `redactBookingPiiFields`. The visits routes do gate *access* (they import `linkedGrantAllowsCalendar` / `linkedGrantAllowsMutation`), so what is missing is specifically **redaction**: a `full_details` partner without the PII grant is served un-redacted data. That is C6's exact shape on two more surfaces, and `bookings/list` documents a guest-history branch for linked venues at line 21.
+
+**This has not been fixed** — it is recorded here as a verified lead, not as work done.
+
+#### The pass that should replace it
+
+Sweep the **control**, not the finding numbers: enumerate every route reachable cross-venue (anything calling `loadStaffAccessibleBooking`, or accepting `owner_venue_id`) and check each against the two gates C6 established. It is derivable entirely from code, needs no recovered text, and on the one sample taken it found two live instances out of three routes checked. C5/N5's column grants close the *realtime* leg of this structurally, but not what these routes return over HTTP.
 
 ---
 
@@ -655,11 +737,11 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **9. C7 — DONE on staging, 2026-08-14.** Via `pending_change`, exactly as prescribed, plus the interim-pair guard and a notification for the deferred change. See C7's status block.
 
-**10. D1 re-scoped** — three write policies, column grants on the read, audit trigger extended, pgTAP rewritten and wired into CI. A two-week item, not a one-migration reduction.
+**10. D1 re-scoped — DONE, 2026-08-14.** A1, A3 and A4 landed with N2/N3/N4 (PR #141); **A2** with C5/N5 (PR #143); **A5** wired pgTAP into CI and it now runs 24/24 on every push. A6 was not needed: Realtime delivery survived the narrowed grant, verified on staging. Nothing of D1 remains open.
 
 **11. C3 interim** (re-validate immediately before insert at every write site), then scope the trigger work as a separate project (see C3).
 
-**12. H38** — cross-venue bookings written with no availability validation. Upgraded; treat as urgent once the linked work is under way.
+**12. H38 — DONE on staging, 2026-08-14.** Cross-venue bookings written with no availability validation, and in fact with no validation of any kind. See H38's own section above.
 
 **13. D2**, five phases, as hardening.
 
@@ -695,11 +777,11 @@ Steps 0 to 8 of the order above are closed on **both environments**. This is the
 | ~~1~~ | **C3 interim — DONE on staging, 2026-08-14** | The only item on this list causing user-visible harm today: a live double-booking race on every appointment write. Re-validate `computeAppointmentAvailability` immediately before insert at all nine write sites, and narrow the create rate limit. Touches no schema and no RLS, so nothing else has to precede it. | Medium |
 | ~~2~~ | **C7 — DONE on staging, 2026-08-14** | An open authorisation hole: the accepter of a link writes `theirs` and the link goes live in the same update. Self-contained, reuses the `pending_change` machinery `propose_change` already has, and no test covers the route. | Small |
 | ~~3~~ | **pgTAP on a local Supabase, wired into CI (D1/A5) — DONE on staging, 2026-08-14. Verified: 22/22 passing in CI** | **The largest residual risk in this document, and it now blocks confidence in work already shipped.** Four RLS-touching changes have landed (C0, C1, C2, N2/N3/N4) verified by reasoning and targeted probes, never by the suite written for exactly that purpose. A local instance built from the migrations needs no production credential and is also the right home for `check:function-grants`. Do it once, for both, and do it BEFORE the last RLS change rather than after. | Medium |
-| 4 | **D1 remainder: A2 + the Realtime smoke test, A6 as fallback** | Closes **C5** and **N5**, the last open Critical with a known fix. Column-level grants on `bookings` for `authenticated`, verified against `REPLICA IDENTITY FULL` on a live instance before shipping. Wants step 3 in place first, because it is the change most likely to break something silently. | Medium |
-| 5 | **H38** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |
+| ~~4~~ | **D1 remainder: A2 — DONE both environments, 2026-08-14. C5 and N5 closed; A6 not needed, Realtime survived the narrowed grant** | Closes **C5** and **N5**, the last open Critical with a known fix. Column-level grants on `bookings` for `authenticated`, verified against `REPLICA IDENTITY FULL` on a live instance before shipping. Wants step 3 in place first, because it is the change most likely to break something silently. | Medium |
+| ~~5~~ | **H38 — DONE on staging, 2026-08-14** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |
 | 6 | **D2** (`bookings.group_kind`) | Hardening, five phases, in the prescribed order: column, writers, backfill, `NOT VALID`, `VALIDATE`, resolver. C12 already closed the cascade defect without it, so this is cleanup of a smeared data model rather than a fix. | Large |
 | 7 | **H7 as a trust boundary** | A feature, not a hardening patch: resolve the staff session in all three create routes, derive `isStaffContext`, and drive the gates off it. The `source` enum stays a label. | Medium |
-| 8 | **Re-verification pass on the untouched Highs** | H11, H16, H24, H25, H32–H37, H39 and H41 were never individually re-verified and remain first-pass confidence. Given that every Critical implemented so far turned out to undercount its call sites, these should be re-derived before being trusted or scheduled. | Medium |
+| 8 | **Linked-venue redaction sweep** (replaces the Highs re-verification) | The Highs pass is not executable: their texts are not in this repo and most were recorded as "Not examined". Sweep the redaction control across every cross-venue-reachable route instead. **Two live instances already verified**: `visits/services`, `visits/schedule`, plus the `bookings/list` guest-history branch. See the section above. | Medium |
 
 **One decision worth taking early rather than late.** C5 is an open Critical and its only real fix is A2, at step 4. If a `time_only` partner receiving guest emails, phones and notes over the realtime WebSocket is not acceptable to leave open that long, **A6 can ship immediately**: delete the linked subscription and poll instead. That closes C5 today at the cost of live cross-venue updates, and the document's own framing applies — visibly degraded beats silently degraded.
 

@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { normalizePublicBaseUrl } from "@/lib/public-base-url";
+import { HELP_CATEGORIES } from "@/lib/help/navigation";
 
 /**
  * Public marketing + legal routes for search engines, served at /sitemap.xml.
@@ -34,13 +35,42 @@ const ROUTES: { path: string; changeFrequency: ChangeFrequency; priority: number
   { path: "/about", changeFrequency: "monthly", priority: 0.5 },
   { path: "/privacy", changeFrequency: "yearly", priority: 0.3 },
   { path: "/terms", changeFrequency: "yearly", priority: 0.3 },
+  { path: "/terms/customer", changeFrequency: "yearly", priority: 0.3 },
+  { path: "/terms/data-processing", changeFrequency: "yearly", priority: 0.3 },
+  { path: "/help", changeFrequency: "weekly", priority: 0.6 },
 ];
+
+/**
+ * The help centre, generated from the same catalogue the pages render from.
+ *
+ * It was absent entirely: ~66 articles that are live, crawlable and carry the
+ * long-tail queries this product should rank for, with no sitemap entry AND no
+ * link from any indexable page (the marketing footer links only /, /privacy and
+ * /terms; every other link to /help sits inside /help itself or under
+ * robots-disallowed /account and /dashboard). Listing them here is half the fix;
+ * the footer link added alongside is the other half, because a sitemap tells a
+ * crawler a URL exists while an internal link is what gives it standing.
+ *
+ * Generated rather than hand-listed so a new article is indexed by writing the
+ * article, which is the only version of this that survives contact with people
+ * adding content.
+ */
+function helpRoutes(): { path: string; changeFrequency: ChangeFrequency; priority: number }[] {
+  return HELP_CATEGORIES.flatMap((category) => [
+    { path: `/help/${category.slug}`, changeFrequency: "monthly" as const, priority: 0.5 },
+    ...category.articles.map((article) => ({
+      path: `/help/${category.slug}/${article.slug}`,
+      changeFrequency: "monthly" as const,
+      priority: 0.4,
+    })),
+  ]);
+}
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
   const lastModified = new Date();
 
-  return ROUTES.map((r) => ({
+  return [...ROUTES, ...helpRoutes()].map((r) => ({
     url: `${base}${r.path}`,
     lastModified,
     changeFrequency: r.changeFrequency,

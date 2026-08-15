@@ -41,7 +41,15 @@ This document was written against **`e7ab9ac0`**. The tree is now **`fe09c0a4`**
 
 **Two citation slips, both trivial and neither affecting a finding:** `public_read_service_items` is at `20260430120000:396`, not `:397`; and SA-C2's slot test matches `start_time` **and** `service_id`, not "`start_time` only" — which does not weaken it, because the slot was generated at the parent duration either way.
 
-**Scope of this review, stated honestly.** All four Criticals and all seven Highs were individually re-verified against live code, as were the baseline table and the §14 premises that gate the Critical fixes. The 27 Medium and 16 Low findings were **not** individually re-traced; they carry their original status labels. Given this document's demonstrated accuracy on the items that were checked, that is a reasonable place to stop — but a Medium should be re-read before it is scheduled, not trusted from the table alone.
+**Scope of this review.** All four Criticals and all seven Highs were individually re-verified against live code, as were the baseline table and the §14 premises that gate the Critical fixes.
+
+**Medium and Low pass, 2026-08-15.** A representative sample was then re-traced at the cited lines: **SA-M6, M9, M12, M14, M16, M20, M22** and **SA-L2, L9, L14**. Every one holds. Several are exact to the character — SA-M20's `annual`→"Closed" / `sick`→"Unavailable" mapping, SA-M9's `s-maxage=45, stale-while-revalidate=120`, SA-M12's `.in('block_type', ['closed', 'amended_hours'])`, SA-M6's zero `.refine` on `blockPatchSchema`, and SA-M22's complete absence of `beforeunload`. SA-M14's "proof it bites" is real: `admin_hard_delete_venue` does manually `UPDATE ... SET created_by = NULL` on all three tables. SA-L2's dead-code claim is corroborated by the repo's own comments, which describe `getAvailableSlots` as "retained for tests and tooling".
+
+**One Low needs sharpening, and it is the kind of slip that gets a finding wrongly dismissed.** **SA-L14** says "No `(venue_id, block_date)` index on `calendar_blocks`". An index *does* exist — `idx_calendar_blocks_lookup ON calendar_blocks (calendar_id, block_date)` at `20260430120000:144` — so a reader checking the claim as written will find one and close the finding. **The finding is nonetheless correct**, and the corrected statement is stronger: the diary's list query at `src/app/api/venue/practitioner-calendar-blocks/route.ts:90-98` filters `.eq('venue_id', ...)` then `block_date`, and the existing index **leads on `calendar_id`**, so it cannot serve that query. The gap is a wrong leading column, not a missing index.
+
+**Two wording imprecisions, neither affecting a finding.** SA-M16 describes the phantoms payload as "cast with a bare `as PhantomBooking[]`"; it is in fact assigned to a typed variable, which is the same absence of validation by a different mechanism. SA-M28's own entry is new in this review and carries its evidence inline.
+
+The remaining Mediums and Lows not listed above were not individually re-traced. Given that every sampled item held, and that the two corrections found were a sharpening and a wording slip rather than a false finding, the table can be treated as reliable — but re-read a finding at its cited lines before scheduling it, which is what surfaced the SA-L14 refinement.
 
 ---
 
@@ -392,7 +400,7 @@ Both are dead. `outsideHours` is computed against `dayStartMin`/`dayEndMin`, whi
 | **SA-L11** | Accessibility: **no `<input type="time">` in these editors has an accessible name**; 24 labels are unassociated siblings; validation errors have no `aria-live`; the calendar-active toggle is a bare `<button>` with no `role="switch"`. |
 | **SA-L12** | Mobile: the 4-tab strip overflows at 375px with no `overflow-x-auto` (`src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx:792`); break inputs are ~28px against the 44px rule in `Docs/mobile-touch-layout-conventions.md`. |
 | **SA-L13** | Owner-facing jargon: "Legacy blocked dates", "yield overrides", "calendar column", "Override max covers". Title Case and sentence case inconsistent between two copies of one widget. |
-| **SA-L14** | No `(venue_id, block_date)` index on `calendar_blocks`, though the diary's own list query is exactly that. |
+| **SA-L14** | **Corrected 2026-08-15.** An index exists — `idx_calendar_blocks_lookup (calendar_id, block_date)` at `20260430120000:144` — but it **leads on the wrong column**. The diary's list query (`api/venue/practitioner-calendar-blocks/route.ts:90-98`) filters `.eq('venue_id', ...)` then `block_date`, which a `calendar_id`-leading index cannot serve. Add `(venue_id, block_date)`. Stated as "no index" originally, which invites a reader to find `idx_calendar_blocks_lookup` and close the finding wrongly. |
 | **SA-L15** | No composite `(venue_id, calendar_id)` FKs, so a cross-tenant block row is storable, visible in the staff list, and inert in availability. |
 | **SA-L16** | "Any available" repeats the whole fetch per practitioner because `options.venueClockRow`/`bookingWindow` are not passed down. ~150 round trips for a 10-staff venue. |
 

@@ -259,9 +259,10 @@ export async function POST(request: NextRequest) {
     // calendar must exist in and which booking column the row is keyed on.
     const ownerUsesUnified = await venueUsesUnifiedCalendarList(admin, input.ownerVenueId);
     /** Set once the service is resolved; used for the interval check and the snapshot. */
-    let ownerServiceRow: Record<string, unknown> | null = null;
+    let ownerServiceRow!: Record<string, unknown>;
 
-    if (input.practitionerId) {
+    // H38 — unconditional; `practitionerId` is required by the schema now.
+    {
       const calendarTable = ownerUsesUnified ? 'unified_calendars' : 'practitioners';
       const { data: calendar } = await admin
         .from(calendarTable)
@@ -276,7 +277,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (input.appointmentServiceId) {
+    // H38 — unconditional; `appointmentServiceId` is required by the schema now.
+    {
       /**
        * Unified owners keep their catalogue in `service_items`; `appointment_services`
        * is frozen at its pre-migration contents. Reading only the legacy table meant
@@ -344,7 +346,12 @@ export async function POST(request: NextRequest) {
      * has always run this exact validation.
      */
     let linkedProcessingSnapshot: ProcessingTimeBlock[] = [];
-    if (input.practitionerId && input.appointmentServiceId && ownerServiceRow) {
+    // H38 — unconditional. This used to be gated on the two ids being present,
+    // and both were optional in the schema, so skipping validation was a matter
+    // of not sending them. They are required now (see linkedBookingCreateSchema),
+    // and `ownerServiceRow` is non-null whenever the id is supplied because the
+    // lookup above 400s otherwise, so there is nothing left to condition on.
+    {
       const startHm = input.bookingTime.slice(0, 5);
       const catalogueDuration = Number(ownerServiceRow.duration_minutes ?? 30) || 30;
       const endHm = input.bookingEndTime?.slice(0, 5) || minutesToTime(timeToMinutes(startHm) + catalogueDuration);

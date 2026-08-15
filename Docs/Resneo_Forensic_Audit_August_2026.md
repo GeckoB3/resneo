@@ -536,7 +536,7 @@ Add a class-cart fixture (`class_instance_id` set) so the discriminator is actua
 
 | ID | From | To | Reason |
 |---|---|---|---|
-| **H38** | High | **Critical-adjacent** | Because the overlap check is gated on `appointmentServiceId`, every cross-venue booking creatable today is written with **no availability validation at all**. A live double-booking path with an identified trigger, unlike C3's race. |
+| **H38** | High | **Critical-adjacent** | Because the overlap check is gated on `appointmentServiceId`, every cross-venue booking creatable today is written with **no availability validation at all**. A live double-booking path with an identified trigger, unlike C3's race. **DONE on staging, 2026-08-14 — and broader than stated; see below.** |
 | H5 | High | Medium | Off-grid start times only; fixed start times and all availability gates still apply. |
 | H10 | High | Medium | "Always fails" is wrong — only shrinks past the last gap's end. |
 | H23 | High | Medium | Paid rows are already blocked from removal by an explicit money check. |
@@ -544,6 +544,28 @@ Add a class-cart fixture (`class_instance_id` set) so the discriminator is actua
 | H43 | High | High | Unchanged, but fold into the C1 pass — same one-line `REVOKE`, no application caller. |
 
 **Corrections to secondary claims:** H3 is 21 external call sites, not 24, and `formatRefundDeadlineIso` *also* hardcodes `Europe/London` (so display and computation are consistently wrong together). H4's contrast is false — the legacy fetcher filters `is_active` too; the unified one additionally narrows to `calendar_service_assignments`, so unassigning a service from a column has the same effect. H14 is **three separate defects**, not one root cause found four times: a client omission (the staff **server** already re-validates correctly), a route with no add-on concept at all (`/api/confirm`), and the visit swap. H21's helper never claimed to be a modify-path refresher. H29's line has drifted to `:75`.
+
+---
+
+### H38. Cross-venue creates skipped every guard, not just availability
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14. Broader than the register row states.**
+>
+> The row names the overlap check. In `venue/linked-calendar/booking/route.ts` **all three** guards were conditional on the same two ids, and `linkedBookingCreateSchema` had both as `.nullable().optional()`:
+>
+> - `if (input.practitionerId)` — the calendar-belongs-to-owner check
+> - `if (input.appointmentServiceId)` — the service-belongs-to-owner check
+> - `if (input.practitionerId && input.appointmentServiceId && ownerServiceRow)` — the overlap and working-hours check
+>
+> Omit either id and all three are skipped while `linked_apply_booking_insert` still writes the row. So a partner could put a booking on the owner's diary with no validation of any kind.
+>
+> **It was reachable from the ordinary UI, not a crafted request.** `LinkedCalendarView`'s Save gated on `!guest` alone and posted `practitionerId || null` / `appointmentServiceId || null`, so a user who simply did not pick a calendar or a service created exactly that row. The route's existing test fixture omitted `practitionerId` too, which is the clearest sign of how normal the unvalidated shape had become.
+>
+> **A second consequence the register does not mention.** A booking with a NULL calendar escapes calendar scoping entirely: `link_calendar_allows` returns true when the calendar is NULL, so such a row is visible to **every** link on that venue regardless of the calendars each link is scoped to. Creating one was a way to plant a row outside §18's scope.
+>
+> **Fix.** Both ids are required in `linkedBookingCreateSchema`, which is the enforcing layer, and the three guards are unconditional. `ownerServiceRow` is non-null whenever the id is supplied, because the lookup 400s otherwise — and that lookup already handled unified vs legacy correctly, so the register's implied cause (a service that cannot be found) was not it. The client gained its own precondition so the gap is a clear message rather than a 400.
+>
+> Three tests added: a create with no calendar is refused and the RPC is never reached, likewise with no service, and the overlap check runs on every create and returns 409 when it fails. Baseline: `tsc` clean, lint 0 errors, **333 files / 3148 tests** green.
 
 ---
 
@@ -673,7 +695,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **11. C3 interim** (re-validate immediately before insert at every write site), then scope the trigger work as a separate project (see C3).
 
-**12. H38** — cross-venue bookings written with no availability validation. Upgraded; treat as urgent once the linked work is under way.
+**12. H38 — DONE on staging, 2026-08-14.** Cross-venue bookings written with no availability validation, and in fact with no validation of any kind. See H38's own section above.
 
 **13. D2**, five phases, as hardening.
 
@@ -710,7 +732,7 @@ Steps 0 to 8 of the order above are closed on **both environments**. This is the
 | ~~2~~ | **C7 — DONE on staging, 2026-08-14** | An open authorisation hole: the accepter of a link writes `theirs` and the link goes live in the same update. Self-contained, reuses the `pending_change` machinery `propose_change` already has, and no test covers the route. | Small |
 | ~~3~~ | **pgTAP on a local Supabase, wired into CI (D1/A5) — DONE on staging, 2026-08-14. Verified: 22/22 passing in CI** | **The largest residual risk in this document, and it now blocks confidence in work already shipped.** Four RLS-touching changes have landed (C0, C1, C2, N2/N3/N4) verified by reasoning and targeted probes, never by the suite written for exactly that purpose. A local instance built from the migrations needs no production credential and is also the right home for `check:function-grants`. Do it once, for both, and do it BEFORE the last RLS change rather than after. | Medium |
 | ~~4~~ | **D1 remainder: A2 — DONE both environments, 2026-08-14. C5 and N5 closed; A6 not needed, Realtime survived the narrowed grant** | Closes **C5** and **N5**, the last open Critical with a known fix. Column-level grants on `bookings` for `authenticated`, verified against `REPLICA IDENTITY FULL` on a live instance before shipping. Wants step 3 in place first, because it is the change most likely to break something silently. | Medium |
-| 5 | **H38** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |
+| ~~5~~ | **H38 — DONE on staging, 2026-08-14** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |
 | 6 | **D2** (`bookings.group_kind`) | Hardening, five phases, in the prescribed order: column, writers, backfill, `NOT VALID`, `VALIDATE`, resolver. C12 already closed the cascade defect without it, so this is cleanup of a smeared data model rather than a fix. | Large |
 | 7 | **H7 as a trust boundary** | A feature, not a hardening patch: resolve the staff session in all three create routes, derive `isStaffContext`, and drive the gates off it. The `source` enum stays a label. | Medium |
 | 8 | **Re-verification pass on the untouched Highs** | H11, H16, H24, H25, H32–H37, H39 and H41 were never individually re-verified and remain first-pass confidence. Given that every Critical implemented so far turned out to undercount its call sites, these should be re-derived before being trusted or scheduled. | Medium |

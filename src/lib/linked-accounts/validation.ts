@@ -70,8 +70,25 @@ export const linkedBookingChangeSchema = z.object({
 export const linkedBookingCreateSchema = z.object({
   ownerVenueId: z.string().uuid(),
   guestId: z.string().uuid(),
-  practitionerId: z.string().uuid().nullable().optional(),
-  appointmentServiceId: z.string().uuid().nullable().optional(),
+  /**
+   * H38 — both REQUIRED, and this is the enforcing half of that fix.
+   *
+   * They were `.nullable().optional()`, and every guard in the create route is
+   * conditional on them: the calendar-belongs-to-owner check, the
+   * service-belongs-to-owner check, and the overlap/working-hours check. Omit
+   * either and all three are skipped while `linked_apply_booking_insert` still
+   * writes the row, so a partner could drop a booking onto the owner's diary
+   * with no validation of any kind. It was reachable from the ordinary UI, not
+   * a crafted request: `LinkedCalendarView` gated Save on `!guest` alone and
+   * posted `practitionerId || null` / `appointmentServiceId || null`.
+   *
+   * A row with no calendar also escapes calendar scoping entirely, because
+   * `link_calendar_allows` returns true when the calendar is NULL. This route
+   * exists to book onto a shared CALENDAR; a booking without one is not a
+   * lesser version of that, it is a row nothing can govern.
+   */
+  practitionerId: z.string().uuid(),
+  appointmentServiceId: z.string().uuid(),
   bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   bookingTime: z.string().regex(TIME_RE),
   bookingEndTime: z.string().regex(TIME_RE).optional(),

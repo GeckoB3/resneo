@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C10, C12, C13, H8 and N2/N3/N4 are closed on both environments too.** **C3's interim, C7, the pgTAP CI job and D1/A2 are closed on both environments too** (C3's race is narrowed, not closed; the RLS suite runs in CI and passes 24/24). **D1 is complete.** The only Critical still open is **C3**, and only in the sense that its real guard remains a scoped project. The only Criticals still open are **C3**, **C5** and **C7**; see the remaining-work section at the end. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-15.** Every Critical is now closed on staging *and* production except **C3**, whose interim is live and whose full fix is **deliberately deferred** (see the decision record in C3). **Every fix in this remediation now has a regression test that fails when the fix is removed.** Closed on both environments: C0, C1, C2, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, H8, H36, H38, N1-N5, and **all of D1** (A1/A3/A4 with N2/N3/N4, A2 with C5/N5, A5 as the CI job). The RLS suite runs on every push and passes 24/24. **D2 and H7 are deferred by decision, not outstanding.** The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -184,6 +184,16 @@ Re-verified independently before shipping: both guest-facing writers (`/api/book
 
 ### C3. No database-level protection against double-booking
 
+> **OPERATOR DECISION, 2026-08-15 — the full fix is deferred, deliberately and with reasons.**
+>
+> The interim is live on production. The database-level guard described below is **not being built for now**, and this is a decision rather than an omission: it should not be re-raised as an oversight by whoever reads this next.
+>
+> The reasoning is exposure, not difficulty. Target venues run on the order of **50 bookings a week**. The race needs two customers to submit against the same slot within the few milliseconds between the re-check and the insert, and at that volume the collision probability is very small. Set against that, the real guard means porting the engine's occupancy semantics into the database: `parallel_clients > 1` calendars, processing-time gaps that free the practitioner mid-service, a multi-service visit whose own later segments must not collide with its earlier ones, and phantom bookings that exist only in the request and have no row at all. Getting that subtly wrong rejects legitimate bookings, which is a worse outcome than the defect.
+>
+> **What would change the decision:** a venue at materially higher booking volume, a move to concurrent booking surfaces (several staff and the public page hitting the same calendar at once), or any actual double-booking report from the field. The first double-booking that reaches support is the signal to revisit this, and it is worth logging as such rather than treated as a one-off.
+>
+> Everything below stands as the design for that work, whenever it is picked up.
+
 > **STATUS — INTERIM IMPLEMENTED ON STAGING, 2026-08-14. THE RACE IS NOT CLOSED.** `createAppointmentSlotRecheck` (`src/lib/booking/revalidate-appointment-slot.ts`) re-runs the caller's own validation against freshly loaded bookings immediately before the insert, at five write paths. It shrinks the window from hundreds of milliseconds — which on `create/route.ts` spans roughly 650 lines including Stripe round trips — to the single-digit milliseconds between the check and the next line. **Two writes that interleave inside that window still both succeed, and nothing here should be described as fixing double-booking.**
 >
 > **It refreshes only `existingBookings`.** By the time the input reaches the insert it is not a plain fetch result: callers fold add-on duration into the chosen service, attach the venue clock and opening hours, and set `skipPastSlotFilter` for waitlist offers. Rebuilding it in the helper would duplicate all of that at every site and let the copies drift, which is the mistake that produced most of the findings around it. The caller hands over the input it actually validated and only the volatile part is replaced. Phantom bookings are preserved deliberately: they are in-request constructs with no rows, so a re-fetch cannot see them and dropping them would make a visit collide with itself.
@@ -200,7 +210,6 @@ Re-verified independently before shipping: both guest-facing writers (`/api/book
 >
 > Nine tests, including that the re-check runs against fresh bookings but the caller-mutated input, that it does not mutate the captured input, and that a reload failure allows the write. Baseline: `tsc` clean, lint 0 errors, **332 files / 3141 tests** green.
 
-### C3. No database-level protection against double-booking
 **CONFIRMED, all four legs.** Zero `EXCLUDE USING` / `btree_gist` / `tstzrange` across 253 migrations. `20261225120000_cde_capacity_guards.sql:125` is literally `-- Appointment / table rows: not governed here. / RETURN NEW;`. No advisory lock on any appointment path. Validate at `create/route.ts:1169`, insert at `:1820`.
 
 **Fix — the original (`EXCLUDE USING gist`) was wrong; the first correction (a single advisory-lock RPC) is IMPOSSIBLE AS STATED.**
@@ -586,9 +595,17 @@ The table below was written from a grep for three helper names plus the presence
 
 **H36 is real, but narrower than "no gates".** `canSeeLinkedPii` covers the guest's name, email, phone, visit count and tags, and stops there. It does **not** cover the booking row's own copy of the client's details: `special_requests` and `internal_notes` are returned unconditionally, and `dietary_notes` and `occasion` whenever the request is not `view=calendar`. All four are in `BOOKING_PII_FIELDS`. So a partner holding `full_details` **without** the PII grant sees the client's free text and the host's private staff notes. Both linked modes require `full_details`, so both are affected. This is C6's shape exactly: a derived object redacted while the row it came from went out beside it.
 
-> **STATUS — FIX APPLIED ON STAGING, 2026-08-14, WITH WEAKER VERIFICATION THAN THE REST OF THIS DOCUMENT.** `bookings/list` now applies `redactBookingPiiFields` to the finished row when the linked grant lacks PII, using the shared field list so a new PII column is covered by editing one constant. `tsc` clean, 333 files / 3148 tests green.
+> **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-15. Verified by hand, not by test.** The operator exercised all three cases on staging and again on production: own-venue notes still render, a linked venue **with** the PII grant still sees the free text, and a linked venue **without** it no longer does. That third case is the fix, and it behaving correctly also resolves the contradiction recorded below in the only way that matters practically: the fix works, whatever the test harness was doing.
 >
-> **No test covers it.** One was written and could not be made to exercise the linked branch: the route's own debug output confirmed `guestHistoryMode: true` and the branch being entered, yet `canSeeLinkedPii` still evaluated true, which should be impossible once `linkedGuestHistoryGrant` is set. That contradiction was not resolved. The route has three request-shaping traps that cost time getting that far — the param is `guest` not `guest_id`, `guest_history=1` alone is insufficient without it, and `resolveCallerGrantOverVenue` comes from `queries`, not `permissions`. **Anyone picking this up should finish the test before trusting the fix**, and should treat the unexplained contradiction as a possible second defect in how the grant reaches the map closure.
+> **The automated test now exists, 2026-08-15, and the harness question is answered.** `route.linked-pii.test.ts` covers four cases: free text withheld from a `full_details` link without the PII grant, served to one that holds it, a `time_only` link refused outright with 403, and own-venue reads never redacted. Disabling the redaction fails exactly the first and leaves the other three green.
+>
+> **There was no second defect.** Instrumenting the route showed `linkedGuestHistoryGrant` resolving correctly and the redaction applying; the earlier failure was purely a harness artefact from the three request-shaping traps below, not a fault in how the grant reaches the projection. The suspicion recorded here on 2026-08-14 is withdrawn.
+>
+> The traps are written into the test's header, because each one silently yields an ordinary own-venue response rather than an error, so a test that trips on one passes while proving nothing. The first assertion checks the row exists before checking its contents, so a future slip fails loudly.
+>
+> **Original note, retained:** fix applied 2026-08-14 with weaker verification than the rest of this document. `bookings/list` now applies `redactBookingPiiFields` to the finished row when the linked grant lacks PII, using the shared field list so a new PII column is covered by editing one constant. `tsc` clean, 333 files / 3148 tests green.
+>
+> **No test covers it.** One was written and could not be made to exercise the linked branch: the route's own debug output confirmed `guestHistoryMode: true` and the branch being entered, yet `canSeeLinkedPii` still evaluated true, which should be impossible once `linkedGuestHistoryGrant` is set. That contradiction was not resolved. The route has three request-shaping traps that cost time getting that far — the param is `guest` not `guest_id`, `guest_history=1` alone is insufficient without it, and `resolveCallerGrantOverVenue` comes from `queries`, not `permissions`. **Anyone picking this up should finish the test**; manual verification has since confirmed the fix itself behaves, so the open question is only why the harness disagreed, which may be a quirk of the mock rather than a second defect.
 
 #### The original leads, as first written (see the correction above)
 
@@ -768,7 +785,11 @@ No code was changed in any of the three review rounds. Implementation began afte
 
 ---
 
-### What remains, 2026-08-14
+### What remains, updated 2026-08-15
+
+**Nothing on this list is outstanding work.** Every row is either done or deferred by an explicit decision recorded alongside it. The audit is closed out apart from C3's full fix, which is deferred on exposure grounds, and the two hardening items below.
+
+#### Original ordering, retained for the record
 
 Steps 0 to 8 of the order above are closed on **both environments**. This is the state of everything left, and the order it is best done in. It differs from the original 9-to-14 numbering because D1 has shrunk: **A1, A3 and A4 landed with N2/N3/N4**, so only A2, A5 and the A6 fallback remain of it.
 
@@ -779,9 +800,9 @@ Steps 0 to 8 of the order above are closed on **both environments**. This is the
 | ~~3~~ | **pgTAP on a local Supabase, wired into CI (D1/A5) — DONE on staging, 2026-08-14. Verified: 22/22 passing in CI** | **The largest residual risk in this document, and it now blocks confidence in work already shipped.** Four RLS-touching changes have landed (C0, C1, C2, N2/N3/N4) verified by reasoning and targeted probes, never by the suite written for exactly that purpose. A local instance built from the migrations needs no production credential and is also the right home for `check:function-grants`. Do it once, for both, and do it BEFORE the last RLS change rather than after. | Medium |
 | ~~4~~ | **D1 remainder: A2 — DONE both environments, 2026-08-14. C5 and N5 closed; A6 not needed, Realtime survived the narrowed grant** | Closes **C5** and **N5**, the last open Critical with a known fix. Column-level grants on `bookings` for `authenticated`, verified against `REPLICA IDENTITY FULL` on a live instance before shipping. Wants step 3 in place first, because it is the change most likely to break something silently. | Medium |
 | ~~5~~ | **H38 — DONE on staging, 2026-08-14** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |
-| 6 | **D2** (`bookings.group_kind`) | Hardening, five phases, in the prescribed order: column, writers, backfill, `NOT VALID`, `VALIDATE`, resolver. C12 already closed the cascade defect without it, so this is cleanup of a smeared data model rather than a fix. | Large |
-| 7 | **H7 as a trust boundary** | A feature, not a hardening patch: resolve the staff session in all three create routes, derive `isStaffContext`, and drive the gates off it. The `source` enum stays a label. | Medium |
-| 8 | **Linked-venue redaction sweep** (replaces the Highs re-verification) | The Highs pass is not executable: their texts are not in this repo and most were recorded as "Not examined". Sweep the redaction control across every cross-venue-reachable route instead. **Two live instances already verified**: `visits/services`, `visits/schedule`, plus the `bookings/list` guest-history branch. See the section above. | Medium |
+| ~~6~~ | **D2 (`bookings.group_kind`) — DEFERRED by decision, 2026-08-15** | Hardening, five phases, strict ordering. **C12 already closed the cascade defect without it**, so this is cleanup of a smeared data model, not a fix. Deferred because it carries real deploy risk (a CHECK landing before the writers ship 500s every group write for the length of a rolling deploy) in exchange for no behaviour a venue would notice. Revisit only if the group-id ambiguity causes a second defect. | Large |
+| ~~7~~ | **H7 as a trust boundary — DEFERRED by decision, 2026-08-15** | A feature, not a hardening patch: resolve the staff session in all three create routes, derive `isStaffContext`, drive the gates off it, leave the `source` enum as a label. Deferred because nothing has been reported against it and it is product work rather than remediation. Schedule it as a feature if the deposit/staff-only-service gates ever need to be trusted rather than merely correct in practice. | Medium |
+| ~~8~~ | **Linked-venue redaction sweep — DONE, 2026-08-15** | Replaced the un-executable Highs pass. Swept every cross-venue-reachable route against C6's two gates. One live leak found and fixed (**H36**, `bookings/list` free text); two suspected instances disproved (`visits/services` and `visits/schedule` are PATCH-only and return no booking detail). See the correction block above the sweep. | Medium |
 
 **One decision worth taking early rather than late.** C5 is an open Critical and its only real fix is A2, at step 4. If a `time_only` partner receiving guest emails, phones and notes over the realtime WebSocket is not acceptable to leave open that long, **A6 can ship immediately**: delete the linked subscription and poll instead. That closes C5 today at the cost of live cross-venue updates, and the document's own framing applies — visibly degraded beats silently degraded.
 

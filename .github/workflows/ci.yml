@@ -91,10 +91,16 @@ jobs:
       # needs no production credential and this repository can stay public. It
       # also catches a bad migration before it reaches any environment, which a
       # check pointed at a live project cannot do.
+      # PINNED, not `latest`. `latest` resolves through an unauthenticated
+      # GitHub API call on every run, which rate-limits and fails the job for a
+      # reason that has nothing to do with the code -- a blocking check that
+      # goes red at random is one people learn to ignore. Pinning also stops the
+      # CLI changing under this suite without a commit saying so. Bump
+      # deliberately.
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.114.0
 
       # Starts Postgres and applies every migration in order. Slow (image
       # pulls), so it is its own job rather than a step on an existing one.
@@ -116,8 +122,12 @@ jobs:
       - name: Run pgTAP suite
         run: supabase test db
 
+      # Cleanup only, and it must never be the reported failure: if the CLI
+      # install itself failed, this step cannot run and its "command not found"
+      # would otherwise bury the real error.
       - name: Stop local Supabase
         if: always()
+        continue-on-error: true
         run: supabase stop --no-backup
 
   # NOTE: there is deliberately no job here for `npm run check:function-grants`,

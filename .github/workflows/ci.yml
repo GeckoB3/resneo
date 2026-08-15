@@ -101,6 +101,16 @@ jobs:
       - name: Start local Supabase
         run: supabase start
 
+      # Hosted Supabase grants anon/authenticated table privileges on `public` at
+      # project creation, outside this repo, so a local instance built purely
+      # from supabase/migrations lacks them and the first SELECT as
+      # `authenticated` fails on privileges before RLS is ever consulted. This
+      # closes that gap so the suite tests the POLICIES rather than the absence
+      # of a grant. See the file's header: it is the table-level twin of C0.
+      - name: Apply hosted-equivalent baseline grants
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres"             -v ON_ERROR_STOP=1             -f supabase/scripts/local_baseline_grants.sql
+
       # Each test file runs in a transaction that is rolled back, so the suite
       # seeds its own fixtures and leaves nothing behind.
       - name: Run pgTAP suite

@@ -577,7 +577,20 @@ Worse, the original audit session's own status table records `H16 | Not examined
 
 **Do not schedule this pass against the finding numbers.** Either recover the discovery output, or replace the pass with the control-based sweep below, which needs no recovered text.
 
-#### What the recovery did surface, and it is live
+#### CORRECTION to this section, 2026-08-14: two of the three claims below were wrong
+
+The table below was written from a grep for three helper names plus the presence of PII identifiers, without checking what each route actually **returns**. That is inference from adjacent evidence, the exact error this document warns about, and it produced two false positives:
+
+- **`visits/services` and `visits/schedule` are PATCH-only.** They expose no GET and return ids and plans, not booking detail. The guest fields in `visits/services` are copied into a NEW booking row's insert payload, not sent to the caller. They need *authorisation* gates, which they have (`linkedGrantAllowsMutation`, `linkedGrantAllowsCalendar`), not redaction. **H24 is not a redaction leak on the evidence available.**
+- **`bookings/list` does gate linked PII**, via `resolveCallerGrantOverVenue` and a local `canSeeLinkedPii`, not via the helper names grepped for.
+
+**H36 is real, but narrower than "no gates".** `canSeeLinkedPii` covers the guest's name, email, phone, visit count and tags, and stops there. It does **not** cover the booking row's own copy of the client's details: `special_requests` and `internal_notes` are returned unconditionally, and `dietary_notes` and `occasion` whenever the request is not `view=calendar`. All four are in `BOOKING_PII_FIELDS`. So a partner holding `full_details` **without** the PII grant sees the client's free text and the host's private staff notes. Both linked modes require `full_details`, so both are affected. This is C6's shape exactly: a derived object redacted while the row it came from went out beside it.
+
+> **STATUS — FIX APPLIED ON STAGING, 2026-08-14, WITH WEAKER VERIFICATION THAN THE REST OF THIS DOCUMENT.** `bookings/list` now applies `redactBookingPiiFields` to the finished row when the linked grant lacks PII, using the shared field list so a new PII column is covered by editing one constant. `tsc` clean, 333 files / 3148 tests green.
+>
+> **No test covers it.** One was written and could not be made to exercise the linked branch: the route's own debug output confirmed `guestHistoryMode: true` and the branch being entered, yet `canSeeLinkedPii` still evaluated true, which should be impossible once `linkedGuestHistoryGrant` is set. That contradiction was not resolved. The route has three request-shaping traps that cost time getting that far — the param is `guest` not `guest_id`, `guest_history=1` alone is insufficient without it, and `resolveCallerGrantOverVenue` comes from `queries`, not `permissions`. **Anyone picking this up should finish the test before trusting the fix**, and should treat the unexplained contradiction as a possible second defect in how the grant reaches the map closure.
+
+#### The original leads, as first written (see the correction above)
 
 One line of the original session groups three findings as instances of a single control failure:
 

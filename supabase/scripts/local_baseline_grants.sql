@@ -24,10 +24,23 @@
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 
-GRANT SELECT, INSERT, UPDATE, DELETE
-  ON ALL TABLES IN SCHEMA public
-  TO authenticated;
-
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
+-- `bookings` is EXCLUDED from the blanket grant. D1/A2 (20270112120000)
+-- narrows it to column-level SELECT precisely to close C5 and N5, and a
+-- blanket `GRANT ... ON ALL TABLES` here would run afterwards and hand the
+-- columns straight back — leaving CI testing a permission environment that no
+-- longer exists anywhere. The loop skips it so the table keeps exactly what
+-- its migration gave it, and the suite asserts that narrowing directly.
+DO $$
+DECLARE t record;
+BEGIN
+  FOR t IN
+    SELECT tablename FROM pg_tables
+     WHERE schemaname = 'public' AND tablename <> 'bookings'
+  LOOP
+    EXECUTE format(
+      'GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO authenticated', t.tablename);
+    EXECUTE format('GRANT SELECT ON public.%I TO anon', t.tablename);
+  END LOOP;
+END $$;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;

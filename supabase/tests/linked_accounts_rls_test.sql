@@ -16,7 +16,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(22);
+SELECT plan(24);
 
 -- =============================================================================
 -- Fixtures — seeded as the (superuser) session role, which bypasses RLS.
@@ -150,10 +150,16 @@ SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.te
 UPDATE bookings SET party_size = 5
 WHERE id = '00000000-0000-0000-0000-0000000000a5';
 
+-- Read back as superuser: after D1/A2 (20270112120000) `authenticated` has no
+-- column grant on `party_size`, so referencing it in a predicate as that role
+-- would fail on privileges rather than prove anything about RLS.
+RESET ROLE;
 SELECT is(
-  (SELECT count(*) FROM bookings
-   WHERE id = '00000000-0000-0000-0000-0000000000a5' AND party_size = 5)::int,
-  0, 'Venue B staff cannot UPDATE a venue A booking once act is reduced to none');
+  (SELECT party_size FROM bookings WHERE id = '00000000-0000-0000-0000-0000000000a5')::int,
+  1, 'Venue B staff cannot UPDATE a venue A booking once act is reduced to none');
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
 
 SELECT is(
   (SELECT count(*) FROM bookings WHERE venue_id = '00000000-0000-0000-0000-0000000000a1')::int,
@@ -338,5 +344,35 @@ SELECT cmp_ok(
   'A cross-venue write audit row creates an owning-venue notification (§17)');
 
 RESET ROLE;
+-- =============================================================================
+-- Test 23-24 — D1/A2: column-level grants close C5 and N5 structurally.
+--   Realtime delivers the whole row, so no API-layer redaction can close this.
+--   Column privileges are checked BEFORE RLS and cannot be forgotten at a call
+--   site, which is what makes them the fix rather than another thing to
+--   remember.
+-- =============================================================================
+
+RESET ROLE;
+UPDATE account_links
+SET status = 'accepted', low_grants_calendar = 'full_details',
+    low_grants_pii = true, low_grants_act = 'edit_existing'
+WHERE id = '00000000-0000-0000-0000-0000000000c1';
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":"admin-b@rls.test"}';
+
+SELECT lives_ok(
+  $$ SELECT booking_date, booking_time, status FROM bookings
+      WHERE venue_id = '00000000-0000-0000-0000-0000000000a1' $$,
+  'A linked venue can still read a booking as a time block');
+
+-- The whole point: even a full_details + PII link cannot reach the free text,
+-- because the grant does not exist. That is what stops Realtime shipping it.
+SELECT throws_ok(
+  $$ SELECT special_requests FROM bookings
+      WHERE venue_id = '00000000-0000-0000-0000-0000000000a1' $$,
+  '42501', NULL,
+  'No linked venue can read special_requests from the base table at all');
+
 SELECT * FROM finish();
 ROLLBACK;

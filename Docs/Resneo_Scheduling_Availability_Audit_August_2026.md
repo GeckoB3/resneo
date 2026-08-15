@@ -159,6 +159,8 @@ Legend: ✅ honoured · ❌ not honoured · ⚠️ honoured differently from its
 | `service_schedule_exceptions` | ❌ inert | ❌ | ❌ | ❌ | ❌ |
 | `availability_config.blocked_dates` | ❌ no reader | ❌ | ❌ | ❌ | ❌ |
 
+**On the Staff diary column (added 2026-08-15).** The leave rows were re-verified and both ✅ are correct: `schedule-closure-blocks.ts` handles partial leave via `unavailable_start_time`/`unavailable_end_time` and detects full-day leave by both being null. Note also that on **part-day closures the diary is the more correct surface** — it uses the intersecting resolver and renders the partial window properly; it is the guest-facing appointment engine that widens to a whole day. That ⚠️ is not a diary defect. What the column does **not** capture is that ✅ here means *honoured*, not *labelled*: several constraints are honoured while rendering as the same undifferentiated block. See `SA-M28`.
+
 **Correction against the first draft:** the part-day-closure "create" cell was previously marked ✅. It is not. `src/app/api/booking/create/route.ts:1019` calls the correct resolver but sits in the **class-session** branch; the appointment branch begins at `:1030` and goes through `fetchAppointmentInput` and the widening adapter. Part-day closures are widened on every appointment layer, consistently. That makes it a revenue-loss defect rather than an overbooking one.
 
 The mobile column's consumer is **unverified from this repo**: the only evidence is a comment at `src/lib/unified-availability.ts:57-60`, and `Docs/MOBILE_API.md` does not list the route. The mobile *write* path does run the engine, so this is a display gap, not a booking bypass.
@@ -369,6 +371,7 @@ Both are dead. `outsideHours` is computed against `dayStartMin`/`dayEndMin`, whi
 | **SA-M25** | **No audit trail and no undo** on any hours, break, closure or leave change. | |
 | **SA-M26** | **Guest manage flow has no `group_booking_id` awareness**, so one leg of a multi-service visit can be moved alone and the visit silently fragments. `guest_self_reschedule` is **default-ON**, so every venue is exposed. The only cross-cutting finding to survive round three intact. | `src/app/api/confirm/route.ts` reschedule branch |
 | **SA-M27** | **Overnight windows are structurally impossible** — `refine(end > start)` at four layers plus two DB CHECKs. The practitioners route error tells users to split the shift across two days. | |
+| **SA-M28** | **The diary cannot distinguish staff leave from ordinary off-hours, and merges them into one block** (VERIFIED 2026-08-15). `schedule-closure-blocks.ts` emits only three types: `venue_closed`, `venue_amended_hours`, `practitioner_closed`. At `:328-334` partial leave is concatenated into the **same array** as the off-working-hours ranges, passed through `mergeAdjacentRanges`, and emitted as `practitioner_closed` with `reason: null`. So a 16:00-17:00 leave abutting a 17:00 close **fuses into one grey block**, and "Sarah is on annual leave" renders identically to "Sarah does not work Wednesday afternoons". Full-day leave is worse: per `SA-M3` it is folded into `days_off` upstream, so it never reaches the diary as leave at all. Breaks are the exception and **do** render distinctly (amber, via `isBreakCalendarBlock` at `PractitionerCalendarView.tsx:487`), which is what makes the leave case look like an oversight rather than a design. Workaround: the separate leave page. **Blocks Phase 0's first item — see below.** | `src/lib/calendar/schedule-closure-blocks.ts:26,111,328-334`; `PractitionerCalendarView.tsx:486-508` |
 
 ---
 
@@ -584,6 +587,7 @@ Sizes: S ≈ under a day, M ≈ a few days, L ≈ a week or more.
 
 | Item | Closes | Size |
 |---|---|---|
+| **Widen the diary block type first** so leave, off-hours and breaks are distinguishable (`schedule-closure-blocks.ts:26`) | `SA-M28`, and **unblocks the row below** | **S** |
 | `isOccupyingBlock(blockType)` in `slotOccupied` (`PractitionerCalendarView.tsx:1692`) and `appointmentWindowCollides` (`:1751`) | `SA-H3`, `SA-H5`, the `SA-M2` lockout | **S** |
 | Apply variant + add-on duration before the reschedule availability check (`src/app/api/confirm/route.ts:1457`) | `SA-C2` | **S** |
 | Availability check in the cancel-driven waitlist offer | `SA-H6` | **S** |
@@ -597,6 +601,8 @@ Sizes: S ≈ under a day, M ≈ a few days, L ≈ a week or more.
 | Drop `s-maxage`; add `availability_epoch` | `SA-M9` | **S** |
 | Drop the nine anon policies; `REVOKE INSERT/UPDATE/DELETE` from `anon, authenticated` | `SA-C4`, `SA-H4` | **M** |
 | GDPR assessment per §8 | `SA-C4` | **S** |
+
+**Ordering within Phase 0 (added 2026-08-15).** `isOccupyingBlock(blockType)` has to switch on a type that carries the distinction it needs, and today's does not: leave, off-hours and working-hour boundaries all arrive as `practitioner_closed` (`SA-M28`). Widen the emitted type **before** writing that helper, or the helper cannot tell a break it should permit from leave it should refuse, and the work stalls halfway. It is a small change in one file and it makes the highest-value fix in the audit actually implementable.
 
 **Dependencies (UPDATED 2026-08-15).** ~~The revoke item depends on D1 being resolved.~~ **D1 is complete**, so that dependency is discharged: A2 narrowed `bookings` to column-level `SELECT` and realtime survived, `20270112120000` is the worked precedent, and the RLS pgTAP suite now runs in CI as a safety net. Run §14 first regardless. Everything else in Phase 0 is independent and can proceed in parallel.
 

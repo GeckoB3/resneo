@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C10, C12, C13, H8 and N2/N3/N4 are closed on both environments too.** **C3's interim is on staging** (the race is narrowed, not closed). The only Criticals still open are **C3**, **C5** and **C7**; see the remaining-work section at the end. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-14.** C0, C1, C2, **C4** and **C11** are closed on staging *and* production. **C6, C8, C9, C10, C12, C13, H8 and N2/N3/N4 are closed on both environments too.** **C3's interim and C7 are on staging** (C3's race is narrowed, not closed). The only Criticals still open are **C3**, **C5** and **C7**; see the remaining-work section at the end. Everything else in this document is unimplemented. The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -276,6 +276,18 @@ Verified safe: `linked_apply_booking_update` writes a fixed column list excludin
 **Bounded correctly:** reachable only by partners holding an accepted link covering that calendar, not "anyone".
 
 **Fix — SAFE.** Add the two gates the sibling GET already has. `isOwnVenue` short-circuits both helpers, so own-venue behaviour is unchanged. Fix the panel's swallowed 403 too, or the next divergence re-opens it. No test covers either file.
+
+### C7. "Accept with changes" lets the recipient seize access unilaterally
+
+> **STATUS — IMPLEMENTED ON STAGING, 2026-08-14.** `accept_with_changes` now applies **only the accepter's own side** and defers any change to the requester's side into `pending_change`, the exact shape `propose_change` already writes, which requires the requester's `accept_change`. The accept flow is therefore consistent with `EditPermissionsModal`, which already imposes the same asymmetry mid-link.
+>
+> **The round-three guard is in and is the reason one test exists.** `isLinkConfigurationValid` is checked on the **interim** pair (the accepter's new grant against the requester's untouched one), not only the proposed pair. Without it an accepter could drop `mine` to `none` while deferring a rise in `theirs`, activating a live none/none link, and permanently so if the requester later rejected the pending change. That case returns 400 with a message naming the way out.
+>
+> **One addition the fix text does not mention.** A deferred change with no notification is its own silent-state bug: the requester would have a pending change sitting on the link, unannounced, while the accepter appeared simply to have been refused. `notifyPermissionChangeProposed` now fires alongside the acceptance mail whenever something was deferred.
+>
+> **The other half was already done.** The fix says "Also fix the email to diff the requester-facing direction." That is already live at `:212-227`, tagged `§17.5`, computing a genuine before/after diff of what the requester can now do to the accepter's data. Same shape as C8, where half the prescribed change was already in the tree. No edit made.
+>
+> Four tests, the route's first (the finding notes none covered it): the seizure itself is refused and deferred, the requester is notified, the accepter's own side still applies immediately with nothing pending, and the none/none activation is refused. Reverting the one-sided apply fails exactly the seizure test. Baseline: `tsc` clean, lint 0 errors, **333 files / 3145 tests** green.
 
 ### C7. "Accept with changes" lets the recipient seize access unilaterally
 **CONFIRMED.** `permissions.ts:319` settles the semantics: *"Grant authored by each venue (what that venue exposes to the other)."* The accepter writes `theirs` and the link goes live in the same update. `respondLinkSchema` imposes no ceiling. The notification diffs only the accepter's own direction, so an untouched `mine` produces empty bullets and a generic "accepted" email.
@@ -625,7 +637,7 @@ Keep the migration regardless: it removes the *direct* `anon`/`authenticated` de
 
 **8. N2, N3, N4 — DONE on both environments, 2026-08-14 (PR #141).** The linked write and guest-scope holes. Landed as D1's A1, A3 and A4 so D1 subsumes rather than repeats them; A2 (the column grant) is still outstanding and still needs the Realtime smoke test. Migration `20270111120000`. See the status block above N2.
 
-**9. C7** via `pending_change`.
+**9. C7 — DONE on staging, 2026-08-14.** Via `pending_change`, exactly as prescribed, plus the interim-pair guard and a notification for the deferred change. See C7's status block.
 
 **10. D1 re-scoped** — three write policies, column grants on the read, audit trigger extended, pgTAP rewritten and wired into CI. A two-week item, not a one-migration reduction.
 
@@ -665,7 +677,7 @@ Steps 0 to 8 of the order above are closed on **both environments**. This is the
 | # | Item | Why here | Size |
 |---|---|---|---|
 | ~~1~~ | **C3 interim — DONE on staging, 2026-08-14** | The only item on this list causing user-visible harm today: a live double-booking race on every appointment write. Re-validate `computeAppointmentAvailability` immediately before insert at all nine write sites, and narrow the create rate limit. Touches no schema and no RLS, so nothing else has to precede it. | Medium |
-| 2 | **C7** | An open authorisation hole: the accepter of a link writes `theirs` and the link goes live in the same update. Self-contained, reuses the `pending_change` machinery `propose_change` already has, and no test covers the route. | Small |
+| ~~2~~ | **C7 — DONE on staging, 2026-08-14** | An open authorisation hole: the accepter of a link writes `theirs` and the link goes live in the same update. Self-contained, reuses the `pending_change` machinery `propose_change` already has, and no test covers the route. | Small |
 | 3 | **pgTAP on a local Supabase, wired into CI** (D1/A5) | **The largest residual risk in this document, and it now blocks confidence in work already shipped.** Four RLS-touching changes have landed (C0, C1, C2, N2/N3/N4) verified by reasoning and targeted probes, never by the suite written for exactly that purpose. A local instance built from the migrations needs no production credential and is also the right home for `check:function-grants`. Do it once, for both, and do it BEFORE the last RLS change rather than after. | Medium |
 | 4 | **D1 remainder: A2 + the Realtime smoke test, A6 as fallback** | Closes **C5** and **N5**, the last open Critical with a known fix. Column-level grants on `bookings` for `authenticated`, verified against `REPLICA IDENTITY FULL` on a live instance before shipping. Wants step 3 in place first, because it is the change most likely to break something silently. | Medium |
 | 5 | **H38** | Cross-venue bookings written with no availability validation at all, because the overlap check is gated on `appointmentServiceId`. The document upgrades it to Critical-adjacent and says treat it as urgent once the linked work is under way. It now is. | Small |

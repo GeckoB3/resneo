@@ -5,7 +5,7 @@
 **Method:** nine parallel audit agents, then **two further rounds of adversarial verification** (six agents, then five), each charged with falsifying the prior round rather than confirming it.
 **Status:** three review rounds complete and converging. Round two withdrew two findings, downgraded nine, added six, and rewrote eight fixes. Round three found the flagship C1 fix *still* ineffective, struck the C3 trigger as a near-term fix, and completed five C7-C13 fixes that were right in direction but each missed a case. Every change is tagged inline with the round that made it.
 
-**Implementation status, updated 2026-08-15.** Every Critical is now closed on staging *and* production except **C3**, whose interim is live and whose full fix is **deliberately deferred** (see the decision record in C3). Closed on both environments: C0, C1, C2, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, H8, H36, H38, N1-N5, and **all of D1** (A1/A3/A4 with N2/N3/N4, A2 with C5/N5, A5 as the CI job). The RLS suite runs on every push and passes 24/24. **D2 and H7 are deferred by decision, not outstanding.** The per-finding status blocks below are authoritative; this line is only a summary.
+**Implementation status, updated 2026-08-15.** Every Critical is now closed on staging *and* production except **C3**, whose interim is live and whose full fix is **deliberately deferred** (see the decision record in C3). **Every fix in this remediation now has a regression test that fails when the fix is removed.** Closed on both environments: C0, C1, C2, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, H8, H36, H38, N1-N5, and **all of D1** (A1/A3/A4 with N2/N3/N4, A2 with C5/N5, A5 as the CI job). The RLS suite runs on every push and passes 24/24. **D2 and H7 are deferred by decision, not outstanding.** The per-finding status blocks below are authoritative; this line is only a summary.
 
 ---
 
@@ -597,7 +597,11 @@ The table below was written from a grep for three helper names plus the presence
 
 > **STATUS — CLOSED ON BOTH ENVIRONMENTS, 2026-08-15. Verified by hand, not by test.** The operator exercised all three cases on staging and again on production: own-venue notes still render, a linked venue **with** the PII grant still sees the free text, and a linked venue **without** it no longer does. That third case is the fix, and it behaving correctly also resolves the contradiction recorded below in the only way that matters practically: the fix works, whatever the test harness was doing.
 >
-> **The automated test is still missing, and that is the residual risk.** Everything else shipped in this remediation has a test that fails when the fix is removed; this does not, so it is the one change that could regress silently. Small, worth doing, and the traps are documented below for whoever does.
+> **The automated test now exists, 2026-08-15, and the harness question is answered.** `route.linked-pii.test.ts` covers four cases: free text withheld from a `full_details` link without the PII grant, served to one that holds it, a `time_only` link refused outright with 403, and own-venue reads never redacted. Disabling the redaction fails exactly the first and leaves the other three green.
+>
+> **There was no second defect.** Instrumenting the route showed `linkedGuestHistoryGrant` resolving correctly and the redaction applying; the earlier failure was purely a harness artefact from the three request-shaping traps below, not a fault in how the grant reaches the projection. The suspicion recorded here on 2026-08-14 is withdrawn.
+>
+> The traps are written into the test's header, because each one silently yields an ordinary own-venue response rather than an error, so a test that trips on one passes while proving nothing. The first assertion checks the row exists before checking its contents, so a future slip fails loudly.
 >
 > **Original note, retained:** fix applied 2026-08-14 with weaker verification than the rest of this document. `bookings/list` now applies `redactBookingPiiFields` to the finished row when the linked grant lacks PII, using the shared field list so a new PII column is covered by editing one constant. `tsc` clean, 333 files / 3148 tests green.
 >

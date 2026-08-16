@@ -51,6 +51,7 @@ import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import {
   isGuestBookingDateAllowed,
+  isStaffWalkInBookingDateAllowed,
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -365,8 +366,21 @@ export async function POST(request: NextRequest) {
        * `attachVenueClockToAppointmentInput` sets `allowSameDayBooking` on the
        * input and the engine assigns it and never reads it again, so the only
        * real enforcement is this helper, which `booking/create` calls and this
-       * route did not. Both this route and `create-group` are anonymous public
-       * flows.
+       * route did not.
+       *
+       * ~~Both this route and `create-group` are anonymous public flows.~~
+       * **That premise was wrong and the first version of this gate was an
+       * unconditional guest check because of it.** This route is also where the
+       * staff mobile app creates every multi-service visit, with `source` of
+       * `phone` or `walk-in`. A walk-in is by definition today, so on a venue
+       * with `allow_same_day_booking: false` the guest rule refused the counter
+       * booking staff were standing there taking.
+       *
+       * The split mirrors `api/venue/bookings` exactly, so a visit and a single
+       * booking now answer the same way: only `walk-in` skips the same-day
+       * rule. A staff PHONE booking still gets the guest rule, which is what
+       * singles do; whether that is right is a product question, but it is not
+       * one this route should answer differently from its sibling.
        *
        * Checked per segment, because the window belongs to the service and a
        * visit can mix services with different windows. One segment out of
@@ -376,7 +390,11 @@ export async function POST(request: NextRequest) {
        * Uses the timezone the attach just resolved, so this asks about the same
        * calendar day the engine is working in.
        */
-      if (!isGuestBookingDateAllowed(booking_date, svcWindow, input.venueTimezone ?? 'Europe/London')) {
+      const msDateAllowed =
+        source === 'walk-in'
+          ? isStaffWalkInBookingDateAllowed(booking_date, svcWindow, input.venueTimezone ?? 'Europe/London')
+          : isGuestBookingDateAllowed(booking_date, svcWindow, input.venueTimezone ?? 'Europe/London');
+      if (!msDateAllowed) {
         return NextResponse.json(
           { error: 'This date is not available for booking' },
           { status: 400 },

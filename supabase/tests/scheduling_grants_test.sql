@@ -42,9 +42,21 @@ INSERT INTO practitioners (id, venue_id, name)
 VALUES ('00000000-0000-0000-0000-0000000000d3',
         '00000000-0000-0000-0000-0000000000d1', 'Pract D');
 
-INSERT INTO venue_services (id, venue_id, name, start_time, end_time, last_booking_time)
+-- `venue_services.area_id` is NOT NULL, and the constraint is NOT in that
+-- table's CREATE TABLE: `20260620120000_multi_area_restaurant_venues.sql:244`
+-- adds the column, backfills it and sets NOT NULL, 300-odd migrations later.
+-- Reading the original DDL alone produces a fixture that fails on insert,
+-- which is exactly how this file failed its first CI run. The sibling suite
+-- carries the same scar for `guests.name`, dropped by a later migration while
+-- its fixture still referenced it. Check the ALTERs, not just the CREATE.
+INSERT INTO areas (id, venue_id, name)
+VALUES ('00000000-0000-0000-0000-0000000000d0',
+        '00000000-0000-0000-0000-0000000000d1', 'Main');
+
+INSERT INTO venue_services (id, venue_id, area_id, name, start_time, end_time, last_booking_time)
 VALUES ('00000000-0000-0000-0000-0000000000d4',
-        '00000000-0000-0000-0000-0000000000d1', 'Service D', '09:00', '17:00', '16:30');
+        '00000000-0000-0000-0000-0000000000d1',
+        '00000000-0000-0000-0000-0000000000d0', 'Service D', '09:00', '17:00', '16:30');
 
 INSERT INTO unified_calendars (id, venue_id, name)
 VALUES ('00000000-0000-0000-0000-0000000000d5',

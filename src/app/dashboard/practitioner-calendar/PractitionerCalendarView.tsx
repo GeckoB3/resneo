@@ -120,8 +120,9 @@ import {
   buildVenueScheduleClosureBlocks,
   isScheduleClosureBlockType,
   scheduleClosureBlockLabel,
-  type PractitionerLeavePeriodInput,
 } from '@/lib/calendar/schedule-closure-blocks';
+import { isNonWorkingBlock, isOccupyingBlock } from '@/lib/calendar/occupying-blocks';
+import { type PractitionerLeavePeriodInput } from '@/lib/calendar/schedule-closure-blocks';
 import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
@@ -465,6 +466,7 @@ function isBreakCalendarBlock(bl: CalendarBlock): boolean {
 function isScheduleClosureBlock(bl: CalendarBlock): boolean {
   return isScheduleClosureBlockType(bl.block_type);
 }
+
 
 /** Manual blocks staff can drag, resize, and edit (not class-tied or schedule breaks). */
 function isManualEditableBlock(bl: CalendarBlock): boolean {
@@ -1695,6 +1697,7 @@ function slotOccupied(
   }
   for (const bl of blocks) {
     if (excludeBlockId && bl.id === excludeBlockId) continue;
+    if (!isOccupyingBlock(bl.block_type)) continue;
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
@@ -1711,6 +1714,28 @@ function slotOccupied(
     const b0 = timeToMinutes(eb.start_time);
     const b1 = b0 + minutesBetweenStartAndEnd(eb.start_time, eb.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
+  }
+  return false;
+}
+
+/**
+ * True if the window lands on hours the venue or the person does not normally
+ * work. Drives the amber "moved outside opening hours" note; see
+ * `isNonWorkingBlock` for which types count and why (SA-H5).
+ */
+function windowCrossesNonWorkingBlock(
+  startMin: number,
+  endMin: number,
+  pracId: string,
+  dateStr: string,
+  blocks: CalendarBlock[],
+): boolean {
+  for (const bl of blocks) {
+    if (!isNonWorkingBlock(bl.block_type)) continue;
+    if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
+    const b0 = timeToMinutes(bl.start_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
+    if (overlapsRange(startMin, endMin, b0, b1)) return true;
   }
   return false;
 }
@@ -1754,6 +1779,7 @@ function appointmentWindowCollides(
   }
   for (const bl of blocks) {
     if (options?.excludeBlockId && bl.id === options.excludeBlockId) continue;
+    if (!isOccupyingBlock(bl.block_type)) continue;
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
@@ -5314,9 +5340,15 @@ export function PractitionerCalendarView({
       serviceMapForBooking(b),
     );
     // Landing before open / after close is allowed (staff can book past opening
-    // hours) — surfaced as an amber warning, not blocked. Only a genuine
-    // conflict (a block/class/event/busy overlap) blocks the move.
-    const outsideHours = targetStartMins < dayStartMin || endMin > dayEndMin;
+    // hours), surfaced as an amber warning rather than blocked. Only a genuine
+    // conflict (a busy overlap, leave, class, event or hand-made block) blocks
+    // the move. The canvas-bounds test alone almost never fired, because the
+    // drawn grid is wider than opening hours; the closure blocks themselves are
+    // the accurate source (SA-H5).
+    const outsideHours =
+      targetStartMins < dayStartMin ||
+      endMin > dayEndMin ||
+      windowCrossesNonWorkingBlock(targetStartMins, endMin, pracId, dateStr, displayBlocks);
     const conflict = appointmentWindowCollides(
       targetStartMins,
       endMin,

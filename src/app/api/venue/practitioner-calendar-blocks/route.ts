@@ -172,42 +172,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: prac } = await staff.db
-      .from('practitioners')
-      .select('id')
-      .eq('id', columnId)
-      .eq('venue_id', staff.venue_id)
-      .maybeSingle();
-
-    if (prac?.id) {
-      const { data: inserted, error: insErr } = await staff.db
-        .from('practitioner_calendar_blocks')
-        .insert({
-          venue_id: staff.venue_id,
-          practitioner_id: columnId,
-          block_date,
-          start_time: toPgTime(start_time),
-          end_time: toPgTime(end_time),
-          reason: reason?.trim() || null,
-          created_by: staff.id,
-        })
-        .select('id, practitioner_id, block_date, start_time, end_time, reason, created_at')
-        .single();
-
-      if (insErr || !inserted) {
-        console.error('POST practitioner-calendar-blocks:', insErr);
-        return NextResponse.json({ error: 'Failed to create block' }, { status: 500 });
-      }
-
-      return NextResponse.json({
-        block: {
-          ...inserted,
-          start_time: String(inserted.start_time).slice(0, 5),
-          end_time: String(inserted.end_time).slice(0, 5),
-        },
-      });
-    }
-
+    /**
+     * SA-M13. A legacy branch used to sit here: if `columnId` resolved to a
+     * `practitioners` row it inserted the block directly, skipping the
+     * `staffManagesCalendar` check that the unified path below applies. It is
+     * deleted rather than fixed, because there is nothing left to reach it:
+     * every venue is on unified scheduling and production holds zero
+     * `practitioners` rows, so the branch could only ever fall through.
+     *
+     * Deleting it makes the managed-calendar check unconditional, which is the
+     * behaviour the route always intended.
+     */
     const { data: calendar } = await staff.db
       .from('unified_calendars')
       .select('id')

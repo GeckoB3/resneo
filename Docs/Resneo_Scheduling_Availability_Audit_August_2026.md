@@ -12,6 +12,32 @@
 
 ---
 
+## IMPLEMENTATION STATUS, 2026-08-16 — round 1 shipped and hand-tested on staging
+
+**Read this before scheduling anything below.** Twelve commits are on `staging` (`0c2f4773..c65fd0ef`); `main` is still at `0c2f4773`. Round 1 was **code only, zero files under `supabase/`**, so it carried no schema window and none of the expand/contract hazard. Baseline after it: `tsc --noEmit` clean, **341 files / 3209 tests** passing, 260 migrations unchanged.
+
+**Closed by round 1.** `SA-C2` · `SA-C3` (made *visible*, not fail-closed — see below) · `SA-H3` · `SA-H5` · `SA-H6` · `SA-H7` · `SA-M2`'s diary lockout · `SA-M3` · `SA-M9`'s cache header · `SA-M13` · `SA-M28` · `SA-C1`'s residual on `api/confirm`. Each finding below carries its own status line.
+
+**Deliberately carved out of round 1, still open.** `SA-H1`'s two-pass offset (59 of 2288 bookings over 90 days are off-grid, and the fix changes reminder timing for *existing* bookings) and closure-aware reminder suppression, the remaining half of `SA-M2` (outbound comms, fails silently). Each wants its own round.
+
+**Round 2, not started.** The migration: drop the nine anon SELECT policies (`SA-C4`), `REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER` from `anon, authenticated` on the six scheduling tables (`SA-H4`), keeping `SELECT`. **Any table this narrows must be excluded from `supabase/scripts/local_baseline_grants.sql`** or CI silently re-grants it and validates a permission environment that exists nowhere — §13's exit criteria carry this and it is the single easiest thing to get wrong. Run it from `C:/Resneo`; `.env.local` lives only there.
+
+### What staging testing changed, and it is not a footnote
+
+Round 1 was hand-tested on staging on 2026-08-16 against venue `plus1@reserveni.com`. **Two of the shipped fixes did not work, and both failures were in the finding this document called its highest-value fix.** Everything else passed: the variant and add-on reschedule durations, the booking-window refusals on the multi-service and group routes, the waitlist closure suppression, and the walk-in refusal onto full-day leave.
+
+| What the document said | What shipping it actually took |
+|---|---|
+| `SA-H3`/`SA-H5`: "Introducing `isOccupyingBlock(blockType)` and using it in both resolves all three. **Highest value-per-line fix in the audit.**" | The rule change alone **changed nothing a user could do.** `SA-H3` also needed the diary's hit-testing fixed (`cb51f514`); `SA-H5` also needed the `allowDuringBreaks` override threaded through four layers plus the visit dry-run route (`c65fd0ef`). |
+
+The mechanism is worth carrying into every remaining phase. `slotOccupied` returning `false` only **enables** the empty-slot button; the closure block is still drawn as an overlay at z-index 15 over slot buttons at z-0, and its inner button is `disabled`, so it swallowed the click. On an amended-hours day every minute carries a block, so the whole column stayed dead to the mouse. Drag and drop was unaffected — dnd-kit resolves a drop by pointer collision against registered droppable rects, ignoring z-order — which is exactly why the unit tests, the adversarial review and this document all missed it: **the path that was tested was the path that already worked.**
+
+Separately, `SA-H5` assumed one gate where the engine has two. `allowOutsideHours` has never relaxed a break; `allowDuringBreaks` is a distinct option that only the walk-in create path had ever sent. Making `break` non-occupying on the diary unlocked the gesture and the PATCH answered `409 Conflicts with a break`. Threading it also exposed a second hole beside it: the dry run a multi-service visit runs before any row is written accepted neither override, so a **visit** dragged past closing was refused while the identical drag on a single booking succeeded.
+
+**The lesson generalises, and it sharpens §15's closing paragraph rather than contradicting it.** This document is reliable about *where a rule is wrong*. It is not reliable about *how many layers enforce that rule*, and it consistently sized fixes as though the layer it had read were the only one. Before scheduling any remaining item, enumerate the enforcing layers — rule, hit-testing, server gate, dry run — rather than trusting the size estimate.
+
+---
+
 ## ADVERSARIAL REVIEW, 2026-08-15 — verified against `fe09c0a4`
 
 This document was written against **`e7ab9ac0`**. The tree is now **`fe09c0a4`**, five PRs later, and the sibling audit's remediation completed in between. Everything below was re-checked against live code.
@@ -59,11 +85,11 @@ The remaining Mediums and Lows not listed above were not individually re-traced.
 
 **2. The flagship overbooking finding is already open elsewhere, and its fix is genuinely hard.** `SA-C1` is the same defect as **C3 in `Docs/Resneo_Forensic_Audit_August_2026.md:36`**, where the trigger-based fix was struck. §11.3 proposes a narrower design **and states honestly which of C3's six objections it does not answer.** Do not read §11.3 as a solved problem. Ship the interim re-validate-before-insert regardless.
 
-**3. Two findings are new, cheap and worth fixing this week.** `SA-C2` (guest reschedule validates the parent service duration then writes the variant duration) and `SA-H3`/`SA-H5` (the diary treats a day's *open* window as occupied). The latter two share one root cause and one small fix.
+**3. ~~Two findings are new, cheap and worth fixing this week.~~ DONE 2026-08-16, and the "one small fix" was wrong.** `SA-C2` and `SA-H3`/`SA-H5` all shipped in round 1. They do share one root cause, but `SA-H3` and `SA-H5` each needed a **second enforcing layer** this document never mentions, and the first attempt at each passed CI while changing nothing a user could do. See the implementation status above before you trust any size estimate here.
 
-**4. One finding is a personal-data exposure and should be treated as a GDPR matter, not only an engineering one.** `SA-C4`: `availability_blocks` is anonymously readable platform-wide with `USING (true)`, and its `reason` column is free text an owner types. See §8 for the notification assessment and the retrospective log check the sibling audit performed for C0.
+**4. ~~One finding is a personal-data exposure and should be treated as a GDPR matter.~~ Falsified 2026-08-16 by production query.** `availability_blocks.reason` is **empty platform-wide**, so there is no personal data behind the exposure. `SA-C4` is downgraded Critical → **High** and is a venue-enumeration oracle, not a GDPR matter. §8 records the completed assessment; Art. 33/34 are not engaged. The structural exposure is real and the fix is unchanged.
 
-**5. Two claims still need a live database query before you act.** `SA-H4`'s fix could break realtime if the premise is wrong, and `SA-C4`'s scope depends on what is actually in `reason`. Queries in §14.
+**5. ~~Two claims still need a live database query before you act.~~ Both queries run 2026-08-16.** `SA-H4`'s premise holds and its fix is safe, but `anon`'s grant surface is **wider than this document states** — the full default set including `TRUNCATE` — so the revoke verb list in `SA-H4` is incomplete as written. `SA-C4`'s scope is settled by item 4. Queries and results in §14.
 
 ---
 
@@ -72,8 +98,8 @@ The remaining Mediums and Lows not listed above were not individually re-traced.
 | Check | Result, 2026-08-15 |
 |---|---|
 | `npx tsc --noEmit` | Clean, exit 0 |
-| `npx vitest run` | 331 files / 3132 tests at `e7ab9ac0`; **335 / 3157 at `fe09c0a4`** |
-| Migrations | 258 at `e7ab9ac0`; **260 at `fe09c0a4`** |
+| `npx vitest run` | 331 files / 3132 tests at `e7ab9ac0`; 335 / 3157 at `fe09c0a4`; **341 / 3209 at `c65fd0ef`** |
+| Migrations | 258 at `e7ab9ac0`; **260 at `fe09c0a4`, unchanged at `c65fd0ef`** — round 1 touched no file under `supabase/` |
 | pgTAP (`supabase/tests/`) | ~~Still runs in no CI pipeline~~ **Now runs on every push and PR (`rls-pgtap`), 24/24 passing** |
 | `btree_gist` / `EXCLUDE USING` | **Absent from all 258 migrations** (VERIFIED) |
 | `revalidateTag` / `revalidatePath` / `unstable_cache` | **Zero occurrences in `src/`** (VERIFIED) |
@@ -100,7 +126,13 @@ A booking the venue cannot honour is scored **Critical** under "tells a customer
 | **CONFIRMED** | An agent read it and an adversarial agent re-read it and upheld it |
 | **REPORTED** | Cited with file and line by one pass, not independently re-traced |
 
-**Anchor note.** Line numbers are exact at `e7ab9ac0`. Files are cited by full path throughout, because the sibling audit records the cost of bare filenames.
+**Anchor note.** Line numbers are exact at `e7ab9ac0`, re-checked at `fe09c0a4`.
+
+> **Anchors are stale from 2026-08-16 onward, and `PractitionerCalendarView.tsx` badly so.** `staging` is at `c65fd0ef`, twelve commits past `0c2f4773`. Round 1 added roughly 2,100 lines across 22 files, so **every line number in this document should be treated as a hint, not a citation** — most are now wrong by tens to hundreds of lines. `SA-H3`'s six-link chain is the worst affected: all six of its cited lines have moved.
+>
+> Grep for the symbol, not the line. File paths are unchanged except where a finding's status note says otherwise, and the new helpers round 1 introduced (`isOccupyingBlock`, `applyReservedDurationToInput`, `reportAvailabilityReadFailure`, `windowCrossesBreakBlock`) are named in the status notes rather than located by line, for this reason.
+
+Files are cited by full path throughout, because the sibling audit records the cost of bare filenames.
 
 ---
 
@@ -158,12 +190,12 @@ Legend: ✅ honoured · ❌ not honoured · ⚠️ honoured differently from its
 | Whole-day closure | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Part-day closure** | ⚠️ widened to whole day | ⚠️ widened | ⚠️ **widened** | ⚠️ intersecting resolver | ❌ |
 | **Amended hours** | ⚠️ **replace** weekly | ⚠️ replace | ⚠️ replace | ⚠️ **intersect** weekly | ❌ |
-| Staff leave (full day) | ✅ | ✅ | ⚠️ skipped when `allowOutsideHours` | ✅ | ❌ |
+| Staff leave (full day) | ✅ | ✅ | ~~⚠️ skipped when `allowOutsideHours`~~ **✅ 2026-08-16** | ✅ | ❌ |
 | Staff leave (partial) | ✅ | ✅ | ✅ | ✅ | ❌ |
 | `calendar_blocks` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `practitioner_calendar_blocks` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Min booking notice | ✅ | ✅ | ✅ | n/a | n/a |
-| **Max advance / same-day rule** | ❌ | ✅ | ⚠️ **absent on multi-service and group** | n/a | n/a |
+| **Max advance / same-day rule** | ❌ | ✅ | ~~⚠️ **absent on multi-service and group**~~ **✅ 2026-08-16** | n/a | n/a |
 | `service_schedule_exceptions` | ❌ inert | ❌ | ❌ | ❌ | ❌ |
 | `availability_config.blocked_dates` | ❌ no reader | ❌ | ❌ | ❌ | ❌ |
 
@@ -172,6 +204,8 @@ Legend: ✅ honoured · ❌ not honoured · ⚠️ honoured differently from its
 **Correction against the first draft:** the part-day-closure "create" cell was previously marked ✅. It is not. `src/app/api/booking/create/route.ts:1019` calls the correct resolver but sits in the **class-session** branch; the appointment branch begins at `:1030` and goes through `fetchAppointmentInput` and the widening adapter. Part-day closures are widened on every appointment layer, consistently. That makes it a revenue-loss defect rather than an overbooking one.
 
 The mobile column's consumer is **unverified from this repo**: the only evidence is a comment at `src/lib/unified-availability.ts:57-60`, and `Docs/MOBILE_API.md` does not list the route. The mobile *write* path does run the engine, so this is a display gap, not a booking bypass.
+
+**Updated 2026-08-16.** Two create-column cells flipped to ✅ in round 1: full-day leave (`SA-M3`) and the max-advance rule on the multi-service and group routes (`SA-H7`). **Every remaining ⚠️ and ❌ in this matrix is still accurate**, and the two ⚠️ rows that matter most — part-day closure and amended hours — are Phase 1 work, not Phase 0, because they need the one resolver rather than a patch per column. The Staff diary column's ✅ marks should still be read as *honoured*, not *labelled*, with one improvement: leave now renders distinctly from off-hours (`SA-M28`).
 
 ---
 
@@ -207,6 +241,10 @@ The asymmetry is documented in the file itself: the comment at `:1527-1531` expl
 
 > **Verified 2026-08-15 at `fe09c0a4`.** `confirm/route.ts` is absent from the seven callers of `applyVariantToAppointmentInput`, and `:1457`, `:1468`, `:1533-1534` are exact. **One slip:** the slot test matches `start_time` **and** `service_id`, not "`start_time` only"; the finding is unaffected, since the slot was generated at the parent duration regardless. **Do this together with the missing pre-insert re-check on the same path** (see SA-C1's update).
 
+> **CLOSED 2026-08-16 · `f56b3209`, staging.** Both adjustments now go on the input *before* the check, via a shared `applyReservedDurationToInput` helper, and the pre-insert re-check landed on the same path in the same commit as the update above advised. Verified on staging: a 150-minute variant of a short parent reschedules to its own length, add-ons survive a same-service move, and a move to a *different* service drops both rather than carrying a variant the new service cannot resolve.
+>
+> **A trap this fix walked into, worth recording.** The obvious implementation mirrors `booking/create`, and it is wrong. `create` reads `baseSvc` because its `svc` is rebuilt by re-applying the variant on top of the practitioner-link merge, which resets the duration and drops the add-on minutes. On the confirm path `svc` is only the merge, so it keeps both, and reading `baseSvc` there writes the catalogue length for any practitioner holding a `custom_duration_minutes` override. Two defects came from copying the sibling without checking that it builds `svc` differently; both were caught in adversarial review (`143a6c1a`).
+
 ---
 
 ### SA-C3 — Availability reads fail open: a database error is computed as "nothing is blocked"
@@ -218,16 +256,30 @@ Thirteen sites verified by direct grep, every one logging a warning and substitu
 - `src/lib/availability/appointment-month-availability.ts:245`, `:249`, `:283`
 - `src/lib/unified-availability.ts:109`, `:195`
 
+> **The count is wrong, and the error was in the dangerous direction.** Implementation enumerated the sites rather than trusting this list: there are **49**, not thirteen. The thirteen above are the ones that logged a `console.warn`, which is precisely why they were the ones a grep found. The other thirty-six substituted an empty result and said **nothing at all**, so the audit's own instrument — grepping for the warning — could only ever find the visible half of a finding about invisibility. Enumerate before trusting any count in this document.
+
 **Failure:** one PostgREST request inside a `Promise.all` fails while the bookings query succeeds. "I could not read the leave table" becomes "nobody is on leave", and the engine sells the day a stylist is abroad.
 
-The adversarial round rated a single incident High, since it is fault-conditional rather than steady-state. It is recorded Critical **as a class** because it is thirteen instances of the same inverted default in the one subsystem where the safe default is obvious, and because §9 shows nothing would tell you it had happened.
+The adversarial round rated a single incident High, since it is fault-conditional rather than steady-state. It is recorded Critical **as a class** because it is forty-nine instances of the same inverted default in the one subsystem where the safe default is obvious, and because §9 shows nothing would tell you it had happened.
 
 **The good pattern exists in-repo:** `src/app/api/venue/schedule/route.ts` fails closed on all eight of its sub-queries. §11.2 gives the contract that makes failing closed survivable rather than a blank booking page.
+
+> **PARTIALLY CLOSED 2026-08-16 · `03b0053c`, staging. Made visible, NOT fail-closed — do not read this as done.** All 49 sites now report to Sentry before the substitution, via `src/lib/availability/availability-read-failure.ts`, fingerprinted by call site so a transient wobble and a persistent outage land in one issue per site rather than one per database message.
+>
+> The behaviour is unchanged: a failed read still becomes "nothing is blocked" and the engine still sells the day. Failing closed needs the third `unavailable` state and a booking UI that can render it, and neither exists yet — that is §11.2, in Phase 1. The reporter's `assumed` field is required rather than optional for this reason: it forces each call site to state what the engine now believes, which is the difference between an alert someone can act on and one they scroll past.
+>
+> **Operationally:** the `availability-read-failure` fingerprint should be empty. Anything in it is a genuinely broken read that was previously silent, not noise from the change.
 
 ---
 
 ### SA-C4 — Anonymous, platform-wide read of every venue's schedule, including free-text closure reasons
-**CONFIRMED (VERIFIED) · Critical (personal data)**
+**CONFIRMED (VERIFIED) · ~~Critical (personal data)~~ → High (venue enumeration). Downgraded 2026-08-16 by production query.**
+
+> **The personal-data limb is dead, and with it the Critical rating.** §14's `reason` query was run against production: **`availability_blocks.reason` is empty platform-wide.** There is no free text, so there is no Art. 9 special-category exposure, no realistic "closed for the funeral" content, and nothing for §8's notification assessment to bite on.
+>
+> §7.3 item 5 raised this finding from High to Critical **specifically** for personal-data exposure. That reason no longer holds, so it returns to **High**. What remains is real and unchanged: `unified_calendars` exposes every venue on the platform's working hours, breaks, days off, staff names, prices and capacity in one unauthenticated request. That is a **venue-enumeration oracle**, which is exactly what the team's own `20270107120000` called it — a confidentiality and competitive-intelligence matter, not a breach matter.
+>
+> **The fix does not change.** Drop all nine policies in round 2. The downgrade affects the GDPR obligations in §8 and the urgency, not the work.
 
 Nine `TO anon` SELECT policies relevant to scheduling survive; only the waitlist pair was ever dropped (`supabase/migrations/20270107120000_revoke_report_rpcs_and_waitlist_anon.sql:72-73`). Enumerated so Phase 0 is startable:
 
@@ -246,7 +298,7 @@ Nine `TO anon` SELECT policies relevant to scheduling survive; only the waitlist
 **None has a venue predicate.** Two consequences:
 
 1. `unified_calendars` exposes **every venue on the platform's** working hours, breaks, days off, staff names, prices and capacity in one unauthenticated request. The team's own migration `20270107120000:5-9` already names this table as a venue-id harvesting oracle and fixed the adjacent waitlist case.
-2. `availability_blocks.reason` is **free text an owner types**, anonymously readable with no predicate at all. Realistic contents: "closed for the funeral", "Sarah's surgery". That is potentially special-category data under UK GDPR Art. 9. See §8.
+2. ~~`availability_blocks.reason` is **free text an owner types**, anonymously readable with no predicate at all. Realistic contents: "closed for the funeral", "Sarah's surgery". That is potentially special-category data under UK GDPR Art. 9. See §8.~~ **Falsified 2026-08-16:** the column is empty platform-wide. The exposure is structural (the policy has no predicate) but there is no content behind it. Minimisation per §8 step 4 is still worth doing before anyone starts typing in that field.
 
 **Correction worth recording:** staff *leave* notes are **safe**. `practitioner_leave_periods` and `practitioner_calendar_blocks` have no `TO anon` policy. The free-text exposure is `availability_blocks.reason` only.
 
@@ -294,6 +346,14 @@ Traced end to end; the two decisive links verified personally:
 
 **On an amended-hours day, the one window the venue is actually working is the one window staff cannot book into, while the guest engine sells it.**
 
+> **CLOSED 2026-08-16 · `79d2d889` + `cb51f514`, staging. It took two commits, and the first one on its own was worth nothing.**
+>
+> `79d2d889` did what this finding asks: `isOccupyingBlock` in both loops, so `venue_amended_hours` stops counting as occupied. Staging testing then found the window **still unclickable**, because link 6 of the chain above is incomplete. `:7209`'s `disabled={occ}` only controls whether the empty-slot button is *enabled*. The block is drawn as a separate overlay at **z-index 15** over slot buttons at **z-0**, and its inner button is `disabled` for closure types, so it swallowed the click rather than passing it down. On an amended-hours day every minute of the column carries a block, so the entire day stayed dead to the mouse with the rule computing correctly underneath.
+>
+> `cb51f514` passes pointer events through for exactly the blocks staff may book over, reusing the same predicate so the rule and the hit-testing cannot drift apart. Bookings sit at z-index 20 and up, so they keep their own clicks.
+>
+> **Why every reviewer missed it, including the adversarial round.** dnd-kit resolves a drop by pointer collision against registered droppable rects, which ignores z-order entirely. So the drag path exercised the fixed rule and passed, and the click path could not reach it. The six-link chain above traces the *rule*, correctly and in detail, and simply never asks whether a click arrives.
+
 ---
 
 ### SA-H4 — Every API permission check on this subsystem is advisory
@@ -311,6 +371,14 @@ Every scheduling table's RLS policy is `FOR ALL` with predicate `venue_id IN (SE
 
 **Fix (M), in order:** (1) `REVOKE INSERT, UPDATE, DELETE` on the six scheduling tables from `anon, authenticated` — **keep `SELECT`** for realtime; (2) add role predicates to policies that should be admin-only; (3) extend `scripts/check-client-executable-functions.mjs`, which polices `pg_proc` and nothing else. That table-shaped blind spot is why this survived four consecutive hardening migrations. Run the §14 query first.
 
+> **§14 query run 2026-08-16. The grant surface is wider than written; the scoping is not.**
+>
+> `anon` holds the **full default grant set on all six tables, including `TRUNCATE`**, not merely the INSERT/UPDATE/DELETE this fix names. So the revoke list must be `INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER`, keeping `SELECT`. Writing the shorter list leaves `TRUNCATE` in `anon`'s hands.
+>
+> **The writes are nonetheless blocked today**, which is why this stays intra-venue and did not escalate: the `staff_manage_*` policies are `FOR ALL` with no `TO` clause, so they apply to every role, and `auth.jwt()->>'email'` is null for `anon`. The predicate fails and the write is refused. The grant is unused reach, not an open door — but it is reach nobody intended, and `TRUNCATE` in particular is not something to leave to a policy predicate.
+>
+> Also relevant to sizing: **`practitioners` has zero rows in production.** Any part of this work that reasons about that table is reasoning about an empty set.
+
 ---
 
 ### SA-H5 — Staff cannot book outside hours or over a break, contradicting the code and the shipped help article
@@ -322,7 +390,17 @@ Both are dead. `outsideHours` is computed against `dayStartMin`/`dayEndMin`, whi
 
 **Failure:** a client asks for 17:15 when the salon closes at 17:00 and the owner is happy to stay. The diary refuses. This is the most common real-world reason a receptionist overrides a schedule, and the product documents a behaviour it does not have.
 
-**`SA-H3`, `SA-H5` and the closure-day lockout in `SA-M1` share one root cause:** `slotOccupied` and `appointmentWindowCollides` do not distinguish block types. Introducing `isOccupyingBlock(blockType)` and using it in both resolves all three. **Highest value-per-line fix in the audit.**
+**`SA-H3`, `SA-H5` and the closure-day lockout in `SA-M1` share one root cause:** `slotOccupied` and `appointmentWindowCollides` do not distinguish block types. Introducing `isOccupyingBlock(blockType)` and using it in both resolves all three. ~~**Highest value-per-line fix in the audit.**~~
+
+> **CLOSED 2026-08-16 · `79d2d889` + `c65fd0ef`, staging. The claim struck through above was wrong, and this is the clearest example in the document of the sizing failure described in the implementation status.**
+>
+> The outside-hours half worked as written: the canvas-bounds test was replaced with the closure blocks themselves as the source, and a drag past closing now saves with an amber note. **The break half did not.** The engine keeps two gates, not one — `allowOutsideHours` has never relaxed a break, and `allowDuringBreaks` is a separate option (`appointment-engine.ts:1031`) that **only the walk-in create path had ever sent**. So the diary permitted the drag, showed the note, and the PATCH answered `409 Conflicts with a break`. The rule changed in the client and the layer that enforces it never heard.
+>
+> `c65fd0ef` threads that override through `validateAppointmentModificationInterval`, the PATCH route and the diary's move, resize and visit paths, as its own permission rather than folded into the hours one: choosing to work past your own closing time and choosing to work through someone's break are different decisions, and the engine is right to ask separately.
+>
+> **A second hole surfaced beside it.** The dry run a multi-service visit runs before any row is written accepted only `allow_manual_overlap`, so a **visit** dragged past closing was refused with "The visit was not moved" while the identical drag on a single booking went through. That is this finding failing for visits independently of breaks, and it would have gone unnoticed had the break fix not passed through the same route.
+>
+> Copy note: crossing a break now says "Moved over a break" rather than claiming opening hours, which was untrue and most confusing in exactly the case staff would be looking at.
 
 ---
 
@@ -335,6 +413,16 @@ Both are dead. `outsideHours` is computed against `dayStartMin`/`dayEndMin`, whi
 
 **Two gates, found on re-verification and recorded here rather than glossed:** the function returns early at `:270` unless the `waitlist_v2` feature flag is enabled, and that flag **defaults to false**; and in `staff_choose` mode it raises a staff alert without notifying any guest. The default mode is `notify_in_order`, which does notify. So exposure equals the set of venues with `waitlist_v2` explicitly on. **This is why it is High and not Critical** — an earlier draft of this document had it as Critical, before the gates were checked.
 
+> **Exposure quantified 2026-08-16 by production query:** `waitlist_v2` is on for **one test venue**. No live venue was ever exposed.
+
+> **CLOSED 2026-08-16 · `29a30a73`, staging.** `findAppointmentWaitlistAvailability` now runs on this path like its five siblings, with three placement decisions worth keeping:
+>
+> - **After** the cancellation is written, which every caller does before reaching this function. Run before that write, the cancelled booking would occupy its own slot and the check would suppress *every* offer.
+> - **After** the match search, so the engine runs only when there is somebody to offer the slot to.
+> - **Before** the mode dispatch, so it covers `staff_choose` as well: an alert about a slot nobody can book is noise, not an opportunity.
+>
+> `desired_time` is passed as the freed start exactly, which the window parser treats as an exact match, so this asks about *this slot* rather than the whole day. Verified on staging in both directions — suppressed on a closure day, and still offered on an ordinary open day, which was the real risk.
+
 ---
 
 ### SA-H7 — Booking-window rules unenforced on the multi-service and group routes
@@ -346,6 +434,10 @@ Both are dead. `outsideHours` is computed against `dayStartMin`/`dayEndMin`, whi
 
 > **Overlap, 2026-08-15:** this restates the forensic audit's **H1 residual** almost exactly. That audit downgraded H1 to Medium (the engine ignoring `allowSameDayBooking` is deliberate and test-pinned at `appointment-engine.test.ts:146`) and named the same real residual: `create-group` and `create-multi-service` never call `isGuestBookingDateAllowed`. One defect, two IDs — schedule it once.
 
+> **CLOSED 2026-08-16 · `68e3b6e4`, staging. This closes the forensic audit's H1 residual too.** `isGuestBookingDateAllowed` is now called on both routes, using the timezone `attachVenueClockToAppointmentInput` just resolved so the check asks about the same calendar day the engine works in. Checked **per segment** on a visit and **per member** on a group, because the window belongs to the service: a visit can mix services with different windows, and a group is not necessarily same-day. One segment or member out of window refuses the whole request, which is the only coherent answer when they share a date.
+>
+> Verified on staging in both directions, which mattered more than the refusal: out-of-window dates are refused on both routes, and ordinary in-window bookings still succeed, including on the two edges where a timezone slip would show up — today, and the last day of the advance window.
+
 ---
 
 # §5 Medium findings
@@ -353,18 +445,18 @@ Both are dead. `outsideHours` is computed against `dayStartMin`/`dayEndMin`, whi
 | ID | Finding | Evidence |
 |---|---|---|
 | **SA-M1** | **Part-day closures are widened to whole-day for appointments** on every layer including create. The UI **discloses** it with an amber banner naming the behaviour and pointing at Amended Hours, which is why this is Medium; **the API does not**, and accepts the times happily. | `src/lib/availability/venue-exceptions-adapter.ts:17-24` (VERIFIED); `src/app/api/venue/availability-blocks/route.ts:91`; `src/app/dashboard/settings/sections/BusinessClosuresSection.tsx:524-535` |
-| **SA-M2** | **Closing a day has no consequence chain.** No customer notification, no bulk cancel, no refund path, and **reminders keep firing** (`src/lib/booking/unified-scheduling-comms.ts:72-81` reads no closure table). Via `SA-H3`/`SA-H5` the orphaned bookings are then unclickable on the diary. Downgraded from Critical on re-verification: there is **no automated no-show marking anywhere**, so that consequence was speculative, and the design is disclosed to the owner with the rationale in code. | `src/lib/calendar/closure-booking-conflicts.ts:277` |
-| **SA-M3** | **`allowOutsideHours` disables the full-day staff-leave gate.** The skipped block at `src/lib/availability/appointment-engine.ts:965-990` also contains the leave gate, because full-day leave is folded into `days_off` at `:249-276`. The comments at `:847-853` and `src/app/api/venue/bookings/route.ts:1134-1136` claiming leave is still honoured are **false**. Not reachable unauthenticated: all four routes sit behind `getVenueStaff`, and the two visit routes add `requireManagedCalendarAccess`. | |
+| **SA-M2** | **PARTIALLY CLOSED 2026-08-16 (`79d2d889` + `cb51f514`).** ~~Via `SA-H3`/`SA-H5` the orphaned bookings are then unclickable on the diary.~~ **The diary lockout is fixed:** a closure day's existing bookings are clickable again, and staff can now *create* on a closed day too, which needed the hit-testing fix as well as the rule (see `SA-H3`). **The rest is open and is the larger half.** Closing a day still has no consequence chain: no customer notification, no bulk cancel, no refund path, and **reminders keep firing** (`src/lib/booking/unified-scheduling-comms.ts:72-81` reads no closure table). Closure-aware reminder suppression was **deliberately carved out of round 1** — it is outbound comms and it fails silently, so it wants its own round. Downgraded from Critical on re-verification: there is **no automated no-show marking anywhere**, so that consequence was speculative. | `src/lib/calendar/closure-booking-conflicts.ts:277` |
+| **SA-M3** | **CLOSED 2026-08-16 (`b529bf0d`).** ~~**`allowOutsideHours` disables the full-day staff-leave gate.**~~ Full-day leave is now checked **ahead of** the `allowOutsideHours` block, via a new `fullDayLeavePractitionerIds` on the engine input, so it survives every staff override. The `days_off` fold is **kept alongside** rather than replaced: the fold is what hides the day from guests, and the new list is what survives an override. Original finding, for the record: the skipped block at `appointment-engine.ts:965-990` also contained the leave gate, because full-day leave is folded into `days_off` at `:249-276`, making the comments at `:847-853` and `venue/bookings/route.ts:1134-1136` false. Partial leave never had the problem — it arrives as a blocked range of kind `leave` and was always checked unconditionally. Verified on staging: a walk-in onto full-day leave is refused, and a walk-in outside opening hours on an ordinary day still succeeds. | |
 | **SA-M4** | **Deleting a calendar has no booking check**; `bookings.calendar_id` is `ON DELETE SET NULL`. Mitigated: the confirm dialog discloses it and the bookings list still shows the appointments, since `bookings.practitioner_id` is untouched. What is lost is diary rendering. | `src/app/api/venue/practitioners/route.ts:911-921`; `20260430120000:212` |
 | **SA-M5** | **Deactivating a calendar (`is_active = false`) has no guard** — the orphan check is gated on `working_hours` changing. Future bookings vanish from the diary while the reminder cron keeps texting. Admin-only and instantly reversible. | `src/app/api/venue/practitioners/route.ts:577-583`; `PractitionerCalendarView.tsx:3576-3585` |
 | **SA-M6** | **`blockPatchSchema` is missing the refine that `blockSchema` has** (VERIFIED). Clearing one Period-1 box on an existing amended-hours entry saves `override_periods: null`, closing the whole day for classes/events/resources. Neither schema validates `date_end >= date_start` or `time_end > time_start`, so reversed ranges store as **inert** closures the owner believes are in force. | `src/app/api/venue/availability-blocks/route.ts:98-116` |
 | **SA-M7** | **A break can be saved over an existing appointment silently.** The orphan guard is gated on `working_hours` only; the identical action via "Block time" or leave returns a hard 409. | `src/app/api/venue/practitioners/route.ts:577-583` |
 | **SA-M8** | **Day API lists slots outside the booking window** while the month API applies it. Dead-end UX alone; the reachability enabler for `SA-H7`. | `src/app/api/booking/availability/route.ts:521-742` |
-| **SA-M9** | **Public month picker is CDN-cached with no revalidation.** `s-maxage=45, stale-while-revalidate=120`, zero `revalidateTag`/`revalidatePath` in `src/` (VERIFIED), `next.config.ts` and `vercel.json` clean. **True worst case 165 s per edge PoP.** Bounded: the day route sets no cache header and `create` re-validates. | `src/app/api/booking/appointment-calendar/route.ts:197` |
+| **SA-M9** | **CLOSED 2026-08-16 (`501a02df`), by the cheaper half of the fix.** The header is now `no-store`: correct and uncached beats fast and wrong, and a closure an owner has just saved greys out immediately instead of selling green dates for up to 165 s at every edge PoP. **The `availability_epoch` half is deliberately not done** — it needs a column plus a trigger across six tables (§11.5), and the cache comes back when there is something to key it on. Original finding: `s-maxage=45, stale-while-revalidate=120` with zero `revalidateTag`/`revalidatePath` in `src/` (VERIFIED), so nothing could ever flush it. | `src/app/api/booking/appointment-calendar/route.ts:197` |
 | **SA-M10** | **Month path double-applies `custom_duration_minutes`**, discarding injected variant and add-on minutes — the hazard the day path documents and avoids. Green dates that offer no slots. | `src/lib/availability/appointment-month-availability.ts:687,696`; contrast `src/lib/availability/appointment-engine.ts:1519-1533` |
 | **SA-M11** | **`opening-hours` orphan check reads only the dead column.** It builds `skipDate` from the empty `venue_opening_exceptions`, so a date governed by an `amended_hours` block is never skipped and the warning **falsely alarms** the admin. | `src/app/api/venue/opening-hours/route.ts:45-64` |
 | **SA-M12** | **`special_event` closures are dropped** by `src/lib/unified-availability.ts:231`, inside `getUnifiedAvailableSlots`. **Correction to the first draft, which called this consumerless:** it is consumed by `src/app/api/booking/unified-availability/route.ts`, a **public anonymous GET** documented as "guest booking page slot list". No first-party client calls it, but it is reachable by anyone. Fix the `.in()` list or delete the route. | |
-| **SA-M13** | **Legacy block branch skips the managed-calendar check.** Reachable: `20260918140000:5-42` mirrors `practitioners` into `unified_calendars` preserving the id without deleting sources. **Fix with `SA-H4` or it is cosmetic**, since RLS already grants what the check withholds. | `src/app/api/venue/practitioner-calendar-blocks/route.ts:175-209` |
+| **SA-M13** | **CLOSED 2026-08-16 (`501a02df`), by deletion rather than repair.** ~~**Legacy block branch skips the managed-calendar check.**~~ The branch is **unreachable**, not merely legacy: every venue is on unified scheduling and **production holds zero `practitioners` rows** (confirmed by query), so it could only ever fall through. Deleting it makes the `staffManagesCalendar` check unconditional, which is what the route always intended. The note that this is "cosmetic until `SA-H4`" still holds for the direct PostgREST path and is discharged by round 2. | `src/app/api/venue/practitioner-calendar-blocks/route.ts:175-209` |
 | **SA-M14** | **`created_by` FKs have no `ON DELETE`** on `calendar_blocks`, `practitioner_calendar_blocks`, `table_blocks`. Any staff member who ever made a block cannot be deleted; surfaces as an opaque 500. Proof it bites: `admin_hard_delete_venue` manually NULLs those columns. | `20260516130000:30-32` |
 | **SA-M15** | **Whole-blob last-write-wins with no concurrency token** on `opening_hours`, `availability_config` and calendar hours. Two admins editing on a Monday silently clobber each other. | `src/app/api/venue/opening-hours/route.ts:86-91` |
 | **SA-M16** | **Anonymous availability endpoint accepts an unvalidated `JSON.parse`d `phantoms` array**, cast with a bare `as PhantomBooking[]`, no zod, no length cap, fed into per-request loops. None of the three public availability routes are rate-limited, though the limiter exists and is used on `booking/create`. | `src/app/api/booking/availability/route.ts:574-582` |
@@ -379,7 +471,7 @@ Both are dead. `outsideHours` is computed against `dayStartMin`/`dayEndMin`, whi
 | **SA-M25** | **No audit trail and no undo** on any hours, break, closure or leave change. | |
 | **SA-M26** | **Guest manage flow has no `group_booking_id` awareness**, so one leg of a multi-service visit can be moved alone and the visit silently fragments. `guest_self_reschedule` is **default-ON**, so every venue is exposed. The only cross-cutting finding to survive round three intact. | `src/app/api/confirm/route.ts` reschedule branch |
 | **SA-M27** | **Overnight windows are structurally impossible** — `refine(end > start)` at four layers plus two DB CHECKs. The practitioners route error tells users to split the shift across two days. | |
-| **SA-M28** | **The diary cannot distinguish staff leave from ordinary off-hours, and merges them into one block** (VERIFIED 2026-08-15). `schedule-closure-blocks.ts` emits only three types: `venue_closed`, `venue_amended_hours`, `practitioner_closed`. At `:328-334` partial leave is concatenated into the **same array** as the off-working-hours ranges, passed through `mergeAdjacentRanges`, and emitted as `practitioner_closed` with `reason: null`. So a 16:00-17:00 leave abutting a 17:00 close **fuses into one grey block**, and "Sarah is on annual leave" renders identically to "Sarah does not work Wednesday afternoons". Full-day leave is worse: per `SA-M3` it is folded into `days_off` upstream, so it never reaches the diary as leave at all. Breaks are the exception and **do** render distinctly (amber, via `isBreakCalendarBlock` at `PractitionerCalendarView.tsx:487`), which is what makes the leave case look like an oversight rather than a design. Workaround: the separate leave page. **Blocks Phase 0's first item — see below.** | `src/lib/calendar/schedule-closure-blocks.ts:26,111,328-334`; `PractitionerCalendarView.tsx:486-508` |
+| **SA-M28** | **CLOSED 2026-08-16 (`58ca0359`).** `practitioner_leave` is now its own emitted type, rendering violet and labelled "On leave", distinct from grey off-hours; a fifth type `linked_venue_closed` was added at the same time so a partner column keeps blocking (working past *your own* closing time is a decision about your own business, which is what `SA-H5` is about; placing an appointment inside another venue's closed hours is not). Partial leave is now **clipped to the hours actually worked** rather than merged with the closed ranges: the minutes greyed are identical, but they are two non-overlapping sets carrying which is which. This was Phase 0's first item and it did unblock `isOccupyingBlock` as predicted — that helper needs a type that carries the leave/off-hours distinction, and now has one. Verified on staging. Original finding follows. ~~**The diary cannot distinguish staff leave from ordinary off-hours, and merges them into one block**~~ (VERIFIED 2026-08-15). `schedule-closure-blocks.ts` emits only three types: `venue_closed`, `venue_amended_hours`, `practitioner_closed`. At `:328-334` partial leave is concatenated into the **same array** as the off-working-hours ranges, passed through `mergeAdjacentRanges`, and emitted as `practitioner_closed` with `reason: null`. So a 16:00-17:00 leave abutting a 17:00 close **fuses into one grey block**, and "Sarah is on annual leave" renders identically to "Sarah does not work Wednesday afternoons". Full-day leave is worse: per `SA-M3` it is folded into `days_off` upstream, so it never reaches the diary as leave at all. Breaks are the exception and **do** render distinctly (amber, via `isBreakCalendarBlock` at `PractitionerCalendarView.tsx:487`), which is what makes the leave case look like an oversight rather than a design. Workaround: the separate leave page. **Blocks Phase 0's first item — see below.** | `src/lib/calendar/schedule-closure-blocks.ts:26,111,328-334`; `PractitionerCalendarView.tsx:486-508` |
 
 ---
 
@@ -443,6 +535,18 @@ Round three red-teamed the first draft and found six. All are fixed above, and l
 
 Also corrected from the target-state pass: **`recurrence_rule` on `unified_calendars` is not an unused column** (VERIFIED). It is read by `src/app/api/cron/materialize-event-sessions/route.ts:46-65`. Recurrence machinery exists for event calendars and was never extended to staff rota patterns.
 
+## 7.4 Errors found by implementing it, 2026-08-16
+
+Round three red-teamed the document. Building from it found five more, and the pattern differs from §7.3's: **round three checked whether claims were true, and they were. These are failures of completeness and of sizing, which re-reading cannot catch.**
+
+1. **The fail-open count was thirteen; it is 49.** The audit grepped for the `console.warn` that made a site visible, in a finding *about* invisibility, so its instrument could only find the harmless half. The 36 silent sites were the dangerous ones. See `SA-C3`.
+2. **`SA-H3` and `SA-H5` were sized as one helper in two loops.** Both needed a second layer the document never mentions: DOM hit-testing for `SA-H3`, a separate server-side `allowDuringBreaks` gate threaded through four call sites for `SA-H5`. The struck-through "highest value-per-line fix in the audit" was the most confident claim in the document and the most wrong.
+3. **`SA-C4`'s Critical rating rested on data that does not exist.** `availability_blocks.reason` is empty platform-wide. §7.3 item 5 raised the severity specifically for personal-data exposure; that limb is gone and the finding returns to High.
+4. **`SA-H4` understated the grant surface.** `anon` holds the full default set including `TRUNCATE`, not the three verbs the fix names. The scoping conclusion is unaffected, because RLS blocks the writes, but the revoke statement written from this document would have been incomplete.
+5. **A sixth type was needed that no finding asked for.** `linked_venue_closed`: `SA-H5` argues staff may work past closing, and applying that uniformly would have let one venue book inside a *partner's* closed hours. The audit treats the diary as single-tenant throughout; linked columns are a case it never considers.
+
+**What generalises.** Findings in this document are trustworthy about *where* a rule is wrong and unreliable about *how many layers enforce it*. Before scheduling anything remaining, enumerate the enforcing layers — the rule, the hit-testing, the server gate, the dry run — and verify the *safety* claim rather than the defect claim, since the defect claims have held up almost without exception and the safety claims are where the surprises are.
+
 ---
 
 # §8 GDPR assessment for SA-C4
@@ -452,20 +556,28 @@ The sibling audit ran a retrospective exploitation-log check for C0. The same di
 **What is exposed.** `availability_blocks` with `USING (true)` and no venue predicate, including `reason`, a free-text field an owner types when closing the venue. Plausible contents name a health condition or a bereavement of an identifiable staff member. `unified_calendars` additionally exposes staff names alongside their working patterns and days off, platform-wide.
 
 **Assessment required, in this order:**
-1. **Sample the data.** Run the §14 `reason` query against production. If every row is operational ("stock take", "bank holiday"), this is a confidentiality issue and no more. If any row names a person's health or a bereavement, it engages Art. 9 special-category data and the assessment below becomes live.
-2. **Check for exploitation.** Query access logs within the retention window for anonymous PostgREST reads of `availability_blocks` and `unified_calendars` that are not attributable to the app's own service-role traffic. The sibling audit's C0 note records how this was done.
-3. **Art. 33 (notify the ICO within 72 hours) and Art. 34 (notify data subjects)** are triggered only by an actual breach, not by exposure alone. Step 2 decides it. Document the decision either way, with the reasoning and the date.
-4. **Minimise regardless.** `reason` should become a controlled taxonomy with an optional private note that is never in an anonymously readable projection. This also serves `SA-M25`'s audit needs.
+1. ~~**Sample the data.**~~ **DONE 2026-08-16. `availability_blocks.reason` is empty platform-wide.** No operational text, no health or bereavement text, nothing. Step 1 was the gate on everything below it and it closes the assessment.
+2. ~~**Check for exploitation.**~~ **Not required.** There is no personal data in the exposed column to have been exploited. `unified_calendars` exposes staff *names* alongside working patterns, which is ordinary business-contact data of the kind any salon publishes, not special-category data.
+3. ~~**Art. 33 / Art. 34.**~~ **Not engaged.** Neither is triggered: there is no breach and, on the evidence of step 1, no personal-data exposure to constitute one. **This decision, its reasoning and its date are recorded here, which is what step 3 asked for either way.**
+4. **Minimise regardless — the one live item.** `reason` should become a controlled taxonomy with an optional private note that is never in an anonymously readable projection. Empty today is not a control; it is luck, and the first owner to type "Sarah's surgery" into that box re-opens everything struck through above. This also serves `SA-M25`'s audit needs. Sits in Phase 6 with the closure reason taxonomy.
 
-**Note for the fix:** dropping the anon policies is safe for request paths (everything public uses service-role) but interacts with **D1** in the sibling audit, which is unresolved. Sequence them together.
+> **Net effect on `SA-C4`:** the finding survives at **High** as a venue-enumeration oracle, and its fix is unchanged and still worth doing in round 2. What is gone is the GDPR limb, the Critical rating and the notification clock.
+
+~~**Note for the fix:** dropping the anon policies is safe for request paths (everything public uses service-role) but interacts with **D1** in the sibling audit, which is unresolved. Sequence them together.~~ **D1 is complete** (see the adversarial review above), so this dependency is discharged. Dropping the anon policies remains safe for request paths: everything public uses the service-role client.
 
 ---
 
 # §9 Observability: none of this would be visible in production
 
-**CONFIRMED.** Sentry is installed with **two** capture sites repo-wide. **3 of 22** crons alert. All thirteen fail-open paths report via `console.warn`. There is no slots-offered metric, no consistency cron, and no structured logging in the availability path.
+**CONFIRMED at the time of writing.** Sentry is installed with **two** capture sites repo-wide. **3 of 22** crons alert. All thirteen fail-open paths report via `console.warn`. There is no slots-offered metric, no consistency cron, and no structured logging in the availability path.
 
 **Every finding in this document would be invisible today.** A venue would discover `SA-C3` when a customer arrives to a locked door.
+
+> **UPDATED 2026-08-16 · `03b0053c`.** Two corrections and one real change.
+>
+> The count was wrong: there are **49** fail-open paths, not thirteen (see `SA-C3`). And of those 49, only thirteen reported via `console.warn` — the other **36 reported nothing at all**, which is worse than this section describes and is the reason the count was wrong in the first place.
+>
+> **All 49 now capture to Sentry**, fingerprinted by call site and tagged with the assumption the engine has just made. The locked-door scenario above is no longer silent. The rest of this section stands: **3 of 22** crons alert, and there is still no slots-offered metric, no consistency cron and no structured logging in the availability path. Those belong with §11.2 in Phase 1, because an alert that a read failed is not the same as a booking page that can say so.
 
 **Minimum viable instrumentation:**
 1. `Sentry.captureException` on every availability fetch error, tagged with venue and date. Converts `SA-C3` from invisible to paged.
@@ -593,24 +705,29 @@ Sizes: S ≈ under a day, M ≈ a few days, L ≈ a week or more.
 
 ### Phase 0 — Stop the bleeding
 
-| Item | Closes | Size |
-|---|---|---|
-| **Widen the diary block type first** so leave, off-hours and breaks are distinguishable (`schedule-closure-blocks.ts:26`) | `SA-M28`, and **unblocks the row below** | **S** |
-| `isOccupyingBlock(blockType)` in `slotOccupied` (`PractitionerCalendarView.tsx:1692`) and `appointmentWindowCollides` (`:1751`) | `SA-H3`, `SA-H5`, the `SA-M2` lockout | **S** |
-| Apply variant + add-on duration before the reschedule availability check (`src/app/api/confirm/route.ts:1457`) | `SA-C2` | **S** |
-| Availability check in the cancel-driven waitlist offer | `SA-H6` | **S** |
-| Suppress reminders for bookings inside a closure (`src/lib/booking/unified-scheduling-comms.ts:72-81`) | part of `SA-M2` | **S** |
-| `Sentry.captureException` at all thirteen fail-open sites | makes `SA-C3` visible | **S** |
-| ~~Re-validate immediately before insert~~ **DONE, on production** (sibling audit's C3 interim, five write paths) | interim `SA-C1` | ~~S~~ |
-| **Extend that re-check to `src/app/api/confirm/route.ts`** — the one appointment-writing path it does not cover | `SA-C1` on the reschedule path | **S** |
-| Booking-window guards on multi-service and group routes | `SA-H7` | **S** |
-| Move the full-day leave gate out of the `allowOutsideHours` block | `SA-M3` | **S** |
-| Two-pass offset in `venueLocalDateTimeToUtcMs` + DST fixtures | `SA-H1` | **M** |
-| Drop `s-maxage`; add `availability_epoch` | `SA-M9` | **S** |
-| Drop the nine anon policies; `REVOKE INSERT/UPDATE/DELETE` from `anon, authenticated` | `SA-C4`, `SA-H4` | **M** |
-| GDPR assessment per §8 | `SA-C4` | **S** |
+**Status 2026-08-16: round 1 is merged to `staging` and hand-tested. Round 2, the migration, has not started.** The two rows still open in round 1 were carved out deliberately, not missed.
+
+| Item | Closes | Size | Status |
+|---|---|---|---|
+| **Widen the diary block type first** so leave, off-hours and breaks are distinguishable (`schedule-closure-blocks.ts:26`) | `SA-M28`, and **unblocks the row below** | **S** | ✅ `58ca0359` |
+| `isOccupyingBlock(blockType)` in `slotOccupied` and `appointmentWindowCollides` | `SA-H3`, `SA-H5`, the `SA-M2` lockout | ~~S~~ **S ×3** | ✅ `79d2d889` + `cb51f514` + `c65fd0ef`. **Sized wrong.** The helper was one commit; making it reachable took two more — see `SA-H3` and `SA-H5` |
+| Apply variant + add-on duration before the reschedule availability check | `SA-C2` | **S** | ✅ `f56b3209` (+ `143a6c1a`) |
+| Availability check in the cancel-driven waitlist offer | `SA-H6` | **S** | ✅ `29a30a73` |
+| Suppress reminders for bookings inside a closure (`src/lib/booking/unified-scheduling-comms.ts:72-81`) | part of `SA-M2` | **S** | ⬜ **Carved out.** Outbound comms, fails silently: its own round |
+| `Sentry.captureException` at all ~~thirteen~~ **49** fail-open sites | makes `SA-C3` visible | ~~S~~ **M** | ✅ `03b0053c`. Visible, **not** fail-closed |
+| ~~Re-validate immediately before insert~~ **DONE, on production** (sibling audit's C3 interim, five write paths) | interim `SA-C1` | ~~S~~ | ✅ prior work |
+| **Extend that re-check to `src/app/api/confirm/route.ts`** — the one appointment-writing path it does not cover | `SA-C1` on the reschedule path | **S** | ✅ `f56b3209` |
+| Booking-window guards on multi-service and group routes | `SA-H7` | **S** | ✅ `68e3b6e4` |
+| Move the full-day leave gate out of the `allowOutsideHours` block | `SA-M3` | **S** | ✅ `b529bf0d` |
+| Two-pass offset in `venueLocalDateTimeToUtcMs` + DST fixtures | `SA-H1` | **M** | ⬜ **Carved out.** 59 of 2288 bookings over 90 days are off-grid and the fix moves reminder times for **existing** bookings: its own round |
+| Drop `s-maxage`; ~~add `availability_epoch`~~ | `SA-M9` | **S** | ✅ `501a02df` (header only; the epoch is Phase 1 work, §11.5) |
+| Delete the unreachable legacy block branch | `SA-M13` | **S** | ✅ `501a02df` |
+| Drop the nine anon policies; `REVOKE INSERT, UPDATE, DELETE, **TRUNCATE, REFERENCES, TRIGGER**` from `anon, authenticated` | `SA-C4`, `SA-H4` | **M** | ⬜ **Round 2, next.** Verb list corrected by the §14 query |
+| GDPR assessment per §8 | `SA-C4` | **S** | ✅ Assessment complete; `reason` empty platform-wide, Art. 33/34 not engaged, minimisation deferred to Phase 6 |
 
 **Ordering within Phase 0 (added 2026-08-15).** `isOccupyingBlock(blockType)` has to switch on a type that carries the distinction it needs, and today's does not: leave, off-hours and working-hour boundaries all arrive as `practitioner_closed` (`SA-M28`). Widen the emitted type **before** writing that helper, or the helper cannot tell a break it should permit from leave it should refuse, and the work stalls halfway. It is a small change in one file and it makes the highest-value fix in the audit actually implementable.
+
+> **Confirmed correct in practice, 2026-08-16.** This ordering call held: the widening landed first and the helper was written against a type that could answer. It also proved incomplete in one direction the note does not anticipate — a **sixth** type, `linked_venue_closed`, was needed so that "staff may work past closing" does not become "one venue may book inside a partner's closed hours". See §7.4 item 5.
 
 **Dependencies (UPDATED 2026-08-15).** ~~The revoke item depends on D1 being resolved.~~ **D1 is complete**, so that dependency is discharged: A2 narrowed `bookings` to column-level `SELECT` and realtime survived, `20270112120000` is the worked precedent, and the RLS pgTAP suite now runs in CI as a safety net. Run §14 first regardless. Everything else in Phase 0 is independent and can proceed in parallel.
 
@@ -664,6 +781,8 @@ order by table_name, grantee, privilege_type;
 ```
 Expected if the finding holds: `SELECT`, `INSERT`, `UPDATE`, `DELETE` for `authenticated`. **Keep `SELECT`** when revoking.
 
+> **RESULT 2026-08-16.** Broader than expected: **`anon` holds the full default grant set on all six tables, including `TRUNCATE`**, alongside `authenticated`. So the revoke must read `INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER`, keeping `SELECT`. The writes are blocked in practice today because `staff_manage_*` is `FOR ALL` with no `TO` clause and `auth.jwt()->>'email'` is null for `anon`, so the grant is unused reach rather than an open door — but write the full verb list.
+
 ```sql
 -- 2. SA-C4 / §8: is any closure reason personal or health-related?
 select id, venue_id, date_start, reason
@@ -672,6 +791,7 @@ where reason is not null and btrim(reason) <> ''
 order by created_at desc
 limit 200;
 ```
+> **RESULT 2026-08-16: zero rows. `reason` is empty platform-wide.** This is the query that closes §8 and downgrades `SA-C4` to High.
 
 ```sql
 -- 3. SA-H1: how many bookings are already off the interval grid?
@@ -680,6 +800,7 @@ select count(*) filter (where extract(minute from booking_time)::int % 15 <> 0) 
 from bookings
 where booking_date >= current_date - 90;
 ```
+> **RESULT 2026-08-16: 59 off-grid of 2288.** Small enough to be tractable, large enough that the fix moves reminder times for existing bookings — which is why `SA-H1` was carved out of round 1 into its own round.
 
 ```sql
 -- 4. Phase 2: existing overlaps that would make EXCLUDE fail on creation.
@@ -697,22 +818,29 @@ group by 1,2 order by 3 desc;
 -- 5. SA-M13: are there surviving legacy practitioners rows?
 select count(*) from practitioners;
 ```
+> **RESULT 2026-08-16: zero.** Which is why `SA-M13`'s branch was deleted rather than repaired, and why anything in this document reasoning about `practitioners` is reasoning about an empty set.
 
 ```sql
 -- 6. SA-C4 blast radius: how many venues have waitlist_v2 on (sizes SA-H6 too)?
 select count(*) from venues where feature_flags ->> 'waitlist_v2' = 'true';
 ```
+> **RESULT 2026-08-16: one, a test venue.** No live venue was ever exposed to `SA-H6`.
 
 ---
 
 # §15 Open questions
 
-1. **Does the mobile app consume `/api/venue/calendar-grid`?** Only a code comment says so; `Docs/MOBILE_API.md` does not list it. Decides whether `SA-M19` is Medium or Low. Settle in the mobile repo.
-2. **Do any venues still have `practitioners` rows?** Settles `SA-M13`. Query 5.
-3. **How many bookings are already off-grid?** Sizes `SA-H1` remediation. Query 3.
-4. **Is `venue_opening_exceptions` `[]` on production as well as staging?** Confirm before deleting the column (`SA-L1`).
-5. **Which venues have amended-hours blocks that widen rather than narrow?** These venues are living `SA-H2` and `SA-H3` together and are the right pilot group for Phase 1.
-6. **Is D1 in the sibling audit resolved?** It gates the `SA-H4` revoke.
+1. **Does the mobile app consume `/api/venue/calendar-grid`?** Only a code comment says so; `Docs/MOBILE_API.md` does not list it. Decides whether `SA-M19` is Medium or Low. Settle in the mobile repo. **Still open.**
+2. ~~**Do any venues still have `practitioners` rows?**~~ **ANSWERED 2026-08-16: zero.** `SA-M13` closed by deletion.
+3. ~~**How many bookings are already off-grid?**~~ **ANSWERED 2026-08-16: 59 of 2288 over 90 days.** `SA-H1` carved into its own round on this basis.
+4. **Is `venue_opening_exceptions` `[]` on production as well as staging?** Confirm before deleting the column (`SA-L1`). **Still open.**
+5. **Which venues have amended-hours blocks that widen rather than narrow?** These venues are living `SA-H2` and `SA-H3` together and are the right pilot group for Phase 1. **Still open, and now more useful:** `SA-H3` is fixed, so these venues are the ones who would notice if it regressed.
+6. ~~**Is D1 in the sibling audit resolved?**~~ **ANSWERED: yes, complete.** The `SA-H4` revoke is unblocked.
+
+**Added 2026-08-16, from implementing round 1:**
+
+7. **How many other single-layer fixes in this document are actually two-layer?** `SA-H3` and `SA-H5` both were. The remaining diary-facing findings (`SA-M2`'s comms chain, `SA-M7`, `SA-M21`) have not been re-examined with that question in mind. §7.4.
+8. **Does anything outside the diary rely on the four block types staff may now book over?** The `isOccupyingBlock` set is consumed in one component today. Phase 1's resolver should own that rule rather than the view.
 
 ---
 
@@ -724,4 +852,8 @@ Nine agents ran across three rounds. Round one investigated five layers in isola
 
 Confidence is highest on §3 and §4, where every claim was read at its line by at least two agents and the highest-stakes were re-read by the author. Confidence is lowest where a finding depends on an unverified consumer (`SA-M19`) or on production data this audit could not see (`SA-C4`'s blast radius, `SA-H1`'s remediation size); those are listed in §15 with the query that settles them.
 
-The recurring lesson, worth more than any single finding: **this codebase gets rules right in one place and does not carry them to their siblings.** The good resolver exists and one engine ignores it. The fail-closed pattern exists in one route and thirteen sites fail open. The admin-scoping helper exists and is wired to one policy. `isGuestBookingDateAllowed` exists and two create routes skip it. The fix that generalises is not any individual patch: it is §11.1, one resolver that no caller can bypass.
+The recurring lesson, worth more than any single finding: **this codebase gets rules right in one place and does not carry them to their siblings.** The good resolver exists and one engine ignores it. The fail-closed pattern exists in one route and **49** sites fail open. The admin-scoping helper exists and is wired to one policy. `isGuestBookingDateAllowed` exists and two create routes skip it. The fix that generalises is not any individual patch: it is §11.1, one resolver that no caller can bypass.
+
+> **Sharpened by implementation, 2026-08-16.** The lesson is right and it applies to this document as well as to the code. Every finding in §3 and §4 held; **the confidence statement above is calibrated for claims and not for sizes**, and it was the sizes that failed. `SA-H3` and `SA-H5` were each described as one change in one layer and each needed two, because the audit read the layer where the rule lives and not the layer that enforces it. A fix written from this document's own root-cause analysis shipped, passed CI, and changed nothing a user could do — twice.
+>
+> The practical rule for whoever picks this up: **trust the defect, re-derive the size.** Before scheduling any remaining finding, enumerate its enforcing layers and confirm the *safety* claims, which is where every surprise so far has come from. §7.4 records the five that were found this way.

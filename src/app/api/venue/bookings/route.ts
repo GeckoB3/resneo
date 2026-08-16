@@ -1161,7 +1161,10 @@ export async function POST(request: NextRequest) {
         // (allowBookingOverlap), be taken inside the service's minimum-notice window
         // (allowInsideNoticeWindow — a walk-in is "now") and run over a staff break
         // (allowDuringBreaks). We still run the interval check for duration sanity/limits
-        // and to honour hard calendar blocks (leave, scheduled classes/events). The
+        // and to honour hard calendar blocks: partial leave, full-day leave, and
+        // scheduled classes/events. Full-day leave only became a genuine block when it
+        // was lifted out of the `allowOutsideHours` gate; before that this comment was
+        // wrong about the case it named first (SA-M3). The
         // catalogue duration already folds in any add-on extension applied to the engine input.
         const walkInEndMinutes =
           parsed.data.duration_minutes != null

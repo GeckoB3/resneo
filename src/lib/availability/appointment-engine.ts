@@ -104,6 +104,18 @@ export interface AppointmentEngineInput {
    * Applied together with weekly opening hours; the first matching range wins.
    */
   venueOpeningExceptions?: VenueOpeningException[] | null;
+  /**
+   * Calendars on FULL-DAY leave for `date`.
+   *
+   * Carried separately because full-day leave is folded into `days_off` by
+   * `leaveRowsToDaysOffAndBlocks`, and `days_off` is consumed by the
+   * working-hours gate, which staff overrides skip. That made leave
+   * unenforceable on any path passing `allowOutsideHours`, while the code
+   * comments claimed the opposite (SA-M3). Partial leave never had this problem:
+   * it arrives as a `practitionerBlockedRange` with kind `leave`, which is
+   * checked unconditionally.
+   */
+  fullDayLeavePractitionerIds?: string[];
 }
 
 /** Apply venue timezone + per-service booking window to appointment availability (guest-facing paths should always call this). */
@@ -853,7 +865,11 @@ export function validateAppointmentCustomInterval(
      * Used for staff-initiated walk-ins, moves and resizes, which are deliberately
      * allowed to run outside the business's / calendar's opening hours (the staff
      * accepts a warning in the UI). Breaks, blocks, overlap, minimum-notice and
-     * duration limits are unaffected by this flag — relax those separately.
+     * duration limits are unaffected by this flag; relax those separately.
+     *
+     * Full-day leave is also unaffected, and is checked ahead of this flag via
+     * `input.fullDayLeavePractitionerIds`. It used to be skipped here, because
+     * full-day leave reaches the gate as a `days_off` entry (SA-M3).
      */
     allowOutsideHours?: boolean;
     /**
@@ -963,6 +979,17 @@ export function validateAppointmentCustomInterval(
   const customerEnd = t + coreDuration + buffer;
   const practMaxEnd = busyWall.length > 0 ? Math.max(...busyWall.map((i) => i.end)) : t;
   const busyEnd = Math.max(customerEnd, practMaxEnd);
+
+  // Full-day leave is NOT an opening-hours question and is checked before the
+  // override below can skip anything. It used to sit inside that block by
+  // accident: `leaveRowsToDaysOffAndBlocks` folds full-day leave into
+  // `days_off`, so the only thing enforcing it was the "not working this day"
+  // gate, and every staff move, resize and walk-in skipped it while the
+  // comments here claimed leave was still honoured (SA-M3). Partial leave was
+  // always safe: it arrives as a blocked range of kind `leave`, checked below.
+  if (input.fullDayLeavePractitionerIds?.includes(practitioner.id)) {
+    return { ok: false, reason: 'Staff on leave this day' };
+  }
 
   // Opening-hours / working-hours gates. Staff-initiated walk-ins, moves and
   // resizes pass `allowOutsideHours` to deliberately book past opening hours.
@@ -1264,6 +1291,7 @@ export async function fetchAppointmentInput(params: {
   let practitioners = (practitionersRes.data ?? []) as Practitioner[];
 
   let leavePartialBlocks: PractitionerCalendarBlockedRange[] = [];
+  let fullDayLeaveIds: string[] = [];
   if (!leaveRes.error && leaveRes.data?.length) {
     const { fullDayPractitionerIds, partialBlocks } = leaveRowsToDaysOffAndBlocks(
       leaveRes.data as Array<{
@@ -1273,6 +1301,10 @@ export async function fetchAppointmentInput(params: {
       }>,
     );
     leavePartialBlocks = partialBlocks;
+    // Kept alongside the `days_off` fold rather than instead of it: the fold is
+    // what hides the day from guests, and this is what survives a staff
+    // override (SA-M3).
+    fullDayLeaveIds = [...fullDayPractitionerIds];
     practitioners = practitioners.map((p) => {
       if (!fullDayPractitionerIds.has(p.id)) return p;
       const existing = Array.isArray(p.days_off) ? [...p.days_off] : [];
@@ -1442,6 +1474,7 @@ export async function fetchAppointmentInput(params: {
     practitionerBlockedRanges,
     venueOpeningHours,
     venueOpeningExceptions,
+    fullDayLeavePractitionerIds: fullDayLeaveIds,
   };
 }
 
@@ -1626,6 +1659,7 @@ export async function fetchCalendarAppointmentInput(params: {
     .gte('end_date', date);
 
   let leavePartialForCalendar: PractitionerCalendarBlockedRange[] = [];
+  let fullDayLeaveIdsForCalendar: string[] = [];
   if (!leaveErr && leaveRows?.length) {
     const { fullDayPractitionerIds, partialBlocks } = leaveRowsToDaysOffAndBlocks(
       leaveRows as Array<{
@@ -1636,6 +1670,8 @@ export async function fetchCalendarAppointmentInput(params: {
     );
     leavePartialForCalendar = partialBlocks;
     if (fullDayPractitionerIds.has(calendarId)) {
+      // See the `days_off` note in `fetchAppointmentInput` (SA-M3).
+      fullDayLeaveIdsForCalendar = [calendarId];
       const existing = Array.isArray(practitioner.days_off) ? [...practitioner.days_off] : [];
       if (!existing.includes(date)) existing.push(date);
       practitioner = { ...practitioner, days_off: existing };
@@ -1851,5 +1887,6 @@ export async function fetchCalendarAppointmentInput(params: {
     practitionerBlockedRanges,
     venueOpeningHours,
     venueOpeningExceptions,
+    fullDayLeavePractitionerIds: fullDayLeaveIdsForCalendar,
   };
 }

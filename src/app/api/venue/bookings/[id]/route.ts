@@ -2290,6 +2290,11 @@ export async function PATCH(
       // Staff moving/extending a booking past opening hours from the calendar
       // (the UI shows an amber "outside opening hours" warning first).
       const allowOutsideHoursCalendar = isAppointment && body.allow_outside_hours === true;
+      // Staff moving/extending a booking over a break from the calendar. A
+      // separate flag from the one above because the engine's break gate is
+      // separate: `allowOutsideHours` has never relaxed it, so the diary let
+      // the drag go and this route refused it (SA-H5).
+      const allowDuringBreaksCalendar = isAppointment && body.allow_during_breaks === true;
       const idLc = id.toLowerCase();
       const beforeEndHm =
         typeof (booking as { booking_end_time?: string | null }).booking_end_time === 'string'
@@ -2383,6 +2388,7 @@ export async function PATCH(
             body.processing_time_blocks !== undefined ? body.processing_time_blocks : undefined,
           allowManualOverlap: allowManualCalendarOverlap,
           allowOutsideHours: allowOutsideHoursCalendar,
+          allowDuringBreaks: allowDuringBreaksCalendar,
         });
         if (!intervalResult.ok) {
           return NextResponse.json(

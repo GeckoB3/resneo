@@ -1742,6 +1742,31 @@ function windowCrossesNonWorkingBlock(
   return false;
 }
 
+/**
+ * True if the window lands on a staff break.
+ *
+ * Tracked apart from `windowCrossesNonWorkingBlock` because the server keeps
+ * the two permissions apart: `allow_outside_hours` has never relaxed the
+ * engine's break gate, so a move over a break needs `allow_during_breaks` sent
+ * with it or the PATCH comes back 409 "Conflicts with a break" (SA-H5).
+ */
+function windowCrossesBreakBlock(
+  startMin: number,
+  endMin: number,
+  pracId: string,
+  dateStr: string,
+  blocks: CalendarBlock[],
+): boolean {
+  for (const bl of blocks) {
+    if (!isBreakCalendarBlock(bl)) continue;
+    if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
+    const b0 = timeToMinutes(bl.start_time);
+    const b1 = b0 + minutesBetweenStartAndEnd(bl.start_time, bl.end_time);
+    if (overlapsRange(startMin, endMin, b0, b1)) return true;
+  }
+  return false;
+}
+
 /** True if [startMin, endMin) overlaps another booking, block, class, or event on this column (half-open end). */
 function appointmentWindowCollides(
   startMin: number,
@@ -2626,6 +2651,8 @@ export function PractitionerCalendarView({
     endMin: number;
     invalid: boolean;
     outsideHours?: boolean;
+    /** Allowed, but lands on a break, which the server gates separately. */
+    overBreak?: boolean;
   } | null>(null);
   const calendarDragTargetRef = useRef<typeof calendarDragTarget>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaYPx: number } | null>(null);
@@ -4275,7 +4302,7 @@ export function PractitionerCalendarView({
     newDate: string,
     newTime: string,
     newPracId: string,
-    opts?: { allowOutsideHours?: boolean },
+    opts?: { allowOutsideHours?: boolean; allowDuringBreaks?: boolean },
   ) {
     const visit = resolveAppointmentVisit(rows.map(visitRowFor));
     if (!visit) return;
@@ -4311,6 +4338,10 @@ export function PractitionerCalendarView({
                 practitioner_id: resolveLinkedGridPractitionerIdForPatch(newPracId),
                 booking_end_time: `${sv.endHm}:00`,
                 allow_manual_overlap: true,
+                // The dry run has to be asked the same question the PATCH will
+                // be asked, or the visit is refused before it is attempted.
+                allow_outside_hours: opts?.allowOutsideHours === true,
+                allow_during_breaks: opts?.allowDuringBreaks === true,
               }),
             },
           );
@@ -4368,6 +4399,7 @@ export function PractitionerCalendarView({
       if (!row) continue;
       const { savePromise } = await patchBookingMove(row, newDate, sv.startHm, newPracId, {
         allowOutsideHours: opts?.allowOutsideHours,
+        allowDuringBreaks: opts?.allowDuringBreaks,
         partOfVisitMove: true,
       });
       saves.push(savePromise);
@@ -4404,7 +4436,7 @@ export function PractitionerCalendarView({
     newDate: string,
     newTime: string,
     newPracId: string,
-    opts?: { allowOutsideHours?: boolean; partOfVisitMove?: boolean },
+    opts?: { allowOutsideHours?: boolean; allowDuringBreaks?: boolean; partOfVisitMove?: boolean },
   ): Promise<{ savePromise: Promise<'ok' | 'failed'> }> {
     const prev = { ...booking };
     const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
@@ -4467,6 +4499,7 @@ export function PractitionerCalendarView({
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
             allow_outside_hours: opts?.allowOutsideHours === true,
+            allow_during_breaks: opts?.allowDuringBreaks === true,
             defer_modification_guest_notification: true,
           }),
         });
@@ -4529,7 +4562,11 @@ export function PractitionerCalendarView({
   }
 
   const patchBookingResize = useCallback(
-    async (booking: Booking, newEndHm: string, opts?: { allowOutsideHours?: boolean }) => {
+    async (
+      booking: Booking,
+      newEndHm: string,
+      opts?: { allowOutsideHours?: boolean; allowDuringBreaks?: boolean },
+    ) => {
       const prev = { ...booking };
       const linkedOwnerVenueId = booking._linkedOwnerVenueId;
       const startHm = booking.booking_time.slice(0, 5);
@@ -4611,6 +4648,7 @@ export function PractitionerCalendarView({
               ...(resizeBlocks ? { processing_time_blocks: resizeBlocks } : {}),
               allow_manual_overlap: true,
               allow_outside_hours: opts?.allowOutsideHours === true,
+              allow_during_breaks: opts?.allowDuringBreaks === true,
               skip_booking_modification_guest_notification: true,
             }),
           });
@@ -5368,6 +5406,13 @@ export function PractitionerCalendarView({
       targetStartMins < dayStartMin ||
       endMin > dayEndMin ||
       windowCrossesNonWorkingBlock(targetStartMins, endMin, pracId, dateStr, displayBlocks);
+    const overBreak = windowCrossesBreakBlock(
+      targetStartMins,
+      endMin,
+      pracId,
+      dateStr,
+      displayBlocks,
+    );
     const conflict = appointmentWindowCollides(
       targetStartMins,
       endMin,
@@ -5391,7 +5436,7 @@ export function PractitionerCalendarView({
     const sameColumn = resolveBookingColumnId(b, resourceParentById) === pracId && b.booking_date === dateStr;
     const label = sameColumn ? `Move to ${timeLabel}` : `Move to ${pracName} · ${timeLabel}`;
     setCalendarDragPreview({ label, invalid, outsideHours });
-    setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid, outsideHours });
+    setCalendarDragTarget({ pracId, startMin: targetStartMins, endMin, invalid, outsideHours, overBreak });
   }
 
   function handleDragCancel(_e: DragCancelEvent) {
@@ -5465,7 +5510,10 @@ export function PractitionerCalendarView({
       return;
     }
     const movedOutsideHours = target?.outsideHours === true;
-    if (movedOutsideHours) {
+    const movedOverBreak = target?.overBreak === true;
+    if (movedOverBreak) {
+      addToast('Moved over a break.', 'info');
+    } else if (movedOutsideHours) {
       addToast('Moved outside opening hours.', 'info');
     }
     // A multi-service visit moves as one booking: dragging the bar used to carry
@@ -5491,10 +5539,14 @@ export function PractitionerCalendarView({
       }
       void patchVisitMove(moveVisitRows, dateStr, newTime, pracId, {
         allowOutsideHours: movedOutsideHours,
+        allowDuringBreaks: movedOverBreak,
       });
       return;
     }
-    void patchBookingMove(b, dateStr, newTime, pracId, { allowOutsideHours: movedOutsideHours });
+    void patchBookingMove(b, dateStr, newTime, pracId, {
+      allowOutsideHours: movedOutsideHours,
+      allowDuringBreaks: movedOverBreak,
+    });
   }
 
   /**
@@ -5833,7 +5885,21 @@ export function PractitionerCalendarView({
           setResizePreviewEnd(null);
           if (committedEndMin === endM0) return;
           const extendedOutsideHours = committedEndMin > gridCloseMin;
-          if (extendedOutsideHours) {
+          // Growing a booking into a break needs the same override a move into
+          // one needs, or the PATCH refuses it (SA-H5).
+          const resizeColumnId = resolveBookingColumnId(booking, resourceParentById);
+          const extendedOverBreak =
+            resizeColumnId != null &&
+            windowCrossesBreakBlock(
+              startM,
+              committedEndMin,
+              resizeColumnId,
+              booking.booking_date,
+              displayBlocks,
+            );
+          if (extendedOverBreak) {
+            addToast('Extended over a break.', 'info');
+          } else if (extendedOutsideHours) {
             addToast('Extended outside opening hours.', 'info');
           }
           // Overlaps stay allowed (deliberate double-booking is legitimate) but
@@ -5860,7 +5926,10 @@ export function PractitionerCalendarView({
           if (visitRows) {
             void patchVisitResize(visitRows, committedEndMin);
           } else {
-            void patchBookingResize(booking, endStr, { allowOutsideHours: extendedOutsideHours });
+            void patchBookingResize(booking, endStr, {
+              allowOutsideHours: extendedOutsideHours,
+              allowDuringBreaks: extendedOverBreak,
+            });
           }
         };
 
@@ -5883,6 +5952,7 @@ export function PractitionerCalendarView({
       visitRowFor,
       withResizeHold,
       slotHeightPx,
+      displayBlocks,
     ],
   );
 

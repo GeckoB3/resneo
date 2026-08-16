@@ -12,7 +12,7 @@
 
 ---
 
-## IMPLEMENTATION STATUS, 2026-08-16 — round 1 shipped and hand-tested on staging
+## IMPLEMENTATION STATUS, 2026-08-16 — rounds 1 and 2 shipped and verified on staging
 
 **Read this before scheduling anything below.** Twelve commits are on `staging` (`0c2f4773..c65fd0ef`); `main` is still at `0c2f4773`. Round 1 was **code only, zero files under `supabase/`**, so it carried no schema window and none of the expand/contract hazard. Baseline after it: `tsc --noEmit` clean, **341 files / 3209 tests** passing, 260 migrations unchanged.
 
@@ -20,7 +20,11 @@
 
 **Deliberately carved out of round 1, still open.** `SA-H1`'s two-pass offset (59 of 2288 bookings over 90 days are off-grid, and the fix changes reminder timing for *existing* bookings) and closure-aware reminder suppression, the remaining half of `SA-M2` (outbound comms, fails silently). Each wants its own round.
 
-**Round 2, not started.** The migration: drop the nine anon SELECT policies (`SA-C4`), `REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER` from `anon, authenticated` on the six scheduling tables (`SA-H4`), keeping `SELECT`. **Any table this narrows must be excluded from `supabase/scripts/local_baseline_grants.sql`** or CI silently re-grants it and validates a permission environment that exists nowhere — §13's exit criteria carry this and it is the single easiest thing to get wrong. Run it from `C:/Resneo`; `.env.local` lives only there.
+**Round 2 shipped: `20270113120000`, on staging code and staging database.** Nine anon SELECT policies dropped (`SA-C4`), and `INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER` revoked from `anon, authenticated` on the six scheduling tables (`SA-H4`), `SELECT` kept. The six are excluded from `supabase/scripts/local_baseline_grants.sql` alongside `bookings`, or CI re-grants after migrations run and validates a permission environment that exists nowhere. `supabase/tests/scheduling_grants_test.sql` adds 18 assertions; the suite now runs 42 and passes.
+
+**Verified against the live staging database, not inferred.** Querying with the publishable key — the same request an anonymous attacker makes — `unified_calendars`, `availability_blocks`, `service_items`, `venue_services` and `service_schedule_exceptions` all return `[]`. Empty arrays rather than errors, which is the designed shape: `anon` keeps the privilege, RLS finds no permissive policy, no rows. An anonymous INSERT returns `42501 permission denied for table`, which is the **grant** refusing; before this migration the same request reached RLS and was refused one layer later. Both behavioural gates passed too: the diary still updates live from a second session (the realtime path on the two tables that keep `SELECT`, whose failure mode is silence), and a public booking still completes end to end.
+
+**Enumeration is narrowed, not closed, and the difference matters.** Roughly twenty further `TO anon` SELECT policies remain on the booking-catalogue tables: `appointment_services`, `calendar_service_assignments`, `service_variants`, `addons`, `class_types`, `class_instances`, `venue_resources` and the two collective tables. Several expose venue names and prices platform-wide by the identical mechanism. The nine dropped here are what this audit scoped; the rest are a separate surface with different public-page consumers and want their own pass. Recorded in the migration header as well, so it is not mistaken for a finished job.
 
 ### What staging testing changed, and it is not a footnote
 
@@ -304,6 +308,12 @@ Nine `TO anon` SELECT policies relevant to scheduling survive; only the waitlist
 
 **These policies are not load-bearing.** All public booking routes and both public page loaders use the service-role client, so they can be dropped without touching a request path.
 
+> **CLOSED 2026-08-16 · `20270113120000`, on staging code and staging database.** All nine dropped. Verified behaviourally rather than by reading the policy list: an anonymous request with the publishable key now returns `[]` from `unified_calendars`, `availability_blocks`, `service_items`, `venue_services` and `service_schedule_exceptions`, and a public booking still completes end to end.
+>
+> **The "not load-bearing" claim was re-derived before shipping, not inherited.** All 27 files importing the browser client issue no `.from()` against any affected table. Of the 166 files using the anon-key *server* client, the only anonymous ones are the three public create routes, and there every query runs on the admin client while the anon client is used solely for the login gate. Two `security_invoker` views exist in the schema and neither reads these tables. That check is the reason this was safe to ship without a flag.
+>
+> **Scope, stated so it is not overread.** Roughly twenty `TO anon` policies remain on the booking-catalogue tables and several leak venue names and prices by the same mechanism. This audit scoped nine. Platform-wide enumeration is narrowed, not closed; the remainder wants its own pass with its own consumer check.
+
 > **Independently re-verified 2026-08-15.** All nine policies exist at the cited migrations with the cited predicates. The load-bearing claim was tested the way the sibling audit learned to test one: **no file importing the browser Supabase client reads any of the nine tables.** This is the best-evidenced finding in the document and is safe to action.
 
 ---
@@ -378,6 +388,14 @@ Every scheduling table's RLS policy is `FOR ALL` with predicate `venue_id IN (SE
 > **The writes are nonetheless blocked today**, which is why this stays intra-venue and did not escalate: the `staff_manage_*` policies are `FOR ALL` with no `TO` clause, so they apply to every role, and `auth.jwt()->>'email'` is null for `anon`. The predicate fails and the write is refused. The grant is unused reach, not an open door — but it is reach nobody intended, and `TRUNCATE` in particular is not something to leave to a policy predicate.
 >
 > Also relevant to sizing: **`practitioners` has zero rows in production.** Any part of this work that reasons about that table is reasoning about an empty set.
+
+> **STEP 1 CLOSED 2026-08-16 · `20270113120000`, on staging code and staging database. Steps 2 and 3 remain open.**
+>
+> The six verbs are revoked from both client roles on all six tables, `SELECT` kept. Verified live: an anonymous INSERT now returns `42501 permission denied for table`, which is the **grant** refusing. That distinction is the whole proof — before this migration the identical request reached RLS and was refused one layer later by the predicate, so the error moved up a layer, which is exactly what the fix was for.
+>
+> **`SELECT` is kept deliberately and this is the load-bearing decision.** `PractitionerCalendarView` opens `postgres_changes` channels on `calendar_blocks` and `practitioner_calendar_blocks`. Removing `SELECT` does not error: the channel subscribes successfully and never fires again, silently, which is the failure D1 documented. Gated on staging before production, per D1's own lesson: the diary was confirmed still updating live from a second session on 2026-08-16.
+>
+> **Steps 2 and 3 are untouched and are what remains of this finding.** The policies are still role-blind — no scheduling policy references `staff.role`, and `caller_staff_admin_venue_ids()` is still wired to exactly one policy — so a non-admin staff member retains, *through the application's own routes*, the reach this finding describes. Revoking the grants closed the direct PostgREST path only. And `scripts/check-client-executable-functions.mjs` still polices `pg_proc` and nothing else, so nothing stops the next table arriving with the same default grants: **this migration fixed six tables, not the mechanism that produced them.**
 
 ---
 
@@ -547,6 +565,10 @@ Round three red-teamed the document. Building from it found five more, and the p
 
 **What generalises.** Findings in this document are trustworthy about *where* a rule is wrong and unreliable about *how many layers enforce it*. Before scheduling anything remaining, enumerate the enforcing layers — the rule, the hit-testing, the server gate, the dry run — and verify the *safety* claim rather than the defect claim, since the defect claims have held up almost without exception and the safety claims are where the surprises are.
 
+**Round 2 added a sixth, and it is the same lesson pointed at the schema.** The migration was correct first time and applied cleanly; its pgTAP suite failed CI **twice**, both times dying in setup before a single assertion ran, both times because a fixture was written from a table's `CREATE TABLE` without checking what later migrations did to it. `venue_services.area_id` became `NOT NULL` some 300 migrations after the table was created. `practitioner_leave_periods.practitioner_id` was re-pointed from `practitioners` to `unified_calendars` by `20260918140000`, while its sibling `practitioner_calendar_blocks.practitioner_id` was not — two identically named columns on adjacent tables resolving to different tables in the same UUID space, survivable only because `practitioners` holds zero rows.
+
+The sibling suite carries the identical scar in a comment: its fixture referenced `guests.name` after a later migration dropped it, and the whole file errored during setup, which is why nobody noticed it had never run. **Three occurrences of one mistake now.** `CREATE TABLE` is a historical record, not a description of the table. Read the `ALTER`s, and prefer a failure that is loud: a fixture that dies in setup reports `Tests: 0`, which is a *pass-shaped* failure if you read only the job status.
+
 ---
 
 # §8 GDPR assessment for SA-C4
@@ -562,6 +584,8 @@ The sibling audit ran a retrospective exploitation-log check for C0. The same di
 4. **Minimise regardless — the one live item.** `reason` should become a controlled taxonomy with an optional private note that is never in an anonymously readable projection. Empty today is not a control; it is luck, and the first owner to type "Sarah's surgery" into that box re-opens everything struck through above. This also serves `SA-M25`'s audit needs. Sits in Phase 6 with the closure reason taxonomy.
 
 > **Net effect on `SA-C4`:** the finding survives at **High** as a venue-enumeration oracle, and its fix is unchanged and still worth doing in round 2. What is gone is the GDPR limb, the Critical rating and the notification clock.
+>
+> **Round 2 shipped that fix on 2026-08-16 (`20270113120000`), so the exposure described in "What is exposed" above is closed for these nine tables.** Step 4, minimisation, is the only live item left and is now the *whole* of this section's remaining work: `reason` being empty is luck rather than a control, and the field is still writable, so the first owner to type "Sarah's surgery" into it re-opens everything struck through above — on the booking-catalogue tables that are still anonymously readable, if not on this one. Sits in Phase 6 with the closure reason taxonomy.
 
 ~~**Note for the fix:** dropping the anon policies is safe for request paths (everything public uses service-role) but interacts with **D1** in the sibling audit, which is unresolved. Sequence them together.~~ **D1 is complete** (see the adversarial review above), so this dependency is discharged. Dropping the anon policies remains safe for request paths: everything public uses the service-role client.
 
@@ -722,7 +746,8 @@ Sizes: S ≈ under a day, M ≈ a few days, L ≈ a week or more.
 | Two-pass offset in `venueLocalDateTimeToUtcMs` + DST fixtures | `SA-H1` | **M** | ⬜ **Carved out.** 59 of 2288 bookings over 90 days are off-grid and the fix moves reminder times for **existing** bookings: its own round |
 | Drop `s-maxage`; ~~add `availability_epoch`~~ | `SA-M9` | **S** | ✅ `501a02df` (header only; the epoch is Phase 1 work, §11.5) |
 | Delete the unreachable legacy block branch | `SA-M13` | **S** | ✅ `501a02df` |
-| Drop the nine anon policies; `REVOKE INSERT, UPDATE, DELETE, **TRUNCATE, REFERENCES, TRIGGER**` from `anon, authenticated` | `SA-C4`, `SA-H4` | **M** | ⬜ **Round 2, next.** Verb list corrected by the §14 query |
+| Drop the nine anon policies; `REVOKE INSERT, UPDATE, DELETE, **TRUNCATE, REFERENCES, TRIGGER**` from `anon, authenticated` | `SA-C4`, `SA-H4` step 1 | **M** | ✅ `20270113120000`, staging code + database. Verb list corrected by the §14 query |
+| Role predicates on admin-only policies; extend `check-client-executable-functions.mjs` past `pg_proc` | `SA-H4` steps 2-3 | **M** | ⬜ **Open.** The revoke closed the direct path; the policies are still role-blind and nothing stops the next table shipping with the same default grants |
 | GDPR assessment per §8 | `SA-C4` | **S** | ✅ Assessment complete; `reason` empty platform-wide, Art. 33/34 not engaged, minimisation deferred to Phase 6 |
 
 **Ordering within Phase 0 (added 2026-08-15).** `isOccupyingBlock(blockType)` has to switch on a type that carries the distinction it needs, and today's does not: leave, off-hours and working-hour boundaries all arrive as `practitioner_closed` (`SA-M28`). Widen the emitted type **before** writing that helper, or the helper cannot tell a break it should permit from leave it should refuse, and the work stalls halfway. It is a small change in one file and it makes the highest-value fix in the audit actually implementable.
@@ -731,7 +756,11 @@ Sizes: S ≈ under a day, M ≈ a few days, L ≈ a week or more.
 
 **Dependencies (UPDATED 2026-08-15).** ~~The revoke item depends on D1 being resolved.~~ **D1 is complete**, so that dependency is discharged: A2 narrowed `bookings` to column-level `SELECT` and realtime survived, `20270112120000` is the worked precedent, and the RLS pgTAP suite now runs in CI as a safety net. Run §14 first regardless. Everything else in Phase 0 is independent and can proceed in parallel.
 
-**Exit (UPDATED).** All merged; a concurrency test proves one winner; a fail-closed test proves 503 not empty. ~~`npm run test:db` runs in CI~~ — **already true**: the `rls-pgtap` job runs on every push and PR against a local Supabase built from the migrations, passing 24/24. Note the gotcha it carries: `supabase/scripts/local_baseline_grants.sql` applies hosted-equivalent table grants to that local instance, and **any table this phase narrows must be excluded from it**, exactly as `bookings` is, or CI will silently hand the privileges back and validate a permission environment that exists nowhere.
+**Exit (UPDATED).** All merged; a concurrency test proves one winner; a fail-closed test proves 503 not empty. ~~`npm run test:db` runs in CI~~ — **already true**: the `rls-pgtap` job runs on every push and PR against a local Supabase built from the migrations, ~~passing 24/24~~ **now 42/42**. Note the gotcha it carries: `supabase/scripts/local_baseline_grants.sql` applies hosted-equivalent table grants to that local instance, and **any table this phase narrows must be excluded from it**, exactly as `bookings` is, or CI will silently hand the privileges back and validate a permission environment that exists nowhere.
+
+> **The gotcha was real and the exclusion was made, 2026-08-16.** Seven tables are now skipped by that script rather than one. Recorded because the trap is invisible from the test's side: the suite would have passed while asserting against a database that differed from every real environment in exactly the way the migration was written to change.
+>
+> **Two Phase 0 exit criteria are still unmet and neither is close.** No concurrency test proves one winner (that is `SA-C1`, whose durable guard the operator deferred), and no fail-closed test proves 503 rather than empty, because `SA-C3` was made *visible* and not fail-closed — that needs the third `unavailable` state and a booking UI that can render it, which is §11.2 in Phase 1. **Phase 0 is not complete.** What is complete is every code and grant item in it.
 
 ### Phase 1 — One resolver
 Build `src/lib/availability/resolver/`; migrate all ten callers behind a per-venue flag with a shadow week (§11.1); land the §11.6 parity matrix. Closes `SA-C3`, `SA-H2`, `SA-M1`, `SA-M10`, `SA-M8`, `SA-M12`, `SA-M19`, `SA-L1`, `SA-L3`. **L.**
@@ -782,6 +811,8 @@ order by table_name, grantee, privilege_type;
 Expected if the finding holds: `SELECT`, `INSERT`, `UPDATE`, `DELETE` for `authenticated`. **Keep `SELECT`** when revoking.
 
 > **RESULT 2026-08-16.** Broader than expected: **`anon` holds the full default grant set on all six tables, including `TRUNCATE`**, alongside `authenticated`. So the revoke must read `INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER`, keeping `SELECT`. The writes are blocked in practice today because `staff_manage_*` is `FOR ALL` with no `TO` clause and `auth.jwt()->>'email'` is null for `anon`, so the grant is unused reach rather than an open door — but write the full verb list.
+>
+> **This query is now the post-migration verification, not the pre-flight.** After `20270113120000` it must return `SELECT` and nothing else, for both roles, on all six. Anything more means the REVOKE ran as a role that did not hold the grant, which fails silently and is the one way this migration can appear to work and not have.
 
 ```sql
 -- 2. SA-C4 / §8: is any closure reason personal or health-related?
@@ -841,6 +872,11 @@ select count(*) from venues where feature_flags ->> 'waitlist_v2' = 'true';
 
 7. **How many other single-layer fixes in this document are actually two-layer?** `SA-H3` and `SA-H5` both were. The remaining diary-facing findings (`SA-M2`'s comms chain, `SA-M7`, `SA-M21`) have not been re-examined with that question in mind. §7.4.
 8. **Does anything outside the diary rely on the four block types staff may now book over?** The `isOccupyingBlock` set is consumed in one component today. Phase 1's resolver should own that rule rather than the view.
+
+**Added 2026-08-16, from round 2:**
+
+9. **Which of the ~20 remaining `TO anon` policies are actually load-bearing?** The nine dropped here were provably not, because no browser-client or anon-key server path read them. The booking-catalogue tables (`appointment_services`, `calendar_service_assignments`, `service_variants`, `addons`, the class tables, the collectives) have not had that check and **may genuinely be read anonymously by a public page**, unlike these. Do not assume this round's answer transfers; it is the same "verify the safety claim" trap in a new place.
+10. **What stops the next table arriving with the same default grants?** Nothing today. `check-client-executable-functions.mjs` polices `pg_proc` only, which is why this survived four hardening migrations. `SA-H4` step 3 is the durable fix and is unscheduled.
 
 ---
 

@@ -84,6 +84,12 @@ const bodySchema = z.object({
   practitioner_id: z.string().uuid().optional(),
   allow_manual_overlap: z.boolean().optional(),
   allow_outside_hours: z.boolean().optional(),
+  /**
+   * Staff placement over a break. Separate from the flag above on purpose: the
+   * engine has never let `allowOutsideHours` relax its break check. See the
+   * sibling `schedule` route for why this arrived a round late (SA-H5).
+   */
+  allow_during_breaks: z.boolean().optional(),
   /** Plan and check without writing, so the form judges what the save will do. */
   dry_run: z.boolean().optional(),
   /** The caller will fire the guest notification itself. */
@@ -485,6 +491,7 @@ export async function PATCH(
           ...(blocks !== null ? { processingTimeBlocksOverride: blocks } : {}),
           allowManualOverlap: body.allow_manual_overlap === true,
           allowOutsideHours: body.allow_outside_hours === true,
+          allowDuringBreaks: body.allow_during_breaks === true,
           excludeBookingIds: visitBookingIds,
         });
         return { entry, result };

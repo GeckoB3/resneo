@@ -119,4 +119,67 @@ describe('the break override reaches the engine (SA-H5)', () => {
     // The move PATCH, the resize PATCH, and the visit dry run.
     expect(sent).toHaveLength(3);
   });
+
+  /**
+   * The visit save routes, missed by the original SA-H5 pass and found by the
+   * mobile app's delta audit (R17-4).
+   *
+   * These two are the ONLY way a visit is moved or re-serviced from the app and
+   * from the web modify form; the diary drag does not touch them. So a staff
+   * member could drag a single appointment over a break and not a visit, with
+   * nothing explaining the difference.
+   *
+   * Neither schema is `.strict()`, so the app's `allow_during_breaks` was being
+   * silently stripped rather than rejected — which is why this failed as a
+   * refusal at the engine and not as a 400 at the schema, and why nothing
+   * pointed at the missing field.
+   */
+  it.each([
+    'src/app/api/venue/visits/[groupBookingId]/schedule/route.ts',
+    'src/app/api/venue/visits/[groupBookingId]/services/route.ts',
+  ])('%s accepts and forwards allow_during_breaks', (route) => {
+    const source = read(route);
+    expect(source).toMatch(/allow_during_breaks:\s*z\.boolean\(\)\.optional\(\)/);
+    expect(source).toMatch(/allowDuringBreaks:\s*body\.allow_during_breaks === true/);
+  });
+
+  /**
+   * Accepting the flag is not enough on its own: it has to sit alongside the
+   * hours flag on the SAME validator call, or a route could accept the key and
+   * forward it from a different branch that never runs.
+   */
+  it.each([
+    'src/app/api/venue/visits/[groupBookingId]/schedule/route.ts',
+    'src/app/api/venue/visits/[groupBookingId]/services/route.ts',
+  ])('%s forwards it on the same call as allowOutsideHours', (route) => {
+    const source = read(route);
+    expect(source).toMatch(
+      /allowOutsideHours: body\.allow_outside_hours === true,\s*\n\s*allowDuringBreaks: body\.allow_during_breaks === true,/,
+    );
+  });
+
+  /**
+   * THE FIFTH CALLER IS DELIBERATELY EXCLUDED. Recorded here because an
+   * enumeration finds "four of five callers pass the flag" and the obvious
+   * conclusion is wrong.
+   *
+   * `api/venue/linked-calendar/booking` is a partner venue CREATING a booking
+   * on a shared calendar, and it passes none of the three staff overrides:
+   * not overlap, not outside-hours, not breaks. Its schema accepts none of
+   * them either.
+   *
+   * That is the `linked_venue_closed` rule from SA-H5 seen from another angle.
+   * Choosing to work past your own closing time is a decision about your own
+   * business; placing an appointment inside a PARTNER's break is not the same
+   * act, and the partner has not agreed to it. If linked venues are ever to
+   * get overrides, that is a grant-ladder decision in the linked-accounts
+   * spec, not a missing argument here.
+   */
+  it('does not quietly hand staff overrides to a linked partner venue', () => {
+    const source = read('src/app/api/venue/linked-calendar/booking/route.ts');
+    expect(source).toContain('validateAppointmentModificationInterval(');
+    expect(source).not.toContain('allowDuringBreaks');
+    expect(source).not.toContain('allowOutsideHours');
+    expect(source).not.toContain('allowManualOverlap');
+  });
 });

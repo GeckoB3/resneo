@@ -23,8 +23,26 @@ export interface ScheduleClosureCalendarBlock {
   start_time: string;
   end_time: string;
   reason: string | null;
-  block_type: 'venue_closed' | 'venue_amended_hours' | 'practitioner_closed';
+  block_type: ScheduleClosureBlockType;
 }
+
+/**
+ * Why `practitioner_leave` is separate from `practitioner_closed`.
+ *
+ * These used to be one type. Partial leave was concatenated into the same array
+ * as the off-working-hours ranges and merged, so a 16:00-17:00 leave abutting a
+ * 17:00 close fused into a single grey block, and "Sarah is on annual leave"
+ * rendered identically to "Sarah does not work Wednesday afternoons" (SA-M28).
+ *
+ * The distinction is also what lets a caller decide whether a block should stop
+ * staff booking over it. Leave is a person being absent; off-hours is a
+ * boundary a venue can choose to work past.
+ */
+export type ScheduleClosureBlockType =
+  | 'venue_closed'
+  | 'venue_amended_hours'
+  | 'practitioner_closed'
+  | 'practitioner_leave';
 
 export interface PractitionerLeavePeriodInput {
   practitioner_id: string;
@@ -321,17 +339,33 @@ export function buildPractitionerScheduleClosureBlocks(params: {
       const working = getWorkingRanges(asPractitioner, dateStr);
 
       let closedRanges: MinuteRange[] = [];
-      if (leave.fullDay || working.length === 0) {
+      let leaveRanges: MinuteRange[] = [];
+
+      if (leave.fullDay) {
+        // Recorded leave outranks an implicit day off: it says why, and the
+        // day-off boundary would only say the same thing less usefully.
+        leaveRanges = [{ start: bounds.start, end: bounds.end }];
+      } else if (working.length === 0) {
         closedRanges = [{ start: bounds.start, end: bounds.end }];
       } else {
         closedRanges = closedRangesFromOpenWindows(working, bounds.start, bounds.end);
         if (leave.partial.length > 0) {
-          closedRanges = mergeAdjacentRanges([...closedRanges, ...leave.partial]);
+          // Clip leave to the hours actually worked instead of merging the two
+          // sets. The minutes covered are identical to the merged version, so
+          // nothing that was greyed stops being greyed; they are now two
+          // non-overlapping sets carrying which is which.
+          const workingInBounds = intersectRanges(working, [
+            { start: bounds.start, end: bounds.end },
+          ]);
+          leaveRanges = intersectRanges(leave.partial, workingInBounds);
         }
       }
 
       for (const range of closedRanges) {
         out.push(toScheduleBlock('practitioner_closed', prac.id, dateStr, range, null));
+      }
+      for (const range of leaveRanges) {
+        out.push(toScheduleBlock('practitioner_leave', prac.id, dateStr, range, null));
       }
     }
   }
@@ -343,12 +377,14 @@ export function isScheduleClosureBlockType(blockType: string | undefined): boole
   return (
     blockType === 'venue_closed' ||
     blockType === 'venue_amended_hours' ||
-    blockType === 'practitioner_closed'
+    blockType === 'practitioner_closed' ||
+    blockType === 'practitioner_leave'
   );
 }
 
 export function scheduleClosureBlockLabel(blockType: string | undefined): string {
   if (blockType === 'venue_amended_hours') return 'Amended hours';
+  if (blockType === 'practitioner_leave') return 'On leave';
   if (blockType === 'venue_closed' || blockType === 'practitioner_closed') return 'Closed';
   return 'Closed';
 }

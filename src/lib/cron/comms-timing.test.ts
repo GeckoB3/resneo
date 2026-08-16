@@ -3,15 +3,15 @@ import {
   bookingCivilDatesForReminderWindow,
   msUntilBookingStartUtc,
 } from './comms-timing';
-import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
 describe('comms-timing', () => {
-  it('msUntilBookingStartUtc matches venueLocalDateTimeToUtcMs minus now (Europe/London summer)', () => {
+  it('msUntilBookingStartUtc matches venueLocalWallTimeToUtcMs minus now (Europe/London summer)', () => {
     const tz = 'Europe/London';
     const nowMs = Date.parse('2026-06-15T12:00:00.000Z');
     const bookingDate = '2026-06-16';
     const bookingTime = '14:30:00';
-    const startMs = venueLocalDateTimeToUtcMs(bookingDate, bookingTime, tz);
+    const startMs = venueLocalWallTimeToUtcMs(bookingDate, bookingTime, tz);
     expect(msUntilBookingStartUtc(bookingDate, bookingTime, tz, nowMs)).toBe(startMs - nowMs);
   });
 

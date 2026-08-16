@@ -1884,7 +1884,7 @@ export async function PATCH(
 
         /**
          * Venue-local wall clock encoded as UTC, matching every create path.
-         * This used to write a TRUE instant (`venueLocalDateTimeToUtcMs`), which
+         * This used to write a TRUE instant (via the venue clock helper), which
          * is an hour out from the create convention under BST. It was masked
          * here only because resource rows also carry `booking_end_time` and
          * every reader prefers that column; the class branch below had the same

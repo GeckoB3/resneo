@@ -9,7 +9,7 @@ import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ClassPaymentRequirement, ClassType, ClassInstance } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
 import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
-import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import {
   resolveVenueWideAllowedMinuteRanges,
@@ -159,7 +159,7 @@ export function isClassInstanceBookableForGuest(
   instance: Pick<ClassInstance, 'instance_date' | 'start_time'>,
   guestBookingWindow: GuestClassBookingWindow,
 ): boolean {
-  const startMs = venueLocalDateTimeToUtcMs(
+  const startMs = venueLocalWallTimeToUtcMs(
     instance.instance_date,
     instance.start_time,
     guestBookingWindow.venueTimezone,

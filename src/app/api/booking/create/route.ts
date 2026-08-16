@@ -66,7 +66,7 @@ import {
 } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
-import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
 import {
   captureBookingComplianceSubmissions,
@@ -1557,7 +1557,7 @@ async function handleNonTableBooking(
     // the create path; the resource-modify route should match this convention rather
     // than serialising venue-local wall-clock as UTC.
     estimatedEndTime = new Date(
-      venueLocalDateTimeToUtcMs(booking_date, endForVenue, venueTzResource),
+      venueLocalWallTimeToUtcMs(booking_date, endForVenue, venueTzResource),
     ).toISOString();
     const venueWideErrRes = venueWideBlocksRejectBookingWindow(
       venueWideHours.openingHours,

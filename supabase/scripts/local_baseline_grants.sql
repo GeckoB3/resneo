@@ -24,18 +24,38 @@
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 
--- `bookings` is EXCLUDED from the blanket grant. D1/A2 (20270112120000)
--- narrows it to column-level SELECT precisely to close C5 and N5, and a
--- blanket `GRANT ... ON ALL TABLES` here would run afterwards and hand the
--- columns straight back — leaving CI testing a permission environment that no
--- longer exists anywhere. The loop skips it so the table keeps exactly what
--- its migration gave it, and the suite asserts that narrowing directly.
+-- SEVEN TABLES ARE EXCLUDED from the blanket grant, for one reason.
+--
+-- `bookings` — D1/A2 (20270112120000) narrows it to column-level SELECT
+-- precisely to close C5 and N5.
+--
+-- The six scheduling tables — SA-C4/SA-H4 (20270113120000) revokes the client
+-- write privileges on them and keeps SELECT.
+--
+-- In both cases a blanket `GRANT ... ON ALL TABLES` here would run AFTERWARDS
+-- and hand the privileges straight back, leaving CI testing a permission
+-- environment that no longer exists anywhere. That is the specific trap: the
+-- suite would pass, and it would be asserting against a database that differs
+-- from every real one in exactly the way the migration was written to change.
+--
+-- The loop skips them so each keeps exactly what its migration gave it, and the
+-- suites assert those narrowings directly. **Any future migration that narrows
+-- a table must be added here at the same time.**
 DO $$
 DECLARE t record;
 BEGIN
   FOR t IN
     SELECT tablename FROM pg_tables
-     WHERE schemaname = 'public' AND tablename <> 'bookings'
+     WHERE schemaname = 'public'
+       AND tablename NOT IN (
+         'bookings',
+         'unified_calendars',
+         'calendar_blocks',
+         'availability_blocks',
+         'practitioner_leave_periods',
+         'practitioner_calendar_blocks',
+         'service_schedule_exceptions'
+       )
   LOOP
     EXECUTE format(
       'GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO authenticated', t.tablename);

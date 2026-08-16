@@ -54,6 +54,18 @@ const bodySchema = z
     allow_manual_overlap: z.boolean().optional(),
     allow_outside_hours: z.boolean().optional(),
     /**
+     * Staff placement over a break. A SEPARATE gate from the flag above,
+     * because the engine has never let `allowOutsideHours` relax its break
+     * check: a caller meaning "past closing" must not silently also mean "over
+     * a break".
+     *
+     * SA-H5 threaded this through the single-booking PATCH and its dry run and
+     * stopped one route short of the two visit routes, so a staff member could
+     * drag a single appointment over a break but not a multi-service visit,
+     * with nothing explaining the difference.
+     */
+    allow_during_breaks: z.boolean().optional(),
+    /**
      * Plan and check the whole visit, write nothing. The modify form's live
      * check and its save then judge the same request through the same code,
      * rather than the form validating each service on its own and hoping the
@@ -391,6 +403,7 @@ export async function PATCH(
           ...(t.blocks !== null ? { processingTimeBlocksOverride: t.blocks } : {}),
           allowManualOverlap: body.allow_manual_overlap === true,
           allowOutsideHours: body.allow_outside_hours === true,
+          allowDuringBreaks: body.allow_during_breaks === true,
           excludeBookingIds: visitBookingIds,
         });
         return { t, result };

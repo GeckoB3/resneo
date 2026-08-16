@@ -50,6 +50,7 @@ import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import {
   isGuestBookingDateAllowed,
+  isStaffWalkInBookingDateAllowed,
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -363,11 +364,31 @@ export async function POST(request: NextRequest) {
        * only real enforcement, and `booking/create` was the only public create
        * route calling it.
        *
+       * **This route is not public-only**, which the first version of this gate
+       * assumed. The staff mobile app creates every group booking here with a
+       * `phone` or `walk-in` source, and an unconditional guest check refused
+       * counter bookings on any venue with `allow_same_day_booking: false`. The
+       * split below mirrors `api/venue/bookings`, so a group and a single
+       * booking answer the same way: only `walk-in` skips the same-day rule.
+       *
        * Per member, on that member's own date: a group is not necessarily
        * same-day, and each member can hold a different service with a different
-       * window.
+       * window. The source applies to the whole request, so it is the same for
+       * every member.
        */
-      if (!isGuestBookingDateAllowed(person.booking_date, svcWindow, input.venueTimezone ?? 'Europe/London')) {
+      const groupDateAllowed =
+        source === 'walk-in'
+          ? isStaffWalkInBookingDateAllowed(
+              person.booking_date,
+              svcWindow,
+              input.venueTimezone ?? 'Europe/London',
+            )
+          : isGuestBookingDateAllowed(
+              person.booking_date,
+              svcWindow,
+              input.venueTimezone ?? 'Europe/London',
+            );
+      if (!groupDateAllowed) {
         return NextResponse.json(
           {
             error: `The date for ${person.person_label} is not available for booking`,

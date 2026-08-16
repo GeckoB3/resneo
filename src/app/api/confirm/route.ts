@@ -40,6 +40,11 @@ import {
   fetchAppointmentInput,
 } from "@/lib/availability/appointment-engine";
 import { mergeAppointmentServiceWithPractitionerLink } from "@/lib/appointments/merge-service-with-overrides";
+import { applyReservedDurationToInput } from "@/lib/appointments/reserved-appointment-duration";
+import {
+  createAppointmentSlotRecheck,
+  SLOT_TAKEN_RESPONSE,
+} from "@/lib/booking/revalidate-appointment-slot";
 import { cancellationDeadlineHoursBefore } from "@/lib/booking/cancellation-deadline";
 import { bookingEndFieldsForStorage } from "@/lib/booking/booking-end-time";
 import { loadActiveVariantForService } from "@/lib/venue/service-variants";
@@ -417,7 +422,7 @@ export async function POST(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from("bookings")
       .select(
-        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
+        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, addons_total_duration_minutes, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
       )
       .eq("id", bookingId)
       .single();
@@ -1464,6 +1469,65 @@ export async function POST(request: NextRequest) {
         input.existingBookings = input.existingBookings.filter(
           (b) => b.id !== bookingId,
         );
+
+        /**
+         * A self-reschedule may land on a DIFFERENT service. The row's variant
+         * and processing snapshot belong to the service they were taken from, so
+         * carrying them across left the booking pointing at a variant of another
+         * service: staff then got "Invalid or inactive variant for this service"
+         * on every later edit, and the old service's gap sat inside the new
+         * service's duration.
+         */
+        const previousServiceId =
+          (booking.service_item_id as string | null) ??
+          (booking.appointment_service_id as string | null);
+        const serviceChanged = bodyAppointmentServiceId !== previousServiceId;
+        const previousVariantId = serviceChanged
+          ? null
+          : ((booking.service_variant_id as string | null) ?? null);
+
+        // An inactive or deleted variant is dropped rather than carried, for the
+        // same reason: a variant the server can no longer resolve makes the
+        // booking permanently uneditable.
+        const keptVariant = previousVariantId
+          ? await loadActiveVariantForService({
+              admin: supabase,
+              venueId: booking.venue_id as string,
+              serviceId: bodyAppointmentServiceId as string,
+              variantId: previousVariantId,
+            })
+          : null;
+        const nextVariantId = keptVariant?.id ?? null;
+
+        /**
+         * Add-ons stay with the booking across a reschedule, so their minutes
+         * are part of the length being reserved. Carried only when the service
+         * is unchanged: add-ons belong to a service, so a move to a different
+         * one cannot bring them, which is the rule the variant follows above.
+         */
+        const carriedAddonMinutes = serviceChanged
+          ? 0
+          : Number(
+              (booking as { addons_total_duration_minutes?: number | null })
+                .addons_total_duration_minutes ?? 0,
+            );
+
+        /**
+         * SA-C2. Both adjustments go on the input BEFORE the availability check,
+         * which is what `booking/create` does and what this route did not: they
+         * were applied to the write only, so the engine was asked about the
+         * parent's duration and the row was written with the variant's. The
+         * write side of that mismatch was found and fixed once already, and the
+         * comment explaining it is still below. Nobody checked the other half of
+         * the same sentence.
+         */
+        applyReservedDurationToInput({
+          services: input.services,
+          serviceId: bodyAppointmentServiceId,
+          variant: keptVariant,
+          extraMinutes: carriedAddonMinutes,
+        });
+
         attachVenueClockToAppointmentInput(input, venueAppt ?? {}, svcWindow);
         const result = computeAppointmentAvailability(input);
         const prac = result.practitioners.find(
@@ -1497,41 +1561,19 @@ export async function POST(request: NextRequest) {
           : undefined;
 
         /**
-         * A self-reschedule may land on a DIFFERENT service. The row's variant
-         * and processing snapshot belong to the service they were taken from, so
-         * carrying them across left the booking pointing at a variant of another
-         * service: staff then got "Invalid or inactive variant for this service"
-         * on every later edit, and the old service's gap sat inside the new
-         * service's duration.
-         */
-        const previousServiceId =
-          (booking.service_item_id as string | null) ??
-          (booking.appointment_service_id as string | null);
-        const serviceChanged = bodyAppointmentServiceId !== previousServiceId;
-        const previousVariantId = serviceChanged
-          ? null
-          : ((booking.service_variant_id as string | null) ?? null);
-
-        // An inactive or deleted variant is dropped rather than carried, for the
-        // same reason: a variant the server can no longer resolve makes the
-        // booking permanently uneditable.
-        const keptVariant = previousVariantId
-          ? await loadActiveVariantForService({
-              admin: supabase,
-              venueId: booking.venue_id as string,
-              serviceId: bodyAppointmentServiceId as string,
-              variantId: previousVariantId,
-            })
-          : null;
-        const nextVariantId = keptVariant?.id ?? null;
-
-        /**
-         * The variant's own duration, not the parent's. Recomputing from the
-         * parent silently shrank a 150-minute variant booking to the 60-minute
-         * service default on every guest reschedule.
+         * The length the engine actually reserved. `baseSvc` is the engine input
+         * row, already carrying the variant's duration and the add-on minutes
+         * folded in above, which is the same rule `booking/create` follows and
+         * for the same reason: `svc` is rebuilt by re-applying the variant, so
+         * reading the duration from it resets to the variant's own and drops the
+         * add-on minutes.
+         *
+         * Reading it from the input is also what keeps the check and the write
+         * in step by construction. They cannot disagree about a duration they
+         * both take from the same row (SA-C2).
          */
         const rescheduleDurationMinutes =
-          keptVariant?.duration_minutes ?? svc?.duration_minutes ?? null;
+          baseSvc?.duration_minutes ?? svc?.duration_minutes ?? null;
 
         let estimatedEndTime: string | null = null;
         let rescheduleBookingEndTime: string | null = null;
@@ -1609,6 +1651,34 @@ export async function POST(request: NextRequest) {
         });
         if (reschedCompliance.blocked) {
           return NextResponse.json(reschedCompliance.body, { status: 409 });
+        }
+
+        /**
+         * SA-C1 on the reschedule path. This was the one appointment-writing
+         * route the C3 interim never covered, so the window between the slot
+         * check above and the write below stayed hundreds of milliseconds wide,
+         * spanning a compliance check and a cancellation-policy lookup.
+         *
+         * `input` is handed over as validated, mutations and all: it carries the
+         * variant and the add-on minutes folded in above, and the re-check
+         * replaces only the volatile part. Rebuilding it here would drop both
+         * and ask a different question from the one that was answered.
+         *
+         * Narrows the race. Does not close it, and must not be described as
+         * doing so. A failed re-check allows the write, because this is a
+         * narrowing of an existing race rather than a new gate.
+         */
+        const rescheduleRecheck = createAppointmentSlotRecheck({
+          supabase,
+          venueId: booking.venue_id as string,
+          date: newDate,
+          practitionerId: bodyPractitionerId,
+          serviceId: bodyAppointmentServiceId,
+          timeHm: timeStr,
+          input,
+        });
+        if (!(await rescheduleRecheck.stillAvailable())) {
+          return NextResponse.json(SLOT_TAKEN_RESPONSE, { status: 409 });
         }
 
         const nowIso = new Date().toISOString();

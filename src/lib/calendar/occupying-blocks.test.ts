@@ -103,4 +103,25 @@ describe('the diary applies the rule (SA-H3, SA-H5)', () => {
     expect(source).toContain('windowCrossesNonWorkingBlock(');
     expect(source).toContain('isNonWorkingBlock');
   });
+
+  /**
+   * The rule and the hit-testing are two separate gates, and passing the first
+   * one alone changed nothing a user could see.
+   *
+   * `slotOccupied` returning false only ENABLES the empty-slot button. The
+   * block is an overlay at z-index 15 and the slot buttons sit at z-0, so the
+   * block still physically covered them and its disabled inner button ate the
+   * click. On an amended-hours day every minute carries a block, so the entire
+   * column was unclickable while both loops above were filtering correctly.
+   *
+   * Found on staging, not by the suite. Guarded here because the coupling is
+   * invisible from either side: nothing in the shell mentions availability, and
+   * nothing in the rules mentions z-order.
+   */
+  it('lets clicks through the overlay for blocks staff may book over (SA-H3)', () => {
+    const source = viewSource();
+    expect(source).toContain('clickThrough={!isOccupyingBlock(bl.block_type)}');
+    // The prop has to actually reach `pointerEvents`, or it is decoration.
+    expect(source).toContain("pointerEvents: isDragging || clickThrough ? 'none' : undefined");
+  });
 });

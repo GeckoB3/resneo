@@ -2007,6 +2007,7 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
   slotHeightPx,
   heightExtraPx = 0,
   canDrag,
+  clickThrough = false,
   children,
 }: {
   block: CalendarBlock;
@@ -2016,6 +2017,22 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
   slotHeightPx: number;
   heightExtraPx?: number;
   canDrag: boolean;
+  /**
+   * Let clicks reach the empty-slot button underneath.
+   *
+   * The shell is an overlay at z-index 15 and the slot buttons sit at z-0, so
+   * whatever the availability rules say, a block physically covers the slots it
+   * spans: its inner button is `disabled` for closures and breaks, which
+   * swallows the click rather than passing it down. Making
+   * `venue_amended_hours` non-occupying therefore fixed the rule and changed
+   * nothing a receptionist could do, because on an amended day every minute is
+   * covered by a block and the whole column was dead to the mouse (SA-H3).
+   *
+   * Drag and drop never had the problem: dnd-kit resolves a drop by pointer
+   * collision against registered droppable rects, which ignores z-order, so the
+   * drag path exercised the fixed rule and the click path could not.
+   */
+  clickThrough?: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
@@ -2030,7 +2047,7 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
     transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : 15,
     opacity: isDragging ? 0.85 : 1,
-    pointerEvents: isDragging ? 'none' : undefined,
+    pointerEvents: isDragging || clickThrough ? 'none' : undefined,
   } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
     ? { listeners, attributes, setActivatorNodeRef }
@@ -7343,6 +7360,7 @@ export function PractitionerCalendarView({
                             slotHeightPx={slotHeightPx}
                             heightExtraPx={resizeExtra}
                             canDrag={canDrag}
+                            clickThrough={!isOccupyingBlock(bl.block_type)}
                           >
                             {(handle) => (
                               <div

@@ -1561,19 +1561,25 @@ export async function POST(request: NextRequest) {
           : undefined;
 
         /**
-         * The length the engine actually reserved. `baseSvc` is the engine input
-         * row, already carrying the variant's duration and the add-on minutes
-         * folded in above, which is the same rule `booking/create` follows and
-         * for the same reason: `svc` is rebuilt by re-applying the variant, so
-         * reading the duration from it resets to the variant's own and drops the
-         * add-on minutes.
+         * The length the engine actually reserved, which is the whole point of
+         * SA-C2: the check and the write must not be able to disagree.
          *
-         * Reading it from the input is also what keeps the check and the write
-         * in step by construction. They cannot disagree about a duration they
-         * both take from the same row (SA-C2).
+         * `svc` is the right row and `baseSvc` is not, because the engine
+         * resolves a practitioner's service the same way, by merging the
+         * `practitioner_services` link over the input row
+         * (`appointment-engine.ts:550`). `baseSvc` carries the variant and the
+         * add-on minutes folded in above; merging the link on top applies a
+         * practitioner's `custom_duration_minutes` when there is one, and
+         * changes nothing when there is not. Reading `baseSvc` directly would
+         * write the catalogue length for a practitioner who has their own.
+         *
+         * Note this differs from `booking/create`, which reads `baseSvc`: its
+         * `svc` is rebuilt by re-applying the variant on top of the merge, so
+         * the duration there resets to the variant's own and drops the add-on
+         * minutes. Here `svc` is only the merge, so it keeps both.
          */
         const rescheduleDurationMinutes =
-          baseSvc?.duration_minutes ?? svc?.duration_minutes ?? null;
+          svc?.duration_minutes ?? baseSvc?.duration_minutes ?? null;
 
         let estimatedEndTime: string | null = null;
         let rescheduleBookingEndTime: string | null = null;

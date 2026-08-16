@@ -498,7 +498,7 @@ function calendarBlockShellClass(bl: CalendarBlock): string {
   if (bl.block_type === 'practitioner_leave') {
     return 'border-violet-200 bg-violet-50/95';
   }
-  if (bl.block_type === 'practitioner_closed') {
+  if (bl.block_type === 'practitioner_closed' || bl.block_type === 'linked_venue_closed') {
     return 'border-slate-300 bg-slate-200/90';
   }
   return 'border-slate-300 bg-slate-200/90 hover:bg-slate-300/90';
@@ -509,7 +509,9 @@ function calendarBlockAccentColor(bl: CalendarBlock): string {
   if (bl.block_type === 'venue_amended_hours') return '#0284c7';
   if (bl.block_type === 'venue_closed') return '#64748b';
   if (bl.block_type === 'practitioner_leave') return '#7c3aed';
-  if (bl.block_type === 'practitioner_closed') return '#94a3b8';
+  if (bl.block_type === 'practitioner_closed' || bl.block_type === 'linked_venue_closed') {
+    return '#94a3b8';
+  }
   return '#94a3b8';
 }
 

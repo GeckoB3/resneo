@@ -42,7 +42,17 @@ export type ScheduleClosureBlockType =
   | 'venue_closed'
   | 'venue_amended_hours'
   | 'practitioner_closed'
-  | 'practitioner_leave';
+  | 'practitioner_leave'
+  /**
+   * A LINKED venue's own closed hours, on a partner column.
+   *
+   * Distinct from `venue_closed` so it keeps blocking. Staff may book past
+   * their own venue's closing time, which is what SA-H5 is about, but choosing
+   * to work late is a decision about your own business. Placing an appointment
+   * inside another venue's closed hours is not the same act, and the partner
+   * has not agreed to it.
+   */
+  | 'linked_venue_closed';
 
 export interface PractitionerLeavePeriodInput {
   practitioner_id: string;
@@ -126,7 +136,7 @@ export function buildLinkedColumnClosureBlocks(params: {
     start_time: minutesToTime(r.start),
     end_time: minutesToTime(r.end),
     reason: null,
-    block_type: 'practitioner_closed' as const,
+    block_type: 'linked_venue_closed' as const,
   }));
 }
 
@@ -378,13 +388,13 @@ export function isScheduleClosureBlockType(blockType: string | undefined): boole
     blockType === 'venue_closed' ||
     blockType === 'venue_amended_hours' ||
     blockType === 'practitioner_closed' ||
-    blockType === 'practitioner_leave'
+    blockType === 'practitioner_leave' ||
+    blockType === 'linked_venue_closed'
   );
 }
 
 export function scheduleClosureBlockLabel(blockType: string | undefined): string {
   if (blockType === 'venue_amended_hours') return 'Amended hours';
   if (blockType === 'practitioner_leave') return 'On leave';
-  if (blockType === 'venue_closed' || blockType === 'practitioner_closed') return 'Closed';
   return 'Closed';
 }

@@ -32,6 +32,13 @@ describe('isOccupyingBlock', () => {
     expect(isOccupyingBlock('class_session')).toBe(true);
   });
 
+  it('still refuses a booking inside a partner venue\'s closed hours', () => {
+    // Working past your own closing time is a decision about your own business.
+    // Booking into another venue's closed hours is not, and they have not
+    // agreed to it, so a linked column stays hard.
+    expect(isOccupyingBlock('linked_venue_closed')).toBe(true);
+  });
+
   it('refuses unknown and absent types, so new ones fail safe', () => {
     expect(isOccupyingBlock('something_added_later')).toBe(true);
     expect(isOccupyingBlock(undefined)).toBe(true);

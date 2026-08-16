@@ -27,8 +27,13 @@ describe('buildLinkedColumnClosureBlocks', () => {
       ['09:00', '10:00'],
       ['18:00', '22:00'],
     ]);
+    // `linked_venue_closed`, not `practitioner_closed`: staff may book past
+    // their own venue's closing time, but a partner's closed hours stay a hard
+    // conflict. See `isOccupyingBlock`.
     expect(
-      blocks.every((b) => b.calendar_id === 'linked:v1:p1' && b.block_type === 'practitioner_closed'),
+      blocks.every(
+        (b) => b.calendar_id === 'linked:v1:p1' && b.block_type === 'linked_venue_closed',
+      ),
     ).toBe(true);
   });
 

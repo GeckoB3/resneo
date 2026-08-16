@@ -70,9 +70,19 @@ INSERT INTO practitioner_calendar_blocks (venue_id, practitioner_id, block_date,
 VALUES ('00000000-0000-0000-0000-0000000000d1',
         '00000000-0000-0000-0000-0000000000d3', '2026-09-01', '14:00', '15:00');
 
+-- NOTE THE ASYMMETRY, which is real and not a typo above.
+--
+-- `practitioner_leave_periods.practitioner_id` points at UNIFIED_CALENDARS:
+-- `20260918140000_practitioner_leave_unified_calendar_fk.sql:52` dropped the
+-- legacy FK to `practitioners` and re-pointed it. Its sibling
+-- `practitioner_calendar_blocks.practitioner_id` was never re-pointed and still
+-- references `practitioners`. Two identically named columns on two adjacent
+-- tables, resolving to two different tables in the same UUID space -- which is
+-- survivable in production only because `practitioners` has zero rows and every
+-- venue is unified.
 INSERT INTO practitioner_leave_periods (venue_id, practitioner_id, start_date, end_date)
 VALUES ('00000000-0000-0000-0000-0000000000d1',
-        '00000000-0000-0000-0000-0000000000d3', '2026-09-02', '2026-09-03');
+        '00000000-0000-0000-0000-0000000000d5', '2026-09-02', '2026-09-03');
 
 INSERT INTO availability_blocks (venue_id, date_start, date_end, reason)
 VALUES ('00000000-0000-0000-0000-0000000000d1', '2026-09-04', '2026-09-04', 'stock take');
@@ -141,10 +151,14 @@ SELECT throws_ok(
              '00000000-0000-0000-0000-0000000000d3', '2026-09-10', '09:00', '10:00') $$,
   '42501', NULL, 'authenticated cannot INSERT practitioner_calendar_blocks');
 
+-- The calendar id, not the practitioner id, for the FK reason noted at the
+-- fixture. The privilege check fires before the constraint either way, so this
+-- would pass with the wrong id today; it is correct so that removing the
+-- revoke makes this fail as a privilege assertion rather than an FK error.
 SELECT throws_ok(
   $$ INSERT INTO practitioner_leave_periods (venue_id, practitioner_id, start_date, end_date)
      VALUES ('00000000-0000-0000-0000-0000000000d1',
-             '00000000-0000-0000-0000-0000000000d3', '2026-09-11', '2026-09-12') $$,
+             '00000000-0000-0000-0000-0000000000d5', '2026-09-11', '2026-09-12') $$,
   '42501', NULL, 'authenticated cannot INSERT practitioner_leave_periods');
 
 SELECT throws_ok(

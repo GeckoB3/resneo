@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isNonWorkingBlock, isOccupyingBlock } from './occupying-blocks';
 
@@ -66,5 +68,39 @@ describe('isNonWorkingBlock', () => {
     expect(isNonWorkingBlock('practitioner_leave')).toBe(false);
     expect(isNonWorkingBlock('class_session')).toBe(false);
     expect(isNonWorkingBlock(undefined)).toBe(false);
+  });
+});
+
+/**
+ * The tests above prove the rule. They do not prove the diary applies it: with
+ * both calls deleted from `PractitionerCalendarView` they still pass, because
+ * the predicate is fine and simply unused. That is the precise failure this
+ * whole finding is, a helper that exists and is bypassed, so it gets its own
+ * guard.
+ *
+ * A bypass guard, not a behaviour test. The view is a 8,000-line client
+ * component and mounting it to assert a slot's disabled state would cost far
+ * more than it proves; staging testing covers the behaviour.
+ */
+describe('the diary applies the rule (SA-H3, SA-H5)', () => {
+  const VIEW = 'src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx';
+
+  function viewSource(): string {
+    return readFileSync(path.join(process.cwd(), VIEW), 'utf8');
+  }
+
+  it('filters blocks through isOccupyingBlock in both conflict loops', () => {
+    const source = viewSource();
+    const guards = source.match(/if \(!isOccupyingBlock\(bl\.block_type\)\) continue;/g) ?? [];
+
+    // One in `slotOccupied`, one in `appointmentWindowCollides`. Both, or the
+    // fix is half applied: the grid would unlock while drags stayed refused.
+    expect(guards).toHaveLength(2);
+  });
+
+  it('derives the outside-hours warning from the blocks, not the canvas bounds', () => {
+    const source = viewSource();
+    expect(source).toContain('windowCrossesNonWorkingBlock(');
+    expect(source).toContain('isNonWorkingBlock');
   });
 });

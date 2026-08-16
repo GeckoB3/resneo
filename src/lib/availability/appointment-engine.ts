@@ -27,6 +27,10 @@ import { getDayOfWeek } from '@/lib/availability/engine';
 import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import {
+  reportAvailabilityReadFailure,
+  reportAvailabilityReadFailures,
+} from '@/lib/availability/availability-read-failure';
+import {
   mapCalendarToResource,
   attachHostCalendarsToResources,
   mergedResourceEffectiveRangesForHost,
@@ -100,6 +104,18 @@ export interface AppointmentEngineInput {
    * Applied together with weekly opening hours; the first matching range wins.
    */
   venueOpeningExceptions?: VenueOpeningException[] | null;
+  /**
+   * Calendars on FULL-DAY leave for `date`.
+   *
+   * Carried separately because full-day leave is folded into `days_off` by
+   * `leaveRowsToDaysOffAndBlocks`, and `days_off` is consumed by the
+   * working-hours gate, which staff overrides skip. That made leave
+   * unenforceable on any path passing `allowOutsideHours`, while the code
+   * comments claimed the opposite (SA-M3). Partial leave never had this problem:
+   * it arrives as a `practitionerBlockedRange` with kind `leave`, which is
+   * checked unconditionally.
+   */
+  fullDayLeavePractitionerIds?: string[];
 }
 
 /** Apply venue timezone + per-service booking window to appointment availability (guest-facing paths should always call this). */
@@ -849,7 +865,11 @@ export function validateAppointmentCustomInterval(
      * Used for staff-initiated walk-ins, moves and resizes, which are deliberately
      * allowed to run outside the business's / calendar's opening hours (the staff
      * accepts a warning in the UI). Breaks, blocks, overlap, minimum-notice and
-     * duration limits are unaffected by this flag — relax those separately.
+     * duration limits are unaffected by this flag; relax those separately.
+     *
+     * Full-day leave is also unaffected, and is checked ahead of this flag via
+     * `input.fullDayLeavePractitionerIds`. It used to be skipped here, because
+     * full-day leave reaches the gate as a `days_off` entry (SA-M3).
      */
     allowOutsideHours?: boolean;
     /**
@@ -959,6 +979,17 @@ export function validateAppointmentCustomInterval(
   const customerEnd = t + coreDuration + buffer;
   const practMaxEnd = busyWall.length > 0 ? Math.max(...busyWall.map((i) => i.end)) : t;
   const busyEnd = Math.max(customerEnd, practMaxEnd);
+
+  // Full-day leave is NOT an opening-hours question and is checked before the
+  // override below can skip anything. It used to sit inside that block by
+  // accident: `leaveRowsToDaysOffAndBlocks` folds full-day leave into
+  // `days_off`, so the only thing enforcing it was the "not working this day"
+  // gate, and every staff move, resize and walk-in skipped it while the
+  // comments here claimed leave was still honoured (SA-M3). Partial leave was
+  // always safe: it arrives as a blocked range of kind `leave`, checked below.
+  if (input.fullDayLeavePractitionerIds?.includes(practitioner.id)) {
+    return { ok: false, reason: 'Staff on leave this day' };
+  }
 
   // Opening-hours / working-hours gates. Staff-initiated walk-ins, moves and
   // resizes pass `allowOutsideHours` to deliberately book past opening hours.
@@ -1146,12 +1177,27 @@ export async function fetchAppointmentInput(params: {
 
   /** Unified scheduling exposes staff as `unified_calendars` rows; the same UUID is sent as `practitioner_id`. */
   if (practitionerId) {
-    const { data: ucRow } = await supabase
+    const { data: ucRow, error: ucLookupErr } = await supabase
       .from('unified_calendars')
       .select('id')
       .eq('venue_id', venueId)
       .eq('id', practitionerId)
       .maybeSingle();
+    if (ucLookupErr) {
+      // Every venue is on unified scheduling, so a failure here routes the
+      // request down the legacy branch, which has no rows to find.
+      reportAvailabilityReadFailure(
+        {
+          source: 'fetchAppointmentInput',
+          table: 'unified_calendars (routing lookup)',
+          assumed: 'this id is not a calendar, so the legacy path runs and finds nothing',
+          venueId,
+          practitionerId,
+          date,
+        },
+        ucLookupErr,
+      );
+    }
     if (ucRow) {
       return fetchCalendarAppointmentInput({ supabase, venueId, date, calendarId: practitionerId, serviceId });
     }
@@ -1219,12 +1265,33 @@ export async function fetchAppointmentInput(params: {
       .gte('date_end', date),
   ]);
 
+  /**
+   * Every read above fails open: each consumer below substitutes an empty
+   * result, so a failed query becomes "nothing is booked" or "nothing is
+   * blocked" rather than an error. Report before that substitution (SA-C3).
+   */
+  reportAvailabilityReadFailures(
+    'fetchAppointmentInput',
+    { venueId, date, practitionerId: practitionerId ?? null },
+    [
+      { table: 'practitioners', assumed: 'the venue has no active practitioners', error: practitionersRes.error },
+      { table: 'appointment_services', assumed: 'the venue offers no services', error: allServicesRes.error },
+      { table: 'practitioner_services', assumed: 'no practitioner is linked to any service', error: psRes.error },
+      { table: 'bookings', assumed: 'nothing is booked, so every slot is free', error: bookingsRes.error },
+      { table: 'practitioner_calendar_blocks', assumed: 'no practitioner has blocked time', error: blocksRes.error },
+      { table: 'practitioner_leave_periods', assumed: 'nobody is on leave', error: leaveRes.error },
+      { table: 'venues.opening_hours', assumed: 'the venue has no opening hours to clip against', error: venueRes.error },
+      { table: 'availability_blocks', assumed: 'the venue has no closures or amended hours', error: venueBlocksRes.error },
+    ],
+  );
+
   /** A model that is switched off must not block; see `blocked-range-models.ts`. */
   const blockSources = blockSourcesFromVenueRow(venueRes.error ? null : venueRes.data);
 
   let practitioners = (practitionersRes.data ?? []) as Practitioner[];
 
   let leavePartialBlocks: PractitionerCalendarBlockedRange[] = [];
+  let fullDayLeaveIds: string[] = [];
   if (!leaveRes.error && leaveRes.data?.length) {
     const { fullDayPractitionerIds, partialBlocks } = leaveRowsToDaysOffAndBlocks(
       leaveRes.data as Array<{
@@ -1234,14 +1301,16 @@ export async function fetchAppointmentInput(params: {
       }>,
     );
     leavePartialBlocks = partialBlocks;
+    // Kept alongside the `days_off` fold rather than instead of it: the fold is
+    // what hides the day from guests, and this is what survives a staff
+    // override (SA-M3).
+    fullDayLeaveIds = [...fullDayPractitionerIds];
     practitioners = practitioners.map((p) => {
       if (!fullDayPractitionerIds.has(p.id)) return p;
       const existing = Array.isArray(p.days_off) ? [...p.days_off] : [];
       if (!existing.includes(date)) existing.push(date);
       return { ...p, days_off: existing };
     });
-  } else if (leaveRes.error) {
-    console.warn('[fetchAppointmentInput] practitioner_leave_periods:', leaveRes.error.message);
   }
   let allServices = (allServicesRes.data ?? []).map((raw) => {
     const s = raw as Record<string, unknown>;
@@ -1251,7 +1320,7 @@ export async function fetchAppointmentInput(params: {
     };
   }) as AppointmentService[];
   if (allServices.length > 0) {
-    const { data: procRows } = await supabase
+    const { data: procRows, error: procErr } = await supabase
       .from('service_items')
       .select('id, processing_time_minutes, processing_time_blocks')
       .eq('venue_id', venueId)
@@ -1259,6 +1328,20 @@ export async function fetchAppointmentInput(params: {
         'id',
         allServices.map((s) => s.id),
       );
+    if (procErr) {
+      // Fails closed rather than open: without the gaps, a booking occupies its
+      // whole duration and the practitioner looks busier than they are.
+      reportAvailabilityReadFailure(
+        {
+          source: 'fetchAppointmentInput',
+          table: 'service_items.processing_time_blocks',
+          assumed: 'services have no processing gaps, so fewer slots are offered',
+          venueId,
+          date,
+        },
+        procErr,
+      );
+    }
     const procMap = new Map(
       (procRows ?? []).map((r) => {
         const row = r as {
@@ -1298,10 +1381,22 @@ export async function fetchAppointmentInput(params: {
   ];
   let variantBlocksById = new Map<string, ProcessingTimeBlock[]>();
   if (variantIds.length > 0) {
-    const { data: vrows } = await supabase
+    const { data: vrows, error: vrowsErr } = await supabase
       .from('service_variants')
       .select('id, processing_time_blocks')
       .in('id', variantIds);
+    if (vrowsErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'fetchAppointmentInput',
+          table: 'service_variants.processing_time_blocks',
+          assumed: 'variants have no processing gaps, so fewer slots are offered',
+          venueId,
+          date,
+        },
+        vrowsErr,
+      );
+    }
     variantBlocksById = new Map(
       (vrows ?? []).map((r) => {
         const row = r as { id: string; processing_time_blocks?: unknown };
@@ -1356,10 +1451,6 @@ export async function fetchAppointmentInput(params: {
     }
   }
 
-  if (blocksRes.error) {
-    console.warn('[fetchAppointmentInput] practitioner_calendar_blocks:', blocksRes.error.message);
-  }
-
   const venueOpeningHours = venueRes.error
     ? null
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
@@ -1373,9 +1464,6 @@ export async function fetchAppointmentInput(params: {
           (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
         );
 
-  if (venueRes.error) {
-    console.warn('[fetchAppointmentInput] venues.opening_hours:', venueRes.error.message);
-  }
 
   return {
     date,
@@ -1386,6 +1474,7 @@ export async function fetchAppointmentInput(params: {
     practitionerBlockedRanges,
     venueOpeningHours,
     venueOpeningExceptions,
+    fullDayLeavePractitionerIds: fullDayLeaveIds,
   };
 }
 
@@ -1420,16 +1509,44 @@ export async function fetchCalendarAppointmentInput(params: {
     .eq('venue_id', venueId)
     .maybeSingle();
   if (ucErr || !ucRow) {
-    console.warn('[fetchCalendarAppointmentInput] unified_calendars:', ucErr?.message);
+    // A missing row is a legitimate answer (no such calendar); an error is not,
+    // and produces an identical empty result. Only the error is worth an alert.
+    if (ucErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'fetchCalendarAppointmentInput',
+          table: 'unified_calendars',
+          assumed: 'the calendar does not exist, so it offers nothing',
+          venueId,
+          calendarId,
+          date,
+        },
+        ucErr,
+      );
+    }
     return empty();
   }
 
   let practitioner: Practitioner = unifiedCalendarRowToPractitioner(ucRow as Record<string, unknown>);
 
-  const { data: assignments } = await supabase
+  const { data: assignments, error: assignmentsErr } = await supabase
     .from('calendar_service_assignments')
     .select('id, service_item_id, custom_duration_minutes, custom_price_pence')
     .eq('calendar_id', calendarId);
+
+  if (assignmentsErr) {
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchCalendarAppointmentInput',
+        table: 'calendar_service_assignments',
+        assumed: 'the calendar offers no services',
+        venueId,
+        calendarId,
+        date,
+      },
+      assignmentsErr,
+    );
+  }
 
   const assignList = assignments ?? [];
   const serviceIds = assignList.map((a) => (a as { service_item_id: string }).service_item_id);
@@ -1542,6 +1659,7 @@ export async function fetchCalendarAppointmentInput(params: {
     .gte('end_date', date);
 
   let leavePartialForCalendar: PractitionerCalendarBlockedRange[] = [];
+  let fullDayLeaveIdsForCalendar: string[] = [];
   if (!leaveErr && leaveRows?.length) {
     const { fullDayPractitionerIds, partialBlocks } = leaveRowsToDaysOffAndBlocks(
       leaveRows as Array<{
@@ -1552,12 +1670,26 @@ export async function fetchCalendarAppointmentInput(params: {
     );
     leavePartialForCalendar = partialBlocks;
     if (fullDayPractitionerIds.has(calendarId)) {
+      // See the `days_off` note in `fetchAppointmentInput` (SA-M3).
+      fullDayLeaveIdsForCalendar = [calendarId];
       const existing = Array.isArray(practitioner.days_off) ? [...practitioner.days_off] : [];
       if (!existing.includes(date)) existing.push(date);
       practitioner = { ...practitioner, days_off: existing };
     }
-  } else if (leaveErr) {
-    console.warn('[fetchCalendarAppointmentInput] practitioner_leave_periods:', leaveErr.message);
+  }
+
+  if (leaveErr) {
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchCalendarAppointmentInput',
+        table: 'practitioner_leave_periods',
+        assumed: 'nobody is on leave',
+        venueId,
+        calendarId,
+        date,
+      },
+      leaveErr,
+    );
   }
 
   const [bookingsRes, blocksRes, calBlocksRes, venueRes, siblingResourcesRes, venueBlocksRes] = await Promise.all([
@@ -1604,6 +1736,20 @@ export async function fetchCalendarAppointmentInput(params: {
       .gte('date_end', date),
   ]);
 
+  /** Same fail-open shape as `fetchAppointmentInput`; see the note there (SA-C3). */
+  reportAvailabilityReadFailures(
+    'fetchCalendarAppointmentInput',
+    { venueId, calendarId, date },
+    [
+      { table: 'bookings', assumed: 'nothing is booked, so every slot is free', error: bookingsRes.error },
+      { table: 'practitioner_calendar_blocks', assumed: 'the calendar has no blocked time', error: blocksRes.error },
+      { table: 'calendar_blocks', assumed: 'the calendar has no blocked time', error: calBlocksRes.error },
+      { table: 'venues.opening_hours', assumed: 'the venue has no opening hours to clip against', error: venueRes.error },
+      { table: 'unified_calendars (sibling resources)', assumed: 'the calendar hosts no resources', error: siblingResourcesRes.error },
+      { table: 'availability_blocks', assumed: 'the venue has no closures or amended hours', error: venueBlocksRes.error },
+    ],
+  );
+
   const serviceMapForBookings = new Map(allServices.map((s) => [s.id, s]));
 
   const calVariantIds = [
@@ -1615,10 +1761,23 @@ export async function fetchCalendarAppointmentInput(params: {
   ];
   let calVariantBlocksById = new Map<string, ProcessingTimeBlock[]>();
   if (calVariantIds.length > 0) {
-    const { data: calVrows } = await supabase
+    const { data: calVrows, error: calVrowsErr } = await supabase
       .from('service_variants')
       .select('id, processing_time_blocks')
       .in('id', calVariantIds);
+    if (calVrowsErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'fetchCalendarAppointmentInput',
+          table: 'service_variants.processing_time_blocks',
+          assumed: 'variants have no processing gaps, so fewer slots are offered',
+          venueId,
+          calendarId,
+          date,
+        },
+        calVrowsErr,
+      );
+    }
     calVariantBlocksById = new Map(
       (calVrows ?? []).map((r) => {
         const row = r as { id: string; processing_time_blocks?: unknown };
@@ -1706,16 +1865,6 @@ export async function fetchCalendarAppointmentInput(params: {
     ...leavePartialForCalendar.map((b) => ({ ...b, kind: 'leave' as const })),
   ];
 
-  if (blocksRes.error) {
-    console.warn('[fetchCalendarAppointmentInput] practitioner_calendar_blocks:', blocksRes.error.message);
-  }
-  if (calBlocksRes.error) {
-    console.warn('[fetchCalendarAppointmentInput] calendar_blocks:', calBlocksRes.error.message);
-  }
-  if (siblingResourcesRes.error) {
-    console.warn('[fetchCalendarAppointmentInput] sibling resources:', siblingResourcesRes.error.message);
-  }
-
   const venueOpeningHours = venueRes.error
     ? null
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
@@ -1738,5 +1887,6 @@ export async function fetchCalendarAppointmentInput(params: {
     practitionerBlockedRanges,
     venueOpeningHours,
     venueOpeningExceptions,
+    fullDayLeavePractitionerIds: fullDayLeaveIdsForCalendar,
   };
 }

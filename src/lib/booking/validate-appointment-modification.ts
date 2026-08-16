@@ -81,6 +81,16 @@ export interface ValidateAppointmentModificationIntervalParams {
   /** Staff move/resize past opening hours — skips the working/opening-hours gates. */
   allowOutsideHours?: boolean;
   /**
+   * Staff move/resize over a break.
+   *
+   * Separate from `allowOutsideHours` because the engine keeps the two gates
+   * separate on purpose: passing the hours flag has never relaxed breaks. The
+   * walk-in create path has allowed this since it was written; the move and
+   * resize paths never sent it, so a drag the diary permitted came back 409
+   * "Conflicts with a break" (SA-H5).
+   */
+  allowDuringBreaks?: boolean;
+  /**
    * Other bookings that are moving in the same edit, and so must not be treated
    * as occupying their old slots.
    *
@@ -117,6 +127,7 @@ export async function validateAppointmentModificationInterval(
     processingTimeBlocksOverride,
     allowManualOverlap,
     allowOutsideHours,
+    allowDuringBreaks,
     excludeBookingIds,
   } = params;
 
@@ -192,10 +203,12 @@ export async function validateAppointmentModificationInterval(
   const intervalOpts: {
     allowBookingOverlap?: boolean;
     allowOutsideHours?: boolean;
+    allowDuringBreaks?: boolean;
     processingTimeBlocks?: ReturnType<typeof parseProcessingTimeBlocksFromDb>;
   } = {
     allowBookingOverlap: allowManualOverlap === true,
     allowOutsideHours: allowOutsideHours === true,
+    allowDuringBreaks: allowDuringBreaks === true,
   };
   if (processingTimeBlocksOverride !== undefined) {
     intervalOpts.processingTimeBlocks = parseProcessingTimeBlocksFromDb(processingTimeBlocksOverride);

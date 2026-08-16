@@ -21,6 +21,7 @@ import {
 } from '@/lib/booking/waitlist-offer-in-order';
 import { markWaitlistOpportunitiesFilledForSlot } from '@/lib/booking/waitlist-slot-opportunity-service';
 import { isWaitlistFreedSlotStillUnbooked } from '@/lib/booking/is-waitlist-freed-slot-unbooked';
+import { findAppointmentWaitlistAvailability } from '@/lib/booking/waitlist-offer-availability';
 import {
   waitlistTimeMatchesFreedSlot,
   type WaitlistTimeFields,
@@ -281,6 +282,47 @@ export async function offerAppointmentWaitlistOnCancel(
     booking.booking_date,
   );
   const matches = findMatchingWaitlistEntries(waitingRows, booking);
+
+  /**
+   * SA-H6. This path asked only "has someone else taken this slot", never "is
+   * the venue open". So an owner who books a closure and cancels the day's
+   * appointments fires one offer per cancellation, and waitlisted guests are
+   * texted offers for a day the venue is shut. Five sibling waitlist paths
+   * already run this helper; this one imported the unbooked check instead and
+   * stopped there.
+   *
+   * Safe to run here because the cancellation is written before every caller
+   * reaches this function, so the freed slot really is free by now. Called
+   * before that write, the cancelled booking would occupy its own slot and this
+   * check would suppress every offer.
+   *
+   * `desired_time` is the freed start exactly, which the window parser treats
+   * as an exact match, so this asks about this slot and not the whole day.
+   *
+   * Placed after the match search so the engine runs only when there is
+   * somebody to offer the slot to, and before the mode dispatch so it also
+   * covers `staff_choose`: an alert about a slot nobody can book is noise, not
+   * an opportunity.
+   */
+  const freedSlotAvailability = await findAppointmentWaitlistAvailability(
+    admin,
+    booking.venue_id,
+    {
+      desired_date: booking.booking_date,
+      desired_time: freedTimeHm,
+      desired_time_end: null,
+      practitioner_id: freedSlot.calendarId ?? null,
+      appointment_service_id: serviceIds.appointmentServiceId,
+      service_item_id: serviceIds.serviceItemId,
+    },
+  );
+  if (!freedSlotAvailability.available) {
+    return {
+      offered: false,
+      mode,
+      reason: `slot_not_bookable:${freedSlotAvailability.reason ?? 'unavailable'}`,
+    };
+  }
 
   if (mode === 'staff_choose') {
     const alert = await recordWaitlistSlotOpportunity(admin, booking);

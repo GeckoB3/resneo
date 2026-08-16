@@ -49,7 +49,10 @@ import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
-import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import {
+  isGuestBookingDateAllowed,
+  loadServiceEntityBookingWindow,
+} from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
@@ -356,6 +359,30 @@ export async function POST(request: NextRequest) {
         venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
         svcWindow,
       );
+
+      /**
+       * SA-H7. The window was loaded and attached, but never actually asked.
+       * `attachVenueClockToAppointmentInput` sets `allowSameDayBooking` on the
+       * input and the engine assigns it and never reads it again, so the only
+       * real enforcement is this helper, which `booking/create` calls and this
+       * route did not. Both this route and `create-group` are anonymous public
+       * flows.
+       *
+       * Checked per segment, because the window belongs to the service and a
+       * visit can mix services with different windows. One segment out of
+       * window refuses the visit, which is the only coherent answer when they
+       * all share a date.
+       *
+       * Uses the timezone the attach just resolved, so this asks about the same
+       * calendar day the engine is working in.
+       */
+      if (!isGuestBookingDateAllowed(booking_date, svcWindow, input.venueTimezone ?? 'Europe/London')) {
+        return NextResponse.json(
+          { error: 'This date is not available for booking' },
+          { status: 400 },
+        );
+      }
+
       const exact = validateExactAppointmentStart(input, practitionerId, seg.service_id, timeStr);
       if (!exact.ok) {
         return NextResponse.json(

@@ -48,7 +48,10 @@ import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
-import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import {
+  isGuestBookingDateAllowed,
+  loadServiceEntityBookingWindow,
+} from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
@@ -353,6 +356,26 @@ export async function POST(request: NextRequest) {
         venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
         svcWindow,
       );
+
+      /**
+       * SA-H7. The window was loaded and attached but never asked. The engine's
+       * `allowSameDayBooking` is assigned and never read, so this helper is the
+       * only real enforcement, and `booking/create` was the only public create
+       * route calling it.
+       *
+       * Per member, on that member's own date: a group is not necessarily
+       * same-day, and each member can hold a different service with a different
+       * window.
+       */
+      if (!isGuestBookingDateAllowed(person.booking_date, svcWindow, input.venueTimezone ?? 'Europe/London')) {
+        return NextResponse.json(
+          {
+            error: `The date for ${person.person_label} is not available for booking`,
+          },
+          { status: 400 },
+        );
+      }
+
       const result = computeAppointmentAvailability(input);
       const prac = result.practitioners.find((p) => p.id === person.practitioner_id);
       const slotAvailable = prac?.slots.some(

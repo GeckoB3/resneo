@@ -194,7 +194,19 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          'Cache-Control': 'public, s-maxage=45, stale-while-revalidate=120',
+          /**
+           * SA-M9. This was `s-maxage=45, stale-while-revalidate=120`, and
+           * nothing in the codebase ever revalidates it: there is not one
+           * `revalidateTag` or `revalidatePath` in `src/`. So a closure an owner
+           * had just saved could keep selling green dates for up to 165 seconds
+           * at every edge location, with no way to flush it.
+           *
+           * The cache comes back when there is something to key it on. §11.5
+           * wants a `venues.availability_epoch` bumped by trigger on every
+           * schedule write, which needs a column and a trigger across six
+           * tables. Until then, correct and uncached beats fast and wrong.
+           */
+          'Cache-Control': 'no-store',
         },
       },
     );

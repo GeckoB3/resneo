@@ -27,6 +27,17 @@ const bodySchema = z.object({
    */
   processing_time_blocks: z.array(z.unknown()).max(20).optional(),
   allow_manual_overlap: z.boolean().optional(),
+  /**
+   * The same two staff overrides the PATCH accepts.
+   *
+   * A visit is dry-run here before any row is written, so an override the PATCH
+   * would honour has to be honoured here too or the two disagree and the visit
+   * is refused before it is ever attempted: dragging a visit past closing, or
+   * over a break, came back "The visit was not moved" while the identical drag
+   * on a single booking went through (SA-H5).
+   */
+  allow_outside_hours: z.boolean().optional(),
+  allow_during_breaks: z.boolean().optional(),
 });
 
 /**
@@ -119,6 +130,8 @@ export async function POST(
       bookingProcessingSnapshot: (booking as { processing_time_blocks?: unknown }).processing_time_blocks,
       processingTimeBlocksOverride: parsed.data.processing_time_blocks,
       allowManualOverlap: parsed.data.allow_manual_overlap === true,
+      allowOutsideHours: parsed.data.allow_outside_hours === true,
+      allowDuringBreaks: parsed.data.allow_during_breaks === true,
     });
 
     if (!result.ok) {

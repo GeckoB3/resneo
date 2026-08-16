@@ -14,6 +14,10 @@ import {
   type PractitionerCalendarBlockedRange,
 } from '@/lib/availability/appointment-engine';
 import { timeToMinutes } from '@/lib/availability';
+import {
+  reportAvailabilityReadFailure,
+  reportAvailabilityReadFailures,
+} from '@/lib/availability/availability-read-failure';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
@@ -106,7 +110,17 @@ async function fetchCalendarBlocksMerged(
     .eq('block_date', date);
 
   if (error) {
-    console.warn('[unified-availability] calendar_blocks:', error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchCalendarBlocksMerged',
+        table: 'calendar_blocks',
+        assumed: 'the calendar has no blocked time',
+        venueId,
+        calendarId,
+        date,
+      },
+      error,
+    );
     return [];
   }
 
@@ -192,7 +206,21 @@ export async function getUnifiedAvailableSlots(params: {
     .maybeSingle();
 
   if (calErr || !calRow) {
-    console.warn('[getUnifiedAvailableSlots] calendar not found:', calErr?.message);
+    // A missing row is a legitimate answer; an error producing the same empty
+    // result is not, and is the case worth alerting on.
+    if (calErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'getUnifiedAvailableSlots',
+          table: 'unified_calendars',
+          assumed: 'the calendar does not exist, so it offers nothing',
+          venueId,
+          calendarId,
+          date,
+        },
+        calErr,
+      );
+    }
     return [];
   }
 
@@ -212,11 +240,11 @@ export async function getUnifiedAvailableSlots(params: {
     return await getEventClassSlots(supabase, venueId, calendarId, date, serviceItemId);
   }
 
-  const [{ data: venue }, extraBlocks, serviceItemRes, venueBlocksRes] = await Promise.all([
+  const [{ data: venue, error: venueErr }, extraBlocks, serviceItemRes, venueBlocksRes] = await Promise.all([
     supabase.from('venues').select('timezone, booking_rules, opening_hours, venue_opening_exceptions').eq('id', venueId).maybeSingle(),
     fetchCalendarBlocksMerged(supabase, venueId, calendarId, date),
     calendarType === 'resource'
-      ? Promise.resolve({ data: null })
+      ? Promise.resolve({ data: null, error: null })
       : supabase
           .from('service_items')
           .select('max_advance_booking_days, min_booking_notice_hours, cancellation_notice_hours, allow_same_day_booking')
@@ -232,6 +260,17 @@ export async function getUnifiedAvailableSlots(params: {
       .lte('date_start', date)
       .gte('date_end', date),
   ]);
+
+  /** Fail-open reads; see `availability-read-failure.ts` (SA-C3). */
+  reportAvailabilityReadFailures(
+    'getUnifiedAvailableSlots',
+    { venueId, calendarId, date },
+    [
+      { table: 'venues', assumed: 'the venue has no opening hours or timezone, so defaults apply', error: venueErr },
+      { table: 'service_items', assumed: 'the service has no booking window, so defaults apply', error: serviceItemRes.error },
+      { table: 'availability_blocks', assumed: 'the venue has no closures or amended hours', error: venueBlocksRes.error },
+    ],
+  );
 
   const venueRow = venue as {
     timezone?: string | null;
@@ -340,17 +379,47 @@ async function getEventClassSlots(
     .eq('session_date', date)
     .eq('is_cancelled', false);
 
-  if (error || !sessions?.length) return [];
+  if (error || !sessions?.length) {
+    if (error) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'getEventClassSlots',
+          table: 'event_sessions',
+          assumed: 'this calendar runs no sessions on this date',
+          venueId,
+          calendarId,
+          date,
+        },
+        error,
+      );
+    }
+    return [];
+  }
 
-  const { data: cal } = await supabase.from('unified_calendars').select('capacity').eq('id', calendarId).single();
+  const { data: cal, error: calCapacityErr } = await supabase
+    .from('unified_calendars')
+    .select('capacity')
+    .eq('id', calendarId)
+    .single();
   const defaultCap = (cal as { capacity?: number } | null)?.capacity ?? 1;
 
-  const { data: bookings } = await supabase
+  const { data: bookings, error: bookingsErr } = await supabase
     .from('bookings')
     .select('event_session_id, capacity_used, status')
     .eq('venue_id', venueId)
     .eq('booking_date', date)
     .in('status', ACTIVE_BOOKING_STATUSES);
+
+  reportAvailabilityReadFailures(
+    'getEventClassSlots',
+    { venueId, calendarId, date },
+    [
+      { table: 'unified_calendars.capacity', assumed: 'the calendar seats one, which understates capacity', error: calCapacityErr },
+      // The dangerous one: no rows read means no seats used, so every session
+      // reports its full capacity free and is sold again.
+      { table: 'bookings', assumed: 'no seats are taken, so every session is fully available', error: bookingsErr },
+    ],
+  );
 
   const used = new Map<string, number>();
   for (const b of bookings ?? []) {

@@ -32,6 +32,10 @@ import { timeToMinutes } from '@/lib/availability';
 import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 import { parseVenueOpeningExceptions, type VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
+import {
+  reportAvailabilityReadFailure,
+  reportAvailabilityReadFailures,
+} from '@/lib/availability/availability-read-failure';
 import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import {
   attachHostCalendarsToResources,
@@ -242,11 +246,33 @@ async function fetchScheduledSessionBlocksForCalendarMonth(
       result.set(row.event_date, list);
     }
   } else {
-    console.warn('[appointment-month-availability] experience_events:', eventsRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchScheduledSessionBlocksForCalendarMonth',
+        table: 'experience_events',
+        assumed: 'no event occupies this calendar, so its slots stay bookable',
+        venueId,
+        calendarId,
+        date: `${monthStart}..${monthEnd}`,
+      },
+      eventsRes.error,
+    );
   }
 
   if (typeRowsRes.error || !typeRowsRes.data?.length) {
-    if (typeRowsRes.error) console.warn('[appointment-month-availability] class_types:', typeRowsRes.error.message);
+    if (typeRowsRes.error) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'fetchScheduledSessionBlocksForCalendarMonth',
+          table: 'class_types',
+          assumed: 'no class occupies this calendar, so its slots stay bookable',
+          venueId,
+          calendarId,
+          date: `${monthStart}..${monthEnd}`,
+        },
+        typeRowsRes.error,
+      );
+    }
     return result;
   }
 
@@ -280,7 +306,17 @@ async function fetchScheduledSessionBlocksForCalendarMonth(
     .in('class_type_id', [...matchingTypeIds]);
 
   if (instErr) {
-    console.warn('[appointment-month-availability] class_instances:', instErr.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchScheduledSessionBlocksForCalendarMonth',
+        table: 'class_instances',
+        assumed: 'no class session occupies this calendar, so its slots stay bookable',
+        venueId,
+        calendarId,
+        date: `${monthStart}..${monthEnd}`,
+      },
+      instErr,
+    );
     return result;
   }
 
@@ -530,13 +566,31 @@ async function buildLegacyPractitionerMonthInputFactory({
     fetchScheduledSessionBlocksForCalendarMonth(supabase, venueId, practitionerId, monthStart, monthEnd, blockSources),
   ]);
 
+  /**
+   * Fail-open reads, as in the day engine (SA-C3). The month picker is the more
+   * exposed of the two: a failure here paints a date green for a whole month.
+   */
+  reportAvailabilityReadFailures(
+    'buildLegacyPractitionerMonthInputFactory',
+    { venueId, practitionerId, date: `${monthStart}..${monthEnd}` },
+    [
+      { table: 'practitioners', assumed: 'the practitioner is not active', error: practitionersRes.error },
+      { table: 'appointment_services', assumed: 'the venue offers no services', error: servicesRes.error },
+      { table: 'practitioner_services', assumed: 'no practitioner is linked to any service', error: practitionerServicesRes.error },
+      { table: 'bookings', assumed: 'nothing is booked all month, so every slot is free', error: bookingsRes.error },
+      { table: 'practitioner_calendar_blocks', assumed: 'the practitioner has no blocked time', error: blocksRes.error },
+      { table: 'practitioner_leave_periods', assumed: 'nobody is on leave', error: leaveRes.error },
+      { table: 'availability_blocks', assumed: 'the venue has no closures or amended hours', error: venueBlocksRes.error },
+    ],
+  );
+
   const practitioners = (practitionersRes.data ?? []) as Practitioner[];
   const basePractitioner = practitioners[0];
   let allServices = ((servicesRes.data ?? []) as Record<string, unknown>[]).map((row) =>
     mapServiceItemToAppointmentService(row, venueId),
   );
   if (allServices.length > 0) {
-    const { data: processingRows } = await supabase
+    const { data: processingRows, error: processingErr } = await supabase
       .from('service_items')
       .select('id, processing_time_minutes, processing_time_blocks')
       .eq('venue_id', venueId)
@@ -544,6 +598,19 @@ async function buildLegacyPractitionerMonthInputFactory({
         'id',
         allServices.map((service) => service.id),
       );
+    if (processingErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'buildLegacyPractitionerMonthInputFactory',
+          table: 'service_items.processing_time_blocks',
+          assumed: 'services have no processing gaps, so fewer dates look available',
+          venueId,
+          practitionerId,
+          date: `${monthStart}..${monthEnd}`,
+        },
+        processingErr,
+      );
+    }
     const processingByServiceId = new Map(
       (processingRows ?? []).map((row) => {
         const r = row as { id: string; processing_time_minutes?: number; processing_time_blocks?: unknown };
@@ -578,10 +645,23 @@ async function buildLegacyPractitionerMonthInputFactory({
   ];
   let monthVariantBlocksLegacy = new Map<string, ProcessingTimeBlock[]>();
   if (monthVariantIdsLegacy.length > 0) {
-    const { data: vrows } = await supabase
+    const { data: vrows, error: vrowsErr } = await supabase
       .from('service_variants')
       .select('id, processing_time_blocks')
       .in('id', monthVariantIdsLegacy);
+    if (vrowsErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'buildLegacyPractitionerMonthInputFactory',
+          table: 'service_variants.processing_time_blocks',
+          assumed: 'variants have no processing gaps, so fewer dates look available',
+          venueId,
+          practitionerId,
+          date: `${monthStart}..${monthEnd}`,
+        },
+        vrowsErr,
+      );
+    }
     monthVariantBlocksLegacy = new Map(
       (vrows ?? []).map((r) => {
         const row = r as { id: string; processing_time_blocks?: unknown };
@@ -657,10 +737,23 @@ async function buildUnifiedCalendarMonthInputFactory({
   const calendarId = calendarRow.id as string;
   const practitioner = unifiedCalendarRowToPractitioner(calendarRow);
 
-  const { data: assignments } = await supabase
+  const { data: assignments, error: assignmentsErr } = await supabase
     .from('calendar_service_assignments')
     .select('id, service_item_id, custom_duration_minutes, custom_price_pence')
     .eq('calendar_id', calendarId);
+  if (assignmentsErr) {
+    reportAvailabilityReadFailure(
+      {
+        source: 'buildUnifiedCalendarMonthInputFactory',
+        table: 'calendar_service_assignments',
+        assumed: 'the calendar offers no services, so no date is available',
+        venueId,
+        calendarId,
+        date: `${monthStart}..${monthEnd}`,
+      },
+      assignmentsErr,
+    );
+  }
   const assignmentRows = (assignments ?? []) as Array<{
     id: string;
     service_item_id: string;
@@ -756,6 +849,20 @@ async function buildUnifiedCalendarMonthInputFactory({
     fetchScheduledSessionBlocksForCalendarMonth(supabase, venueId, calendarId, monthStart, monthEnd, blockSources),
   ]);
 
+  /** Same fail-open shape as the legacy factory above (SA-C3). */
+  reportAvailabilityReadFailures(
+    'buildUnifiedCalendarMonthInputFactory',
+    { venueId, calendarId, date: `${monthStart}..${monthEnd}` },
+    [
+      { table: 'bookings', assumed: 'nothing is booked all month, so every slot is free', error: bookingsRes.error },
+      { table: 'practitioner_calendar_blocks', assumed: 'the calendar has no blocked time', error: legacyBlocksRes.error },
+      { table: 'calendar_blocks', assumed: 'the calendar has no blocked time', error: calendarBlocksRes.error },
+      { table: 'practitioner_leave_periods', assumed: 'nobody is on leave', error: leaveRes.error },
+      { table: 'unified_calendars (sibling resources)', assumed: 'the calendar hosts no resources', error: siblingResourcesRes.error },
+      { table: 'availability_blocks', assumed: 'the venue has no closures or amended hours', error: venueBlocksRes.error },
+    ],
+  );
+
   const monthVariantIdsCal = [
     ...new Set(
       (bookingsRes.data ?? [])
@@ -765,10 +872,23 @@ async function buildUnifiedCalendarMonthInputFactory({
   ];
   let monthVariantBlocksCal = new Map<string, ProcessingTimeBlock[]>();
   if (monthVariantIdsCal.length > 0) {
-    const { data: vrowsCal } = await supabase
+    const { data: vrowsCal, error: vrowsCalErr } = await supabase
       .from('service_variants')
       .select('id, processing_time_blocks')
       .in('id', monthVariantIdsCal);
+    if (vrowsCalErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'buildUnifiedCalendarMonthInputFactory',
+          table: 'service_variants.processing_time_blocks',
+          assumed: 'variants have no processing gaps, so fewer dates look available',
+          venueId,
+          calendarId,
+          date: `${monthStart}..${monthEnd}`,
+        },
+        vrowsCalErr,
+      );
+    }
     monthVariantBlocksCal = new Map(
       (vrowsCal ?? []).map((r) => {
         const row = r as { id: string; processing_time_blocks?: unknown };

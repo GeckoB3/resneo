@@ -9,6 +9,10 @@ import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/lib/cron/unified-scheduling-comms';
+import {
+  fetchVenueClosureBlocksForDates,
+  reminderSuppressedByClosure,
+} from '@/lib/cron/reminder-closure-suppression';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import {
   markReviewRequestSent,
@@ -220,6 +224,15 @@ async function sendConfirmOrCancelPrompts(results: {
 
       if (!bookings?.length) continue;
 
+      /**
+       * SA-M2, same rule as the unified lane. This branch serves table venues,
+       * which the appointments audit did not scope, but a restaurant closing a
+       * day and still texting reminders is the identical bug. Applied here
+       * rather than reasoned about: if this path has no live venues it is
+       * simply inert, which is cheaper than being wrong about it.
+       */
+      const closureBlocks = await fetchVenueClosureBlocksForDates(supabase, venue.id, dates);
+
       const venueData = venueRowToEmailData(venue);
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
@@ -240,6 +253,16 @@ async function sendConfirmOrCancelPrompts(results: {
             nowMs,
           );
           if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) continue;
+
+          // After the window match, before the send: no communication_logs row
+          // is written, so the dedupe slot stays free (see the lib header).
+          if (reminderSuppressedByClosure({
+            bookingDate: bookingRow.booking_date,
+            bookingTime: bookingRow.booking_time,
+            blocks: closureBlocks,
+          })) {
+            continue;
+          }
 
           let booking = buildBookingData(bookingRow);
           const [manageLink, confirmLink] = await Promise.all([
@@ -339,6 +362,9 @@ async function sendPreVisitReminders(results: {
 
       if (!bookings?.length) continue;
 
+      /** SA-M2; see the note on the confirm/cancel lane above. */
+      const closureBlocks = await fetchVenueClosureBlocksForDates(supabase, venue.id, dates);
+
       const venueData = venueRowToEmailData(venue);
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
@@ -359,6 +385,14 @@ async function sendPreVisitReminders(results: {
             nowMs,
           );
           if (delta < targetMs - toleranceMs || delta > targetMs + toleranceMs) continue;
+
+          if (reminderSuppressedByClosure({
+            bookingDate: bookingRow.booking_date,
+            bookingTime: bookingRow.booking_time,
+            blocks: closureBlocks,
+          })) {
+            continue;
+          }
 
           let booking = buildBookingData(bookingRow);
           const [manageLinkPv, confirmLinkPv] = await Promise.all([

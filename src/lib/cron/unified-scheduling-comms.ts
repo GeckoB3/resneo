@@ -13,6 +13,10 @@ import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import {
+  fetchVenueClosureBlocksForDates,
+  reminderSuppressedByClosure,
+} from '@/lib/cron/reminder-closure-suppression';
+import {
   markReviewRequestSent,
   shouldIncludeReviewRequest,
   venueWithoutReviewRequest,
@@ -227,6 +231,13 @@ async function runLaneReminder(opts: {
     statuses: ['Pending', 'Booked', 'Confirmed'],
   });
 
+  /**
+   * SA-M2. One query per venue per lane, not one per booking: `dates` is the
+   * one or two civil dates this lane can possibly match. Loaded before the loop
+   * even when `rows` is empty, which is cheap and keeps the call site simple.
+   */
+  const closureBlocks = await fetchVenueClosureBlocksForDates(opts.supabase, opts.venue.id, dates);
+
   const venueData = venueRowToEmailData(opts.venue);
   for (const row of rows) {
     try {
@@ -237,6 +248,25 @@ async function runLaneReminder(opts: {
 
       const delta = msUntilBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
       if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {
+        continue;
+      }
+
+      /**
+       * SA-M2. Placed after the window match so the check only runs for
+       * bookings actually about to be reminded, and before the send so no
+       * `communication_logs` row is written.
+       *
+       * That second point matters more than it looks: the dedupe is keyed on
+       * booking, message type and lane, so writing a row here would burn the
+       * slot permanently. `continue` leaves the booking eligible, so if the
+       * owner deletes the closure while the reminder window is still open, the
+       * next cron beat sends normally.
+       */
+      if (reminderSuppressedByClosure({
+        bookingDate: row.booking_date,
+        bookingTime: row.booking_time,
+        blocks: closureBlocks,
+      })) {
         continue;
       }
 

@@ -15,7 +15,7 @@
  * - `No-Show`   — Guest did not arrive.
  * - `Cancelled` — Booking cancelled by guest or staff.
  */
-import { getVenueLocalDateAndMinutes, venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { getVenueLocalDateAndMinutes, venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
 export const BOOKING_STATUSES = [
   'Pending',
@@ -134,7 +134,7 @@ export function canMarkNoShowForSlot(
   if (bookingDate < todayInVenue) return true;
   if (bookingDate > todayInVenue) return false;
 
-  const startMs = venueLocalDateTimeToUtcMs(bookingDate, bookingTimeHm, timeZone);
+  const startMs = venueLocalWallTimeToUtcMs(bookingDate, bookingTimeHm, timeZone);
   const graceEndMs = startMs + graceMinutes * 60 * 1000;
   return nowDate.getTime() >= graceEndMs;
 }

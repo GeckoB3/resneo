@@ -21,42 +21,27 @@ export function addDaysToYmd(ymd: string, delta: number): string {
 }
 
 /**
- * Convert a venue-local wall time (date + HH:mm) to UTC epoch milliseconds.
- * Uses 15-minute stepping search so DST transitions are handled without extra deps.
+ * `venueLocalDateTimeToUtcMs` USED TO LIVE HERE. It is deleted, not deprecated,
+ * and this note is why (SA-H1).
+ *
+ * It found the instant for a wall time by walking a 15-minute grid outward from
+ * noon UTC and returning noon if nothing matched. Every real IANA offset is a
+ * multiple of 15 minutes, so only wall times ending :00, :15, :30 or :45 could
+ * ever match: **1344 of the 1440 minutes in a day silently resolved to noon.**
+ *
+ * It was not a rare edge. `booking_interval_minutes` accepts 1 to 60,
+ * `booking_start_times` accepts arbitrary `HH:MM`, appointment intervals step
+ * from the range start rather than from `:00` (so a day opening at 09:05 makes
+ * every slot off-grid), and staff drag snaps to one minute, which the shipped
+ * help article tells them to do.
+ *
+ * Every caller now uses {@link venueLocalWallTimeToUtcMs}, which was already in
+ * this file, already correct, and already documented as the one to use for
+ * booking times. That is the whole shape of this finding: the good function
+ * existed and seven call sites used the broken one. Deleting rather than
+ * fixing-in-place is deliberate, so there is no second implementation left for
+ * a future caller to pick by accident.
  */
-export function venueLocalDateTimeToUtcMs(dateYmd: string, timeHHmm: string, timeZone: string): number {
-  const [y, mo, d] = dateYmd.split('-').map(Number);
-  const [h, min] = timeHHmm.slice(0, 5).split(':').map(Number);
-  const targetHm = h * 60 + min;
-  const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const partsAt = (utcMs: number) => {
-    const parts = formatter.formatToParts(new Date(utcMs));
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
-    const yy = get('year');
-    const mm = get('month');
-    const dd = get('day');
-    const hh = get('hour');
-    const mi = get('minute');
-    const ymd = `${yy}-${mm}-${dd}`;
-    const mins = Number(hh) * 60 + Number(mi);
-    return { ymd, mins };
-  };
-  const anchor = Date.UTC(y, mo - 1, d, 12, 0, 0);
-  for (let step = 0; step < 192; step++) {
-    const utcMs = anchor + (step - 96) * 15 * 60 * 1000;
-    const { ymd, mins } = partsAt(utcMs);
-    if (ymd === dateYmd && mins === targetHm) return utcMs;
-  }
-  return anchor;
-}
 
 /** Offset of `timeZone` from UTC at `utcMs` (positive east of UTC), read via Intl. */
 function timeZoneOffsetMs(utcMs: number, timeZone: string): number {
@@ -84,12 +69,19 @@ function timeZoneOffsetMs(utcMs: number, timeZone: string): number {
 
 /**
  * Convert a venue-local wall time (date + HH:mm) to UTC epoch milliseconds,
- * exact for ANY minute value. Unlike {@link venueLocalDateTimeToUtcMs}, which
- * probes a 15-minute grid (and falls back to noon for off-grid times, so it
- * must not be used for booking start times on 5/10-minute marks), this
- * resolves via the timezone offset with a second pass for DST transitions.
- * A nonexistent spring-forward wall time maps to the instant the clocks
- * skipped to.
+ * exact for ANY minute value. Resolves via the timezone offset with a second
+ * pass, which is what makes it correct across DST transitions.
+ *
+ * The two irregular cases, both pinned by tests so they are known rather than
+ * accidental:
+ *
+ *  * **Spring forward, a wall time that never happens** (01:30 on a UK spring
+ *    transition day) maps to the instant the clocks skipped to.
+ *  * **Autumn back, a wall time that happens twice** (01:30 on a UK autumn
+ *    transition day) resolves to the SECOND occurrence, after the clocks go
+ *    back. Most date libraries default to the first. Left as-is deliberately:
+ *    it is one repeated hour a year, in the middle of the night, and
+ *    `cancellation-deadline` has shipped on this behaviour.
  */
 export function venueLocalWallTimeToUtcMs(dateYmd: string, timeHHmm: string, timeZone: string): number {
   const [y, mo, d] = dateYmd.split('-').map(Number);
@@ -107,7 +99,7 @@ export function venueLocalWallTimeToUtcMs(dateYmd: string, timeHHmm: string, tim
 export function endOfCaptureDayInVenueTimezone(capturedAtUtc: Date, venueTimezone: string): Date {
   const tz = venueTimezone.trim() || 'Europe/London';
   const dayYmd = formatYmdInTimezone(capturedAtUtc.getTime(), tz);
-  const nextMidnightUtcMs = venueLocalDateTimeToUtcMs(addDaysToYmd(dayYmd, 1), '00:00', tz);
+  const nextMidnightUtcMs = venueLocalWallTimeToUtcMs(addDaysToYmd(dayYmd, 1), '00:00', tz);
   return new Date(nextMidnightUtcMs - 1);
 }
 

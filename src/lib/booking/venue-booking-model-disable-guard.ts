@@ -1,6 +1,6 @@
 import type { BookingModel } from '@/types/booking-models';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { formatYmdInTimezone, venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { formatYmdInTimezone, venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
 const TERMINAL_STATUSES = new Set(['Cancelled', 'Completed', 'No-Show']);
 
@@ -106,7 +106,7 @@ export async function assertCanDisableBookingModels(
     const dateStr = row.booking_date as string;
     const timeRaw = row.booking_time as string;
     const timeHm = timeRaw.length >= 5 ? timeRaw.slice(0, 5) : timeRaw;
-    const startMs = venueLocalDateTimeToUtcMs(dateStr, timeHm, tz);
+    const startMs = venueLocalWallTimeToUtcMs(dateStr, timeHm, tz);
     if (startMs < nowMs) continue;
 
     const canonical = rowBookingModelToCanonical(String(row.booking_model));

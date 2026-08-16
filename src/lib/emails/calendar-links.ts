@@ -5,7 +5,7 @@
 
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import type { BookingModel } from '@/types/booking-models';
-import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
 function formatGoogleUtcEpochMs(utcMs: number): string {
   const d = new Date(utcMs);
@@ -87,7 +87,7 @@ export function buildGoogleCalendarAddUrlForBooking(
 
   let startMs: number;
   try {
-    startMs = venueLocalDateTimeToUtcMs(booking.booking_date, `${hm}:00`, tz);
+    startMs = venueLocalWallTimeToUtcMs(booking.booking_date, `${hm}:00`, tz);
   } catch {
     return null;
   }

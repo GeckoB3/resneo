@@ -20,7 +20,7 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
-import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 // Types
@@ -113,7 +113,7 @@ export function computeEventAvailability(
       if (!isGuestBookingDateAllowed(event.event_date, w, guestCtx.venueTimezone, guestCtx.referenceNowMs)) {
         continue;
       }
-      const startMs = venueLocalDateTimeToUtcMs(
+      const startMs = venueLocalWallTimeToUtcMs(
         event.event_date,
         String(event.start_time).slice(0, 5),
         guestCtx.venueTimezone,

@@ -5,7 +5,7 @@ import { validateClassModification } from '@/lib/booking/validate-class-modifica
  * These tests exercise validateClassModification against a hand-rolled fake of
  * the Supabase query builder (the three reads it performs: class_instances,
  * class_types, bookings). The real future/notice maths (via
- * isClassInstanceBookableForGuest → venueLocalDateTimeToUtcMs) runs unmocked, so
+ * isClassInstanceBookableForGuest → venueLocalWallTimeToUtcMs) runs unmocked, so
  * we pin `referenceNowMs` and use Europe/London to keep assertions deterministic.
  */
 

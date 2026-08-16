@@ -4,7 +4,7 @@
  */
 
 import {
-  venueLocalDateTimeToUtcMs,
+  venueLocalWallTimeToUtcMs,
   formatYmdInTimezone,
 } from '@/lib/venue/venue-local-clock';
 
@@ -18,7 +18,7 @@ export function msUntilBookingStartUtc(
   venueTimeZone: string,
   nowMs: number,
 ): number {
-  return venueLocalDateTimeToUtcMs(bookingDateYmd, bookingTimeHmss, venueTimeZone) - nowMs;
+  return venueLocalWallTimeToUtcMs(bookingDateYmd, bookingTimeHmss, venueTimeZone) - nowMs;
 }
 
 /** Milliseconds since booking start (`booking_date` + `booking_time` in venue TZ). */
@@ -28,7 +28,7 @@ export function msSinceBookingStartUtc(
   venueTimeZone: string,
   nowMs: number,
 ): number {
-  return nowMs - venueLocalDateTimeToUtcMs(bookingDateYmd, bookingTimeHmss, venueTimeZone);
+  return nowMs - venueLocalWallTimeToUtcMs(bookingDateYmd, bookingTimeHmss, venueTimeZone);
 }
 
 /**

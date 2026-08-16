@@ -18,7 +18,11 @@
 
 **Closed by round 1.** `SA-C2` · `SA-C3` (made *visible*, not fail-closed — see below) · `SA-H3` · `SA-H5` · `SA-H6` · `SA-H7` · `SA-M2`'s diary lockout · `SA-M3` · `SA-M9`'s cache header · `SA-M13` · `SA-M28` · `SA-C1`'s residual on `api/confirm`. Each finding below carries its own status line.
 
-**Deliberately carved out of round 1, still open.** `SA-H1`'s two-pass offset (59 of 2288 bookings over 90 days are off-grid, and the fix changes reminder timing for *existing* bookings) and closure-aware reminder suppression, the remaining half of `SA-M2` (outbound comms, fails silently). Each wants its own round.
+**Round 3 shipped: `a47fecf9`, staging, hand-tested. Code only, no migration.** `SA-H1` closed by deleting the noon-fallback wall clock and pointing all seven callers at the correct function that was already in the same file. See the finding for what that changes and what it deliberately does not (no `estimated_end_time` backfill, declined by the operator).
+
+**Still carved out.** Closure-aware reminder suppression, the remaining half of `SA-M2`: outbound comms, fails silently, wants its own round.
+
+**With `SA-H1` closed, every Critical and every High in this document is now closed or explicitly deferred by decision.** What remains at High is `SA-H2` (amended hours meaning "replace" to one engine and "intersect" to another), which is **not** a standalone fix — it is the clearest symptom of there being two resolvers, and it closes when Phase 1 lands. And `SA-H4` steps 2 and 3, which are the durable half of a finding whose direct path round 2 closed.
 
 **Round 2 shipped: `20270113120000`, on staging code and staging database.** Nine anon SELECT policies dropped (`SA-C4`), and `INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER` revoked from `anon, authenticated` on the six scheduling tables (`SA-H4`), `SELECT` kept. The six are excluded from `supabase/scripts/local_baseline_grants.sql` alongside `bookings`, or CI re-grants after migrations run and validates a permission environment that exists nowhere. `supabase/tests/scheduling_grants_test.sql` adds 18 assertions; the suite now runs 42 and passes.
 
@@ -330,6 +334,22 @@ Off-grid times arise four ways: `booking_interval_minutes` accepts 1–60; `book
 **Downstream:** `src/lib/booking/comms-timing.ts:21,31` (a 2-hour reminder for an 09:35 appointment is computed against noon and fires *after* the appointment), `src/lib/emails/calendar-links.ts:90` (the confirmation email's "add to calendar" link says noon), `src/lib/table-management/booking-status.ts:137` (no-show grace window), `src/lib/booking/venue-booking-model-disable-guard.ts:109`, `src/app/api/booking/create/route.ts:1536`. Nothing normalises `booking_time` on write.
 
 **Fix (M):** replace the grid probe with the standard two-pass offset algorithm — compute the offset at a guess instant, apply, recompute, apply. `timeZoneOffsetMs` already sits in the same file. Add fixtures for 09:35 and both UK DST transition days. **Size the remediation first** with the §14 query for existing off-grid rows.
+
+> **CLOSED 2026-08-16 · `a47fecf9`, staging, hand-tested. Code only, no migration. The fix was S, not M, and the reason is the pattern this whole document keeps finding.**
+>
+> Nothing had to be written. **`venueLocalWallTimeToUtcMs` was already in the same file**, already the two-pass algorithm, already exact for any minute, and its own docstring already said the grid version "must not be used for booking start times on 5/10-minute marks". One caller used it. Seven used the broken one. The grid probe is **deleted** rather than repaired, so one implementation survives and there is no second one to pick by accident; the signatures were identical, so every call site was a rename.
+>
+> **The severity was understated, and measurement is what showed it.** This document says only :00/:15/:30/:45 can match, which is right but reads like an edge case. Running both implementations across a full day: the probe was wrong for **1344 of 1440 minutes**. It is not that off-grid times fail, it is that on-grid times were the only ones that ever worked.
+>
+> **One downstream consequence this document does not name, and it is the worst of them.** `booking-status.ts:137` is the no-show grace window: with the start pinned to noon, an afternoon booking was eligible to be auto-marked **no-show** from noon onward, hours before the guest was due. The listed consequences are all "fires at the wrong time"; this one marks a paying guest absent.
+>
+> **`estimated_end_time` already holds bad data.** `create/route.ts` writes that column as a stored instant, so noon-derived values exist for off-grid resource bookings made before this. The fix corrects new writes only. **A backfill was considered and declined by the operator on 2026-08-16**; recorded here so the decision is visible rather than rediscovered as a bug.
+>
+> **Transition risk, checked rather than assumed.** Deploying moves when reminders fire for existing bookings. It cannot duplicate one: the comms dedupe is durable and keyed on `(booking_id, message_type, communication_lane)`, so anything already `sent` stays sent. The bounded cost runs the other way, a booking whose corrected reminder moment falls between deploy and its old noon-based moment gets no reminder rather than a mistimed one. At most 2.6% of bookings, and only those inside that gap.
+>
+> **One on-grid behaviour changed**: an ambiguous autumn wall time now resolves to the second occurrence, because the deleted probe walked upward from the previous day and found the earlier one. Pinned by test rather than "fixed" — one repeated hour a year in the middle of the night, and `cancellation-deadline` had already shipped on that behaviour.
+>
+> **The file had no test at all**, which is how a 93%-wrong function survived every review including this audit's. It now has 19, three of which sweep all 1440 minutes of a BST day, a GMT day and the autumn transition day. Spot checks were never going to catch this: the probe passed every on-grid example anyone would think to write, which is exactly the set a reviewer writes.
 
 ---
 
@@ -743,7 +763,7 @@ Sizes: S ≈ under a day, M ≈ a few days, L ≈ a week or more.
 | **Extend that re-check to `src/app/api/confirm/route.ts`** — the one appointment-writing path it does not cover | `SA-C1` on the reschedule path | **S** | ✅ `f56b3209` |
 | Booking-window guards on multi-service and group routes | `SA-H7` | **S** | ✅ `68e3b6e4` |
 | Move the full-day leave gate out of the `allowOutsideHours` block | `SA-M3` | **S** | ✅ `b529bf0d` |
-| Two-pass offset in `venueLocalDateTimeToUtcMs` + DST fixtures | `SA-H1` | **M** | ⬜ **Carved out.** 59 of 2288 bookings over 90 days are off-grid and the fix moves reminder times for **existing** bookings: its own round |
+| ~~Two-pass offset in `venueLocalDateTimeToUtcMs`~~ **Delete it; every caller to the correct function already in the file** + DST fixtures | `SA-H1` | ~~M~~ **S** | ✅ `a47fecf9`, staging, hand-tested. Sized M on the assumption the algorithm had to be written; it already existed |
 | Drop `s-maxage`; ~~add `availability_epoch`~~ | `SA-M9` | **S** | ✅ `501a02df` (header only; the epoch is Phase 1 work, §11.5) |
 | Delete the unreachable legacy block branch | `SA-M13` | **S** | ✅ `501a02df` |
 | Drop the nine anon policies; `REVOKE INSERT, UPDATE, DELETE, **TRUNCATE, REFERENCES, TRIGGER**` from `anon, authenticated` | `SA-C4`, `SA-H4` step 1 | **M** | ✅ `20270113120000`, staging code + database. Verb list corrected by the §14 query |
@@ -889,6 +909,8 @@ Nine agents ran across three rounds. Round one investigated five layers in isola
 Confidence is highest on §3 and §4, where every claim was read at its line by at least two agents and the highest-stakes were re-read by the author. Confidence is lowest where a finding depends on an unverified consumer (`SA-M19`) or on production data this audit could not see (`SA-C4`'s blast radius, `SA-H1`'s remediation size); those are listed in §15 with the query that settles them.
 
 The recurring lesson, worth more than any single finding: **this codebase gets rules right in one place and does not carry them to their siblings.** The good resolver exists and one engine ignores it. The fail-closed pattern exists in one route and **49** sites fail open. The admin-scoping helper exists and is wired to one policy. `isGuestBookingDateAllowed` exists and two create routes skip it. The fix that generalises is not any individual patch: it is §11.1, one resolver that no caller can bypass.
+
+> **Confirmed a fourth time by `SA-H1`, 2026-08-16.** "The good resolver exists and one engine ignores it" is the lesson, and `SA-H1` is its purest instance: the correct wall-clock function was in the same file as the broken one, with a docstring naming the exact misuse, and seven call sites used the broken one anyway. The audit sized the fix as writing an algorithm. The algorithm was already there. **When this document says a fix must be written, check first whether it has been.**
 
 > **Sharpened by implementation, 2026-08-16.** The lesson is right and it applies to this document as well as to the code. Every finding in §3 and §4 held; **the confidence statement above is calibrated for claims and not for sizes**, and it was the sizes that failed. `SA-H3` and `SA-H5` were each described as one change in one layer and each needed two, because the audit read the layer where the rule lives and not the layer that enforces it. A fix written from this document's own root-cause analysis shipped, passed CI, and changed nothing a user could do — twice.
 >

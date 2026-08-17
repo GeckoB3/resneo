@@ -364,7 +364,13 @@ export async function getUnifiedAvailableSlots(params: {
   });
 }
 
-async function getEventClassSlots(
+/**
+ * Slot listing for `event` and `class` calendar columns. Exported so the scheduling
+ * parity harness can assert the read/write agreement pair for group sessions: this path
+ * applies no venue-wide gate while `booking/create` applies the full one.
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §1.2 item 15 and Stage 0b.
+ */
+export async function getEventClassSlots(
   supabase: SupabaseClient,
   venueId: string,
   calendarId: string,

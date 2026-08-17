@@ -8,7 +8,7 @@
 | 0a (exports, Supabase fake) | **DONE 2026-08-17.** tsc clean, lint clean, 345 files / 3274 tests green. |
 | 0b (parity harness) | **DONE 2026-08-17.** 46 tests, 347 files / 3315 green. Month path, diary renderer and `getUnifiedAvailableSlots` deferred to before Stage 4. |
 | 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
-| 2 (event read/write contract) | nothing. **(H) taken.** |
+| 2 (event read/write contract) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 3 (venue resolver) | nothing. **Q3 returned zero rows on production**, so there is nothing to repair. Requires Stage 1 item 3 to have landed, which is what keeps that zero true. |
 | 4 (diary geometry) | Stage 2's discriminated struct |
 | 5 (calendar resolver) | nothing. **(F) and (G) taken.** |
@@ -84,7 +84,7 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 6. **Breaks are a veto in the appointment engine and a subtraction in the resource engine.** Veto at `appointment-engine.ts:680-682` and `:1032-1034`; subtraction at `resource-booking-engine.ts:229-231`.
 
-7. **A single unrelated block on a date flips class/event semantics for that whole date.** Not "both" as v2 said, but **two read paths, one write gate and a renderer** `[R3-10]`: `class-session-engine.ts:191-192` (`if (dayBlocks.length === 0) return true`), `class-schedule-availability-conflicts.ts:125-126` (`if (dayBlocks.length > 0)`), `event-ticket-engine.ts:100-103` via `isWeeklyScheduleClosedForDate` (which returns false the moment any block exists, `venue-wide-business-hours.ts:41`), and `schedule-closure-blocks.ts:245`.
+7. ⚠️ **FIXED FOR EVENTS, Stage 2.** The event engine now tests closure OVERLAP rather than block presence, so an unrelated closure no longer changes the answer. **Classes still short-circuit on `dayBlocks.length === 0`** in both the engine and the schedule-time validator; that is Stage 5. Original finding: **a single unrelated block on a date flips class/event semantics for that whole date.** Not "both" as v2 said, but **two read paths, one write gate and a renderer** `[R3-10]`: `class-session-engine.ts:191-192` (`if (dayBlocks.length === 0) return true`), `class-schedule-availability-conflicts.ts:125-126` (`if (dayBlocks.length > 0)`), `event-ticket-engine.ts:100-103` via `isWeeklyScheduleClosedForDate` (which returns false the moment any block exists, `venue-wide-business-hours.ts:41`), and `schedule-closure-blocks.ts:245`.
 
 8. **Appointments evaluate one block per date; everything else combines all of them.** `appointment-engine.ts:482-484`: `applicable.find((ex) => ex.closed) ?? applicable[0]!`.
 
@@ -104,7 +104,7 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 #### New in v3
 
-16. **A second, structurally different read/write disagreement: every class and every event on a weekly-closed weekday is listed and then refused at checkout** `[R3-17]`. On a weekday with zero periods and zero blocks, the class engine sells it (`class-session-engine.ts:190-192` returns `true`), the event engine sells it (`event-ticket-engine.ts:100-103`, the deliberate carve-out), and **both create gates reject it** (`create/route.ts:1031` and `:1298` via `venue-wide-business-hours.ts:220`). This is live at every venue with configured opening hours. It is the single most important new finding, because it is the pair that decision (B) must resolve and v2 never names it.
+16. ✅ **FIXED, Stage 2.** The listing was the correct side under decision (H), so the create gate moved to `scheduledInstanceRejectBookingWindow`. Original finding: **every class and every event on a weekly-closed weekday is listed and then refused at checkout** `[R3-17]`. On a weekday with zero periods and zero blocks, the class engine sells it (`class-session-engine.ts:190-192` returns `true`), the event engine sells it (`event-ticket-engine.ts:100-103`, the deliberate carve-out), and **both create gates reject it** (`create/route.ts:1031` and `:1298` via `venue-wide-business-hours.ts:220`). This is live at every venue with configured opening hours. It is the single most important new finding, because it is the pair that decision (B) must resolve and v2 never names it.
 
 17. **`amended_hours` rows with empty `override_periods` mean opposite things on the two paths, and unifying moves availability in *both* directions** `[R3-18]`. **(Zero such rows on production as of 2026-08-17; this is a latent defect held closed only by Stage 1 item 3.)** Today such a row is dropped for appointments (`venue-exceptions-adapter.ts:25` requires a non-empty array, so the day sells) and closes the whole day for classes, events, resources and the diary (`venue-wide-business-hours.ts:179`). Unify on "closed" and appointment days that sell today stop selling; unify on "ignore" (§2.2's law) and days that show closed today reopen, putting sessions back on sale. **v2 sized only widenings and this defect can go either way**, which is why Q3 is a repair prerequisite rather than a sizing query: fix the rows and neither direction fires.
 
@@ -517,7 +517,7 @@ Every slot after the break moves. This is the single strongest argument for deci
 
 **Three production zeros now rest on Stage 1 code**, and all three expire if it is reverted: Q3 on item 3 (the merged-row validation), Q5 on item 8 (the `days_off` schema), Q9 on item 2 (the exception precedence).
 
-### Stage 2 — The event read/write contract. The one atomic unit.
+### Stage 2 — The event read/write contract. The one atomic unit. ✅ DONE 2026-08-17
 
 Ship alone, revert alone. Closes §1.2 items 16 and, for events, 7.
 
@@ -526,7 +526,11 @@ Ship alone, revert alone. Closes §1.2 items 16 and, for events, 7.
 - **Delete `isWeeklyScheduleClosedForDate` in favour of the struct.** Do **not** "fix its guard in place" `[R3-59]`: `venue-wide-business-hours.ts:41` returns false the moment any block exists, and relaxing that so it returns true on a weekly-closed weekday regardless of blocks makes `event-ticket-engine.ts:100-103` fire even when the owner has posted an **explicit full-day closure**, putting events on sale on a day the venue deliberately shut. Only the struct path is safe, because §2.6's ALWAYS clause tests closure overlap independently of the weekly state.
 - Align `booking/create:1031` and `:1298` with the read paths in the **same commit**. Read and write move together or the disagreement simply changes direction.
 
-**Exit:** the weekly-closed-weekday fixtures for class and event show read and write agreeing, in both the listing and the create gate.
+**Exit:** the weekly-closed-weekday fixtures for class and event show read and write agreeing, in both the listing and the create gate. **Met:** tsc clean, lint 0 errors, **353 files / 3368 tests**. `venue-wide-business-hours.ts` went from **2 tests to 14**, including the case the deleted helper got wrong.
+
+**One refinement the matrix forced, on the first run `[R3-69]`.** `cause` is deliberately **not** `'weekly'` when an amended-hours row applies to the date. That row is the venue naming hours for that specific date, and until Stage 3 makes amended hours replace the weekly baseline the resolver cannot honour them — granting the allowance would have put an instance on sale at any hour while the venue had named a window. Scoping `cause` this way preserves today's behaviour for that shape exactly, which is what keeps Stage 2 atomic. **Stage 3 must revisit it:** once amended hours replace, the amended window becomes `hours` and the event is coverage-checked against it, so the `amended.length > 0` guard in the resolver should be removed in the same commit.
+
+**Not needed after all.** The plan expected `booking/create:1039` to dispatch on `calendar_type`. It does not, yet: on a weekly-closed weekday decision (H) makes classes and events agree, so one instance gate serves both. The dispatch is genuinely Stage 5 work, for the out-of-hours-on-an-open-weekday case where classes are allowed and events are not.
 
 ### Stage 3 — One venue resolver.
 

@@ -11,6 +11,7 @@ import type {
   ServiceCustomScheduleStored,
   WorkingHours,
 } from '@/types/booking-models';
+import { venueOpeningExceptionsToBlocks } from '@/lib/availability/venue-exceptions-adapter';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 const MONTH_NAMES = [
@@ -89,6 +90,21 @@ export function ServiceAvailabilityCalendar({
   customWorkingHours,
   footnote,
 }: Props) {
+  /**
+   * This surface is fed the LEGACY `venues.venue_opening_exceptions` JSON, not
+   * `availability_blocks`, so it has never seen a real closure or amended-hours row --
+   * and Q9 (2026-08-17) found no venue carrying any legacy JSON at all, which means the
+   * summary has effectively been resolving "no venue exceptions" for everyone.
+   *
+   * Converting here puts it on the shared resolver so its answer matches the engine's.
+   * Pointing it at `availability_blocks` is a data-fetch change in the dashboard view and
+   * belongs with the Stage 4 UI work; recorded in the plan rather than left implied.
+   */
+  const venueWideBlocks = useMemo(
+    () => venueOpeningExceptionsToBlocks(venueOpeningExceptions ?? null, ''),
+    [venueOpeningExceptions],
+  );
+
   const today = useMemo(() => todayParts(), []);
   const [year, setYear] = useState<number>(today.year);
   const [month, setMonth] = useState<number>(today.month);
@@ -110,7 +126,7 @@ export function ServiceAvailabilityCalendar({
         computeServiceAvailabilityForDate(
           {
             venueOpeningHours,
-            venueOpeningExceptions,
+            venueWideBlocks,
             linkedCalendars,
             customAvailabilityEnabled,
             customWorkingHours,
@@ -125,7 +141,7 @@ export function ServiceAvailabilityCalendar({
     month,
     lastDate,
     venueOpeningHours,
-    venueOpeningExceptions,
+    venueWideBlocks,
     linkedCalendars,
     customAvailabilityEnabled,
     customWorkingHours,

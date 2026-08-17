@@ -12,9 +12,10 @@ import type {
   WorkingHours,
 } from '@/types/booking-models';
 import type { OpeningHours } from '@/types/availability';
-import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { getDayOfWeek } from '@/lib/availability/engine';
-import { getOpeningPeriodsForDay, minutesToTime, timeToMinutes } from '@/lib/availability';
+import { minutesToTime, timeToMinutes } from '@/lib/availability';
+import type { AvailabilityBlock } from '@/types/availability';
+import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
@@ -330,47 +331,27 @@ export function formatServiceCustomScheduleSummary(schedule: ServiceCustomSchedu
     .join('\n');
 }
 
-function isVenueOpeningHoursConfigured(openingHours: OpeningHours | null | undefined): boolean {
-  return openingHours != null && typeof openingHours === 'object' && Object.keys(openingHours).length > 0;
-}
-
-/** Keep in sync with `venueMinuteRangesForAppointmentDate` in appointment-engine.ts */
-function findApplicableVenueOpeningException(
-  exceptions: VenueOpeningException[] | null | undefined,
-  dateStr: string,
-): VenueOpeningException | null {
-  if (!exceptions?.length) return null;
-  for (const ex of exceptions) {
-    if (ex.date_start <= dateStr && dateStr <= ex.date_end) return ex;
-  }
-  return null;
-}
-
+/**
+ * Venue minute ranges for the summary line, resolved by the SHARED resolver.
+ *
+ * This used to be a hand-rolled copy carrying a "keep in sync with
+ * venueMinuteRangesForAppointmentDate" comment, and it was not in sync: it took the FIRST
+ * matching exception in list order, while the engine had been fixed to prefer a closure
+ * over an amended row. So a date with both showed amended hours in the service summary and
+ * resolved closed in the engine. That function is now deleted, which would have left this
+ * comment pointing at nothing.
+ *
+ * Returns null when the venue imposes no constraint, [] when it is shut for the day.
+ */
 function venueMinuteRangesForSummaryDate(
   venueOpeningHours: OpeningHours | null | undefined,
   dateStr: string,
-  exceptions: VenueOpeningException[] | null | undefined,
+  blocks: AvailabilityBlock[] | null | undefined,
 ): Array<{ start: number; end: number }> | null {
-  const ex = findApplicableVenueOpeningException(exceptions, dateStr);
-  if (ex) {
-    if (ex.closed) return [];
-    if (ex.periods?.length) {
-      return ex.periods.map((p) => ({
-        start: timeToMinutes(p.open.slice(0, 5)),
-        end: timeToMinutes(p.close.slice(0, 5)),
-      }));
-    }
-  }
-  if (isVenueOpeningHoursConfigured(venueOpeningHours)) {
-    const day = getDayOfWeek(dateStr);
-    const periods = getOpeningPeriodsForDay(venueOpeningHours, day);
-    if (periods.length === 0) return [];
-    return periods.map((p) => ({
-      start: timeToMinutes(p.open.slice(0, 5)),
-      end: timeToMinutes(p.close.slice(0, 5)),
-    }));
-  }
-  return null;
+  const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours, dateStr, blocks ?? []);
+  if (res.kind === 'unrestricted') return null;
+  if (res.kind === 'closed') return [];
+  return res.ranges;
 }
 
 /** Next calendar date from local today within `maxDays` where `getDay()` equals `dow` (0=Sun … 6=Sat). */
@@ -454,12 +435,12 @@ export interface OnlineBookableWeeklySummaryParts {
  */
 export function getOnlineBookableWeeklySummaryParts(params: {
   venueOpeningHours: OpeningHours | null | undefined;
-  venueOpeningExceptions?: VenueOpeningException[] | null;
+  venueWideBlocks?: AvailabilityBlock[] | null;
   linkedCalendars: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
   customAvailabilityEnabled: boolean;
   customWorkingHours: ServiceCustomScheduleStored | null | undefined;
 }): OnlineBookableWeeklySummaryParts {
-  const { venueOpeningHours, venueOpeningExceptions, linkedCalendars, customAvailabilityEnabled, customWorkingHours } =
+  const { venueOpeningHours, venueWideBlocks, linkedCalendars, customAvailabilityEnabled, customWorkingHours } =
     params;
   if (linkedCalendars.length === 0) {
     return {
@@ -509,7 +490,7 @@ export function getOnlineBookableWeeklySummaryParts(params: {
       previewDateParts.push(`${label.slice(0, 3)} ${anchorYmd}`);
     }
 
-    const venueRanges = venueMinuteRangesForSummaryDate(venueOpeningHours, anchorYmd, venueOpeningExceptions);
+    const venueRanges = venueMinuteRangesForSummaryDate(venueOpeningHours, anchorYmd, venueWideBlocks);
     const all: Array<{ start: number; end: number }> = [];
     for (const cal of linkedCalendars) {
       const calRanges = minuteRangesForWorkingHoursDay(cal.working_hours, dow);
@@ -539,7 +520,7 @@ export function getOnlineBookableWeeklySummaryParts(params: {
       : null;
 
   const venueExceptionNote =
-    !hasComplexCustom && venueOpeningExceptions && venueOpeningExceptions.length > 0
+    !hasComplexCustom && venueWideBlocks && venueWideBlocks.length > 0
       ? 'Venue closed or amended days on the calendar use the next occurrence of each weekday from today (service hours follow the usual weekly pattern).'
       : null;
 
@@ -575,7 +556,7 @@ export interface ServiceAvailabilityForDate {
 export function computeServiceAvailabilityForDate(
   params: {
     venueOpeningHours: OpeningHours | null | undefined;
-    venueOpeningExceptions?: VenueOpeningException[] | null;
+    venueWideBlocks?: AvailabilityBlock[] | null;
     linkedCalendars: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
     customAvailabilityEnabled: boolean;
     customWorkingHours: ServiceCustomScheduleStored | null | undefined;
@@ -584,7 +565,7 @@ export function computeServiceAvailabilityForDate(
 ): ServiceAvailabilityForDate {
   const {
     venueOpeningHours,
-    venueOpeningExceptions,
+    venueWideBlocks,
     linkedCalendars,
     customAvailabilityEnabled,
     customWorkingHours,
@@ -601,7 +582,7 @@ export function computeServiceAvailabilityForDate(
   }
 
   const dow = getDayOfWeek(dateStr);
-  const venueRanges = venueMinuteRangesForSummaryDate(venueOpeningHours, dateStr, venueOpeningExceptions);
+  const venueRanges = venueMinuteRangesForSummaryDate(venueOpeningHours, dateStr, venueWideBlocks);
   const venueClosed = venueRanges !== null && venueRanges.length === 0;
 
   const calendarEffective: Array<{ start: number; end: number }> = [];
@@ -643,7 +624,7 @@ export function formatMinuteRangeShort(range: { start: number; end: number }): s
 /** Single string for simple callers; dashboard uses {@link getOnlineBookableWeeklySummaryParts}. */
 export function describeOnlineBookableWeeklySummary(params: {
   venueOpeningHours: OpeningHours | null | undefined;
-  venueOpeningExceptions?: VenueOpeningException[] | null;
+  venueWideBlocks?: AvailabilityBlock[] | null;
   linkedCalendars: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
   customAvailabilityEnabled: boolean;
   customWorkingHours: ServiceCustomScheduleStored | null | undefined;

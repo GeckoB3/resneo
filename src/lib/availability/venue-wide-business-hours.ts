@@ -28,24 +28,6 @@ export function blocksForDate(venueWideBlocks: AvailabilityBlock[], dateStr: str
   );
 }
 
-/**
- * True when there are no venue-wide blocks on this date, weekly opening hours are configured,
- * but this weekday has no periods (e.g. restaurant closed Mon–Wed). In that case
- * {@link resolveVenueWideAllowedMinuteRanges} returns `closed` even though there is no explicit
- * closure block — ticketed events may still run that day.
- */
-export function isWeeklyScheduleClosedForDate(
-  openingHours: OpeningHours | null | undefined,
-  dateStr: string,
-  venueWideBlocks: AvailabilityBlock[],
-): boolean {
-  if (blocksForDate(venueWideBlocks, dateStr).length > 0) return false;
-  if (!isOpeningHoursConfigured(openingHours)) return false;
-  const day = getDayOfWeek(dateStr);
-  const periods = getOpeningPeriodsForDay(openingHours!, day);
-  return periods.length === 0;
-}
-
 function subtractOneRange(
   r: { start: number; end: number },
   cut: { start: number; end: number },
@@ -113,12 +95,62 @@ function unionAmendedPeriods(blocks: AvailabilityBlock[]): Array<{ start: number
   return unionMinuteRanges(periods.filter((r) => r.end > r.start));
 }
 
+/**
+ * Why the venue is closed, when it is.
+ *
+ * `weekly` means the venue simply does not trade this weekday: opening hours are
+ * configured and this weekday has no periods. That is an ABSENCE of configuration, not a
+ * decision to shut, and scheduled instances someone deliberately put on the calendar are
+ * still allowed to run (operator decision H).
+ *
+ * `override` means something explicitly closed it: a closure block, a special event, or an
+ * amended-hours row that resolved to nothing.
+ *
+ * Collapsing these two into a bare `closed` is what forced `isWeeklyScheduleClosedForDate`
+ * to exist, and that helper had to re-derive the distinction from the block list -- which
+ * it got wrong, returning false the moment ANY block existed on the date. See the resolver
+ * plan §2.3 step 5.
+ */
+export type VenueClosedCause = 'weekly' | 'override';
+
 export type VenueWideResolution =
-  | { kind: 'unrestricted' }
-  | { kind: 'closed' }
-  | { kind: 'allowed'; ranges: Array<{ start: number; end: number }> };
+  | { kind: 'unrestricted'; closures: Array<{ start: number; end: number }> }
+  | { kind: 'closed'; cause: VenueClosedCause; closures: Array<{ start: number; end: number }> }
+  | {
+      kind: 'allowed';
+      ranges: Array<{ start: number; end: number }>;
+      closures: Array<{ start: number; end: number }>;
+    };
+
+/**
+ * Closed / special_event windows for the date, materialised. A block with no times covers
+ * the whole day. Exposed on every resolution so a consumer can ask "does a closure overlap
+ * MY window?" without re-deriving it from the block list.
+ */
+export function venueClosureWindowsForDate(
+  venueWideBlocks: AvailabilityBlock[],
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const out: Array<{ start: number; end: number }> = [];
+  for (const b of blocksForDate(venueWideBlocks, dateStr)) {
+    if (b.block_type !== 'closed' && b.block_type !== 'special_event') continue;
+    const ts = sliceTime(b.time_start);
+    const te = sliceTime(b.time_end);
+    if (ts == null || te == null) {
+      out.push({ start: 0, end: 24 * 60 });
+      continue;
+    }
+    const a = timeToMinutes(ts);
+    const c = timeToMinutes(te);
+    if (c > a) out.push({ start: a, end: c });
+  }
+  return unionMinuteRanges(out);
+}
 
 const FULL_DAY = [{ start: 0, end: 24 * 60 }];
+
+/** Single source for the guest-facing refusal, so both gates say the same thing. */
+const CLOSED_MESSAGE = 'The venue is closed for this date or time.';
 
 /**
  * Allowed venue-local minute ranges for a calendar date after applying venue-wide
@@ -131,13 +163,16 @@ export function resolveVenueWideAllowedMinuteRanges(
 ): VenueWideResolution {
   const dayBlocks = blocksForDate(venueWideBlocks, dateStr);
   const hasWeekly = isOpeningHoursConfigured(openingHours);
+  const closures = venueClosureWindowsForDate(venueWideBlocks, dateStr);
 
   if (dayBlocks.length === 0) {
-    if (!hasWeekly) return { kind: 'unrestricted' };
+    if (!hasWeekly) return { kind: 'unrestricted', closures };
     const day = getDayOfWeek(dateStr);
     const periods = getOpeningPeriodsForDay(openingHours!, day);
     const ranges = periods.map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }));
-    return ranges.length === 0 ? { kind: 'closed' } : { kind: 'allowed', ranges };
+    return ranges.length === 0
+      ? { kind: 'closed', cause: 'weekly', closures }
+      : { kind: 'allowed', ranges, closures };
   }
 
   const closedLike = dayBlocks.filter((b) => b.block_type === 'closed' || b.block_type === 'special_event');
@@ -148,7 +183,17 @@ export function resolveVenueWideAllowedMinuteRanges(
     const day = getDayOfWeek(dateStr);
     const periods = getOpeningPeriodsForDay(openingHours!, day);
     base = periods.map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }));
-    if (base.length === 0) return { kind: 'closed' };
+    if (base.length === 0) {
+      // The weekday has no periods. A CLOSURE on the date does not change why it is shut,
+      // so the weekly allowance still applies. An AMENDED-HOURS row does: it is the venue
+      // stating hours for this specific date. Until Stage 3 makes amended hours replace
+      // the weekly baseline, this resolver cannot honour those hours, and granting the
+      // weekly allowance here would put an instance on sale at ANY time of day while the
+      // venue had named a window. Report it as an override-closed day instead, which is
+      // exactly today's behaviour for this shape.
+      const cause: VenueClosedCause = amended.length > 0 ? 'override' : 'weekly';
+      return { kind: 'closed', cause, closures };
+    }
   } else {
     base = [...FULL_DAY];
   }
@@ -158,7 +203,7 @@ export function resolveVenueWideAllowedMinuteRanges(
     const te = sliceTime(b.time_end);
     return ts == null || te == null;
   });
-  if (fullDayClosed) return { kind: 'closed' };
+  if (fullDayClosed) return { kind: 'closed', cause: 'override', closures };
 
   const partialClosed: Array<{ start: number; end: number }> = [];
   for (const b of closedLike) {
@@ -176,14 +221,14 @@ export function resolveVenueWideAllowedMinuteRanges(
 
   if (amended.length > 0) {
     const union = unionAmendedPeriods(amended);
-    if (union.length === 0) return { kind: 'closed' };
+    if (union.length === 0) return { kind: 'closed', cause: 'override', closures };
     base = intersectMinuteRangeArrays(base, union);
   }
 
   const cleaned = base.filter((r) => r.end > r.start);
-  if (cleaned.length === 0) return { kind: 'closed' };
+  if (cleaned.length === 0) return { kind: 'closed', cause: 'override', closures };
 
-  return { kind: 'allowed', ranges: cleaned };
+  return { kind: 'allowed', ranges: cleaned, closures };
 }
 
 /** Exported for tests / event validation edge cases. */
@@ -217,13 +262,62 @@ export function venueWideBlocksRejectBookingWindow(
   const res = resolveVenueWideAllowedMinuteRanges(openingHours, dateStr, venueWideBlocks);
   if (res.kind === 'unrestricted') return null;
   if (res.kind === 'closed') {
-    return 'The venue is closed for this date or time.';
+    return CLOSED_MESSAGE;
   }
   const start = timeToMinutes(startHhMm.slice(0, 5));
   const end = timeToMinutes(endHhMm.slice(0, 5));
   if (!isMinuteSubintervalCoveredByRanges(start, end, res.ranges)) {
-    return 'The venue is closed for this date or time.';
+    return CLOSED_MESSAGE;
   }
+  return null;
+}
+
+/**
+ * Venue gate for a SCHEDULED INSTANCE: a class, an event, or an `event_sessions` row.
+ *
+ * Different from {@link venueWideBlocksRejectBookingWindow}, which stays the gate for slot
+ * generation (resources, appointments). A scheduled instance is not a slot someone picked
+ * off a grid; it is a fixed time staff deliberately put on the calendar, so a weekday the
+ * venue has no hours for does not by itself refuse it (operator decision H).
+ *
+ * The rules, in order:
+ *  1. An explicit closure overlapping the window always refuses. This is checked against
+ *     the closure windows directly, so an UNRELATED closure elsewhere in the day no longer
+ *     changes the answer -- which is §1.2 item 7, fixed for scheduled instances.
+ *  2. `weekly` closed, with no overlapping closure, is ALLOWED. This is what
+ *     `isWeeklyScheduleClosedForDate` used to express, minus its bug: that helper returned
+ *     false the moment any block existed on the date, so one unrelated morning closure
+ *     silently took every evening event off sale.
+ *  3. Otherwise the window must fit inside the resolved open ranges, as before.
+ *
+ * Classes being bookable outside weekly hours on an OPEN weekday is a separate rule and is
+ * still enforced by rule 3 here; splitting that by `calendar_type` is Stage 5 work.
+ *
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §2.6 and Stage 2.
+ */
+export function scheduledInstanceRejectBookingWindow(
+  openingHours: OpeningHours | null | undefined,
+  dateStr: string,
+  startHhMm: string,
+  endHhMm: string,
+  venueWideBlocks: AvailabilityBlock[],
+): string | null {
+  const res = resolveVenueWideAllowedMinuteRanges(openingHours, dateStr, venueWideBlocks);
+
+  const start = timeToMinutes(startHhMm.slice(0, 5));
+  const rawEnd = timeToMinutes(endHhMm.slice(0, 5));
+  // An instance ending at or before its start crosses midnight; compare against the tail
+  // that falls on this date. Matches the class and event engines.
+  const end = rawEnd <= start ? 24 * 60 : rawEnd;
+
+  const overlapsClosure = res.closures.some((c) => start < c.end && c.start < end);
+  if (overlapsClosure) return CLOSED_MESSAGE;
+
+  if (res.kind === 'unrestricted') return null;
+  if (res.kind === 'closed') {
+    return res.cause === 'weekly' ? null : CLOSED_MESSAGE;
+  }
+  if (!isMinuteSubintervalCoveredByRanges(start, end, res.ranges)) return CLOSED_MESSAGE;
   return null;
 }
 

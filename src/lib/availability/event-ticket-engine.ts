@@ -12,7 +12,6 @@ import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status'
 import {
   resolveVenueWideAllowedMinuteRanges,
   isMinuteSubintervalCoveredByRanges,
-  isWeeklyScheduleClosedForDate,
 } from '@/lib/availability/venue-wide-business-hours';
 import {
   rowsToVenueWideBlocks,
@@ -98,11 +97,28 @@ export function computeEventAvailability(
 
     if (venueWideBlocks != null) {
       const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours ?? null, event.event_date, venueWideBlocks);
-      const weeklyOffDayNoBlocks =
-        res.kind === 'closed' &&
-        isWeeklyScheduleClosedForDate(venueOpeningHours ?? null, event.event_date, venueWideBlocks);
-      if (res.kind === 'closed' && !weeklyOffDayNoBlocks) continue;
-      if (res.kind === 'allowed') {
+
+      {
+        // An explicit closure overlapping the event always hides it, whatever the weekly
+        // shape says. Checked against the closure windows directly, so an UNRELATED
+        // closure elsewhere in the day no longer changes the answer: that was §1.2 item 7,
+        // where a single 06:00-07:00 block took every evening event off sale.
+        const s = timeToMinutes(String(event.start_time).slice(0, 5));
+        const rawE = timeToMinutes(String(event.end_time).slice(0, 5));
+        const e = rawE <= s ? 24 * 60 : rawE;
+        if (res.closures.some((c) => s < c.end && c.start < e)) continue;
+      }
+
+      // A weekday the venue has no hours for is an absence of configuration, not a
+      // decision to shut, and someone deliberately scheduled this event on it. Keep
+      // selling (operator decision H). This replaces isWeeklyScheduleClosedForDate,
+      // which had to re-derive the same distinction from the block list and got it
+      // wrong whenever the date carried any block at all.
+      if (res.kind === 'closed' && res.cause === 'weekly') {
+        // fall through to the capacity and booking-window checks below
+      } else if (res.kind === 'closed') {
+        continue;
+      } else if (res.kind === 'allowed') {
         const start = timeToMinutes(String(event.start_time).slice(0, 5));
         const rawEnd = timeToMinutes(String(event.end_time).slice(0, 5));
         // Events store an absolute wall-clock end, so a 22:00-01:00 event arrives as

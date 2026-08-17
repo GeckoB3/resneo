@@ -86,7 +86,10 @@ import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
-import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wide-business-hours';
+import {
+  venueWideBlocksRejectBookingWindow,
+  scheduledInstanceRejectBookingWindow,
+} from '@/lib/availability/venue-wide-business-hours';
 import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/venue-wide-blocks-fetch';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import { DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES } from '@/lib/booking/resource-booking-defaults';
@@ -1028,7 +1031,12 @@ async function handleNonTableBooking(
 
     unifiedSessionAnchor = { calendar_id: sess.calendar_id, service_item_id: sess.service_item_id };
 
-    const venueWideErr = venueWideBlocksRejectBookingWindow(
+    // A group session is a SCHEDULED INSTANCE, not a slot picked off a grid, so it uses
+    // the instance gate. Without this the listing sold a session on a weekday the venue
+    // has no hours for and this gate refused it at checkout -- live at every venue with
+    // configured opening hours. Read and write have to move together or the disagreement
+    // only changes direction. See the resolver plan §2.6 and Stage 2.
+    const venueWideErr = scheduledInstanceRejectBookingWindow(
       venueWideHours.openingHours,
       booking_date,
       sessionStart,
@@ -1295,7 +1303,8 @@ async function handleNonTableBooking(
     if (!event || event.remaining_capacity < party_size) {
       return NextResponse.json({ error: 'This event is fully booked or unavailable' }, { status: 409 });
     }
-    const venueWideErrEvent = venueWideBlocksRejectBookingWindow(
+    // Same instance gate as the group-session branch above; matches computeEventAvailability.
+    const venueWideErrEvent = scheduledInstanceRejectBookingWindow(
       venueWideHours.openingHours,
       booking_date,
       event.start_time.slice(0, 5),

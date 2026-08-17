@@ -53,6 +53,7 @@ import {
 import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 import {
   resolveVenueWideAllowedMinuteRanges,
+  scheduledInstanceRejectBookingWindow,
   venueWideBlocksRejectBookingWindow,
 } from '@/lib/availability/venue-wide-business-hours';
 
@@ -330,6 +331,22 @@ export function hostCalendar(world: SchedulingWorld): NonNullable<VenueResource[
 export function venueWriteGate(world: SchedulingWorld, startHhMm?: string, endHhMm?: string): string | null {
   const win = instanceWindow(world);
   return venueWideBlocksRejectBookingWindow(
+    world.venueOpeningHours,
+    world.date,
+    startHhMm ?? win.start,
+    endHhMm ?? win.end,
+    world.venueBlocks,
+  );
+}
+
+/**
+ * The `booking/create` gate for a SCHEDULED INSTANCE (group session at :1039, event ticket
+ * at :1307). Split from the slot-generation gate in Stage 2, so the pair can be asserted
+ * against the class and event listings rather than against the appointment grid.
+ */
+export function instanceWriteGate(world: SchedulingWorld, startHhMm?: string, endHhMm?: string): string | null {
+  const win = instanceWindow(world);
+  return scheduledInstanceRejectBookingWindow(
     world.venueOpeningHours,
     world.date,
     startHhMm ?? win.start,

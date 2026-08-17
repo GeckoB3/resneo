@@ -8,6 +8,7 @@ import {
   configuredButClosedOn,
   eventOffered,
   openOn,
+  instanceWriteGate,
   venueWriteGate,
   type SchedulingWorld,
 } from '@/lib/availability/parity/scheduling-world';
@@ -180,14 +181,14 @@ describe('read/write agreement / scheduled instances', () => {
   });
 
   /**
-   * PINS THE LIVE DISAGREEMENT (plan §1.2 item 16). On a weekday the venue has no periods
-   * for, with no blocks, both listings sell the session and the create gate refuses it.
-   * Every venue with configured opening hours is exposed to this today.
+   * CLOSED BY STAGE 2 (plan §1.2 item 16). On a weekday the venue has no periods for, both
+   * listings sell the session and the create gate now accepts it. Under decision (H) the
+   * listing was the correct side, so the GATE moved: `booking/create` uses the
+   * scheduled-instance gate for group sessions and event tickets.
    *
-   * Stage 2 closes it. Under decision (H) the listing is correct and the GATE moves, so
-   * when this expectation changes it should become `toBeNull()`, not `toBe(false)`.
+   * This was live at every venue with configured opening hours before Stage 2.
    */
-  it('DIVERGES: listings sell a session on a weekly-closed weekday and the gate refuses it', () => {
+  it('AGREES after Stage 2: a session on a weekly-closed weekday is listed and accepted', () => {
     const w = world({
       name: 'weekly-closed weekday, no blocks',
       venueOpeningHours: configuredButClosedOn(DATE, [{ open: '09:00', close: '17:00' }]),
@@ -195,7 +196,45 @@ describe('read/write agreement / scheduled instances', () => {
 
     expect(classOffered(w)).toBe(true);
     expect(eventOffered(w)).toBe(true);
+    expect(instanceWriteGate(w)).toBeNull();
+    // The slot-generation gate still refuses, and should: appointments and resources are
+    // not scheduled instances. That difference is the point of splitting the two gates.
     expect(venueWriteGate(w)).toBe('The venue is closed for this date or time.');
+  });
+
+  /**
+   * The safety valve that makes decision (H) safe: an explicit closure still wins. An owner
+   * who genuinely shuts that day is obeyed, on both sides.
+   */
+  it('refuses on both sides when the owner explicitly closes the weekly-closed day', () => {
+    const w = world({
+      name: 'weekly-closed weekday, explicit closure',
+      venueOpeningHours: configuredButClosedOn(DATE, [{ open: '09:00', close: '17:00' }]),
+      venueBlocks: [block({ block_type: 'closed', date_start: DATE, date_end: DATE })],
+    });
+
+    expect(classOffered(w)).toBe(false);
+    expect(eventOffered(w)).toBe(false);
+    expect(instanceWriteGate(w)).toBe('The venue is closed for this date or time.');
+  });
+
+  /**
+   * §1.2 item 7, fixed for scheduled instances. A closure that does not overlap the
+   * instance no longer changes the answer. Before Stage 2 a single 06:00-07:00 block took
+   * every evening event off sale for the whole date.
+   */
+  it('ignores a non-overlapping closure on a weekly-closed weekday', () => {
+    const w = world({
+      name: 'weekly-closed weekday, unrelated early closure',
+      venueOpeningHours: configuredButClosedOn(DATE, [{ open: '09:00', close: '17:00' }]),
+      venueBlocks: [
+        block({ block_type: 'closed', date_start: DATE, date_end: DATE, time_start: '06:00', time_end: '07:00' }),
+      ],
+      instance: { start: '19:00', end: '20:00' },
+    });
+
+    expect(eventOffered(w)).toBe(true);
+    expect(instanceWriteGate(w)).toBeNull();
   });
 
   /**

@@ -11,6 +11,10 @@ import {
 } from '@/lib/calendar/hours-change-orphans';
 import type { OpeningHours } from '@/types/availability';
 import { openingHoursSchema } from '@/types/config-schemas';
+import {
+  rowsToVenueWideBlocks,
+  venueWideBlocksQueryForRange,
+} from '@/lib/availability/venue-wide-blocks-fetch';
 
 /** PATCH /api/venue/opening-hours - update opening_hours (admin only). */
 export async function PATCH(request: NextRequest) {
@@ -56,11 +60,30 @@ export async function PATCH(request: NextRequest) {
         const exceptions = parseVenueOpeningExceptions(
           (current as { venue_opening_exceptions?: unknown }).venue_opening_exceptions,
         );
-        const orphans = await findBookingsOrphanedByHoursChange(getSupabaseAdminClient(), {
+        // Dates carrying a venue-wide block have their own hours, so a weekly change does
+        // not strand anything on them. Passing the blocks to BOTH sides makes the old and
+        // new answers identical on those dates, which is more accurate than skipping them
+        // and also catches the case where a part-day closure already narrowed the day.
+        const admin = getSupabaseAdminClient();
+        const { data: blockRows } = await venueWideBlocksQueryForRange(
+          admin,
+          staff.venue_id,
+          fromDate,
+          '2999-12-31',
+        );
+        const venueBlocks = rowsToVenueWideBlocks(blockRows);
+
+        const orphans = await findBookingsOrphanedByHoursChange(admin, {
           venueId: staff.venue_id,
           fromDate,
-          oldPeriodsForDate: venueWeeklyMinutesForDate((current.opening_hours as OpeningHours | null) ?? null),
-          newPeriodsForDate: venueWeeklyMinutesForDate((opening_hours as OpeningHours | null | undefined) ?? null),
+          oldPeriodsForDate: venueWeeklyMinutesForDate(
+            (current.opening_hours as OpeningHours | null) ?? null,
+            venueBlocks,
+          ),
+          newPeriodsForDate: venueWeeklyMinutesForDate(
+            (opening_hours as OpeningHours | null | undefined) ?? null,
+            venueBlocks,
+          ),
           skipDate: (d) => exceptions.some((ex) => ex.date_start <= d && d <= ex.date_end),
         });
         if (orphans.total > 0) {

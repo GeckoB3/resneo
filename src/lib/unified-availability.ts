@@ -256,7 +256,12 @@ export async function getUnifiedAvailableSlots(params: {
       .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
       .eq('venue_id', venueId)
       .is('service_id', null)
-      .in('block_type', ['closed', 'amended_hours'])
+      // `special_event` is closure-like everywhere else that reads venue-wide blocks
+      // (venue-wide-business-hours.ts, venue-exceptions-adapter.ts, venue-wide-blocks-fetch.ts).
+      // Omitting it here did not merely miss a closure: this list is passed on as a non-null
+      // array, which overwrites the correctly-resolved exceptions the fetcher had already
+      // built from a query that does include it. SA-M12.
+      .in('block_type', ['closed', 'special_event', 'amended_hours'])
       .lte('date_start', date)
       .gte('date_end', date),
   ]);

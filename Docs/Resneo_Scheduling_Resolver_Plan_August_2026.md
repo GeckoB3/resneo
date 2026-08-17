@@ -6,7 +6,7 @@
 | Stage | Blocked on |
 |---|---|
 | 0a (exports, Supabase fake) | **DONE 2026-08-17.** tsc clean, lint clean, 345 files / 3274 tests green. |
-| 0b (parity harness) | nothing. **Ready to implement**, and 0a's seams are in place. |
+| 0b (parity harness) | **DONE 2026-08-17.** 46 tests, 347 files / 3315 green. Month path, diary renderer and `getUnifiedAvailableSlots` deferred to before Stage 4. |
 | 1 items 1, 3, 4, 5, 7, 8 | nothing. **Ready**, but land after 0b so the matrix pins them. **Items 3 and 8 are the two that hold Q3's and Q5's zeros true**, so they are the highest-priority items in the stage, not the smallest. |
 | 1 items 2, 6 | nothing, but both change resolver output. Land after 0b, and run **Q9** before item 2. |
 | 2 (event read/write contract) | nothing. **(H) taken.** |
@@ -459,7 +459,7 @@ Delivered:
 - **Citations re-anchored.** Stage 0a added ~45 lines to `resource-booking-engine.ts` and ~6 to `unified-availability.ts`, shifting every line this document cites in them. All 20 were recomputed and spot-checked against the post-stage file. **Every stage from here does the same, and re-anchoring is part of the stage, not cleanup afterwards** — a plan whose anchors have rotted is how the previous three rounds went wrong (§9).
 - `src/lib/testing/supabase-fake.ts` plus 11 tests. It applies filters rather than returning everything, supports exactly the operators the availability fetchers use (eq, neq, in, is, gte, lte, gt, lt, order, limit, `not(col,'is',null)`, `or()` as an eq-disjunction), and **throws on any unsupported operator** rather than silently matching all rows. Typed end to end: no `as any` at call sites, and the one unavoidable structural cast is behind `asSupabaseClient<T>()`.
 
-### Stage 0b — The parity harness. No behaviour change.
+### Stage 0b — The parity harness. No behaviour change. ✅ DONE 2026-08-17
 
 Pin current behaviour so every later stage is a reviewable diff in one file.
 
@@ -472,7 +472,28 @@ Pin current behaviour so every later stage is a reviewable diff in one file.
 
 **Do not claim DST coverage `[AR-minor]`.** The resolver is wall-clock minute arithmetic. Note also that there are **three** date-to-weekday implementations (`engine.ts:56-58` server-local, `resource-booking-engine.ts:89-93` UTC, `venue-local-clock.ts:110-116` via `Intl` at 12:00 UTC, which is wrong for UTC+13/+14), so the diary can disagree with the engines about which weekday a date is.
 
-**Exit:** the matrix reproduces every divergence in §1.2 as an explicit expectation. **Risk:** none beyond 0a's exports.
+**Exit:** the matrix reproduces every divergence in §1.2 as an explicit expectation. **Met:** tsc clean, lint 0 errors, **347 files / 3315 tests** green, of which **46 are the harness**.
+
+Delivered, in `src/lib/availability/parity/`:
+- `scheduling-world.ts` — one fixture type describing a venue + calendar + blocks world, with adapters feeding it to the appointment engine, class engine, event engine, resource engine, the venue resolver and the `booking/create` venue gate. Appointment fixtures deliberately route through `blocksToVenueOpeningExceptions`, because that adapter's lossiness *is* several of the divergences.
+- `parity-matrix.test.ts` (23 tests) — ordered start-time lists per consumer. Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour.
+- `parity-read-write.test.ts` (18 tests) — the read/write pairs.
+- `parity-group-sessions.test.ts` (5 tests) — `getEventClassSlots` driven through the Stage 0a fake.
+
+**What the harness proved, rather than argued `[R3-64]`.** §2.7's worked example is now measured, not reasoned. Working 09:00–17:00, break 12:00–12:45, 60-minute service:
+
+| Path | Offered starts |
+|---|---|
+| Appointments (veto) | 09:00, 10:00, 11:00, **13:00**, 14:00, 15:00, 16:00 |
+| Hosted resource (subtract) | 09:00, 10:00, 11:00, **12:45**, 13:45, 14:45, 15:45 |
+
+Every slot after the break moves. This is the single strongest argument for decision (A) and for ordered-list assertions, and it was a prediction until now.
+
+**A correction to this stage's own stated property `[R3-65]`.** The instruction "the engine offers time T ⟺ the corresponding write gate accepts T" is **too strong in the reverse direction**, and a harness built to it fails on correct code. There are **three** write validators answering three different questions (`revalidate-appointment-slot.ts:58-66`): `grid` re-runs the engine and looks for membership, `exact` runs `validateExactAppointmentStart`, `interval` runs `validateAppointmentCustomInterval`. `exact` deliberately accepts **off-grid** starts, because a multi-service visit books them and a staff duration override books an arbitrary interval. The invariant that holds, and the only one asserted, is the **forward** direction: everything offered is accepted. Pair the right validator with the right read path.
+
+**Coverage gap, stated rather than implied `[R3-66]`.** Four consumers this stage named are **not** yet asserted: the **appointment month path**, the **diary closure renderer**, `getUnifiedAvailableSlots`, and the **`booking/create` route branches**. The last is a declared non-goal (see the scope limit above). The first three are reachable and simply not done; the month path and the diary renderer both matter to Stage 4, so they should be added **before Stage 4**, not before Stage 3. Until then the harness covers the venue layer and the appointment/class/event/resource day paths only.
+
+**Risk:** none beyond 0a's exports.
 
 ### Stage 1 — Standalone bugs. Each its own commit.
 

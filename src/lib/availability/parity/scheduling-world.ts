@@ -50,7 +50,6 @@ import {
   buildResourceEngineInputFromParts,
   computeResourceAvailability,
 } from '@/lib/availability/resource-booking-engine';
-import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 import {
   resolveVenueWideAllowedMinuteRanges,
   scheduledInstanceRejectBookingWindow,
@@ -181,7 +180,7 @@ export function toAppointmentInput(
     existingBookings,
     practitionerBlockedRanges: world.blockedRanges ?? [],
     venueOpeningHours: world.venueOpeningHours,
-    venueOpeningExceptions: blocksToVenueOpeningExceptions(world.venueBlocks),
+    venueWideBlocks: world.venueBlocks,
   };
 }
 

@@ -29,8 +29,7 @@ import {
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
-import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
-import { parseVenueOpeningExceptions, type VenueOpeningException } from '@/types/venue-opening-exceptions';
+import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import {
   reportAvailabilityReadFailure,
@@ -56,8 +55,10 @@ import {
 } from '@/lib/booking/entity-booking-window';
 import { listPractitionerIdsForAppointmentService } from '@/lib/availability/appointment-any-practitioner';
 import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
+import { venueOpeningExceptionsToBlocks } from '@/lib/availability/venue-exceptions-adapter';
 
 interface VenueClockRow {
+  id?: string | null;
   timezone?: string | null;
   booking_rules?: unknown;
   opening_hours?: unknown;
@@ -137,14 +138,24 @@ function applyLeaveForDate(
   return { practitioner: nextPractitioner, partialBlocks };
 }
 
-function venueOpeningExceptionsForDate(
+/**
+ * Venue-wide blocks for one date. The month path filters per date before handing them to
+ * the engine, so a range-scoped fetch cannot leak a block from a neighbouring day.
+ *
+ * The legacy JSON is converted UP to block shape rather than the engine being taught a
+ * second format, so there is one resolution path. It is a fallback only, and Q9 found no
+ * venue carrying any.
+ */
+function venueBlocksForDate(
   date: string,
   venueClockRow: VenueClockRow,
   venueBlockRows: AvailabilityBlock[],
-): VenueOpeningException[] | null {
+): AvailabilityBlock[] | null {
   const matchingBlocks = venueBlockRows.filter((block) => block.date_start <= date && block.date_end >= date);
-  if (matchingBlocks.length > 0) return blocksToVenueOpeningExceptions(matchingBlocks);
-  return parseVenueOpeningExceptions(venueClockRow.venue_opening_exceptions);
+  if (matchingBlocks.length > 0) return matchingBlocks;
+  const legacy = parseVenueOpeningExceptions(venueClockRow.venue_opening_exceptions);
+  if (legacy.length === 0) return null;
+  return venueOpeningExceptionsToBlocks(legacy, String(venueClockRow.id ?? ''));
 }
 
 /** Exported for tests: the month view and the day view must map service rows identically. */
@@ -711,7 +722,7 @@ async function buildLegacyPractitionerMonthInputFactory({
         ...leave.partialBlocks,
       ],
       venueOpeningHours: (venueClockRow.opening_hours as OpeningHours | null) ?? null,
-      venueOpeningExceptions: venueOpeningExceptionsForDate(date, venueClockRow, venueBlocks),
+      venueWideBlocks: venueBlocksForDate(date, venueClockRow, venueBlocks),
     };
   };
 }
@@ -955,7 +966,7 @@ async function buildUnifiedCalendarMonthInputFactory({
         ...leave.partialBlocks,
       ],
       venueOpeningHours: (venueClockRow.opening_hours as OpeningHours | null) ?? null,
-      venueOpeningExceptions: venueOpeningExceptionsForDate(date, venueClockRow, venueBlocks),
+      venueWideBlocks: venueBlocksForDate(date, venueClockRow, venueBlocks),
     };
   };
 }
@@ -969,7 +980,7 @@ function emptyAppointmentInput(date: string): AppointmentEngineInput {
     existingBookings: [],
     practitionerBlockedRanges: [],
     venueOpeningHours: null,
-    venueOpeningExceptions: null,
+    venueWideBlocks: null,
   };
 }
 

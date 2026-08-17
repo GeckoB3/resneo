@@ -246,7 +246,7 @@ describe('parity matrix / closures (plan §1.2 item 3)', () => {
    * part-day closure removes the whole appointment day while narrowing it everywhere else.
    * Stage 3 makes appointments subtract too.
    */
-  it('DIVERGES: a part-day closure closes the whole appointment day but only narrows the rest', () => {
+  it('CONVERGED in Stage 3: a part-day closure narrows every path, and the grid stays aligned', () => {
     const w = world({
       name: 'closed 12:00-13:00',
       venueBlocks: [
@@ -254,9 +254,38 @@ describe('parity matrix / closures (plan §1.2 item 3)', () => {
       ],
     });
 
-    expect(appointmentStarts(w)).toEqual([]);
+    // Appointments used to lose the WHOLE day here, because the old adapter discarded the
+    // times and wrote `closed: true`. They now lose only the covered hour.
+    expect(appointmentStarts(w)).toEqual(['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00']);
     expect(venueResolution(w)).toEqual({ kind: 'allowed', ranges: ['09:00-12:00', '13:00-17:00'] });
     expect(resourceStarts(w)).toEqual(['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00']);
+  });
+
+  /**
+   * The reason closures are a VETO and not a subtraction (plan §2.1, `[R3-52]`).
+   *
+   * A 12:00-12:45 closure removes the 12:00 candidate and leaves the rest of the grid where
+   * it was. Had the closure been subtracted from the anchoring range, the afternoon would
+   * have re-anchored to 12:45/13:15/13:45 and `validateExactAppointmentStart` would have
+   * started refusing times that were bookable the day before. That is the §2.7 harm applied
+   * to a different rule, and it is why this fixture asserts an ordered list.
+   */
+  it('keeps the grid aligned across a closure that does not land on a slot boundary', () => {
+    const w = world({
+      name: 'closed 12:00-12:45',
+      durationMinutes: 30,
+      intervalMinutes: 30,
+      venueBlocks: [
+        block({ block_type: 'closed', date_start: DATE, date_end: DATE, time_start: '12:00', time_end: '12:45' }),
+      ],
+    });
+
+    const starts = appointmentStarts(w);
+    expect(starts).not.toContain('12:00');
+    expect(starts).not.toContain('12:45');
+    expect(starts.slice(starts.indexOf('11:00'))).toEqual([
+      '11:00', '11:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30',
+    ]);
   });
 
   it('closes every consumer for a whole-day closure, which is the one case they all agree on', () => {
@@ -279,7 +308,7 @@ describe('parity matrix / closures (plan §1.2 item 3)', () => {
    * other paths (`venue-wide-business-hours.ts` requires `end > start`). After Stage 3 the
    * appointment day reopens completely, which is the maximal widening in the plan.
    */
-  it('DIVERGES: an inverted closure window closes appointments and constrains nothing else', () => {
+  it('CONVERGED in Stage 3: an inverted closure window constrains nothing, on every path', () => {
     const w = world({
       name: 'closed 13:00-12:00 (inverted)',
       venueBlocks: [
@@ -287,7 +316,9 @@ describe('parity matrix / closures (plan §1.2 item 3)', () => {
       ],
     });
 
-    expect(appointmentStarts(w)).toEqual([]);
+    // Q1 calls these `day_reopens_completely`: they shut the whole appointment day today
+    // and impose nothing after Stage 3, which is the maximal widening in the plan.
+    expect(appointmentStarts(w)).toEqual(HOURLY_9_TO_5);
     expect(venueResolution(w)).toEqual({ kind: 'allowed', ranges: ['09:00-17:00'] });
     expect(resourceStarts(w)).toEqual(HOURLY_9_TO_5);
   });

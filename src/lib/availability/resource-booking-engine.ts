@@ -209,6 +209,11 @@ function getBaseResourceAvailabilityRanges(
 /**
  * Bookable windows for the resource on this date: resource row hours, intersected with the host
  * calendar column when `display_on_calendar_id` is set; host breaks are then carved out.
+ *
+ * This is the resource's OWN grid — the ranges its candidate start times are anchored to.
+ * Do not use it for occupancy projected onto another calendar; use
+ * {@link resourceRangesForHostProjection} for that. The two are identical today and are
+ * deliberately separate functions, because they must diverge: see the note on that function.
  */
 export function getEffectiveAvailabilityRanges(
   resource: VenueResource,
@@ -228,6 +233,37 @@ export function getEffectiveAvailabilityRanges(
   return intersected;
 }
 
+/**
+ * The same windows, but consumed as *occupancy on someone else's calendar*: sibling exclusion
+ * on a peer resource, and the union projected onto the host's appointment column via
+ * {@link mergedResourceEffectiveRangesForHost}.
+ *
+ * Byte-identical to {@link getEffectiveAvailabilityRanges} today. It exists as its own function
+ * because the two have to stop being identical, and doing the split before changing anything
+ * keeps that change reviewable:
+ *
+ * - The operator has taken the decision that breaks become a **veto** applied per candidate
+ *   rather than a subtraction from the anchoring ranges, so that resource slot times stop
+ *   re-anchoring after every host break. That change belongs to
+ *   {@link getEffectiveAvailabilityRanges} alone.
+ * - This function must **keep subtracting host breaks**. Its output becomes a
+ *   `kind: 'resource'` entry in `practitionerBlockedRanges` (appointment-engine.ts) and is
+ *   vetoed unconditionally, one gate below the break check that `allowDuringBreaks` skips.
+ *   Stop subtracting here and the host's own lunch hour turns into a resource block, so a
+ *   staff walk-in using `allowDuringBreaks` — the exact gesture that option exists to permit —
+ *   starts failing on every column that hosts a resource.
+ * - Sibling exclusion is range arithmetic (`subtractRangesFromRanges`) and cannot be
+ *   expressed as a per-candidate veto at all.
+ *
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §2.5 and Stage 0a.
+ */
+export function resourceRangesForHostProjection(
+  resource: VenueResource,
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  return getEffectiveAvailabilityRanges(resource, dateStr);
+}
+
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
   return startA < endB && startB < endA;
 }
@@ -241,13 +277,15 @@ function mergedSiblingResourceRangesExcluding(
   const others = siblingsOnHost.filter((r) => r.id !== excludeResourceId);
   const all: Array<{ start: number; end: number }> = [];
   for (const r of others) {
-    all.push(...getEffectiveAvailabilityRanges(r, dateStr));
+    all.push(...resourceRangesForHostProjection(r, dateStr));
   }
   return unionMinuteRanges(all);
 }
 
 /**
- * Union of effective bookable windows for resources attached to the same host column (same date).
+ * Union of effective bookable windows for resources attached to the same host column (same date),
+ * projected onto that host's appointment column as occupancy. Uses
+ * {@link resourceRangesForHostProjection}, not the resource's own grid.
  */
 export function mergedResourceEffectiveRangesForHost(
   resourcesOnHost: VenueResource[],
@@ -255,7 +293,7 @@ export function mergedResourceEffectiveRangesForHost(
 ): Array<{ start: number; end: number }> {
   const all: Array<{ start: number; end: number }> = [];
   for (const r of resourcesOnHost) {
-    all.push(...getEffectiveAvailabilityRanges(r, dateStr));
+    all.push(...resourceRangesForHostProjection(r, dateStr));
   }
   return unionMinuteRanges(all);
 }
@@ -480,7 +518,14 @@ function filterResourceBookingsForDate(
   return bookingsForDate.filter((row) => String(row.id).toLowerCase() !== lc);
 }
 
-function buildResourceEngineInputFromParts(params: {
+/**
+ * Pure assembly of a ResourceEngineInput from already-fetched parts. Exported so the
+ * scheduling parity harness can drive the resource engine without a Supabase client:
+ * the venue-wide composition lives here rather than in `computeResourceAvailability`,
+ * so this is the only seam at which resource availability can be fixtured.
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md Stage 0a/0b.
+ */
+export function buildResourceEngineInputFromParts(params: {
   date: string;
   resources: VenueResource[];
   conflictResources: VenueResource[];

@@ -143,13 +143,21 @@ export function attachVenueClockToAppointmentInput(
     input.venueOpeningExceptions = blocksToVenueOpeningExceptions(venueBlocks);
   } else if (venueBlocks != null && venueBlocks.length === 0) {
     input.venueOpeningExceptions = [];
-  } else if (venue.venue_opening_exceptions !== undefined) {
-    const parsed = parseVenueOpeningExceptions(venue.venue_opening_exceptions);
-    if (parsed.length > 0) {
-      input.venueOpeningExceptions = parsed;
-    } else if (input.venueOpeningExceptions == null) {
-      input.venueOpeningExceptions = parsed;
-    }
+  } else if (venue.venue_opening_exceptions !== undefined && input.venueOpeningExceptions == null) {
+    /**
+     * The legacy `venues.venue_opening_exceptions` JSON is a FALLBACK, never an override.
+     *
+     * It used to win whenever it parsed non-empty, which quietly discarded the
+     * block-derived list the caller's fetcher had already built from `availability_blocks`
+     * -- and all three fetchers do build one (`fetchAppointmentInput`,
+     * `fetchCalendarAppointmentInput`, `appointment-month-availability`). Fourteen of the
+     * fifteen call sites pass no `venueBlocks`, so at any venue carrying legacy JSON the
+     * closures table was overruled by a column nothing has written since the migration.
+     *
+     * Filling only when genuinely absent keeps the escape hatch for a caller that has no
+     * blocks at all, without letting it outrank the table. SA-L1.
+     */
+    input.venueOpeningExceptions = parseVenueOpeningExceptions(venue.venue_opening_exceptions);
   }
 }
 

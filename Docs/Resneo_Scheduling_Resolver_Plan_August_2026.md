@@ -65,7 +65,7 @@ Every claim below carries a `file:line` citation that was re-read at `ea9672f2`.
 | `/dashboard/availability` is an hours surface | The **route** redirects appointment venues to `/dashboard/calendar-availability` (`page.tsx:78-79`), but that destination renders `AppointmentAvailabilitySettings.tsx` **from the `availability/` directory**, which imports `WorkingHoursControl` at `:12` and renders it at `:1245` `[R3-8]`. **`/dashboard/calendar-availability` is the appointment hours surface and neither the audit nor v2 names it.** |
 | Four weekly-hours editors with different copy-day rules | **Three** editors (`OpeningHoursControl.tsx:134`, `WorkingHoursControl.tsx:56`, `resource-timeline-ui.tsx:576`), and all three have **identical** copy-day rules. The period caps do differ (2 vs unlimited vs unlimited). |
 | Click counts ("14+", "~27") | v2's counter-numbers (4, 37, ~122) are UX measurements, not code facts, and are neither verified nor relied on by any stage. |
-| `SA-L1` (`venue_opening_exceptions`) is "latent, not live" | **Live at venues whose legacy JSON is non-empty**, and only those. See §1.2 item 4. |
+| `SA-L1` (`venue_opening_exceptions`) is "latent, not live" | The audit was **right by accident**. The precedence defect is real (§1.2 item 4) but fires only where the legacy JSON is non-empty, and **Q9 shows no venue carries one**. Latent, and one column write away from live. |
 
 ### 1.2 What is actually wrong, ranked
 
@@ -940,6 +940,8 @@ Rows where `pg_temp.weekly_period_count` is **0** for that date are the events d
 
 ### Q9 — NEW. Venues whose appointment hours change the moment Stage 1 item 2 ships
 
+**Run against production 2026-08-17: zero rows.** No venue carries a non-empty `venues.venue_opening_exceptions`, so `SA-L1` is **latent, not live**, and item 2 shipped as a pure no-op against current data. The legacy column is still writable through `PATCH /api/venue/venue-opening-exceptions` (§1.3 tier 1), so this zero expires like the others.
+
 §1.1 records that `SA-L1` is live **only** at venues whose legacy JSON is non-empty. Stage 1 item 2 makes `availability_blocks` win the precedence, which silently changes resolved appointment hours at exactly those venues. v2 and the first v3 draft both described Stage 1 as having no data prerequisite `[R3-58]`.
 
 ```sql
@@ -955,7 +957,7 @@ where jsonb_typeof(v.venue_opening_exceptions) = 'array'
 order by legacy_entries desc;
 ```
 
-Rows with **both** columns non-zero are venues where the two sources disagree and the block table starts winning. Zero rows means item 2 is a pure no-op and can ship unannounced.
+Rows with **both** columns non-zero are venues where the two sources disagree and the block table starts winning. Zero rows means item 2 is a pure no-op and can ship unannounced, **which is what happened**.
 
 ### Q10 — NEW. Calendars that lose every break if `break_times` is contracted
 

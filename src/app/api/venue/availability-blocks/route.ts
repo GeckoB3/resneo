@@ -82,6 +82,41 @@ const overridePeriodsSchema = z
   .nullable()
   .optional();
 
+/**
+ * Ordering rules that apply to a WHOLE block, whichever verb produced it.
+ *
+ * `date_end < date_start` and `time_end <= time_start` were accepted by both schemas. An
+ * inverted time window is not inert: on the appointment path
+ * `blocksToVenueOpeningExceptions` discards the times and closes the entire day, while the
+ * venue resolver requires `end > start` and so applies no constraint at all. The same row
+ * therefore means "shut" to one model and "open" to every other one.
+ */
+function blockOrderingError(v: {
+  block_type?: string | null;
+  date_start?: string | null;
+  date_end?: string | null;
+  time_start?: string | null;
+  time_end?: string | null;
+  override_periods?: unknown;
+}): string | null {
+  if (v.date_start && v.date_end && v.date_end < v.date_start) {
+    return 'The end date cannot be before the start date.';
+  }
+  if (v.time_start && v.time_end && v.time_end <= v.time_start) {
+    return 'The end time must be after the start time.';
+  }
+  if (
+    v.block_type === 'amended_hours' &&
+    !(Array.isArray(v.override_periods) && v.override_periods.length > 0)
+  ) {
+    // An amended block with no periods resolves to a silent full-day closure for classes,
+    // events, resources and the diary, and is ignored entirely on the appointment path.
+    // The POST schema has always refused it; PATCH could still create one.
+    return 'At least one open period is required for amended hours.';
+  }
+  return null;
+}
+
 const blockSchema = z
   .object({
     service_id: z.string().uuid().nullable().optional(),
@@ -98,7 +133,11 @@ const blockSchema = z
   .refine(
     (v) => v.block_type !== 'amended_hours' || (Array.isArray(v.override_periods) && v.override_periods.length > 0),
     { message: 'override_periods required for amended_hours', path: ['override_periods'] },
-  );
+  )
+  .superRefine((v, ctx) => {
+    const message = blockOrderingError(v);
+    if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  });
 
 const blockPatchSchema = z
   .object({
@@ -113,7 +152,19 @@ const blockPatchSchema = z
     reason: z.string().max(500).nullable().optional(),
     yield_overrides: yieldOverridesSchema,
     override_periods: overridePeriodsSchema,
+  })
+  /**
+   * Only the pairs present in THIS patch can be judged here; a `{id, date_end}` patch has
+   * nothing to compare against. The authoritative check runs on the merged row in the
+   * handler, which is why this schema stays a genuine partial-update schema rather than
+   * inheriting the POST refine.
+   */
+  .superRefine((v, ctx) => {
+    const message = blockOrderingError(v);
+    if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
   });
+
+const blockDeleteSchema = z.object({ id: z.string().uuid() });
 
 /** GET /api/venue/availability-blocks */
 export async function GET(request: NextRequest) {
@@ -209,21 +260,37 @@ export async function PATCH(request: NextRequest) {
     // merge the patch onto the stored row and run the same check.
     const { data: existing } = await admin
       .from('availability_blocks')
-      .select('block_type, date_start, date_end, time_start, time_end')
+      .select('block_type, date_start, date_end, time_start, time_end, override_periods')
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
-    if (existing) {
-      const merged = { ...(existing as Record<string, unknown>), ...fields } as {
-        block_type?: string;
-        date_start?: string;
-        date_end?: string;
-        time_start?: string | null;
-        time_end?: string | null;
-      };
-      const conflictCheck = await guardVenueClosureConflicts(request, admin, staff.venue_id, merged);
-      if (conflictCheck) return conflictCheck;
+
+    // A missing row used to skip the conflict guard and fall through to an unconditional
+    // update, which then matched nothing and 500'd on `.single()`. Say so plainly instead.
+    if (!existing) {
+      return NextResponse.json({ error: 'Block not found' }, { status: 404 });
     }
+
+    const merged = { ...(existing as Record<string, unknown>), ...fields } as {
+      block_type?: string;
+      date_start?: string;
+      date_end?: string;
+      time_start?: string | null;
+      time_end?: string | null;
+      override_periods?: unknown;
+    };
+
+    // Validate the row this PATCH will actually produce, not just the fields it carries.
+    // Porting the POST refine onto the patch schema would break partial updates: a normal
+    // `{id, date_end}` patch has no block_type to test. Merging first is what lets a
+    // partial-update schema stay partial while the stored result is still guaranteed valid.
+    const orderingError = blockOrderingError(merged);
+    if (orderingError) {
+      return NextResponse.json({ error: orderingError }, { status: 400 });
+    }
+
+    const conflictCheck = await guardVenueClosureConflicts(request, admin, staff.venue_id, merged);
+    if (conflictCheck) return conflictCheck;
 
     const { data, error } = await admin
       .from('availability_blocks')
@@ -254,10 +321,17 @@ export async function DELETE(request: NextRequest) {
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
-    if (!body.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    const parsedDelete = blockDeleteSchema.safeParse(body);
+    if (!parsedDelete.success) {
+      return NextResponse.json({ error: 'Invalid request', details: parsedDelete.error.flatten() }, { status: 400 });
+    }
 
     const admin = getSupabaseAdminClient();
-    const { error } = await admin.from('availability_blocks').delete().eq('id', body.id).eq('venue_id', staff.venue_id);
+    const { error } = await admin
+      .from('availability_blocks')
+      .delete()
+      .eq('id', parsedDelete.data.id)
+      .eq('venue_id', staff.venue_id);
     if (error) {
       console.error('DELETE /api/venue/availability-blocks failed:', error);
       return NextResponse.json({ error: 'Failed to delete block' }, { status: 500 });

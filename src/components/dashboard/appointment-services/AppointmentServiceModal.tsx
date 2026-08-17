@@ -14,6 +14,7 @@ import { readResponseJson } from '@/lib/api/read-response-json';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import type { WorkingHours } from '@/types/booking-models';
+import type { AvailabilityBlock } from '@/types/availability';
 
 export interface ServiceModalCalendar {
   id: string;
@@ -31,6 +32,7 @@ export interface AppointmentServiceModalProps {
   currencySymbol: string;
   venueOpeningHours: OpeningHours | null;
   venueOpeningExceptions?: VenueOpeningException[] | null;
+  venueWideBlocks?: AvailabilityBlock[] | null;
   /** Bookable calendars/practitioners the service can be linked to. */
   calendars: ServiceModalCalendar[];
   /** Seed values (e.g. import prefills name/duration/price from the booking data). */
@@ -57,6 +59,7 @@ export function AppointmentServiceModal({
   currencySymbol,
   venueOpeningHours,
   venueOpeningExceptions = null,
+  venueWideBlocks = null,
   calendars,
   initialForm,
   title = 'Add service',
@@ -157,6 +160,7 @@ export function AppointmentServiceModal({
         fieldGroupSuffix={editingId ?? 'import-new-service'}
         venueOpeningHours={venueOpeningHours}
         venueOpeningExceptions={venueOpeningExceptions}
+        venueWideBlocks={venueWideBlocks}
         linkedCalendarsForPreview={linkedCalendarsForPreview}
         calendarsSection={
           calendars.length > 0 ? (

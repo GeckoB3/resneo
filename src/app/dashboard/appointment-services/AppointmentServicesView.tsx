@@ -58,6 +58,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { AddonsLibraryView } from '@/app/dashboard/addons/AddonsLibraryView';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
 
 interface Service {
   id: string;
@@ -275,6 +276,7 @@ export function AppointmentServicesView({
   const [deleteServiceModalError, setDeleteServiceModalError] = useState<string | null>(null);
   const [venueOpeningHours, setVenueOpeningHours] = useState<OpeningHours | null>(null);
   const [venueOpeningExceptions, setVenueOpeningExceptions] = useState<VenueOpeningException[]>([]);
+  const venueWideBlocks = useVenueWideBlocks();
 
   const {
     entitlement: calendarEntitlement,
@@ -1209,6 +1211,7 @@ export function AppointmentServicesView({
               fieldGroupSuffix={editingId ?? 'new-service'}
               venueOpeningHours={venueOpeningHours}
               venueOpeningExceptions={venueOpeningExceptions}
+              venueWideBlocks={venueWideBlocks}
               linkedCalendarsForPreview={linkedCalendarsForPreview}
               calendarsSection={
                 calendarsForServiceForm.length > 0 ||

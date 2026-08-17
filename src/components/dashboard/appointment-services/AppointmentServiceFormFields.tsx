@@ -19,6 +19,7 @@ import { NumericInput } from '@/components/ui/NumericInput';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import type { WorkingHours } from '@/types/booking-models';
+import type { AvailabilityBlock } from '@/types/availability';
 
 function parsePositivePounds(value: string): boolean {
   const t = value.trim().replace(/,/g, '');
@@ -48,6 +49,7 @@ export interface AppointmentServiceFormFieldsProps {
   fieldGroupSuffix: string;
   venueOpeningHours: OpeningHours | null;
   venueOpeningExceptions?: VenueOpeningException[] | null;
+  venueWideBlocks?: AvailabilityBlock[] | null;
   linkedCalendarsForPreview: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
   calendarsSection: ReactNode;
   /** Appointments Light: hide “optional overrides per calendar” only. */
@@ -69,6 +71,7 @@ export function AppointmentServiceFormFields({
   fieldGroupSuffix,
   venueOpeningHours,
   venueOpeningExceptions = null,
+  venueWideBlocks = null,
   linkedCalendarsForPreview,
   calendarsSection,
   hideStaffMaySection = false,
@@ -912,6 +915,7 @@ export function AppointmentServiceFormFields({
         <ServiceAvailabilityCalendar
           venueOpeningHours={venueOpeningHours}
           venueOpeningExceptions={venueOpeningExceptions ?? undefined}
+          venueWideBlocks={venueWideBlocks}
           linkedCalendars={linkedCalendarsForPreview}
           customAvailabilityEnabled={form.custom_availability_enabled}
           customWorkingHours={form.custom_working_hours}

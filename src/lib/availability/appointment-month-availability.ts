@@ -386,16 +386,31 @@ export async function computeAppointmentAvailableDatesInMonth(
   const audience = options.audience ?? 'public';
   const { monthStart, monthEnd, dates } = monthBounds(year, month);
 
-  const venueClockRow: VenueClockRow =
-    options.venueClockRow ??
-    ((
-      await supabase
-        .from('venues')
-        .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
-        .eq('id', venueId)
-        .maybeSingle()
-    ).data as VenueClockRow | null) ??
-    {};
+  let venueClockRow: VenueClockRow = options.venueClockRow ?? {};
+  if (!options.venueClockRow) {
+    const venueClockRes = await supabase
+      .from('venues')
+      .select('id, timezone, booking_rules, opening_hours, venue_opening_exceptions')
+      .eq('id', venueId)
+      .maybeSingle();
+    // This read was discarded outright: a failure became `{}`, which means no timezone, no
+    // opening hours and no exceptions, so the month path resolved every date as
+    // unrestricted and offered the lot. Silence on this one is worse than on most, because
+    // the substituted value is maximally permissive rather than merely wrong.
+    if (venueClockRes.error) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'appointment-month-availability',
+          table: 'venues',
+          assumed: 'the venue has no opening hours or timezone, so every date in the month is offered',
+          venueId,
+          date: `${monthStart}..${monthEnd}`,
+        },
+        venueClockRes.error,
+      );
+    }
+    venueClockRow = (venueClockRes.data as VenueClockRow | null) ?? {};
+  }
 
   const bookingWindow =
     options.bookingWindow ??

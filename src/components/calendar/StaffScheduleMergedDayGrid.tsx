@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ScheduleFeedColumn } from '@/app/dashboard/practitioner-calendar/ScheduleFeedColumn';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
 import { minutesToTime } from '@/lib/availability';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
@@ -34,6 +35,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
   const [blocks, setBlocks] = useState<ScheduleBlockDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const venueWideBlocks = useVenueWideBlocks();
 
   useEffect(() => {
     if (venueBootstrap) {
@@ -99,8 +101,8 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
   }, []);
 
   const { startHour, endHour } = useMemo(
-    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),
-    [date, openingHours, venueTimezone],
+    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone, venueWideBlocks }),
+    [date, openingHours, venueTimezone, venueWideBlocks],
   );
 
   const showEvents = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');

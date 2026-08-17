@@ -77,6 +77,7 @@ import {
 } from '@/lib/booking/staff-booking-location';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
@@ -422,6 +423,7 @@ export function AppointmentBookingsDashboard({
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const venueWideBlocks = useVenueWideBlocks();
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -476,8 +478,9 @@ export function AppointmentBookingsDashboard({
     () =>
       getCalendarGridBounds(anchorDate, openingHours ?? undefined, 7, 21, {
         timeZone: venueTimezone,
+              venueWideBlocks,
       }),
-    [anchorDate, openingHours, venueTimezone],
+    [anchorDate, openingHours, venueTimezone, venueWideBlocks],
   );
   const pickerStartHour = startHourOverride ?? derivedStartHour;
   const pickerEndHour = endHourOverride ?? derivedEndHour;

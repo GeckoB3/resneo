@@ -12,6 +12,7 @@ import type {
   WorkingHours,
 } from '@/types/booking-models';
 import { venueOpeningExceptionsToBlocks } from '@/lib/availability/venue-exceptions-adapter';
+import type { AvailabilityBlock } from '@/types/availability';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 const MONTH_NAMES = [
@@ -69,6 +70,8 @@ function fullRange(r: { start: number; end: number }): string {
 interface Props {
   venueOpeningHours: OpeningHours | null | undefined;
   venueOpeningExceptions?: VenueOpeningException[] | null;
+  /** Real `availability_blocks` rows. Preferred over the legacy JSON when supplied. */
+  venueWideBlocks?: AvailabilityBlock[] | null;
   linkedCalendars: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
   customAvailabilityEnabled: boolean;
   customWorkingHours: ServiceCustomScheduleStored | null | undefined;
@@ -85,6 +88,7 @@ interface Props {
 export function ServiceAvailabilityCalendar({
   venueOpeningHours,
   venueOpeningExceptions,
+  venueWideBlocks,
   linkedCalendars,
   customAvailabilityEnabled,
   customWorkingHours,
@@ -100,9 +104,20 @@ export function ServiceAvailabilityCalendar({
    * Pointing it at `availability_blocks` is a data-fetch change in the dashboard view and
    * belongs with the Stage 4 UI work; recorded in the plan rather than left implied.
    */
-  const venueWideBlocks = useMemo(
-    () => venueOpeningExceptionsToBlocks(venueOpeningExceptions ?? null, ''),
-    [venueOpeningExceptions],
+  /**
+   * Real blocks when the caller has them; otherwise the legacy
+   * `venues.venue_opening_exceptions` JSON converted up to block shape.
+   *
+   * This surface used to read ONLY the legacy JSON, so it never saw a closure or an
+   * amended-hours row -- and Q9 (2026-08-17) found no venue carrying any legacy JSON at
+   * all, which means the summary was resolving "no venue exceptions" for everyone.
+   */
+  const resolvedVenueBlocks = useMemo(
+    () =>
+      venueWideBlocks && venueWideBlocks.length > 0
+        ? venueWideBlocks
+        : venueOpeningExceptionsToBlocks(venueOpeningExceptions ?? null, ''),
+    [venueWideBlocks, venueOpeningExceptions],
   );
 
   const today = useMemo(() => todayParts(), []);
@@ -126,7 +141,7 @@ export function ServiceAvailabilityCalendar({
         computeServiceAvailabilityForDate(
           {
             venueOpeningHours,
-            venueWideBlocks,
+            venueWideBlocks: resolvedVenueBlocks,
             linkedCalendars,
             customAvailabilityEnabled,
             customWorkingHours,
@@ -141,7 +156,7 @@ export function ServiceAvailabilityCalendar({
     month,
     lastDate,
     venueOpeningHours,
-    venueWideBlocks,
+    resolvedVenueBlocks,
     linkedCalendars,
     customAvailabilityEnabled,
     customWorkingHours,

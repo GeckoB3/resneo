@@ -10,7 +10,7 @@
 | 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
 | 2 (event read/write contract) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
-| 4 (diary geometry) | Stage 2's discriminated struct |
+| 4 (diary geometry) | **DONE 2026-08-17.** 354 files / 3377 tests green; diary and month verified in the app. |
 | 5 (calendar resolver) | nothing. **(F) and (G) taken.** |
 | 6a / 6b (data model) | §1.3 tier 2 and tier 3 prerequisites, **Q6**, **Q7**, **Q10** |
 | 7 (fail closed) | its own decision, still open |
@@ -571,7 +571,7 @@ Ship alone, revert alone. Closes §1.2 items 16 and, for events, 7.
 
 **The `amended_hours` booking-conflict guard was extended, not just added.** It checks the **complement** of the override periods, because a closure asks what is covered and an override asks what is no longer covered.
 
-### Stage 4 — Diary and month geometry.
+### Stage 4 — Diary and month geometry. ✅ DONE 2026-08-17
 
 A stage, not a bullet: five client components need a new data dependency, three call sites are out of scope, and persisted UI state can defeat the whole fix.
 
@@ -587,7 +587,21 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 **Method:** `getCalendarGridBounds` gains an **optional** `venueWideBlocks` parameter defaulting to today's behaviour, so the three restaurant call sites (`TableGridView.tsx:1692`, `FloorPlanLiveView.tsx:395`, `:468`) are **provably untouched** `[R3-44]`. Of the ten call sites, `PractitionerCalendarView` already fetches blocks (`:2536`, `:3382`) and `schedule-closure-blocks.ts:223` already receives them; three are the exempt restaurant sites. **Five** client components need the new data dependency: `AppointmentBookingsDashboard.tsx:477`, `BookingsDashboard.tsx:455`, `DaySheetView.tsx:507`, `StaffScheduleHub.tsx:50`, `StaffScheduleMergedDayGrid.tsx:102` `[R3-55]`.
 
-**Acceptance criteria v2 omitted:** drag-and-drop bounds clamp move validity (`:5340-5343`, `:5390-5392`), so staff still cannot drag into an amended window until this lands; the persisted `startHourOverride`/`endHourOverride` wins over derived bounds (`:3119-3120`), so an owner who once pinned 09:00–17:00 never sees amended hours regardless of the fix; scroll reset keys on `startHour, endHour` (`:3572`).
+**Acceptance criteria v2 omitted:** drag-and-drop bounds clamp move validity, so staff still cannot drag into an amended window until this lands; the persisted `startHourOverride`/`endHourOverride` wins over derived bounds, so an owner who once pinned 09:00–17:00 never sees amended hours regardless of the fix; scroll reset keys on `startHour, endHour`.
+
+**Met:** tsc clean, lint 0 errors, **354 files / 3377 tests**. Shipped as three commits, and **verified in the running app** against the staging venue, which already carried the fixtures.
+
+| Date | Data | Before | After |
+|---|---|---|---|
+| 16 Sep 2026 | amended 09:00–11:00, 15:00–17:00 | grid 09:00–**22:00** | grid 09:00–**17:00**, stripes visible |
+| 28 Aug 2026 | whole-day closure | month said **Open** | month says **Closed** |
+| 17 Aug 2026 | no blocks | 09:00–22:00 | unchanged |
+
+**The finding no test could have caught `[R3-72]`.** Part 1 made `getCalendarGridBounds` resolve correctly and **changed nothing on screen**. `buildVenueScheduleClosureBlocks` generates the Closed and Amended stripes *from* the bounds, those land in `displayBlocks`, and the day-view auto-expansion then widened the grid to cover every one of them — so the generated "Closed 17:00–22:00" stripe dragged the grid straight back out to 22:00. An output cannot be an input. v2 predicted this as breakage 3 and called it circular; it is exactly that, and it exists only in the component's data flow, which is why the unit tests were all green while the screen was wrong.
+
+**The persisted-override hazard did not fire here.** The staging venue has no stored calendar preference, so the From/Until control was merely displaying the derived bounds and now reads 17:00. The hazard remains real for a venue that has pinned hours, and is **not** addressed by this stage.
+
+**What was NOT verified in the browser, stated rather than implied.** The appointments nav carries no day-sheet or table grids, so `DaySheetView`, `BookingsDashboard` and `AppointmentBookingsDashboard` were covered by types and unit tests only. The service availability summary renders only behind the custom-schedule toggle, and enabling it showed the service's own empty schedule rather than the venue layer, so that path was not isolated either. Nothing was saved to the venue.
 
 ### Stage 5 — One calendar resolver.
 

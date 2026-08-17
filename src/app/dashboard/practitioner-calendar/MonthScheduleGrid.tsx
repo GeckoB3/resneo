@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import type { MonthDayScheduleCounts } from '@/lib/calendar/schedule-blocks-grouping';
 import type { OpeningHours } from '@/types/availability';
 import { getVenueBusinessDayStatus } from '@/lib/venue-calendar-bounds';
+import type { AvailabilityBlock } from '@/types/availability';
 
 const WEEK_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -16,6 +17,12 @@ interface Props {
   showMergedFeeds: boolean;
   /** Venue business hours (Settings); used for Open/Closed on days with no bookings. */
   openingHours: OpeningHours | null;
+  /**
+   * Venue-wide closures and amended hours. Without these the grid greys a day out purely
+   * on the weekly shape, so a date the owner opened specially still showed as closed and a
+   * date they closed still showed as open.
+   */
+  venueWideBlocks?: AvailabilityBlock[] | null;
   venueTimezone: string;
   /** Venue-local today (from server) — avoids UTC `toISOString()` SSR/client mismatch. */
   todayIso: string;
@@ -32,6 +39,7 @@ export function MonthScheduleGrid({
   linkedCountByDate,
   showMergedFeeds,
   openingHours,
+  venueWideBlocks,
   venueTimezone,
   todayIso,
   onSelectDay,
@@ -82,7 +90,7 @@ export function MonthScheduleGrid({
           ]
             .filter(Boolean)
             .join(' · ');
-          const businessStatus = getVenueBusinessDayStatus(cell, openingHours, venueTimezone);
+          const businessStatus = getVenueBusinessDayStatus(cell, openingHours, venueTimezone, venueWideBlocks);
           const businessLabel = businessStatus === 'closed' ? 'Closed' : 'Open';
           const tip = bookingTip ? `${bookingTip} · ${businessLabel}` : businessLabel;
           return (

@@ -3024,8 +3024,13 @@ export function PractitionerCalendarView({
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
     () => {
+      // Pass the blocks so the grid follows the venue's RESOLVED hours for this date. An
+      // amended window running past the weekly close used to leave the grid at the weekly
+      // bounds, and schedule-closure-blocks then clipped the stripe away -- so the hours
+      // the owner had just entered were the ones they could neither see nor drag into.
       const base = getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21, {
         timeZone: venueTimezone,
+        venueWideBlocks,
       });
       if (viewMode !== 'day') return base;
 
@@ -3062,7 +3067,7 @@ export function PractitionerCalendarView({
       const endHour = Math.max(startHour + 1, Math.ceil(maxM / 60));
       return { startHour, endHour };
     },
-    [activeDayDate, displayBlocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
+    [activeDayDate, displayBlocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, venueWideBlocks, viewMode],
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -6677,6 +6682,7 @@ export function PractitionerCalendarView({
           linkedCountByDate={monthLinkedCountByDate}
           showMergedFeeds={showMergedFeeds}
           openingHours={openingHours}
+          venueWideBlocks={venueWideBlocks}
           venueTimezone={venueTimezone}
           todayIso={initialIsoDate}
           onSelectDay={(cell) => {

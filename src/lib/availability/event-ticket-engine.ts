@@ -103,8 +103,25 @@ export function computeEventAvailability(
       if (res.kind === 'closed' && !weeklyOffDayNoBlocks) continue;
       if (res.kind === 'allowed') {
         const start = timeToMinutes(String(event.start_time).slice(0, 5));
-        const end = timeToMinutes(String(event.end_time).slice(0, 5));
-        if (!isMinuteSubintervalCoveredByRanges(start, end, res.ranges)) continue;
+        const rawEnd = timeToMinutes(String(event.end_time).slice(0, 5));
+        // Events store an absolute wall-clock end, so a 22:00-01:00 event arrives as
+        // end=60, start=1320 and `end <= start` means it runs past midnight. Coverage
+        // then failed outright and the event vanished from the listing with no error.
+        // Classes already handle this (class-session-engine.ts:199-203) because they
+        // derive the end from a duration and can exceed 1440; events could not reach
+        // that branch at all. Same rule here, so the two models agree.
+        //
+        // No write path can currently produce such a row (`validateStartEndTimes`
+        // refuses `end <= start` on POST, PATCH and in the UI), so this is defensive
+        // cover for imported or hand-inserted rows, not new past-midnight support.
+        // Past-midnight opening hours remain unsupported; see the resolver plan §2.2.
+        const end = rawEnd <= start ? rawEnd + 24 * 60 : rawEnd;
+        if (end <= start) continue;
+        const covered =
+          end <= 24 * 60
+            ? isMinuteSubintervalCoveredByRanges(start, end, res.ranges)
+            : res.ranges.some((r) => start >= r.start && start < r.end);
+        if (!covered) continue;
       }
     }
 

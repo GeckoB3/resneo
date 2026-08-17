@@ -203,7 +203,12 @@ function instanceWindow(world: SchedulingWorld): { start: string; end: string } 
 /** True when the class engine offers its single instance for this world. */
 export function classOffered(world: SchedulingWorld): boolean {
   const win = instanceWindow(world);
-  const duration = timeToMinutes(win.end) - timeToMinutes(win.start);
+  // Classes are scheduled as start + duration, so a past-midnight window has to be turned
+  // back into a positive duration here. Without this the fixture hands the engine a
+  // negative duration and the probe reports "not offered" for a harness bug.
+  const startMin = timeToMinutes(win.start);
+  const rawEndMin = timeToMinutes(win.end);
+  const duration = (rawEndMin <= startMin ? rawEndMin + 24 * 60 : rawEndMin) - startMin;
   const classTypes = [
     {
       id: 'ct-1',

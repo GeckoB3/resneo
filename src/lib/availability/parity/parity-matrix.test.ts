@@ -388,3 +388,45 @@ describe('parity matrix / special_event (plan §1.2 item 9)', () => {
     expect(appointmentStarts(w)).toEqual([]);
   });
 });
+
+describe('parity matrix / past-midnight instances (plan §1.2 item 12)', () => {
+  /**
+   * Events store an absolute wall-clock end, so a 22:00-01:00 event arrives as
+   * end=60 < start=1320. Before Stage 1 item 7 the coverage check failed outright and the
+   * event vanished with no error. It is now treated as crossing midnight, matching the
+   * class engine, and judged by whether its START falls inside an open range.
+   *
+   * No write path can create such a row today, so this is defensive cover for imported or
+   * hand-inserted data. Past-midnight opening HOURS remain unsupported (plan §2.2).
+   */
+  it('offers a past-midnight event whose start is inside opening hours', () => {
+    const w = world({
+      name: 'event 22:00-01:00, venue open to 23:00',
+      venueOpeningHours: openOn(DATE, [{ open: '09:00', close: '23:00' }]),
+      instance: { start: '22:00', end: '01:00' },
+    });
+
+    expect(eventOffered(w)).toBe(true);
+  });
+
+  it('still hides a past-midnight event whose start is outside opening hours', () => {
+    const w = world({
+      name: 'event 22:00-01:00, venue closes 17:00',
+      instance: { start: '22:00', end: '01:00' },
+    });
+
+    expect(eventOffered(w)).toBe(false);
+  });
+
+  it('agrees with the class engine on the same window', () => {
+    const w = world({
+      name: 'class 22:00-01:00, venue open to 23:00',
+      venueOpeningHours: openOn(DATE, [{ open: '09:00', close: '23:00' }]),
+      venueBlocks: [block({ block_type: 'closed', date_start: DATE, date_end: DATE, time_start: '02:00', time_end: '03:00' })],
+      instance: { start: '22:00', end: '01:00' },
+    });
+
+    expect(classOffered(w)).toBe(true);
+    expect(eventOffered(w)).toBe(true);
+  });
+});

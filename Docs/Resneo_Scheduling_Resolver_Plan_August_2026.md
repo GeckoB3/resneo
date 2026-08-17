@@ -449,7 +449,7 @@ The harness cannot be built without it, and the `resourceRangesForHostProjection
 
 1. Export `buildResourceEngineInputFromParts` (`resource-booking-engine.ts:528` after this stage) and `getEventClassSlots` (`unified-availability.ts:373` after this stage). Both are currently unexported, which is why v2's Stage 0 could not assert the resource engine or the group-session path `[R3-37]`.
 2. Split `getEffectiveAvailabilityRanges` into the candidate set and `resourceRangesForHostProjection` (§2.5). **Both still subtract breaks at this stage.** Pure refactor.
-3. Add a shared Supabase fake. There is none: every route test hand-rolls `vi.mock`.
+3. Add a shared Supabase fake. There was none: every route test hand-rolled `vi.mock`, and a `mockReturnThis` chain cannot model *which* rows a filter returns. **Delivered at `src/lib/testing/supabase-fake.ts`.**
 
 **Exit:** `tsc --noEmit` clean, suite green, zero behaviour diff. **Met:** tsc clean, `npm run lint` 0 errors (104 pre-existing warnings, none in touched files), **345 files / 3274 tests passing**. The entire non-comment diff is one delegating function, two call-site repoints and two `export` keywords, so behaviour-neutrality is provable by reading rather than asserted.
 
@@ -503,7 +503,9 @@ Every slot after the break moves. This is the single strongest argument for deci
 4. Failure reporting — route the class, event and resource `console.warn` sites through `reportAvailabilityReadFailure`; stop the month picker discarding its venue-clock error; **and add the fourth tier**: `resource-booking-engine.ts:224-226` fails closed and silent (§1.2 item 11).
 5. **Three `no-store` fixes `[R3-20]`** — apply the `SA-M9` remedy to `appointment-calendar/route.ts:95`, `class-instances/route.ts:88`, `resource-calendar/route.ts:110`. Without this the staging soak for every later stage is invalid.
 6. Merge and dedup ranges (§2.2), fixing the duplicate-slot bug (§1.2 item 19).
-7. Event end-time hardening: `if (end <= start) end += 1440` at parse, plus the same in `event-hours-vs-venue-calendar.ts:174`. Defensive, per §1.2 item 12.
+7. Event end-time hardening on the **read** path only `[R3-67]`. `event-ticket-engine.ts` now treats `end <= start` as crossing midnight and, like the class engine, judges such an instance by whether its **start** falls inside an open range. Defensive cover for imported or hand-inserted rows, per §1.2 item 12.
+
+   **v3's original instruction to apply "the same in `event-hours-vs-venue-calendar.ts:174`" was wrong and is not implemented.** That line is a *write* validator returning "End time must be after start time.", and it is precisely what enforces §2.2's rule that ResNeo does not support past-midnight windows. Making it wrap would not be hardening; it would silently add unsupported past-midnight event creation, contradicting §2.2 in the same document. Reads stay defensive about data that should not exist, writes keep preventing it. That asymmetry is deliberate and should survive.
 8. **Close the `days_off` write surface** (decision G, `[R3-61]`). `/api/venue/practitioners:213` accepts `z.array(z.string())` with no validation of contents; tighten it to ISO dates only, and reject weekday names with a real error. Production is empty today (Q5), and this is what keeps it empty while Stages 2 to 5 stop expecting recurring entries. **Do this before Stage 5**, not alongside the contraction.
 
 **Removed from v2's Stage 1.** Its item 6 ("`getEventClassSlots` — apply the same venue gate the create path applies") **would hide every out-of-hours class** `[R3-38]`, because `getEventClassSlots` serves both calendar types (`unified-availability.ts:239-241`). It is calendar-type-aware work and moves to Stage 5.
@@ -593,7 +595,7 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 ## §5 The safety net, since there is no flag
 
-1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs.
+1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs. **Built, at `src/lib/availability/parity/` (46 tests).** Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour, so a stage that changes one must change its expectation in the same commit. Its coverage gap (month path, diary renderer, `getUnifiedAvailableSlots`) is recorded in Stage 0b and is due before Stage 4.
 2. **One concern per commit**, each independently revertable.
 3. **Staging soak per stage** — now actually valid, because Stage 1 item 5 removes the CDN caching that would otherwise mask changes for 165 seconds per edge node.
 

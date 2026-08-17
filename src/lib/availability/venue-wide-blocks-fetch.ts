@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
+import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 
 export const VENUE_WIDE_BLOCK_SELECT =
   'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods';
@@ -56,11 +57,31 @@ export async function fetchVenueOpeningHoursAndWideBlocksForDate(
     supabase.from('venues').select('opening_hours').eq('id', venueId).maybeSingle(),
     venueWideBlocksQueryForDate(supabase, venueId, date),
   ]);
+  // This is the fetcher behind booking/create's venue gate, so a silent failure here
+  // does not merely widen a listing: it lets a booking through on a closed day.
   if (venueErr) {
-    console.warn('[fetchVenueOpeningHoursAndWideBlocksForDate] venues:', venueErr.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchVenueOpeningHoursAndWideBlocksForDate',
+        table: 'venues',
+        assumed: 'the venue has no weekly opening hours, so no weekly boundary applies',
+        venueId,
+        date,
+      },
+      venueErr,
+    );
   }
   if (blockErr) {
-    console.warn('[fetchVenueOpeningHoursAndWideBlocksForDate] availability_blocks:', blockErr.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchVenueOpeningHoursAndWideBlocksForDate',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours on this date, so the window is accepted',
+        venueId,
+        date,
+      },
+      blockErr,
+    );
   }
   return {
     openingHours: (venueRow?.opening_hours as OpeningHours | null) ?? null,

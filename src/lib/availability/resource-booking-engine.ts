@@ -27,6 +27,7 @@ import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
+import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -649,7 +650,15 @@ async function expandResourcesWithSiblings(
     .eq('is_active', true)
     .in('display_on_calendar_id', hostIdsForSiblings);
   if (sibErr) {
-    console.warn('[expandResourcesWithSiblings] sibling resources:', sibErr.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'expandResourcesWithSiblings',
+        table: 'unified_calendars',
+        assumed: 'no sibling resources share these host columns, so none of their bookings exclude each other',
+        venueId,
+      },
+      sibErr,
+    );
   }
   const byId = new Map(resources.map((r) => [r.id, r] as const));
   for (const row of sibRows ?? []) {
@@ -729,7 +738,15 @@ async function prefetchResourceMonthForAvailability(
   ]);
 
   if (blocksRes.error) {
-    console.warn('[prefetchResourceMonthForAvailability] availability_blocks:', blocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'prefetchResourceMonthForAvailability',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours this month, so every resource date is offered',
+        venueId,
+      },
+      blocksRes.error,
+    );
   }
 
   const excludeLc = options?.excludeBookingId?.toLowerCase();
@@ -966,7 +983,18 @@ export async function attachHostCalendarsToResources(
     .in('id', ids);
 
   if (error) {
-    console.warn('[attachHostCalendarsToResources] unified_calendars:', error.message);
+    // This one fails CLOSED, not open, and is the fourth visibility tier: with no host
+    // row, getEffectiveAvailabilityRanges returns [] and every hosted resource becomes
+    // unbookable. Silence here meant a whole booking model going dark with no signal.
+    reportAvailabilityReadFailure(
+      {
+        source: 'attachHostCalendarsToResources',
+        table: 'unified_calendars',
+        assumed: 'these resources have no host calendar, so every hosted resource is unbookable',
+        venueId,
+      },
+      error,
+    );
   }
 
   const map = new Map(
@@ -1041,7 +1069,16 @@ export async function fetchResourceInput(params: {
   const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources);
 
   if (venueBlocksRes.error) {
-    console.warn('[fetchResourceInput] availability_blocks:', venueBlocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchResourceInput',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours on this date, so every resource slot is offered',
+        venueId,
+        date,
+      },
+      venueBlocksRes.error,
+    );
   }
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
   const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);

@@ -22,6 +22,7 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
+import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 
 // Types
 
@@ -424,7 +425,16 @@ export async function fetchClassInput(params: {
   }
 
   if (venueBlocksRes.error) {
-    console.warn('[fetchClassInput] availability_blocks:', venueBlocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchClassInput',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours on this date, so every class runs',
+        venueId,
+        date,
+      },
+      venueBlocksRes.error,
+    );
   }
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
@@ -537,7 +547,16 @@ export async function fetchClassInputForRange(params: {
   }
 
   if (venueBlocksRes.error) {
-    console.warn('[fetchClassInputForRange] availability_blocks:', venueBlocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchClassInputForRange',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours in this range, so every class runs',
+        venueId,
+        date: `${fromDate}..${toDate}`,
+      },
+      venueBlocksRes.error,
+    );
   }
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;

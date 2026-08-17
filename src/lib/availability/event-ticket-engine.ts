@@ -22,6 +22,7 @@ import {
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
+import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 
 // Types
 
@@ -277,7 +278,16 @@ export async function fetchEventInput(params: {
   }
 
   if (venueBlocksRes.error) {
-    console.warn('[fetchEventInput] availability_blocks:', venueBlocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchEventInput',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours on this date, so every event is on sale',
+        venueId,
+        date,
+      },
+      venueBlocksRes.error,
+    );
   }
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
@@ -428,7 +438,16 @@ export async function fetchEventInputForRange(params: {
   }
 
   if (venueBlocksRes.error) {
-    console.warn('[fetchEventInputForRange] availability_blocks:', venueBlocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchEventInputForRange',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours in this range, so every event is on sale',
+        venueId,
+        date: `${fromDate}..${toDate}`,
+      },
+      venueBlocksRes.error,
+    );
   }
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;

@@ -7,8 +7,7 @@
 |---|---|
 | 0a (exports, Supabase fake) | **DONE 2026-08-17.** tsc clean, lint clean, 345 files / 3274 tests green. |
 | 0b (parity harness) | **DONE 2026-08-17.** 46 tests, 347 files / 3315 green. Month path, diary renderer and `getUnifiedAvailableSlots` deferred to before Stage 4. |
-| 1 items 1, 3, 4, 5, 7, 8 | nothing. **Ready**, but land after 0b so the matrix pins them. **Items 3 and 8 are the two that hold Q3's and Q5's zeros true**, so they are the highest-priority items in the stage, not the smallest. |
-| 1 items 2, 6 | nothing, but both change resolver output. Land after 0b, and run **Q9** before item 2. |
+| 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
 | 2 (event read/write contract) | nothing. **(H) taken.** |
 | 3 (venue resolver) | nothing. **Q3 returned zero rows on production**, so there is nothing to repair. Requires Stage 1 item 3 to have landed, which is what keeps that zero true. |
 | 4 (diary geometry) | Stage 2's discriminated struct |
@@ -495,7 +494,7 @@ Every slot after the break moves. This is the single strongest argument for deci
 
 **Risk:** none beyond 0a's exports.
 
-### Stage 1 — Standalone bugs. Each its own commit.
+### Stage 1 — Standalone bugs. Each its own commit. ✅ DONE 2026-08-17
 
 1. `unified-availability.ts:259` — add `special_event` to the block-type filter (`SA-M12`).
 2. **`attachVenueClockToAppointmentInput` precedence `[R3-9]`.** Fill from the legacy JSON **only when `input.venueOpeningExceptions == null`**. Roughly three lines at `:148-152`. **Do not** implement v2's prescription of passing `venueBlocks` from fourteen call sites: all fourteen already hold a correctly block-derived list from their fetcher, so that change adds a duplicate `availability_blocks` round-trip per site — including one inside a per-practitioner loop (`waitlist-offer-availability.ts:121-129`) — for no behavioural gain. Deleting `venue_opening_exceptions` from the fourteen `venues` selects is separate cleanup.
@@ -512,7 +511,11 @@ Every slot after the break moves. This is the single strongest argument for deci
 
 **Removed from v2's Stage 1.** Its item 6 ("`getEventClassSlots` — apply the same venue gate the create path applies") **would hide every out-of-hours class** `[R3-38]`, because `getEventClassSlots` serves both calendar types (`unified-availability.ts:239-241`). It is calendar-type-aware work and moves to Stage 5.
 
-**Exit:** Stage 0b's matrix updates in the same commits.
+**Exit:** Stage 0b's matrix updates in the same commits. **Met:** all eight items shipped as eight commits; tsc clean, lint 0 errors, **3354 tests** green. The matrix caught item 6 and its expectation was updated in the same commit, which is the §5 mechanism working as designed.
+
+**Two items were changed by contact with the code, and both are recorded above rather than silently adjusted:** item 7's write-validator half was **not** implemented, because it would have added the past-midnight support §2.2 says this plan does not add; item 4's month-picker limb moved to Stage 4, because it is a diary client component rather than a fetcher.
+
+**Three production zeros now rest on Stage 1 code**, and all three expire if it is reverted: Q3 on item 3 (the merged-row validation), Q5 on item 8 (the `days_off` schema), Q9 on item 2 (the exception precedence).
 
 ### Stage 2 — The event read/write contract. The one atomic unit.
 

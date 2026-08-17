@@ -81,44 +81,95 @@ export function intersectMinuteRangeArrays(
   return unionMinuteRanges(out);
 }
 
-function unionAmendedPeriods(blocks: AvailabilityBlock[]): Array<{ start: number; end: number }> {
-  const periods: Array<{ start: number; end: number }> = [];
-  for (const b of blocks) {
-    if (b.block_type !== 'amended_hours' || !Array.isArray(b.override_periods)) continue;
-    for (const p of b.override_periods) {
-      periods.push({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) });
-    }
-  }
-  // Note this is a concat across every amended block on the date, not a per-block choice.
-  // Which block wins when several apply is operator decision (E), and lands in Stage 3.
-  // Merging here only removes duplicate and overlapping output; it does not pick a winner.
-  return unionMinuteRanges(periods.filter((r) => r.end > r.start));
+/** Inclusive day span of a block's date range, for decision (E)'s specificity rule. */
+function blockSpanDays(b: AvailabilityBlock): number {
+  const a = Date.parse(`${b.date_start}T00:00:00Z`);
+  const c = Date.parse(`${b.date_end}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(c)) return Number.MAX_SAFE_INTEGER;
+  return Math.max(0, Math.round((c - a) / 86_400_000));
+}
+
+/** Valid periods of one amended block. An override with none is IGNORED, not a closure (§2.2). */
+function amendedPeriodsOf(b: AvailabilityBlock): Array<{ start: number; end: number }> {
+  if (!Array.isArray(b.override_periods)) return [];
+  return b.override_periods
+    .map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }))
+    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start);
 }
 
 /**
- * Why the venue is closed, when it is.
+ * Which Hours override wins when several cover the same date. Operator decision (E).
  *
- * `weekly` means the venue simply does not trade this weekday: opening hours are
- * configured and this weekday has no periods. That is an ABSENCE of configuration, not a
- * decision to shut, and scheduled instances someone deliberately put on the calendar are
- * still allowed to run (operator decision H).
+ * Most specific wins: the smallest inclusive date span. Ties break on the later
+ * `created_at`, then on `id` so the answer is deterministic even when the column is absent
+ * (it is optional on the type, and older callers do not select it). Genuinely tied
+ * overrides union.
  *
- * `override` means something explicitly closed it: a closure block, a special event, or an
- * amended-hours row that resolved to nothing.
- *
- * Collapsing these two into a bare `closed` is what forced `isWeeklyScheduleClosedForDate`
- * to exist, and that helper had to re-derive the distinction from the block list -- which
- * it got wrong, returning false the moment ANY block existed on the date. See the resolver
- * plan §2.3 step 5.
+ * The old rule concatenated the periods of EVERY applicable block, so a one-day
+ * 10:00-14:00 override nested inside a three-month 08:00-20:00 one widened to the union
+ * instead of narrowing that day -- silently, with no error. Q4 confirmed no venue has
+ * overlapping overrides today, so this changes nobody's hours on the day it ships.
  */
+function winningAmendedPeriods(blocks: AvailabilityBlock[]): Array<{ start: number; end: number }> {
+  const applicable = blocks
+    .filter((b) => b.block_type === 'amended_hours')
+    .map((b) => ({ block: b, periods: amendedPeriodsOf(b) }))
+    .filter((x) => x.periods.length > 0);
+  if (applicable.length === 0) return [];
+
+  const minSpan = Math.min(...applicable.map((x) => blockSpanDays(x.block)));
+  let tied = applicable.filter((x) => blockSpanDays(x.block) === minSpan);
+
+  if (tied.length > 1) {
+    // Tie-break on created_at ONLY. Do not fall back to `id`: that would make a genuine tie
+    // impossible, and two equally-specific overrides an owner saved for the same date are
+    // both real statements about it. Decision (E) unions those rather than picking one at
+    // random, which is also the behaviour that does not depend on a column callers may not
+    // have selected.
+    const latest = tied.reduce((acc, x) => {
+      const at = x.block.created_at ?? '';
+      return at > acc ? at : acc;
+    }, '');
+    const stillTied = tied.filter((x) => (x.block.created_at ?? '') === latest);
+    if (stillTied.length > 0) tied = stillTied;
+  }
+
+  return unionMinuteRanges(tied.flatMap((x) => x.periods));
+}
+
 export type VenueClosedCause = 'weekly' | 'override';
 
+/**
+ * The venue's hours for a date, BEFORE closures are subtracted.
+ *
+ * `weekly-closed` is distinct from an empty range list: the venue trades, just not this
+ * weekday. Every consumer that has to tell "does not trade this weekday" from "an override
+ * shut it" reads this rather than re-deriving it from the block list.
+ */
+export type VenueHours =
+  | { kind: 'unrestricted' }
+  | { kind: 'weekly-closed' }
+  | { kind: 'ranges'; ranges: Array<{ start: number; end: number }> };
+
+/**
+ * `kind`/`ranges` is the EFFECTIVE answer (hours minus closures) and is what containment
+ * consumers test against. `hours` and `closures` are exposed separately because slot
+ * generation must anchor to `hours` and veto `closures` per candidate: subtracting a
+ * part-day closure from the anchoring set would re-anchor every slot after it, which is
+ * the harm §2.7 forbids for breaks, applied to a different rule. See plan §2.1.
+ */
 export type VenueWideResolution =
-  | { kind: 'unrestricted'; closures: Array<{ start: number; end: number }> }
-  | { kind: 'closed'; cause: VenueClosedCause; closures: Array<{ start: number; end: number }> }
+  | { kind: 'unrestricted'; hours: VenueHours; closures: Array<{ start: number; end: number }> }
+  | {
+      kind: 'closed';
+      cause: VenueClosedCause;
+      hours: VenueHours;
+      closures: Array<{ start: number; end: number }>;
+    }
   | {
       kind: 'allowed';
       ranges: Array<{ start: number; end: number }>;
+      hours: VenueHours;
       closures: Array<{ start: number; end: number }>;
     };
 
@@ -162,73 +213,64 @@ export function resolveVenueWideAllowedMinuteRanges(
   venueWideBlocks: AvailabilityBlock[],
 ): VenueWideResolution {
   const dayBlocks = blocksForDate(venueWideBlocks, dateStr);
-  const hasWeekly = isOpeningHoursConfigured(openingHours);
   const closures = venueClosureWindowsForDate(venueWideBlocks, dateStr);
 
-  if (dayBlocks.length === 0) {
-    if (!hasWeekly) return { kind: 'unrestricted', closures };
-    const day = getDayOfWeek(dateStr);
-    const periods = getOpeningPeriodsForDay(openingHours!, day);
-    const ranges = periods.map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }));
-    return ranges.length === 0
-      ? { kind: 'closed', cause: 'weekly', closures }
-      : { kind: 'allowed', ranges, closures };
-  }
-
-  const closedLike = dayBlocks.filter((b) => b.block_type === 'closed' || b.block_type === 'special_event');
-  const amended = dayBlocks.filter((b) => b.block_type === 'amended_hours');
-
-  let base: Array<{ start: number; end: number }>;
-  if (hasWeekly) {
-    const day = getDayOfWeek(dateStr);
-    const periods = getOpeningPeriodsForDay(openingHours!, day);
-    base = periods.map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }));
-    if (base.length === 0) {
-      // The weekday has no periods. A CLOSURE on the date does not change why it is shut,
-      // so the weekly allowance still applies. An AMENDED-HOURS row does: it is the venue
-      // stating hours for this specific date. Until Stage 3 makes amended hours replace
-      // the weekly baseline, this resolver cannot honour those hours, and granting the
-      // weekly allowance here would put an instance on sale at ANY time of day while the
-      // venue had named a window. Report it as an override-closed day instead, which is
-      // exactly today's behaviour for this shape.
-      const cause: VenueClosedCause = amended.length > 0 ? 'override' : 'weekly';
-      return { kind: 'closed', cause, closures };
-    }
+  // 1. The weekly baseline, in three states. "Configured but no periods this weekday" is
+  //    NOT the same as "no hours configured at all", and collapsing them is what made the
+  //    weekly-closed carve-out impossible to express.
+  let hours: VenueHours;
+  if (!isOpeningHoursConfigured(openingHours)) {
+    hours = { kind: 'unrestricted' };
   } else {
-    base = [...FULL_DAY];
+    const periods = getOpeningPeriodsForDay(openingHours!, getDayOfWeek(dateStr));
+    const ranges = periods
+      .map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }))
+      .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start);
+    hours = ranges.length === 0 ? { kind: 'weekly-closed' } : { kind: 'ranges', ranges: unionMinuteRanges(ranges) };
   }
 
-  const fullDayClosed = closedLike.some((b) => {
-    const ts = sliceTime(b.time_start);
-    const te = sliceTime(b.time_end);
-    return ts == null || te == null;
-  });
-  if (fullDayClosed) return { kind: 'closed', cause: 'override', closures };
-
-  const partialClosed: Array<{ start: number; end: number }> = [];
-  for (const b of closedLike) {
-    const ts = sliceTime(b.time_start);
-    const te = sliceTime(b.time_end);
-    if (ts != null && te != null) {
-      const a = timeToMinutes(ts);
-      const c = timeToMinutes(te);
-      if (c > a) partialClosed.push({ start: a, end: c });
-    }
-  }
-  if (partialClosed.length > 0) {
-    base = subtractRangesFromRanges(base, partialClosed);
+  // 2. Hours overrides REPLACE the baseline, including replacing 'weekly-closed'. That is
+  //    what lets a venue open specially on a normally-closed weekday, and it is the single
+  //    most broken case in the old resolver, which returned closed before it ever looked at
+  //    amended hours. Which override wins is decision (E).
+  const overridePeriods = winningAmendedPeriods(dayBlocks);
+  if (overridePeriods.length > 0) {
+    hours = { kind: 'ranges', ranges: overridePeriods };
   }
 
-  if (amended.length > 0) {
-    const union = unionAmendedPeriods(amended);
-    if (union.length === 0) return { kind: 'closed', cause: 'override', closures };
-    base = intersectMinuteRangeArrays(base, union);
+  // 3. A weekday the venue does not trade, with no override claiming otherwise.
+  if (hours.kind === 'weekly-closed') {
+    return { kind: 'closed', cause: 'weekly', hours, closures };
   }
 
-  const cleaned = base.filter((r) => r.end > r.start);
-  if (cleaned.length === 0) return { kind: 'closed', cause: 'override', closures };
+  // 4. Materialise before subtracting. Without this a part-day closure at a venue with no
+  //    weekly hours is a silent no-op, and that is the most common appointments shape.
+  if (hours.kind === 'unrestricted') {
+    if (closures.length === 0) return { kind: 'unrestricted', hours, closures };
+    const effective = subtractRangesFromRanges([...FULL_DAY], closures);
+    return effective.length === 0
+      ? { kind: 'closed', cause: 'override', hours, closures }
+      : { kind: 'allowed', ranges: effective, hours, closures };
+  }
 
-  return { kind: 'allowed', ranges: cleaned, closures };
+  // 5. Closures subtract last, so a closure always beats an Hours override.
+  const effective = subtractRangesFromRanges(hours.ranges, closures).filter((r) => r.end > r.start);
+  if (effective.length === 0) {
+    return { kind: 'closed', cause: 'override', hours, closures };
+  }
+  return { kind: 'allowed', ranges: unionMinuteRanges(effective), hours, closures };
+}
+
+/**
+ * The anchoring set for slot generation: hours only, closures NOT subtracted.
+ *
+ * Returns null when the venue imposes no constraint, and an empty array when it is shut for
+ * the whole day on the weekly shape. Callers veto `resolution.closures` per candidate.
+ */
+export function venueHoursToNullableRanges(hours: VenueHours): Array<{ start: number; end: number }> | null {
+  if (hours.kind === 'unrestricted') return null;
+  if (hours.kind === 'weekly-closed') return [];
+  return hours.ranges;
 }
 
 /** Exported for tests / event validation edge cases. */

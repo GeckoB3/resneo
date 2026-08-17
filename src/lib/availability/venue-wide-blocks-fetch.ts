@@ -8,7 +8,7 @@ import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 
 export const VENUE_WIDE_BLOCK_SELECT =
-  'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods';
+  'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods, created_at';
 
 /** Venue-wide blocks overlapping `date` (inclusive). */
 export function venueWideBlocksQueryForDate(

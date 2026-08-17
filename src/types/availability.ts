@@ -180,6 +180,13 @@ export interface AvailabilityBlock {
   reason: string | null;
   yield_overrides?: BlockYieldOverridesPayload | null;
   override_periods?: Array<{ open: string; close: string }> | null;
+  /**
+   * Tie-break for operator decision (E): when two Hours overrides cover the same date with
+   * the same span, the later-created one wins. Optional because most constructors (tests,
+   * adapters) do not carry it; the resolver falls back to `id` so the result stays
+   * deterministic either way.
+   */
+  created_at?: string | null;
 }
 
 /** Date-scoped overrides merged onto booking_restrictions for matching slots/days. */

@@ -47,6 +47,7 @@ import {
   VENUE_BOOKING_MODEL_COLUMNS,
   blockSourcesFromVenueRow,
 } from '@/lib/availability/blocked-range-models';
+import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
 
 // Types
 
@@ -1265,7 +1266,7 @@ export async function fetchAppointmentInput(params: {
       .single(),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
@@ -1736,7 +1737,7 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('is_active', true),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])

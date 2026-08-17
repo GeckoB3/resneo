@@ -55,6 +55,7 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { listPractitionerIdsForAppointmentService } from '@/lib/availability/appointment-any-practitioner';
+import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
 
 interface VenueClockRow {
   timezone?: string | null;
@@ -557,7 +558,7 @@ async function buildLegacyPractitionerMonthInputFactory({
       .gte('end_date', monthStart),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
@@ -840,7 +841,7 @@ async function buildUnifiedCalendarMonthInputFactory({
       .eq('is_active', true),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])

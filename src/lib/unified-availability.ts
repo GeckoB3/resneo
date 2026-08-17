@@ -23,6 +23,7 @@ import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import type { AvailabilityBlock } from '@/types/availability';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
 
 export interface UnifiedAvailableSlot {
   time: string;
@@ -253,7 +254,7 @@ export async function getUnifiedAvailableSlots(params: {
           .maybeSingle(),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       // `special_event` is closure-like everywhere else that reads venue-wide blocks

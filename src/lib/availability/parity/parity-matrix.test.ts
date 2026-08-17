@@ -104,7 +104,7 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
    * resolve through the legacy exception path, where amended REPLACES) honour it.
    * Stage 3 makes every consumer behave the way appointments already do.
    */
-  it('DIVERGES: amended hours open a weekly-closed day for appointments only', () => {
+  it('CONVERGED in Stage 3: amended hours open a weekly-closed day for every consumer', () => {
     const w = world({
       name: 'amended hours on a weekly-closed weekday',
       venueOpeningHours: configuredButClosedOn(DATE, [{ open: '09:00', close: '17:00' }]),
@@ -120,10 +120,10 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
     });
 
     expect(appointmentStarts(w)).toEqual(['10:00', '11:00', '12:00', '13:00']);
-    expect(venueResolution(w)).toEqual({ kind: 'closed', ranges: [] });
-    expect(resourceStarts(w)).toEqual([]);
-    expect(classOffered(w)).toBe(false);
-    expect(eventOffered(w)).toBe(false);
+    expect(venueResolution(w)).toEqual({ kind: 'allowed', ranges: ['10:00-14:00'] });
+    expect(resourceStarts(w)).toEqual(['10:00', '11:00', '12:00', '13:00']);
+    expect(classOffered(w)).toBe(true);
+    expect(eventOffered(w)).toBe(true);
   });
 
   /**
@@ -131,7 +131,7 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
    * else, so an override that extends beyond the weekly hours is honoured on one path
    * and clipped on the others.
    */
-  it('DIVERGES: an override extending past closing is honoured by appointments, clipped elsewhere', () => {
+  it('CONVERGED in Stage 3: an override extending past closing is honoured everywhere', () => {
     const w = world({
       name: 'amended 08:00-20:00 over a 09:00-17:00 weekly',
       venueBlocks: [
@@ -148,8 +148,10 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
     expect(appointmentStarts(w)).toEqual([
       '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00',
     ]);
-    expect(venueResolution(w)).toEqual({ kind: 'allowed', ranges: ['09:00-17:00'] });
-    expect(resourceStarts(w)).toEqual(HOURLY_9_TO_5);
+    expect(venueResolution(w)).toEqual({ kind: 'allowed', ranges: ['08:00-20:00'] });
+    expect(resourceStarts(w)).toEqual([
+      '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00',
+    ]);
   });
 
   /**
@@ -158,7 +160,7 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
    * (appointments sell the day) and closes the whole day everywhere else. Production
    * has zero such rows (query Q3), and Stage 1 item 3 stops new ones appearing.
    */
-  it('DIVERGES: an empty override is ignored by appointments and closes the day elsewhere', () => {
+  it('CONVERGED in Stage 3: an empty override is ignored everywhere, never a silent closure', () => {
     const w = world({
       name: 'amended_hours with no periods',
       venueBlocks: [
@@ -167,10 +169,10 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
     });
 
     expect(appointmentStarts(w)).toEqual(HOURLY_9_TO_5);
-    expect(venueResolution(w)).toEqual({ kind: 'closed', ranges: [] });
-    expect(resourceStarts(w)).toEqual([]);
-    expect(classOffered(w)).toBe(false);
-    expect(eventOffered(w)).toBe(false);
+    expect(venueResolution(w)).toEqual({ kind: 'allowed', ranges: ['09:00-17:00'] });
+    expect(resourceStarts(w)).toEqual(HOURLY_9_TO_5);
+    expect(classOffered(w)).toBe(true);
+    expect(eventOffered(w)).toBe(true);
   });
 
   /**
@@ -185,7 +187,7 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
    * Decision (E) replaces the concat with most-specific-wins, in Stage 3. When that lands
    * this expectation becomes `['10:00-14:00']`.
    */
-  it('DIVERGES: a nested override widens to the union instead of narrowing the day', () => {
+  it('FIXED in Stage 3: a nested one-day override narrows the day (decision E)', () => {
     const w = world({
       name: 'one-day override nested in a long one',
       venueBlocks: [
@@ -206,10 +208,9 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
 
     const res = venueResolution(w);
     expect(res.kind).toBe('allowed');
-    // Merged, so no duplicate start times reach a guest. But the nested 10:00-14:00
-    // override has been absorbed rather than applied: the day is still the wider window.
-    expect(res.ranges).toEqual(['09:00-17:00']);
-    expect(res.ranges).not.toContain('10:00-14:00');
+    // The one-day override is more specific than the month-long one, so it wins outright
+    // instead of being absorbed into a union that silently ignored it.
+    expect(res.ranges).toEqual(['10:00-14:00']);
   });
 
   it('emits no duplicate start times when two amended blocks overlap', () => {

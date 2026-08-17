@@ -52,7 +52,12 @@ function blk(partial: Partial<AvailabilityBlock> & { block_type: string }): Avai
 describe('resolveVenueWideAllowedMinuteRanges cause', () => {
   it('reports weekly when the weekday has no periods and nothing else applies', () => {
     const res = resolveVenueWideAllowedMinuteRanges(MON_TO_FRI, SATURDAY, []);
-    expect(res).toEqual({ kind: 'closed', cause: 'weekly', closures: [] });
+    expect(res).toEqual({
+      kind: 'closed',
+      cause: 'weekly',
+      hours: { kind: 'weekly-closed' },
+      closures: [],
+    });
   });
 
   it('still reports weekly when an unrelated closure sits on the date', () => {
@@ -65,13 +70,70 @@ describe('resolveVenueWideAllowedMinuteRanges cause', () => {
     expect(res.kind === 'closed' && res.cause).toBe('weekly');
   });
 
-  it('reports override when an amended row names hours for the date', () => {
-    // The venue HAS stated hours for this specific date, so the weekly allowance must not
-    // apply, even though this resolver cannot honour those hours until Stage 3.
+  it('opens a weekly-closed weekday when an amended row names hours for it', () => {
+    // Stage 3: Hours overrides REPLACE the weekly baseline, including replacing
+    // 'weekly-closed'. This is the case the old resolver got wrong -- it returned closed
+    // before ever looking at amended hours, so only appointments honoured it.
     const res = resolveVenueWideAllowedMinuteRanges(MON_TO_FRI, SATURDAY, [
       blk({ block_type: 'amended_hours', override_periods: [{ open: '10:00', close: '14:00' }] }),
     ]);
-    expect(res.kind === 'closed' && res.cause).toBe('override');
+    expect(res.kind).toBe('allowed');
+    expect(res.kind === 'allowed' && res.ranges).toEqual([{ start: 600, end: 840 }]);
+    expect(res.hours).toEqual({ kind: 'ranges', ranges: [{ start: 600, end: 840 }] });
+  });
+
+  it('ignores an amended row with no valid periods rather than closing the day', () => {
+    // §2.2: an Hours override with nothing in it is invalid data, not an intent to shut.
+    // It used to resolve the whole day closed for classes, events, resources and the diary.
+    const res = resolveVenueWideAllowedMinuteRanges(OPEN_SATURDAY, SATURDAY, [
+      blk({ block_type: 'amended_hours', override_periods: [] }),
+    ]);
+    expect(res.kind).toBe('allowed');
+    expect(res.kind === 'allowed' && res.ranges).toEqual([{ start: 540, end: 1020 }]);
+  });
+
+  it('lets a closure beat an Hours override, because closures subtract last', () => {
+    const res = resolveVenueWideAllowedMinuteRanges(MON_TO_FRI, SATURDAY, [
+      blk({ id: 'a', block_type: 'amended_hours', override_periods: [{ open: '10:00', close: '14:00' }] }),
+      blk({ id: 'b', block_type: 'closed', time_start: '11:00', time_end: '12:00' }),
+    ]);
+    expect(res.kind === 'allowed' && res.ranges).toEqual([
+      { start: 600, end: 660 },
+      { start: 720, end: 840 },
+    ]);
+  });
+
+  it('picks the most specific override, and unions genuine ties (decision E)', () => {
+    const long = blk({
+      id: 'long',
+      block_type: 'amended_hours',
+      date_start: '2026-04-01',
+      date_end: '2026-06-30',
+      override_periods: [{ open: '08:00', close: '20:00' }],
+    });
+    const oneDay = blk({
+      id: 'day',
+      block_type: 'amended_hours',
+      override_periods: [{ open: '10:00', close: '14:00' }],
+    });
+    const narrowed = resolveVenueWideAllowedMinuteRanges(MON_TO_FRI, SATURDAY, [long, oneDay]);
+    expect(narrowed.kind === 'allowed' && narrowed.ranges).toEqual([{ start: 600, end: 840 }]);
+
+    // Equally specific and no created_at to separate them: both are real statements about
+    // the date, so they union rather than one winning at random.
+    const tiedA = blk({ id: 'a', block_type: 'amended_hours', override_periods: [{ open: '09:00', close: '11:00' }] });
+    const tiedB = blk({ id: 'b', block_type: 'amended_hours', override_periods: [{ open: '13:00', close: '15:00' }] });
+    const tied = resolveVenueWideAllowedMinuteRanges(MON_TO_FRI, SATURDAY, [tiedA, tiedB]);
+    expect(tied.kind === 'allowed' && tied.ranges).toEqual([
+      { start: 540, end: 660 },
+      { start: 780, end: 900 },
+    ]);
+
+    // created_at breaks the tie when it is present.
+    const older = blk({ id: 'o', block_type: 'amended_hours', created_at: '2026-01-01T00:00:00Z', override_periods: [{ open: '09:00', close: '11:00' }] });
+    const newer = blk({ id: 'n', block_type: 'amended_hours', created_at: '2026-02-01T00:00:00Z', override_periods: [{ open: '13:00', close: '15:00' }] });
+    const byDate = resolveVenueWideAllowedMinuteRanges(MON_TO_FRI, SATURDAY, [older, newer]);
+    expect(byDate.kind === 'allowed' && byDate.ranges).toEqual([{ start: 780, end: 900 }]);
   });
 
   it('reports override for a whole-day closure on a trading weekday', () => {
@@ -90,6 +152,7 @@ describe('resolveVenueWideAllowedMinuteRanges cause', () => {
   it('reports unrestricted when no weekly hours are configured', () => {
     expect(resolveVenueWideAllowedMinuteRanges(null, SATURDAY, [])).toEqual({
       kind: 'unrestricted',
+      hours: { kind: 'unrestricted' },
       closures: [],
     });
   });

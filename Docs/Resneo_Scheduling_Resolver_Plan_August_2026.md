@@ -6,16 +6,27 @@
 | Stage | Blocked on |
 |---|---|
 | 0a (exports, Supabase fake) | **DONE 2026-08-17.** tsc clean, lint clean, 345 files / 3274 tests green. |
-| 0b (parity harness) | **DONE 2026-08-17.** 46 tests, 347 files / 3315 green. Month path, diary renderer and `getUnifiedAvailableSlots` deferred to before Stage 4. |
+| 0b (parity harness) | **DONE 2026-08-17.** 46 tests, 347 files / 3315 green. ⚠️ **Its coverage gap was NOT closed before Stage 4 as promised** — see below. |
 | 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
 | 2 (event read/write contract) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 4 (diary geometry) | **DONE 2026-08-17.** 354 files / 3377 tests green; diary and month verified in the app. |
-| 5 (calendar resolver) | nothing. **(F) and (G) taken.** |
+| 5 (calendar resolver) | nothing. **(F) and (G) taken.** Do the outstanding 0b fixtures first (see below). |
 | 6a / 6b (data model) | §1.3 tier 2 and tier 3 prerequisites, **Q6**, **Q7**, **Q10** |
 | 7 (fail closed) | its own decision, still open |
 
-No code written.
+**Outstanding harness debt `[R3-73]`.** Stage 0b named four consumers it did not assert, and said the first three were due **before Stage 4**. Stage 4 has shipped and they are still not asserted:
+
+| Consumer | Status |
+|---|---|
+| `booking/create` route branches | Declared non-goal in Stage 0b. Unchanged, and hand-reviewed in Stages 2 and 5. |
+| Appointment **month path** | Still unasserted. Stage 3 changed its venue resolution and Stage 4 changed its error handling, both uncovered. |
+| Diary **closure renderer** | Partly covered: `venue-calendar-bounds.blocks.test.ts` asserts the bounds, but `buildVenueScheduleClosureBlocks` itself is still unasserted. |
+| `getUnifiedAvailableSlots` | Still unasserted. |
+
+This is a commitment made in the plan and missed, recorded rather than quietly dropped. **Do these before Stage 5**, not after: Stage 5 rewrites the calendar layer that all three read, and going in without them repeats the Stage 4 lesson, where every unit test was green and the screen was wrong.
+
+**Stages 0a to 4 are implemented on `staging`.** Stages 5, 6a, 6b and 7 remain.
 
 **Baseline:** tree of `6bc9ef4f`, now squash-merged and shipped as `ea9672f2` on `main` and `staging`. Since the v2 draft: 20 lines of unrelated visits-route code and 63 lines of test. **Nothing this plan cites has moved.** 344 test files, 261 migrations.
 
@@ -492,7 +503,7 @@ Every slot after the break moves. This is the single strongest argument for deci
 
 **A correction to this stage's own stated property `[R3-65]`.** The instruction "the engine offers time T ⟺ the corresponding write gate accepts T" is **too strong in the reverse direction**, and a harness built to it fails on correct code. There are **three** write validators answering three different questions (`revalidate-appointment-slot.ts:58-66`): `grid` re-runs the engine and looks for membership, `exact` runs `validateExactAppointmentStart`, `interval` runs `validateAppointmentCustomInterval`. `exact` deliberately accepts **off-grid** starts, because a multi-service visit books them and a staff duration override books an arbitrary interval. The invariant that holds, and the only one asserted, is the **forward** direction: everything offered is accepted. Pair the right validator with the right read path.
 
-**Coverage gap, stated rather than implied `[R3-66]`.** Four consumers this stage named are **not** yet asserted: the **appointment month path**, the **diary closure renderer**, `getUnifiedAvailableSlots`, and the **`booking/create` route branches**. The last is a declared non-goal (see the scope limit above). The first three are reachable and simply not done; the month path and the diary renderer both matter to Stage 4, so they should be added **before Stage 4**, not before Stage 3. Until then the harness covers the venue layer and the appointment/class/event/resource day paths only.
+**Coverage gap, stated rather than implied `[R3-66]`.** Four consumers this stage named are **not** asserted: the **appointment month path**, the **diary closure renderer**, `getUnifiedAvailableSlots`, and the **`booking/create` route branches**. The last is a declared non-goal (see the scope limit above). ⚠️ **This gap was due before Stage 4 and was not closed** — Stages 3 and 4 both changed code these consumers run, uncovered. It is now the first item of Stage 5; see the harness-debt table in the status block.
 
 **Risk:** none beyond 0a's exports.
 
@@ -575,13 +586,13 @@ Ship alone, revert alone. Closes §1.2 items 16 and, for events, 7.
 
 A stage, not a bullet: five client components need a new data dependency, three call sites are out of scope, and persisted UI state can defeat the whole fix.
 
-**v2's example does not reproduce and must be replaced `[R3-43]`.** On a weekday with no periods, `getCalendarGridBounds` hits `periods.length === 0` and returns the 07:00–21:00 fallback (`venue-calendar-bounds.ts:90-92`), so the stripe renders. An implementer testing the stated case concludes the stage is unnecessary. The real breakages:
+**v2's example does not reproduce and must be replaced `[R3-43]`.** On a weekday with no periods, `getCalendarGridBounds` hits `periods.length === 0` and returns the 07:00–21:00 fallback (`venue-calendar-bounds.ts:145-147`), so the stripe renders. An implementer testing the stated case concludes the stage is unnecessary. The real breakages:
 
 1. Amended hours **outside an open weekday's bounds** — weekly 09:00–17:00 amended to 20:00 gives bounds of 09:00–17:00 and the stripe is clipped (`schedule-closure-blocks.ts:275-279`).
-2. The **month grey-out** is weekly-only and blind to blocks (`MonthScheduleGrid.tsx:85` → `getVenueBusinessDayStatus`, `venue-calendar-bounds.ts:36-63`). This is the claim that stands as written, and Stage 2's discriminated struct is what makes it fixable.
+2. The **month grey-out** is weekly-only and blind to blocks (`MonthScheduleGrid.tsx:93` → `getVenueBusinessDayStatus`, `venue-calendar-bounds.ts:36-63`). This is the claim that stands as written, and Stage 2's discriminated struct is what makes it fixable.
 3. Day view's auto-expansion (`PractitionerCalendarView.tsx:3030-3063`) is **circular** — it widens bounds to cover blocks that were already clipped to the old bounds — and is gated `if (viewMode !== 'day')`, so **week view never expands at all**.
 
-**Carried in from Stage 3 `[R3-70]`.** The **service-availability summary** now resolves through the shared function but is still fed the legacy `venues.venue_opening_exceptions` JSON, parsed client-side in `AppointmentServicesView.tsx:311`, so it has never seen a real closure or amended-hours row. Point that view at `availability_blocks` and drop the conversion in `ServiceAvailabilityCalendar.tsx`. It is a dashboard fetch change, which is why it belongs here rather than in Stage 3.
+**Carried in from Stage 3 `[R3-70]`.** The **service-availability summary** now resolves through the shared function but is still fed the legacy `venues.venue_opening_exceptions` JSON, parsed client-side in `AppointmentServicesView.tsx:312`, so it has never seen a real closure or amended-hours row. Point that view at `availability_blocks` and drop the conversion in `ServiceAvailabilityCalendar.tsx`. It is a dashboard fetch change, which is why it belongs here rather than in Stage 3.
 
 **Also carried in from Stage 1 `[R3-68]`:** the month picker discarding its venue-clock error. It is a diary client component, not a fetcher, so it did not belong with the engine reads.
 
@@ -605,19 +616,22 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 ### Stage 5 — One calendar resolver.
 
+**First, clear the Stage 0b harness debt `[R3-73]`:** assert the appointment month path, `buildVenueScheduleClosureBlocks`, and `getUnifiedAvailableSlots`. These were due before Stage 4 and were not done, and Stage 5 rewrites the calendar layer all three read. Stage 4's lesson was that a defect can live entirely in a component's data flow while every unit test stays green; going into the largest remaining stage without these fixtures invites the same thing.
+
+
 - `calendarHours` / `calendarClosures` / `calendarBreaks` / `calendarAdHocBlocks` / `calendarBookableSegments` (§2.4), collapsing six working-hours and four break implementations.
 - Breaks become a veto in the resource **slot loop** (`:368`) only; `resourceRangesForHostProjection` keeps subtracting (§2.5). **Assert the `allowDuringBreaks`-on-a-hosting-column fixture before and after.**
 - `resourceCandidates` (§2.5) routes the host through `calendarHours`, fixing resource-ignores-leave, adding the venue layer v2 dropped, and newly subtracting host ad-hoc blocks.
-- Classes adopt the §2.6 carve-out. Events do not (decision B).
+- Classes adopt the §2.6 carve-out. Events do not (decision B), and their side is already done: Stage 2 gave the event engine the closure-overlap test and the `weekly-closed → allowed` rule.
 - `class-schedule-availability-conflicts.ts` step 1 rewritten to `scheduledInstanceAllowed`; only its break clause survives (decision C).
 - `event-hours-vs-venue-calendar.ts` repointed at **`calendarBookableSegments`**, not `calendarHours` (decision D).
 - `unified-calendar-mapper.ts` carries `availability_exceptions`, closing §1.2 item 21.
-- Split the write gate three ways and make `booking/create:1039` load `calendar_type` (§2.6).
+- **Make the write-gate split three-way.** Stage 2 already created `scheduledInstanceRejectBookingWindow` and repointed `booking/create:1039` and `:1307` at it, which is the two-way split; resources keep `venueWideBlocksRejectBookingWindow`. What remains is the third rule: `:1039` must load `calendar_type` alongside the session row (it currently selects only `capacity, name`) and apply the **class** rule on a `class` column and the **event** rule on an `event` one. Stage 2 did not need this because decision (H) makes the two agree on a weekly-closed weekday; they diverge on the out-of-hours-on-an-open-weekday case (§2.6).
 - Corrected form of v2's Stage 1 item 6: `getEventClassSlots` applies the **class** gate for `calendar_type='class'` and the **event** gate for `'event'`.
 - **Expected new refusal:** event creation on a staff leave date starts failing (§1.2 item 24). Intended under (D); state it to owners.
 - `days_off` keeps being **honoured** for both its semantics (ISO dates and weekday names), read-only. Decision (G) converts weekday names into weekly working hours, and Q5 confirms there are none on production to convert — but the engines must keep reading it until Stage 6b, because Stage 1 item 8 is the only thing standing between the mobile API and a new entry.
 
-**Closes:** §1.2 items 5, 6, 7, 10, 14, 21.
+**Closes:** §1.2 items 5, 6, 10, 14, 21, and the **class half** of item 7 (its event half closed in Stage 2).
 
 ### Stage 6 — Data model and write surface.
 
@@ -1082,7 +1096,7 @@ All nine of v2's entries were verified at the cited lines and stand. Three of th
 | Working-hours line formatter | `calendar/format-working-hours-for-date.ts:6-24` | A seventh weekday-key reader, uncounted in item 10 |
 | Import tool reference writer | `import/create-reference-entity.ts:79-82,138-140` | **Writes** `working_hours`, `break_times`, `days_off` |
 | Public booking page hours display | `booking/get-public-venue-for-book.ts`, `build-venue-public.ts`, `map-api-venue-to-public.ts`, `venue-settings-to-preview-public.ts` | Shows hours that will disagree with the new resolution on amended dates |
-| Month grey-out grid | `dashboard/practitioner-calendar/MonthScheduleGrid.tsx:85` | Named in Stage 4 prose; needs the discriminated struct from Stage 2 |
+| Month grey-out grid | `dashboard/practitioner-calendar/MonthScheduleGrid.tsx:93` | Named in Stage 4 prose; needs the discriminated struct from Stage 2 |
 | Help centre closure articles | `lib/help/articles/getting-started.ts:49` and its figures | **Documents the behaviour Stage 3 reverses** (item `[R3-41]`) |
 
 `service_items.custom_working_hours` composes **inside** the anchoring set, not after the venue clip as v2 said (§2.5), and inherits decision (A).

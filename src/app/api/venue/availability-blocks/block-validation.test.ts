@@ -60,6 +60,17 @@ describe('availability-blocks validation (SA-M19 / plan §1.2 item 13)', () => {
     expect(source).not.toContain("if (!body.id) return NextResponse.json({ error: 'Missing id' }");
   });
 
+  it('checks amended hours for stranded bookings, using the complement of the periods', () => {
+    // Under REPLACE semantics, saving 10:00-14:00 on a day that ran 09:00-17:00 puts every
+    // booking outside that window out of hours. A closure asks "what is covered"; an
+    // override asks "what is no longer covered", so the guard checks the gaps.
+    expect(source).toContain("const isAmended = block.block_type === 'amended_hours';");
+    expect(source).toContain('the COMPLEMENT of the override periods');
+    expect(source).toContain('for (const w of windows) {');
+    // An override with no valid period is ignored entirely, so nothing is stranded.
+    expect(source).toContain('if (periods.length === 0) return null;');
+  });
+
   it('runs the conflict guard unconditionally once the row is known to exist', () => {
     const patchBody = source.slice(source.indexOf('export async function PATCH'));
     const guardIndex = patchBody.indexOf('guardVenueClosureConflicts');

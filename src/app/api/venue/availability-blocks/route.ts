@@ -11,6 +11,14 @@ import { z } from 'zod';
 /** Block types that make the venue unavailable, so existing bookings are stranded. */
 const CLOSING_BLOCK_TYPES = new Set(['closed', 'special_event']);
 
+function hhmmToMinutes(v: string): number {
+  return Number(v.slice(0, 2)) * 60 + Number(v.slice(3, 5));
+}
+
+function minutesToHhmm(m: number): string {
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
 /**
  * Returns a 409 asking the admin to confirm when a proposed closure covers bookings
  * that already exist, or `null` to proceed. Mirrors the opening-hours flow: warn once,
@@ -26,29 +34,65 @@ async function guardVenueClosureConflicts(
     date_end?: string;
     time_start?: string | null;
     time_end?: string | null;
+    override_periods?: Array<{ open: string; close: string }> | null;
   },
 ): Promise<NextResponse | null> {
-  if (!block.block_type || !CLOSING_BLOCK_TYPES.has(block.block_type)) return null;
   if (!block.date_start || !block.date_end) return null;
   if (request.nextUrl.searchParams.get('acknowledge_affected_bookings') === 'true') return null;
 
+  /**
+   * Amended hours strand bookings just as a closure does, and until Stage 3 they were not
+   * checked at all: `CLOSING_BLOCK_TYPES` excluded them because under the old INTERSECT
+   * semantics an override could only ever narrow within the weekly hours. Now that Hours
+   * overrides REPLACE the baseline, saving "10:00 to 14:00" on a day that used to run
+   * 09:00 to 17:00 puts every booking outside that window out of hours, silently.
+   *
+   * The windows to check are the COMPLEMENT of the override periods across the day, since
+   * a closure asks "what is covered" and an override asks "what is no longer covered".
+   */
+  const isClosing = block.block_type ? CLOSING_BLOCK_TYPES.has(block.block_type) : false;
+  const isAmended = block.block_type === 'amended_hours';
+  if (!isClosing && !isAmended) return null;
+
+  const windows: Array<{ startTime: string | null; endTime: string | null }> = [];
+  if (isAmended) {
+    const periods = (block.override_periods ?? [])
+      .map((p) => ({ start: hhmmToMinutes(p.open), end: hhmmToMinutes(p.close) }))
+      .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start)
+      .sort((a, b) => a.start - b.start);
+    // No valid period means the override is ignored entirely (§2.2), so nothing is stranded.
+    if (periods.length === 0) return null;
+    let cursor = 0;
+    for (const p of periods) {
+      if (p.start > cursor) windows.push({ startTime: minutesToHhmm(cursor), endTime: minutesToHhmm(p.start) });
+      cursor = Math.max(cursor, p.end);
+    }
+    if (cursor < 24 * 60) windows.push({ startTime: minutesToHhmm(cursor), endTime: '23:59' });
+    if (windows.length === 0) return null;
+  } else {
+    windows.push({ startTime: block.time_start ?? null, endTime: block.time_end ?? null });
+  }
+
   try {
-    const conflicts = await findVenueClosureBookingConflicts(admin, {
-      venueId,
-      startDate: block.date_start,
-      endDate: block.date_end,
-      startTime: block.time_start,
-      endTime: block.time_end,
-    });
-    if (!conflicts) return null;
-    return NextResponse.json(
-      {
-        requires_confirmation: true,
-        affected_count: conflicts.totalConflicts,
-        message: describeVenueClosureConflicts(conflicts),
-      },
-      { status: 409 },
-    );
+    for (const w of windows) {
+      const conflicts = await findVenueClosureBookingConflicts(admin, {
+        venueId,
+        startDate: block.date_start,
+        endDate: block.date_end,
+        startTime: w.startTime,
+        endTime: w.endTime,
+      });
+      if (!conflicts) continue;
+      return NextResponse.json(
+        {
+          requires_confirmation: true,
+          affected_count: conflicts.totalConflicts,
+          message: describeVenueClosureConflicts(conflicts),
+        },
+        { status: 409 },
+      );
+    }
+    return null;
   } catch (e) {
     // Fail loudly rather than closing over bookings without a word.
     console.error('[availability-blocks] closure conflict check:', e);
@@ -277,7 +321,7 @@ export async function PATCH(request: NextRequest) {
       date_end?: string;
       time_start?: string | null;
       time_end?: string | null;
-      override_periods?: unknown;
+      override_periods?: Array<{ open: string; close: string }> | null;
     };
 
     // Validate the row this PATCH will actually produce, not just the fields it carries.

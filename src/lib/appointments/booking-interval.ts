@@ -118,7 +118,11 @@ export function candidateStartMinutes(params: {
       out.push(t);
     }
   }
-  return out;
+  // Overlapping input ranges would otherwise emit the same start twice, and the caller
+  // maps candidates straight to guest-visible slots. The venue resolver now merges its
+  // output, so this is belt and braces for any other producer of ranges; it is also the
+  // reason the list is sorted, since two ranges could interleave.
+  return [...new Set(out)].sort((a, b) => a - b);
 }
 
 /**

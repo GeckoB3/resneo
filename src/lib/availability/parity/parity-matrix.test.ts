@@ -174,12 +174,18 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
   });
 
   /**
-   * PINS DEFECT #19 and sizes decision (E). `unionAmendedPeriods` concatenates the periods
-   * of every amended block on the date without merging, so a nested override does not
-   * narrow the day, and the resolver emits OVERLAPPING ranges. Decision (E) replaces the
-   * concat with a most-specific-wins rule.
+   * PINS DEFECT #19, half-closed, and sizes decision (E).
+   *
+   * Stage 1 item 6 merged the resolver's output, so overlapping ranges no longer escape and
+   * the duplicate-slot bug is gone. What remains is the SEMANTIC half: the periods of every
+   * amended block on the date are still concatenated, so a one-day 10:00-14:00 override
+   * nested inside a three-month 08:00-20:00 one does not narrow that day. It widens to the
+   * union instead, silently and with no error.
+   *
+   * Decision (E) replaces the concat with most-specific-wins, in Stage 3. When that lands
+   * this expectation becomes `['10:00-14:00']`.
    */
-  it('DIVERGES: overlapping amended blocks concatenate rather than narrowing, and emit overlapping ranges', () => {
+  it('DIVERGES: a nested override widens to the union instead of narrowing the day', () => {
     const w = world({
       name: 'one-day override nested in a long one',
       venueBlocks: [
@@ -200,8 +206,36 @@ describe('parity matrix / amended hours (plan §1.2 items 1 and 2)', () => {
 
     const res = venueResolution(w);
     expect(res.kind).toBe('allowed');
-    expect(res.ranges).toEqual(['09:00-17:00', '10:00-14:00']);
-    expect(res.ranges.length).toBeGreaterThan(1);
+    // Merged, so no duplicate start times reach a guest. But the nested 10:00-14:00
+    // override has been absorbed rather than applied: the day is still the wider window.
+    expect(res.ranges).toEqual(['09:00-17:00']);
+    expect(res.ranges).not.toContain('10:00-14:00');
+  });
+
+  it('emits no duplicate start times when two amended blocks overlap', () => {
+    const w = world({
+      name: 'two overlapping overrides',
+      venueOpeningHours: null,
+      venueBlocks: [
+        block({
+          block_type: 'amended_hours',
+          date_start: DATE,
+          date_end: DATE,
+          override_periods: [{ open: '09:00', close: '13:00' }],
+        }),
+        block({
+          block_type: 'amended_hours',
+          date_start: DATE,
+          date_end: DATE,
+          override_periods: [{ open: '11:00', close: '15:00' }],
+        }),
+      ],
+      workingHours: { [DK]: [{ start: '08:00', end: '20:00' }] },
+    });
+
+    const starts = resourceStarts(w);
+    expect(starts).toEqual([...new Set(starts)]);
+    expect(starts).toEqual(['09:00', '10:00', '11:00', '12:00', '13:00', '14:00']);
   });
 });
 

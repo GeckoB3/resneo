@@ -7,6 +7,7 @@
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import { getOpeningPeriodsForDay, timeToMinutes } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
+import { unionMinuteRanges } from '@/lib/availability/calendar-resource-occupancy';
 
 function isOpeningHoursConfigured(openingHours: OpeningHours | null | undefined): boolean {
   return openingHours != null && typeof openingHours === 'object' && Object.keys(openingHours).length > 0;
@@ -90,7 +91,12 @@ export function intersectMinuteRangeArrays(
       if (s < e) out.push({ start: s, end: e });
     }
   }
-  return out.sort((x, y) => x.start - y.start);
+  // Merge, do not merely sort. When two amended blocks overlap on a date this produced
+  // OVERLAPPING output ranges, and `candidateStartMinutes` iterates ranges without
+  // deduping, so a guest was offered the same start time twice. The diary's
+  // `closedRangesFromOpenWindows` mis-rendered the same day for the same reason.
+  // Merging is behaviour-preserving for coverage checks, which already tolerate overlap.
+  return unionMinuteRanges(out);
 }
 
 function unionAmendedPeriods(blocks: AvailabilityBlock[]): Array<{ start: number; end: number }> {
@@ -101,7 +107,10 @@ function unionAmendedPeriods(blocks: AvailabilityBlock[]): Array<{ start: number
       periods.push({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) });
     }
   }
-  return periods.filter((r) => r.end > r.start);
+  // Note this is a concat across every amended block on the date, not a per-block choice.
+  // Which block wins when several apply is operator decision (E), and lands in Stage 3.
+  // Merging here only removes duplicate and overlapping output; it does not pick a winner.
+  return unionMinuteRanges(periods.filter((r) => r.end > r.start));
 }
 
 export type VenueWideResolution =

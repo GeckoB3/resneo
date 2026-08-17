@@ -9,7 +9,7 @@
 | 0b (parity harness) | **DONE 2026-08-17.** 46 tests, 347 files / 3315 green. Month path, diary renderer and `getUnifiedAvailableSlots` deferred to before Stage 4. |
 | 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
 | 2 (event read/write contract) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
-| 3 (venue resolver) | nothing. **Q3 returned zero rows on production**, so there is nothing to repair. Requires Stage 1 item 3 to have landed, which is what keeps that zero true. |
+| 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 4 (diary geometry) | Stage 2's discriminated struct |
 | 5 (calendar resolver) | nothing. **(F) and (G) taken.** |
 | 6a / 6b (data model) | §1.3 tier 2 and tier 3 prerequisites, **Q6**, **Q7**, **Q10** |
@@ -72,11 +72,11 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 #### The composition defects
 
-1. **Amended hours cannot open a weekly-closed day** for classes, events, resources or the diary. `resolveVenueWideAllowedMinuteRanges` returns `closed` at `venue-wide-business-hours.ts:174` for a weekday with no weekly periods, **before amended hours are examined at `:168`**. Opening specially on a bank-holiday Sunday: appointments sell it, everything else shows nothing, and the diary greys the day out *and* draws amended stripes over it (`schedule-closure-blocks.ts:251-252` and `:266`).
+1. ✅ **FIXED, Stage 3.** Hours overrides now replace the baseline, including replacing a weekly-closed weekday, on every path. Original finding: **amended hours cannot open a weekly-closed day** for classes, events, resources or the diary. `resolveVenueWideAllowedMinuteRanges` returns `closed` at `venue-wide-business-hours.ts:174` for a weekday with no weekly periods, **before amended hours are examined at `:168`**. Opening specially on a bank-holiday Sunday: appointments sell it, everything else shows nothing, and the diary greys the day out *and* draws amended stripes over it (`schedule-closure-blocks.ts:251-252` and `:266`).
 
-2. **Amended hours REPLACE for appointments and INTERSECT for everything else.** `appointment-engine.ts:499-504` returns `ex.periods` without ever intersecting the weekly base; `venue-wide-business-hours.ts:225` intersects.
+2. ✅ **FIXED, Stage 3.** One resolver, replace semantics everywhere. Original finding: **amended hours REPLACE for appointments and INTERSECT for everything else.** `appointment-engine.ts:499-504` returns `ex.periods` without ever intersecting the weekly base; `venue-wide-business-hours.ts:225` intersects.
 
-3. **Part-day closures widen to whole-day for appointments only.** `venue-exceptions-adapter.ts:17-24` pushes `closed: true` and never reads `time_start`/`time_end`.
+3. ✅ **FIXED, Stage 3.** The lossy adapter is deleted; part-day closures narrow every path, and are vetoed rather than subtracted so the slot grid keeps its alignment. Original finding: **part-day closures widen to whole-day for appointments only.** `venue-exceptions-adapter.ts:17-24` pushes `closed: true` and never reads `time_start`/`time_end`.
 
 4. ✅ **FIXED, Stage 1 item 2.** ~~The legacy `venues.venue_opening_exceptions` JSON outranks the closures table, at venues that have one.~~ The legacy JSON is now a fallback that fills only when the field is absent. Q9 confirmed zero venues carried one, so it shipped as a no-op. **Kept below because the defect is one column write from returning**, and because the count corrections matter for §7b. `[AR-5] corrected again in v3 [R3-9].` There are **fifteen** `attachVenueClockToAppointmentInput` invocation sites and **fourteen** omit `venueBlocks` (v2 said fourteen and thirteen). But v2's headline — "clobbers the block-derived list on every one" — is **false**. All three fetchers already derive `venueOpeningExceptions` from `availability_blocks` (`appointment-engine.ts:1466-1470`, `:1872-1879`, `appointment-month-availability.ts:139-146`), and `attachVenueClockToAppointmentInput` overwrites that only when the legacy JSON parses non-empty (`:148-149`); otherwise the derived list survives (`:150-152`). **The defect is a precedence bug in one function, not a plumbing gap across fourteen.** v2's Stage 1 prescription is correspondingly wrong: see Stage 1 item 4.
 
@@ -86,7 +86,7 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 7. ⚠️ **FIXED FOR EVENTS, Stage 2.** The event engine now tests closure OVERLAP rather than block presence, so an unrelated closure no longer changes the answer. **Classes still short-circuit on `dayBlocks.length === 0`** in both the engine and the schedule-time validator; that is Stage 5. Original finding: **a single unrelated block on a date flips class/event semantics for that whole date.** Not "both" as v2 said, but **two read paths, one write gate and a renderer** `[R3-10]`: `class-session-engine.ts:191-192` (`if (dayBlocks.length === 0) return true`), `class-schedule-availability-conflicts.ts:125-126` (`if (dayBlocks.length > 0)`), `event-ticket-engine.ts:109-124` via `isWeeklyScheduleClosedForDate` (which returns false the moment any block exists, `venue-wide-business-hours.ts:41`), and `schedule-closure-blocks.ts:245`.
 
-8. **Appointments evaluate one block per date; everything else combines all of them.** `appointment-engine.ts:482-484`: `applicable.find((ex) => ex.closed) ?? applicable[0]!`.
+8. ✅ **FIXED, Stage 3.** The appointment engine calls the shared resolver, which combines all applicable blocks under decision (E). Original finding: **appointments evaluate one block per date; everything else combines all of them.** `appointment-engine.ts:482-484`: `applicable.find((ex) => ex.closed) ?? applicable[0]!`.
 
 9. ✅ **FIXED, Stage 1 item 1.** ~~`unified-availability.ts:264` omits `special_event`~~, and the list it wiped was already correct `[R3-11]`. A cross-module test now asserts the four venue-wide `block_type` filters agree, so they cannot drift apart again. `getUnifiedAvailableSlots` builds its input via `fetchCalendarAppointmentInput`, whose own query **does** include `special_event` (`appointment-engine.ts:1742`). Line 171 then passes a list built from the narrower query, so on a `special_event`-only date it passes `[]` and `attachVenueClockToAppointmentInput:144-145` clears a correctly-resolved closure. One bug firing twice.
 
@@ -116,9 +116,9 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 21. **The unified path ignores resource `availability_exceptions` entirely.** **Latent: zero resource calendars and zero stored overrides (Q0).** `mapCalendarToResource` reads it (`resource-booking-engine.ts:957`), but `unified-availability.ts:301-350` routes resource calendars through the **appointment** engine via `unifiedCalendarRowToPractitioner`, and `unified-calendar-mapper.ts:17-36` does not carry the field. A resource's per-date override is honoured on `/book` and silently ignored on the unified path. The same two paths also read **different break sets**: the host calendar's on one, the resource calendar's own on the other.
 
-22. **`service-custom-availability.ts` is the un-synced twin, and Stage 3 orphans its contract.** Its picker at `:337-347` carries `/** Keep in sync with venueMinuteRangesForAppointmentDate in appointment-engine.ts */` and is **not** in sync (§1.2 item 10). Stage 3 deletes the function that comment points at. No stage in v2 assigns work to this file.
+22. ✅ **FIXED, Stage 3.** It resolves through the shared function, so the summary and the engine cannot disagree. **A separate gap remains:** it is fed the legacy JSON rather than `availability_blocks`, which is now a Stage 4 item. Original finding: **`service-custom-availability.ts` is the un-synced twin.** Its picker at `:337-347` carries `/** Keep in sync with venueMinuteRangesForAppointmentDate in appointment-engine.ts */` and is **not** in sync (§1.2 item 10). Stage 3 deletes the function that comment points at. No stage in v2 assigns work to this file.
 
-23. **`hours-change-orphans.ts` reads weekly opening hours only.** It warns owners which upcoming bookings an hours change strands. It never reads `availability_blocks`, amended hours or closures. Stage 3 redefines "inside hours" for every other consumer and this warning silently drifts. v2 counts its confirm dialog in §1.1 and never assigns it.
+23. ✅ **FIXED, Stage 3.** It accepts venue-wide blocks and resolves through the shared function; the opening-hours route passes real blocks to both sides. Original finding: **`hours-change-orphans.ts` reads weekly opening hours only.** It warns owners which upcoming bookings an hours change strands. It never reads `availability_blocks`, amended hours or closures. Stage 3 redefines "inside hours" for every other consumer and this warning silently drifts. v2 counts its confirm dialog in §1.1 and never assigns it.
 
 24. **Event creation never checks leave, and Stage 5 turns that on silently.** `validate-event-calendar-placement.ts:53-84` reaches `calendarSegmentsForDate` (`event-hours-vs-venue-calendar.ts:144-149`), which reads `working_hours`, `break_times` and `days_off` and never `practitioner_leave_periods`. Decision (D) keeps this validator, so making leave a calendar closure starts refusing event creation on leave dates, at a write surface, whether or not anyone intends it.
 
@@ -532,7 +532,7 @@ Ship alone, revert alone. Closes §1.2 items 16 and, for events, 7.
 
 **Not needed after all.** The plan expected `booking/create:1039` to dispatch on `calendar_type`. It does not, yet: on a weekly-closed weekday decision (H) makes classes and events agree, so one instance gate serves both. The dispatch is genuinely Stage 5 work, for the out-of-hours-on-an-open-weekday case where classes are allowed and events are not.
 
-### Stage 3 — One venue resolver.
+### Stage 3 — One venue resolver. ✅ DONE 2026-08-17
 
 - Amended hours replace rather than intersect, evaluated **before** the weekly short-circuit.
 - **Carried from Stage 2 `[R3-69]`:** remove the `amended.length > 0` guard that scopes `cause` to `override`. Once amended hours replace, an amended row on a weekly-closed weekday produces `hours = ranges`, so the instance is coverage-checked against the venue's own stated window and the guard becomes both unnecessary and wrong. **Same commit as the replace change**, or the two contradict.
@@ -557,6 +557,18 @@ Ship alone, revert alone. Closes §1.2 items 16 and, for events, 7.
 
 **No change fires for empty-period amended blocks**, because Q3's rows are repaired before this stage (§2.2, `[R3-53]`).
 
+**Met:** tsc clean, lint 0 errors (104 pre-existing warnings, none in touched files), **353 files / 3368 tests**. Shipped as five commits.
+
+**Three things found by implementing it `[R3-70]`:**
+
+1. **A whole-day closure must still DROP the calendar**, not return it with an empty slot list. Vetoing closures uniformly left staff listed with no times on a fully closed day. Only a part-day closure reaches the veto; `venueAnchorRangesForDate` returns `[]` when the resolution is `closed`.
+2. **The venue-closure veto belongs INSIDE the `allowOutsideHours` gate.** A venue closure is an `hours` rule staff can deliberately book through today; leave is `hard` and stays checked above it. Putting the veto in the wrong place would have quietly changed what staff can do, which §8 promises this plan does not.
+3. **The decision (E) tie-break must not fall back to `id`.** Doing so makes a genuine tie impossible and picks a winner at random between two overrides an owner saved for the same date. `created_at` only, then union.
+
+**Two items were smaller than the plan expected, and one was larger.** The `two-closures` and `closures-form` figures needed no edit: they describe closure *scope*, which this work does not change. The `service-custom-availability` fix, by contrast, exposed that the whole service-summary surface is fed the **legacy JSON** rather than `availability_blocks`, so it has never seen a real closure. It now resolves through the shared function, but pointing it at the right data source is a dashboard fetch change and is **added to Stage 4**.
+
+**The `amended_hours` booking-conflict guard was extended, not just added.** It checks the **complement** of the override periods, because a closure asks what is covered and an override asks what is no longer covered.
+
 ### Stage 4 — Diary and month geometry.
 
 A stage, not a bullet: five client components need a new data dependency, three call sites are out of scope, and persisted UI state can defeat the whole fix.
@@ -566,6 +578,10 @@ A stage, not a bullet: five client components need a new data dependency, three 
 1. Amended hours **outside an open weekday's bounds** — weekly 09:00–17:00 amended to 20:00 gives bounds of 09:00–17:00 and the stripe is clipped (`schedule-closure-blocks.ts:275-279`).
 2. The **month grey-out** is weekly-only and blind to blocks (`MonthScheduleGrid.tsx:85` → `getVenueBusinessDayStatus`, `venue-calendar-bounds.ts:36-63`). This is the claim that stands as written, and Stage 2's discriminated struct is what makes it fixable.
 3. Day view's auto-expansion (`PractitionerCalendarView.tsx:3030-3063`) is **circular** — it widens bounds to cover blocks that were already clipped to the old bounds — and is gated `if (viewMode !== 'day')`, so **week view never expands at all**.
+
+**Carried in from Stage 3 `[R3-70]`.** The **service-availability summary** now resolves through the shared function but is still fed the legacy `venues.venue_opening_exceptions` JSON, parsed client-side in `AppointmentServicesView.tsx:311`, so it has never seen a real closure or amended-hours row. Point that view at `availability_blocks` and drop the conversion in `ServiceAvailabilityCalendar.tsx`. It is a dashboard fetch change, which is why it belongs here rather than in Stage 3.
+
+**Also carried in from Stage 1 `[R3-68]`:** the month picker discarding its venue-clock error. It is a diary client component, not a fetcher, so it did not belong with the engine reads.
 
 **Method:** `getCalendarGridBounds` gains an **optional** `venueWideBlocks` parameter defaulting to today's behaviour, so the three restaurant call sites (`TableGridView.tsx:1692`, `FloorPlanLiveView.tsx:395`, `:468`) are **provably untouched** `[R3-44]`. Of the ten call sites, `PractitionerCalendarView` already fetches blocks (`:2536`, `:3382`) and `schedule-closure-blocks.ts:223` already receives them; three are the exempt restaurant sites. **Five** client components need the new data dependency: `AppointmentBookingsDashboard.tsx:477`, `BookingsDashboard.tsx:455`, `DaySheetView.tsx:507`, `StaffScheduleHub.tsx:50`, `StaffScheduleMergedDayGrid.tsx:102` `[R3-55]`.
 

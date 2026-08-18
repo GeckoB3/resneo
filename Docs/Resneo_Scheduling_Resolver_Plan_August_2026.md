@@ -12,7 +12,8 @@
 | 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 4 (diary geometry) | **DONE 2026-08-17.** 354 files / 3377 tests green; diary and month verified in the app. |
 | 5 (calendar resolver) | **DONE 2026-08-18.** 361 files / 3470 tests green. Harness debt cleared first (3 files, 32 fixtures, 2 defects found). |
-| 6a / 6b (data model) | §1.3 tier 2 and tier 3 prerequisites, **Q6**, **Q7**, **Q10** |
+| 6a (expand) | ⏳ **Migration written 2026-08-18, not applied.** Blocked on a `db push` to staging plus its verification block; the rest of 6a (dual-write, editor consolidation) waits on that. |
+| 6b (contract) | §1.3 tier 2 and tier 3 prerequisites, **Q5**, **Q6**, **Q7**, **Q10**, and 6a live and soaked. |
 | 7 (fail closed) | its own decision, still open |
 
 **Harness debt: CLEARED 2026-08-18 `[R3-73]`.** Stage 0b named four consumers it did not assert and said three were due before Stage 4; they were not done, and Stages 3 and 4 both changed code they run. Cleared as the first part of Stage 5:
@@ -28,7 +29,7 @@
 
 **Two traps for anyone adding fixtures to these paths.** The month path filters every date through the service booking window, whose default caps advance booking at **90 days**. `getUnifiedAvailableSlots` applies `isGuestBookingDateAllowed` before resolving anything, and `entityBookingWindowFromRow` hard-caps `max_advance_booking_days` at **365** — a real product rule. A fixed far-future date is rejected before the resolver is ever consulted, and the whole file then returns empty lists that look exactly like a resolver defect. The unified fixture computes its date relative to today for that reason.
 
-**Stages 0a to 5 are implemented on `staging`.** Stages 6a, 6b and 7 remain.
+**Stages 0a to 5 are implemented on `staging`.** Stage 6a's migration is written but **not applied**; 6b and 7 remain.
 
 **Baseline:** tree of `6bc9ef4f`, now squash-merged and shipped as `ea9672f2` on `main` and `staging`. Since the v2 draft: 20 lines of unrelated visits-route code and 63 lines of test. **Nothing this plan cites has moved.** 344 test files, 261 migrations.
 
@@ -654,7 +655,19 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 **Split into 6a (expand) and 6b (contract), which is not optional** `[R3-45]`. The standing deploy ritual applies migrations to production **before** merging the code, so production runs old code against the new schema for the whole window. A `DROP COLUMN` in that window is not a degradation, it is a `42703` and the route 500s. `resource-booking-engine.ts:981` selects `id, working_hours, days_off, break_times, break_times_by_day` explicitly, so dropping either column **takes the entire resource booking engine down**. Three more single-line explicit selects break the same way: `venue/practitioners/route.ts:110`, `venue/resources/route.ts:201`, `class-schedule-availability-conflicts.ts:197` `[R3-56]`.
 
-**Stage 6a — expand only.** Create `calendar_date_overrides`, dual-write, backfill leave rows, and **leave every old column and table in place**. Carry `leave_type`, `notes` and `created_at` (§1.3 tier 3). One weekly-hours editor replaces three; one date-override editor replaces the venue closure editor and the leave panel. Fix the "Closure vs Unavailable window" options that produce byte-identical rows. Validation parity between POST and PATCH on every route. Add "apply to all calendars" for breaks.
+**Stage 6a — expand only.** ⏳ **IN PROGRESS.** The migration is written (`20270114120000_calendar_date_overrides.sql`, 2026-08-18) with all nine RLS/grant artefacts, the leave backfill, and pgTAP assertions. **Nothing else in 6a is started**, and the remaining work is gated on a `db push` that only the operator can run.
+
+**Sequencing hazard, and the reason the split matters here `[R3-77]`.** The ritual deploys **code before** the migration reaches the database, so any code that reads or writes `calendar_date_overrides` will hit a missing table for the whole window between the two. This is the mirror of Stage 6b's hazard and just as real. Two consequences: the dual-write must be **fail-soft** (report and continue, never throw), and it must not ship in the same pass that first introduces the table unless it is.
+
+**Operator steps before the rest of 6a can proceed:**
+1. `supabase db push` to **staging**, then run the migration's verification block against staging: the grant query (expect `SELECT` only for `anon` and `authenticated`), the backfill counts, and the left-behind query.
+2. Confirm CI's `rls-pgtap` job is green — the migration has **not** been validated locally (no Docker in the working environment), so CI is its first real execution.
+3. `npm run check:function-grants` against staging.
+4. Only then production, per the standing ritual.
+
+**Then the rest of 6a**, none of which is started:
+
+Create `calendar_date_overrides`, dual-write, backfill leave rows, and **leave every old column and table in place**. Carry `leave_type`, `notes` and `created_at` (§1.3 tier 3). One weekly-hours editor replaces three; one date-override editor replaces the venue closure editor and the leave panel. Fix the "Closure vs Unavailable window" options that produce byte-identical rows. Validation parity between POST and PATCH on every route. Add "apply to all calendars" for breaks.
 
 **Stage 6b — contract, a separate pass of the full ritual**, only after 6a is live on production and soaked. **No `DROP COLUMN`, `DROP TABLE`, new `CHECK` or new `NOT NULL` may share a migration with the code that stops using it.** Before every contraction: `create table _archive_<name>_20260817 as select * from <source>`, retained one release cycle, plus a confirmed PITR window on both projects. Only tier 1 and tier 2 items are eligible, and only after their prerequisites in §1.3.
 

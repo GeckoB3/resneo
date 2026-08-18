@@ -33,5 +33,13 @@ export function unifiedCalendarRowToPractitioner(uc: Record<string, unknown>): P
       typeof uc.parallel_clients === 'number' && uc.parallel_clients >= 1
         ? Math.min(50, Math.floor(uc.parallel_clients))
         : 1,
+    /**
+     * Per-date Hours and Closed overrides. This mapper dropped the column, so a resource's
+     * own per-date override was honoured on the `/book` resource path (which maps the row
+     * itself) and silently ignored on the unified path (which routes resource calendars
+     * through the appointment engine via this mapper). Same stored setting, two answers.
+     * §1.2 item 21.
+     */
+    availability_exceptions: (uc.availability_exceptions ?? null) as Practitioner['availability_exceptions'],
   };
 }

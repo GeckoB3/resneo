@@ -98,6 +98,13 @@ export interface Practitioner {
    */
   break_times_by_day?: WorkingHours | null;
   days_off: string[]; // recurring day names or "YYYY-MM-DD" dates
+  /**
+   * Per-date Hours or Closed overrides, keyed by "YYYY-MM-DD"
+   * (`unified_calendars.availability_exceptions`). Live for resource calendars; carried
+   * here so the unified path resolves a resource identically to the `/book` path, which
+   * maps the row directly. §1.2 item 21.
+   */
+  availability_exceptions?: ResourceAvailabilityExceptions | null;
   is_active: boolean;
   sort_order: number;
   created_at: string;

@@ -216,3 +216,51 @@ describe('calendarBookableSegments', () => {
     ]);
   });
 });
+
+describe('unified mapper carries per-date overrides (§1.2 item 21)', () => {
+  /**
+   * The resource's own per-date override used to be honoured on the `/book` path, which
+   * maps the resource row directly, and silently ignored on the unified path, which routes
+   * resource calendars through the appointment engine via `unifiedCalendarRowToPractitioner`
+   * -- and that mapper dropped the column. Same stored setting, two different answers
+   * depending on which URL the guest arrived through.
+   */
+  it('resolves a mapped calendar row identically to the raw row', async () => {
+    const { unifiedCalendarRowToPractitioner } = await import('@/lib/availability/unified-calendar-mapper');
+
+    const raw = {
+      id: 'cal-1',
+      venue_id: 'v1',
+      name: 'Room 2',
+      is_active: true,
+      working_hours: { [DK]: [{ start: '09:00', end: '17:00' }] },
+      break_times: [],
+      break_times_by_day: null,
+      days_off: [],
+      availability_exceptions: { [DATE]: { periods: [{ start: '10:00', end: '12:00' }] } },
+    };
+
+    const mapped = unifiedCalendarRowToPractitioner(raw);
+
+    expect(calendarHours(raw as CalendarScheduleRow, DATE)).toEqual([{ start: 600, end: 720 }]);
+    expect(calendarHours(mapped as CalendarScheduleRow, DATE)).toEqual([{ start: 600, end: 720 }]);
+  });
+
+  it('carries a { closed: true } override through the mapper too', async () => {
+    const { unifiedCalendarRowToPractitioner } = await import('@/lib/availability/unified-calendar-mapper');
+
+    const mapped = unifiedCalendarRowToPractitioner({
+      id: 'cal-1',
+      venue_id: 'v1',
+      name: 'Room 2',
+      is_active: true,
+      working_hours: { [DK]: [{ start: '09:00', end: '17:00' }] },
+      break_times: [],
+      break_times_by_day: null,
+      days_off: [],
+      availability_exceptions: { [DATE]: { closed: true } },
+    });
+
+    expect(calendarHours(mapped as CalendarScheduleRow, DATE)).toEqual([]);
+  });
+});

@@ -24,7 +24,7 @@ const DK = String(getDayOfWeek(DATE));
 const VENUE = 'venue-1';
 const CAL = 'cal-event-1';
 
-function fakeWith(sessions: Array<{ start: string; end: string }>) {
+function fakeWith(sessions: Array<{ start: string; end: string }>, blocks: Record<string, unknown>[] = []) {
   return createSupabaseFake({
     tables: {
       event_sessions: sessions.map((s, i) => ({
@@ -40,6 +40,8 @@ function fakeWith(sessions: Array<{ start: string; end: string }>) {
       })),
       unified_calendars: [{ id: CAL, capacity: 10, calendar_type: 'event' }],
       bookings: [],
+      venues: [{ id: VENUE, opening_hours: { [DK]: { periods: [{ open: '09:00', close: '17:00' }] } } }],
+      availability_blocks: blocks,
     },
   });
 }
@@ -65,32 +67,46 @@ describe('read/write agreement / group sessions', () => {
   });
 
   /**
-   * PINS THE LIVE DEFECT. The listing has no venue gate, so it sells a 19:00 session at a
-   * venue that closes at 17:00. The create gate refuses it with the message the guest sees.
+   * CLOSED BY STAGE 5, and the answer now depends on the column's type.
    *
-   * When Stage 5 closes this, the fix depends on the calendar's type: for a `class` column
-   * the LISTING is correct and the gate must stop consulting weekly hours; for an `event`
-   * column the gate is correct and the listing must start. `getEventClassSlots` serves both
-   * (`unified-availability.ts:239-241`), which is why plan §1.2 item 14 needs three gates
-   * rather than two, and why this expectation must be split in two when it changes.
+   * `event_sessions` rows are classes or events purely by `unified_calendars.calendar_type`,
+   * and decision (B) gives them different venue rules. An EVENT must fit the venue's hours
+   * where those exist, so a 19:00 session at a 09:00-17:00 venue is no longer listed --
+   * which is the side that agrees with the create gate, closing §1.2 item 15.
    */
-  it('DIVERGES: lists a 19:00 session at a 09:00-17:00 venue that the create gate refuses', async () => {
+  it('AGREES after Stage 5: a 19:00 EVENT session is no longer listed, matching the gate', async () => {
     const fake = fakeWith([{ start: '19:00', end: '20:00' }]);
-    const slots = await getEventClassSlots(fake.asSupabaseClient<SupabaseClient>(), VENUE, CAL, DATE, 'svc-1');
+    const slots = await getEventClassSlots(fake.asSupabaseClient<SupabaseClient>(), VENUE, CAL, DATE, 'svc-1', 'event');
 
-    expect(slots.map((s) => s.time)).toEqual(['19:00']);
+    expect(slots).toEqual([]);
     expect(venueWriteGate(worldFor({ start: '19:00', end: '20:00' }))).toBe(
       'The venue is closed for this date or time.',
     );
   });
 
-  it('DIVERGES: lists sessions on a day the venue is explicitly closed', async () => {
-    const fake = fakeWith([{ start: '10:00', end: '11:00' }]);
-    const slots = await getEventClassSlots(fake.asSupabaseClient<SupabaseClient>(), VENUE, CAL, DATE, 'svc-1');
+  /**
+   * The same row on a CLASS column stays listed. A class is a fixed time staff scheduled
+   * deliberately, so the venue's weekly hours never hid one -- decision (B) keeps that
+   * carve-out for classes and withholds it from events. Same session, different column
+   * type, different answer, and `booking/create` makes the identical dispatch.
+   */
+  it('still lists a 19:00 CLASS session, because classes keep the carve-out', async () => {
+    const fake = fakeWith([{ start: '19:00', end: '20:00' }]);
+    const slots = await getEventClassSlots(fake.asSupabaseClient<SupabaseClient>(), VENUE, CAL, DATE, 'svc-1', 'class');
 
-    // The listing never reads availability_blocks at all, so a closure cannot reach it.
-    expect(slots).toHaveLength(1);
-    expect(fake.calls.map((c) => c.table)).not.toContain('availability_blocks');
+    expect(slots.map((s) => s.time)).toEqual(['19:00']);
+  });
+
+  it('now reads availability_blocks, and hides even a class when a closure covers it', async () => {
+    const fake = fakeWith([{ start: '10:00', end: '11:00' }], [
+      { id: 'b1', venue_id: VENUE, service_id: null, block_type: 'closed', date_start: DATE, date_end: DATE, time_start: null, time_end: null, override_periods: null, reason: null, yield_overrides: null, created_at: null },
+    ]);
+
+    const slots = await getEventClassSlots(fake.asSupabaseClient<SupabaseClient>(), VENUE, CAL, DATE, 'svc-1', 'class');
+
+    // A closure hides even a class: it is the one venue rule classes never escaped.
+    expect(slots).toEqual([]);
+    expect(fake.calls.map((c) => c.table)).toContain('availability_blocks');
   });
 
   it('excludes cancelled sessions and sessions on other dates', async () => {

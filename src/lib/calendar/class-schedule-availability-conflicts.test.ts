@@ -102,13 +102,20 @@ describe('evaluateClassWindowAvailabilityConflict', () => {
     expect(evaluateClassWindowAvailabilityConflict(data)).toMatch(/venue is closed/i);
   });
 
-  it('blocks when amended venue hours do not cover the class window', () => {
+  /**
+   * Stage 5, decision (B): amended hours constrain slot generation, not a class staff
+   * schedule deliberately. The class ENGINE stopped hiding such a class, so this validator
+   * had to stop refusing it -- keeping the check here would have sold a 19:00 class to
+   * guests and then refused staff scheduling the next one. Decision (C) keeps this
+   * validator's BREAK refusal, which is a separate step and unchanged.
+   */
+it('allows a class outside amended venue hours, matching what the engine offers', () => {
     const data = baseData({
       startMin: mins('09:00'),
       endMin: mins('10:00'),
       venueWideBlocks: [block({ block_type: 'amended_hours', override_periods: [{ open: '11:00', close: '14:00' }] })],
     });
-    expect(evaluateClassWindowAvailabilityConflict(data)).toMatch(/venue closure|amended hours/i);
+    expect(evaluateClassWindowAvailabilityConflict(data)).toBeNull();
   });
 
   it('allows when amended venue hours cover the class window', () => {

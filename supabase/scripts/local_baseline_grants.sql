@@ -54,7 +54,8 @@ BEGIN
          'availability_blocks',
          'practitioner_leave_periods',
          'practitioner_calendar_blocks',
-         'service_schedule_exceptions'
+         'service_schedule_exceptions',
+         'calendar_date_overrides'
        )
   LOOP
     EXECUTE format(

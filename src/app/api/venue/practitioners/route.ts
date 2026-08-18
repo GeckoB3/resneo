@@ -200,6 +200,55 @@ const timeRangeSchema = z
 
 const timeRangeArraySchema = z.array(timeRangeSchema);
 
+/**
+ * `days_off` holds exact ISO dates, and the engines ALSO honour lowercase weekday names
+ * (`appointment-engine.ts:212-214`, `resource-booking-engine.ts:114-119` both test
+ * `d === dateStr || d === dayName`). A stored `"mon"` is a permanent, recurring weekly
+ * closure that no dashboard screen displays and the target scheduling model cannot express.
+ *
+ * Production carries none today (resolver plan query Q5, 2026-08-17: zero rows), and this
+ * schema is what keeps that true. Every dashboard writes `[]`; this route is the only
+ * surface that ever accepted anything else, and it serves the mobile app from a repository
+ * this one cannot see, so "no in-repo caller sends one" is not a guarantee.
+ *
+ * Accepting only ISO dates here means Stages 2 to 5 can stop expecting recurring entries
+ * without a new one appearing behind them.
+ *
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §1.2 item 18, decision (G),
+ * Stage 1 item 8.
+ */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const WEEKDAY_NAMES = new Set(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+
+const daysOffSchema = z.array(
+  z.string().superRefine((value, ctx) => {
+    if (ISO_DATE.test(value)) {
+      // Date.parse rolls 2026-02-30 over to 2 March rather than failing, so round-trip the
+      // components instead of trusting it.
+      const [y, m, d] = value.split('-').map(Number);
+      const dt = new Date(Date.UTC(y!, m! - 1, d!));
+      const roundTrips =
+        dt.getUTCFullYear() === y && dt.getUTCMonth() === m! - 1 && dt.getUTCDate() === d;
+      if (!roundTrips) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${value} is not a real date.` });
+      }
+      return;
+    }
+    if (WEEKDAY_NAMES.has(value.toLowerCase())) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Repeating days off are set in working hours, not here. Leave the weekday unticked in working hours instead.',
+      });
+      return;
+    }
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Days off must be dates in YYYY-MM-DD form. Received "${value}".`,
+    });
+  }),
+);
+
 const practitionerSchema = z.object({
   name: z.string().min(1).max(200),
   email: optionalEmail,
@@ -210,7 +259,7 @@ const practitionerSchema = z.object({
   break_times: timeRangeArraySchema.optional(),
   /** Non-null object = per-weekday breaks; null clears to “same every day” mode (uses break_times). */
   break_times_by_day: z.record(z.string(), timeRangeArraySchema).nullable().optional(),
-  days_off: z.array(z.string()).optional(),
+  days_off: daysOffSchema.optional(),
   is_active: z.boolean().optional(),
   sort_order: z.number().int().optional(),
   staff_id: z.string().uuid().optional(),

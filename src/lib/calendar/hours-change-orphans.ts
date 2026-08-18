@@ -4,6 +4,10 @@
  * not block — when a venue narrows or shifts hours: existing bookings are honoured
  * (grandfathered), but the venue is told which upcoming ones now fall outside hours.
  *
+ * Venue-wide blocks: `venueWeeklyMinutesForDate` accepts them and resolves through the
+ * shared venue resolver when given. Without them it answers on the weekly baseline alone,
+ * which is what every caller did before Stage 3 of the scheduling resolver work.
+ *
  * Mirror note: closures over bookings are *hard-blocked* (see closure-booking-conflicts.ts)
  * because a closure is a deliberate "not here at this exact time". An hours change is a
  * forward-looking policy, so existing commitments are kept and the venue is merely warned.
@@ -12,7 +16,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getOpeningPeriodsForDay, timeToMinutes } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
-import type { OpeningHours } from '@/types/availability';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
+import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
@@ -52,13 +57,38 @@ function bookingWindowEndMinutes(row: {
   return start + 60;
 }
 
-/** Open minute-ranges for a date under venue weekly `opening_hours` (`{periods}` shape). */
-export function venueWeeklyMinutesForDate(openingHours: OpeningHours | null | undefined): PeriodsForDate {
-  return (dateStr: string) =>
-    getOpeningPeriodsForDay(openingHours ?? null, getDayOfWeek(dateStr)).map((p) => ({
+/**
+ * Open minute-ranges for a date under venue weekly `opening_hours`, plus any venue-wide
+ * blocks that apply.
+ *
+ * `venueWideBlocks` is optional and defaults to none, which is the weekly-only answer this
+ * function used to give unconditionally. That was a real gap: it warned owners about
+ * bookings an hours change would strand while ignoring closures and amended hours
+ * entirely, so a date the venue had already amended was judged against the weekly shape
+ * the amendment replaced. Resolving through the shared function keeps this warning
+ * agreeing with what the engines will actually offer.
+ *
+ * Callers that have the blocks should pass them; the two that do not are warning against
+ * the weekly baseline only, and say so at the call site.
+ */
+export function venueWeeklyMinutesForDate(
+  openingHours: OpeningHours | null | undefined,
+  venueWideBlocks?: AvailabilityBlock[] | null,
+): PeriodsForDate {
+  return (dateStr: string) => {
+    if (venueWideBlocks && venueWideBlocks.length > 0) {
+      const res = resolveVenueWideAllowedMinuteRanges(openingHours ?? null, dateStr, venueWideBlocks);
+      if (res.kind === 'closed') return [];
+      // `unrestricted` means the venue imposes no weekly boundary, which for an
+      // orphan check is "nothing can fall outside it".
+      if (res.kind === 'unrestricted') return [{ start: 0, end: 24 * 60 }];
+      return res.ranges;
+    }
+    return getOpeningPeriodsForDay(openingHours ?? null, getDayOfWeek(dateStr)).map((p) => ({
       start: hhmmToMinutes(p.open),
       end: hhmmToMinutes(p.close),
     }));
+  };
 }
 
 /** Open minute-ranges for a date under a calendar's `working_hours` (`[{start,end}]` shape). */

@@ -23,6 +23,16 @@ import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import type { AvailabilityBlock } from '@/types/availability';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
+import type { OpeningHours } from '@/types/availability';
+import {
+  rowsToVenueWideBlocks,
+  venueWideBlocksQueryForDate,
+} from '@/lib/availability/venue-wide-blocks-fetch';
+import {
+  classInstanceRejectBookingWindow,
+  scheduledInstanceRejectBookingWindow,
+} from '@/lib/availability/venue-wide-business-hours';
 
 export interface UnifiedAvailableSlot {
   time: string;
@@ -237,7 +247,7 @@ export async function getUnifiedAvailableSlots(params: {
   const calendarType = cal.calendar_type ?? 'practitioner';
 
   if (calendarType === 'event' || calendarType === 'class') {
-    return await getEventClassSlots(supabase, venueId, calendarId, date, serviceItemId);
+    return await getEventClassSlots(supabase, venueId, calendarId, date, serviceItemId, calendarType);
   }
 
   const [{ data: venue, error: venueErr }, extraBlocks, serviceItemRes, venueBlocksRes] = await Promise.all([
@@ -253,10 +263,15 @@ export async function getUnifiedAvailableSlots(params: {
           .maybeSingle(),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
-      .in('block_type', ['closed', 'amended_hours'])
+      // `special_event` is closure-like everywhere else that reads venue-wide blocks
+      // (venue-wide-business-hours.ts, venue-exceptions-adapter.ts, venue-wide-blocks-fetch.ts).
+      // Omitting it here did not merely miss a closure: this list is passed on as a non-null
+      // array, which overwrites the correctly-resolved exceptions the fetcher had already
+      // built from a query that does include it. SA-M12.
+      .in('block_type', ['closed', 'special_event', 'amended_hours'])
       .lte('date_start', date)
       .gte('date_end', date),
   ]);
@@ -364,12 +379,19 @@ export async function getUnifiedAvailableSlots(params: {
   });
 }
 
-async function getEventClassSlots(
+/**
+ * Slot listing for `event` and `class` calendar columns. Exported so the scheduling
+ * parity harness can assert the read/write agreement pair for group sessions: this path
+ * applies no venue-wide gate while `booking/create` applies the full one.
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §1.2 item 15 and Stage 0b.
+ */
+export async function getEventClassSlots(
   supabase: SupabaseClient,
   venueId: string,
   calendarId: string,
   date: string,
   serviceItemId: string,
+  calendarType: 'event' | 'class' | string = 'event',
 ): Promise<UnifiedAvailableSlot[]> {
   const { data: sessions, error } = await supabase
     .from('event_sessions')
@@ -410,6 +432,24 @@ async function getEventClassSlots(
     .eq('booking_date', date)
     .in('status', ACTIVE_BOOKING_STATUSES);
 
+  // Venue hours and blocks for the gate below. This listing applied no venue gate at all
+  // before Stage 5, which is why it disagreed with booking/create. Both reads fail open:
+  // an unreadable venue row leaves the sessions listed, matching every other fetcher here.
+  const [venueForGateRes, blocksForGateRes] = await Promise.all([
+    supabase.from('venues').select('opening_hours').eq('id', venueId).maybeSingle(),
+    venueWideBlocksQueryForDate(supabase, venueId, date),
+  ]);
+  reportAvailabilityReadFailures(
+    'getEventClassSlots',
+    { venueId, calendarId, date },
+    [
+      { table: 'venues', assumed: 'the venue has no opening hours, so no weekly boundary applies', error: venueForGateRes.error },
+      { table: 'availability_blocks', assumed: 'the venue has no closures on this date', error: blocksForGateRes.error },
+    ],
+  );
+  const venueOpeningHours = (venueForGateRes.data?.opening_hours ?? null) as OpeningHours | null;
+  const venueWideBlocksForGate = rowsToVenueWideBlocks(blocksForGateRes.data);
+
   reportAvailabilityReadFailures(
     'getEventClassSlots',
     { venueId, calendarId, date },
@@ -444,6 +484,21 @@ async function getEventClassSlots(
     const remaining = Math.max(0, cap - booked);
     const start = String(r.start_time).slice(0, 5);
     const end = String(r.end_time).slice(0, 5);
+
+    /**
+     * The venue gate this listing never applied (§1.2 item 15): a 19:00 group session at a
+     * 09:00-17:00 venue was listed to the guest and then refused at checkout with "The
+     * venue is closed for this date or time."
+     *
+     * WHICH gate depends on the column's type, and it is the same dispatch
+     * `booking/create` makes. An `event_sessions` row is a class or an event purely by
+     * `unified_calendars.calendar_type`, and decision (B) gives them different venue rules:
+     * a class is gated by explicit closures alone, an event must also fit the venue's hours
+     * where those exist. Read and write now ask the same question of the same row.
+     */
+    const gate = calendarType === 'class' ? classInstanceRejectBookingWindow : scheduledInstanceRejectBookingWindow;
+    if (gate(venueOpeningHours, date, start, end, venueWideBlocksForGate) != null) continue;
+
     out.push({
       time: start,
       endTime: end,

@@ -107,7 +107,24 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          'Cache-Control': 'public, s-maxage=45, stale-while-revalidate=120',
+          /**
+           * SA-M9, extended to this route. Schedule-derived answers cannot be
+           * CDN-cached while nothing revalidates them: there is not one
+           * `revalidateTag` or `revalidatePath` in `src/`, so a closure or an
+           * hours change an owner had just saved kept selling for up to 165
+           * seconds at every edge location, with no way to flush it. The
+           * sibling appointment-calendar branch was fixed for exactly this and
+           * this one was missed.
+           *
+           * It also invalidates staging soaks: the scheduling resolver work
+           * changes precisely the values this cached, so a soak would look
+           * correct while production served pre-change availability.
+           *
+           * The cache comes back when there is something to key it on. §11.5
+           * wants a `venues.availability_epoch` bumped by trigger on every
+           * schedule write. Until then, correct and uncached beats fast and wrong.
+           */
+          'Cache-Control': 'no-store',
         },
       },
     );

@@ -20,7 +20,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(18);
+SELECT plan(21);
 
 -- =============================================================================
 -- Fixtures — seeded as the (superuser) session role, which bypasses RLS.
@@ -61,6 +61,15 @@ VALUES ('00000000-0000-0000-0000-0000000000d4',
 INSERT INTO unified_calendars (id, venue_id, name)
 VALUES ('00000000-0000-0000-0000-0000000000d5',
         '00000000-0000-0000-0000-0000000000d1', 'Calendar D');
+
+-- Stage 6a. FK'd to unified_calendars, not practitioners: every calendar lives there, and
+-- `practitioners` is the table whose empty FK space keeps practitioner_calendar_blocks
+-- permanently unreachable.
+INSERT INTO calendar_date_overrides (id, venue_id, calendar_id, override_kind, date_start, date_end)
+VALUES ('00000000-0000-0000-0000-0000000000d8',
+        '00000000-0000-0000-0000-0000000000d1',
+        (SELECT id FROM unified_calendars WHERE venue_id = '00000000-0000-0000-0000-0000000000d1' LIMIT 1),
+        'closed', '2026-09-10', '2026-09-10');
 
 INSERT INTO calendar_blocks (calendar_id, venue_id, block_date, start_time, end_time)
 VALUES ('00000000-0000-0000-0000-0000000000d5',
@@ -117,6 +126,10 @@ SELECT is((SELECT count(*) FROM practitioner_leave_periods
            WHERE venue_id = '00000000-0000-0000-0000-0000000000d1')::int,
           1, 'authenticated staff can still SELECT practitioner_leave_periods');
 
+SELECT is((SELECT count(*) FROM calendar_date_overrides
+           WHERE venue_id = '00000000-0000-0000-0000-0000000000d1')::int,
+          1, 'authenticated staff can still SELECT calendar_date_overrides');
+
 SELECT is((SELECT count(*) FROM availability_blocks
            WHERE venue_id = '00000000-0000-0000-0000-0000000000d1')::int,
           1, 'authenticated staff can still SELECT availability_blocks');
@@ -144,6 +157,17 @@ SELECT throws_ok(
      VALUES ('00000000-0000-0000-0000-0000000000d5',
              '00000000-0000-0000-0000-0000000000d1', '2026-09-10', '09:00', '10:00') $$,
   '42501', NULL, 'authenticated cannot INSERT calendar_blocks');
+
+SELECT throws_ok(
+  $$ INSERT INTO calendar_date_overrides (venue_id, calendar_id, override_kind, date_start, date_end)
+     VALUES ('00000000-0000-0000-0000-0000000000d1',
+             '00000000-0000-0000-0000-0000000000d5', 'closed', '2026-09-11', '2026-09-11') $$,
+  '42501', NULL, 'authenticated cannot INSERT calendar_date_overrides');
+
+SELECT throws_ok(
+  $$ UPDATE calendar_date_overrides SET date_end = '2026-09-12'
+      WHERE id = '00000000-0000-0000-0000-0000000000d8' $$,
+  '42501', NULL, 'authenticated cannot UPDATE calendar_date_overrides');
 
 SELECT throws_ok(
   $$ INSERT INTO practitioner_calendar_blocks (venue_id, practitioner_id, block_date, start_time, end_time)

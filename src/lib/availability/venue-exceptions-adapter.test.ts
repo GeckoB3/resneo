@@ -1,90 +1,78 @@
 import { describe, it, expect } from 'vitest';
-import { blocksToVenueOpeningExceptions } from './venue-exceptions-adapter';
-import type { AvailabilityBlock } from '@/types/availability';
+import { venueOpeningExceptionsToBlocks } from './venue-exceptions-adapter';
 
-function block(partial: Partial<AvailabilityBlock> & Pick<AvailabilityBlock, 'id' | 'block_type'>): AvailabilityBlock {
-  return {
-    venue_id: 'v1',
-    service_id: null,
-    date_start: '2026-06-01',
-    date_end: '2026-06-30',
-    time_start: null,
-    time_end: null,
-    override_max_covers: null,
-    reason: null,
-    yield_overrides: null,
-    override_periods: null,
-    ...partial,
-  };
-}
-
-describe('blocksToVenueOpeningExceptions', () => {
-  it('returns empty array for empty input', () => {
-    expect(blocksToVenueOpeningExceptions([])).toEqual([]);
+/**
+ * Stage 3 reversed this adapter.
+ *
+ * It used to convert `availability_blocks` DOWN into the legacy `VenueOpeningException`
+ * shape so the appointment engine could keep its own minute-range logic. That direction was
+ * lossy in exactly the two ways the resolver plan calls defects: it discarded
+ * `time_start`/`time_end` on a closure, so a part-day closure removed the whole appointment
+ * day, and it dropped an amended row with no periods, so one row meant "open" to
+ * appointments and "shut" to everything else.
+ *
+ * Every consumer now resolves through `resolveVenueWideAllowedMinuteRanges`, so the legacy
+ * JSON is converted UP to the canonical shape instead and there is one resolution path.
+ */
+describe('venueOpeningExceptionsToBlocks', () => {
+  it('returns nothing for an absent or empty list', () => {
+    expect(venueOpeningExceptionsToBlocks(null, 'v1')).toEqual([]);
+    expect(venueOpeningExceptionsToBlocks(undefined, 'v1')).toEqual([]);
+    expect(venueOpeningExceptionsToBlocks([], 'v1')).toEqual([]);
   });
 
-  it('converts closed block to { closed: true } exception', () => {
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b1', block_type: 'closed', date_start: '2026-07-01', date_end: '2026-07-02', reason: 'Holiday' }),
-    ]);
-    expect(result).toEqual([
-      { id: 'b1', date_start: '2026-07-01', date_end: '2026-07-02', closed: true, reason: 'Holiday' },
-    ]);
+  it('maps a closed exception to a whole-day closure block', () => {
+    const [b] = venueOpeningExceptionsToBlocks(
+      [{ id: 'e1', date_start: '2030-06-05', date_end: '2030-06-05', closed: true, reason: 'Bank holiday' }],
+      'v1',
+    );
+
+    expect(b).toMatchObject({
+      id: 'e1',
+      venue_id: 'v1',
+      service_id: null,
+      block_type: 'closed',
+      date_start: '2030-06-05',
+      date_end: '2030-06-05',
+      reason: 'Bank holiday',
+      override_periods: null,
+    });
+    // The legacy shape never had a part-day closure, so the window stays whole-day.
+    expect(b!.time_start).toBeNull();
+    expect(b!.time_end).toBeNull();
   });
 
-  it('converts special_event block to { closed: true } exception', () => {
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b2', block_type: 'special_event', reason: 'Private event' }),
-    ]);
-    expect(result).toHaveLength(1);
-    expect(result[0].closed).toBe(true);
+  it('maps an open exception with periods to an amended-hours block', () => {
+    const [b] = venueOpeningExceptionsToBlocks(
+      [
+        {
+          id: 'e2',
+          date_start: '2030-06-05',
+          date_end: '2030-06-07',
+          closed: false,
+          periods: [{ open: '10:00', close: '14:00' }],
+        },
+      ],
+      'v1',
+    );
+
+    expect(b).toMatchObject({
+      block_type: 'amended_hours',
+      date_start: '2030-06-05',
+      date_end: '2030-06-07',
+      override_periods: [{ open: '10:00', close: '14:00' }],
+    });
   });
 
-  it('converts amended_hours block to { closed: false, periods } exception', () => {
-    const periods = [{ open: '10:00', close: '14:00' }];
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b3', block_type: 'amended_hours', override_periods: periods, reason: 'Short day' }),
-    ]);
-    expect(result).toEqual([
-      { id: 'b3', date_start: '2026-06-01', date_end: '2026-06-30', closed: false, periods, reason: 'Short day' },
-    ]);
-  });
+  it('gives every row an id, so a list with none still resolves deterministically', () => {
+    const blocks = venueOpeningExceptionsToBlocks(
+      [
+        { date_start: '2030-06-05', date_end: '2030-06-05', closed: true },
+        { date_start: '2030-06-06', date_end: '2030-06-06', closed: true },
+      ] as never,
+      'v1',
+    );
 
-  it('filters out blocks with service_id set', () => {
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b4', block_type: 'closed', service_id: 'svc-1' }),
-    ]);
-    expect(result).toEqual([]);
-  });
-
-  it('filters out reduced_capacity blocks', () => {
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b5', block_type: 'reduced_capacity', override_max_covers: 10 }),
-    ]);
-    expect(result).toEqual([]);
-  });
-
-  it('skips amended_hours blocks with empty/missing override_periods', () => {
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b6', block_type: 'amended_hours', override_periods: null }),
-      block({ id: 'b7', block_type: 'amended_hours', override_periods: [] }),
-    ]);
-    expect(result).toEqual([]);
-  });
-
-  it('sorts output by date_start', () => {
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b8', block_type: 'closed', date_start: '2026-08-01', date_end: '2026-08-01' }),
-      block({ id: 'b9', block_type: 'closed', date_start: '2026-06-15', date_end: '2026-06-15' }),
-    ]);
-    expect(result[0].id).toBe('b9');
-    expect(result[1].id).toBe('b8');
-  });
-
-  it('omits reason when null', () => {
-    const result = blocksToVenueOpeningExceptions([
-      block({ id: 'b10', block_type: 'closed', reason: null }),
-    ]);
-    expect(result[0].reason).toBeUndefined();
+    expect(blocks.map((b) => b.id)).toEqual(['legacy-0', 'legacy-1']);
   });
 });

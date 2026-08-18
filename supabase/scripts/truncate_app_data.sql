@@ -115,6 +115,7 @@ TRUNCATE TABLE
   import_column_mappings,
   import_files,
   import_records,
+  calendar_date_overrides,
   import_sessions,
   import_validation_issues,
   party_size_durations,

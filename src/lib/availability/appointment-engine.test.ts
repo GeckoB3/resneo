@@ -75,14 +75,21 @@ describe('computeAppointmentAvailability', () => {
     const input: AppointmentEngineInput = {
       date,
       venueOpeningHours,
-      venueOpeningExceptions: [
+      venueWideBlocks: [
         {
           id: 'ex1',
+          venue_id: 'v1',
+          service_id: null,
+          block_type: 'closed',
           date_start: date,
           date_end: date,
-          closed: true,
+          time_start: null,
+          time_end: null,
+          override_max_covers: null,
+          reason: null,
+          override_periods: null,
         },
-      ],
+      ] as unknown as AppointmentEngineInput['venueWideBlocks'],
       practitioners: [
         {
           id: 'p1',
@@ -711,11 +718,12 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
         { id: 'ps1', practitioner_id: 'p1', service_id: 's30', custom_duration_minutes: null, custom_price_pence: null },
       ],
       existingBookings: [],
-      // Amended hours saved first (earlier date_start), closure saved second.
-      venueOpeningExceptions: [
-        { date_start: '2030-06-01', date_end: '2030-08-31', closed: false, periods: [{ open: '10:00', close: '14:00' }] },
-        { date_start: date, date_end: date, closed: true, periods: [] },
-      ] as unknown as AppointmentEngineInput['venueOpeningExceptions'],
+      // A summer amended-hours range, plus a whole-day closure on this one date. The
+      // closure must win: closures subtract after Hours overrides replace.
+      venueWideBlocks: [
+        { id: 'a', block_type: 'amended_hours', date_start: '2030-06-01', date_end: '2030-08-31', override_periods: [{ open: '10:00', close: '14:00' }] },
+        { id: 'b', block_type: 'closed', date_start: date, date_end: date, time_start: null, time_end: null },
+      ] as unknown as AppointmentEngineInput['venueWideBlocks'],
     };
 
     const result = computeAppointmentAvailability(input);

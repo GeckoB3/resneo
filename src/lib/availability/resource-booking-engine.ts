@@ -22,11 +22,17 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
+import {
+  calendarBreaks,
+  calendarHours,
+  type CalendarScheduleRow,
+} from '@/lib/availability/calendar-hours';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
   DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
 } from '@/lib/booking/resource-booking-defaults';
+import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -106,18 +112,12 @@ function getAvailabilityRanges(hours: WorkingHours, dateStr: string): Array<{ st
   return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
 }
 
-/** Working hours + days_off for the host calendar column (same key rules as resource availability). */
+/** Working hours + days_off for the host calendar column, via the shared calendar layer. */
 function getHostCalendarRanges(
   host: { working_hours: WorkingHours; days_off: string[] },
   dateStr: string,
 ): Array<{ start: number; end: number }> {
-  const dayName = dayNameForDate(dateStr);
-  if (Array.isArray(host.days_off)) {
-    for (const d of host.days_off) {
-      if (d === dateStr || d === dayName) return [];
-    }
-  }
-  return getAvailabilityRanges(host.working_hours, dateStr);
+  return calendarHours(host as CalendarScheduleRow, dateStr);
 }
 
 function intersectRanges(
@@ -135,7 +135,7 @@ function intersectRanges(
   return out;
 }
 
-/** Same rules as appointment `getBreakRanges` for a host calendar row. */
+/** Break windows for a host calendar row, via the shared calendar layer. */
 function getHostBreakRanges(
   host: {
     break_times: Array<{ start: string; end: string }>;
@@ -143,18 +143,7 @@ function getHostBreakRanges(
   },
   dateStr: string,
 ): Array<{ start: number; end: number }> {
-  const byDay = host.break_times_by_day;
-  if (byDay && typeof byDay === 'object' && !Array.isArray(byDay) && Object.keys(byDay).length > 0) {
-    const dayKey = dayKeyForDate(dateStr);
-    const dayName = dayNameForDate(dateStr);
-    const ranges = byDay[dayKey] ?? byDay[dayName];
-    if (!ranges || !Array.isArray(ranges) || ranges.length === 0) return [];
-    return ranges.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
-  }
-
-  const breaks = host.break_times;
-  if (!Array.isArray(breaks)) return [];
-  return breaks.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
+  return calendarBreaks(host as CalendarScheduleRow, dateStr);
 }
 
 function subtractOneRange(
@@ -207,8 +196,17 @@ function getBaseResourceAvailabilityRanges(
 }
 
 /**
- * Bookable windows for the resource on this date: resource row hours, intersected with the host
- * calendar column when `display_on_calendar_id` is set; host breaks are then carved out.
+ * The resource's OWN ANCHORING grid: resource row hours, intersected with the host calendar
+ * column when `display_on_calendar_id` is set.
+ *
+ * Host breaks are NOT subtracted here. They are vetoed per candidate in the slot loop
+ * instead (operator decision A), because the candidate grid is anchored to each range's
+ * start: subtracting a 12:00-12:45 break split the day and re-anchored the whole afternoon
+ * to 12:45, 13:15, 13:45 rather than leaving it on 13:00, 14:00, 15:00. Appointments have
+ * always vetoed; this is what makes the two engines agree.
+ *
+ * Do not use this for occupancy projected onto another calendar. See
+ * {@link resourceRangesForHostProjection}, which must keep subtracting.
  */
 export function getEffectiveAvailabilityRanges(
   resource: VenueResource,
@@ -219,13 +217,64 @@ export function getEffectiveAvailabilityRanges(
   if (!resource.host_calendar) {
     return [];
   }
-  const hostRanges = getHostCalendarRanges(resource.host_calendar, dateStr);
-  let intersected = intersectRanges(base, hostRanges);
+  return intersectRanges(base, getHostCalendarRanges(resource.host_calendar, dateStr));
+}
+
+/**
+ * The same windows consumed as *occupancy on someone else's calendar*: sibling exclusion on
+ * a peer resource, and the union projected onto the host's appointment column via
+ * {@link mergedResourceEffectiveRangesForHost}.
+ *
+ * This one KEEPS SUBTRACTING host breaks, and the difference is the whole reason the two
+ * functions exist:
+ *
+ * - Its output becomes a `kind: 'resource'` entry in `practitionerBlockedRanges`
+ *   (appointment-engine.ts) and is vetoed UNCONDITIONALLY, one gate below the break check
+ *   that `allowDuringBreaks` skips. Stop subtracting here and the host's own lunch hour
+ *   turns into a resource block, so a staff walk-in using `allowDuringBreaks` -- the exact
+ *   gesture that option exists to permit -- starts failing on every column hosting a
+ *   resource.
+ * - Sibling exclusion is range arithmetic and cannot be expressed as a per-candidate veto
+ *   at all.
+ *
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §2.5 and Stage 5.
+ */
+export function resourceRangesForHostProjection(
+  resource: VenueResource,
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const own = getEffectiveAvailabilityRanges(resource, dateStr);
+  if (!resource.display_on_calendar_id || !resource.host_calendar) return own;
   const hostBreaks = getHostBreakRanges(resource.host_calendar, dateStr);
-  if (hostBreaks.length > 0) {
-    intersected = subtractRangesFromRanges(intersected, hostBreaks);
-  }
-  return intersected;
+  return hostBreaks.length > 0 ? subtractRangesFromRanges(own, hostBreaks) : own;
+}
+
+/**
+ * Host break windows to VETO a resource candidate against, per operator decision (A).
+ *
+ * Empty for a standalone resource: a resource with no host column has no host breaks.
+ */
+function hostBreakVetoRanges(resource: VenueResource, dateStr: string): Array<{ start: number; end: number }> {
+  if (!resource.display_on_calendar_id || !resource.host_calendar) return [];
+  return getHostBreakRanges(resource.host_calendar, dateStr);
+}
+
+/**
+ * Host leave and ad-hoc blocked time to veto a resource candidate against.
+ *
+ * This engine read no leave table and no block table at all, so a hosted resource stayed
+ * bookable straight through both: a room on a stylist's column sold while the stylist was
+ * on holiday, and through any blocked time they had dragged onto the diary. §1.2 item 5.
+ *
+ * A veto rather than a subtraction, for the same reason as breaks: subtracting would split
+ * the anchoring ranges and re-anchor every later slot.
+ */
+function hostUnavailableVetoRanges(
+  resource: VenueResource,
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  if (!resource.display_on_calendar_id || !resource.host_calendar) return [];
+  return resource.host_calendar.unavailable_by_date?.[dateStr] ?? [];
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
@@ -241,13 +290,15 @@ function mergedSiblingResourceRangesExcluding(
   const others = siblingsOnHost.filter((r) => r.id !== excludeResourceId);
   const all: Array<{ start: number; end: number }> = [];
   for (const r of others) {
-    all.push(...getEffectiveAvailabilityRanges(r, dateStr));
+    all.push(...resourceRangesForHostProjection(r, dateStr));
   }
   return unionMinuteRanges(all);
 }
 
 /**
- * Union of effective bookable windows for resources attached to the same host column (same date).
+ * Union of effective bookable windows for resources attached to the same host column (same date),
+ * projected onto that host's appointment column as occupancy. Uses
+ * {@link resourceRangesForHostProjection}, not the resource's own grid.
  */
 export function mergedResourceEffectiveRangesForHost(
   resourcesOnHost: VenueResource[],
@@ -255,7 +306,7 @@ export function mergedResourceEffectiveRangesForHost(
 ): Array<{ start: number; end: number }> {
   const all: Array<{ start: number; end: number }> = [];
   for (const r of resourcesOnHost) {
-    all.push(...getEffectiveAvailabilityRanges(r, dateStr));
+    all.push(...resourceRangesForHostProjection(r, dateStr));
   }
   return unionMinuteRanges(all);
 }
@@ -325,6 +376,12 @@ export function computeResourceAvailability(
     );
 
     const slots: ResourceSlot[] = [];
+    // Decision (A): host breaks are vetoed per candidate, not subtracted from `ranges`.
+    // Subtracting split the day and re-anchored every slot after the break.
+    const breakVeto = [
+      ...hostBreakVetoRanges(resource, date),
+      ...hostUnavailableVetoRanges(resource, date),
+    ];
 
     for (const range of ranges) {
       for (let t = range.start; t + duration <= range.end; t += resource.slot_interval_minutes) {
@@ -340,6 +397,8 @@ export function computeResourceAvailability(
         }
 
         const slotEnd = t + duration;
+
+        if (breakVeto.some((b) => overlaps(t, slotEnd, b.start, b.end))) continue;
 
         const conflict = resourceBookings.some((b) => {
           const bStart = timeToMinutes(b.booking_time);
@@ -408,6 +467,11 @@ export function resourceHasAvailabilityForAnyDurationCandidate(
   );
 
   const { sameDaySlotCutoff } = input;
+  // Same veto as the slot loop above, so the offered set and this validator agree.
+  const breakVeto = [
+    ...hostBreakVetoRanges(resource, input.date),
+    ...hostUnavailableVetoRanges(resource, input.date),
+  ];
 
   for (const range of ranges) {
     for (let t = range.start; t < range.end; t += resource.slot_interval_minutes) {
@@ -430,6 +494,8 @@ export function resourceHasAvailabilityForAnyDurationCandidate(
         if (t + duration > range.end) continue;
 
         const slotEnd = t + duration;
+
+        if (breakVeto.some((b) => overlaps(t, slotEnd, b.start, b.end))) continue;
         const conflict = resourceBookings.some((b) => {
           const bStart = timeToMinutes(b.booking_time);
           const bEnd = timeToMinutes(b.booking_end_time);
@@ -480,7 +546,14 @@ function filterResourceBookingsForDate(
   return bookingsForDate.filter((row) => String(row.id).toLowerCase() !== lc);
 }
 
-function buildResourceEngineInputFromParts(params: {
+/**
+ * Pure assembly of a ResourceEngineInput from already-fetched parts. Exported so the
+ * scheduling parity harness can drive the resource engine without a Supabase client:
+ * the venue-wide composition lives here rather than in `computeResourceAvailability`,
+ * so this is the only seam at which resource availability can be fixtured.
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md Stage 0a/0b.
+ */
+export function buildResourceEngineInputFromParts(params: {
   date: string;
   resources: VenueResource[];
   conflictResources: VenueResource[];
@@ -589,6 +662,7 @@ async function expandResourcesWithSiblings(
   supabase: SupabaseClient,
   venueId: string,
   resources: VenueResource[],
+  dateRange?: { from: string; to: string },
 ): Promise<VenueResource[]> {
   const hostIdsForSiblings = [...new Set(resources.map((r) => r.display_on_calendar_id).filter(Boolean))] as string[];
   let conflictResources = resources;
@@ -604,7 +678,15 @@ async function expandResourcesWithSiblings(
     .eq('is_active', true)
     .in('display_on_calendar_id', hostIdsForSiblings);
   if (sibErr) {
-    console.warn('[expandResourcesWithSiblings] sibling resources:', sibErr.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'expandResourcesWithSiblings',
+        table: 'unified_calendars',
+        assumed: 'no sibling resources share these host columns, so none of their bookings exclude each other',
+        venueId,
+      },
+      sibErr,
+    );
   }
   const byId = new Map(resources.map((r) => [r.id, r] as const));
   for (const row of sibRows ?? []) {
@@ -612,7 +694,7 @@ async function expandResourcesWithSiblings(
     if (!byId.has(r.id)) byId.set(r.id, r);
   }
   conflictResources = [...byId.values()];
-  return attachHostCalendarsToResources(supabase, venueId, conflictResources);
+  return attachHostCalendarsToResources(supabase, venueId, conflictResources, dateRange);
 }
 
 export interface PrefetchResourceMonthOptions {
@@ -665,9 +747,9 @@ async function prefetchResourceMonthForAvailability(
       .order('sort_order');
 
     resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
-    resources = await attachHostCalendarsToResources(supabase, venueId, resources);
+    resources = await attachHostCalendarsToResources(supabase, venueId, resources, { from: monthStart, to: monthEnd });
   }
-  const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources);
+  const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources, { from: monthStart, to: monthEnd });
 
   const [venueRes, blocksRes, bookingsRes] = await Promise.all([
     supabase.from('venues').select('opening_hours, timezone').eq('id', venueId).maybeSingle(),
@@ -684,7 +766,15 @@ async function prefetchResourceMonthForAvailability(
   ]);
 
   if (blocksRes.error) {
-    console.warn('[prefetchResourceMonthForAvailability] availability_blocks:', blocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'prefetchResourceMonthForAvailability',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours this month, so every resource date is offered',
+        venueId,
+      },
+      blocksRes.error,
+    );
   }
 
   const excludeLc = options?.excludeBookingId?.toLowerCase();
@@ -902,31 +992,148 @@ export function mapCalendarToResource(row: Record<string, unknown>): VenueResour
 }
 
 /**
+ * Host leave and ad-hoc blocked time, as minute windows per date.
+ *
+ * The resource engine read neither table, so a hosted resource stayed bookable while its
+ * host was on leave or had blocked time on the diary (§1.2 item 5). Both reads fail open:
+ * an empty result is exactly the pre-Stage-5 input, so a failure degrades to today's
+ * behaviour rather than making every hosted resource unbookable.
+ *
+ * Without a date range there is nothing sensible to scope leave to, so the caller must
+ * supply one; omitting it returns no windows and the engine behaves as it did before.
+ */
+async function fetchHostUnavailableWindows(
+  supabase: SupabaseClient,
+  venueId: string,
+  calendarIds: string[],
+  dateRange?: { from: string; to: string },
+): Promise<Map<string, Record<string, Array<{ start: number; end: number }>>>> {
+  const out = new Map<string, Record<string, Array<{ start: number; end: number }>>>();
+  if (!dateRange || calendarIds.length === 0) return out;
+
+  const add = (calendarId: string, dateStr: string, range: { start: number; end: number }) => {
+    if (range.end <= range.start) return;
+    const byDate = out.get(calendarId) ?? {};
+    byDate[dateStr] = [...(byDate[dateStr] ?? []), range];
+    out.set(calendarId, byDate);
+  };
+
+  const [leaveRes, blocksRes] = await Promise.all([
+    supabase
+      .from('practitioner_leave_periods')
+      .select('practitioner_id, start_date, end_date, unavailable_start_time, unavailable_end_time')
+      .eq('venue_id', venueId)
+      .in('practitioner_id', calendarIds)
+      .lte('start_date', dateRange.to)
+      .gte('end_date', dateRange.from),
+    supabase
+      .from('calendar_blocks')
+      .select('calendar_id, block_date, start_time, end_time')
+      .eq('venue_id', venueId)
+      .in('calendar_id', calendarIds)
+      .gte('block_date', dateRange.from)
+      .lte('block_date', dateRange.to),
+  ]);
+
+  if (leaveRes.error) {
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchHostUnavailableWindows',
+        table: 'practitioner_leave_periods',
+        assumed: 'no host is on leave, so hosted resources stay bookable through it',
+        venueId,
+      },
+      leaveRes.error,
+    );
+  }
+  if (blocksRes.error) {
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchHostUnavailableWindows',
+        table: 'calendar_blocks',
+        assumed: 'no host has blocked time, so hosted resources stay bookable through it',
+        venueId,
+      },
+      blocksRes.error,
+    );
+  }
+
+  for (const row of (leaveRes.data ?? []) as Record<string, unknown>[]) {
+    const calendarId = String(row.practitioner_id ?? '');
+    const startDate = String(row.start_date ?? '');
+    const endDate = String(row.end_date ?? '');
+    if (!calendarId || !startDate || !endDate) continue;
+    const st = row.unavailable_start_time as string | null;
+    const en = row.unavailable_end_time as string | null;
+    // Both null is legacy full-day leave; a pair is a window repeated on every date.
+    const range =
+      st && en
+        ? { start: timeToMinutes(String(st).slice(0, 5)), end: timeToMinutes(String(en).slice(0, 5)) }
+        : { start: 0, end: 24 * 60 };
+    for (
+      let d = new Date(`${startDate}T00:00:00Z`);
+      d <= new Date(`${endDate}T00:00:00Z`);
+      d = new Date(d.getTime() + 86_400_000)
+    ) {
+      add(calendarId, d.toISOString().slice(0, 10), range);
+    }
+  }
+
+  for (const row of (blocksRes.data ?? []) as Record<string, unknown>[]) {
+    const calendarId = String(row.calendar_id ?? '');
+    const dateStr = String(row.block_date ?? '');
+    if (!calendarId || !dateStr) continue;
+    add(calendarId, dateStr, {
+      start: timeToMinutes(String(row.start_time ?? '00:00').slice(0, 5)),
+      end: timeToMinutes(String(row.end_time ?? '00:00').slice(0, 5)),
+    });
+  }
+
+  return out;
+}
+
+/**
  * Loads host `unified_calendars` rows and attaches `host_calendar` for resource availability intersection.
  */
 export async function attachHostCalendarsToResources(
   supabase: SupabaseClient,
   venueId: string,
   resources: VenueResource[],
+  dateRange?: { from: string; to: string },
 ): Promise<VenueResource[]> {
   const ids = [...new Set(resources.map((r) => r.display_on_calendar_id).filter(Boolean))] as string[];
   if (ids.length === 0) {
     return resources.map((r) => ({ ...r, host_calendar: null }));
   }
 
-  const { data, error } = await supabase
-    .from('unified_calendars')
-    .select('id, working_hours, days_off, break_times, break_times_by_day')
-    .eq('venue_id', venueId)
-    .in('id', ids);
+  const [{ data, error }, unavailableByCalendar] = await Promise.all([
+    supabase
+      .from('unified_calendars')
+      .select('id, working_hours, days_off, break_times, break_times_by_day')
+      .eq('venue_id', venueId)
+      .in('id', ids),
+    fetchHostUnavailableWindows(supabase, venueId, ids, dateRange),
+  ]);
 
   if (error) {
-    console.warn('[attachHostCalendarsToResources] unified_calendars:', error.message);
+    // This one fails CLOSED, not open, and is the fourth visibility tier: with no host
+    // row, getEffectiveAvailabilityRanges returns [] and every hosted resource becomes
+    // unbookable. Silence here meant a whole booking model going dark with no signal.
+    reportAvailabilityReadFailure(
+      {
+        source: 'attachHostCalendarsToResources',
+        table: 'unified_calendars',
+        assumed: 'these resources have no host calendar, so every hosted resource is unbookable',
+        venueId,
+      },
+      error,
+    );
   }
 
   const map = new Map(
     (data ?? []).map((row) => {
       const id = row.id as string;
+      const unavailable_by_date = unavailableByCalendar.get(id) ?? null;
       const breakTimes = row.break_times;
       const byDay = row.break_times_by_day;
       return [
@@ -942,6 +1149,7 @@ export async function attachHostCalendarsToResources(
             byDay && typeof byDay === 'object' && !Array.isArray(byDay)
               ? (byDay as WorkingHours)
               : null,
+          unavailable_by_date,
         },
       ] as const;
     }),
@@ -992,11 +1200,20 @@ export async function fetchResourceInput(params: {
   ]);
 
   let resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
-  resources = await attachHostCalendarsToResources(supabase, venueId, resources);
-  const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources);
+  resources = await attachHostCalendarsToResources(supabase, venueId, resources, { from: date, to: date });
+  const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources, { from: date, to: date });
 
   if (venueBlocksRes.error) {
-    console.warn('[fetchResourceInput] availability_blocks:', venueBlocksRes.error.message);
+    reportAvailabilityReadFailure(
+      {
+        source: 'fetchResourceInput',
+        table: 'availability_blocks',
+        assumed: 'the venue has no closures or amended hours on this date, so every resource slot is offered',
+        venueId,
+        date,
+      },
+      venueBlocksRes.error,
+    );
   }
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
   const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);

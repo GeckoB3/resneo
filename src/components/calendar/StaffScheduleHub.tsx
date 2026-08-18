@@ -6,6 +6,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { StaffScheduleMergedDayGrid } from '@/components/calendar/StaffScheduleMergedDayGrid';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
 import type { OpeningHours } from '@/types/availability';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
@@ -33,6 +34,7 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
 
   const openingHours = venueBootstrap?.openingHours ?? fetchedOpeningHours;
   const venueTimezone = venueBootstrap?.timezone ?? fetchedVenueTimezone;
+  const venueWideBlocks = useVenueWideBlocks();
 
   useEffect(() => {
     if (venueBootstrap) return;
@@ -47,8 +49,8 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
   }, [venueBootstrap]);
 
   const { startHour: derivedStart, endHour: derivedEnd } = useMemo(
-    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),
-    [date, openingHours, venueTimezone],
+    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone, venueWideBlocks }),
+    [date, openingHours, venueTimezone, venueWideBlocks],
   );
   const startHour = startHourOverride ?? derivedStart;
   const endHour = endHourOverride ?? derivedEnd;

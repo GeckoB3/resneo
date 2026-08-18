@@ -3024,8 +3024,13 @@ export function PractitionerCalendarView({
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
     () => {
+      // Pass the blocks so the grid follows the venue's RESOLVED hours for this date. An
+      // amended window running past the weekly close used to leave the grid at the weekly
+      // bounds, and schedule-closure-blocks then clipped the stripe away -- so the hours
+      // the owner had just entered were the ones they could neither see nor drag into.
       const base = getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21, {
         timeZone: venueTimezone,
+        venueWideBlocks,
       });
       if (viewMode !== 'day') return base;
 
@@ -3049,7 +3054,19 @@ export function PractitionerCalendarView({
         minM = Math.min(minM, startM);
         maxM = Math.max(maxM, endM);
       }
-      for (const block of displayBlocks) {
+      /**
+       * REAL blocks only. `displayBlocks` also carries `scheduleClosureBlocks`, which are
+       * generated FROM these bounds by buildVenueScheduleClosureBlocks and then clipped to
+       * them. Feeding those back in makes the computation circular: on a day amended to
+       * 09:00-11:00 and 15:00-17:00, the generated "Closed 17:00-22:00" stripe dragged the
+       * grid back out to 22:00, so the bounds could never follow the amended hours no
+       * matter what getCalendarGridBounds returned. An output cannot be an input.
+       */
+      for (const block of blocks) {
+        if (block.block_date !== activeDayDate) continue;
+        includeRange(block.start_time, block.end_time, 60);
+      }
+      for (const block of practitionerBreakBlocks) {
         if (block.block_date !== activeDayDate) continue;
         includeRange(block.start_time, block.end_time, 60);
       }
@@ -3062,7 +3079,7 @@ export function PractitionerCalendarView({
       const endHour = Math.max(startHour + 1, Math.ceil(maxM / 60));
       return { startHour, endHour };
     },
-    [activeDayDate, displayBlocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, viewMode],
+    [activeDayDate, blocks, practitionerBreakBlocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, venueWideBlocks, viewMode],
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -6677,6 +6694,7 @@ export function PractitionerCalendarView({
           linkedCountByDate={monthLinkedCountByDate}
           showMergedFeeds={showMergedFeeds}
           openingHours={openingHours}
+          venueWideBlocks={venueWideBlocks}
           venueTimezone={venueTimezone}
           todayIso={initialIsoDate}
           onSelectDay={(cell) => {

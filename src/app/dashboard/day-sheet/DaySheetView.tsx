@@ -64,6 +64,7 @@ import type { GuestMessageChannel, GuestMessageSendResult } from '@/lib/booking/
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -459,6 +460,7 @@ export function DaySheetView({
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [dietaryOpen, setDietaryOpen] = useState(false);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const venueWideBlocks = useVenueWideBlocks();
   const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -506,8 +508,9 @@ export function DaySheetView({
     () =>
       getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, {
         timeZone: venueTimezone,
+              venueWideBlocks,
       }),
-    [date, openingHours, venueTimezone],
+    [date, openingHours, venueTimezone, venueWideBlocks],
   );
   const pickerStartHour = startHourOverride ?? derivedStartHour;
   const pickerEndHour = endHourOverride ?? derivedEndHour;

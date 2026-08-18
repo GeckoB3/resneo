@@ -521,16 +521,15 @@ function UnifiedBlocksEditor({
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                   />
                 </div>
-                {/* Part-day closures are honoured for classes, events and resources
-                    (venue-wide-business-hours) but the appointment engine converts any
-                    'closed' block to a full-day closure (venue-exceptions-adapter), so
-                    appointment venues must be told these times will not narrow the day. */}
+                {/* Part-day closures now narrow the day on every booking model. The
+                    appointment engine used to convert any 'closed' block to a full-day
+                    closure via venue-exceptions-adapter; Stage 3 of the scheduling
+                    resolver work removed that adapter, so the times entered here mean
+                    what they say. */}
                 {!isRestaurant && (
-                  <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    For appointments, a <span className="font-medium">Closure</span> always removes
-                    the whole day, even with times set here. To close early or open late for one
-                    day, choose <span className="font-medium">Amended Hours</span> instead and enter
-                    the hours you are actually working.
+                  <p className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Leave both times blank to close the whole day. Fill them in to close
+                    just that window, so bookings either side of it stay available.
                   </p>
                 )}
               </>

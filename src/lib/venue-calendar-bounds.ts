@@ -1,4 +1,5 @@
-import type { OpeningHours, OpeningHoursPeriod } from '@/types/availability';
+import type { AvailabilityBlock, OpeningHours, OpeningHoursPeriod } from '@/types/availability';
+import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
 import { getDayOfWeekForYmdInTimezone } from '@/lib/venue/venue-local-clock';
 
 function timeToMinutesHM(t: string): number {
@@ -37,7 +38,19 @@ export function getVenueBusinessDayStatus(
   dateStr: string,
   openingHours: OpeningHours | null | undefined,
   timeZone?: string | null,
+  venueWideBlocks?: AvailabilityBlock[] | null,
 ): 'open' | 'closed' | null {
+  /**
+   * `venueWideBlocks` is optional and omitting it reproduces the weekly-only answer this
+   * gave before Stage 4. When supplied, the month grid greys a day out only if the venue is
+   * ACTUALLY shut on it: a day the owner amended to open specially stopped being greyed,
+   * and a day an override closed starts being greyed even though the weekly shape says open.
+   */
+  if (venueWideBlocks && venueWideBlocks.length > 0) {
+    const res = resolveVenueWideAllowedMinuteRanges(openingHours ?? null, dateStr, venueWideBlocks);
+    if (res.kind === 'unrestricted') return null;
+    return res.kind === 'closed' ? 'closed' : 'open';
+  }
   if (!openingHours || Object.keys(openingHours).length === 0) {
     return null;
   }
@@ -65,6 +78,34 @@ export function getVenueBusinessDayStatus(
 export interface CalendarGridBoundsOptions {
   /** IANA timezone (e.g. Europe/London). When set, weekday matches Settings → Business Hours for that civil date. */
   timeZone?: string | null;
+  /**
+   * Venue-wide `availability_blocks` for the date. OPTIONAL, and omitting it reproduces the
+   * pre-Stage-4 behaviour exactly, which is what keeps the restaurant call sites provably
+   * untouched.
+   *
+   * When supplied, bounds are derived from the venue's RESOLVED hours for that date rather
+   * than from the weekly shape alone. Without it, a day amended to run until 20:00 at a
+   * venue whose weekly hours end at 17:00 produced a grid ending at 17:00 and the amended
+   * stripe was clipped away by `schedule-closure-blocks`, so the very hours the owner had
+   * just entered were the ones they could not see or drag into.
+   */
+  venueWideBlocks?: AvailabilityBlock[] | null;
+}
+
+/**
+ * Resolved open ranges for the date, or null when blocks are not supplied or impose nothing.
+ * Closures are NOT subtracted: the grid should still SHOW a closed window so the diary can
+ * draw it, and drawing is what `schedule-closure-blocks` does with the same data.
+ */
+function resolvedHourRangesForBounds(
+  dateStr: string,
+  openingHours: OpeningHours | null | undefined,
+  venueWideBlocks: AvailabilityBlock[] | null | undefined,
+): Array<{ start: number; end: number }> | null {
+  if (!venueWideBlocks || venueWideBlocks.length === 0) return null;
+  const res = resolveVenueWideAllowedMinuteRanges(openingHours ?? null, dateStr, venueWideBlocks);
+  if (res.hours.kind === 'ranges') return res.hours.ranges;
+  return null;
 }
 
 /**
@@ -85,20 +126,32 @@ export function getCalendarGridBounds(
   const key = tz
     ? String(getDayOfWeekForYmdInTimezone(dateStr, tz))
     : utcWeekdayKey(dateStr);
-  const day = openingHours[key];
-  const periods = periodsForDay(day);
-  if (periods.length === 0) {
-    return { startHour: fallbackStart, endHour: fallbackEnd };
-  }
+  const resolved = resolvedHourRangesForBounds(dateStr, openingHours, options?.venueWideBlocks);
+
   let minM = Infinity;
   let maxM = -Infinity;
-  for (const p of periods) {
-    if (typeof p.open !== 'string' || typeof p.close !== 'string') continue;
-    const openM = timeToMinutesHM(p.open);
-    const closeM = timeToMinutesHM(p.close);
-    if (!Number.isFinite(openM) || !Number.isFinite(closeM)) continue;
-    minM = Math.min(minM, openM);
-    maxM = Math.max(maxM, closeM);
+
+  if (resolved) {
+    // An Hours override REPLACES the weekly shape, so the grid follows the override --
+    // including on a weekday the venue would otherwise not trade at all.
+    for (const r of resolved) {
+      minM = Math.min(minM, r.start);
+      maxM = Math.max(maxM, r.end);
+    }
+  } else {
+    const day = openingHours[key];
+    const periods = periodsForDay(day);
+    if (periods.length === 0) {
+      return { startHour: fallbackStart, endHour: fallbackEnd };
+    }
+    for (const p of periods) {
+      if (typeof p.open !== 'string' || typeof p.close !== 'string') continue;
+      const openM = timeToMinutesHM(p.open);
+      const closeM = timeToMinutesHM(p.close);
+      if (!Number.isFinite(openM) || !Number.isFinite(closeM)) continue;
+      minM = Math.min(minM, openM);
+      maxM = Math.max(maxM, closeM);
+    }
   }
   if (!Number.isFinite(minM) || minM === Infinity || !Number.isFinite(maxM) || maxM === -Infinity) {
     return { startHour: fallbackStart, endHour: fallbackEnd };

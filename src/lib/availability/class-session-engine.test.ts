@@ -297,7 +297,15 @@ describe('computeClassAvailability — venue opening hours vs explicit blocks', 
     expect(slots).toHaveLength(1);
   });
 
-  it('hides a class that does not fit inside amended hours', () => {
+  /**
+   * Stage 5, operator decision (B): amended hours no longer hide a class.
+   *
+   * An Hours override is a SLOT-GENERATION concept -- it says which times a guest may pick
+   * off a grid. A class is a fixed time staff put on the calendar deliberately, so it is
+   * gated by explicit closures only, exactly as the venue's weekly hours never hid it.
+   * An explicit closure over the class still hides it; the full-day closure test covers that.
+   */
+it('still shows a class outside amended hours, which only constrain slot generation', () => {
     const block: AvailabilityBlock = {
       id: 'blk-5',
       venue_id: 'v-1',
@@ -319,7 +327,7 @@ describe('computeClassAvailability — venue opening hours vs explicit blocks', 
       venueWideBlocks: [block],
       venueOpeningHours: weekdayOpeningHours,
     });
-    expect(slots).toHaveLength(0);
+    expect(slots).toHaveLength(1);
   });
 
   it('shows classes when venue has no opening hours and no blocks', () => {

@@ -26,9 +26,7 @@ import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { WorkingHours } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime, getDayOfWeek } from '@/lib/availability';
 import {
-  blocksForDate,
-  resolveVenueWideAllowedMinuteRanges,
-  isMinuteSubintervalCoveredByRanges,
+  classInstanceRejectBookingWindow,
 } from '@/lib/availability/venue-wide-business-hours';
 import { rowsToVenueWideBlocks, venueWideBlocksQueryForDate } from '@/lib/availability/venue-wide-blocks-fetch';
 
@@ -121,16 +119,28 @@ export function evaluateClassWindowAvailabilityConflict(data: ClassWindowAvailab
   const endLabel = minutesToTime(endMin);
   const dateLabel = formatScheduleDate(date);
 
-  // 1. Venue-wide business closure (only date-specific blocks constrain classes).
-  const dayBlocks = blocksForDate(data.venueWideBlocks, date);
-  if (dayBlocks.length > 0) {
-    const res = resolveVenueWideAllowedMinuteRanges(data.openingHours, date, data.venueWideBlocks);
-    if (res.kind === 'closed') {
-      return `The venue is closed on ${dateLabel}, so this class can’t be scheduled then. Remove or amend that closure first.`;
-    }
-    if (res.kind === 'allowed' && !isMinuteSubintervalCoveredByRanges(startMin, endMin, res.ranges)) {
-      return `On ${dateLabel}, ${startLabel}–${endLabel} falls inside a venue closure or outside the venue’s amended hours for that date. Pick a time inside the open hours.`;
-    }
+  /**
+   * 1. Venue-wide CLOSURES only, matching what the class engine offers to guests.
+   *
+   * Decision (C) keeps this validator's break refusal (step 3 below); it does not keep this
+   * step unchanged. Two things had to go:
+   *
+   * - The `dayBlocks.length > 0` short-circuit, where the mere PRESENCE of a block on the
+   *   date changed the rule for the whole day. That is §1.2 item 7 on the write path, the
+   *   twin of the one the class engine carried.
+   * - The amended-hours coverage check. An Hours override constrains slot generation, not a
+   *   fixed time staff schedule deliberately, so keeping it here while the engine dropped it
+   *   would have sold a 19:00 class to guests and then refused staff scheduling the next one.
+   */
+  const venueClosureError = classInstanceRejectBookingWindow(
+    data.openingHours,
+    date,
+    startLabel,
+    endLabel,
+    data.venueWideBlocks,
+  );
+  if (venueClosureError) {
+    return `The venue is closed on ${dateLabel} at ${startLabel}–${endLabel}, so this class can’t be scheduled then. Remove or amend that closure first.`;
   }
 
   // 2. Calendar closure — staff leave (full day or a partial window).

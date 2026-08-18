@@ -29,8 +29,7 @@ import {
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
-import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
-import { parseVenueOpeningExceptions, type VenueOpeningException } from '@/types/venue-opening-exceptions';
+import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import {
   reportAvailabilityReadFailure,
@@ -55,8 +54,11 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { listPractitionerIdsForAppointmentService } from '@/lib/availability/appointment-any-practitioner';
+import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
+import { venueOpeningExceptionsToBlocks } from '@/lib/availability/venue-exceptions-adapter';
 
 interface VenueClockRow {
+  id?: string | null;
   timezone?: string | null;
   booking_rules?: unknown;
   opening_hours?: unknown;
@@ -136,14 +138,24 @@ function applyLeaveForDate(
   return { practitioner: nextPractitioner, partialBlocks };
 }
 
-function venueOpeningExceptionsForDate(
+/**
+ * Venue-wide blocks for one date. The month path filters per date before handing them to
+ * the engine, so a range-scoped fetch cannot leak a block from a neighbouring day.
+ *
+ * The legacy JSON is converted UP to block shape rather than the engine being taught a
+ * second format, so there is one resolution path. It is a fallback only, and Q9 found no
+ * venue carrying any.
+ */
+function venueBlocksForDate(
   date: string,
   venueClockRow: VenueClockRow,
   venueBlockRows: AvailabilityBlock[],
-): VenueOpeningException[] | null {
+): AvailabilityBlock[] | null {
   const matchingBlocks = venueBlockRows.filter((block) => block.date_start <= date && block.date_end >= date);
-  if (matchingBlocks.length > 0) return blocksToVenueOpeningExceptions(matchingBlocks);
-  return parseVenueOpeningExceptions(venueClockRow.venue_opening_exceptions);
+  if (matchingBlocks.length > 0) return matchingBlocks;
+  const legacy = parseVenueOpeningExceptions(venueClockRow.venue_opening_exceptions);
+  if (legacy.length === 0) return null;
+  return venueOpeningExceptionsToBlocks(legacy, String(venueClockRow.id ?? ''));
 }
 
 /** Exported for tests: the month view and the day view must map service rows identically. */
@@ -374,16 +386,31 @@ export async function computeAppointmentAvailableDatesInMonth(
   const audience = options.audience ?? 'public';
   const { monthStart, monthEnd, dates } = monthBounds(year, month);
 
-  const venueClockRow: VenueClockRow =
-    options.venueClockRow ??
-    ((
-      await supabase
-        .from('venues')
-        .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
-        .eq('id', venueId)
-        .maybeSingle()
-    ).data as VenueClockRow | null) ??
-    {};
+  let venueClockRow: VenueClockRow = options.venueClockRow ?? {};
+  if (!options.venueClockRow) {
+    const venueClockRes = await supabase
+      .from('venues')
+      .select('id, timezone, booking_rules, opening_hours, venue_opening_exceptions')
+      .eq('id', venueId)
+      .maybeSingle();
+    // This read was discarded outright: a failure became `{}`, which means no timezone, no
+    // opening hours and no exceptions, so the month path resolved every date as
+    // unrestricted and offered the lot. Silence on this one is worse than on most, because
+    // the substituted value is maximally permissive rather than merely wrong.
+    if (venueClockRes.error) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'appointment-month-availability',
+          table: 'venues',
+          assumed: 'the venue has no opening hours or timezone, so every date in the month is offered',
+          venueId,
+          date: `${monthStart}..${monthEnd}`,
+        },
+        venueClockRes.error,
+      );
+    }
+    venueClockRow = (venueClockRes.data as VenueClockRow | null) ?? {};
+  }
 
   const bookingWindow =
     options.bookingWindow ??
@@ -557,7 +584,7 @@ async function buildLegacyPractitionerMonthInputFactory({
       .gte('end_date', monthStart),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
@@ -710,7 +737,7 @@ async function buildLegacyPractitionerMonthInputFactory({
         ...leave.partialBlocks,
       ],
       venueOpeningHours: (venueClockRow.opening_hours as OpeningHours | null) ?? null,
-      venueOpeningExceptions: venueOpeningExceptionsForDate(date, venueClockRow, venueBlocks),
+      venueWideBlocks: venueBlocksForDate(date, venueClockRow, venueBlocks),
     };
   };
 }
@@ -840,7 +867,7 @@ async function buildUnifiedCalendarMonthInputFactory({
       .eq('is_active', true),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
@@ -954,7 +981,7 @@ async function buildUnifiedCalendarMonthInputFactory({
         ...leave.partialBlocks,
       ],
       venueOpeningHours: (venueClockRow.opening_hours as OpeningHours | null) ?? null,
-      venueOpeningExceptions: venueOpeningExceptionsForDate(date, venueClockRow, venueBlocks),
+      venueWideBlocks: venueBlocksForDate(date, venueClockRow, venueBlocks),
     };
   };
 }
@@ -968,7 +995,7 @@ function emptyAppointmentInput(date: string): AppointmentEngineInput {
     existingBookings: [],
     practitionerBlockedRanges: [],
     venueOpeningHours: null,
-    venueOpeningExceptions: null,
+    venueWideBlocks: null,
   };
 }
 

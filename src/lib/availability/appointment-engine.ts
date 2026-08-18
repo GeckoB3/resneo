@@ -22,8 +22,7 @@ import {
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { candidateStartMinutes, sanitizeBookingStartTimes } from '@/lib/appointments/booking-interval';
 import type { OpeningHours } from '@/types/availability';
-import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/availability';
-import { getDayOfWeek } from '@/lib/availability/engine';
+import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import {
@@ -37,16 +36,26 @@ import {
 } from '@/lib/availability/resource-booking-engine';
 import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
-import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { AvailabilityBlock } from '@/types/availability';
-import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
+import { venueOpeningExceptionsToBlocks } from '@/lib/availability/venue-exceptions-adapter';
+import {
+  calendarBreaks,
+  calendarHours,
+  type CalendarScheduleRow,
+} from '@/lib/availability/calendar-hours';
+import {
+  resolveVenueWideAllowedMinuteRanges,
+  venueClosureWindowsForDate,
+  venueHoursToNullableRanges,
+} from '@/lib/availability/venue-wide-business-hours';
 import { intersectEffectiveRangesWithServiceCustom, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { fetchScheduledSessionBlocksForCalendar } from '@/lib/availability/calendar-session-blocks';
 import {
   VENUE_BOOKING_MODEL_COLUMNS,
   blockSourcesFromVenueRow,
 } from '@/lib/availability/blocked-range-models';
+import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
 
 // Types
 
@@ -100,10 +109,11 @@ export interface AppointmentEngineInput {
    */
   venueOpeningHours?: OpeningHours | null;
   /**
-   * Venue-wide date exceptions (venues.venue_opening_exceptions): closed days or amended opening periods.
-   * Applied together with weekly opening hours; the first matching range wins.
+   * Venue-wide `availability_blocks` rows for the date (closures, special events, amended
+   * hours). Replaces the old `venueWideBlocks`, so this engine and every other
+   * consumer now resolve venue hours through the same function.
    */
-  venueOpeningExceptions?: VenueOpeningException[] | null;
+  venueWideBlocks?: AvailabilityBlock[] | null;
   /**
    * Calendars on FULL-DAY leave for `date`.
    *
@@ -122,6 +132,7 @@ export interface AppointmentEngineInput {
 export function attachVenueClockToAppointmentInput(
   input: AppointmentEngineInput,
   venue: {
+    id?: string | null;
     timezone?: string | null;
     booking_rules?: unknown;
     opening_hours?: unknown;
@@ -139,17 +150,22 @@ export function attachVenueClockToAppointmentInput(
   if (venue.opening_hours !== undefined) {
     input.venueOpeningHours = venue.opening_hours as OpeningHours | null;
   }
-  if (venueBlocks != null && venueBlocks.length > 0) {
-    input.venueOpeningExceptions = blocksToVenueOpeningExceptions(venueBlocks);
-  } else if (venueBlocks != null && venueBlocks.length === 0) {
-    input.venueOpeningExceptions = [];
-  } else if (venue.venue_opening_exceptions !== undefined) {
+  if (venueBlocks != null) {
+    input.venueWideBlocks = venueBlocks;
+  } else if (venue.venue_opening_exceptions !== undefined && input.venueWideBlocks == null) {
+    /**
+     * The legacy `venues.venue_opening_exceptions` JSON is a FALLBACK, never an override.
+     *
+     * It used to win whenever it parsed non-empty, which quietly discarded the
+     * block-derived list the caller's fetcher had already built. Filling only when
+     * genuinely absent keeps the escape hatch for a caller that has no blocks at all,
+     * without letting it outrank the table. SA-L1.
+     *
+     * Converted up to `availability_blocks` shape so there is one resolution path rather
+     * than two. Q9 found no venue carrying legacy JSON, so this branch is dead in practice.
+     */
     const parsed = parseVenueOpeningExceptions(venue.venue_opening_exceptions);
-    if (parsed.length > 0) {
-      input.venueOpeningExceptions = parsed;
-    } else if (input.venueOpeningExceptions == null) {
-      input.venueOpeningExceptions = parsed;
-    }
+    input.venueWideBlocks = venueOpeningExceptionsToBlocks(parsed, String(venue.id ?? ''));
   }
 }
 
@@ -192,49 +208,15 @@ export interface AppointmentAvailabilityResult {
 
 // Helpers
 
-const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
-/** Align with dashboard working-hours keys (JS getDay, 0=Sun) - same as getDayOfWeek() in engine.ts. */
-function dayKeyForDate(dateStr: string): string {
-  return String(getDayOfWeek(dateStr));
-}
 
-function dayNameForDate(dateStr: string): string {
-  const dow = getDayOfWeek(dateStr);
-  return DAY_NAMES[dow]!;
-}
 
 export function getWorkingRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
-  const dayKey = dayKeyForDate(dateStr);
-  const dayName = dayNameForDate(dateStr);
-
-  // Check specific date days-off
-  if (Array.isArray(practitioner.days_off)) {
-    for (const d of practitioner.days_off) {
-      if (d === dateStr || d === dayName) return [];
-    }
-  }
-
-  const hours = practitioner.working_hours as Record<string, Array<{ start: string; end: string }>>;
-  const ranges = hours[dayKey] ?? hours[dayName];
-  if (!ranges || ranges.length === 0) return [];
-
-  return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
+  return calendarHours(practitioner as CalendarScheduleRow, dateStr);
 }
 
 export function getBreakRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
-  const byDay = practitioner.break_times_by_day;
-  if (byDay && typeof byDay === 'object' && !Array.isArray(byDay) && Object.keys(byDay).length > 0) {
-    const dayKey = dayKeyForDate(dateStr);
-    const dayName = dayNameForDate(dateStr);
-    const ranges = byDay[dayKey] ?? byDay[dayName];
-    if (!ranges || !Array.isArray(ranges) || ranges.length === 0) return [];
-    return ranges.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
-  }
-
-  const breaks = practitioner.break_times as Array<{ start: string; end: string }>;
-  if (!Array.isArray(breaks)) return [];
-  return breaks.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
+  return calendarBreaks(practitioner as CalendarScheduleRow, dateStr);
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
@@ -401,10 +383,6 @@ function parallelCapacityFor(practitioner: Practitioner): number {
   return 1;
 }
 
-/** True when the venue has saved opening hours (non-empty object). */
-function isVenueOpeningHoursConfigured(openingHours: OpeningHours | null | undefined): boolean {
-  return openingHours != null && typeof openingHours === 'object' && Object.keys(openingHours).length > 0;
-}
 
 /** Intersect two lists of [start,end) minute ranges (half-open style end at boundary). */
 function intersectMinuteRanges(
@@ -456,70 +434,50 @@ function slotMinutesFromNow(params: {
 }
 
 /**
- * The exception that governs `dateStr`. A CLOSURE always wins over amended
- * hours that happen to span the same date.
+ * The venue's ANCHORING hours for a date: weekly baseline after Hours overrides replace it,
+ * with closures NOT subtracted. Null means the venue imposes no constraint.
  *
- * This used to return the first match in list order, and the adapter sorts by
- * `date_start`, so a long "summer hours" block saved in July beat a one-day bank
- * holiday closure saved for August: appointments were offered on a day the venue
- * had explicitly closed. Nothing prevents the two from overlapping, and the
- * venue-wide resolver used by classes, events and resources already partitions
- * closures from amendments this way.
+ * Closures are deliberately excluded and vetoed per candidate instead. Subtracting a
+ * part-day closure here would split the anchoring range and re-anchor every slot after it,
+ * so a 12:00-12:45 closure would move the afternoon grid from 13:00/13:30 to 12:45/13:15
+ * and `validateExactAppointmentStart` would start refusing previously-bookable times. That
+ * is the harm §2.7 forbids for breaks, and it applies identically here. See plan §2.1.
  */
-function findApplicableVenueOpeningException(
-  exceptions: VenueOpeningException[] | null | undefined,
-  dateStr: string,
-): VenueOpeningException | null {
-  if (!exceptions?.length) return null;
-  const applicable = exceptions.filter((ex) => ex.date_start <= dateStr && dateStr <= ex.date_end);
-  if (applicable.length === 0) return null;
-  return applicable.find((ex) => ex.closed) ?? applicable[0]!;
-}
-
-/**
- * Venue-wide minute ranges for `dateStr` after weekly hours and per-date exceptions.
- * Returns null when no venue boundary applies (legacy: staff hours only).
- */
-function venueMinuteRangesForAppointmentDate(
+function venueAnchorRangesForDate(
   venueOpeningHours: OpeningHours | null | undefined,
   dateStr: string,
-  exceptions: VenueOpeningException[] | null | undefined,
+  venueWideBlocks: AvailabilityBlock[] | null | undefined,
 ): Array<{ start: number; end: number }> | null {
-  const ex = findApplicableVenueOpeningException(exceptions, dateStr);
-  if (ex) {
-    if (ex.closed) return [];
-    if (ex.periods?.length) {
-      return ex.periods.map((p) => ({
-        start: timeToMinutes(p.open.slice(0, 5)),
-        end: timeToMinutes(p.close.slice(0, 5)),
-      }));
-    }
-  }
-  if (isVenueOpeningHoursConfigured(venueOpeningHours)) {
-    const day = getDayOfWeek(dateStr);
-    const periods = getOpeningPeriodsForDay(venueOpeningHours, day);
-    return periods.map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }));
-  }
-  return null;
+  const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours, dateStr, venueWideBlocks ?? []);
+  // Nothing survives the day at all: no anchoring set, and the caller drops the calendar
+  // rather than returning it with an empty slot list. Only a WHOLE-day closure (or a
+  // weekly-closed weekday) reaches here; a part-day closure leaves ranges behind and is
+  // vetoed per candidate below, which is what preserves the grid alignment.
+  if (res.kind === 'closed') return [];
+  return venueHoursToNullableRanges(res.hours);
+}
+
+/** Venue closure windows for the date, as a veto set. */
+function venueClosureRangesForDate(
+  dateStr: string,
+  venueWideBlocks: AvailabilityBlock[] | null | undefined,
+): Array<{ start: number; end: number }> {
+  return venueClosureWindowsForDate(venueWideBlocks ?? [], dateStr);
 }
 
 /**
- * Staff working ranges intersected with venue opening periods for that calendar date.
- * When venue has no opening-hours config and no applicable exception, returns staff ranges unchanged.
+ * Staff working ranges intersected with the venue's anchoring hours for that date.
+ * When the venue imposes no constraint, returns the staff ranges unchanged.
  */
 function effectiveWorkingRangesForAppointments(
   workingRanges: Array<{ start: number; end: number }>,
   venueOpeningHours: OpeningHours | null | undefined,
   dateStr: string,
-  venueOpeningExceptions?: VenueOpeningException[] | null,
+  venueWideBlocks?: AvailabilityBlock[] | null,
 ): Array<{ start: number; end: number }> {
-  const venueRanges = venueMinuteRangesForAppointmentDate(venueOpeningHours, dateStr, venueOpeningExceptions);
-  if (venueRanges === null) {
-    return workingRanges;
-  }
-  if (venueRanges.length === 0) {
-    return [];
-  }
+  const venueRanges = venueAnchorRangesForDate(venueOpeningHours, dateStr, venueWideBlocks);
+  if (venueRanges === null) return workingRanges;
+  if (venueRanges.length === 0) return [];
   return intersectMinuteRanges(workingRanges, venueRanges);
 }
 
@@ -567,7 +525,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     venueTimezone,
     minNoticeHours = 0,
     venueOpeningHours,
-    venueOpeningExceptions,
+    venueWideBlocks,
   } = input;
 
   // “Today” and clock are venue-local when timezone is set (production); otherwise server-local (tests).
@@ -584,6 +542,11 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
   }
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
 
+  // Venue closures are a VETO, not a subtraction from the anchoring set. See
+  // venueAnchorRangesForDate for why: subtracting would re-anchor every slot after a
+  // part-day closure.
+  const venueClosures = venueClosureRangesForDate(date, venueWideBlocks);
+
   const result: AppointmentAvailabilityResult = { practitioners: [] };
 
   for (const practitioner of practitioners) {
@@ -596,7 +559,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
       workingRanges,
       venueOpeningHours,
       date,
-      venueOpeningExceptions,
+      venueWideBlocks,
     );
     if (effectiveWorkingRanges.length === 0) continue;
 
@@ -667,6 +630,10 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
 
         const slotEnd = t + totalSpan;
         const candidateBusy = wallBusyIntervalsForServiceSlot(t, svc);
+
+        // Venue closure covering this candidate. Vetoed rather than subtracted, so the
+        // times either side of a part-day closure keep their grid alignment.
+        if (venueClosures.some((c) => overlaps(t, slotEnd, c.start, c.end))) continue;
 
         // Check breaks
         const hitsBreak = breakRanges.some((b) => overlaps(t, slotEnd, b.start, b.end));
@@ -739,7 +706,7 @@ export function validateExactAppointmentStart(
     venueTimezone,
     minNoticeHours = 0,
     venueOpeningHours,
-    venueOpeningExceptions,
+    venueWideBlocks,
   } = input;
 
   let todayStr: string;
@@ -785,7 +752,7 @@ export function validateExactAppointmentStart(
     workingRanges,
     venueOpeningHours,
     date,
-    venueOpeningExceptions,
+    venueWideBlocks,
   );
   if (effectiveWorkingRanges.length === 0) {
     return { ok: false, reason: 'Outside opening hours' };
@@ -806,6 +773,12 @@ export function validateExactAppointmentStart(
     slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) < minNoticeMinutes
   ) {
     return { ok: false, reason: 'Past minimum notice window' };
+  }
+
+  // Venue closure covering this exact start. Same veto as slot generation, so the two
+  // stay in agreement -- the read/write pair the parity harness asserts.
+  if (venueClosureRangesForDate(date, venueWideBlocks).some((c) => overlaps(t, slotEnd, c.start, c.end))) {
+    return { ok: false, reason: 'The venue is closed for this date or time.' };
   }
 
   const breakRanges = getBreakRanges(practitioner, date);
@@ -899,7 +872,7 @@ export function validateAppointmentCustomInterval(
     venueTimezone,
     minNoticeHours = 0,
     venueOpeningHours,
-    venueOpeningExceptions,
+    venueWideBlocks,
   } = input;
 
   let todayStr: string;
@@ -1003,7 +976,7 @@ export function validateAppointmentCustomInterval(
       workingRanges,
       venueOpeningHours,
       date,
-      venueOpeningExceptions,
+      venueWideBlocks,
     );
     if (effectiveWorkingRanges.length === 0) {
       return { ok: false, reason: 'Outside opening hours' };
@@ -1017,6 +990,13 @@ export function validateAppointmentCustomInterval(
     const fitsInRange = afterServiceCustom.some((r) => t >= r.start && busyEnd <= r.end);
     if (!fitsInRange) {
       return { ok: false, reason: 'Outside working hours' };
+    }
+
+    // Venue closure covering this window. Inside the allowOutsideHours gate, because a
+    // venue closure is an `hours` rule that staff can deliberately book through today --
+    // unlike leave, which is checked above and which nothing may skip. See plan §2.1.
+    if (venueClosureRangesForDate(date, venueWideBlocks).some((c) => overlaps(t, busyEnd, c.start, c.end))) {
+      return { ok: false, reason: 'The venue is closed for this date or time.' };
     }
   }
 
@@ -1257,7 +1237,7 @@ export async function fetchAppointmentInput(params: {
       .single(),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
@@ -1456,13 +1436,7 @@ export async function fetchAppointmentInput(params: {
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
 
   const venueBlocks = (venueBlocksRes.data ?? []) as AvailabilityBlock[];
-  const venueOpeningExceptions = venueBlocks.length > 0
-    ? blocksToVenueOpeningExceptions(venueBlocks)
-    : venueRes.error
-      ? null
-      : parseVenueOpeningExceptions(
-          (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
-        );
+
 
 
   return {
@@ -1473,7 +1447,7 @@ export async function fetchAppointmentInput(params: {
     existingBookings,
     practitionerBlockedRanges,
     venueOpeningHours,
-    venueOpeningExceptions,
+    venueWideBlocks: venueBlocks,
     fullDayLeavePractitionerIds: fullDayLeaveIds,
   };
 }
@@ -1499,7 +1473,7 @@ export async function fetchCalendarAppointmentInput(params: {
     existingBookings: [],
     practitionerBlockedRanges: [],
     venueOpeningHours: null,
-    venueOpeningExceptions: null,
+    venueWideBlocks: null,
   });
 
   const { data: ucRow, error: ucErr } = await supabase
@@ -1728,7 +1702,7 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('is_active', true),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .select(VENUE_WIDE_BLOCK_SELECT)
       .eq('venue_id', venueId)
       .is('service_id', null)
       .in('block_type', ['closed', 'amended_hours', 'special_event'])
@@ -1870,13 +1844,7 @@ export async function fetchCalendarAppointmentInput(params: {
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
 
   const calVenueBlocks = (venueBlocksRes.data ?? []) as AvailabilityBlock[];
-  const venueOpeningExceptions = calVenueBlocks.length > 0
-    ? blocksToVenueOpeningExceptions(calVenueBlocks)
-    : venueRes.error
-      ? null
-      : parseVenueOpeningExceptions(
-          (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
-        );
+
 
   return {
     date,
@@ -1886,7 +1854,7 @@ export async function fetchCalendarAppointmentInput(params: {
     existingBookings,
     practitionerBlockedRanges,
     venueOpeningHours,
-    venueOpeningExceptions,
+    venueWideBlocks: calVenueBlocks,
     fullDayLeavePractitionerIds: fullDayLeaveIdsForCalendar,
   };
 }

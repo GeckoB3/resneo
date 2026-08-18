@@ -1,12 +1,12 @@
 # ResNeo scheduling resolver — gold-standard implementation plan
 
 **Date:** 2026-08-17
-**Status:** **v3.1.** **All eight semantic decisions (A) to (H) are taken.** **Q0 was run against production on 2026-08-17 and reframes the whole plan: see §6.** The only live composition is venue weekly hours × calendar working hours × breaks × leave, on appointments, at 14 venues. Amended hours have **never** been used, and there are zero resources, zero future classes and zero future events. Q3, Q4, Q5 and Q6 all return zero because the populations are empty, not because the rows are clean. **Every decision (A) to (H) is therefore a zero-risk change against current data**, and the plan's purpose is to make the model correct before venues arrive rather than to stop live bleeding. Re-run Q3 and Q5 before the stages that depend on them: both results expire.
+**Status:** **v3.2** (2026-08-18). **All eight semantic decisions (A) to (H) are taken.** **Q0 was run against production on 2026-08-17 and reframes the whole plan: see §6.** The only live composition is venue weekly hours × calendar working hours × breaks × leave, on appointments, at 14 venues. Amended hours have **never** been used, and there are zero resources, zero future classes and zero future events. Q3, Q4, Q5 and Q6 all return zero because the populations are empty, not because the rows are clean. **Every decision (A) to (H) is therefore a zero-risk change against current data**, and the plan's purpose is to make the model correct before venues arrive rather than to stop live bleeding. Re-run Q3 and Q5 before the stages that depend on them: both results expire.
 
 | Stage | Blocked on |
 |---|---|
 | 0a (exports, Supabase fake) | **DONE 2026-08-17.** tsc clean, lint clean, 345 files / 3274 tests green. |
-| 0b (parity harness) | **DONE 2026-08-17.** 46 tests. Its coverage gap was missed before Stage 4 and **cleared 2026-08-18** as the first part of Stage 5. |
+| 0b (parity harness) | **DONE 2026-08-17.** 46 tests at the time, **105 across 9 files** after Stage 5. Its coverage gap was missed before Stage 4 and **cleared 2026-08-18** as the first part of Stage 5. |
 | 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
 | 2 (event read/write contract) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
@@ -29,7 +29,7 @@
 
 **Two traps for anyone adding fixtures to these paths.** The month path filters every date through the service booking window, whose default caps advance booking at **90 days**. `getUnifiedAvailableSlots` applies `isGuestBookingDateAllowed` before resolving anything, and `entityBookingWindowFromRow` hard-caps `max_advance_booking_days` at **365** — a real product rule. A fixed far-future date is rejected before the resolver is ever consulted, and the whole file then returns empty lists that look exactly like a resolver defect. The unified fixture computes its date relative to today for that reason.
 
-**Stages 0a to 5 are implemented on `staging`.** Stage 6a's migration is written but **not applied**; 6b and 7 remain.
+**Stages 0a to 5 are implemented and pushed to `origin/staging`.** Stage 6a's migration is written and pushed but **has never been executed against any database**; the rest of 6a, plus 6b and 7, remain.
 
 **Baseline:** tree of `6bc9ef4f`, now squash-merged and shipped as `ea9672f2` on `main` and `staging`. Since the v2 draft: 20 lines of unrelated visits-route code and 63 lines of test. **Nothing this plan cites has moved.** 344 test files, 261 migrations.
 
@@ -59,6 +59,16 @@ v2 was attacked on four independent axes by four reviewers working from the code
 **Two v2 claims were over-stated and one was inverted.** §1.2 item 4's "clobbers on every call site" is conditional, not universal, and the fix is three lines rather than fourteen call sites. §1.2 item 12 is latent, not live. "Four of five engines use the resolver" is three of five.
 
 **One claim that appeared in the v3 review round is itself wrong and has not been carried through.** A reviewer argued that a narrow one-day amended block correctly narrows a longer one today, and that §2.3's union would regress it. It does not: `unionAmendedPeriods` (`venue-wide-business-hours.ts:84-96`) already concatenates the periods of **every** amended block on the date before intersecting. The narrowing does not work today either. A specificity rule is still the right design, but it is an **improvement**, not a preservation. It was therefore raised as operator decision **(E)** rather than adopted silently, sized with Q4 (zero rows on production), and then taken on 2026-08-17.
+
+**What v3.2 changed, all of it from implementing the plan `[R3-75]`, `[R3-78]`.** Building a thing is a review technique the other four axes cannot replace, and it found two model errors and one false prediction that reading could not:
+
+| | v3.0/3.1 said | Corrected in v3.2 |
+|---|---|---|
+| `[R3-75]` | §2.4 filed `days_off` and `{closed:true}` under a `hard` `calendarClosures` set | Both are **hours** rules. They sit inside the `allowOutsideHours` gate, so tagging them `hard` would have stopped staff booking a walk-in on a day off, which §8 forbids. **Leave is the only `hard` calendar rule.** |
+| `[R3-75]` | §2.4 specified `calendarClosures` and `calendarAdHocBlocks` as functions | Neither was built. There is no honest source for a calendar closure set distinct from leave until Stage 6a lands, and ad-hoc blocks already reach the engine as `practitionerBlockedRanges`. |
+| `[R3-78]` | Stage 5 would silently start refusing event creation on staff leave dates (§1.2 item 24) | **It did not, because leave stayed outside the module.** Item 24 is still open, is now scheduled explicitly in Stage 6a, and the asymmetry is stated: class creation checks leave, event creation does not. |
+
+Two further defects were found the same way and are recorded in their stages: Stage 4 part 1 changed nothing on screen because the day-view expansion fed its own generated stripes back in, and the diary renderer clipped amended stripes to weekly bounds. **Both were found by using the application, not by reading it or by running the suite.**
 
 ---
 
@@ -122,7 +132,7 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 16. ✅ **FIXED, Stage 2.** The listing was the correct side under decision (H), so the create gate moved to `scheduledInstanceRejectBookingWindow`. Original finding: **every class and every event on a weekly-closed weekday is listed and then refused at checkout** `[R3-17]`. On a weekday with zero periods and zero blocks, the class engine sells it (`class-session-engine.ts` returns `true`), the event engine sells it (`event-ticket-engine.ts`, the deliberate carve-out), and **both create gates reject it** (`create/route.ts` and `:1298` via `venue-wide-business-hours.ts`). This is live at every venue with configured opening hours. It is the single most important new finding, because it is the pair that decision (B) must resolve and v2 never names it.
 
-17. **`amended_hours` rows with empty `override_periods` mean opposite things on the two paths, and unifying moves availability in *both* directions** `[R3-18]`. **(Zero such rows on production as of 2026-08-17; this is a latent defect held closed only by Stage 1 item 3.)** Today such a row is dropped for appointments (`venue-exceptions-adapter.ts:25` requires a non-empty array, so the day sells) and closes the whole day for classes, events, resources and the diary (`venue-wide-business-hours.ts:215`). Unify on "closed" and appointment days that sell today stop selling; unify on "ignore" (§2.2's law) and days that show closed today reopen, putting sessions back on sale. **v2 sized only widenings and this defect can go either way**, which is why Q3 is a repair prerequisite rather than a sizing query: fix the rows and neither direction fires.
+17. ✅ **FIXED, Stage 3.** Both paths now resolve through `amendedPeriodsOf` in `venue-wide-business-hours.ts`, which ignores an override with no valid period and lets the weekly base survive (§2.2) — the appointment path's behaviour, chosen because a row with nothing in it is invalid data rather than an intent to shut. The parity harness asserts it directly on the guest path. **Originally:** the two paths meant opposite things and unifying moved availability in *both* directions `[R3-18]`. **(Zero such rows on production as of 2026-08-17; this is a latent defect held closed only by Stage 1 item 3.)** Today such a row is dropped for appointments (`venue-exceptions-adapter.ts:25` requires a non-empty array, so the day sells) and closes the whole day for classes, events, resources and the diary (`venue-wide-business-hours.ts:215`). Unify on "closed" and appointment days that sell today stop selling; unify on "ignore" (§2.2's law) and days that show closed today reopen, putting sessions back on sale. **v2 sized only widenings and this defect can go either way**, which is why Q3 is a repair prerequisite rather than a sizing query: fix the rows and neither direction fires.
 
 18. ⚠️ **WRITE SURFACE CLOSED, Stage 1 item 8.** The API now accepts ISO dates only. **The read paths still honour weekday names**, deliberately, until Stage 6b contracts the column. Original finding: **`unified_calendars.days_off` carries recurring weekday names, and the target model cannot express them** `[R3-3]`. `appointment-engine.ts` and `resource-booking-engine.ts` both test `if (d === dateStr || d === dayName) return [];` where `dayName` is `sun`…`sat`. A value of `"mon"` is a permanent weekly closure. This is why v2's "migration residue" framing is wrong and why decision **(G)** exists. **Q5 on production (2026-08-17) returned zero rows**, so no venue is exposed today; the live risk is that `/api/venue/practitioners` still accepts arbitrary strings into this column from a mobile client this repository cannot see (§7, decision G).
 
@@ -136,7 +146,7 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 23. ✅ **FIXED, Stage 3.** It accepts venue-wide blocks and resolves through the shared function; the opening-hours route passes real blocks to both sides. Original finding: **`hours-change-orphans.ts` reads weekly opening hours only.** It warns owners which upcoming bookings an hours change strands. It never reads `availability_blocks`, amended hours or closures. Stage 3 redefines "inside hours" for every other consumer and this warning silently drifts. v2 counts its confirm dialog in §1.1 and never assigns it.
 
-24. **Event creation never checks leave, and Stage 5 turns that on silently.** `validate-event-calendar-placement.ts:53-84` reaches `calendarSegmentsForDate` (`event-hours-vs-venue-calendar.ts:80-93`), which reads `working_hours`, `break_times` and `days_off` and never `practitioner_leave_periods`. Decision (D) keeps this validator, so making leave a calendar closure starts refusing event creation on leave dates, at a write surface, whether or not anyone intends it.
+24. ⚠️ **STILL OPEN, and Stage 5 did NOT turn it on as v3.0 predicted `[R3-78]`.** Leave stayed outside the calendar-hours module by design, so the validator still never reads `practitioner_leave_periods`. **Class creation checks leave; event creation does not** — the same venue, two answers. Scheduled explicitly in Stage 6a rather than left to fall out of a refactor. **Originally:** event creation never checks leave, and Stage 5 was expected to turn that on silently. `validate-event-calendar-placement.ts:53-84` reaches `calendarSegmentsForDate` (`event-hours-vs-venue-calendar.ts:80-93`), which reads `working_hours`, `break_times` and `days_off` and never `practitioner_leave_periods`. Decision (D) keeps this validator, so making leave a calendar closure starts refusing event creation on leave dates, at a write surface, whether or not anyone intends it.
 
 ### 1.3 What is dead, what only looks dead, and what must never be dropped
 
@@ -273,21 +283,23 @@ calendarHours(date, calendar) -> ranges            // tag: hours
        sources: resource availability_exceptions[date] = {periods:[...]}
                 (Stage 6) calendar_date_overrides of kind 'hours'
      An override with no valid period is IGNORED and the weekly base survives (§2.2).
-  3. breaks are NOT subtracted here; closures are NOT subtracted here
-  4. result: ranges (empty = not working)
+  3. if days_off marks the date, OR availability_exceptions[date] = {closed:true},
+     OR (Stage 6) a calendar_date_overrides row of kind 'closed' covers the whole day
+       -> result is EMPTY. These are hours rules, not closures: see below.
+  4. breaks are NOT subtracted here; leave is NOT subtracted here
+  5. result: ranges (empty = not working)
 
-calendarClosures(date, calendar) -> windows[]      // tag: hard. NOTHING skips these.
+calendarLeave(date, calendar) -> windows[]         // tag: hard. NOTHING skips these.
   sources: practitioner_leave_periods -- both times null -> [0,1440);
              both set -> that window, on every date in [start_date, end_date]
-           unified_calendars.days_off entries equal to this date -> [0,1440)
-           resource availability_exceptions[date] = {closed:true} -> [0,1440)
-           (Stage 6) calendar_date_overrides of kind 'closed'
-  These NEVER enter an anchoring range. Partial-day leave is a VETO today
-  (appointment-engine.ts:994-997 says so explicitly); subtracting it would move
-  every slot after every leave window.                                     [R3-27]
+  Checked by the engine ABOVE the allowOutsideHours gate, deliberately outside the
+  calendar-hours module. These NEVER enter an anchoring range. Partial-day leave is
+  a VETO today (appointment-engine.ts:994-997 says so explicitly); subtracting it
+  would move every slot after every leave window.                          [R3-27]
 
 calendarBreaks(date, calendar)      -> windows[]   // tag: break
-calendarAdHocBlocks(date, calendar) -> windows[]   // tag: hard (calendar_blocks)
+  ad-hoc calendar_blocks are tag: hard, and reach the engine already, as
+  practitionerBlockedRanges. No wrapper is built for them (Stage 5).
 
 calendarBookableSegments(date, calendar) = calendarHours - calendarBreaks
   FOR CONTAINMENT CONSUMERS ONLY (event-hours validation, class placement).
@@ -297,6 +309,8 @@ calendarBookableSegments(date, calendar) = calendarHours - calendarBreaks
   Stage 5's instruction to repoint the event-hours checker at calendarHours would
   silently delete decision (D)'s break clause.                             [R3-28]
 ```
+
+**`days_off` and `{closed:true}` are HOURS rules, not closures — corrected in Stage 5 `[R3-75]`.** v3.0 filed both under a `hard` `calendarClosures` set that nothing may skip. That is wrong, and shipping it would have been a regression: both sit inside the `allowOutsideHours` gate today, so tagging them `hard` would have stopped staff booking a walk-in on a calendar's day off, which §8 promises this work does not do. They resolve to an empty hours set instead, which is skippable exactly as it is now. **Leave is the only `hard` calendar rule**, and it is checked outside the module. There is no `calendarClosures` function and no honest source for one until Stage 6a's `calendar_date_overrides` provides it.
 
 **`availability_exceptions` maps two ways, not one** `[R3-29]`. v2 filed all of it under Hours. `{closed:true}` is a **Closed** override; `{periods:[...]}` is an **Hours** override; `{periods:[]}` falls through to the weekly base. It is keyed by exact date, never a range, so the Stage 6 migration is many-rows-to-one-row-per-date.
 
@@ -619,7 +633,7 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 ### Stage 5 — One calendar resolver. ✅ DONE 2026-08-18
 
-**✅ Harness debt cleared 2026-08-18** — 3 files, 32 fixtures, and two live defects found in the diary renderer (see the status block). The calendar-resolver work below is not started.
+**✅ Harness debt cleared 2026-08-18** — 3 files, 32 fixtures, and two live defects found in the diary renderer (see the status block). **Every item below is now done**; the corrections each one forced are recorded inline.
 
 
 - ✅ **DONE 2026-08-18.** `calendarHours` / `calendarBreaks` / `calendarBookableSegments` / `calendarDayOff` in `src/lib/availability/calendar-hours.ts`, 21 tests. Six working-hours and four break implementations collapsed onto it (appointment engine, resource engine, event-hours validator). `event-hours-vs-venue-calendar` repointed at `calendarBookableSegments`, not `calendarHours`, so decision (D)'s break clause survives.
@@ -638,7 +652,7 @@ A stage, not a bullet: five client components need a new data dependency, three 
 - ✅ **DONE 2026-08-18.** `unified-calendar-mapper.ts` carries `availability_exceptions`, so a resource's per-date override resolves identically on the `/book` and unified paths (§1.2 item 21).
 - ✅ **DONE 2026-08-18.** **Made the write-gate split three-way.** Stage 2 already created `scheduledInstanceRejectBookingWindow` and repointed `booking/create:1039` and `:1307` at it, which is the two-way split; resources keep `venueWideBlocksRejectBookingWindow`. What remains is the third rule: `:1039` must load `calendar_type` alongside the session row (it currently selects only `capacity, name`) and apply the **class** rule on a `class` column and the **event** rule on an `event` one. Stage 2 did not need this because decision (H) makes the two agree on a weekly-closed weekday; they diverge on the out-of-hours-on-an-open-weekday case (§2.6).
 - ✅ **DONE 2026-08-18.** `getEventClassSlots` applies the **class** gate on a `class` column and the **event** gate on an `event` one, the same dispatch `booking/create` makes. It applied no venue gate at all before, which is §1.2 item 15. The fixtures assert the divergence directly: the same 19:00 session is hidden on an event column and listed on a class column.
-- **Expected new refusal:** event creation on a staff leave date starts failing (§1.2 item 24). Intended under (D); state it to owners.
+- ❌ **The predicted new refusal did NOT happen, and item 24 stays open `[R3-78]`.** v3.0 said event creation on a staff leave date would start failing as a side effect of this stage. It did not, and could not: correction 1 above keeps leave **outside** the calendar-hours module, so `calendarBookableSegments` reads `working_hours`, `break_times`, `days_off` and `availability_exceptions` and still never reads `practitioner_leave_periods`. The asymmetry is now explicit and worth stating plainly: **class creation checks leave** (`calendar-event-window-conflicts.ts` routes through `findClassScheduleWindowAvailabilityConflict`, whose comment names closures, leave, days-off and breaks), **event creation does not**. Closing it is a deliberate one-line change to the event validator under decision (D), not a by-product of a refactor — scheduled below, not silently assumed.
 - `days_off` keeps being **honoured** for both its semantics (ISO dates and weekday names), read-only. Decision (G) converts weekday names into weekly working hours, and Q5 confirms there are none on production to convert — but the engines must keep reading it until Stage 6b, because Stage 1 item 8 is the only thing standing between the mobile API and a new entry.
 
 **Closes:** §1.2 items 5, 6, 10, 14, 15, 21, and the **class half** of item 7 (its event half closed in Stage 2).
@@ -655,7 +669,11 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 **Split into 6a (expand) and 6b (contract), which is not optional** `[R3-45]`. The standing deploy ritual applies migrations to production **before** merging the code, so production runs old code against the new schema for the whole window. A `DROP COLUMN` in that window is not a degradation, it is a `42703` and the route 500s. `resource-booking-engine.ts:981` selects `id, working_hours, days_off, break_times, break_times_by_day` explicitly, so dropping either column **takes the entire resource booking engine down**. Three more single-line explicit selects break the same way: `venue/practitioners/route.ts:110`, `venue/resources/route.ts:201`, `class-schedule-availability-conflicts.ts:197` `[R3-56]`.
 
-**Stage 6a — expand only.** ⏳ **IN PROGRESS.** The migration is written (`20270114120000_calendar_date_overrides.sql`, 2026-08-18) with all nine RLS/grant artefacts, the leave backfill, and pgTAP assertions. **Nothing else in 6a is started**, and the remaining work is gated on a `db push` that only the operator can run.
+**Stage 6a — expand only.** ⏳ **IN PROGRESS, and blocked.** The migration is written and pushed to `origin/staging` (`20270114120000_calendar_date_overrides.sql`, 2026-08-18) with all nine RLS/grant artefacts, the leave backfill, and three pgTAP assertions (plan 18 → 21).
+
+**It has never been executed against any database.** There is no Docker in the working environment, so no local Postgres; CI's `rls-pgtap` job is its first real run. A green unit suite says nothing about this file, and this line should not be removed until an environment has actually taken it.
+
+**Nothing else in 6a is started.**
 
 **Sequencing hazard, and the reason the split matters here `[R3-77]`.** The ritual deploys **code before** the migration reaches the database, so any code that reads or writes `calendar_date_overrides` will hit a missing table for the whole window between the two. This is the mirror of Stage 6b's hazard and just as real. Two consequences: the dual-write must be **fail-soft** (report and continue, never throw), and it must not ship in the same pass that first introduces the table unless it is.
 
@@ -665,9 +683,16 @@ A stage, not a bullet: five client components need a new data dependency, three 
 3. `npm run check:function-grants` against staging.
 4. Only then production, per the standing ritual.
 
-**Then the rest of 6a**, none of which is started:
+**Then the rest of 6a**, in this order. The table now exists in the migration, so what follows is code:
 
-Create `calendar_date_overrides`, dual-write, backfill leave rows, and **leave every old column and table in place**. Carry `leave_type`, `notes` and `created_at` (§1.3 tier 3). One weekly-hours editor replaces three; one date-override editor replaces the venue closure editor and the leave panel. Fix the "Closure vs Unavailable window" options that produce byte-identical rows. Validation parity between POST and PATCH on every route. Add "apply to all calendars" for breaks.
+1. **Fail-soft dual-write** to `calendar_date_overrides` alongside the existing leave and closure writes, per the hazard above: report and continue, never throw, and tolerate the table being absent. The old rows stay authoritative until 6b.
+2. **Close §1.2 item 24** — teach the event placement validator to read leave, so event creation refuses a staff leave date the way class creation already does. One deliberate change under decision (D), stated to owners, **not** a by-product of a refactor. Expect event creation to start failing on leave dates; that is the point.
+3. **One weekly-hours editor replaces three**, and **one date-override editor replaces the venue closure editor and the leave panel**.
+4. **Fix the "Closure vs Unavailable window" options** that write byte-identical rows.
+5. **Validation parity between POST and PATCH** on every route.
+6. **"Apply to all calendars" for breaks.**
+
+Items 3 to 6 are the write surface and are the **largest remaining block of work in the whole programme**; items 1 and 2 are small and independently shippable. **Leave every old column and table in place throughout** — contraction is 6b.
 
 **Stage 6b — contract, a separate pass of the full ritual**, only after 6a is live on production and soaked. **No `DROP COLUMN`, `DROP TABLE`, new `CHECK` or new `NOT NULL` may share a migration with the code that stops using it.** Before every contraction: `create table _archive_<name>_20260817 as select * from <source>`, retained one release cycle, plus a confirmed PITR window on both projects. Only tier 1 and tier 2 items are eligible, and only after their prerequisites in §1.3.
 
@@ -683,7 +708,7 @@ Create `calendar_date_overrides`, dual-write, backfill leave rows, and **leave e
 
 ## §5 The safety net, since there is no flag
 
-1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs. **Built, at `src/lib/availability/parity/` (46 tests).** Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour, so a stage that changes one must change its expectation in the same commit. Its coverage gap (month path, diary renderer, `getUnifiedAvailableSlots`) is recorded in Stage 0b and is due before Stage 4.
+1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs. **Built, at `src/lib/availability/parity/` — 9 files, 105 tests as of 2026-08-18.** Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour, so a stage that changes one must change its expectation in the same commit. Its coverage gap (month path, diary renderer, `getUnifiedAvailableSlots`) was recorded in Stage 0b and **was cleared in Stage 5**, which found two live diary-renderer defects in the process.
 2. **One concern per commit**, each independently revertable.
 3. **Staging soak per stage** — now actually valid, because Stage 1 item 5 removes the CDN caching that would otherwise mask changes for 165 seconds per edge node.
 
@@ -1084,13 +1109,14 @@ Every row is a calendar in "same breaks every day" mode whose breaks vanish on a
 
 **(H) Events keep the weekly-closed allowance.** Recorded in §3 and coded in §2.6. The load-bearing detail is that an **explicit** closure on the date still hides the event, so an owner who genuinely shuts that Sunday is obeyed. Stage 2 must assert both directions: allowed with no blocks, hidden with a closure.
 
+**(I) Stage 6a stores per-date overrides in a NEW `calendar_date_overrides` table**, not a type discriminator on `practitioner_leave_periods`. Taken 2026-08-18, when the migration was written. That table is FK'd to `practitioners`, which has zero production rows, while every calendar lives in `unified_calendars`: extending it would mean re-pointing an FK on a table with live readers. A new table costs one backfill and leaves the old one untouched for 6b to retire on its own schedule. `leave_type`, `notes` and `created_at` are carried across (§1.3 tier 3).
+
 ### Still open
 
-1. **Stage 6a's storage.** New `calendar_date_overrides` table, or extend `practitioner_leave_periods` with a type discriminator? Recommend a new table, named for what it is, carrying `leave_type`, `notes` and `created_at`.
-2. **Is Stage 7 (fail-closed) in or out?** Largest single piece, and the only one touching the guest booking UI.
-3. **`leave_type`** — the mislabelling is a copy fix (§1.3 tier 3), not a schema change. Confirm no reader is wanted before Stage 6a freezes the shape.
-4. **No data prerequisite is outstanding.** Q3, Q4 and Q5 all returned zero rows on production (2026-08-17). Q1, Q2, Q8 and Q9 remain advisory: run them to decide which venues need telling. **Run Q0 first** to confirm the population is non-empty before trusting any zero, and re-run Q3 immediately before Stage 3 merges.
-5. **Confirm the `reserveni-app` grep and the production access-log check** before any route in §1.3 tier 1 is deleted.
+1. **Is Stage 7 (fail-closed) in or out?** Largest single piece, and the only one touching the guest booking UI.
+2. **`leave_type`** — the mislabelling is a copy fix (§1.3 tier 3), not a schema change. Confirm no reader is wanted before Stage 6a freezes the shape.
+3. **No data prerequisite is outstanding.** Q3, Q4 and Q5 all returned zero rows on production (2026-08-17). Q1, Q2, Q8 and Q9 remain advisory: run them to decide which venues need telling. **Run Q0 first** to confirm the population is non-empty before trusting any zero, and re-run Q3 immediately before `staging` merges to `main` (Stage 3 is already on `staging`, so that merge is when it reaches production data).
+4. **Confirm the `reserveni-app` grep and the production access-log check** before any route in §1.3 tier 1 is deleted.
 
 ---
 

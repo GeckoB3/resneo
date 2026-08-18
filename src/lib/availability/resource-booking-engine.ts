@@ -196,13 +196,17 @@ function getBaseResourceAvailabilityRanges(
 }
 
 /**
- * Bookable windows for the resource on this date: resource row hours, intersected with the host
- * calendar column when `display_on_calendar_id` is set; host breaks are then carved out.
+ * The resource's OWN ANCHORING grid: resource row hours, intersected with the host calendar
+ * column when `display_on_calendar_id` is set.
  *
- * This is the resource's OWN grid — the ranges its candidate start times are anchored to.
- * Do not use it for occupancy projected onto another calendar; use
- * {@link resourceRangesForHostProjection} for that. The two are identical today and are
- * deliberately separate functions, because they must diverge: see the note on that function.
+ * Host breaks are NOT subtracted here. They are vetoed per candidate in the slot loop
+ * instead (operator decision A), because the candidate grid is anchored to each range's
+ * start: subtracting a 12:00-12:45 break split the day and re-anchored the whole afternoon
+ * to 12:45, 13:15, 13:45 rather than leaving it on 13:00, 14:00, 15:00. Appointments have
+ * always vetoed; this is what makes the two engines agree.
+ *
+ * Do not use this for occupancy projected onto another calendar. See
+ * {@link resourceRangesForHostProjection}, which must keep subtracting.
  */
 export function getEffectiveAvailabilityRanges(
   resource: VenueResource,
@@ -213,44 +217,46 @@ export function getEffectiveAvailabilityRanges(
   if (!resource.host_calendar) {
     return [];
   }
-  const hostRanges = getHostCalendarRanges(resource.host_calendar, dateStr);
-  let intersected = intersectRanges(base, hostRanges);
-  const hostBreaks = getHostBreakRanges(resource.host_calendar, dateStr);
-  if (hostBreaks.length > 0) {
-    intersected = subtractRangesFromRanges(intersected, hostBreaks);
-  }
-  return intersected;
+  return intersectRanges(base, getHostCalendarRanges(resource.host_calendar, dateStr));
 }
 
 /**
- * The same windows, but consumed as *occupancy on someone else's calendar*: sibling exclusion
- * on a peer resource, and the union projected onto the host's appointment column via
+ * The same windows consumed as *occupancy on someone else's calendar*: sibling exclusion on
+ * a peer resource, and the union projected onto the host's appointment column via
  * {@link mergedResourceEffectiveRangesForHost}.
  *
- * Byte-identical to {@link getEffectiveAvailabilityRanges} today. It exists as its own function
- * because the two have to stop being identical, and doing the split before changing anything
- * keeps that change reviewable:
+ * This one KEEPS SUBTRACTING host breaks, and the difference is the whole reason the two
+ * functions exist:
  *
- * - The operator has taken the decision that breaks become a **veto** applied per candidate
- *   rather than a subtraction from the anchoring ranges, so that resource slot times stop
- *   re-anchoring after every host break. That change belongs to
- *   {@link getEffectiveAvailabilityRanges} alone.
- * - This function must **keep subtracting host breaks**. Its output becomes a
- *   `kind: 'resource'` entry in `practitionerBlockedRanges` (appointment-engine.ts) and is
- *   vetoed unconditionally, one gate below the break check that `allowDuringBreaks` skips.
- *   Stop subtracting here and the host's own lunch hour turns into a resource block, so a
- *   staff walk-in using `allowDuringBreaks` — the exact gesture that option exists to permit —
- *   starts failing on every column that hosts a resource.
- * - Sibling exclusion is range arithmetic (`subtractRangesFromRanges`) and cannot be
- *   expressed as a per-candidate veto at all.
+ * - Its output becomes a `kind: 'resource'` entry in `practitionerBlockedRanges`
+ *   (appointment-engine.ts) and is vetoed UNCONDITIONALLY, one gate below the break check
+ *   that `allowDuringBreaks` skips. Stop subtracting here and the host's own lunch hour
+ *   turns into a resource block, so a staff walk-in using `allowDuringBreaks` -- the exact
+ *   gesture that option exists to permit -- starts failing on every column hosting a
+ *   resource.
+ * - Sibling exclusion is range arithmetic and cannot be expressed as a per-candidate veto
+ *   at all.
  *
- * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §2.5 and Stage 0a.
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §2.5 and Stage 5.
  */
 export function resourceRangesForHostProjection(
   resource: VenueResource,
   dateStr: string,
 ): Array<{ start: number; end: number }> {
-  return getEffectiveAvailabilityRanges(resource, dateStr);
+  const own = getEffectiveAvailabilityRanges(resource, dateStr);
+  if (!resource.display_on_calendar_id || !resource.host_calendar) return own;
+  const hostBreaks = getHostBreakRanges(resource.host_calendar, dateStr);
+  return hostBreaks.length > 0 ? subtractRangesFromRanges(own, hostBreaks) : own;
+}
+
+/**
+ * Host break windows to VETO a resource candidate against, per operator decision (A).
+ *
+ * Empty for a standalone resource: a resource with no host column has no host breaks.
+ */
+function hostBreakVetoRanges(resource: VenueResource, dateStr: string): Array<{ start: number; end: number }> {
+  if (!resource.display_on_calendar_id || !resource.host_calendar) return [];
+  return getHostBreakRanges(resource.host_calendar, dateStr);
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
@@ -352,6 +358,9 @@ export function computeResourceAvailability(
     );
 
     const slots: ResourceSlot[] = [];
+    // Decision (A): host breaks are vetoed per candidate, not subtracted from `ranges`.
+    // Subtracting split the day and re-anchored every slot after the break.
+    const breakVeto = hostBreakVetoRanges(resource, date);
 
     for (const range of ranges) {
       for (let t = range.start; t + duration <= range.end; t += resource.slot_interval_minutes) {
@@ -367,6 +376,8 @@ export function computeResourceAvailability(
         }
 
         const slotEnd = t + duration;
+
+        if (breakVeto.some((b) => overlaps(t, slotEnd, b.start, b.end))) continue;
 
         const conflict = resourceBookings.some((b) => {
           const bStart = timeToMinutes(b.booking_time);
@@ -435,6 +446,8 @@ export function resourceHasAvailabilityForAnyDurationCandidate(
   );
 
   const { sameDaySlotCutoff } = input;
+  // Same veto as the slot loop above, so the offered set and this validator agree.
+  const breakVeto = hostBreakVetoRanges(resource, input.date);
 
   for (const range of ranges) {
     for (let t = range.start; t < range.end; t += resource.slot_interval_minutes) {
@@ -457,6 +470,8 @@ export function resourceHasAvailabilityForAnyDurationCandidate(
         if (t + duration > range.end) continue;
 
         const slotEnd = t + duration;
+
+        if (breakVeto.some((b) => overlaps(t, slotEnd, b.start, b.end))) continue;
         const conflict = resourceBookings.some((b) => {
           const bStart = timeToMinutes(b.booking_time);
           const bEnd = timeToMinutes(b.booking_end_time);

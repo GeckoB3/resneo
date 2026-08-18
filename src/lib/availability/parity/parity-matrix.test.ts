@@ -9,10 +9,15 @@ import {
   hostCalendar,
   openOn,
   resourceStarts,
+  hostedResourceForProjection,
   venueResolution,
   venueWriteGate,
   type SchedulingWorld,
 } from '@/lib/availability/parity/scheduling-world';
+import {
+  getEffectiveAvailabilityRanges,
+  resourceRangesForHostProjection,
+} from '@/lib/availability/resource-booking-engine';
 
 /**
  * Stage 0b: the parity matrix.
@@ -347,12 +352,45 @@ describe('parity matrix / breaks (plan §1.2 item 6, decision A)', () => {
    * Decision (A) unifies on veto, so it is the RESOURCE list below that changes at Stage 5.
    * A boolean matrix would show both engines as "has availability" and see nothing.
    */
-  it('DIVERGES: appointments veto the break, hosted resources re-anchor after it', () => {
+  it('CONVERGED in Stage 5: both engines veto the break and keep the same grid', () => {
     const w = world({ name: 'lunch break 12:00-12:45', breakTimes: breaks });
+    const expected = ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00'];
 
-    expect(appointmentStarts(w)).toEqual(['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00']);
-    expect(resourceStarts(w, hostCalendar(w))).toEqual([
-      '09:00', '10:00', '11:00', '12:45', '13:45', '14:45', '15:45',
+    expect(appointmentStarts(w)).toEqual(expected);
+    // Was ['09:00','10:00','11:00','12:45','13:45','14:45','15:45'] -- the resource engine
+    // subtracted the break from its anchoring ranges, so the whole afternoon re-anchored to
+    // 12:45. Decision (A) made it a per-candidate veto instead, and the two engines now
+    // answer identically for the same configuration. This is the fixture that made the
+    // ordered-list assertion worth having: as booleans both lists read "has availability".
+    expect(resourceStarts(w, hostCalendar(w))).toEqual(expected);
+  });
+
+  /**
+   * THE GUARD ON DECISION (A), and the reason `resourceRangesForHostProjection` exists.
+   *
+   * The projection is consumed as a RANGE on the host's own appointment column and vetoed
+   * unconditionally, one gate below the break check that `allowDuringBreaks` skips. So it
+   * must keep SUBTRACTING host breaks even though the resource's own grid stopped: if the
+   * host's lunch hour survived into the projection, it would arrive on the host's column as
+   * a resource block, and a staff walk-in using `allowDuringBreaks` -- the exact gesture
+   * that option exists to permit -- would start failing on every column hosting a resource.
+   *
+   * The two functions were split in Stage 0a precisely so this could be asserted before and
+   * after decision (A) landed.
+   */
+  it('keeps the break OUT of the host projection, so allowDuringBreaks still works', () => {
+    const w = world({ name: 'projection excludes the break', breakTimes: breaks });
+    const resource = hostedResourceForProjection(w);
+
+    const projected = resourceRangesForHostProjection(resource, w.date);
+    const own = getEffectiveAvailabilityRanges(resource, w.date);
+
+    // The own grid keeps the break inside its range (it is vetoed per candidate instead).
+    expect(own).toEqual([{ start: 540, end: 1020 }]);
+    // The projection carves it out, so it never reaches the host column as occupancy.
+    expect(projected).toEqual([
+      { start: 540, end: 720 },
+      { start: 765, end: 1020 },
     ]);
   });
 

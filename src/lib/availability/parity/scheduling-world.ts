@@ -312,6 +312,32 @@ export function resourceStarts(world: SchedulingWorld, host?: VenueResource['hos
   return (results[0]?.slots ?? []).map((s) => s.start_time);
 }
 
+/**
+ * A hosted resource row, for asserting the projection/own-grid split directly.
+ * Stage 0a separated those two functions; this is how the difference is observed.
+ */
+export function hostedResourceForProjection(world: SchedulingWorld): VenueResource {
+  const duration = world.durationMinutes ?? DEFAULT_DURATION;
+  return {
+    id: RESOURCE_ID,
+    venue_id: VENUE_ID,
+    name: 'Parity resource',
+    resource_type: null,
+    min_booking_minutes: duration,
+    max_booking_minutes: duration,
+    slot_interval_minutes: world.intervalMinutes ?? duration,
+    price_per_slot_pence: null,
+    payment_requirement: 'none',
+    deposit_amount_pence: null,
+    availability_hours: world.workingHours,
+    is_active: true,
+    sort_order: 0,
+    created_at: '2030-01-01T00:00:00Z',
+    display_on_calendar_id: CALENDAR_ID,
+    host_calendar: hostCalendar(world),
+  } as unknown as VenueResource;
+}
+
 /** A host calendar row shaped as `attachHostCalendarsToResources` builds it. */
 export function hostCalendar(world: SchedulingWorld): NonNullable<VenueResource['host_calendar']> {
   return {

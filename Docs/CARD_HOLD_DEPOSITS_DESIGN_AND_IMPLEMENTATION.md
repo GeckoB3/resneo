@@ -106,7 +106,8 @@ Appointment resolution: `src/lib/appointments/appointment-service-payment.ts` (`
 ### 2.8 Staff-created bookings and the payment-link machinery (verified)
 
 - **Route:** `POST /api/venue/bookings` (`src/app/api/venue/bookings/route.ts`, `phoneBookingSchema` lines 82-129). Fields: `require_deposit: z.boolean().optional()`, `source: z.enum(['phone','walk-in']).optional()` (default `'phone'`); `booking_source` enum overall: `online, phone, walk-in, widget, booking_page, import`. `staffWalkIn = source === 'walk-in'`; **walk-ins never collect deposits in any model**.
-- **Toggle semantics today (per model):** table: `requiresDeposit = !staffWalkIn && Boolean(require_deposit)` (pure toggle; **party-size threshold NOT applied** in the staff path; toggle on with no configured amount -> 400). Appointment: `full_payment` always requires payment; `deposit` only when the toggle is on. Event/class/resource: **toggle ignored**, config-driven, off for walk-ins.
+- **Toggle semantics today (per model):** table: `requiresDeposit = !staffWalkIn && Boolean(require_deposit)` (pure toggle; **party-size threshold NOT applied** in the staff path; toggle on with no configured amount -> 400). Appointment: the toggle is the sole gate for **both** chargeable labels, `deposit` and `full_payment`. Event/class/resource: **toggle ignored**, config-driven, off for walk-ins.
+  - *Corrected Aug 2026.* `full_payment` used to force the charge on regardless of the toggle, so a pay-in-full service could not be taken over the phone at all: the row landed `Pending` and nothing staff could do from the counter confirmed it. Staff take money in person, on account, or not at all, and that is a per-booking call.
 - **Statuses:** deposit -> `Pending`/`'Pending'` + `deposit_amount_pence`; not required -> `'Booked'`/`'Not Required'`/`null`. So **create-time toggle-off yields `'Not Required'`** (the `'Waived'` value is reserved for the post-hoc `waive` action).
 - **PI + link at create:** deposit paths create the PI inline (table `~1544-1565`, appointment `~1255-1272`) or via `applyStaffBookingPaymentAndComms` (`src/lib/booking/staff-booking-payment-comms.ts`, CDE), then `createOrGetPaymentShortLink(...)` and **auto-send** `sendDepositRequestNotifications(...)` in `after()`. Stripe failure rolls the insert back. Non-deposit paths send a manage link + confirmation instead.
 - **Form UI:** `src/components/booking/UnifiedBookingForm.tsx`: `requireDeposit` state default **off** (line ~218), switch labelled "Require deposit" / "Send a payment link to the guest" (~1733-1751), rendered only when `!isEdit`; body sends `require_deposit` (~1037); success toast `'Booking created - deposit link sent'` (~1090).
@@ -115,7 +116,32 @@ Appointment resolution: `src/lib/appointments/appointment-service-payment.ts` (`
 - **Pay page:** `src/app/pay/page.tsx` is self-contained (does NOT reuse `PaymentStep`): `BookingDetailsCard` + `RefundPolicy` + `<Elements>` + `PayForm` (`PaymentElement`, `confirmPayment` with `return_url: '/pay/success'`, `redirect:'if_required'`), then best-effort `POST /api/booking/confirm-payment { booking_id, guest_email }`.
 - **Re-send:** deposit route `send_payment_link`: requires guest email or phone (400 otherwise), does NOT create a missing PI, deletes prior `deposit_request_sms`/`deposit_request_email` comm-logs (dedupe bypass), sends `sendDepositRequestNotifications` (both channels gated by the `deposit_payment_request` communication policy; SMS additionally requires `guest_phone`), 422 if neither channel sent.
 - **Comms:** templates `deposit-request-email.ts` (subject "Pay your deposit to confirm your booking at {venue}", CTA "Pay deposit") and `deposit-request-sms.ts` (160-char cap); message keys `deposit_payment_request` and `deposit_payment_reminder` (defaults `EMAIL_AND_SMS` in `policies.ts`). Channel gating is per message key via the `venues.communication_policies` JSONB resolved by `resolveCommPolicy` (`policy-resolver.ts`, lookup `policies[lane][messageKey]`, log types via the explicit `LOG_MESSAGE_TYPE_MAP`). The venue column `deposit_request_email_enabled` is vestigial (only a test fixture references it); it does not gate live sends.
-- **Staff deposit toggles today live in two places:** `UnifiedBookingForm.tsx` is the TABLE staff form only; the appointment staff toggle (`staffRequireDeposit`) lives in `AppointmentBookingFlow.tsx` (staff audience, ~578, 2100-2104, 3982). CDE staff creation goes through the Class/Event/Resource flows in staff audience (`venueBookingsCreateUrl()`, `src/lib/booking/booking-flow-api.ts:132-134`) plus `ResourceSlotBookingForm.tsx`, none of which have a deposit toggle today.
+- **Staff deposit toggles today live in two places:** `UnifiedBookingForm.tsx` is the TABLE staff form only; the appointment staff toggle (`staffRequireDeposit`) lives in `AppointmentBookingFlow.tsx` (staff audience). CDE staff creation goes through the Class/Event/Resource flows in staff audience (`venueBookingsCreateUrl()`, `src/lib/booking/booking-flow-api.ts:132-134`) plus `ResourceSlotBookingForm.tsx`, none of which have a deposit toggle today.
+
+### 2.9 Staff discretion on the VISIT routes (added Aug 2026)
+
+The appointment staff flow posts to **three** routes depending on the shape of the booking, and only `POST /api/venue/bookings` understood the toggle:
+
+| Shape | Route |
+| --- | --- |
+| One service (with variants / add-ons) | `POST /api/venue/bookings` |
+| Two to four services, one guest | `POST /api/booking/create-multi-service` |
+| Several people, one payment | `POST /api/booking/create-group` |
+
+Both visit routes were written as anonymous public endpoints and only later became the routes the staff surfaces and the **staff mobile app** use, so they read the deposit straight off the catalog with no per-booking discretion. A staff multi-service visit of a deposit-taking service landed `Pending` with a payment step and no way past it, while the same services booked one at a time confirmed immediately. (The same wrong premise had already produced the SA-H7 same-day gate bug in these routes.)
+
+Both routes now accept `require_deposit` and `require_card_hold` and resolve them through `resolveStaffVisitChargeDiscretion` (`src/lib/booking/staff-visit-charge-discretion.ts`), which applies exactly the rules the single route applies:
+
+- Public sources (`online`, `widget`, `booking_page`) **ignore** the fields, rather than defaulting them. These routes have no staff authentication, so a crafted body must not be able to waive a guest's deposit.
+- Staff `phone`: charges only when `require_deposit` is explicitly true. Default off.
+- Staff `walk-in`: never charges, whatever the field says (2.8).
+- Card holds keep their own default-on decision, walk-ins included (D6).
+
+Waiving zeroes each segment's chargeable amount before the totals are summed, so the existing machinery does the rest: `requiresDeposit` false -> `hasPaymentStep` false -> rows insert `'Booked'`/`'Not Required'` -> `captureMode` `'none'` -> confirmation comms. It also stops the "Venue has not set up payments" 400, which previously blocked multi-service staff bookings outright at venues with no Stripe account.
+
+**Client:** the checkbox in `AppointmentBookingFlow.tsx` was gated on `!(segments.length > 1)`, the exact inverse of the branch that posts to `create-multi-service`, so it vanished for precisely the bookings that needed it. It is now driven by the whole-visit totals and rendered for every shape, with the group step carrying the same control (unreachable on the web today, since the group flow's only entry is the `mode_choice` chooser staff never see, but `create-group` is staff-reachable from mobile).
+
+**Mobile note:** a client that sends no `require_deposit` now gets **no deposit** on staff-source visits, matching how `POST /api/venue/bookings` has always treated the omitted field.
 
 ---
 

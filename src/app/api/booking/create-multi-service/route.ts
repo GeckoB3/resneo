@@ -55,6 +55,7 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
+import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
@@ -95,6 +96,13 @@ const createMultiServiceSchema = z.object({
   email: z.union([z.literal(''), z.string().email()]).optional(),
   phone: z.string().max(24).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
+  /**
+   * Staff discretion over money, honoured only for the `phone` / `walk-in`
+   * sources and ignored outright for public ones. See
+   * `resolveStaffVisitChargeDiscretion`.
+   */
+  require_deposit: z.boolean().optional(),
+  require_card_hold: z.boolean().optional(),
   services: z.array(serviceEntrySchema).min(1).max(4),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
@@ -133,6 +141,8 @@ export async function POST(request: NextRequest) {
       email,
       phone,
       source,
+      require_deposit,
+      require_card_hold,
       services: rawServices,
       dietary_notes,
       occasion,
@@ -153,6 +163,14 @@ export async function POST(request: NextRequest) {
 
     const isOnlineLikeSource =
       source === 'online' || source === 'widget' || source === 'booking_page';
+    // Staff may take a visit without collecting anything; public sources always
+    // charge what the catalog says. Applied per segment below, so a mixed chain
+    // waives as one visit (one guest, one decision).
+    const staffCharges = resolveStaffVisitChargeDiscretion({
+      source,
+      require_deposit,
+      require_card_hold,
+    });
     if (isOnlineLikeSource && !String(email ?? '').trim()) {
       return NextResponse.json(
         { error: 'Email is required for online bookings.' },
@@ -464,16 +482,19 @@ export async function POST(request: NextRequest) {
         if (online != null && online.amountPence > 0) {
           if (online.chargeLabel === 'card_hold') {
             // Card hold (spec 7.1): fixed fee, no money due at booking for this row.
-            // Flag off resolves as 'none' (spec 6.3).
-            if (cardHoldEnabled) {
-              segCardHoldFeePence = online.amountPence;
-            } else {
+            // Flag off resolves as 'none' (spec 6.3). Staff may waive per booking
+            // (D6), walk-ins included.
+            if (!cardHoldEnabled) {
               console.warn(
                 '[booking/create-multi-service] card_hold service booked while card_hold_deposits flag is off; treating as no charge',
                 { venue_id, service_id: seg.service_id },
               );
+            } else if (staffCharges.holdCards) {
+              segCardHoldFeePence = online.amountPence;
             }
-          } else {
+          } else if (staffCharges.chargeDeposits) {
+            // Covers `deposit` and `full_payment` alike: staff take money in
+            // person or not at all, and a waived visit must confirm on the spot.
             depositPence = online.amountPence;
           }
         }

@@ -708,13 +708,17 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 ## §5 The safety net, since there is no flag
 
-1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs. **Built, at `src/lib/availability/parity/` — 9 files, 105 tests as of 2026-08-18.** Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour, so a stage that changes one must change its expectation in the same commit. Its coverage gap (month path, diary renderer, `getUnifiedAvailableSlots`) was recorded in Stage 0b and **was cleared in Stage 5**, which found two live diary-renderer defects in the process.
+1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs. **Built, at `src/lib/availability/parity/` — 9 files, 107 tests as of 2026-08-18.** Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour, so a stage that changes one must change its expectation in the same commit. Its coverage gap (month path, diary renderer, `getUnifiedAvailableSlots`) was recorded in Stage 0b and **was cleared in Stage 5**, which found two live diary-renderer defects in the process.
 2. **One concern per commit**, each independently revertable.
 3. **Staging soak per stage** — now actually valid, because Stage 1 item 5 removes the CDN caching that would otherwise mask changes for 165 seconds per edge node.
 
+**A fixture can assert an ordered list and still be blind `[R3-79]`.** Asserting start times rather than booleans is necessary and **not sufficient**. The guest path's part-day closure fixture ran 12:00 to 13:00 on a 60-minute grid, where subtracting the closure re-anchors to 13:00 — exactly where vetoing leaves it. Identical output, defect invisible, assertion green either way. This was **proved, not reasoned about**: injecting a subtraction into `venueAnchorRangesForDate` left that fixture passing while the matrix's own appointment-path fixture went red, because its 12:00 to 12:45 closure sits off the 30-minute grid. The appointment path was covered; the guest path, where a defect reaches a customer rather than a member of staff, was not.
+
+**The rule this yields: a fixture guarding an anchoring rule must place at least one boundary OFF the interval grid**, or it cannot distinguish veto from subtract. Two such fixtures were added on 2026-08-18 (105 → 107 tests), each asserting the ordered list *and* the specific times that appear only under subtraction, so a regression names itself. **Test the test**: inject the defect and confirm the fixture fails. A fixture never seen red is a fixture of unknown value.
+
 **Four classes of regression the matrix cannot catch.**
 
-1. **Slot-time drift**, if the matrix asserts booleans. Fixed by asserting ordered start-time lists.
+1. **Slot-time drift**, if the matrix asserts booleans. Fixed by asserting ordered start-time lists. **See the sufficiency caveat above** — ordered lists on grid-aligned boundaries are still blind.
 2. **Configuration shapes not in the fixture set.** Build fixtures from real staging configurations, and run §6's queries against production. **Q0 shows production has 17 calendars, all `practitioner`**, so resource, event-column and class-column scheduling cannot be soaked at all: for those paths the Stage 0b fixtures are the only net, not a second one.
 3. **Cross-surface disagreement.** Fixed by read/write agreement pairs, which would have caught §1.2 items 15 and 16 — both live today.
 4. **Route-level branch selection `[R3-37]`.** The matrix reaches gates at helper level, not through `create/route.ts`. §1.2 item 14 is exactly a branch-selection defect. Hand review in Stages 2 and 5 is the only mitigation, and it is weaker than a test.

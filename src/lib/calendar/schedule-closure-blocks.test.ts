@@ -108,9 +108,13 @@ describe('buildVenueScheduleClosureBlocks', () => {
       start_time: '10:00',
       end_time: '14:00',
     });
+    // Stage 4/5: the grid follows the venue's RESOLVED hours, so on an amended day the grid
+    // IS the amended window and there is no band outside it left to grey. This used to
+    // assert grey bands at 09:00-10:00 and 14:00-17:00, which existed only because the
+    // renderer derived its bounds from the weekly shape while the grid had already moved.
+    // Both halves now read the same hours. See parity-closure-renderer.test.ts.
     const closed = blocks.filter((b) => b.block_type === 'venue_closed');
-    expect(closed.some((b) => b.start_time === '09:00' && b.end_time === '10:00')).toBe(true);
-    expect(closed.some((b) => b.start_time === '14:00' && b.end_time === '17:00')).toBe(true);
+    expect(closed).toHaveLength(0);
   });
 });
 

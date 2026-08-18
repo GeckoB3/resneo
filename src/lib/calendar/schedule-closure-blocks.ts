@@ -219,8 +219,18 @@ function gridMinuteBounds(
   dateStr: string,
   openingHours: OpeningHours | null | undefined,
   timeZone?: string | null,
+  venueWideBlocks?: AvailabilityBlock[] | null,
 ): { start: number; end: number } {
-  const { startHour, endHour } = getCalendarGridBounds(dateStr, openingHours, 7, 21, { timeZone });
+  // The blocks matter here for the same reason they matter to the grid itself: these
+  // stripes are CLIPPED to these bounds. Deriving them from the weekly shape alone meant a
+  // day amended to run past the weekly close had its amended stripe clipped away, so the
+  // owner saw an empty band exactly where the hours they had just entered should be --
+  // while Stage 4 had already widened the visible grid to show them. Both sides have to
+  // read the same hours or the diary contradicts itself.
+  const { startHour, endHour } = getCalendarGridBounds(dateStr, openingHours, 7, 21, {
+    timeZone,
+    venueWideBlocks,
+  });
   return { start: startHour * 60, end: endHour * 60 };
 }
 
@@ -240,7 +250,7 @@ export function buildVenueScheduleClosureBlocks(params: {
 
   const out: ScheduleClosureCalendarBlock[] = [];
   for (const dateStr of enumerateDatesInclusive(fromDate, toDate)) {
-    const bounds = gridMinuteBounds(dateStr, openingHours, timeZone);
+    const bounds = gridMinuteBounds(dateStr, openingHours, timeZone, venueWideBlocks);
     const resolution = resolveVenueWideAllowedMinuteRanges(openingHours, dateStr, venueWideBlocks);
     const dayBlocks = blocksForDate(venueWideBlocks, dateStr);
     const amendedUnion = unionAmendedPeriodsForDate(dayBlocks);
@@ -259,11 +269,20 @@ export function buildVenueScheduleClosureBlocks(params: {
 
     // `resolution.kind` is narrowed to 'closed' | 'allowed' here (the third kind
     // `continue`s above), so no further `unrestricted` guard is needed.
+    /**
+     * No amended stripes on a day that resolves CLOSED.
+     *
+     * A closure beats an Hours override (§2.3 step 5), so drawing an open-looking "Amended
+     * hours" band across a greyed-out day told the owner two contradictory things at once.
+     * This used to be the only way an amended day was visible at all, because the old
+     * resolver returned closed for a weekly-closed weekday before it ever looked at amended
+     * hours -- the plan's §1.2 item 1 describes exactly that: greyed out AND striped. Stage 3
+     * made those days resolve `allowed`, so the only way to reach `closed` with an amended
+     * row now is an explicit closure over it, where the grey is the truthful answer.
+     */
     const amendedRanges =
-      amendedUnion.length > 0
-        ? resolution.kind === 'allowed'
-          ? intersectRanges(amendedUnion, allowedRanges)
-          : amendedUnion.filter((r) => r.end > bounds.start && r.start < bounds.end)
+      amendedUnion.length > 0 && resolution.kind === 'allowed'
+        ? intersectRanges(amendedUnion, allowedRanges)
         : [];
 
     for (const columnId of columnIds) {

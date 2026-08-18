@@ -26,6 +26,7 @@ import { getVenueLocalDateTimeForBooking } from '@/lib/venue/venue-local-clock';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
+import { StaffRequireChargeCheckbox } from '@/components/booking/StaffRequireChargeCheckbox';
 import {
   resolveStaffEntityCardHold,
   STAFF_CARD_HOLD_LINK_SENT_LINE,
@@ -2387,6 +2388,14 @@ export function AppointmentBookingFlow({
               email: details.email || undefined,
               phone: details.phone?.trim() || undefined,
               source: isStaff ? staffBookingSource : 'booking_page',
+              // Staff discretion over money, mirroring the single-booking route.
+              // Ignored server-side for public sources, so it is sent only here.
+              ...(isStaff
+                ? {
+                    require_deposit: !isStaffWalkInAppointment && staffRequireDeposit,
+                    require_card_hold: staffRequireCardHold,
+                  }
+                : {}),
               dietary_notes: details.dietary_notes,
               occasion: details.occasion,
               ...clientAddressPayloadFields(details),
@@ -2450,11 +2459,15 @@ export function AppointmentBookingFlow({
         if (isStaff) {
           const offerForCharge = effectiveOfferForBooking ?? selectedServiceForPractitioner;
           const online = offerForCharge ? onlineChargeFromCatalogOffer(offerForCharge) : null;
+          // The checkbox is the only gate, for `full_payment` as much as for
+          // `deposit`. A pay-in-full service used to be forced on with no
+          // control, so it could not be booked over the phone at all.
           const require_deposit =
             !isStaffWalkInAppointment &&
+            staffRequireDeposit &&
             online != null &&
             online.amountPence > 0 &&
-            (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffRequireDeposit));
+            (online.chargeLabel === 'full_payment' || online.chargeLabel === 'deposit');
           // Card-hold services (design doc 7.6): send the toggle state explicitly
           // (server defaults to true when omitted; ignored for non-card-hold services).
           const staffCardHold = resolveStaffEntityCardHold({
@@ -2760,6 +2773,14 @@ export function AppointmentBookingFlow({
           email: details.email || undefined,
           phone: details.phone?.trim() || undefined,
           source: isStaff ? staffBookingSource : 'booking_page',
+          // Staff discretion over money, mirroring the single-booking route.
+          // Ignored server-side for public sources, so it is sent only here.
+          ...(isStaff
+            ? {
+                require_deposit: !isStaffWalkInAppointment && staffRequireDeposit,
+                require_card_hold: staffRequireCardHold,
+              }
+            : {}),
           dietary_notes: details.dietary_notes,
           ...clientAddressPayloadFields(details),
           people: groupPeople.map((p) => ({
@@ -2805,7 +2826,7 @@ export function AppointmentBookingFlow({
     } finally {
       setSubmitting(false);
     }
-  }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource, isPublicGuest, accountGate, publicCreateErrorMessage, bookingCompliance]);
+  }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource, isStaffWalkInAppointment, staffRequireDeposit, staffRequireCardHold, isPublicGuest, accountGate, publicCreateErrorMessage, bookingCompliance]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
@@ -2916,6 +2937,19 @@ export function AppointmentBookingFlow({
     : singleDetailsChargeLabel === 'card_hold'
       ? singleOnlineCharge?.amountPence ?? 0
       : 0;
+
+  /**
+   * Whether this staff booking actually collects money.
+   *
+   * Every staff shape (single, multi-service visit, group) answers to the one
+   * checkbox, and the guest-facing charge copy inside `DetailsStep` follows it
+   * rather than the catalog: with the box unchecked there is no deposit to
+   * describe, so promising a refund window for one would be a lie. Walk-ins
+   * never collect a deposit in any model (spec 2.8).
+   */
+  const staffCollectsCharge = isStaff && !isStaffWalkInAppointment && staffRequireDeposit;
+  const chargeCopyVisible = isStaff ? staffCollectsCharge : true;
+  const staffKeepsCardHold = !isStaff || staffRequireCardHold;
 
   const paymentCancellationBlurb = `Full deposit refund if you cancel ≥${refundNoticeHours}h before each appointment.`;
 
@@ -4613,53 +4647,59 @@ export function AppointmentBookingFlow({
               </div>
             </div>
           )}
-          {isStaff && !(multiServiceSegments && multiServiceSegments.length > 1) && (() => {
-            const o = effectiveOfferForBooking
-              ? onlineChargeFromCatalogOffer(effectiveOfferForBooking)
-              : null;
-            if (!o || o.amountPence <= 0) return null;
-            // Card-hold services show the card-hold toggle INSTEAD of the deposit toggle
-            // (the two are never shown together, design doc 7.6). Applies to walk-ins
-            // too: card holds, unlike deposits, are allowed for walk-in bookings (D6).
-            // Hidden when editing, like the deposit toggle (7.6).
-            if (o.chargeLabel === 'card_hold') {
-              if (isEdit) return null;
-              const hold = resolveStaffEntityCardHold({
-                paymentRequirement: o.chargeLabel,
-                feePerUnitPence: o.amountPence,
-                cardHoldFlagEnabled: cardHoldDepositsEnabled,
-              });
-              if (!hold) return null;
-              return (
-                <StaffCardHoldToggle
-                  checked={staffRequireCardHold}
-                  onChange={setStaffRequireCardHold}
-                  feePence={hold.feePence}
-                  className="mb-4"
-                />
-              );
-            }
-            if (o.chargeLabel === 'full_payment') {
-              return (
-                <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  Full payment online ({sym}
-                  {(o.amountPence / 100).toFixed(2)}). A payment link will be sent to the client.
-                </p>
-              );
-            }
+          {isStaff && !isEdit && (() => {
+            /**
+             * Staff charge controls for BOTH single and multi-service bookings.
+             *
+             * This block used to be gated on `!(segments.length > 1)`, the exact
+             * inverse of the branch in `handleDetailsSubmit` that posts to
+             * `create-multi-service`. So the checkbox appeared precisely when it
+             * was not needed and vanished precisely when it was: a two-service
+             * visit of a deposit-taking service had no way to skip the deposit
+             * and stuck at `Pending`.
+             *
+             * The amounts come from the same whole-visit sums the summary card
+             * and `DetailsStep` use, so a chain is charged and described as one
+             * booking. A mixed chain can carry both a chargeable amount and a
+             * card-hold fee; each gets its own control, since for a chain "the
+             * two are never shown together" (7.6) would leave one of them with
+             * no control at all. For a single service only one is ever non-zero,
+             * so nothing changes there.
+             */
+            // Walk-ins never collect a deposit in any model (spec 2.8), so there
+            // is no decision to offer. Card holds ARE offered on walk-ins (D6).
+            const chargePence = isStaffWalkInAppointment ? 0 : singleDetailsDepositPence;
+            const holdPence = singleDetailsCardHoldFeePence;
+            const hold =
+              holdPence > 0
+                ? resolveStaffEntityCardHold({
+                    paymentRequirement: 'card_hold',
+                    feePerUnitPence: holdPence,
+                    cardHoldFlagEnabled: cardHoldDepositsEnabled,
+                  })
+                : null;
+            if (chargePence <= 0 && !hold) return null;
             return (
-              <label className="mb-4 flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
-                <input
-                  type="checkbox"
-                  checked={staffRequireDeposit}
-                  onChange={(e) => setStaffRequireDeposit(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                />
-                <span className="text-sm text-slate-700">
-                  Require deposit ({sym}
-                  {(o.amountPence / 100).toFixed(2)})
-                </span>
-              </label>
+              <div className="mb-4 space-y-3">
+                {chargePence > 0 && (
+                  <StaffRequireChargeCheckbox
+                    checked={staffRequireDeposit}
+                    onChange={setStaffRequireDeposit}
+                    chargeLabel={
+                      singleDetailsChargeLabel === 'full_payment' ? 'full_payment' : 'deposit'
+                    }
+                    amountPence={chargePence}
+                    currencySymbol={sym}
+                  />
+                )}
+                {hold && (
+                  <StaffCardHoldToggle
+                    checked={staffRequireCardHold}
+                    onChange={setStaffRequireCardHold}
+                    feePence={hold.feePence}
+                  />
+                )}
+              </div>
             );
           })()}
           {isEdit ? (
@@ -4710,9 +4750,11 @@ export function AppointmentBookingFlow({
                 setStep('multi_service');
               }}
               variant="appointment"
-              appointmentDepositPence={isStaffWalkInAppointment ? null : singleDetailsDepositPence}
-              appointmentChargeLabel={isStaffWalkInAppointment ? 'deposit' : singleDetailsChargeLabel}
-              appointmentCardHoldFeePence={isStaffWalkInAppointment ? null : singleDetailsCardHoldFeePence}
+              appointmentDepositPence={chargeCopyVisible ? singleDetailsDepositPence : null}
+              appointmentChargeLabel={chargeCopyVisible ? singleDetailsChargeLabel : 'deposit'}
+              appointmentCardHoldFeePence={
+                isStaffWalkInAppointment || !staffKeepsCardHold ? null : singleDetailsCardHoldFeePence
+              }
               currencySymbol={sym}
               refundNoticeHours={refundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
@@ -5580,6 +5622,51 @@ export function AppointmentBookingFlow({
                   onChange={setBookingCompliance}
                 />
               )}
+              {isStaff && (() => {
+                /**
+                 * The group flow had no charge control of any kind. One decision
+                 * covers everybody in the group, matching the single shared
+                 * payment `create-group` takes.
+                 *
+                 * Unreachable on the web today: the group flow's only entry is
+                 * the `mode_choice` chooser, which staff never see. It is here
+                 * because `create-group` IS staff-reachable from the mobile app
+                 * (`source` of `phone` / `walk-in`), so the route needed the
+                 * decision, and a staff entry point added later must not
+                 * silently re-introduce a group that cannot be booked without
+                 * taking money.
+                 */
+                const chargePence = isStaffWalkInAppointment ? 0 : groupPaidDepositPence;
+                const hold =
+                  groupCardHoldFeePence > 0
+                    ? resolveStaffEntityCardHold({
+                        paymentRequirement: 'card_hold',
+                        feePerUnitPence: groupCardHoldFeePence,
+                        cardHoldFlagEnabled: cardHoldDepositsEnabled,
+                      })
+                    : null;
+                if (chargePence <= 0 && !hold) return null;
+                return (
+                  <div className="mb-4 space-y-3">
+                    {chargePence > 0 && (
+                      <StaffRequireChargeCheckbox
+                        checked={staffRequireDeposit}
+                        onChange={setStaffRequireDeposit}
+                        chargeLabel={groupChargeLabel === 'full_payment' ? 'full_payment' : 'deposit'}
+                        amountPence={chargePence}
+                        currencySymbol={sym}
+                      />
+                    )}
+                    {hold && (
+                      <StaffCardHoldToggle
+                        checked={staffRequireCardHold}
+                        onChange={setStaffRequireCardHold}
+                        feePence={hold.feePence}
+                      />
+                    )}
+                  </div>
+                );
+              })()}
               <DetailsStep
                 slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
                 date={groupPeople[0]?.date ?? date}
@@ -5587,9 +5674,13 @@ export function AppointmentBookingFlow({
                 onSubmit={handleGroupDetailsSubmit}
                 onBack={() => setStep('group_review')}
                 variant="appointment"
-                appointmentDepositPence={groupChargeLabel === 'card_hold' ? null : groupPaidDepositPence}
-                appointmentChargeLabel={groupChargeLabel}
-                appointmentCardHoldFeePence={groupCardHoldFeePence > 0 ? groupCardHoldFeePence : null}
+                appointmentDepositPence={
+                  chargeCopyVisible && groupChargeLabel !== 'card_hold' ? groupPaidDepositPence : null
+                }
+                appointmentChargeLabel={chargeCopyVisible ? groupChargeLabel : 'deposit'}
+                appointmentCardHoldFeePence={
+                  staffKeepsCardHold && groupCardHoldFeePence > 0 ? groupCardHoldFeePence : null
+                }
                 currencySymbol={sym}
                 refundNoticeHours={refundNoticeHours}
                 multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}

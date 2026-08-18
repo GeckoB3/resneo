@@ -166,6 +166,64 @@ describe('unified availability / venue-wide blocks', () => {
     expect(out).toEqual(['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00']);
   });
 
+  /**
+   * The decisive veto-vs-subtract fixture for the GUEST path.
+   *
+   * The case above cannot tell the two apart. Its closure runs 12:00-13:00 on a 60-minute
+   * grid, so subtracting it yields [09:00,12:00] and [13:00,17:00] and re-anchoring lands on
+   * 13:00 -- exactly where the veto leaves it. Identical output, defect invisible. Every
+   * closure fixture on this path shared that property.
+   *
+   * A closure whose boundaries do NOT fall on the grid separates them:
+   *
+   *   veto      -> the 12:00 candidate overlaps and is dropped; the rest of the grid is
+   *                untouched            -> 09:00 10:00 11:00 13:00 14:00 15:00 16:00
+   *   subtract  -> the anchoring range restarts at 12:40 and every later slot follows it
+   *                                     -> 09:00 10:00 11:00 12:40 13:40 14:40 15:40
+   *
+   * The subtract signature is asserted explicitly as well as the ordered list, so a
+   * regression names itself in the failure output instead of showing two long arrays that
+   * differ somewhere in the middle.
+   *
+   * Confirmed against the plus-1 staging venue on 2026-08-18 with a real 12:10-12:40 closure:
+   * 12:40 was absent and all 28 slots stayed on the 15-minute grid. Plan §2.1, §2.7, [R3-52].
+   */
+  it('keeps the grid aligned when the closure boundaries are off the slot grid', async () => {
+    const out = await slots([blk({ block_type: 'closed', time_start: '12:10', time_end: '12:40' })]);
+
+    // Re-anchoring signature: these appear if and only if the closure was subtracted.
+    expect(out).not.toContain('12:40');
+    expect(out).not.toContain('13:40');
+
+    expect(out).toEqual(['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00']);
+  });
+
+  /**
+   * The same rule under a finer interval, which is the shape the staging venue actually runs
+   * (15-minute interval, 30-minute service). Here a subtraction would put every afternoon
+   * slot on :10 and :40, so the assertion is that no start falls off the quarter-hour.
+   */
+  it('keeps every start on the interval grid across an off-grid closure', async () => {
+    const world = tables([blk({ block_type: 'closed', time_start: '12:10', time_end: '12:40' })]);
+    world.service_items[0]!.duration_minutes = 30;
+    world.service_items[0]!.booking_interval_minutes = 15;
+    const fake = createSupabaseFake({ tables: world });
+
+    const out = (
+      await getUnifiedAvailableSlots({
+        supabase: fake.asSupabaseClient<SupabaseClient>(),
+        venueId: VENUE,
+        calendarId: CAL,
+        date: DATE,
+        serviceItemId: SVC,
+      })
+    ).map((s) => s.time);
+
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((t) => ['00', '15', '30', '45'].includes(t.slice(3)))).toBe(true);
+    expect(out).not.toContain('12:40');
+  });
+
   it('follows an Hours override that extends past the weekly close', async () => {
     const out = await slots([
       blk({ block_type: 'amended_hours', override_periods: [{ open: '09:00', close: '19:00' }] }),

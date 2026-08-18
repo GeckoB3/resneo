@@ -23,7 +23,6 @@ import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/
 import { candidateStartMinutes, sanitizeBookingStartTimes } from '@/lib/appointments/booking-interval';
 import type { OpeningHours } from '@/types/availability';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
-import { getDayOfWeek } from '@/lib/availability/engine';
 import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import {
@@ -40,6 +39,11 @@ import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-wind
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { AvailabilityBlock } from '@/types/availability';
 import { venueOpeningExceptionsToBlocks } from '@/lib/availability/venue-exceptions-adapter';
+import {
+  calendarBreaks,
+  calendarHours,
+  type CalendarScheduleRow,
+} from '@/lib/availability/calendar-hours';
 import {
   resolveVenueWideAllowedMinuteRanges,
   venueClosureWindowsForDate,
@@ -204,49 +208,15 @@ export interface AppointmentAvailabilityResult {
 
 // Helpers
 
-const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
-/** Align with dashboard working-hours keys (JS getDay, 0=Sun) - same as getDayOfWeek() in engine.ts. */
-function dayKeyForDate(dateStr: string): string {
-  return String(getDayOfWeek(dateStr));
-}
 
-function dayNameForDate(dateStr: string): string {
-  const dow = getDayOfWeek(dateStr);
-  return DAY_NAMES[dow]!;
-}
 
 export function getWorkingRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
-  const dayKey = dayKeyForDate(dateStr);
-  const dayName = dayNameForDate(dateStr);
-
-  // Check specific date days-off
-  if (Array.isArray(practitioner.days_off)) {
-    for (const d of practitioner.days_off) {
-      if (d === dateStr || d === dayName) return [];
-    }
-  }
-
-  const hours = practitioner.working_hours as Record<string, Array<{ start: string; end: string }>>;
-  const ranges = hours[dayKey] ?? hours[dayName];
-  if (!ranges || ranges.length === 0) return [];
-
-  return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
+  return calendarHours(practitioner as CalendarScheduleRow, dateStr);
 }
 
 export function getBreakRanges(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
-  const byDay = practitioner.break_times_by_day;
-  if (byDay && typeof byDay === 'object' && !Array.isArray(byDay) && Object.keys(byDay).length > 0) {
-    const dayKey = dayKeyForDate(dateStr);
-    const dayName = dayNameForDate(dateStr);
-    const ranges = byDay[dayKey] ?? byDay[dayName];
-    if (!ranges || !Array.isArray(ranges) || ranges.length === 0) return [];
-    return ranges.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
-  }
-
-  const breaks = practitioner.break_times as Array<{ start: string; end: string }>;
-  if (!Array.isArray(breaks)) return [];
-  return breaks.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
+  return calendarBreaks(practitioner as CalendarScheduleRow, dateStr);
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {

@@ -4,7 +4,6 @@
  */
 
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
-import type { Practitioner, WorkingHours } from '@/types/booking-models';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { getOpeningPeriodsForDay, getDayOfWeek, timeToMinutes } from '@/lib/availability';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
@@ -12,16 +11,12 @@ import {
   resolveVenueWideAllowedMinuteRanges,
   venueWideResolutionToNullableRanges,
 } from '@/lib/availability/venue-wide-business-hours';
+import {
+  calendarBookableSegments,
+  type CalendarScheduleRow,
+} from '@/lib/availability/calendar-hours';
 
-const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
-function dayKeyForDate(dateStr: string): string {
-  return String(getDayOfWeek(dateStr));
-}
-
-function dayNameForDate(dateStr: string): string {
-  return DAY_NAMES[getDayOfWeek(dateStr)]!;
-}
 
 function isVenueOpeningHoursConfigured(openingHours: OpeningHours | null | undefined): boolean {
   return openingHours != null && typeof openingHours === 'object' && Object.keys(openingHours).length > 0;
@@ -62,66 +57,7 @@ function venueMinuteRangesForDate(
   return null;
 }
 
-function getWorkingRangesForPractitioner(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
-  const dayKey = dayKeyForDate(dateStr);
-  const dayName = dayNameForDate(dateStr);
-  if (Array.isArray(practitioner.days_off)) {
-    for (const d of practitioner.days_off) {
-      if (d === dateStr || d === dayName) return [];
-    }
-  }
-  const hours = practitioner.working_hours as WorkingHours;
-  const ranges = hours[dayKey] ?? hours[dayName];
-  if (!ranges || ranges.length === 0) return [];
-  return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
-}
 
-function getBreakRangesForPractitioner(practitioner: Practitioner, dateStr: string): Array<{ start: number; end: number }> {
-  const byDay = practitioner.break_times_by_day;
-  if (byDay && typeof byDay === 'object' && !Array.isArray(byDay) && Object.keys(byDay).length > 0) {
-    const dayKey = dayKeyForDate(dateStr);
-    const dayName = dayNameForDate(dateStr);
-    const ranges = byDay[dayKey] ?? byDay[dayName];
-    if (!ranges || !Array.isArray(ranges) || ranges.length === 0) return [];
-    return ranges.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
-  }
-  const breaks = practitioner.break_times;
-  if (!Array.isArray(breaks)) return [];
-  return breaks.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
-}
-
-function subtractOneRange(
-  r: { start: number; end: number },
-  cut: { start: number; end: number },
-): Array<{ start: number; end: number }> {
-  if (cut.end <= r.start || cut.start >= r.end) return [r];
-  const out: Array<{ start: number; end: number }> = [];
-  if (cut.start > r.start) {
-    const segEnd = Math.min(cut.start, r.end);
-    if (segEnd > r.start) out.push({ start: r.start, end: segEnd });
-  }
-  if (cut.end < r.end) {
-    const segStart = Math.max(cut.end, r.start);
-    if (r.end > segStart) out.push({ start: segStart, end: r.end });
-  }
-  return out;
-}
-
-function subtractRangesFromRanges(
-  ranges: Array<{ start: number; end: number }>,
-  toRemove: Array<{ start: number; end: number }>,
-): Array<{ start: number; end: number }> {
-  let result = ranges.filter((r) => r.end > r.start);
-  for (const cut of toRemove) {
-    if (cut.end <= cut.start) continue;
-    const next: Array<{ start: number; end: number }> = [];
-    for (const r of result) {
-      next.push(...subtractOneRange(r, cut));
-    }
-    result = next;
-  }
-  return result;
-}
 
 function intersectMinuteRanges(
   a: Array<{ start: number; end: number }>,
@@ -142,10 +78,20 @@ function intersectMinuteRanges(
  * Calendar bookable segments (working hours minus breaks) for this date.
  */
 export function calendarSegmentsForDate(ucRow: Record<string, unknown>, dateStr: string): Array<{ start: number; end: number }> {
+  /**
+   * `calendarBookableSegments`, NOT `calendarHours`.
+   *
+   * This is a CONTAINMENT question -- does the event window fit inside a working period
+   * that is not a break? -- and the break subtraction IS the enforcement behind decision
+   * (D)'s "it cannot overlap a break" error. Repointing this at `calendarHours` would drop
+   * that clause silently and make the decision half vacuous, which is the trap the plan
+   * flags at §2.4.
+   *
+   * Containment is also the one case where subtracting and vetoing are equivalent, so
+   * using the split set here is safe. Slot generation must not: see §2.7.
+   */
   const p = unifiedCalendarRowToPractitioner(ucRow);
-  const working = getWorkingRangesForPractitioner(p, dateStr);
-  const breaks = getBreakRangesForPractitioner(p, dateStr);
-  return subtractRangesFromRanges(working, breaks);
+  return calendarBookableSegments(p as CalendarScheduleRow, dateStr);
 }
 
 export type VenueHoursInput = {

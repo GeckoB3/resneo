@@ -22,6 +22,11 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
+import {
+  calendarBreaks,
+  calendarHours,
+  type CalendarScheduleRow,
+} from '@/lib/availability/calendar-hours';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import {
   DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
@@ -107,18 +112,12 @@ function getAvailabilityRanges(hours: WorkingHours, dateStr: string): Array<{ st
   return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
 }
 
-/** Working hours + days_off for the host calendar column (same key rules as resource availability). */
+/** Working hours + days_off for the host calendar column, via the shared calendar layer. */
 function getHostCalendarRanges(
   host: { working_hours: WorkingHours; days_off: string[] },
   dateStr: string,
 ): Array<{ start: number; end: number }> {
-  const dayName = dayNameForDate(dateStr);
-  if (Array.isArray(host.days_off)) {
-    for (const d of host.days_off) {
-      if (d === dateStr || d === dayName) return [];
-    }
-  }
-  return getAvailabilityRanges(host.working_hours, dateStr);
+  return calendarHours(host as CalendarScheduleRow, dateStr);
 }
 
 function intersectRanges(
@@ -136,7 +135,7 @@ function intersectRanges(
   return out;
 }
 
-/** Same rules as appointment `getBreakRanges` for a host calendar row. */
+/** Break windows for a host calendar row, via the shared calendar layer. */
 function getHostBreakRanges(
   host: {
     break_times: Array<{ start: string; end: string }>;
@@ -144,18 +143,7 @@ function getHostBreakRanges(
   },
   dateStr: string,
 ): Array<{ start: number; end: number }> {
-  const byDay = host.break_times_by_day;
-  if (byDay && typeof byDay === 'object' && !Array.isArray(byDay) && Object.keys(byDay).length > 0) {
-    const dayKey = dayKeyForDate(dateStr);
-    const dayName = dayNameForDate(dateStr);
-    const ranges = byDay[dayKey] ?? byDay[dayName];
-    if (!ranges || !Array.isArray(ranges) || ranges.length === 0) return [];
-    return ranges.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
-  }
-
-  const breaks = host.break_times;
-  if (!Array.isArray(breaks)) return [];
-  return breaks.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
+  return calendarBreaks(host as CalendarScheduleRow, dateStr);
 }
 
 function subtractOneRange(

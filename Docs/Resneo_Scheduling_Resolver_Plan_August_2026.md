@@ -6,25 +6,27 @@
 | Stage | Blocked on |
 |---|---|
 | 0a (exports, Supabase fake) | **DONE 2026-08-17.** tsc clean, lint clean, 345 files / 3274 tests green. |
-| 0b (parity harness) | **DONE 2026-08-17.** 46 tests, 347 files / 3315 green. ⚠️ **Its coverage gap was NOT closed before Stage 4 as promised** — see below. |
+| 0b (parity harness) | **DONE 2026-08-17.** 46 tests. Its coverage gap was missed before Stage 4 and **cleared 2026-08-18** as the first part of Stage 5. |
 | 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
 | 2 (event read/write contract) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 4 (diary geometry) | **DONE 2026-08-17.** 354 files / 3377 tests green; diary and month verified in the app. |
-| 5 (calendar resolver) | nothing. **(F) and (G) taken.** Do the outstanding 0b fixtures first (see below). |
+| 5 (calendar resolver) | **IN PROGRESS.** Harness debt cleared 2026-08-18 (3 files, 32 fixtures, 2 defects found). Calendar-resolver work not started. |
 | 6a / 6b (data model) | §1.3 tier 2 and tier 3 prerequisites, **Q6**, **Q7**, **Q10** |
 | 7 (fail closed) | its own decision, still open |
 
-**Outstanding harness debt `[R3-73]`.** Stage 0b named four consumers it did not assert, and said the first three were due **before Stage 4**. Stage 4 has shipped and they are still not asserted:
+**Harness debt: CLEARED 2026-08-18 `[R3-73]`.** Stage 0b named four consumers it did not assert and said three were due before Stage 4; they were not done, and Stages 3 and 4 both changed code they run. Cleared as the first part of Stage 5:
 
 | Consumer | Status |
 |---|---|
-| `booking/create` route branches | Declared non-goal in Stage 0b. Unchanged, and hand-reviewed in Stages 2 and 5. |
-| Appointment **month path** | Still unasserted. Stage 3 changed its venue resolution and Stage 4 changed its error handling, both uncovered. |
-| Diary **closure renderer** | Partly covered: `venue-calendar-bounds.blocks.test.ts` asserts the bounds, but `buildVenueScheduleClosureBlocks` itself is still unasserted. |
-| `getUnifiedAvailableSlots` | Still unasserted. |
+| `booking/create` route branches | Declared non-goal in Stage 0b. Unchanged; hand-reviewed in Stages 2 and 5. |
+| Appointment **month path** | ✅ 9 fixtures (`parity-month-path.test.ts`). |
+| Diary **closure renderer** | ✅ 13 fixtures (`parity-closure-renderer.test.ts`). **Found two live defects** — see below. |
+| `getUnifiedAvailableSlots` | ✅ 10 fixtures (`parity-unified-availability.test.ts`). |
 
-This is a commitment made in the plan and missed, recorded rather than quietly dropped. **Do these before Stage 5**, not after: Stage 5 rewrites the calendar layer that all three read, and going in without them repeats the Stage 4 lesson, where every unit test was green and the screen was wrong.
+**Clearing it paid for itself immediately `[R3-74]`.** The renderer fixtures found that **Stage 4 was incomplete**: `gridMinuteBounds` called `getCalendarGridBounds` without the venue blocks, so the renderer clipped its stripes to the WEEKLY bounds while Stage 4 had already moved the visible grid to the resolved ones. A day amended past the weekly close showed the extra hours in the grid with no stripe over them — the plan's own Stage 4 breakage 1, fixed on the grid and missed on the renderer. Verified on the staging venue afterwards: a Tuesday (weekly close 18:00) amended to 21:00 now renders a full-width amended stripe to 21:00. They also found an amended stripe being drawn across a day that resolves **closed**, which told the owner two contradictory things at once.
+
+**Two traps for anyone adding fixtures to these paths.** The month path filters every date through the service booking window, whose default caps advance booking at **90 days**. `getUnifiedAvailableSlots` applies `isGuestBookingDateAllowed` before resolving anything, and `entityBookingWindowFromRow` hard-caps `max_advance_booking_days` at **365** — a real product rule. A fixed far-future date is rejected before the resolver is ever consulted, and the whole file then returns empty lists that look exactly like a resolver defect. The unified fixture computes its date relative to today for that reason.
 
 **Stages 0a to 4 are implemented on `staging`.** Stages 5, 6a, 6b and 7 remain.
 
@@ -616,7 +618,7 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 ### Stage 5 — One calendar resolver.
 
-**First, clear the Stage 0b harness debt `[R3-73]`:** assert the appointment month path, `buildVenueScheduleClosureBlocks`, and `getUnifiedAvailableSlots`. These were due before Stage 4 and were not done, and Stage 5 rewrites the calendar layer all three read. Stage 4's lesson was that a defect can live entirely in a component's data flow while every unit test stays green; going into the largest remaining stage without these fixtures invites the same thing.
+**✅ Harness debt cleared 2026-08-18** — 3 files, 32 fixtures, and two live defects found in the diary renderer (see the status block). The calendar-resolver work below is not started.
 
 
 - `calendarHours` / `calendarClosures` / `calendarBreaks` / `calendarAdHocBlocks` / `calendarBookableSegments` (§2.4), collapsing six working-hours and four break implementations.

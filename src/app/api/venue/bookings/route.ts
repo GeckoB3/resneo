@@ -1249,11 +1249,24 @@ export async function POST(request: NextRequest) {
           })
         : null;
       const staffWantsDeposit = !staffWalkIn && (require_deposit ?? false);
+      /**
+       * The toggle is the ONLY gate, for `full_payment` as much as for `deposit`.
+       *
+       * `full_payment` used to force the charge on regardless, which meant a
+       * pay-in-full service could not be booked over the phone at all: staff
+       * finished the flow, the row landed `Pending`, and nothing they could do
+       * from the counter would confirm it. Staff take money in person, on
+       * account, or not at all, and that is their call to make per booking, so
+       * both charge labels now answer to `require_deposit`.
+       *
+       * Walk-ins still never charge (spec 2.8), and card_hold is untouched: it
+       * has its own toggle and the two are never shown together (D6).
+       */
       const requiresDeposit =
-        !staffWalkIn &&
+        staffWantsDeposit &&
         online != null &&
         online.amountPence > 0 &&
-        (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffWantsDeposit));
+        (online.chargeLabel === 'full_payment' || online.chargeLabel === 'deposit');
       const depositAmountPence = requiresDeposit ? online!.amountPence : null;
 
       // Card hold (spec 7.6): fixed service fee (variant-adjusted, add-ons excluded);

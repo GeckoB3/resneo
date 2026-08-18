@@ -481,6 +481,13 @@ export interface VenueResource {
     days_off: string[];
     break_times: Array<{ start: string; end: string }>;
     break_times_by_day: WorkingHours | null;
+    /**
+     * Windows the host is unavailable for on a given date: staff leave and ad-hoc blocked
+     * time, keyed by "YYYY-MM-DD". A hosted resource stayed bookable straight through both
+     * until Stage 5 -- the resource engine read no leave table and no block table at all
+     * (§1.2 item 5), so a room on a stylist's column sold while the stylist was on holiday.
+     */
+    unavailable_by_date?: Record<string, Array<{ start: number; end: number }>> | null;
   } | null;
 }
 

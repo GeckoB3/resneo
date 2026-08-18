@@ -394,6 +394,28 @@ describe('parity matrix / breaks (plan §1.2 item 6, decision A)', () => {
     ]);
   });
 
+  /**
+   * §1.2 item 5, fixed in Stage 5. The resource engine read no leave table and no block
+   * table at all, so a room on a stylist's column sold straight through the stylist's
+   * holiday and through any blocked time dragged onto the diary. The host's unavailable
+   * windows are now a per-candidate veto, for the same reason breaks are: subtracting them
+   * would split the anchoring ranges and re-anchor every later slot.
+   */
+  it('vetoes a hosted resource across the host leave and blocked time', () => {
+    const w = world({ name: 'host unavailable 12:00-14:00' });
+    const host = {
+      ...hostCalendar(w),
+      unavailable_by_date: { [DATE]: [{ start: 720, end: 840 }] },
+    } as ReturnType<typeof hostCalendar>;
+
+    const starts = resourceStarts(w, host);
+
+    expect(starts).not.toContain('12:00');
+    expect(starts).not.toContain('13:00');
+    // The grid keeps its alignment either side, which subtraction would have destroyed.
+    expect(starts).toEqual(['09:00', '10:00', '11:00', '14:00', '15:00', '16:00']);
+  });
+
   it('leaves an unhosted resource untouched by the calendar break, since it has no host', () => {
     const w = world({ name: 'break, standalone resource', breakTimes: breaks });
     expect(resourceStarts(w)).toEqual(HOURLY_9_TO_5);

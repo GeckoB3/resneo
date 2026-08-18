@@ -258,7 +258,7 @@ describe('read/write agreement / scheduled instances', () => {
    * "must fit inside the resolved ranges" for the whole date (plan §1.2 item 7). Same
    * world as above plus a block that does not overlap the instance at all.
    */
-  it('DIVERGES: an unrelated block on the date changes the class rule for the whole day', () => {
+  it('FIXED in Stage 5: an unrelated block no longer changes the class rule for the day', () => {
     const withoutBlock = world({ name: 'no blocks', instance: { start: '19:00', end: '20:00' } });
     const withBlock = world({
       name: 'one unrelated morning closure',
@@ -268,7 +268,10 @@ describe('read/write agreement / scheduled instances', () => {
       ],
     });
 
+    // Both true now. The class gate asks whether a closure OVERLAPS the instance, not
+    // whether the date happens to carry a block: a 06:00-07:00 closure used to take every
+    // evening class off sale for the whole day. §1.2 item 7, class half.
     expect(classOffered(withoutBlock)).toBe(true);
-    expect(classOffered(withBlock)).toBe(false);
+    expect(classOffered(withBlock)).toBe(true);
   });
 });

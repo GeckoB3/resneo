@@ -7,14 +7,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ClassPaymentRequirement, ClassType, ClassInstance } from '@/types/booking-models';
-import { timeToMinutes } from '@/lib/availability';
+import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
 import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import {
-  resolveVenueWideAllowedMinuteRanges,
-  isMinuteSubintervalCoveredByRanges,
-  blocksForDate,
+  classInstanceRejectBookingWindow,
 } from '@/lib/availability/venue-wide-business-hours';
 import {
   rowsToVenueWideBlocks,
@@ -174,12 +172,16 @@ export function isClassInstanceBookableForGuest(
 // Core engine
 
 /**
- * Class sessions are *explicitly scheduled* by staff, so the venue's weekly `opening_hours`
- * do not hide them (a 7pm yoga class is bookable even if the venue's weekly hours are 9am–5pm).
- * Only date-specific venue-wide blocks constrain them:
- *   - `closed` / `special_event` → hides overlapping class times
- *   - `amended_hours` → class must fit inside the amended periods
- * When there are no date-specific blocks, the scheduled session is always allowed.
+ * Venue gate for a class instance: explicit closures only (operator decision B).
+ *
+ * The weekly baseline is never consulted, so a 7pm class at a 9-to-5 venue stays bookable,
+ * and neither is an amended-hours window: a class is a fixed time staff put on the
+ * calendar, not a slot picked off a grid.
+ *
+ * This used to short-circuit on `blocksForDate(...).length === 0`, so the mere PRESENCE of
+ * any block on the date changed the rule for the whole day -- one unrelated morning closure
+ * and every evening class had to fit inside the venue's resolved hours. That is §1.2 item 7,
+ * and it is fixed by asking about closure OVERLAP instead.
  */
 function classInstanceAllowedByVenueWideBlocks(
   instanceDate: string,
@@ -189,19 +191,19 @@ function classInstanceAllowedByVenueWideBlocks(
   venueOpeningHours: OpeningHours | null | undefined,
 ): boolean {
   if (venueWideBlocks == null) return true;
-  const dayBlocks = blocksForDate(venueWideBlocks, instanceDate);
-  if (dayBlocks.length === 0) return true;
-
-  const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours ?? null, instanceDate, venueWideBlocks);
-  if (res.kind === 'unrestricted') return true;
-  if (res.kind === 'closed') return false;
   const startMin = timeToMinutes(String(startTimeHhMm).slice(0, 5));
   const endMin = startMin + durationMinutes;
   if (endMin <= startMin) return false;
-  if (endMin <= 24 * 60) {
-    return isMinuteSubintervalCoveredByRanges(startMin, endMin, res.ranges);
-  }
-  return res.ranges.some((r) => startMin >= r.start && startMin < r.end);
+  const endHhMm = minutesToTime(Math.min(endMin, 24 * 60));
+  return (
+    classInstanceRejectBookingWindow(
+      venueOpeningHours ?? null,
+      instanceDate,
+      String(startTimeHhMm).slice(0, 5),
+      endHhMm,
+      venueWideBlocks,
+    ) == null
+  );
 }
 
 export function computeClassAvailability(input: ClassEngineInput): ClassAvailabilitySlot[] {

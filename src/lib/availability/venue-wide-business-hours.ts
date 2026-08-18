@@ -315,6 +315,42 @@ export function venueWideBlocksRejectBookingWindow(
 }
 
 /**
+ * Venue gate for a CLASS instance: explicit closures only.
+ *
+ * Classes are scheduled by staff at a fixed time, and the venue's weekly opening hours do
+ * not hide them -- a 7pm yoga class at a 9-to-5 venue is bookable on purpose, which
+ * `class-session-engine.ts` has documented for as long as it has existed. Operator decision
+ * (B) keeps that carve-out for classes and withholds it from events.
+ *
+ * Only an explicit Closed or special_event window overlapping the instance refuses it.
+ * Amended hours do not: an Hours override is a slot-generation concept, and a class was put
+ * on the calendar deliberately rather than picked off a grid.
+ *
+ * This replaces the `blocksForDate(...).length > 0` short-circuit that both the class engine
+ * and the schedule-time validator carried, where the mere PRESENCE of any block on the date
+ * flipped the rule for the whole day: one unrelated 06:00 closure and every evening class
+ * suddenly had to fit inside the venue's resolved hours. That is §1.2 item 7.
+ *
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §2.6 and Stage 5.
+ */
+export function classInstanceRejectBookingWindow(
+  openingHours: OpeningHours | null | undefined,
+  dateStr: string,
+  startHhMm: string,
+  endHhMm: string,
+  venueWideBlocks: AvailabilityBlock[],
+): string | null {
+  const closures = venueClosureWindowsForDate(venueWideBlocks, dateStr);
+  if (closures.length === 0) return null;
+
+  const start = timeToMinutes(startHhMm.slice(0, 5));
+  const rawEnd = timeToMinutes(endHhMm.slice(0, 5));
+  const end = rawEnd <= start ? 24 * 60 : rawEnd;
+
+  return closures.some((c) => start < c.end && c.start < end) ? CLOSED_MESSAGE : null;
+}
+
+/**
  * Venue gate for a SCHEDULED INSTANCE: a class, an event, or an `event_sessions` row.
  *
  * Different from {@link venueWideBlocksRejectBookingWindow}, which stays the gate for slot

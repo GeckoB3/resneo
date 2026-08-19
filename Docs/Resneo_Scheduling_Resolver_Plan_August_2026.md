@@ -691,7 +691,7 @@ A stage, not a bullet: five client components need a new data dependency, three 
 1. ✅ `supabase db push` to **staging**, and the migration's verification block run against it: grants returned `SELECT` only for `anon` and `authenticated`, 8 overrides against 8 leave rows, nothing left behind.
 2. ✅ CI's `rls-pgtap` job green on the introducing commit.
 3. ✅ Production `db push`, then `staging` merged to `main`, then staging reset. Q3 was re-run against production first and returned zero rows.
-4. ⚠️ **Still owed:** `npm run check:function-grants` against **production**, and the grant query run there separately. Hosted grants are not reproduced by migration history, so staging passing proves nothing about production (see [[supabase-hosted-vs-local-grants]] reasoning in §6).
+4. ✅ **Production permissions verified 2026-08-19.** `npm run check:function-grants` against production (`njualfobtudvlugqkqho`) returned **PASS, 13 of 13 allowlisted**, with no `UNEXPECTED` and no `MISSING`. The table grant query, run separately against production, returned `SELECT` only for `anon` and `authenticated`. Both were required because hosted grants are not reproduced by migration history and the two checks are independent: the script inspects **function** EXECUTE grants, the query inspects **table** privileges. The script prints the project ref it connected to, which is what confirms a shell override actually beat `.env.local` rather than silently falling back to staging.
 
 **Then the rest of 6a**, in this order. The table now exists in the migration, so what follows is code:
 

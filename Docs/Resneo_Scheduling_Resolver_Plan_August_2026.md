@@ -14,7 +14,7 @@
 | 5 (calendar resolver) | **DONE 2026-08-18.** 361 files / 3470 tests green. Harness debt cleared first (3 files, 32 fixtures, 2 defects found). |
 | 6a (expand) | ✅ **COMPLETE 2026-08-19**, except the resource half of (L), deferred with its prerequisite recorded (`[R3-89]`). Migration applied to staging and production and verified; dual-write, item 24, decisions (K) and (L), validation parity and apply-to-all breaks all on `staging` awaiting merge. |
 | 6b (contract) | §1.3 tier 2 and tier 3 prerequisites, **Q5**, **Q6**, **Q7**, **Q10**, and 6a live and soaked. |
-| 7 (fail closed) | **Decided IN 2026-08-19 (decision J). Not implemented.** Guest path only. |
+| 7 (fail closed) | ⏳ **Mostly done 2026-08-19 (decision J).** Mechanism plus the three routes carrying real guest traffic (`unified-availability`, `availability`, `appointment-calendar`) and both UI states, all proven on staging. **Remaining: `class-instances` and `resource-calendar`**, latent while production has no classes, events or resources. Guest paths only. |
 
 **Harness debt: CLEARED 2026-08-18 `[R3-73]`.** Stage 0b named four consumers it did not assert and said three were due before Stage 4; they were not done, and Stages 3 and 4 both changed code they run. Cleared as the first part of Stage 5:
 
@@ -786,9 +786,37 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **Verify grants on the hosted projects, not from the migrations.** Hosted Supabase grants `anon`/`authenticated` a full default privilege set through project-level defaults that live outside this repository, and table privileges are checked **before** RLS, so a local pgTAP pass proves nothing. Run `20270113120000`'s verification query against staging and production **separately** after each push, plus `npm run check:function-grants` per environment.
 
-### Stage 7 — Fail closed (`SA-C3` proper). ✅ **DECIDED IN, 2026-08-19. Not yet implemented.**
+### Stage 7 — Fail closed (`SA-C3` proper). ⏳ **MOSTLY DONE, 2026-08-19.** The three routes carrying real guest traffic are covered and proven; two latent ones remain.
 
 `loadScheduleContext`, the third `unavailable` state, HTTP 503 with `Retry-After`, a retry card in the booking UI. Independent of everything above and the only stage touching the guest booking UI.
+
+**⏳ IN PROGRESS. The mechanism is built and proven; the guest UI and the remaining routes are not.**
+
+**Done 2026-08-19:**
+- `schedule-read-context.ts` collects, per request, every schedule read that failed open. **It hooks the reporter all 44 fail-open sites already call**, rather than threading a return value through 11 files: the diff would have been enormous and its real risk is the one site someone forgets, silently keeping the old behaviour exactly where it matters. The `node:async_hooks` import lives in this module and registers a listener, because the engines reach browser bundles and a static Node import would break them.
+- `schedule-unavailable-response.ts` returns **503 with `Retry-After: 15` and `no-store`**, not 500: this is temporary and retrying is right, which is what 503 means. The body carries `unavailable: true` and the failing table names, and deliberately **no venue or calendar ids**, since it reaches an unauthenticated guest.
+- `/api/booking/unified-availability` uses both. **Proven end to end on staging** by injecting a failure deep inside the engine: the route returned 503 with the right headers instead of a slot list, and reverted cleanly to 200.
+
+**Added and PROVEN 2026-08-19 `[R3-91]`:**
+- `/api/booking/availability` wraps its whole handler, which covers appointments, events, classes and resources at once and cannot miss a branch the way per-return edits would. **This is the route the guest appointment flow actually uses**; `unified-availability` serves the embed and the mobile app, so wiring that one first covered the smaller audience.
+- A **retry card** in `AppointmentBookingFlow`, at both the single and group render sites. It is deliberately not the "no times available" card: that one advises trying a different date, which is wrong when the date is fine and the lookup is not. "Try again" replays the last lookup from a ref rather than reloading and losing the wizard state.
+- **The 503 handling matters more than it looks.** The fetch ignored `res.ok` and did `data.practitioners ?? []`, so a 503 rendered as "fully booked" -- the same screen a genuinely full day produces. A guest would have given up on a venue that was open.
+
+**✅ The route is now PROVEN, 2026-08-19 `[R3-91]`.** Injecting at handler level (guaranteed on the path, unlike `fetchAppointmentInput`, which this request shape does not reach) returned **503 with `Retry-After: 15`**. The earlier failure was the injection point, not the wrap.
+
+**✅ The card is now pinned, 2026-08-19.** `AppointmentBookingFlow.slots-unavailable.test.tsx`, 5 fixtures: the retry card renders on a 503, the "no times available" copy and its wrong "try a different date" advice do NOT, "Try again" replays the lookup and recovers to real slots, the card stays absent on success, and the copy carries no em-dash.
+
+**Tested the test:** disabling the 503 branch turns exactly four of the five red, the fifth being the success path that should not depend on it. A component test was the right answer over driving the UI, which had already failed twice: the slot step sits inside a panel the headless browser could not open.
+
+**✅ The month path is done, 2026-08-19.** It was the most exposed surface in the programme: `appointment-month-availability.ts` carries **twelve** fail-open reads, more than any other file, and a failure there does not remove one time, it removes whole DATES from the picker. A guest sees a month with nothing green and concludes the venue is busy for weeks.
+- `/api/booking/appointment-calendar` wraps its handler. **Proven on staging: 503 with `Retry-After: 15`**, recovering to a normal month once the injection was removed.
+- The month fetch already checked `res.ok` and threw, which is better than the slot path did, but a throw still leaves an empty picker that reads as "fully booked". It now flags the 503 specifically and shows its own notice, worded for a month rather than a day.
+- **Any successful month load clears the flag**, whether or not anyone pressed Try again: one month answering means the venue is reachable again.
+- 3 further fixtures (8 in the file). Tested the test: disabling the branch turns exactly the two month fixtures red.
+
+**A test-design note worth keeping `[R3-92]`.** The first attempt at the retry fixture failed because the flow **prefetches more than one month**, so "fail the first call, then succeed" let a later success clear the notice before the assertion ran. The fix was an explicit switch the test flips, not a call counter. Any fixture that assumes one request per user action on this flow will be flaky in the same way.
+
+**Still to do:** `class-instances` and `resource-calendar`, both far lower traffic than the two paths now covered.
 
 **Decision (J), taken 2026-08-19.** Today every availability fetcher reads `res.data ?? []`, so a failed read of the leave or closure table is indistinguishable from "nothing there" and the engine sells the day. The operator's call: **a wrong booking costs staff time and goodwill to untangle, while a retry message costs one refresh**, so the system should refuse to answer rather than answer wrongly. Stage 1 item 4 already made these failures visible in Sentry, which is the prerequisite; this stage makes them safe.
 

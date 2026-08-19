@@ -800,6 +800,49 @@ export function AppointmentBookingFlow({
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
+  /**
+   * The server could not read this venue's schedule and refused to guess (Stage 7).
+   * Distinct from "no slots": one means try again, the other means try another day.
+   */
+  const [slotsUnavailable, setSlotsUnavailable] = useState(false);
+  /**
+   * The month lookup could not be answered (Stage 7). Separate from `slotsUnavailable`:
+   * one greys out a whole picker, the other empties a single day's time list.
+   */
+  const [calendarUnavailable, setCalendarUnavailable] = useState(false);
+  /**
+   * Arguments of the last month lookup, so "Try again" can replay exactly that request.
+   * Clearing the cache alone does not refetch: the effect that loads a month is keyed on
+   * the month and selection, none of which changed, so nothing would happen.
+   */
+  const lastCalendarFetchRef = useRef<Parameters<typeof fetchAppointmentCalendarMonth>[0] | null>(null);
+  /**
+   * The arguments of the last slot lookup, so "Try again" can replay exactly that request.
+   * A ref, not state: it must not cause a render, and the retry only ever reads the latest.
+   */
+  const lastSlotFetchRef = useRef<Parameters<typeof fetchAvailability>[0] | null>(null);
+
+  /**
+   * Stage 7 (decision J). Deliberately NOT the "no times available" card: that one tells a
+   * guest to try a different date, which is the wrong advice when the date is fine and the
+   * lookup is not. Amber rather than red, because nothing is broken for them and retrying
+   * usually works.
+   */
+  const renderSlotsUnavailable = (onRetry: () => void) => (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 p-8 text-center">
+      <p className="text-sm font-medium text-amber-900">We could not load times for {formatDateHuman(date)}</p>
+      <p className="mx-auto mt-1 max-w-sm text-xs text-amber-800">
+        This is a temporary problem on our side, not a sign the day is full. Please try again in a moment.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-4 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+      >
+        Try again
+      </button>
+    </div>
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1081,6 +1124,7 @@ export function AppointmentBookingFlow({
       durationMinutes?: number | null;
       addonIds?: string[];
     }) => {
+      lastSlotFetchRef.current = opts;
       setLoading(true);
       try {
         const params = new URLSearchParams({ venue_id: venue.id, date });
@@ -1103,6 +1147,18 @@ export function AppointmentBookingFlow({
         }
         const res = await fetch(bookingAvailabilityUrl(params));
         const data = await res.json();
+        /**
+         * Stage 7 (decision J). A 503 means the server could not read this venue's schedule
+         * and refused to guess. Before this, `data.practitioners ?? []` turned that into an
+         * empty slot list, which reads as "fully booked" -- the same screen a genuinely full
+         * day produces, so a guest would give up on a venue that was open.
+         */
+        if (res.status === 503 && (data as { unavailable?: boolean })?.unavailable) {
+          setSlotsUnavailable(true);
+          setSlotPractitioners([]);
+          return;
+        }
+        setSlotsUnavailable(false);
         setSlotPractitioners(data.practitioners ?? []);
       } catch {
         setError('Failed to load availability');
@@ -1125,6 +1181,7 @@ export function AppointmentBookingFlow({
       month: number;
       signal?: AbortSignal;
     }): Promise<Set<string>> => {
+      lastCalendarFetchRef.current = opts;
       const url = appointmentCalendarUrl(
         bookingAudience,
         venue.id,
@@ -1140,8 +1197,23 @@ export function AppointmentBookingFlow({
         opts.addonIds ?? null,
       );
       const res = await fetch(url, { signal: opts.signal });
-      const data = (await res.json()) as { available_dates?: string[]; error?: string };
+      const data = (await res.json()) as { available_dates?: string[]; error?: string; unavailable?: boolean };
+      /**
+       * Stage 7 (decision J). A 503 means the server could not read this venue's schedule
+       * and refused to guess. The throw below is kept, so nothing caches a wrong month, but
+       * the flag is what stops the picker rendering an empty month as though every date
+       * were genuinely full. That is the more misleading failure of the two: a guest sees
+       * dates greyed out and concludes the venue is busy for weeks.
+       *
+       * Clearing the flag on ANY successful month load is deliberate: one month answering
+       * means the venue is reachable again, whether or not anyone pressed Try again.
+       */
+      if (res.status === 503 && data.unavailable) {
+        setCalendarUnavailable(true);
+        throw new Error(data.error ?? 'Availability temporarily unavailable');
+      }
       if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
+      setCalendarUnavailable(false);
       return new Set(data.available_dates ?? []);
     },
     [bookingAudience, venue.id, linkedOwnerVenueId],
@@ -4232,6 +4304,32 @@ export function AppointmentBookingFlow({
           )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Date and time</h2>
           <p className="mb-4 text-sm text-slate-500">Green days have at least one bookable time. Select a day to see times.</p>
+          {/**
+            * Stage 7. Without this, a month the server refused to answer renders as a grid
+            * with nothing green: visually identical to a venue booked solid for weeks, and
+            * the guest has no way to tell the difference or reason to try again.
+            */}
+          {calendarUnavailable && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-medium">We could not check which days are free</p>
+              <p className="mt-1 text-xs text-amber-800">
+                This is a temporary problem on our side, not a sign the month is full. Please try again in a
+                moment.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCalendarUnavailable(false);
+                  setCalendarCache(new Map());
+                  const last = lastCalendarFetchRef.current;
+                  if (last) void fetchAppointmentCalendarMonth(last).then((set) => setAvailableDates(set)).catch(() => {});
+                }}
+                className="mt-3 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+              >
+                Try again
+              </button>
+            </div>
+          )}
           <div className="mb-4">
             <ResourceCalendarMonth
               year={calendarMonth.year}
@@ -4285,6 +4383,11 @@ export function AppointmentBookingFlow({
           )}
           {loading ? (
             <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
+          ) : slotsUnavailable ? (
+            renderSlotsUnavailable(() => {
+              const last = lastSlotFetchRef.current;
+              if (last) void fetchAvailability(last);
+            })
           ) : availableSlots.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No times available on {formatDateHuman(date)}</p>
@@ -5562,6 +5665,11 @@ export function AppointmentBookingFlow({
           </div>
           {loading ? (
             <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
+          ) : slotsUnavailable ? (
+            renderSlotsUnavailable(() => {
+              const last = lastSlotFetchRef.current;
+              if (last) void fetchAvailability(last);
+            })
           ) : groupAvailableSlots.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No times available on {formatDateHuman(date)}</p>

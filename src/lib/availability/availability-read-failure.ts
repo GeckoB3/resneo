@@ -30,6 +30,32 @@ export interface AvailabilityReadFailureContext {
   date?: string | null;
 }
 
+/** One read that failed open, as handed to a listener. */
+export interface ScheduleReadFailure {
+  source: string;
+  table: string;
+  assumed: string;
+  venueId?: string | null;
+  calendarId?: string | null;
+  date?: string | null;
+}
+
+/**
+ * Optional per-request collector (Stage 7).
+ *
+ * Deliberately a listener rather than a return value: 44 call sites already funnel through
+ * `reportAvailabilityReadFailure`, so hooking it covers all of them by construction, and the
+ * one site someone forgets to update cannot silently keep failing open. `schedule-read-context`
+ * registers this; nothing here depends on Node, so browser bundles are unaffected.
+ */
+let failureListener: ((failure: ScheduleReadFailure) => void) | null = null;
+
+export function setScheduleReadFailureListener(
+  listener: ((failure: ScheduleReadFailure) => void) | null,
+): void {
+  failureListener = listener;
+}
+
 /** The shape PostgREST returns. Not an `Error`, which is why one is built below. */
 export interface ReadError {
   message?: string | null;
@@ -87,6 +113,23 @@ export function reportAvailabilityReadFailure(
 ): void {
   const message = error?.message ?? 'unknown error';
   console.warn(`[${context.source}] ${context.table}: ${message}`);
+
+  // Before the Sentry guards below: a request that wants to fail closed must learn about
+  // this even when no DSN is configured.
+  if (failureListener) {
+    try {
+      failureListener({
+        source: context.source,
+        table: context.table,
+        assumed: context.assumed,
+        venueId: context.venueId ?? null,
+        calendarId: context.calendarId ?? null,
+        date: context.date ?? null,
+      });
+    } catch {
+      // Collecting must never be the reason a lookup fails.
+    }
+  }
 
   // Browser bundles must not pull in the Sentry SDK from the engine, and with no
   // DSN configured `sentry.server.config.ts` never called `init`, so there is

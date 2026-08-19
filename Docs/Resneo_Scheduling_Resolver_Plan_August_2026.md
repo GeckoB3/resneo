@@ -692,6 +692,8 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
   The migration's `INSERT ... SELECT` is idempotent by construction (`WHERE NOT EXISTS` plus the partial unique index on `source_leave_id`), so the repair is to run that exact statement again against each environment **after** the dual-write is deployed there. Running it before merely re-opens the same window.
 
+  **Status: staging caught up 2026-08-19** (the one row was a 12:00 to 12:45 partial leave on 2026-09-15, created 20:37 UTC on 18 August, after the backfill). **Production is still outstanding and must wait until the dual-write is deployed there.**
+
   **Verify with the invariant, not the counts:** `leave_without_mirror` must be 0 ignoring rows that are legitimately unmirrorable (no matching `unified_calendars` row, or an inverted time pair). Counts alone cannot distinguish "never inserted" from "inserted then deleted".
 
   **A comment in the applied migration is misleading and the SQL is right `[R3-83]`.** The defensive clause says an inverted time pair is copied "as a whole-day closure instead"; the `AND (...)` predicate **skips** such rows. The behaviour is correct and deliberate, and the file is applied to both environments, so it is not being edited. Recorded here so the next reader trusts the SQL over the comment.

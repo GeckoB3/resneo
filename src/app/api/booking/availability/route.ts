@@ -54,6 +54,8 @@ import {
   loadCollectiveDayAvailability,
 } from '@/lib/linked-accounts/collective-booking-bridge';
 import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
+import { withScheduleReadContext } from '@/lib/availability/schedule-read-context';
+import { scheduleUnavailableResponse } from '@/lib/availability/schedule-unavailable-response';
 
 /** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
 const AVAILABILITY_REQUEST_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
@@ -312,7 +314,25 @@ async function runTableReservationAvailabilityForArea(
 }
 
 /** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N [&booking_model=event_ticket|class_session|resource_booking] */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * Every branch below reads schedules through fetchers that substitute `[]` on a failed
+ * query, so a database wobble produced a confident, wrong answer: an empty slot list is
+ * indistinguishable from a genuinely full day, and a guest could book a time the venue is
+ * not open for. Wrapping the whole handler covers appointments, events, classes and
+ * resources at once, and cannot miss a branch the way per-return edits would.
+ *
+ * Only a SUCCESSFUL response is replaced. A 400 or 404 is already a correct answer about
+ * the request itself and says nothing about schedule data.
+ */
 export async function GET(request: NextRequest) {
+  const { result, failures } = await withScheduleReadContext(() => handleAvailabilityGet(request));
+  if (failures.length > 0 && result.status < 400) return scheduleUnavailableResponse(failures);
+  return result;
+}
+
+async function handleAvailabilityGet(request: NextRequest) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   try {
     const { searchParams } = new URL(request.url);

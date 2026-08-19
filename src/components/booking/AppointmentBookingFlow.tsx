@@ -800,6 +800,38 @@ export function AppointmentBookingFlow({
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
+  /**
+   * The server could not read this venue's schedule and refused to guess (Stage 7).
+   * Distinct from "no slots": one means try again, the other means try another day.
+   */
+  const [slotsUnavailable, setSlotsUnavailable] = useState(false);
+  /**
+   * The arguments of the last slot lookup, so "Try again" can replay exactly that request.
+   * A ref, not state: it must not cause a render, and the retry only ever reads the latest.
+   */
+  const lastSlotFetchRef = useRef<Parameters<typeof fetchAvailability>[0] | null>(null);
+
+  /**
+   * Stage 7 (decision J). Deliberately NOT the "no times available" card: that one tells a
+   * guest to try a different date, which is the wrong advice when the date is fine and the
+   * lookup is not. Amber rather than red, because nothing is broken for them and retrying
+   * usually works.
+   */
+  const renderSlotsUnavailable = (onRetry: () => void) => (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 p-8 text-center">
+      <p className="text-sm font-medium text-amber-900">We could not load times for {formatDateHuman(date)}</p>
+      <p className="mx-auto mt-1 max-w-sm text-xs text-amber-800">
+        This is a temporary problem on our side, not a sign the day is full. Please try again in a moment.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-4 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+      >
+        Try again
+      </button>
+    </div>
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1081,6 +1113,7 @@ export function AppointmentBookingFlow({
       durationMinutes?: number | null;
       addonIds?: string[];
     }) => {
+      lastSlotFetchRef.current = opts;
       setLoading(true);
       try {
         const params = new URLSearchParams({ venue_id: venue.id, date });
@@ -1103,6 +1136,18 @@ export function AppointmentBookingFlow({
         }
         const res = await fetch(bookingAvailabilityUrl(params));
         const data = await res.json();
+        /**
+         * Stage 7 (decision J). A 503 means the server could not read this venue's schedule
+         * and refused to guess. Before this, `data.practitioners ?? []` turned that into an
+         * empty slot list, which reads as "fully booked" -- the same screen a genuinely full
+         * day produces, so a guest would give up on a venue that was open.
+         */
+        if (res.status === 503 && (data as { unavailable?: boolean })?.unavailable) {
+          setSlotsUnavailable(true);
+          setSlotPractitioners([]);
+          return;
+        }
+        setSlotsUnavailable(false);
         setSlotPractitioners(data.practitioners ?? []);
       } catch {
         setError('Failed to load availability');
@@ -4285,6 +4330,11 @@ export function AppointmentBookingFlow({
           )}
           {loading ? (
             <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
+          ) : slotsUnavailable ? (
+            renderSlotsUnavailable(() => {
+              const last = lastSlotFetchRef.current;
+              if (last) void fetchAvailability(last);
+            })
           ) : availableSlots.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No times available on {formatDateHuman(date)}</p>
@@ -5562,6 +5612,11 @@ export function AppointmentBookingFlow({
           </div>
           {loading ? (
             <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
+          ) : slotsUnavailable ? (
+            renderSlotsUnavailable(() => {
+              const last = lastSlotFetchRef.current;
+              if (last) void fetchAvailability(last);
+            })
           ) : groupAvailableSlots.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-sm font-medium text-slate-600">No times available on {formatDateHuman(date)}</p>

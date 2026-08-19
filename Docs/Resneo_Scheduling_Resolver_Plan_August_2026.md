@@ -804,7 +804,9 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **✅ The route is now PROVEN, 2026-08-19 `[R3-91]`.** Injecting at handler level (guaranteed on the path, unlike `fetchAppointmentInput`, which this request shape does not reach) returned **503 with `Retry-After: 15`**. The earlier failure was the injection point, not the wrap.
 
-**⚠️ The CARD itself has still not been seen rendering.** The guest wizard's slot step sits inside a panel the headless browser could not reach, so the path from 503 to the amber card is covered only by reading the code. **The next session should pin it with a component test** rather than another attempt at driving the UI: render `AppointmentBookingFlow` with a stubbed fetch returning 503 and assert the retry copy appears and "Try again" refetches. That is more durable than any manual observation anyway.
+**✅ The card is now pinned, 2026-08-19.** `AppointmentBookingFlow.slots-unavailable.test.tsx`, 5 fixtures: the retry card renders on a 503, the "no times available" copy and its wrong "try a different date" advice do NOT, "Try again" replays the lookup and recovers to real slots, the card stays absent on success, and the copy carries no em-dash.
+
+**Tested the test:** disabling the 503 branch turns exactly four of the five red, the fifth being the success path that should not depend on it. A component test was the right answer over driving the UI, which had already failed twice: the slot step sits inside a panel the headless browser could not open.
 
 **Still to do:** the month path (`appointment-calendar`), which matters most because a whole month rendering unavailable is far more visible than one day, plus `class-instances` and `resource-calendar`.
 

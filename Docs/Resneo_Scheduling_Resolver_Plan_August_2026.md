@@ -715,7 +715,20 @@ A stage, not a bullet: five client components need a new data dependency, three 
   **The shared helper alone would have missed the thing being asked for `[R3-81]`.** `validateEventCalendarPlacement` covers only the two PATCH paths; **event CREATE validates hours inline** in `experience-events/route.ts` POST, because it builds many dates from one payload and fetches the venue and calendar once for all of them. Adding the check to the helper and stopping would have fixed editing an event onto leave while leaving creating one straight onto leave untouched. Both paths now carry it, and the POST path fetches leave once for the whole create range.
 
   Four fixtures assert events and classes returning the **same verdict** on the same windows, which is the actual defect: one venue, two answers. Refusal is 400, not 409: leave is a property of the calendar, like hours, not a collision with another booked item.
-3. **One weekly-hours editor replaces three**, and **one date-override editor replaces the venue closure editor and the leave panel**.
+3. **One weekly-hours editor replaces three** — specified as decision (K) below — and **one date-override editor replaces the venue closure editor and the leave panel**.
+
+  **Decision (K), taken 2026-08-19: one shared component, two locations, no period cap.**
+
+  v3.3 and earlier said "one editor replaces three" and never said *where*, which left the most consequential half of the work unspecified. The three today are `OpeningHoursControl` (**venue** hours, in Settings and onboarding), `WorkingHoursControl` (**calendar** hours, in `/dashboard/availability`, onboarding and `ServiceCustomAvailabilityEditor`) and the inline editor in `resource-timeline-ui` (**resource** hours, in `/dashboard/resource-timeline`).
+
+  **One component, but NOT one page.** Venue hours and calendar hours answer different questions: *when is the business open* versus *when does this person or room work*. They **compose**, and a calendar cannot sell outside venue hours. Collapsing them onto one surface would hide the relationship this entire programme exists to make correct, and would invite a venue to believe editing one edits the other. So:
+  - **Venue hours stay in Settings.** Set rarely, usually once at onboarding.
+  - **Calendar and resource hours merge into `/dashboard/availability`**, retiring `/dashboard/resource-timeline`'s inline editor. Three pages becomes two.
+  - **The calendar editor shows the venue's hours as read-only context**, so setting hours outside them is visible at the point of editing rather than discovered later as a missing slot.
+
+  **No period cap anywhere.** Today `OpeningHoursControl` renders `periods[0]` and `periods[1]` and **cannot display a third**, while the other two are unlimited. The cap is also enforced server-side at `config-schemas.ts` `openingHoursDaySchema` (`.max(2)`), which is what stops the truncation becoming data loss today: a third period cannot be stored, so opening Settings and saving cannot silently drop one. **Relaxing it is contained**, verified 2026-08-19: `/api/venue/opening-hours` is the only writer of `venues.opening_hours`, the only consumer of that schema, and **nothing outside the editor indexes `periods[1]`**. The resolver unions any number of periods already. A venue with a genuine third window (morning, afternoon, evening) can then express it.
+
+  **Order of work, so the risky part lands last:** (1) relax `.max(2)` and prove the resolver and restaurant read paths are indifferent; (2) make the shared component render N periods; (3) repoint `OpeningHoursControl`'s call sites at it; (4) repoint `WorkingHoursControl`'s; (5) move resource hours into `/dashboard/availability` and retire the inline editor; (6) add the read-only venue-hours context. Steps 1 to 4 are invisible to a venue. **Step 5 is the first user-visible navigation change in the whole programme.**
 4. **Fix the "Closure vs Unavailable window" options** that write byte-identical rows.
 5. **Validation parity between POST and PATCH** on every route.
 6. **"Apply to all calendars" for breaks.**

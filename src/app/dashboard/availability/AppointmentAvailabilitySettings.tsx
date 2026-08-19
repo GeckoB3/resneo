@@ -1098,6 +1098,21 @@ export function AppointmentAvailabilitySettings({
                     </div>
                   )}
                   <StaffLeaveCalendarPanel
+                    /**
+                     * appointmentCalendars, NOT scheduleCalendars: resources are deliberately
+                     * excluded here, and this is a deferral rather than an oversight.
+                     *
+                     * Decision (L) said resource date overrides merge into this panel. They
+                     * cannot yet. `POST /api/venue/practitioner-leave` rejects a resource
+                     * with "Calendar not found" (`requireVenueHostCalendarId` filters
+                     * `calendar_type = 'resource'`), and more importantly NOTHING WOULD READ
+                     * IT: `fetchHostUnavailableWindows` is called with host calendar ids
+                     * only, so leave stored against a resource is invisible to every engine.
+                     *
+                     * Offering it would produce a setting that saves and does nothing, which
+                     * is the exact defect class this programme exists to remove. The resource
+                     * half of (L) is blocked on engine support first. See `[R3-89]`.
+                     */
                     practitioners={appointmentCalendars.map((p) => ({ id: p.id, name: p.name }))}
                     isAdmin={isAdmin}
                     selfPractitionerId={
@@ -1198,7 +1213,22 @@ export function AppointmentAvailabilitySettings({
                     />
                   )}
 
-                  {selectedPrac && tab === 'breaks' && (
+                  {/**
+                    * Breaks are not offered for a resource, for the same reason closures are
+                    * not (`[R3-89]`): the resource engine reads `break_times` from the HOST
+                    * calendar row, never from the resource's own, so a break saved here would
+                    * be invisible to every engine. Saying so beats a control that appears to
+                    * work. HOURS are different and genuinely supported: resource
+                    * `working_hours` is the column the engine reads, verified end to end.
+                    */}
+                  {selectedPrac && tab === 'breaks' && (selectedPrac.calendar_type ?? 'practitioner') === 'resource' && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+                      Breaks are not available for resources yet. Set the hours this resource can be booked on the
+                      Availability tab instead. To keep a room free at the same time each day, add a break on the
+                      staff calendar it appears on.
+                    </div>
+                  )}
+                  {selectedPrac && tab === 'breaks' && (selectedPrac.calendar_type ?? 'practitioner') !== 'resource' && (
                     <>
                       {canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && (
                         <p className="mb-4 text-sm text-slate-600">

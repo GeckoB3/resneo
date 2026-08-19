@@ -26,10 +26,12 @@ interface CalendarOption {
   name: string;
 }
 
+/**
+ * DERIVED from the stored times, never chosen. See the note on the form below.
+ */
 type CalendarBlockType = 'closed' | 'partial';
 
 interface DraftState {
-  block_type: CalendarBlockType;
   date_start: string;
   date_end: string;
   time_start: string | null;
@@ -39,9 +41,22 @@ interface DraftState {
   apply_to_all_active: boolean;
 }
 
+/**
+ * Labels for an EXISTING entry, derived from whether it carries times.
+ *
+ * These used to be a choice on the form: "Closure" and "Unavailable window", which wrote
+ * byte-identical rows. The helper text conceded it -- "Closure blocks the whole day unless
+ * you add optional times" -- at which point it was an Unavailable window. `block_type` never
+ * reached the server; both options set the same two columns, and the only real difference
+ * was whether the time inputs were required. Picking between them changed nothing, which is
+ * the kind of choice that quietly erodes trust in everything else on the screen.
+ *
+ * The form now has one shape with optional times, and these labels just describe what is
+ * stored. Plan §4 Stage 6a item 5, `[R3-84]`.
+ */
 const BLOCK_TYPE_LABELS: Record<CalendarBlockType, string> = {
-  closed: 'Closure',
-  partial: 'Unavailable window',
+  closed: 'All day',
+  partial: 'Part day',
 };
 
 const BLOCK_TYPE_COLORS: Record<CalendarBlockType, string> = {
@@ -51,7 +66,6 @@ const BLOCK_TYPE_COLORS: Record<CalendarBlockType, string> = {
 
 function emptyDraft(): DraftState {
   return {
-    block_type: 'closed',
     date_start: '',
     date_end: '',
     time_start: null,
@@ -72,7 +86,6 @@ function isFullDayLeave(p: Pick<LeavePeriodRow, 'unavailable_start_time' | 'unav
 function draftFromPeriod(p: LeavePeriodRow): DraftState {
   const fullDay = isFullDayLeave(p);
   return {
-    block_type: fullDay ? 'closed' : 'partial',
     date_start: p.start_date,
     date_end: p.end_date,
     time_start: fullDay ? null : (p.unavailable_start_time?.slice(0, 5) ?? null),
@@ -277,8 +290,16 @@ export function StaffLeaveCalendarPanel({
       setFormError('End date must be on or after start date.');
       return;
     }
-    if (draft.block_type === 'partial' && (!draft.time_start || !draft.time_end || draft.time_end <= draft.time_start)) {
-      setFormError('Unavailable window requires a valid start and end time (end after start).');
+    // Blank both times = all day. One time on its own is not a window, and the engines
+    // treat a half-set pair as a whole-day closure, so refusing it here stops the venue
+    // storing something that means the opposite of what the form showed them.
+    const hasAnyTime = Boolean(draft.time_start || draft.time_end);
+    if (hasAnyTime && (!draft.time_start || !draft.time_end)) {
+      setFormError('Enter both a start and an end time, or leave both blank to block the whole day.');
+      return;
+    }
+    if (draft.time_start && draft.time_end && draft.time_end <= draft.time_start) {
+      setFormError('End time must be after start time.');
       return;
     }
     if (!editingId && !draft.apply_to_all_active && !calendarId) {
@@ -286,7 +307,7 @@ export function StaffLeaveCalendarPanel({
       return;
     }
 
-    const fullDay = draft.block_type === 'closed' && !draft.time_start && !draft.time_end;
+    const fullDay = !draft.time_start && !draft.time_end;
     const payload = {
       start_date: draft.date_start,
       end_date: draft.date_end,
@@ -373,7 +394,7 @@ export function StaffLeaveCalendarPanel({
   if (practitioners.length === 0) {
     return (
       <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-        Add a calendar first to set closures and unavailable windows.
+        Add a calendar first to set closures.
       </p>
     );
   }
@@ -383,7 +404,7 @@ export function StaffLeaveCalendarPanel({
       <div className="max-w-xl space-y-1">
         <p className="text-sm text-slate-600">
           Block online booking for one calendar column at a time. Click dates on the calendar to select a range, then
-          set closure or unavailable window details below.
+          set the closure details below.
         </p>
         <p className="text-xs text-slate-500">
           Whole-venue closures and amended opening hours for every booking type are in{' '}
@@ -452,30 +473,6 @@ export function StaffLeaveCalendarPanel({
                 </h3>
 
                 <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
-                  <div className="min-w-0 sm:col-span-2">
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
-                    <select
-                      value={draft.block_type}
-                      onChange={(e) => {
-                        const block_type = e.target.value as CalendarBlockType;
-                        setDraft((d) => ({
-                          ...d,
-                          block_type,
-                          time_start: block_type === 'partial' ? d.time_start ?? '09:00' : null,
-                          time_end: block_type === 'partial' ? d.time_end ?? '12:00' : null,
-                        }));
-                      }}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="closed">Closure</option>
-                      <option value="partial">Unavailable window</option>
-                    </select>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      Closure blocks the whole day unless you add optional times. Unavailable window blocks the same
-                      time range on every day in the range.
-                    </p>
-                  </div>
-
                   <div className="min-w-0">
                     <label className="mb-1 block text-xs font-medium text-slate-600">Start date</label>
                     <input
@@ -501,36 +498,34 @@ export function StaffLeaveCalendarPanel({
                     />
                   </div>
 
-                  {(draft.block_type === 'closed' || draft.block_type === 'partial') && (
-                    <>
-                      <div className="min-w-0">
-                        <label className="mb-1 block text-xs font-medium text-slate-600">
-                          {draft.block_type === 'partial'
-                            ? 'Start time'
-                            : 'Start time (optional, for partial-day)'}
-                        </label>
-                        <input
-                          type="time"
-                          value={draft.time_start ?? ''}
-                          onChange={(e) =>
-                            setDraft({ ...draft, time_start: e.target.value || null })
-                          }
-                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="mb-1 block text-xs font-medium text-slate-600">
-                          {draft.block_type === 'partial' ? 'End time' : 'End time (optional)'}
-                        </label>
-                        <input
-                          type="time"
-                          value={draft.time_end ?? ''}
-                          onChange={(e) => setDraft({ ...draft, time_end: e.target.value || null })}
-                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                        />
-                      </div>
-                    </>
-                  )}
+                  <div className="min-w-0 sm:col-span-2">
+                    <p className="text-[11px] text-slate-500">
+                      Leave both times blank to block the whole day. Enter a start and an end to block that window
+                      on every date in the range.
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Start time (optional)
+                    </label>
+                    <input
+                      type="time"
+                      value={draft.time_start ?? ''}
+                      onChange={(e) => setDraft({ ...draft, time_start: e.target.value || null })}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      End time (optional)
+                    </label>
+                    <input
+                      type="time"
+                      value={draft.time_end ?? ''}
+                      onChange={(e) => setDraft({ ...draft, time_end: e.target.value || null })}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </div>
 
                   <div className="min-w-0 sm:col-span-2">
                     <label className="mb-1 block text-xs font-medium text-slate-600">Label (optional)</label>
@@ -736,7 +731,7 @@ export function StaffLeaveCalendarPanel({
 
       {!loading && periods.length === 0 && (
         <p className="text-center text-sm text-slate-400">
-          No closures or unavailable windows for this calendar. Click dates on the calendar to add one.
+          No closures for this calendar. Click dates on the calendar to add one.
         </p>
       )}
 

@@ -840,6 +840,16 @@ The shared helper has **8 fixtures** covering what the copies never tested: 503 
 
 **Scope note.** The decision covers the GUEST booking path, which is what `SA-C3` is about. The staff write-path validators (`findClassScheduleWindowAvailabilityConflict`, `findEventLeaveConflict`) still fail open, deliberately and consistently with each other. Changing those is not part of Stage 7 and should not be smuggled into it: refusing to let staff schedule anything during a database wobble is a different trade with a different answer.
 
+**Extended to staff READS, 2026-08-19 `[R3-95]`. The scope note above was narrower than it read, and the gap was found from outside.** The mobile app's R20 delta audit asked whether the staff copies of the wrapped guest routes had been considered and excluded. They had not: this note justifies excluding two named *write validators*, and says nothing about staff *reads*, which block nothing and instead answer a question wrongly. Decision (J)'s own justification is already a staff-cost argument, so it applies unchanged with the audience swapped. The correspondence is in `Docs/R20-1_WEB_RESPONSE.md`, `_2` and `_3`.
+
+**The enumeration was the defect, twice.** Stage 7's "five guest availability routes" was not exhaustive, and neither was the first attempt to extend it. Both lists had been typed by hand. `booking/class-offerings` and `booking/event-offerings` are guest routes on the same engines that were never wrapped; `venue/event-offerings` is a staff twin that a hand-written list missed even while correcting a hand-written list. A derived sweep (find every module containing a `reportAvailabilityReadFailure` call site, find the functions those sites sit in, find the routes calling them) produced the real set. **A transitive import walk does not work**: a barrel re-export makes `venue/compliance/types/[id]/versions` look like an availability consumer, and it returns 80 routes.
+
+**The list now lives in `src/lib/availability/schedule-fail-closed-coverage.test.ts`**, with both halves: the routes that must be wrapped, and the routes that must not, each with its reason. A route that quietly loses its wrapper fails that file instead of waiting for the next audit.
+
+**Two things stay fail open, recorded so they are not re-found.** `getCalendarGrid` reports nothing at all, so wrapping `venue/calendar-grid` would be inert and would read as protection: it needs instrumentation first. `cron/send-communications` reaches `fetchVenueClosureBlocksForDates`, so a failed read can let a reminder go out for a booking on a closed day, but fail closed does not apply where there is no client to retry.
+
+**`venue/waitlist` degrades per entry instead, and the two mechanisms must never be combined `[R3-96]`.** See §4 Stage 7a below.
+
 ---
 
 ## §5 The safety net, since there is no flag

@@ -26,6 +26,7 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -40,7 +41,28 @@ function toMinutes(value: string): number {
  * Staff day-level appointment slots using staff booking-window rules (same-day allowed,
  * past slots on today allowed). Supports linked-owner venues and reschedule exclusion.
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * The staff slot list, and the mobile app's time picker (R20-1). A failed leave or closure
+ * read does not only withhold times: in the other direction it OFFERS one that is not free,
+ * and the booking that follows double-books a practitioner.
+ *
+ * Staff READS, not the staff write validators. Stage 7's scope note excludes
+ * `findClassScheduleWindowAvailabilityConflict` and `findEventLeaveConflict` deliberately,
+ * because refusing to let staff SCHEDULE anything during a database wobble is a different
+ * trade with a different answer. This route blocks nothing: it answers a question, and
+ * answering it wrongly is the failure decision (J) exists to prevent, with the audience
+ * changed.
+ *
+ * The 401 guard below runs before any schedule read, and the wrapper replaces only a
+ * SUCCESSFUL response, so an unauthenticated request still gets 401 rather than 503.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleStaffAppointmentAvailabilityGet(request));
+}
+
+async function handleStaffAppointmentAvailabilityGet(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);

@@ -27,6 +27,7 @@ import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-acce
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
 import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -37,7 +38,30 @@ const UUID_RE =
  * Returns month dates with at least one bookable appointment slot for the given
  * practitioner/calendar + service, using staff booking-window rules (same-day allowed).
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * The month path is the most exposed surface in the programme:
+ * `appointment-month-availability.ts` carries TWELVE fail-open reads, and a failure there
+ * does not remove one time, it removes whole DATES from the picker. The guest copy was
+ * wrapped in Stage 7 and this, the staff copy on the same module, was not. It is the
+ * mobile app's date picker (R20-1), which DISABLES the dates this route omits.
+ *
+ * Staff READS, not the staff write validators. Stage 7's scope note excludes
+ * `findClassScheduleWindowAvailabilityConflict` and `findEventLeaveConflict` deliberately,
+ * because refusing to let staff SCHEDULE anything during a database wobble is a different
+ * trade with a different answer. This route blocks nothing: it answers a question, and
+ * answering it wrongly is the failure decision (J) exists to prevent, with the audience
+ * changed.
+ *
+ * The 401 guard below runs before any schedule read, and the wrapper replaces only a
+ * SUCCESSFUL response, so an unauthenticated request still gets 401 rather than 503.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleStaffAppointmentCalendarGet(request));
+}
+
+async function handleStaffAppointmentCalendarGet(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);

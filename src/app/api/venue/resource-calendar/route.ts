@@ -9,13 +9,38 @@ import {
   computeResourceAvailableDatesInMonthAnyDuration,
   attachHostCalendarsToResources,
 } from '@/lib/availability/resource-booking-engine';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 /**
  * GET /api/venue/resource-calendar?resource_id=&year=&month=&duration=
  * Staff: available dates for one resource in a calendar month.
  * Omit `duration` or use `duration=any` to mark days where any valid slot-interval-based duration can book.
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * Staff twin of `/api/booking/resource-calendar`, which Stage 7 wrapped. A resource month
+ * built without one of its inputs removes whole dates from the picker, which reads as fully
+ * booked.
+ *
+ * Latent today, since production has zero resources. Wired now for the same reason the
+ * guest copy was.
+ *
+ * Staff READS, not the staff write validators. Stage 7's scope note excludes
+ * `findClassScheduleWindowAvailabilityConflict` and `findEventLeaveConflict` deliberately,
+ * because refusing to let staff SCHEDULE anything during a database wobble is a different
+ * trade with a different answer. This route blocks nothing: it answers a question, and
+ * answering it wrongly is the failure decision (J) exists to prevent, with the audience
+ * changed.
+ *
+ * The 401 guard below runs before any schedule read, and the wrapper replaces only a
+ * SUCCESSFUL response, so an unauthenticated request still gets 401 rather than 503.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleStaffResourceCalendarGet(request));
+}
+
+async function handleStaffResourceCalendarGet(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);

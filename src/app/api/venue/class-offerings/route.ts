@@ -10,6 +10,7 @@ import {
 } from '@/lib/availability/class-session-engine';
 import { loadClassOfferingCommerceCatalog } from '@/lib/class-commerce/enrich-class-offerings';
 import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -25,7 +26,29 @@ function addDaysIso(from: string, days: number): string {
  * GET /api/venue/class-offerings?from=YYYY-MM-DD&days=90
  * Staff: same shape as public class-offerings; includes sessions inside min-notice (staff can book walk-ins).
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * Staff twin of `/api/booking/class-offerings`. The reads behind
+ * `fetchClassInputForRange` substitute `[]` on failure, so an offering list built without
+ * one of its inputs can show a session on a day the venue is closed, or hide one it is
+ * running.
+ *
+ * Staff READS, not the staff write validators. Stage 7's scope note excludes
+ * `findClassScheduleWindowAvailabilityConflict` and `findEventLeaveConflict` deliberately,
+ * because refusing to let staff SCHEDULE anything during a database wobble is a different
+ * trade with a different answer. This route blocks nothing: it answers a question, and
+ * answering it wrongly is the failure decision (J) exists to prevent, with the audience
+ * changed.
+ *
+ * The 401 guard below runs before any schedule read, and the wrapper replaces only a
+ * SUCCESSFUL response, so an unauthenticated request still gets 401 rather than 503.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleStaffClassOfferingsGet(request));
+}
+
+async function handleStaffClassOfferingsGet(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);

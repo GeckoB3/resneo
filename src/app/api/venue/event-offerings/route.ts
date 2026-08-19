@@ -9,6 +9,7 @@ import {
   fetchEventInputForRange,
 } from '@/lib/availability/event-ticket-engine';
 import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,7 +25,29 @@ function addDaysIso(from: string, days: number): string {
  * GET /api/venue/event-offerings?from=YYYY-MM-DD&days=90
  * Staff: event series with bookable dates in range + full occurrence rows for calendar selection.
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * Staff twin of `/api/booking/event-offerings`. The fail-open read behind
+ * `fetchEventInputForRange` states its own consequence: it assumes "the venue has no
+ * closures or amended hours in this range, so every event is on sale". A failed read does
+ * not hide events, it SELLS them through a closure.
+ *
+ * Staff READS, not the staff write validators. Stage 7's scope note excludes
+ * `findClassScheduleWindowAvailabilityConflict` and `findEventLeaveConflict` deliberately,
+ * because refusing to let staff SCHEDULE anything during a database wobble is a different
+ * trade with a different answer. This route blocks nothing: it answers a question, and
+ * answering it wrongly is the failure decision (J) exists to prevent, with the audience
+ * changed.
+ *
+ * The 401 guard below runs before any schedule read, and the wrapper replaces only a
+ * SUCCESSFUL response, so an unauthenticated request still gets 401 rather than 503.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleStaffEventOfferingsGet(request));
+}
+
+async function handleStaffEventOfferingsGet(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);

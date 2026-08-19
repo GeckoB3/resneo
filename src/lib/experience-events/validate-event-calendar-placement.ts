@@ -19,6 +19,7 @@ import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import { rowsToVenueWideBlocks, venueWideBlocksQueryForDate } from '@/lib/availability/venue-wide-blocks-fetch';
 import { assertExperienceEventWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { validateExperienceEventWindowAgainstVenueAndCalendar } from '@/lib/experience-events/event-hours-vs-venue-calendar';
+import { findEventLeaveConflict } from '@/lib/experience-events/event-leave-conflict';
 
 function timeHhMm(t: string): string {
   const s = String(t).trim();
@@ -82,6 +83,24 @@ export async function validateEventCalendarPlacement(
   );
   if (hoursErr) {
     return { ok: false, error: hoursErr, status: 400 };
+  }
+
+  /**
+   * Staff leave (§1.2 item 24). Checked AFTER hours and BEFORE the overlap scan, matching
+   * the order the class path uses, so a venue gets the same reason in the same priority
+   * whichever thing it is scheduling. 400 rather than 409: leave is a property of the
+   * calendar, like hours, not a collision with another booked item.
+   */
+  const leaveErr = await findEventLeaveConflict(admin, {
+    venueId,
+    calendarId,
+    date: eventDate,
+    startHHmm: startHm,
+    endHHmm: endHm,
+    calendarName: (ucRow as { name?: string | null }).name ?? null,
+  });
+  if (leaveErr) {
+    return { ok: false, error: leaveErr, status: 400 };
   }
 
   const conflict = await assertExperienceEventWindowFreeOnCalendar(

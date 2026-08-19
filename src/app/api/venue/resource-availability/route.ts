@@ -4,13 +4,39 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 /**
  * GET /api/venue/resource-availability?date=YYYY-MM-DD&duration=60&resource_id=<optional uuid>
  * Staff-only resource slots for the signed-in venue (primary or secondary `resource_booking`).
  * When `resource_id` is set, only that resource is computed (faster than loading all resources).
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * Staff twin of the guest resource slot path. The reads behind `fetchResourceInput`
+ * substitute `[]` on failure, so a slot list built without one of its inputs offers a
+ * resource that is already taken, or hides one that is free.
+ *
+ * Latent today, since production has zero resources. Wired now because the mechanism is
+ * fresh and the cost is four lines; left undone it becomes the thing nobody remembers when
+ * a venue first switches resources on.
+ *
+ * Staff READS, not the staff write validators. Stage 7's scope note excludes
+ * `findClassScheduleWindowAvailabilityConflict` and `findEventLeaveConflict` deliberately,
+ * because refusing to let staff SCHEDULE anything during a database wobble is a different
+ * trade with a different answer. This route blocks nothing: it answers a question, and
+ * answering it wrongly is the failure decision (J) exists to prevent, with the audience
+ * changed.
+ *
+ * The 401 guard below runs before any schedule read, and the wrapper replaces only a
+ * SUCCESSFUL response, so an unauthenticated request still gets 401 rather than 503.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleStaffResourceAvailabilityGet(request));
+}
+
+async function handleStaffResourceAvailabilityGet(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);

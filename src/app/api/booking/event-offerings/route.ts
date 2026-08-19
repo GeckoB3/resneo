@@ -8,6 +8,7 @@ import {
   fetchEventInputForRange,
 } from '@/lib/availability/event-ticket-engine';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 function addDaysIso(from: string, days: number): string {
   const [y, m, d] = from.split('-').map(Number);
@@ -20,7 +21,23 @@ function addDaysIso(from: string, days: number): string {
  * GET /api/booking/event-offerings?venue_id=uuid&from=YYYY-MM-DD&days=90
  * Public: event series with bookable dates in range + occurrence rows (guest booking rules applied).
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * Missed by Stage 7's original five, and found by the mobile app's R20 delta audit. The
+ * fail-open read behind this route states its own consequence: `fetchEventInputForRange`
+ * assumes "the venue has no closures or amended hours in this range, so every event is on
+ * sale". A failed read therefore does not hide events, it SELLS them through a closure.
+ *
+ * Wrapping the handler covers every branch at once and cannot miss one the way per-return
+ * edits would. Only a SUCCESSFUL response is replaced: a 400 is already a correct answer
+ * about the request itself and says nothing about schedule data.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleEventOfferingsGet(request));
+}
+
+async function handleEventOfferingsGet(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const venueId = searchParams.get('venue_id');

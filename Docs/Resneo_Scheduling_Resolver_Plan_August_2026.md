@@ -840,6 +840,30 @@ The shared helper has **8 fixtures** covering what the copies never tested: 503 
 
 **Scope note.** The decision covers the GUEST booking path, which is what `SA-C3` is about. The staff write-path validators (`findClassScheduleWindowAvailabilityConflict`, `findEventLeaveConflict`) still fail open, deliberately and consistently with each other. Changing those is not part of Stage 7 and should not be smuggled into it: refusing to let staff schedule anything during a database wobble is a different trade with a different answer.
 
+**Extended to staff READS, 2026-08-19 `[R3-95]`. The scope note above was narrower than it read, and the gap was found from outside.** The mobile app's R20 delta audit asked whether the staff copies of the wrapped guest routes had been considered and excluded. They had not: this note justifies excluding two named *write validators*, and says nothing about staff *reads*, which block nothing and instead answer a question wrongly. Decision (J)'s own justification is already a staff-cost argument, so it applies unchanged with the audience swapped. The correspondence is in `Docs/R20-1_WEB_RESPONSE.md`, `_2` and `_3`.
+
+**The enumeration was the defect, twice.** Stage 7's "five guest availability routes" was not exhaustive, and neither was the first attempt to extend it. Both lists had been typed by hand. `booking/class-offerings` and `booking/event-offerings` are guest routes on the same engines that were never wrapped; `venue/event-offerings` is a staff twin that a hand-written list missed even while correcting a hand-written list. A derived sweep (find every module containing a `reportAvailabilityReadFailure` call site, find the functions those sites sit in, find the routes calling them) produced the real set. **A transitive import walk does not work**: a barrel re-export makes `venue/compliance/types/[id]/versions` look like an availability consumer, and it returns 80 routes.
+
+**The list now lives in `src/lib/availability/schedule-fail-closed-coverage.test.ts`**, with both halves: the routes that must be wrapped, and the routes that must not, each with its reason. A route that quietly loses its wrapper fails that file instead of waiting for the next audit.
+
+**Two things stay fail open, recorded so they are not re-found.** `getCalendarGrid` reports nothing at all, so wrapping `venue/calendar-grid` would be inert and would read as protection: it needs instrumentation first. `cron/send-communications` reaches `fetchVenueClosureBlocksForDates`, so a failed read can let a reminder go out for a booking on a closed day, but fail closed does not apply where there is no client to retry.
+
+**`venue/waitlist` degrades per entry instead, and the two mechanisms must never be combined `[R3-96]`.** See Stage 7a below.
+
+### Stage 7a — per-entry degradation, and the nesting hazard `[R3-96]`
+
+**✅ COMPLETE 2026-08-19.** `GET /api/venue/waitlist` folds `can_offer` into each entry of one list response. A failed schedule read used to answer `can_offer: false` with "No matching availability", which both clients render as a **disabled Offer button** and a warning: the system told staff a waiting client could not be offered a slot, and removed their ability to try. A wrong answer, not a missing one.
+
+**Wrapping it was the obvious remedy and the wrong one.** There is no availability-only sub-view on either client; both render a single error state for the whole screen. A 503 would trade a wrong flag on some entries for **no waitlist at all for every entry**, including a tables-only venue whose entries never reach the check. The flag is also advisory in front of a gate that re-checks: `offerAppointmentWaitlistEntryManually` re-resolves the slot and returns 409. Fail closed buys less in front of a re-checking gate than it does on a picker, where the output IS the answer.
+
+So the route runs each entry's check in its own `withScheduleReadContext` and, on any reported failure, leaves `can_offer` unset and sets `offer_check_failed`. Both clients gate on an explicit `=== false`, so **the button stays enabled on builds that predate the flag** and the change degrades cleanly without an app release.
+
+**It keys on "a read failed", not on which way the answer came out.** A failed working-hours read yields no slots and the wrong disable above. A failed `bookings` read yields no occupancy, so the engine believes the day is empty and answers `available: true` — a wrong **enable**, pointing staff at a slot already taken. The mobile repo's harm argument covered only the first; narrowing the rule to `available === false` would reopen the second.
+
+**The hazard, which is the part worth keeping.** The collector reads `AsyncLocalStorage.getStore()`, which returns the **innermost** store. A per-entry context therefore **shadows** a route-level one, so `withScheduleFailClosed` added on top of this route would see an empty failure list for every per-entry read and return a clean 200 — while still converting failures from reads *outside* the loop into 503s. Partial, unpredictable, and **invisible to a handler-level injection fixture**, which is the style Stage 7 itself recommends (`[R3-91]`). The two mechanisms are mutually exclusive, not additive.
+
+This was proven rather than reasoned about, after being asserted twice from reading: three fixtures in `schedule-read-context.test.ts` pin the shadowing, the partial-protection case, and the concurrent isolation that makes per-entry attribution possible at all. `schedule-fail-closed-coverage.test.ts` lists the route under `MUST_NOT_WRAP`, because a comment fails when someone reads the file and a test fails when someone changes it.
+
 ---
 
 ## §5 The safety net, since there is no flag
@@ -1288,7 +1312,7 @@ All nine of v2's entries were verified at the cited lines and stand. Three of th
 | Staff appointment-modification route | `api/venue/bookings/[id]/validate-appointment-modification/route.ts` | v2 lists the lib, not the route |
 | Multi-service visit scheduler | `api/venue/visits/[groupBookingId]/schedule/route.ts`, `.../services/route.ts` | The only code to change since baseline |
 | Linked-accounts staff booking | `api/venue/linked-calendar/booking/route.ts` | Collective **write** path; v2 lists only the read bridge |
-| Staff availability routes | `api/venue/class-availability`, `resource-availability`, `class-offerings`, `event-offerings` | Dashboard twins of the guest routes |
+| Staff availability routes | `api/venue/resource-availability`, `class-offerings`, `event-offerings` | Dashboard twins of the guest routes. All wrapped 2026-08-19 `[R3-95]`. `class-availability` was listed here too and was **deleted**: it had no caller in either repo, on any branch, ever |
 | Resource mint-slots helper | `calendar/resource-availability-mint-slots.ts:35` | Decision (A) moves it |
 | Diary break renderer | `calendar/practitioner-break-blocks.ts:3` | Shares the helpers Stage 5 rewrites |
 | Closure-over-booking guard | `calendar/closure-booking-conflicts.ts:1-9` | Write gate on the surface Stage 6a migrates |

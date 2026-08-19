@@ -528,13 +528,17 @@ export async function getCalendarGrid(params: {
   const { supabase, venueId, calendarIds, startDate, endDate } = params;
   if (calendarIds.length === 0) return { calendars: [] };
 
-  const { data: cals } = await supabase
+  const { data: cals, error: calsErr } = await supabase
     .from('unified_calendars')
     .select('id, name, working_hours')
     .eq('venue_id', venueId)
     .in('id', calendarIds);
 
-  const [{ data: bookingRows }, { data: blockRows }, { data: sessionRows }] = await Promise.all([
+  const [
+    { data: bookingRows, error: bookingsErr },
+    { data: blockRows, error: blocksErr },
+    { data: sessionRows, error: sessionsErr },
+  ] = await Promise.all([
     supabase
       .from('bookings')
       .select(
@@ -574,6 +578,46 @@ export async function getCalendarGrid(params: {
       .eq('is_cancelled', false),
   ]);
 
+  /**
+   * Fail-open reads; see `availability-read-failure.ts` (SA-C3). Stage 1 instrumented the
+   * engines and never reached this function, so until 2026-08-19 all seven reads here
+   * discarded `error` entirely and substituted `[]`. A failed `bookings` read therefore
+   * rendered an EMPTY DAY on the mobile calendar (this function is that screen's only
+   * source), and staff concluded nobody was booked. Nothing logged it and nothing reached
+   * Sentry.
+   *
+   * The last two are LABEL-ONLY: losing them mislabels a bar, it does not misstate the
+   * schedule. That distinction matters if `venue/calendar-grid` is ever wrapped in
+   * `withScheduleFailClosed`, because the collector is flat: a failed guest-name lookup
+   * would then blank the whole calendar. Decide that when wrapping, not by accident.
+   */
+  reportAvailabilityReadFailures(
+    'getCalendarGrid',
+    { venueId, date: `${startDate}..${endDate}` },
+    [
+      {
+        table: 'unified_calendars',
+        assumed: 'the venue has no calendars, so the grid is empty',
+        error: calsErr,
+      },
+      {
+        table: 'bookings',
+        assumed: 'nothing is booked in this range, so every column reads as free',
+        error: bookingsErr,
+      },
+      {
+        table: 'calendar_blocks',
+        assumed: 'no time is blocked out, so blocked slots look bookable',
+        error: blocksErr,
+      },
+      {
+        table: 'event_sessions',
+        assumed: 'no sessions are scheduled, so their columns look free',
+        error: sessionsErr,
+      },
+    ],
+  );
+
   const guestIdList = [
     ...new Set(
       (bookingRows ?? [])
@@ -581,10 +625,17 @@ export async function getCalendarGrid(params: {
         .filter((id): id is string => Boolean(id)),
     ),
   ];
-  const { data: guestRows } =
+  const { data: guestRows, error: guestsErr } =
     guestIdList.length > 0
       ? await supabase.from('guests').select('id, first_name, last_name').in('id', guestIdList)
-      : { data: [] as { id: string; first_name: string | null; last_name: string | null }[] };
+      : { data: [] as { id: string; first_name: string | null; last_name: string | null }[], error: null };
+  reportAvailabilityReadFailures('getCalendarGrid', { venueId, date: `${startDate}..${endDate}` }, [
+    {
+      table: 'guests',
+      assumed: 'the bookings have no guest, so every bar is labelled "Guest" (label only)',
+      error: guestsErr,
+    },
+  ]);
 
   const guestName = new Map(
     (guestRows ?? []).map((g) => [g.id, formatGuestDisplayName(g.first_name, g.last_name)] as const),
@@ -598,16 +649,30 @@ export async function getCalendarGrid(params: {
   }
   const serviceNames = new Map<string, string>();
   if (serviceIds.size > 0) {
-    const { data: svcAppointment } = await supabase
+    const { data: svcAppointment, error: svcAppointmentErr } = await supabase
       .from('appointment_services')
       .select('id, name')
       .eq('venue_id', venueId)
       .in('id', [...serviceIds]);
-    const { data: svcItems } = await supabase
+    const { data: svcItems, error: svcItemsErr } = await supabase
       .from('service_items')
       .select('id, name')
       .eq('venue_id', venueId)
       .in('id', [...serviceIds]);
+    // Label only: the booking's own `service_name_snapshot` is preferred below, so a
+    // failure here shows "Service" on rows taken before snapshotting existed.
+    reportAvailabilityReadFailures('getCalendarGrid', { venueId, date: `${startDate}..${endDate}` }, [
+      {
+        table: 'appointment_services',
+        assumed: 'the catalogue has no names, so unsnapshotted bars read "Service" (label only)',
+        error: svcAppointmentErr,
+      },
+      {
+        table: 'service_items',
+        assumed: 'the catalogue has no names, so unsnapshotted bars read "Service" (label only)',
+        error: svcItemsErr,
+      },
+    ]);
     for (const s of [...(svcAppointment ?? []), ...(svcItems ?? [])]) {
       const row = s as { id: string; name: string };
       serviceNames.set(row.id, row.name);

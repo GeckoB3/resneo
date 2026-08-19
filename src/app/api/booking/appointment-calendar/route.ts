@@ -28,6 +28,8 @@ import {
   isCollectiveId,
   loadCollectiveMonthAvailableDates,
 } from '@/lib/linked-accounts/collective-booking-bridge';
+import { withScheduleReadContext } from '@/lib/availability/schedule-read-context';
+import { scheduleUnavailableResponse } from '@/lib/availability/schedule-unavailable-response';
 
 /**
  * GET /api/booking/appointment-calendar?venue_id=&practitioner_id=&service_id=&year=&month=
@@ -36,7 +38,26 @@ import {
  *
  * Feeds the visual date picker on the public appointment booking form.
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * The month path is the most exposed surface in the programme:
+ * `appointment-month-availability.ts` carries TWELVE fail-open reads, more than any other
+ * file, and a failure there does not remove one time, it removes whole DATES from the
+ * picker. A guest sees a month with days greyed out and concludes the venue is busy, which
+ * is both wrong and completely silent.
+ *
+ * Wrapping the handler covers every branch at once. Only a SUCCESSFUL response is replaced:
+ * a 400 is already a correct answer about the request itself and says nothing about
+ * schedule data.
+ */
 export async function GET(request: NextRequest) {
+  const { result, failures } = await withScheduleReadContext(() => handleAppointmentCalendarGet(request));
+  if (failures.length > 0 && result.status < 400) return scheduleUnavailableResponse(failures);
+  return result;
+}
+
+async function handleAppointmentCalendarGet(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
     const venueId = searchParams.get('venue_id');

@@ -114,14 +114,23 @@ function slotsResponse() {
  * lookup fail and the retry succeed. That ordering IS the feature: a card that appears but
  * cannot recover would be no better than the wrong list it replaced.
  */
-function installFetch(availabilityResponses: Array<() => Response>) {
+function installFetch(
+  availabilityResponses: Array<() => Response>,
+  calendarResponses?: Array<() => Response>,
+) {
   let availabilityCalls = 0;
+  let calendarCalls = 0;
 
   const impl = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : String(input);
 
     if (url.includes('/api/booking/appointment-catalog')) return jsonResponse({ practitioners: CATALOG });
-    if (url.includes('appointment-calendar')) return jsonResponse({ available_dates: [todayYmd()] });
+    if (url.includes('appointment-calendar')) {
+      if (!calendarResponses) return jsonResponse({ available_dates: [todayYmd()] });
+      const next = calendarResponses[Math.min(calendarCalls, calendarResponses.length - 1)]!;
+      calendarCalls += 1;
+      return next();
+    }
     if (url.includes('/api/booking/availability')) {
       const next = availabilityResponses[Math.min(availabilityCalls, availabilityResponses.length - 1)]!;
       availabilityCalls += 1;
@@ -131,7 +140,7 @@ function installFetch(availabilityResponses: Array<() => Response>) {
   });
 
   vi.stubGlobal('fetch', impl);
-  return { calls: () => availabilityCalls };
+  return { calls: () => availabilityCalls, calendarCalls: () => calendarCalls };
 }
 
 async function walkToSlots(): Promise<void> {
@@ -218,5 +227,62 @@ describe('slot lookup returning 503', () => {
 
     const card = (await screen.findByText(/We could not load times for/i)).closest('div');
     expect(card?.textContent ?? '').not.toContain('—');
+  });
+});
+
+/**
+ * The MONTH path, which is the most exposed surface in the programme:
+ * `appointment-month-availability.ts` carries twelve fail-open reads, more than any other
+ * file, and a failure there does not remove one time, it removes whole DATES from the
+ * picker. Rendered without this notice, a month the server refused to answer looks exactly
+ * like a venue booked solid for weeks, and a guest has no reason to try again.
+ */
+describe('month lookup returning 503', () => {
+  it('warns that the month could not be checked, without claiming it is full', async () => {
+    installFetch([slotsResponse], [unavailableResponse]);
+    render(<AppointmentBookingFlow venue={venue()} />);
+    await walkToSlots();
+
+    expect(await screen.findByText(/We could not check which days are free/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/temporary problem on our side, not a sign the month is full/i),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * The flow loads more than one month while walking (it prefetches around the current
+   * one), so "fail the first call, succeed after" cannot express this: a later success
+   * clears the notice before the assertion runs. That clearing is CORRECT -- any month that
+   * loads means the venue is reachable again -- so the test controls the switch explicitly
+   * rather than counting calls.
+   */
+  it('offers a Try again that refetches the month', async () => {
+    let healthy = false;
+    const stub = installFetch(
+      [slotsResponse],
+      [() => (healthy ? jsonResponse({ available_dates: [todayYmd()] }) : unavailableResponse())],
+    );
+    render(<AppointmentBookingFlow venue={venue()} />);
+    await walkToSlots();
+
+    await screen.findByText(/We could not check which days are free/i);
+    const before = stub.calendarCalls();
+
+    healthy = true;
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }));
+
+    await waitFor(() => expect(stub.calendarCalls()).toBeGreaterThan(before));
+    await waitFor(() =>
+      expect(screen.queryByText(/We could not check which days are free/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  it('stays absent when the month lookup succeeds', async () => {
+    installFetch([slotsResponse]);
+    render(<AppointmentBookingFlow venue={venue()} />);
+    await walkToSlots();
+
+    expect(await screen.findByRole('button', { name: '10:00' })).toBeInTheDocument();
+    expect(screen.queryByText(/We could not check which days are free/i)).not.toBeInTheDocument();
   });
 });

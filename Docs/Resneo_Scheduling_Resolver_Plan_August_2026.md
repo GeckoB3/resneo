@@ -808,7 +808,15 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **Tested the test:** disabling the 503 branch turns exactly four of the five red, the fifth being the success path that should not depend on it. A component test was the right answer over driving the UI, which had already failed twice: the slot step sits inside a panel the headless browser could not open.
 
-**Still to do:** the month path (`appointment-calendar`), which matters most because a whole month rendering unavailable is far more visible than one day, plus `class-instances` and `resource-calendar`.
+**✅ The month path is done, 2026-08-19.** It was the most exposed surface in the programme: `appointment-month-availability.ts` carries **twelve** fail-open reads, more than any other file, and a failure there does not remove one time, it removes whole DATES from the picker. A guest sees a month with nothing green and concludes the venue is busy for weeks.
+- `/api/booking/appointment-calendar` wraps its handler. **Proven on staging: 503 with `Retry-After: 15`**, recovering to a normal month once the injection was removed.
+- The month fetch already checked `res.ok` and threw, which is better than the slot path did, but a throw still leaves an empty picker that reads as "fully booked". It now flags the 503 specifically and shows its own notice, worded for a month rather than a day.
+- **Any successful month load clears the flag**, whether or not anyone pressed Try again: one month answering means the venue is reachable again.
+- 3 further fixtures (8 in the file). Tested the test: disabling the branch turns exactly the two month fixtures red.
+
+**A test-design note worth keeping `[R3-92]`.** The first attempt at the retry fixture failed because the flow **prefetches more than one month**, so "fail the first call, then succeed" let a later success clear the notice before the assertion ran. The fix was an explicit switch the test flips, not a call counter. Any fixture that assumes one request per user action on this flow will be flaky in the same way.
+
+**Still to do:** `class-instances` and `resource-calendar`, both far lower traffic than the two paths now covered.
 
 **Decision (J), taken 2026-08-19.** Today every availability fetcher reads `res.data ?? []`, so a failed read of the leave or closure table is indistinguishable from "nothing there" and the engine sells the day. The operator's call: **a wrong booking costs staff time and goodwill to untangle, while a retry message costs one refresh**, so the system should refuse to answer rather than answer wrongly. Stage 1 item 4 already made these failures visible in Sentry, which is the prerequisite; this stage makes them safe.
 

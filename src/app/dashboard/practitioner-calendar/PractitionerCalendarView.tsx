@@ -193,6 +193,7 @@ import {
   processingBlocksForDurationChange,
 } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
+import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
 
 /** Same semantics as `minutesBetweenStartAndEnd` in appointment-engine (HH:mm span, wraps past midnight). */
 function minutesBetweenStartAndEnd(startHHmm: string, endHHmm: string): number {
@@ -3022,6 +3023,23 @@ export function PractitionerCalendarView({
   );
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
+
+  /**
+   * Venue hours for the day on screen, for the column headers (decision (K), step 6).
+   *
+   * The header printed the calendar's RAW working hours while the grid beside it drew the
+   * effective ones, so on a Tuesday where the venue closes at 18:00 and a calendar runs to
+   * 22:00 the two halves of the same screen disagreed, and only the grid was right.
+   *
+   * `unrestricted` means no opening hours are set, so there is nothing to constrain by and
+   * the headers keep their raw line. `closed` yields an empty list, which reads as closed.
+   */
+  const venueRangesForHeader = useMemo(() => {
+    const res = resolveVenueWideAllowedMinuteRanges(openingHours, activeDayDate, venueWideBlocks);
+    if (res.kind === 'unrestricted') return null;
+    if (res.kind === 'closed') return [];
+    return res.ranges;
+  }, [openingHours, activeDayDate, venueWideBlocks]);
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
     () => {
       // Pass the blocks so the grid follows the venue's RESOLVED hours for this date. An
@@ -7139,6 +7157,10 @@ export function PractitionerCalendarView({
                         col.practitioner.working_hours,
                         date,
                         venueTimezone,
+                        // Native columns only. Linked columns belong to another venue with
+                        // its own opening hours; constraining them by this venue's would be
+                        // wrong, so they keep the unconstrained line.
+                        venueRangesForHeader,
                       );
                       return (
                         <div

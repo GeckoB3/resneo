@@ -11,6 +11,20 @@ import { listActiveHostCalendarIds, requireVenueHostCalendarId } from '@/lib/ven
 import { findClosureBookingConflicts, describeClosureBookingConflict } from '@/lib/calendar/closure-booking-conflicts';
 import { z } from 'zod';
 
+import {
+  mirrorLeaveDelete,
+  mirrorLeaveInsert,
+  mirrorLeaveUpdate,
+} from '@/lib/availability/calendar-date-overrides-mirror';
+
+/**
+ * Stage 6a keeps `calendar_date_overrides` in step with every write below. The mirror is
+ * fail-soft by construction: this table stays authoritative, and no `await` here can turn a
+ * mirror problem into a failed leave save. See the module header for why.
+ */
+const MIRROR_SELECT =
+  'id, venue_id, practitioner_id, start_date, end_date, leave_type, notes, unavailable_start_time, unavailable_end_time, created_at';
+
 const LEAVE_SELECT =
   'id, practitioner_id, start_date, end_date, leave_type, notes, created_at, unavailable_start_time, unavailable_end_time';
 
@@ -313,11 +327,15 @@ export async function POST(request: NextRequest) {
           unavailable_end_time: timeNorm.end,
         },
       ];
-      const { data, error } = await admin.from('practitioner_leave_periods').insert(rows).select('id');
+      const { data, error } = await admin
+        .from('practitioner_leave_periods')
+        .insert(rows)
+        .select(MIRROR_SELECT);
       if (error) {
         console.error('POST /api/venue/practitioner-leave (staff) failed:', error);
         return NextResponse.json({ error: 'Failed to save unavailability' }, { status: 500 });
       }
+      await mirrorLeaveInsert(admin, data ?? [], 'POST /api/venue/practitioner-leave (staff)');
       return NextResponse.json(
         { created: data?.length ?? 0, ids: (data ?? []).map((r: { id: string }) => r.id) },
         { status: 201 },
@@ -354,12 +372,17 @@ export async function POST(request: NextRequest) {
       unavailable_end_time: timeNorm.end,
     }));
 
-    const { data, error } = await admin.from('practitioner_leave_periods').insert(rows).select('id');
+    const { data, error } = await admin
+      .from('practitioner_leave_periods')
+      .insert(rows)
+      .select(MIRROR_SELECT);
 
     if (error) {
       console.error('POST /api/venue/practitioner-leave failed:', error);
       return NextResponse.json({ error: 'Failed to save unavailability' }, { status: 500 });
     }
+
+    await mirrorLeaveInsert(admin, data ?? [], 'POST /api/venue/practitioner-leave');
 
     return NextResponse.json({ created: data?.length ?? 0, ids: (data ?? []).map((r: { id: string }) => r.id) }, { status: 201 });
   } catch (err) {
@@ -526,6 +549,8 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update unavailability' }, { status: 500 });
     }
 
+    await mirrorLeaveUpdate(admin, data, 'PATCH /api/venue/practitioner-leave');
+
     return NextResponse.json(data);
   } catch (err) {
     console.error('PATCH /api/venue/practitioner-leave failed:', err);
@@ -583,6 +608,8 @@ export async function DELETE(request: NextRequest) {
       console.error('DELETE /api/venue/practitioner-leave failed:', error);
       return NextResponse.json({ error: 'Failed to delete unavailability' }, { status: 500 });
     }
+
+    await mirrorLeaveDelete(admin, id, staff.venue_id, 'DELETE /api/venue/practitioner-leave');
 
     return NextResponse.json({ success: true });
   } catch (err) {

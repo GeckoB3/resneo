@@ -29,7 +29,7 @@
 
 **Two traps for anyone adding fixtures to these paths.** The month path filters every date through the service booking window, whose default caps advance booking at **90 days**. `getUnifiedAvailableSlots` applies `isGuestBookingDateAllowed` before resolving anything, and `entityBookingWindowFromRow` hard-caps `max_advance_booking_days` at **365** — a real product rule. A fixed far-future date is rejected before the resolver is ever consulted, and the whole file then returns empty lists that look exactly like a resolver defect. The unified fixture computes its date relative to today for that reason.
 
-**Stages 0a to 5 are implemented and pushed to `origin/staging`.** Stage 6a's migration is written and pushed but **has never been executed against any database**; the rest of 6a, plus 6b and 7, remain.
+**Stages 0a to 5 are on `main` and in production.** Stage 6a's migration is applied to staging and production; its dual-write and the item 24 fix are implemented. **Every decision (A) to (J) is now taken**, including (J) fail-closed. What remains is 6a's write-surface consolidation, 6b's contraction, and Stage 7's implementation.
 
 **Baseline:** tree of `6bc9ef4f`, now squash-merged and shipped as `ea9672f2` on `main` and `staging`. Since the v2 draft: 20 lines of unrelated visits-route code and 63 lines of test. **Nothing this plan cites has moved.** 344 test files, 261 migrations.
 
@@ -146,7 +146,7 @@ Items 1 to 15 are carried from v2 with corrections. Items 16 to 24 are new in v3
 
 23. ✅ **FIXED, Stage 3.** It accepts venue-wide blocks and resolves through the shared function; the opening-hours route passes real blocks to both sides. Original finding: **`hours-change-orphans.ts` reads weekly opening hours only.** It warns owners which upcoming bookings an hours change strands. It never reads `availability_blocks`, amended hours or closures. Stage 3 redefines "inside hours" for every other consumer and this warning silently drifts. v2 counts its confirm dialog in §1.1 and never assigns it.
 
-24. ⚠️ **STILL OPEN, and Stage 5 did NOT turn it on as v3.0 predicted `[R3-78]`.** Leave stayed outside the calendar-hours module by design, so the validator still never reads `practitioner_leave_periods`. **Class creation checks leave; event creation does not** — the same venue, two answers. Scheduled explicitly in Stage 6a rather than left to fall out of a refactor. **Originally:** event creation never checks leave, and Stage 5 was expected to turn that on silently. `validate-event-calendar-placement.ts:53-84` reaches `calendarSegmentsForDate` (`event-hours-vs-venue-calendar.ts:80-93`), which reads `working_hours`, `break_times` and `days_off` and never `practitioner_leave_periods`. Decision (D) keeps this validator, so making leave a calendar closure starts refusing event creation on leave dates, at a write surface, whether or not anyone intends it.
+24. ✅ **FIXED, Stage 6a, 2026-08-19 `[R3-81]`.** Both event PATCH paths and event CREATE now check leave, so events and classes refuse the same windows. **Stage 5 did NOT turn this on as v3.0 predicted `[R3-78]`:** Leave stayed outside the calendar-hours module by design, so the validator still never reads `practitioner_leave_periods`. **Class creation checks leave; event creation does not** — the same venue, two answers. Scheduled explicitly in Stage 6a rather than left to fall out of a refactor. **Originally:** event creation never checks leave, and Stage 5 was expected to turn that on silently. `validate-event-calendar-placement.ts:53-84` reaches `calendarSegmentsForDate` (`event-hours-vs-venue-calendar.ts:80-93`), which reads `working_hours`, `break_times` and `days_off` and never `practitioner_leave_periods`. Decision (D) keeps this validator, so making leave a calendar closure starts refusing event creation on leave dates, at a write surface, whether or not anyone intends it.
 
 ### 1.3 What is dead, what only looks dead, and what must never be dropped
 
@@ -687,8 +687,12 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 **Then the rest of 6a**, in this order. The table now exists in the migration, so what follows is code:
 
-1. **Fail-soft dual-write** to `calendar_date_overrides` alongside the existing leave and closure writes, per the hazard above: report and continue, never throw, and tolerate the table being absent. The old rows stay authoritative until 6b.
-2. **Close §1.2 item 24** — teach the event placement validator to read leave, so event creation refuses a staff leave date the way class creation already does. One deliberate change under decision (D), stated to owners, **not** a by-product of a refactor. Expect event creation to start failing on leave dates; that is the point.
+1. ✅ **DONE 2026-08-19. Fail-soft dual-write** in `src/lib/availability/calendar-date-overrides-mirror.ts`, wired into all four write points of `practitioner-leave/route.ts` (two inserts, the update, the delete), 15 tests. `practitioner_leave_periods` stays authoritative. **`mirrorLeaveUpdate` inserts when no mirror row matched**, so a row lost to an earlier fail-soft failure is repaired the next time anyone edits that leave period, which is why no reconciliation job is scheduled. Live-checked on staging: POST 201 and PATCH 200 against the real table.
+2. ✅ **DONE 2026-08-19. §1.2 item 24 closed** in `src/lib/experience-events/event-leave-conflict.ts`, 12 tests.
+
+  **The shared helper alone would have missed the thing being asked for `[R3-81]`.** `validateEventCalendarPlacement` covers only the two PATCH paths; **event CREATE validates hours inline** in `experience-events/route.ts` POST, because it builds many dates from one payload and fetches the venue and calendar once for all of them. Adding the check to the helper and stopping would have fixed editing an event onto leave while leaving creating one straight onto leave untouched. Both paths now carry it, and the POST path fetches leave once for the whole create range.
+
+  Four fixtures assert events and classes returning the **same verdict** on the same windows, which is the actual defect: one venue, two answers. Refusal is 400, not 409: leave is a property of the calendar, like hours, not a collision with another booked item.
 3. **One weekly-hours editor replaces three**, and **one date-override editor replaces the venue closure editor and the leave panel**.
 4. **Fix the "Closure vs Unavailable window" options** that write byte-identical rows.
 5. **Validation parity between POST and PATCH** on every route.
@@ -702,9 +706,13 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **Verify grants on the hosted projects, not from the migrations.** Hosted Supabase grants `anon`/`authenticated` a full default privilege set through project-level defaults that live outside this repository, and table privileges are checked **before** RLS, so a local pgTAP pass proves nothing. Run `20270113120000`'s verification query against staging and production **separately** after each push, plus `npm run check:function-grants` per environment.
 
-### Stage 7 — Fail closed (`SA-C3` proper). Optional, decide separately.
+### Stage 7 — Fail closed (`SA-C3` proper). ✅ **DECIDED IN, 2026-08-19. Not yet implemented.**
 
 `loadScheduleContext`, the third `unavailable` state, HTTP 503 with `Retry-After`, a retry card in the booking UI. Independent of everything above and the only stage touching the guest booking UI.
+
+**Decision (J), taken 2026-08-19.** Today every availability fetcher reads `res.data ?? []`, so a failed read of the leave or closure table is indistinguishable from "nothing there" and the engine sells the day. The operator's call: **a wrong booking costs staff time and goodwill to untangle, while a retry message costs one refresh**, so the system should refuse to answer rather than answer wrongly. Stage 1 item 4 already made these failures visible in Sentry, which is the prerequisite; this stage makes them safe.
+
+**Scope note.** The decision covers the GUEST booking path, which is what `SA-C3` is about. The staff write-path validators (`findClassScheduleWindowAvailabilityConflict`, `findEventLeaveConflict`) still fail open, deliberately and consistently with each other. Changing those is not part of Stage 7 and should not be smuggled into it: refusing to let staff schedule anything during a database wobble is a different trade with a different answer.
 
 ---
 
@@ -1117,12 +1125,13 @@ Every row is a calendar in "same breaks every day" mode whose breaks vanish on a
 
 **(I) Stage 6a stores per-date overrides in a NEW `calendar_date_overrides` table**, not a type discriminator on `practitioner_leave_periods`. Taken 2026-08-18, when the migration was written. That table is FK'd to `practitioners`, which has zero production rows, while every calendar lives in `unified_calendars`: extending it would mean re-pointing an FK on a table with live readers. A new table costs one backfill and leaves the old one untouched for 6b to retire on its own schedule. `leave_type`, `notes` and `created_at` are carried across (§1.3 tier 3).
 
+**(J) The system fails CLOSED when it cannot read a venue's schedule.** Taken 2026-08-19. See Stage 7 for the reasoning and for what the decision deliberately does not cover.
+
 ### Still open
 
-1. **Is Stage 7 (fail-closed) in or out?** Largest single piece, and the only one touching the guest booking UI.
-2. **`leave_type`** — the mislabelling is a copy fix (§1.3 tier 3), not a schema change. Confirm no reader is wanted before Stage 6a freezes the shape.
-3. **No data prerequisite is outstanding.** Q3, Q4 and Q5 all returned zero rows on production (2026-08-17). Q1, Q2, Q8 and Q9 remain advisory: run them to decide which venues need telling. **Run Q0 first** to confirm the population is non-empty before trusting any zero, and re-run Q3 immediately before `staging` merges to `main` (Stage 3 is already on `staging`, so that merge is when it reaches production data).
-4. **Confirm the `reserveni-app` grep and the production access-log check** before any route in §1.3 tier 1 is deleted.
+1. **`leave_type`** — the mislabelling is a copy fix (§1.3 tier 3), not a schema change. Confirm no reader is wanted before Stage 6a freezes the shape.
+2. **No data prerequisite is outstanding.** Q3, Q4 and Q5 all returned zero rows on production (2026-08-17). Q1, Q2, Q8 and Q9 remain advisory: run them to decide which venues need telling. **Run Q0 first** to confirm the population is non-empty before trusting any zero, and re-run Q3 immediately before `staging` merges to `main` (Stage 3 is already on `staging`, so that merge is when it reaches production data).
+3. **Confirm the `reserveni-app` grep and the production access-log check** before any route in §1.3 tier 1 is deleted.
 
 ---
 

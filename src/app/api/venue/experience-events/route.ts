@@ -16,6 +16,8 @@ import { buildEntityNotFoundMessage } from '@/lib/venue/entity-delete-booking-gu
 import { assertExperienceEventWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { validateExperienceEventWindowAgainstVenueAndCalendar } from '@/lib/experience-events/event-hours-vs-venue-calendar';
 import { validateEventCalendarPlacement } from '@/lib/experience-events/validate-event-calendar-placement';
+import { evaluateEventLeaveConflict, type LeaveWindow } from '@/lib/experience-events/event-leave-conflict';
+import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 import { syncEventTicketTypes } from '@/lib/experience-events/sync-event-ticket-types';
 import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
 import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
@@ -324,6 +326,8 @@ export async function POST(request: NextRequest) {
       availability_blocks: ReturnType<typeof rowsToVenueWideBlocks>;
     } | null = null;
     let calendarRowForHours: Record<string, unknown> | null = null;
+    let leavePeriodsForRange: Array<LeaveWindow & { start_date: string; end_date: string }> = [];
+    let calendarNameForLeave: string | null = null;
 
     if (resolvedCalendarId) {
       const sortedCreateDates = [...datesToCreate].sort();
@@ -347,6 +351,38 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Calendar column not found for this venue.' }, { status: 400 });
       }
       calendarRowForHours = ucFull as Record<string, unknown>;
+
+      /**
+       * Staff leave for the whole create range, fetched once (§1.2 item 24).
+       *
+       * This POST path validates hours inline rather than through
+       * `validateEventCalendarPlacement`, because it creates many dates from one payload
+       * and fetches the venue and calendar once for all of them. That is also why adding
+       * the leave check to the shared helper alone would have missed CREATE entirely and
+       * covered only the two PATCH paths.
+       */
+      const { data: leaveRows, error: leaveErr } = await admin
+        .from('practitioner_leave_periods')
+        .select('start_date, end_date, unavailable_start_time, unavailable_end_time')
+        .eq('venue_id', staff.venue_id)
+        .eq('practitioner_id', resolvedCalendarId)
+        .lte('start_date', maxCreateDate)
+        .gte('end_date', minCreateDate);
+      if (leaveErr) {
+        reportAvailabilityReadFailure(
+          {
+            source: 'POST /api/venue/experience-events',
+            table: 'practitioner_leave_periods',
+            assumed: 'nobody is on leave, so every date in this event series is allowed',
+            venueId: staff.venue_id,
+            calendarId: resolvedCalendarId,
+            date: `${minCreateDate}..${maxCreateDate}`,
+          },
+          leaveErr,
+        );
+      }
+      leavePeriodsForRange = (leaveRows ?? []) as Array<LeaveWindow & { start_date: string; end_date: string }>;
+      calendarNameForLeave = (ucFull as { name?: string | null }).name ?? null;
       venueHoursPayload = {
         opening_hours: (venueRow?.opening_hours as OpeningHours | null) ?? null,
         venue_opening_exceptions: parseVenueOpeningExceptions(venueRow?.venue_opening_exceptions),
@@ -355,6 +391,21 @@ export async function POST(request: NextRequest) {
     }
 
     for (const eventDate of orderedCreateDates) {
+      if (resolvedCalendarId) {
+        // Narrow the range-wide leave rows to the ones actually covering this date.
+        const leaveConflict = evaluateEventLeaveConflict({
+          date: eventDate,
+          startHHmm: startHm,
+          endHHmm: endHm,
+          calendarName: calendarNameForLeave,
+          leavePeriods: leavePeriodsForRange.filter(
+            (l) => l.start_date <= eventDate && l.end_date >= eventDate,
+          ),
+        });
+        if (leaveConflict) {
+          return NextResponse.json({ error: leaveConflict }, { status: 400 });
+        }
+      }
       if (resolvedCalendarId && venueHoursPayload && calendarRowForHours) {
         const hoursErr = validateExperienceEventWindowAgainstVenueAndCalendar(
           eventDate,

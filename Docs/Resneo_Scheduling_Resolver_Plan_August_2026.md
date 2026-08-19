@@ -1,20 +1,20 @@
 # ResNeo scheduling resolver — gold-standard implementation plan
 
 **Date:** 2026-08-17
-**Status:** **v3.2** (2026-08-18). **All eight semantic decisions (A) to (H) are taken.** **Q0 was run against production on 2026-08-17 and reframes the whole plan: see §6.** The only live composition is venue weekly hours × calendar working hours × breaks × leave, on appointments, at 14 venues. Amended hours have **never** been used, and there are zero resources, zero future classes and zero future events. Q3, Q4, Q5 and Q6 all return zero because the populations are empty, not because the rows are clean. **Every decision (A) to (H) is therefore a zero-risk change against current data**, and the plan's purpose is to make the model correct before venues arrive rather than to stop live bleeding. Re-run Q3 and Q5 before the stages that depend on them: both results expire.
+**Status:** **v3.3** (2026-08-19). **All ten decisions (A) to (J) are taken.** **Q0 was run against production on 2026-08-17 and reframes the whole plan: see §6.** The only live composition is venue weekly hours × calendar working hours × breaks × leave, on appointments, at 14 venues. Amended hours have **never** been used, and there are zero resources, zero future classes and zero future events. Q3, Q4, Q5 and Q6 all return zero because the populations are empty, not because the rows are clean. **Every decision (A) to (H) is therefore a zero-risk change against current data**, and the plan's purpose is to make the model correct before venues arrive rather than to stop live bleeding. Re-run Q3 and Q5 before the stages that depend on them: both results expire.
 
 | Stage | Blocked on |
 |---|---|
 | 0a (exports, Supabase fake) | **DONE 2026-08-17.** tsc clean, lint clean, 345 files / 3274 tests green. |
-| 0b (parity harness) | **DONE 2026-08-17.** 46 tests at the time, **105 across 9 files** after Stage 5. Its coverage gap was missed before Stage 4 and **cleared 2026-08-18** as the first part of Stage 5. |
+| 0b (parity harness) | **DONE 2026-08-17.** 46 tests at the time, **107 across 9 files** after Stage 5 and the off-grid fixtures. Its coverage gap was missed before Stage 4 and **cleared 2026-08-18** as the first part of Stage 5. |
 | 1 (all eight items) | **DONE 2026-08-17.** Q9 was run first and returned zero rows, so item 2 shipped as a no-op. Items 2, 3 and 8 are what hold Q9's, Q3's and Q5's production zeros true. |
 | 2 (event read/write contract) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 4 (diary geometry) | **DONE 2026-08-17.** 354 files / 3377 tests green; diary and month verified in the app. |
 | 5 (calendar resolver) | **DONE 2026-08-18.** 361 files / 3470 tests green. Harness debt cleared first (3 files, 32 fixtures, 2 defects found). |
-| 6a (expand) | ⏳ **Migration written 2026-08-18, not applied.** Blocked on a `db push` to staging plus its verification block; the rest of 6a (dual-write, editor consolidation) waits on that. |
+| 6a (expand) | ⏳ **Part done.** Migration applied to staging and production 2026-08-19 and verified; dual-write and item 24 shipped to `staging` 2026-08-19. **Remaining: the write-surface consolidation, and production's backfill catch-up (`[R3-82]`).** |
 | 6b (contract) | §1.3 tier 2 and tier 3 prerequisites, **Q5**, **Q6**, **Q7**, **Q10**, and 6a live and soaked. |
-| 7 (fail closed) | its own decision, still open |
+| 7 (fail closed) | **Decided IN 2026-08-19 (decision J). Not implemented.** Guest path only. |
 
 **Harness debt: CLEARED 2026-08-18 `[R3-73]`.** Stage 0b named four consumers it did not assert and said three were due before Stage 4; they were not done, and Stages 3 and 4 both changed code they run. Cleared as the first part of Stage 5:
 
@@ -59,6 +59,15 @@ v2 was attacked on four independent axes by four reviewers working from the code
 **Two v2 claims were over-stated and one was inverted.** §1.2 item 4's "clobbers on every call site" is conditional, not universal, and the fix is three lines rather than fourteen call sites. §1.2 item 12 is latent, not live. "Four of five engines use the resolver" is three of five.
 
 **One claim that appeared in the v3 review round is itself wrong and has not been carried through.** A reviewer argued that a narrow one-day amended block correctly narrows a longer one today, and that §2.3's union would regress it. It does not: `unionAmendedPeriods` (`venue-wide-business-hours.ts:84-96`) already concatenates the periods of **every** amended block on the date before intersecting. The narrowing does not work today either. A specificity rule is still the right design, but it is an **improvement**, not a preservation. It was therefore raised as operator decision **(E)** rather than adopted silently, sized with Q4 (zero rows on production), and then taken on 2026-08-17.
+
+**What v3.3 changed, all of it from deploying and operating the thing `[R3-80]` to `[R3-83]`.** A second review technique the others cannot replace: running it against a real database.
+
+| | Found | Correction |
+|---|---|---|
+| `[R3-80]` | `[R3-77]` claimed the ritual deploys code before migrations | **Inverted.** Migrations reach production at step 4, code merges at step 5. The missing-table window it described does not exist; the dual-write is fail-soft for a better reason that does not depend on deploy order. |
+| `[R3-81]` | Adding the leave check to `validateEventCalendarPlacement` would have looked complete | That helper covers only the two PATCH paths. **Event CREATE validates hours inline**, so the obvious fix would have left creating an event onto leave untouched while fixing editing one. |
+| `[R3-82]` | Staging showed 9 leave rows against 8 mirrored | **A backfill is a point-in-time snapshot and a dual-write only covers its own deployment onward.** The seam between them is invisible to both halves. Caught by the invariant query, not by row counts, which looked plausible either way. |
+| `[R3-83]` | A comment in the applied migration contradicts its own SQL | Inverted time pairs are **skipped**, not copied as whole-day closures. SQL correct, comment wrong, file applied so not edited. |
 
 **What v3.2 changed, all of it from implementing the plan `[R3-75]`, `[R3-78]`.** Building a thing is a review technique the other four axes cannot replace, and it found two model errors and one false prediction that reading could not:
 
@@ -669,21 +678,20 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
 **Split into 6a (expand) and 6b (contract), which is not optional** `[R3-45]`. The standing deploy ritual applies migrations to production **before** merging the code, so production runs old code against the new schema for the whole window. A `DROP COLUMN` in that window is not a degradation, it is a `42703` and the route 500s. `resource-booking-engine.ts:981` selects `id, working_hours, days_off, break_times, break_times_by_day` explicitly, so dropping either column **takes the entire resource booking engine down**. Three more single-line explicit selects break the same way: `venue/practitioners/route.ts:110`, `venue/resources/route.ts:201`, `class-schedule-availability-conflicts.ts:197` `[R3-56]`.
 
-**Stage 6a — expand only.** ⏳ **IN PROGRESS, and blocked.** The migration is written and pushed to `origin/staging` (`20270114120000_calendar_date_overrides.sql`, 2026-08-18) with all nine RLS/grant artefacts, the leave backfill, and three pgTAP assertions (plan 18 → 21).
+**Stage 6a — expand only.** ⏳ **PART DONE.** The migration, the dual-write and the item 24 fix are all shipped; **the write-surface consolidation is the whole of what remains**, plus production's catch-up run. The migration was written and pushed to `origin/staging` (`20270114120000_calendar_date_overrides.sql`, 2026-08-18) with all nine RLS/grant artefacts, the leave backfill, and three pgTAP assertions (plan 18 → 21).
 
 **✅ Executed and verified, 2026-08-18.** CI's `rls-pgtap` job passed on the introducing commit (run `32182208996`, against a local Supabase built from the migrations), and the operator pushed it to **staging**, where the verification block returned exactly the expected posture: `SELECT` only for `anon` and `authenticated`, 8 overrides against 8 leave rows, and **nothing left behind** (8 distinct `source_leave_id` values against 8 leave rows accounts for every one). It was never run locally, as there is no Docker in the working environment.
 
-**Nothing else in 6a is started.**
 
 **`[R3-77]` was INVERTED and is corrected here `[R3-80]`.** It claimed the ritual deploys *code before* the migration, and that the dual-write would therefore hit a missing table. **The ritual is the other way round**: migrations are applied to production by hand at step 4, and `staging` merges into `main` at step 5. The table exists in production *before* any code that reads it arrives, so the missing-table window it described does not exist. The hazard that IS real is the one the Stage 6 header already states and the one this migration is expand-only to avoid: production runs **old code against the new schema** for the length of that window, which is safe for an added table and fatal for a contraction.
 
 **The dual-write should still be fail-soft, for a different and better reason.** `calendar_date_overrides` is a secondary mirror until Stage 6b; `practitioner_leave_periods` stays authoritative. A write to a mirror must never be able to fail the primary write path a venue is actually depending on, so it reports and continues rather than throwing. That argument does not depend on deploy ordering and holds in every environment, including a developer's machine with the migration unapplied.
 
-**Operator steps before the rest of 6a can proceed:**
-1. `supabase db push` to **staging**, then run the migration's verification block against staging: the grant query (expect `SELECT` only for `anon` and `authenticated`), the backfill counts, and the left-behind query.
-2. Confirm CI's `rls-pgtap` job is green — the migration has **not** been validated locally (no Docker in the working environment), so CI is its first real execution.
-3. `npm run check:function-grants` against staging.
-4. Only then production, per the standing ritual.
+**Operator steps, all completed 2026-08-19:**
+1. ✅ `supabase db push` to **staging**, and the migration's verification block run against it: grants returned `SELECT` only for `anon` and `authenticated`, 8 overrides against 8 leave rows, nothing left behind.
+2. ✅ CI's `rls-pgtap` job green on the introducing commit.
+3. ✅ Production `db push`, then `staging` merged to `main`, then staging reset. Q3 was re-run against production first and returned zero rows.
+4. ⚠️ **Still owed:** `npm run check:function-grants` against **production**, and the grant query run there separately. Hosted grants are not reproduced by migration history, so staging passing proves nothing about production (see [[supabase-hosted-vs-local-grants]] reasoning in §6).
 
 **Then the rest of 6a**, in this order. The table now exists in the migration, so what follows is code:
 
@@ -728,7 +736,7 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 ## §5 The safety net, since there is no flag
 
-1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs. **Built, at `src/lib/availability/parity/` — 9 files, 107 tests as of 2026-08-18.** Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour, so a stage that changes one must change its expectation in the same commit. Its coverage gap (month path, diary renderer, `getUnifiedAvailableSlots`) was recorded in Stage 0b and **was cleared in Stage 5**, which found two live diary-renderer defects in the process.
+1. **Stage 0b's parity matrix**, asserting ordered start times and read/write pairs. **Built, at `src/lib/availability/parity/` — 9 files, 107 tests as of 2026-08-19.** Ten assertions are labelled `DIVERGES` and pin a defect rather than a desired behaviour, so a stage that changes one must change its expectation in the same commit. Its coverage gap (month path, diary renderer, `getUnifiedAvailableSlots`) was recorded in Stage 0b and **was cleared in Stage 5**, which found two live diary-renderer defects in the process.
 2. **One concern per commit**, each independently revertable.
 3. **Staging soak per stage** — now actually valid, because Stage 1 item 5 removes the CDN caching that would otherwise mask changes for 165 seconds per edge node.
 

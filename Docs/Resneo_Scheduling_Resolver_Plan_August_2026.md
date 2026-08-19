@@ -773,7 +773,13 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
   **The same applies to breaks, from step 5 `[R3-89]`.** Step 5 put resources on the hours, breaks and closures tabs together. **Hours are genuinely supported** and were verified end to end (the engine reads resource `working_hours`; an edit propagated and read back through the resources API). **Breaks are not:** the resource engine reads `break_times` from the host row, never the resource's own. The breaks tab now says so for a resource rather than offering a control that silently does nothing.
 
-  **Prerequisite for the resource half:** the engines must read a resource's own leave and breaks before either surface is offered. Until then, resources get hours here and nothing else.
+  **CORRECTION 2026-08-19 `[R3-94]`: this is not an engine gap, and calling it one was wrong.** Resources already have a working per-date override mechanism of their own: `unified_calendars.availability_exceptions`, written through `/api/venue/resources` and genuinely read by `getBaseResourceAvailabilityRanges` (`resource-booking-engine.ts`). It expresses `{closed:true}` for a whole day and `{periods:[...]}` for different hours that day, and two periods express "blocked in the middle" perfectly well. **A room can already be closed for a date, and the engine honours it.**
+
+  So the remaining gap is **consolidation, not capability**: staff closures live on one screen and resource closures on another, which is what (L) set out to fix. The earlier finding stands but was narrower than it read — what no engine reads for a resource is `practitioner_leave_periods` and the resource's own `break_times`, which is why wiring the shared panel at those tables would have produced a setting that saves and does nothing.
+
+  **The work, when it is worth doing, is an ADAPTER not engine support:** when the selected calendar is a resource, point the date-override panel at `availability_exceptions` instead of the leave table. Teaching the engines to read leave for resources would be the larger job AND would duplicate a mechanism that already works, so it is the wrong branch to take.
+
+  **Priority: low.** Production has zero resources, and the venue that does have one can already do everything it needs on the resource screen.
 
   **The diary keeps its quick-add.** `PractitionerCalendarView` can already create closures and leave. That is a shortcut from where the problem was noticed, not a home for the setting, and it stays.
 

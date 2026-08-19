@@ -1298,7 +1298,7 @@ All nine of v2's entries were verified at the cited lines and stand. Three of th
 | Staff appointment-modification route | `api/venue/bookings/[id]/validate-appointment-modification/route.ts` | v2 lists the lib, not the route |
 | Multi-service visit scheduler | `api/venue/visits/[groupBookingId]/schedule/route.ts`, `.../services/route.ts` | The only code to change since baseline |
 | Linked-accounts staff booking | `api/venue/linked-calendar/booking/route.ts` | Collective **write** path; v2 lists only the read bridge |
-| Staff availability routes | `api/venue/class-availability`, `resource-availability`, `class-offerings`, `event-offerings` | Dashboard twins of the guest routes |
+| Staff availability routes | `api/venue/resource-availability`, `class-offerings`, `event-offerings` | Dashboard twins of the guest routes. All wrapped 2026-08-19 `[R3-95]`. `class-availability` was listed here too and was **deleted**: it had no caller in either repo, on any branch, ever |
 | Resource mint-slots helper | `calendar/resource-availability-mint-slots.ts:35` | Decision (A) moves it |
 | Diary break renderer | `calendar/practitioner-break-blocks.ts:3` | Shares the helpers Stage 5 rewrites |
 | Closure-over-booking guard | `calendar/closure-booking-conflicts.ts:1-9` | Write gate on the surface Stage 6a migrates |

@@ -12,6 +12,7 @@ import { BookableCalendarsPanel } from '@/app/dashboard/availability/BookableCal
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 import { useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { AppointmentAvailabilityTabPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { pickScheduleCalendarId } from '@/lib/calendar/pick-schedule-calendar';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Practitioner {
@@ -223,6 +224,26 @@ export function AppointmentAvailabilitySettings({
   );
 
   /**
+   * Every calendar whose weekly schedule is editable here, resources included
+   * (decision (K), step 5).
+   *
+   * A resource is a `unified_calendars` row like any other and its hours are the same
+   * `working_hours` column: `/api/venue/resources` only ALIASES it as `availability_hours`
+   * on the way in and out (`resources/route.ts:281` reads `row.working_hours`, `:593`
+   * writes it). Excluding resources here is what forced a second weekly-hours editor to
+   * exist in `resource-timeline-ui`, editing the same column through a different screen.
+   *
+   * Breaks and closures take the same list deliberately: `break_times` is read for a
+   * resource's own grid by the resource engine, and decision (L) folds
+   * `ResourceExceptionsCalendar` into the closures panel for exactly this reason. One
+   * calendar, one place to set its schedule, whatever type it is.
+   */
+  const scheduleCalendars = useMemo(
+    () => [...practitioners].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [practitioners],
+  );
+
+  /**
    * Class types, resources, and ticketed events may only sit on one team calendar at a time.
    * If already assigned elsewhere, we warn before moving them to the calendar being edited.
    */
@@ -362,16 +383,17 @@ export function AppointmentAvailabilitySettings({
       setPractitioners(pracs);
       setServices(svcData.services ?? []);
       setPLinks(svcData.practitioner_services ?? []);
-      setSelectedPractitionerId((prev) => {
-        const pool = (pracs as Practitioner[]).filter(
-          (p) => (p.calendar_type ?? 'practitioner') !== 'resource',
-        );
-        const own = currentStaffId
-          ? pool.find((p) => staffIdsForPractitioner(p).includes(currentStaffId))
-          : undefined;
-        if (prev && pool.some((p) => p.id === prev)) return prev;
-        return own?.id ?? pool[0]?.id ?? '';
-      });
+      setSelectedPractitionerId((prev) =>
+        pickScheduleCalendarId({
+          previous: prev,
+          calendars: (pracs as Practitioner[]).map((p) => ({
+            id: p.id,
+            calendar_type: p.calendar_type,
+            staffIds: staffIdsForPractitioner(p),
+          })),
+          currentStaffId,
+        }),
+      );
     } catch {
       if (!silent) {
         setError('Failed to load data. Please check your connection.');
@@ -399,13 +421,16 @@ export function AppointmentAvailabilitySettings({
     );
   }, []);
 
+  // Looks up in scheduleCalendars, not appointmentCalendars: with a resource selected the
+  // narrower list returns null and every permission check and save handler below would
+  // silently treat the calendar as missing.
   const selectedPrac = useMemo(
-    () => appointmentCalendars.find((p) => p.id === selectedPractitionerId) ?? null,
-    [appointmentCalendars, selectedPractitionerId],
+    () => scheduleCalendars.find((p) => p.id === selectedPractitionerId) ?? null,
+    [scheduleCalendars, selectedPractitionerId],
   );
 
-  /** Host appointment columns (excludes resource-type rows) for availability / breaks / leave. */
-  const practitionersForScheduleTabs = appointmentCalendars;
+  /** Availability / breaks / closures operate on every calendar, resources included. */
+  const practitionersForScheduleTabs = scheduleCalendars;
 
   function flash(msg: string) {
     setSuccess(msg);
@@ -1076,7 +1101,7 @@ export function AppointmentAvailabilitySettings({
 
           {(tab === 'hours' || tab === 'breaks') && (
             <div>
-              {appointmentCalendars.length === 0 ? (
+              {scheduleCalendars.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
                   <p className="text-slate-500">Add calendars first to set their schedule.</p>
                 </div>

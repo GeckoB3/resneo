@@ -787,24 +787,59 @@ export function AppointmentAvailabilitySettings({
   }
 
   // ─── Breaks Tab ─────────────────────────────────────────────────────
-  async function saveBreakSchedule(payload: {
-    break_times: TimeRange[];
-    break_times_by_day: WorkingHours | null;
-  }) {
+  /**
+   * Save breaks for the selected calendar, or for every staff calendar at once
+   * (Stage 6a item 7).
+   *
+   * A lunch break is almost always the same shape across a team, and until now it had to be
+   * retyped per calendar, which is how two calendars end up disagreeing by a typo nobody
+   * notices. The leave panel has had `apply_to_all_active` all along; this is the same idea
+   * on the same screen.
+   *
+   * RESOURCES ARE EXCLUDED from "all calendars" deliberately: the resource engine reads
+   * `break_times` from the host row, never the resource's own, so writing one there would be
+   * a setting that saves and does nothing (`[R3-89]`).
+   *
+   * Written one PATCH at a time rather than in a batch, because `/api/venue/practitioners`
+   * takes a single id. A partial failure therefore leaves some calendars updated: the count
+   * in the message is what actually succeeded, not what was attempted.
+   */
+  async function saveBreakSchedule(
+    payload: {
+      break_times: TimeRange[];
+      break_times_by_day: WorkingHours | null;
+    },
+    applyToAll = false,
+  ) {
     if (!selectedPrac || !canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)) return;
+
+    const targets = applyToAll
+      ? appointmentCalendars.filter((p) => canEditBreaksFor(p, isAdmin, currentStaffId))
+      : [selectedPrac];
+    if (targets.length === 0) return;
+
     setSaving(true);
     setError(null);
+    let saved = 0;
     try {
-      const res = await fetch('/api/venue/practitioners', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedPrac.id, ...payload }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      flash('Breaks saved');
+      for (const target of targets) {
+        const res = await fetch('/api/venue/practitioners', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: target.id, ...payload }),
+        });
+        if (!res.ok) throw new Error('Failed to save');
+        saved += 1;
+      }
+      flash(targets.length > 1 ? `Breaks saved to ${saved} calendars` : 'Breaks saved');
       await fetchData();
     } catch {
-      setError('Failed to save breaks');
+      setError(
+        saved > 0
+          ? `Saved breaks to ${saved} of ${targets.length} calendars, then failed. Check the remaining ones.`
+          : 'Failed to save breaks',
+      );
+      if (saved > 0) await fetchData();
     } finally {
       setSaving(false);
     }
@@ -1240,6 +1275,11 @@ export function AppointmentAvailabilitySettings({
                       <BreaksScheduleEditor
                         key={`${selectedPrac.id}:${JSON.stringify(selectedPrac.break_times)}:${JSON.stringify(selectedPrac.break_times_by_day ?? null)}`}
                         practitioner={selectedPrac}
+                        otherCalendarCount={
+                          appointmentCalendars.filter(
+                            (p) => p.id !== selectedPrac.id && canEditBreaksFor(p, isAdmin, currentStaffId),
+                          ).length
+                        }
                         onSave={saveBreakSchedule}
                         saving={saving}
                         readOnly={!canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)}
@@ -1390,12 +1430,18 @@ const MONDAY_DAY_KEY = DAY_KEYS[0]!;
 function BreaksScheduleEditor({
   practitioner,
   onSave,
+  otherCalendarCount,
   saving,
   readOnly = false,
   readOnlyHint,
 }: {
   practitioner: Practitioner;
-  onSave: (payload: { break_times: TimeRange[]; break_times_by_day: WorkingHours | null }) => void;
+  onSave: (
+    payload: { break_times: TimeRange[]; break_times_by_day: WorkingHours | null },
+    applyToAll?: boolean,
+  ) => void;
+  /** Number of other calendars "apply to all" would write to, for the confirm copy. */
+  otherCalendarCount?: number;
   saving: boolean;
   readOnly?: boolean;
   readOnlyHint?: string;
@@ -1436,10 +1482,19 @@ function BreaksScheduleEditor({
     });
   }
 
-  function handleSave() {
+  function handleSave(applyToAll = false) {
     const full: WorkingHours = {};
     for (const k of DAY_KEYS) full[k] = [...(byDayBreaks[k] ?? [])];
-    onSave({ break_times: [], break_times_by_day: full });
+    if (
+      applyToAll &&
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `Replace the breaks on ${otherCalendarCount} other calendar(s) with these? Their existing breaks will be overwritten.`,
+      )
+    ) {
+      return;
+    }
+    onSave({ break_times: [], break_times_by_day: full }, applyToAll);
   }
 
   return (
@@ -1518,14 +1573,28 @@ function BreaksScheduleEditor({
       </div>
 
       {!readOnly && (
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save breaks'}
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button
+            type="button"
+            onClick={() => handleSave(false)}
+            disabled={saving}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save breaks'}
+          </button>
+          {/* Overwrites other calendars, so it confirms first and never becomes the
+              default action. Hidden when there is nothing else to write to. */}
+          {(otherCalendarCount ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={() => handleSave(true)}
+              disabled={saving}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Save to all calendars
+            </button>
+          )}
+        </div>
       )}
       {readOnly && (
         <p className="text-sm text-slate-500">

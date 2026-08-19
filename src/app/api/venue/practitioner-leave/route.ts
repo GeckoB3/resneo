@@ -435,15 +435,67 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    if (
-      typeof updates.start_date === 'string' &&
-      typeof updates.end_date === 'string' &&
-      updates.end_date < updates.start_date
-    ) {
+    const admin = getSupabaseAdminClient();
+
+    /**
+     * Validate the MERGED row, not the patch (Stage 6a item 6, validation parity).
+     *
+     * Both checks below used to fire only when the patch happened to carry both halves of a
+     * pair, so a partial PATCH walked straight past them:
+     *
+     *   - sending only `unavailable_start_time` stored a HALF-SET pair, which every engine
+     *     reads as a whole-day closure. The venue set a start time and got the whole day
+     *     blocked, and nothing said so. This is the same defect the closures form had, still
+     *     open on the API after the UI was fixed;
+     *   - sending only `end_date` could move it before the stored `start_date`.
+     *
+     * POST validates the complete row because it always has one. PATCH now does the same by
+     * merging over what is stored, which is what parity means here.
+     */
+    const { data: existingRow, error: existingErr } = await admin
+      .from('practitioner_leave_periods')
+      .select('start_date, end_date, unavailable_start_time, unavailable_end_time')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (existingErr || !existingRow) {
+      return NextResponse.json({ error: 'Entry not found' }, { status: 404 });
+    }
+
+    const mergedStart =
+      typeof updates.start_date === 'string' ? updates.start_date : (existingRow.start_date as string);
+    const mergedEnd =
+      typeof updates.end_date === 'string' ? updates.end_date : (existingRow.end_date as string);
+    if (mergedEnd < mergedStart) {
       return NextResponse.json({ error: 'End date must be on or after start date' }, { status: 400 });
     }
 
-    const admin = getSupabaseAdminClient();
+    const mergedTimeStart = hasUst
+      ? (parsed.data.unavailable_start_time ?? null)
+      : ((existingRow.unavailable_start_time as string | null) ?? null);
+    const mergedTimeEnd = hasUen
+      ? (parsed.data.unavailable_end_time ?? null)
+      : ((existingRow.unavailable_end_time as string | null) ?? null);
+
+    /**
+     * Only when the patch TOUCHES the times.
+     *
+     * Validating the merged pair unconditionally would reject any patch to an unrelated
+     * field on a row whose stored pair is already invalid, so a legacy half-set row could
+     * never have its notes corrected or its dates fixed. Refusing to let someone repair bad
+     * data because the data is bad is the wrong trade: the engines already read such a row
+     * as a whole-day closure, and Stage 6b's pre-contraction check is where they get found.
+     */
+    if (hasUst || hasUen) {
+      const mergedPair = normalizeUnavailableTimePair(mergedTimeStart, mergedTimeEnd);
+      if (!mergedPair.ok) {
+        return NextResponse.json({ error: mergedPair.error }, { status: 400 });
+      }
+      // Write both halves together, so a patch clearing one cannot strand the other.
+      updates.unavailable_start_time = mergedPair.start;
+      updates.unavailable_end_time = mergedPair.end;
+    }
 
     if (staff.role !== 'admin') {
       const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);

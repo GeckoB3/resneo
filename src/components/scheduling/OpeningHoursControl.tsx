@@ -36,95 +36,129 @@ function isOpeningDayOpen(oh: OpeningHoursSettings | null, dayKey: string): bool
   return !('closed' in c && c.closed);
 }
 
+const END_OF_DAY_MIN = 24 * 60 - 1; // 23:59
+
+function toMinutes(hhmm: string): number {
+  return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+}
+
+function toHhMm(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Is there room in the day for another period after the last one?
+ *
+ * Without this the Add button clamps against the end of the day and hands back a period
+ * identical to the one before it. On a venue closing at 22:00 the second period defaults to
+ * 23:00-23:59, and a third then produced 23:00-23:59 again: two identical rows, both valid
+ * on their own, neither what anyone asked for. Found by clicking Add twice in the app;
+ * nothing in the type system or the schema objects to it.
+ */
+function canAddPeriod(periods: { open: string; close: string }[]): boolean {
+  const last = periods[periods.length - 1];
+  if (!last) return true;
+  return toMinutes(last.close) + 60 <= END_OF_DAY_MIN;
+}
+
+/**
+ * A starting point for a newly added period: an hour's gap after the previous one closes,
+ * an hour long. Beats a fixed 17:00-22:00, which was wrong for any venue whose second
+ * period had already moved past it. Only called when {@link canAddPeriod} is true, so the
+ * result can never collide with the period before it.
+ */
+function nextPeriodAfter(previous: { open: string; close: string } | undefined): { open: string; close: string } {
+  const closeMin = previous ? toMinutes(previous.close) : 17 * 60;
+  const start = closeMin + 60;
+  return { open: toHhMm(start), close: toHhMm(Math.min(start + 60, END_OF_DAY_MIN)) };
+}
+
 interface OpeningHoursControlProps {
   value: OpeningHoursSettings;
   onChange: (next: OpeningHoursSettings) => void;
   disabled?: boolean;
 }
 
-function TimePeriodRow({
-  p1,
-  p2,
-  onUpdateP1,
-  onUpdateP2,
-  onAddSecond,
-  onRemoveSecond,
+/**
+ * The day's service periods, however many there are.
+ *
+ * This was hardcoded to a first and an optional second period, which is where the 2-period
+ * cap came from: the schema enforced `.max(2)` because this control could not draw a third,
+ * and without the cap a stored third period would have been silently dropped on save.
+ * Rendering the array removes the reason for the cap (decision (K)).
+ */
+function PeriodList({
+  periods,
+  onUpdate,
+  onAdd,
+  onRemove,
   disabled,
 }: {
-  p1: { open: string; close: string };
-  p2?: { open: string; close: string };
-  onUpdateP1: (field: 'open' | 'close', value: string) => void;
-  onUpdateP2: (field: 'open' | 'close', value: string) => void;
-  onAddSecond: () => void;
-  onRemoveSecond: () => void;
+  periods: { open: string; close: string }[];
+  onUpdate: (index: number, field: 'open' | 'close', value: string) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
   disabled: boolean;
 }) {
+  const canAdd = canAddPeriod(periods);
   const timeInputClass =
     'min-h-10 w-full min-w-0 flex-1 rounded border border-slate-300 px-2 py-2 text-sm sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1';
 
   return (
     <div className="min-w-0 max-w-full space-y-3">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <input
-          type="time"
-          value={p1.open}
-          onChange={(e) => onUpdateP1('open', e.target.value)}
-          disabled={disabled}
-          className={timeInputClass}
-        />
-        <span className="text-slate-500">–</span>
-        <input
-          type="time"
-          value={p1.close}
-          onChange={(e) => onUpdateP1('close', e.target.value)}
-          disabled={disabled}
-          className={timeInputClass}
-        />
-      </div>
-      {!p2 ? (
+      {periods.map((p, index) => (
+        <div key={index} className="flex min-w-0 flex-wrap items-center gap-2">
+          <input
+            type="time"
+            value={p.open}
+            onChange={(e) => onUpdate(index, 'open', e.target.value)}
+            disabled={disabled}
+            className={timeInputClass}
+            aria-label={`Period ${index + 1} opens`}
+          />
+          <span className="text-slate-500">–</span>
+          <input
+            type="time"
+            value={p.close}
+            onChange={(e) => onUpdate(index, 'close', e.target.value)}
+            disabled={disabled}
+            className={timeInputClass}
+            aria-label={`Period ${index + 1} closes`}
+          />
+          {/* Never offer to remove the last period: a day with none is invalid, and
+              "closed" is the Open toggle's job, not a side effect of removing a row. */}
+          {periods.length > 1 && (
+            <button
+              type="button"
+              onClick={() => onRemove(index)}
+              disabled={disabled}
+              className="min-h-10 text-sm text-red-600 hover:underline disabled:opacity-50"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      ))}
+      {canAdd ? (
         <button
           type="button"
-          onClick={onAddSecond}
+          onClick={onAdd}
           disabled={disabled}
           className="min-h-10 text-sm text-blue-600 hover:underline disabled:opacity-50"
         >
-          + Add second period
+          + Add period
         </button>
       ) : (
-        <>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <input
-              type="time"
-              value={p2.open}
-              onChange={(e) => onUpdateP2('open', e.target.value)}
-              disabled={disabled}
-              className={timeInputClass}
-            />
-            <span className="text-slate-500">–</span>
-            <input
-              type="time"
-              value={p2.close}
-              onChange={(e) => onUpdateP2('close', e.target.value)}
-              disabled={disabled}
-              className={timeInputClass}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={onRemoveSecond}
-            disabled={disabled}
-            className="min-h-10 text-sm text-red-600 hover:underline disabled:opacity-50"
-          >
-            Remove second period
-          </button>
-        </>
+        <p className="text-xs text-slate-500">
+          The last period runs to the end of the day, so there is no room for another one.
+        </p>
       )}
     </div>
   );
 }
 
 /**
- * Controlled venue opening hours (up to two periods per day). Same behaviour as Settings → Business Hours.
+ * Controlled venue opening hours, any number of periods per day (decision (K)). Same behaviour as Settings → Business Hours.
  */
 export function OpeningHoursControl({ value, onChange, disabled = false }: OpeningHoursControlProps) {
   const setDay = (day: string, config: OpeningHoursDaySettings) => {
@@ -153,8 +187,7 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
         const config = value[key] ?? getDayConfig(null, key);
         const closed = 'closed' in config && config.closed;
         const periods = !closed && 'periods' in config ? config.periods : [];
-        const p1 = periods[0] ?? { open: '09:00', close: '17:00' };
-        const p2 = periods[1];
+        const dayPeriods = periods.length > 0 ? periods : [{ open: '09:00', close: '17:00' }];
         const canCopyElsewhere =
           !closed &&
           !disabled &&
@@ -180,7 +213,7 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
                   </label>
                 ) : (
                   <span className="text-sm text-slate-600">
-                    {closed ? 'Closed' : `${p1.open}–${p1.close}${p2 ? `, ${p2.open}–${p2.close}` : ''}`}
+                    {closed ? 'Closed' : dayPeriods.map((p) => `${p.open}–${p.close}`).join(', ')}
                   </span>
                 )}
               </div>
@@ -197,20 +230,22 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
                       Copy to other open days
                     </button>
                   )}
-                  <TimePeriodRow
-                    p1={p1}
-                    p2={p2}
+                  <PeriodList
+                    periods={dayPeriods}
                     disabled={disabled}
-                    onUpdateP1={(field, nextVal) =>
+                    onUpdate={(index, field, nextVal) =>
                       setDay(key, {
-                        periods: [{ ...p1, [field]: nextVal }, p2].filter(Boolean) as { open: string; close: string }[],
+                        periods: dayPeriods.map((p, i) => (i === index ? { ...p, [field]: nextVal } : p)),
                       })
                     }
-                    onUpdateP2={(field, nextVal) =>
-                      setDay(key, { periods: [p1, { ...p2!, [field]: nextVal }] })
+                    onAdd={() =>
+                      setDay(key, {
+                        periods: [...dayPeriods, nextPeriodAfter(dayPeriods[dayPeriods.length - 1])],
+                      })
                     }
-                    onAddSecond={() => setDay(key, { periods: [p1, { open: '17:00', close: '22:00' }] })}
-                    onRemoveSecond={() => setDay(key, { periods: [p1] })}
+                    onRemove={(index) =>
+                      setDay(key, { periods: dayPeriods.filter((_, i) => i !== index) })
+                    }
                   />
                 </div>
               )}

@@ -729,9 +729,18 @@ A stage, not a bullet: five client components need a new data dependency, three 
   **No period cap anywhere.** Today `OpeningHoursControl` renders `periods[0]` and `periods[1]` and **cannot display a third**, while the other two are unlimited. The cap is also enforced server-side at `config-schemas.ts` `openingHoursDaySchema` (`.max(2)`), which is what stops the truncation becoming data loss today: a third period cannot be stored, so opening Settings and saving cannot silently drop one. **Relaxing it is contained**, verified 2026-08-19: `/api/venue/opening-hours` is the only writer of `venues.opening_hours`, the only consumer of that schema, and **nothing outside the editor indexes `periods[1]`**. The resolver unions any number of periods already. A venue with a genuine third window (morning, afternoon, evening) can then express it.
 
   **Order of work, so the risky part lands last:** (1) relax `.max(2)` and prove the resolver and restaurant read paths are indifferent; (2) make the shared component render N periods; (3) repoint `OpeningHoursControl`'s call sites at it; (4) repoint `WorkingHoursControl`'s; (5) move resource hours into `/dashboard/availability` and retire the inline editor; (6) add the read-only venue-hours context. Steps 1 to 4 are invisible to a venue. **Step 5 is the first user-visible navigation change in the whole programme.**
-4. **Fix the "Closure vs Unavailable window" options** that write byte-identical rows.
-5. **Validation parity between POST and PATCH** on every route.
-6. **"Apply to all calendars" for breaks.**
+4. **Decision (L), taken 2026-08-19: date overrides mirror (K) exactly, on the same two pages.**
+
+  - **Venue date overrides** (closures, amended hours) **stay in Settings**, next to venue hours. `settings/sections/BusinessClosuresSection.tsx` is already there.
+  - **Calendar and resource date overrides merge into `/dashboard/availability`**, next to calendar hours: one component replacing `availability/StaffLeaveCalendarPanel.tsx` and `resource-timeline/ResourceExceptionsCalendar.tsx`.
+
+  **Why the same axis and not a single "date overrides" page.** The current layout already works this way, so following it means no venue relearns where anything lives. It keeps one axis across the whole rebuild, leaving each page complete for its subject rather than making a venue ask whether closures are a Settings thing or a Dates thing. And it **finishes retiring `/dashboard/resource-timeline`**: (K) moves its hours editor, this moves its exceptions calendar, so the page goes rather than lingering with one orphaned panel. The rejected alternative was one "what is different on a specific date" page holding venue closures and staff leave together; it reads well, but it cuts across the venue/calendar distinction this programme exists to make explicit. If the two-trip problem proves real, a shortcut between the pages is the cheaper fix, and the diary's quick-add already offers both.
+
+  **The diary keeps its quick-add.** `PractitionerCalendarView` can already create closures and leave. That is a shortcut from where the problem was noticed, not a home for the setting, and it stays.
+
+5. **Fix the "Closure vs Unavailable window" options** that write byte-identical rows. **This is internal to the leave panel, not an IA problem `[R3-84]`.** `StaffLeaveCalendarPanel.tsx:471` offers `Closure` and `Unavailable window`, and its own helper text concedes the overlap: "Closure blocks the whole day **unless you add optional times**." Adding times to a Closure produces exactly an Unavailable window, and both write the same two columns of `practitioner_leave_periods`. **One control, times optional, blank means all day** — which is what the data model already says. `ResourceExceptionsCalendar.tsx:195` carries the same wording and is absorbed by (L).
+6. **Validation parity between POST and PATCH** on every route.
+7. **"Apply to all calendars" for breaks.**
 
 Items 3 to 6 are the write surface and are the **largest remaining block of work in the whole programme**; items 1 and 2 are small and independently shippable. **Leave every old column and table in place throughout** — contraction is 6b.
 

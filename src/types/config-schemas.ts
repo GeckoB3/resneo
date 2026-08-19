@@ -13,12 +13,31 @@ export const openingHoursPeriodSchema = z.object({
   close: timeHHmm,
 }).refine((p) => p.open < p.close, { message: 'Close must be after open' });
 
-/** One day: either closed or up to 2 periods. */
+/**
+ * One day: either closed, or one or more service periods.
+ *
+ * The cap was 2, which no other layer shared: `WorkingHoursControl` and the resource
+ * timeline have always been unlimited, and the resolver unions any number of periods
+ * (`venue-wide-business-hours.ts`). The limit existed because `OpeningHoursControl` renders
+ * a first and a second period and cannot draw a third, so the schema was what stopped that
+ * display truncation from becoming data loss on save.
+ *
+ * Removed under decision (K) with the editor rewritten to render N periods. A venue with a
+ * genuine third window (morning, afternoon, evening) can now express it. Verified before
+ * relaxing: `/api/venue/opening-hours` is the only writer of `venues.opening_hours`, the
+ * only consumer of this schema, and nothing outside the editor indexes `periods[1]`.
+ *
+ * There is deliberately still no upper bound. A day has 1440 minutes and
+ * `openingHoursPeriodSchema` already rejects a period that does not advance, so the useful
+ * ceiling enforces itself.
+ *
+ * See Docs/Resneo_Scheduling_Resolver_Plan_August_2026.md §4 Stage 6a, decision (K).
+ */
 export const openingHoursDaySchema = z.union([
   z.object({ closed: z.literal(true) }),
   z.object({
     closed: z.literal(false).optional(),
-    periods: z.array(openingHoursPeriodSchema).min(1).max(2),
+    periods: z.array(openingHoursPeriodSchema).min(1),
   }),
 ]);
 

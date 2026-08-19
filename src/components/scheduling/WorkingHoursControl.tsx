@@ -1,155 +1,82 @@
 'use client';
 
 import type { WorkingHours } from '@/types/booking-models';
-
-const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const DAY_KEYS = ['1', '2', '3', '4', '5', '6', '0'] as const;
+import type { ReactNode } from 'react';
+import {
+  WeeklyHoursEditor,
+  type HoursPeriod,
+  type NormalisedWeek,
+  type WeeklyHoursEditorDay,
+} from '@/components/scheduling/WeeklyHoursEditor';
 
 /**
- * Controlled working-hours editor (Mon–Sun, keys "1".."6","0"). Matches dashboard Availability behaviour.
+ * Calendar working hours, as an adapter over the shared {@link WeeklyHoursEditor}
+ * (decision (K), step 4).
+ *
+ * The only thing this file still owns is the storage shape. `WorkingHours` is a bare
+ * `{ [day]: [{ start, end }] }` where an ABSENT KEY means not working, and the previous
+ * implementation deleted the key rather than storing an empty array. That is preserved
+ * exactly: `toWorkingHours` omits closed days rather than writing `[]`, because callers
+ * persist this object as-is and an empty array is not the same stored value.
+ */
+
+const DAYS: WeeklyHoursEditorDay[] = [
+  { key: '1', label: 'Monday' },
+  { key: '2', label: 'Tuesday' },
+  { key: '3', label: 'Wednesday' },
+  { key: '4', label: 'Thursday' },
+  { key: '5', label: 'Friday' },
+  { key: '6', label: 'Saturday' },
+  { key: '0', label: 'Sunday' },
+];
+
+function toNormalised(value: WorkingHours): NormalisedWeek {
+  const out: NormalisedWeek = {};
+  for (const { key } of DAYS) {
+    const ranges = value[key];
+    out[key] = ranges?.length ? ranges.map((r) => ({ open: r.start, close: r.end })) : null;
+  }
+  return out;
+}
+
+function toWorkingHours(next: NormalisedWeek, previous: WorkingHours): WorkingHours {
+  // Start from the previous object so any key outside DAYS survives untouched rather than
+  // being dropped by an editor that never displayed it.
+  const out: WorkingHours = { ...previous };
+  for (const { key } of DAYS) {
+    const periods = next[key];
+    if (periods?.length) out[key] = periods.map((p) => ({ start: p.open, end: p.close }));
+    else delete out[key];
+  }
+  return out;
+}
+
+/**
+ * Controlled working-hours editor (Mon–Sun, keys "1".."6","0"). Matches dashboard
+ * Availability behaviour.
  */
 export function WorkingHoursControl({
   value,
   onChange,
   disabled = false,
+  renderDayContext,
 }: {
   value: WorkingHours;
   onChange: (next: WorkingHours) => void;
   disabled?: boolean;
+  /** Venue-hours context per day (decision (K), step 6). */
+  renderDayContext?: (dayKey: string, periods: HoursPeriod[] | null) => ReactNode;
 }) {
-  function toggleDay(dayKey: string) {
-    const copy = { ...value };
-    if (copy[dayKey] && copy[dayKey]!.length > 0) {
-      delete copy[dayKey];
-    } else {
-      copy[dayKey] = [{ start: '09:00', end: '17:00' }];
-    }
-    onChange(copy);
-  }
-
-  function updateRange(dayKey: string, index: number, field: 'start' | 'end', nextVal: string) {
-    const ranges = [...(value[dayKey] ?? [])];
-    ranges[index] = { ...ranges[index]!, [field]: nextVal };
-    onChange({ ...value, [dayKey]: ranges });
-  }
-
-  function addRange(dayKey: string) {
-    onChange({
-      ...value,
-      [dayKey]: [...(value[dayKey] ?? []), { start: '09:00', end: '17:00' }],
-    });
-  }
-
-  function removeRange(dayKey: string, index: number) {
-    const ranges = [...(value[dayKey] ?? [])];
-    ranges.splice(index, 1);
-    const copy = { ...value };
-    if (ranges.length === 0) delete copy[dayKey];
-    else copy[dayKey] = ranges;
-    onChange(copy);
-  }
-
-  function cloneRanges(ranges: { start: string; end: string }[]) {
-    return ranges.map((r) => ({ start: r.start, end: r.end }));
-  }
-
-  function copyThisDayToOtherWorkingDays(sourceKey: string) {
-    const sourceRanges = value[sourceKey];
-    if (!sourceRanges?.length) return;
-    const template = cloneRanges(sourceRanges);
-    const hasOtherWorking = DAY_KEYS.some((dk) => dk !== sourceKey && (value[dk]?.length ?? 0) > 0);
-    if (!hasOtherWorking) return;
-    const next: WorkingHours = { ...value };
-    for (const dk of DAY_KEYS) {
-      if (dk === sourceKey) continue;
-      if ((value[dk]?.length ?? 0) > 0) {
-        next[dk] = cloneRanges(template);
-      }
-    }
-    onChange(next);
-  }
-
   return (
-    <div className="min-w-0 max-w-full space-y-3">
-      {DAY_KEYS.map((dayKey, i) => {
-        const ranges = value[dayKey] ?? [];
-        const isWorking = ranges.length > 0;
-        const canCopyElsewhere =
-          isWorking &&
-          !disabled &&
-          DAY_KEYS.some((dk) => dk !== dayKey && (value[dk]?.length ?? 0) > 0);
-        return (
-          <div key={dayKey} className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-3 py-3 sm:px-4">
-            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-              <label className="flex min-h-10 cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={isWorking}
-                  onChange={() => toggleDay(dayKey)}
-                  disabled={disabled}
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600 disabled:opacity-50"
-                />
-                <span className={`text-sm font-medium ${isWorking ? 'text-slate-900' : 'text-slate-400'}`}>
-                  {DAY_LABELS[i]}
-                </span>
-              </label>
-              {isWorking && !disabled && (
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                  {canCopyElsewhere && (
-                    <button
-                      type="button"
-                      onClick={() => copyThisDayToOtherWorkingDays(dayKey)}
-                      className="min-h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 sm:w-auto"
-                      title="Apply this day’s hours to every other day that is ticked as working"
-                    >
-                      Copy to other open days
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => addRange(dayKey)}
-                    className="min-h-10 text-left text-xs text-blue-600 hover:underline sm:min-h-0"
-                  >
-                    + Add split
-                  </button>
-                </div>
-              )}
-            </div>
-            {isWorking && (
-              <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 sm:pl-7 sm:pt-2 sm:border-t-0">
-                {ranges.map((r, ri) => (
-                  <div key={ri} className="flex min-w-0 flex-wrap items-center gap-2">
-                    <input
-                      type="time"
-                      value={r.start}
-                      onChange={(e) => updateRange(dayKey, ri, 'start', e.target.value)}
-                      disabled={disabled}
-                      className="min-h-10 w-full min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-50 sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1"
-                    />
-                    <span className="text-sm text-slate-400">to</span>
-                    <input
-                      type="time"
-                      value={r.end}
-                      onChange={(e) => updateRange(dayKey, ri, 'end', e.target.value)}
-                      disabled={disabled}
-                      className="min-h-10 w-full min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-50 sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1"
-                    />
-                    {ranges.length > 1 && !disabled && (
-                      <button
-                        type="button"
-                        onClick={() => removeRange(dayKey, ri)}
-                        className="min-h-10 text-xs text-red-500 hover:underline"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+    <WeeklyHoursEditor
+      days={DAYS}
+      value={toNormalised(value)}
+      onChange={(next) => onChange(toWorkingHours(next, value))}
+      disabled={disabled}
+      addLabel="+ Add split"
+      openLabel="working"
+      separator="to"
+      renderDayContext={renderDayContext}
+    />
   );
 }

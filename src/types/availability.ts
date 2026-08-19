@@ -24,7 +24,7 @@ export interface OpeningHoursDayLegacy {
   close: string;
 }
 
-/** New format: closed or up to 2 periods per day. */
+/** New format: closed, or one or more periods per day (the cap of 2 was removed under decision (K)). */
 export type OpeningHoursDay =
   | { closed: true }
   | { periods: OpeningHoursPeriod[] };

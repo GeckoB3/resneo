@@ -16,6 +16,39 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 
+/**
+ * GET /api/venue/opening-hours - read opening_hours.
+ *
+ * Added for decision (K) step 6: the calendar-hours screen shows the venue's hours beside
+ * the calendar's, and had no way to read them. NOT admin-only, unlike PATCH: any member of
+ * staff who can see a calendar's hours needs the context to understand them, and this
+ * returns nothing they could not already infer from the public booking page.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createVenueRouteClient(request);
+    const staff = await getVenueStaff(supabase);
+    if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+
+    const admin = getSupabaseAdminClient();
+    const { data, error } = await admin
+      .from('venues')
+      .select('opening_hours')
+      .eq('id', staff.venue_id)
+      .single();
+
+    if (error) {
+      console.error('GET /api/venue/opening-hours failed:', error);
+      return NextResponse.json({ error: 'Failed to load opening hours' }, { status: 500 });
+    }
+
+    return NextResponse.json({ opening_hours: data?.opening_hours ?? null });
+  } catch (err) {
+    console.error('GET /api/venue/opening-hours failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 /** PATCH /api/venue/opening-hours - update opening_hours (admin only). */
 export async function PATCH(request: NextRequest) {
   try {

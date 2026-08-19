@@ -12,6 +12,13 @@ import { BookableCalendarsPanel } from '@/app/dashboard/availability/BookableCal
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 import { useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { AppointmentAvailabilityTabPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { pickScheduleCalendarId } from '@/lib/calendar/pick-schedule-calendar';
+import {
+  calendarHoursOutsideVenue,
+  describeVenueDay,
+  venueDayContext,
+} from '@/lib/calendar/venue-hours-context';
+import type { OpeningHours } from '@/types/availability';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Practitioner {
@@ -166,6 +173,8 @@ export function AppointmentAvailabilitySettings({
     setTab(fromUrl);
   }, [searchParams, isAdmin]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
+  /** Venue weekly hours, shown as context beside each calendar day (decision (K), step 6). */
+  const [venueHours, setVenueHours] = useState<OpeningHours | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [pLinks, setPLinks] = useState<PractitionerServiceLink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -219,6 +228,26 @@ export function AppointmentAvailabilitySettings({
       practitioners
         .filter((p) => (p.calendar_type ?? 'practitioner') !== 'resource')
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [practitioners],
+  );
+
+  /**
+   * Every calendar whose weekly schedule is editable here, resources included
+   * (decision (K), step 5).
+   *
+   * A resource is a `unified_calendars` row like any other and its hours are the same
+   * `working_hours` column: `/api/venue/resources` only ALIASES it as `availability_hours`
+   * on the way in and out (`resources/route.ts:281` reads `row.working_hours`, `:593`
+   * writes it). Excluding resources here is what forced a second weekly-hours editor to
+   * exist in `resource-timeline-ui`, editing the same column through a different screen.
+   *
+   * Breaks and closures take the same list deliberately: `break_times` is read for a
+   * resource's own grid by the resource engine, and decision (L) folds
+   * `ResourceExceptionsCalendar` into the closures panel for exactly this reason. One
+   * calendar, one place to set its schedule, whatever type it is.
+   */
+  const scheduleCalendars = useMemo(
+    () => [...practitioners].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     [practitioners],
   );
 
@@ -348,11 +377,18 @@ export function AppointmentAvailabilitySettings({
         return;
       }
 
-      const [pracRes, svcRes] = await Promise.all([
+      const [pracRes, svcRes, hoursRes] = await Promise.all([
         fetch('/api/venue/practitioners?roster=1'),
         fetch('/api/venue/appointment-services'),
+        // Context only. A failure here must not stop the page loading: without it the
+        // editor simply shows no comparison, which is where it was before step 6.
+        fetch('/api/venue/opening-hours').catch(() => null),
         isAdmin ? fetchAssociationData() : Promise.resolve(null),
       ]);
+      if (hoursRes?.ok) {
+        const hoursBody = (await hoursRes.json().catch(() => null)) as { opening_hours?: OpeningHours | null } | null;
+        setVenueHours(hoursBody?.opening_hours ?? null);
+      }
       if (!pracRes.ok || !svcRes.ok) {
         setError('Failed to load data. Please refresh the page.');
         return;
@@ -362,16 +398,17 @@ export function AppointmentAvailabilitySettings({
       setPractitioners(pracs);
       setServices(svcData.services ?? []);
       setPLinks(svcData.practitioner_services ?? []);
-      setSelectedPractitionerId((prev) => {
-        const pool = (pracs as Practitioner[]).filter(
-          (p) => (p.calendar_type ?? 'practitioner') !== 'resource',
-        );
-        const own = currentStaffId
-          ? pool.find((p) => staffIdsForPractitioner(p).includes(currentStaffId))
-          : undefined;
-        if (prev && pool.some((p) => p.id === prev)) return prev;
-        return own?.id ?? pool[0]?.id ?? '';
-      });
+      setSelectedPractitionerId((prev) =>
+        pickScheduleCalendarId({
+          previous: prev,
+          calendars: (pracs as Practitioner[]).map((p) => ({
+            id: p.id,
+            calendar_type: p.calendar_type,
+            staffIds: staffIdsForPractitioner(p),
+          })),
+          currentStaffId,
+        }),
+      );
     } catch {
       if (!silent) {
         setError('Failed to load data. Please check your connection.');
@@ -399,13 +436,16 @@ export function AppointmentAvailabilitySettings({
     );
   }, []);
 
+  // Looks up in scheduleCalendars, not appointmentCalendars: with a resource selected the
+  // narrower list returns null and every permission check and save handler below would
+  // silently treat the calendar as missing.
   const selectedPrac = useMemo(
-    () => appointmentCalendars.find((p) => p.id === selectedPractitionerId) ?? null,
-    [appointmentCalendars, selectedPractitionerId],
+    () => scheduleCalendars.find((p) => p.id === selectedPractitionerId) ?? null,
+    [scheduleCalendars, selectedPractitionerId],
   );
 
-  /** Host appointment columns (excludes resource-type rows) for availability / breaks / leave. */
-  const practitionersForScheduleTabs = appointmentCalendars;
+  /** Availability / breaks / closures operate on every calendar, resources included. */
+  const practitionersForScheduleTabs = scheduleCalendars;
 
   function flash(msg: string) {
     setSuccess(msg);
@@ -747,24 +787,59 @@ export function AppointmentAvailabilitySettings({
   }
 
   // ─── Breaks Tab ─────────────────────────────────────────────────────
-  async function saveBreakSchedule(payload: {
-    break_times: TimeRange[];
-    break_times_by_day: WorkingHours | null;
-  }) {
+  /**
+   * Save breaks for the selected calendar, or for every staff calendar at once
+   * (Stage 6a item 7).
+   *
+   * A lunch break is almost always the same shape across a team, and until now it had to be
+   * retyped per calendar, which is how two calendars end up disagreeing by a typo nobody
+   * notices. The leave panel has had `apply_to_all_active` all along; this is the same idea
+   * on the same screen.
+   *
+   * RESOURCES ARE EXCLUDED from "all calendars" deliberately: the resource engine reads
+   * `break_times` from the host row, never the resource's own, so writing one there would be
+   * a setting that saves and does nothing (`[R3-89]`).
+   *
+   * Written one PATCH at a time rather than in a batch, because `/api/venue/practitioners`
+   * takes a single id. A partial failure therefore leaves some calendars updated: the count
+   * in the message is what actually succeeded, not what was attempted.
+   */
+  async function saveBreakSchedule(
+    payload: {
+      break_times: TimeRange[];
+      break_times_by_day: WorkingHours | null;
+    },
+    applyToAll = false,
+  ) {
     if (!selectedPrac || !canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)) return;
+
+    const targets = applyToAll
+      ? appointmentCalendars.filter((p) => canEditBreaksFor(p, isAdmin, currentStaffId))
+      : [selectedPrac];
+    if (targets.length === 0) return;
+
     setSaving(true);
     setError(null);
+    let saved = 0;
     try {
-      const res = await fetch('/api/venue/practitioners', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedPrac.id, ...payload }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      flash('Breaks saved');
+      for (const target of targets) {
+        const res = await fetch('/api/venue/practitioners', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: target.id, ...payload }),
+        });
+        if (!res.ok) throw new Error('Failed to save');
+        saved += 1;
+      }
+      flash(targets.length > 1 ? `Breaks saved to ${saved} calendars` : 'Breaks saved');
       await fetchData();
     } catch {
-      setError('Failed to save breaks');
+      setError(
+        saved > 0
+          ? `Saved breaks to ${saved} of ${targets.length} calendars, then failed. Check the remaining ones.`
+          : 'Failed to save breaks',
+      );
+      if (saved > 0) await fetchData();
     } finally {
       setSaving(false);
     }
@@ -1058,6 +1133,21 @@ export function AppointmentAvailabilitySettings({
                     </div>
                   )}
                   <StaffLeaveCalendarPanel
+                    /**
+                     * appointmentCalendars, NOT scheduleCalendars: resources are deliberately
+                     * excluded here, and this is a deferral rather than an oversight.
+                     *
+                     * Decision (L) said resource date overrides merge into this panel. They
+                     * cannot yet. `POST /api/venue/practitioner-leave` rejects a resource
+                     * with "Calendar not found" (`requireVenueHostCalendarId` filters
+                     * `calendar_type = 'resource'`), and more importantly NOTHING WOULD READ
+                     * IT: `fetchHostUnavailableWindows` is called with host calendar ids
+                     * only, so leave stored against a resource is invisible to every engine.
+                     *
+                     * Offering it would produce a setting that saves and does nothing, which
+                     * is the exact defect class this programme exists to remove. The resource
+                     * half of (L) is blocked on engine support first. See `[R3-89]`.
+                     */
                     practitioners={appointmentCalendars.map((p) => ({ id: p.id, name: p.name }))}
                     isAdmin={isAdmin}
                     selfPractitionerId={
@@ -1076,7 +1166,7 @@ export function AppointmentAvailabilitySettings({
 
           {(tab === 'hours' || tab === 'breaks') && (
             <div>
-              {appointmentCalendars.length === 0 ? (
+              {scheduleCalendars.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
                   <p className="text-slate-500">Add calendars first to set their schedule.</p>
                 </div>
@@ -1135,6 +1225,17 @@ export function AppointmentAvailabilitySettings({
 
                   {selectedPrac && tab === 'hours' && (
                     <WorkingHoursEditor
+                      renderDayContext={(dayKey, periods) => {
+                        const ctx = venueDayContext(venueHours, dayKey);
+                        if (ctx.kind === 'unset') return null;
+                        const outside = calendarHoursOutsideVenue(periods, ctx);
+                        return (
+                          <span className={outside ? 'text-amber-700' : 'text-slate-500'}>
+                            Venue: {describeVenueDay(ctx)}
+                            {outside ? ' (hours outside this are not bookable)' : ''}
+                          </span>
+                        );
+                      }}
                       hours={selectedPrac.working_hours ?? {}}
                       onSave={saveWorkingHours}
                       saving={saving}
@@ -1147,7 +1248,22 @@ export function AppointmentAvailabilitySettings({
                     />
                   )}
 
-                  {selectedPrac && tab === 'breaks' && (
+                  {/**
+                    * Breaks are not offered for a resource, for the same reason closures are
+                    * not (`[R3-89]`): the resource engine reads `break_times` from the HOST
+                    * calendar row, never from the resource's own, so a break saved here would
+                    * be invisible to every engine. Saying so beats a control that appears to
+                    * work. HOURS are different and genuinely supported: resource
+                    * `working_hours` is the column the engine reads, verified end to end.
+                    */}
+                  {selectedPrac && tab === 'breaks' && (selectedPrac.calendar_type ?? 'practitioner') === 'resource' && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+                      Breaks are not available for resources yet. Set the hours this resource can be booked on the
+                      Availability tab instead. To keep a room free at the same time each day, add a break on the
+                      staff calendar it appears on.
+                    </div>
+                  )}
+                  {selectedPrac && tab === 'breaks' && (selectedPrac.calendar_type ?? 'practitioner') !== 'resource' && (
                     <>
                       {canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && (
                         <p className="mb-4 text-sm text-slate-600">
@@ -1159,6 +1275,11 @@ export function AppointmentAvailabilitySettings({
                       <BreaksScheduleEditor
                         key={`${selectedPrac.id}:${JSON.stringify(selectedPrac.break_times)}:${JSON.stringify(selectedPrac.break_times_by_day ?? null)}`}
                         practitioner={selectedPrac}
+                        otherCalendarCount={
+                          appointmentCalendars.filter(
+                            (p) => p.id !== selectedPrac.id && canEditBreaksFor(p, isAdmin, currentStaffId),
+                          ).length
+                        }
                         onSave={saveBreakSchedule}
                         saving={saving}
                         readOnly={!canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)}
@@ -1227,12 +1348,14 @@ function WorkingHoursEditor({
   saving,
   readOnly = false,
   readOnlyHint,
+  renderDayContext,
 }: {
   hours: Record<string, Array<{ start: string; end: string }>>;
   onSave: (hours: Record<string, Array<{ start: string; end: string }>>) => void;
   saving: boolean;
   readOnly?: boolean;
   readOnlyHint?: string;
+  renderDayContext?: (dayKey: string, periods: Array<{ open: string; close: string }> | null) => React.ReactNode;
 }) {
   const [draft, setDraft] = useState(hours);
 
@@ -1242,7 +1365,7 @@ function WorkingHoursEditor({
 
   return (
     <div className="space-y-3">
-      <WorkingHoursControl value={draft} onChange={setDraft} disabled={readOnly} />
+      <WorkingHoursControl value={draft} onChange={setDraft} disabled={readOnly} renderDayContext={renderDayContext} />
 
       {!readOnly && (
         <button
@@ -1307,12 +1430,18 @@ const MONDAY_DAY_KEY = DAY_KEYS[0]!;
 function BreaksScheduleEditor({
   practitioner,
   onSave,
+  otherCalendarCount,
   saving,
   readOnly = false,
   readOnlyHint,
 }: {
   practitioner: Practitioner;
-  onSave: (payload: { break_times: TimeRange[]; break_times_by_day: WorkingHours | null }) => void;
+  onSave: (
+    payload: { break_times: TimeRange[]; break_times_by_day: WorkingHours | null },
+    applyToAll?: boolean,
+  ) => void;
+  /** Number of other calendars "apply to all" would write to, for the confirm copy. */
+  otherCalendarCount?: number;
   saving: boolean;
   readOnly?: boolean;
   readOnlyHint?: string;
@@ -1353,10 +1482,19 @@ function BreaksScheduleEditor({
     });
   }
 
-  function handleSave() {
+  function handleSave(applyToAll = false) {
     const full: WorkingHours = {};
     for (const k of DAY_KEYS) full[k] = [...(byDayBreaks[k] ?? [])];
-    onSave({ break_times: [], break_times_by_day: full });
+    if (
+      applyToAll &&
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `Replace the breaks on ${otherCalendarCount} other calendar(s) with these? Their existing breaks will be overwritten.`,
+      )
+    ) {
+      return;
+    }
+    onSave({ break_times: [], break_times_by_day: full }, applyToAll);
   }
 
   return (
@@ -1435,14 +1573,28 @@ function BreaksScheduleEditor({
       </div>
 
       {!readOnly && (
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save breaks'}
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button
+            type="button"
+            onClick={() => handleSave(false)}
+            disabled={saving}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save breaks'}
+          </button>
+          {/* Overwrites other calendars, so it confirms first and never becomes the
+              default action. Hidden when there is nothing else to write to. */}
+          {(otherCalendarCount ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={() => handleSave(true)}
+              disabled={saving}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Save to all calendars
+            </button>
+          )}
+        </div>
       )}
       {readOnly && (
         <p className="text-sm text-slate-500">

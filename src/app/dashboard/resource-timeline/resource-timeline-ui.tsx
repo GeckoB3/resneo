@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/primitives/Button';
 import { cn } from '@/components/ui/primitives/cn';
+import { WeeklyHoursEditor, type NormalisedWeek } from '@/components/scheduling/WeeklyHoursEditor';
 
 /** Shared field styles — tall targets, clear focus rings */
 export const fieldInputClass =
@@ -528,8 +529,6 @@ export function ResourcePaymentCards({
   );
 }
 
-const weekHoursTimeInputClass =
-  'box-border min-h-10 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm [color-scheme:light]';
 
 type WeekHoursRange = { start: string; end: string };
 type WeekHoursDay = { enabled: boolean; ranges: WeekHoursRange[] };
@@ -550,37 +549,50 @@ export function WeekHoursEditor({
   onToggleMatchCalendar: () => void;
   matchLabel: string;
 }) {
-  function ensureRanges(day: WeekHoursDay): WeekHoursRange[] {
-    return day.ranges.length > 0 ? day.ranges : [{ start: '09:00', end: '17:00' }];
+  /**
+   * The third weekly-hours editor, now a shell around the shared one (decision (K), step 5).
+   *
+   * Only the surrounding "Match selected calendar hours" control and this component's
+   * per-day `onChange` contract are still local. Day rows, the copy-day rule, split periods
+   * and the end-of-day guard all come from {@link WeeklyHoursEditor}, so the three editors
+   * can no longer drift apart the way the six working-hours implementations Stage 5
+   * collapsed had already begun to.
+   *
+   * This does NOT disappear in favour of `/dashboard/calendar-availability`, which is what
+   * the plan originally assumed. It is step 5 of the resource CREATION wizard, so removing
+   * it would mean a resource could not be given hours until after it existed. Resources are
+   * now editable in both places, backed by one implementation.
+   *
+   * `WeekHoursDay` is a third storage shape (`{ enabled, ranges: [{ start, end }] }`), so it
+   * converts at the edge like the other two rather than any format migrating.
+   */
+  const normalised: NormalisedWeek = {};
+  for (const d of days) {
+    const day = hours[d.key];
+    normalised[d.key] =
+      day?.enabled && day.ranges.length > 0
+        ? day.ranges.map((r) => ({ open: r.start, close: r.end }))
+        : null;
   }
-  function setEnabled(key: string, enabled: boolean) {
-    const day = hours[key]!;
-    onChange(key, { enabled, ranges: ensureRanges(day) });
-  }
-  function setRange(key: string, idx: number, patch: Partial<WeekHoursRange>) {
-    const day = hours[key]!;
-    const ranges = ensureRanges(day).map((r, i) => (i === idx ? { ...r, ...patch } : r));
-    onChange(key, { enabled: true, ranges });
-  }
-  function addRange(key: string) {
-    const day = hours[key]!;
-    const ranges = [...ensureRanges(day), { start: '09:00', end: '17:00' }];
-    onChange(key, { enabled: true, ranges });
-  }
-  function removeRange(key: string, idx: number) {
-    const day = hours[key]!;
-    const ranges = ensureRanges(day).filter((_, i) => i !== idx);
-    // Removing the last range closes the day rather than leaving it open with no hours.
-    onChange(key, ranges.length > 0 ? { enabled: true, ranges } : { enabled: false, ranges: ensureRanges(day) });
-  }
-  function copyDayToOtherOpenDays(sourceKey: string) {
-    const source = hours[sourceKey];
-    if (!source?.enabled) return;
+
+  /**
+   * The shared editor reports the whole week; callers here expect one day at a time.
+   * Emitting only the days that actually changed keeps that contract, and stops a caller
+   * that persists per day from writing six untouched days on every keystroke.
+   */
+  function handleWeekChange(next: NormalisedWeek) {
     for (const d of days) {
-      if (d.key === sourceKey) continue;
-      if (hours[d.key]?.enabled) {
-        onChange(d.key, { enabled: true, ranges: source.ranges.map((r) => ({ ...r })) });
-      }
+      const before = normalised[d.key] ?? null;
+      const after = next[d.key] ?? null;
+      if (JSON.stringify(before) === JSON.stringify(after)) continue;
+      onChange(
+        d.key,
+        after
+          ? { enabled: true, ranges: after.map((pd) => ({ start: pd.open, end: pd.close })) }
+          : // Keep the ranges so unticking and reticking a day restores what was there,
+            // which is what the previous implementation did via ensureRanges.
+            { enabled: false, ranges: hours[d.key]?.ranges ?? [] },
+      );
     }
   }
 
@@ -601,108 +613,7 @@ export function WeekHoursEditor({
           {matchLabel}
         </Button>
       </div>
-      <div className="space-y-2">
-        {days.map((d) => {
-          const day = hours[d.key]!;
-          const ranges = ensureRanges(day);
-          const canCopyElsewhere =
-            day.enabled && days.some((other) => other.key !== d.key && hours[other.key]?.enabled);
-          return (
-            <div
-              key={d.key}
-              className={cn(
-                'flex min-w-0 flex-col gap-3 overflow-hidden rounded-xl border px-3 py-3 md:flex-row md:items-start md:gap-4',
-                day.enabled ? 'border-slate-200/90 bg-white' : 'border-slate-100 bg-slate-50/60',
-              )}
-            >
-              <label className="flex min-h-10 shrink-0 cursor-pointer items-center gap-3 md:w-28 lg:w-32 md:pt-1">
-                <input
-                  type="checkbox"
-                  checked={day.enabled}
-                  onChange={(e) => setEnabled(d.key, e.target.checked)}
-                  className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                />
-                <span className="text-sm font-medium text-slate-800">{d.label}</span>
-              </label>
-              {day.enabled ? (
-                <div className="flex w-full min-w-0 flex-1 flex-col gap-2.5">
-                  {ranges.map((range, idx) => (
-                    <div
-                      key={idx}
-                      className="grid w-full min-w-0 gap-2 max-md:grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] md:items-center md:gap-x-2"
-                    >
-                      <div className="min-w-0 max-md:space-y-1">
-                        <span className="text-[11px] font-medium text-slate-500 md:sr-only">
-                          {idx === 0 ? 'From' : `Range ${idx + 1} from`}
-                        </span>
-                        <input
-                          type="time"
-                          value={range.start}
-                          onChange={(e) => setRange(d.key, idx, { start: e.target.value })}
-                          className={weekHoursTimeInputClass}
-                          aria-label={`${d.label} range ${idx + 1} start`}
-                        />
-                      </div>
-                      <span className="text-center text-sm text-slate-400 max-md:py-0.5 md:px-0.5" aria-hidden>
-                        to
-                      </span>
-                      <div className="min-w-0 max-md:space-y-1">
-                        <span className="text-[11px] font-medium text-slate-500 md:sr-only">
-                          {idx === 0 ? 'To' : `Range ${idx + 1} to`}
-                        </span>
-                        <input
-                          type="time"
-                          value={range.end}
-                          onChange={(e) => setRange(d.key, idx, { end: e.target.value })}
-                          className={weekHoursTimeInputClass}
-                          aria-label={`${d.label} range ${idx + 1} end`}
-                        />
-                      </div>
-                      {ranges.length > 1 ? (
-                        <button
-                          type="button"
-                          onClick={() => removeRange(d.key, idx)}
-                          className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 max-md:w-full"
-                          aria-label={`Remove ${d.label} range ${idx + 1}`}
-                        >
-                          Remove
-                        </button>
-                      ) : (
-                        <span className="hidden md:block" aria-hidden />
-                      )}
-                    </div>
-                  ))}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="w-full shrink-0 sm:w-auto"
-                      onClick={() => addRange(d.key)}
-                    >
-                      + Add range
-                    </Button>
-                    {canCopyElsewhere ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="w-full shrink-0 sm:w-auto"
-                        onClick={() => copyDayToOtherOpenDays(d.key)}
-                        title={`Apply ${d.label}'s times to every other day that is open`}
-                      >
-                        Copy to other open days
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : (
-                <span className="text-sm text-slate-400 md:pt-2.5">Closed</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <WeeklyHoursEditor days={days} value={normalised} onChange={handleWeekChange} />
     </div>
   );
 }

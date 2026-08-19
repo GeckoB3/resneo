@@ -187,12 +187,14 @@ export function ResourceExceptionsCalendar({
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-600">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded border border-red-200 bg-red-50" aria-hidden />
-          Closed
+          {calendarMode ? 'All day' : 'Closed'}
         </span>
         {calendarMode ? (
+          // Matches BLOCK_TYPE_LABELS in StaffLeaveCalendarPanel: these describe what is
+          // stored (whether the row carries times), not a type anyone chose.
           <span className="inline-flex items-center gap-1.5">
             <span className="h-3 w-3 rounded border border-rose-200 bg-rose-50" aria-hidden />
-            Unavailable window
+            Part day
           </span>
         ) : (
           <>

@@ -9,13 +9,30 @@ import {
   attachHostCalendarsToResources,
 } from '@/lib/availability/resource-booking-engine';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 /**
  * GET /api/booking/resource-calendar?venue_id=&resource_id=&year=&month=&duration=
  * Dates in that month (YYYY-MM-DD) with at least one available slot for the duration.
  * Use duration=any (or flex) to mark days where any valid duration in range can book (aligned with staff calendar).
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * The reads behind this route substitute `[]` on failure, so a resource month built without one of its inputs removes whole dates from the picker, which reads as fully booked. Wrapping the handler
+ * covers every branch at once and cannot miss one the way per-return edits would. Only a
+ * SUCCESSFUL response is replaced: a 400 is already a correct answer about the request
+ * itself and says nothing about schedule data.
+ *
+ * Latent today, since production has no classes, events or resources. Wired now because the
+ * mechanism is fresh and the cost is four lines; left undone it becomes the thing nobody
+ * remembers when a venue first switches these on.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleResourceCalendarGet(request));
+}
+
+async function handleResourceCalendarGet(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
     const venueId = searchParams.get('venue_id');

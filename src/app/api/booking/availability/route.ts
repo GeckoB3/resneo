@@ -54,8 +54,7 @@ import {
   loadCollectiveDayAvailability,
 } from '@/lib/linked-accounts/collective-booking-bridge';
 import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
-import { withScheduleReadContext } from '@/lib/availability/schedule-read-context';
-import { scheduleUnavailableResponse } from '@/lib/availability/schedule-unavailable-response';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 /** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
 const AVAILABILITY_REQUEST_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
@@ -327,9 +326,7 @@ async function runTableReservationAvailabilityForArea(
  * the request itself and says nothing about schedule data.
  */
 export async function GET(request: NextRequest) {
-  const { result, failures } = await withScheduleReadContext(() => handleAvailabilityGet(request));
-  if (failures.length > 0 && result.status < 400) return scheduleUnavailableResponse(failures);
-  return result;
+  return withScheduleFailClosed(() => handleAvailabilityGet(request));
 }
 
 async function handleAvailabilityGet(request: NextRequest) {

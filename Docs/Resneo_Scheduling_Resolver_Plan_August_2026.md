@@ -14,7 +14,7 @@
 | 5 (calendar resolver) | **DONE 2026-08-18.** 361 files / 3470 tests green. Harness debt cleared first (3 files, 32 fixtures, 2 defects found). |
 | 6a (expand) | ✅ **COMPLETE 2026-08-19**, except the resource half of (L), deferred with its prerequisite recorded (`[R3-89]`). Migration applied to staging and production and verified; dual-write, item 24, decisions (K) and (L), validation parity and apply-to-all breaks all on `staging` awaiting merge. |
 | 6b (contract) | §1.3 tier 2 and tier 3 prerequisites, **Q5**, **Q6**, **Q7**, **Q10**, and 6a live and soaked. |
-| 7 (fail closed) | ⏳ **Guest-facing slice IN PRODUCTION 2026-08-19 (decision J).** Mechanism, the three routes carrying real guest traffic (`unified-availability`, `availability`, `appointment-calendar`) and both UI states. **Remaining: `class-instances` and `resource-calendar`**, latent while production has no classes, events or resources. Guest paths only. |
+| 7 (fail closed) | ✅ **COMPLETE 2026-08-19 (decision J).** All five guest availability routes on one shared `withScheduleFailClosed`, plus both UI states. The three carrying real traffic are in production; the two latent ones await the next merge. Guest paths only: staff write validators still fail open, deliberately. |
 
 **Harness debt: CLEARED 2026-08-18 `[R3-73]`.** Stage 0b named four consumers it did not assert and said three were due before Stage 4; they were not done, and Stages 3 and 4 both changed code they run. Cleared as the first part of Stage 5:
 
@@ -792,7 +792,7 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **Verify grants on the hosted projects, not from the migrations.** Hosted Supabase grants `anon`/`authenticated` a full default privilege set through project-level defaults that live outside this repository, and table privileges are checked **before** RLS, so a local pgTAP pass proves nothing. Run `20270113120000`'s verification query against staging and production **separately** after each push, plus `npm run check:function-grants` per environment.
 
-### Stage 7 — Fail closed (`SA-C3` proper). ⏳ **GUEST-FACING SLICE IN PRODUCTION, 2026-08-19.** The three routes carrying real guest traffic are covered and proven; two latent ones remain.
+### Stage 7 — Fail closed (`SA-C3` proper). ✅ **COMPLETE, 2026-08-19.** All five guest availability routes fail closed, on one shared rule.
 
 `loadScheduleContext`, the third `unavailable` state, HTTP 503 with `Retry-After`, a retry card in the booking UI. Independent of everything above and the only stage touching the guest booking UI.
 
@@ -822,7 +822,13 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **A test-design note worth keeping `[R3-92]`.** The first attempt at the retry fixture failed because the flow **prefetches more than one month**, so "fail the first call, then succeed" let a later success clear the notice before the assertion ran. The fix was an explicit switch the test flips, not a call counter. Any fixture that assumes one request per user action on this flow will be flaky in the same way.
 
-**Still to do:** `class-instances` and `resource-calendar`, both far lower traffic than the two paths now covered.
+**✅ Stage 7 is COMPLETE, 2026-08-19.** `class-instances` and `resource-calendar` are wired, and the five copies of the rule became one.
+
+**Neither could be proven by exercising the route `[R3-93]`.** `class-instances` needs a `class_type_id` and `resource-calendar` is gated behind the venue's booking models, so on a venue with no classes or resources they cannot reach a successful response at all: injecting a failure returned the routes' own 400 and 403, exactly as the rule says it should. **That absence of proof is the finding.** Rather than reconfigure a venue to manufacture a test, the three-line rule five routes were each carrying was extracted into `withScheduleFailClosed`, which is the same shape that produced the six working-hours implementations Stage 5 collapsed: identical by coincidence, free to drift, and provable only by exercising every caller.
+
+The shared helper has **8 fixtures** covering what the copies never tested: 503 replaces a SUCCESS, a 400 / 403 / 500 is left alone (a 400 already answers correctly about the request, and turning it into "come back later" would hide a client bug behind an apparent outage), table names are deduplicated, **no venue or calendar id reaches the guest-visible body**, and a throw is not swallowed. That is a better proof than five separate live checks, and it is the only proof available for the two latent routes.
+
+**Re-proven live after the refactor**, because the wrap moved: injecting into `appointment-calendar` still returned 503 with `Retry-After: 15`, recovering to 200. All five routes verified returning their normal responses, with no false 503.
 
 **Decision (J), taken 2026-08-19.** Today every availability fetcher reads `res.data ?? []`, so a failed read of the leave or closure table is indistinguishable from "nothing there" and the engine sells the day. The operator's call: **a wrong booking costs staff time and goodwill to untangle, while a retry message costs one refresh**, so the system should refuse to answer rather than answer wrongly. Stage 1 item 4 already made these failures visible in Sentry, which is the prerequisite; this stage makes them safe.
 

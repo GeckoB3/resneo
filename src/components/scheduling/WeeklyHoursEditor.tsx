@@ -1,5 +1,7 @@
 'use client';
 
+import type { ReactNode } from 'react';
+
 /**
  * The one weekly-hours editor (decision (K)).
  *
@@ -85,6 +87,14 @@ interface WeeklyHoursEditorProps {
   openLabel?: string;
   separator?: string;
   defaultPeriod?: HoursPeriod;
+  /**
+   * Optional per-day context, rendered under the day's label (decision (K), step 6).
+   *
+   * Kept as a render prop rather than baked in, because only the CALENDAR screen has a
+   * constraining layer above it. The venue screen has nothing to compare against, and
+   * showing an empty context line there would imply otherwise.
+   */
+  renderDayContext?: (dayKey: string, periods: HoursPeriod[] | null) => ReactNode;
 }
 
 export function WeeklyHoursEditor({
@@ -96,6 +106,7 @@ export function WeeklyHoursEditor({
   openLabel = 'Open',
   separator = '–',
   defaultPeriod = { open: '09:00', close: '17:00' },
+  renderDayContext,
 }: WeeklyHoursEditorProps) {
   const timeInputClass =
     'min-h-10 w-full min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm disabled:bg-slate-50 sm:w-auto sm:min-w-[7rem] sm:flex-none sm:py-1';
@@ -148,6 +159,10 @@ export function WeeklyHoursEditor({
                   {label}
                 </span>
               </label>
+
+              {renderDayContext ? (
+                <div className="min-w-0 text-xs sm:text-right">{renderDayContext(key, periods ?? null)}</div>
+              ) : null}
 
               {open && !disabled && canCopy && (
                 <button

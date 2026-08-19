@@ -1,8 +1,10 @@
 'use client';
 
 import type { WorkingHours } from '@/types/booking-models';
+import type { ReactNode } from 'react';
 import {
   WeeklyHoursEditor,
+  type HoursPeriod,
   type NormalisedWeek,
   type WeeklyHoursEditorDay,
 } from '@/components/scheduling/WeeklyHoursEditor';
@@ -57,10 +59,13 @@ export function WorkingHoursControl({
   value,
   onChange,
   disabled = false,
+  renderDayContext,
 }: {
   value: WorkingHours;
   onChange: (next: WorkingHours) => void;
   disabled?: boolean;
+  /** Venue-hours context per day (decision (K), step 6). */
+  renderDayContext?: (dayKey: string, periods: HoursPeriod[] | null) => ReactNode;
 }) {
   return (
     <WeeklyHoursEditor
@@ -71,6 +76,7 @@ export function WorkingHoursControl({
       addLabel="+ Add split"
       openLabel="working"
       separator="to"
+      renderDayContext={renderDayContext}
     />
   );
 }

@@ -13,6 +13,12 @@ import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl
 import { useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { AppointmentAvailabilityTabPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { pickScheduleCalendarId } from '@/lib/calendar/pick-schedule-calendar';
+import {
+  calendarHoursOutsideVenue,
+  describeVenueDay,
+  venueDayContext,
+} from '@/lib/calendar/venue-hours-context';
+import type { OpeningHours } from '@/types/availability';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Practitioner {
@@ -167,6 +173,8 @@ export function AppointmentAvailabilitySettings({
     setTab(fromUrl);
   }, [searchParams, isAdmin]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
+  /** Venue weekly hours, shown as context beside each calendar day (decision (K), step 6). */
+  const [venueHours, setVenueHours] = useState<OpeningHours | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [pLinks, setPLinks] = useState<PractitionerServiceLink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -369,11 +377,18 @@ export function AppointmentAvailabilitySettings({
         return;
       }
 
-      const [pracRes, svcRes] = await Promise.all([
+      const [pracRes, svcRes, hoursRes] = await Promise.all([
         fetch('/api/venue/practitioners?roster=1'),
         fetch('/api/venue/appointment-services'),
+        // Context only. A failure here must not stop the page loading: without it the
+        // editor simply shows no comparison, which is where it was before step 6.
+        fetch('/api/venue/opening-hours').catch(() => null),
         isAdmin ? fetchAssociationData() : Promise.resolve(null),
       ]);
+      if (hoursRes?.ok) {
+        const hoursBody = (await hoursRes.json().catch(() => null)) as { opening_hours?: OpeningHours | null } | null;
+        setVenueHours(hoursBody?.opening_hours ?? null);
+      }
       if (!pracRes.ok || !svcRes.ok) {
         setError('Failed to load data. Please refresh the page.');
         return;
@@ -1160,6 +1175,17 @@ export function AppointmentAvailabilitySettings({
 
                   {selectedPrac && tab === 'hours' && (
                     <WorkingHoursEditor
+                      renderDayContext={(dayKey, periods) => {
+                        const ctx = venueDayContext(venueHours, dayKey);
+                        if (ctx.kind === 'unset') return null;
+                        const outside = calendarHoursOutsideVenue(periods, ctx);
+                        return (
+                          <span className={outside ? 'text-amber-700' : 'text-slate-500'}>
+                            Venue: {describeVenueDay(ctx)}
+                            {outside ? ' (hours outside this are not bookable)' : ''}
+                          </span>
+                        );
+                      }}
                       hours={selectedPrac.working_hours ?? {}}
                       onSave={saveWorkingHours}
                       saving={saving}
@@ -1252,12 +1278,14 @@ function WorkingHoursEditor({
   saving,
   readOnly = false,
   readOnlyHint,
+  renderDayContext,
 }: {
   hours: Record<string, Array<{ start: string; end: string }>>;
   onSave: (hours: Record<string, Array<{ start: string; end: string }>>) => void;
   saving: boolean;
   readOnly?: boolean;
   readOnlyHint?: string;
+  renderDayContext?: (dayKey: string, periods: Array<{ open: string; close: string }> | null) => React.ReactNode;
 }) {
   const [draft, setDraft] = useState(hours);
 
@@ -1267,7 +1295,7 @@ function WorkingHoursEditor({
 
   return (
     <div className="space-y-3">
-      <WorkingHoursControl value={draft} onChange={setDraft} disabled={readOnly} />
+      <WorkingHoursControl value={draft} onChange={setDraft} disabled={readOnly} renderDayContext={renderDayContext} />
 
       {!readOnly && (
         <button

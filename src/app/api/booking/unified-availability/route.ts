@@ -3,8 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { getUnifiedAvailableSlots } from '@/lib/unified-availability';
-import { withScheduleReadContext } from '@/lib/availability/schedule-read-context';
-import { scheduleUnavailableResponse } from '@/lib/availability/schedule-unavailable-response';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 import { z } from 'zod';
 
@@ -56,20 +55,17 @@ export async function GET(request: NextRequest) {
      * guest retry. The engine is unchanged; only what this route does with a known-incomplete
      * answer has changed.
      */
-    const { result: slots, failures } = await withScheduleReadContext(() =>
-      getUnifiedAvailableSlots({
+    return withScheduleFailClosed(async () => {
+      const slots = await getUnifiedAvailableSlots({
         supabase,
         venueId: venue_id,
         calendarId: calendar_id,
         date,
         serviceItemId: service_item_id,
         durationMinutesOverride: duration_minutes,
-      }),
-    );
-
-    if (failures.length > 0) return scheduleUnavailableResponse(failures);
-
-    return NextResponse.json({ slots });
+      });
+      return NextResponse.json({ slots });
+    });
   } catch (err) {
     console.error('[unified-availability] GET failed:', err);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

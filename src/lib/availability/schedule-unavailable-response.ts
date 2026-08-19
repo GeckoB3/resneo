@@ -45,3 +45,30 @@ export function scheduleUnavailableResponse(failures: readonly ScheduleReadFailu
     },
   );
 }
+
+/**
+ * Runs a guest-facing route handler and converts a KNOWN-INCOMPLETE success into a 503.
+ *
+ * Five routes were each carrying their own copy of this three-line rule, which is exactly
+ * the shape that produced the six working-hours implementations Stage 5 collapsed: identical
+ * by coincidence, free to drift, and testable only by exercising every route. Two of those
+ * routes (`class-instances`, `resource-calendar`) cannot reach a successful response on any
+ * venue without classes or resources configured, so per-route proof was not available for
+ * them at all. One shared helper is provable once and cannot drift.
+ *
+ * The rule, and why each half matters:
+ *   - **failures and a success** -> 503. The body was built without one of its inputs.
+ *   - **failures and a 4xx** -> leave it. A 400 is already a correct answer about the
+ *     request itself and says nothing about schedule data; replacing it would turn "you
+ *     asked for something invalid" into "come back later", which is worse advice and hides
+ *     a client bug.
+ *   - **no failures** -> leave it, whatever it is.
+ */
+export async function withScheduleFailClosed(
+  handler: () => Promise<NextResponse>,
+): Promise<NextResponse> {
+  const { withScheduleReadContext } = await import('@/lib/availability/schedule-read-context');
+  const { result, failures } = await withScheduleReadContext(handler);
+  if (failures.length > 0 && result.status < 400) return scheduleUnavailableResponse(failures);
+  return result;
+}

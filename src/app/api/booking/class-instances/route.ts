@@ -7,6 +7,7 @@ import {
   fetchClassInputForRange,
 } from '@/lib/availability/class-session-engine';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
+import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 function addDaysIso(from: string, days: number): string {
   const [y, m, d] = from.split('-').map(Number);
@@ -24,7 +25,23 @@ function addDaysIso(from: string, days: number): string {
  * capacity), then narrows to the requested class type. No auth required — the
  * manage link itself is the bearer; capacity is re-checked on the actual move.
  */
+/**
+ * Stage 7 (decision J): fail closed rather than open.
+ *
+ * The reads behind this route substitute `[]` on failure, so a class list built without one of its inputs can show a session the venue is closed for, or hide one it is running. Wrapping the handler
+ * covers every branch at once and cannot miss one the way per-return edits would. Only a
+ * SUCCESSFUL response is replaced: a 400 is already a correct answer about the request
+ * itself and says nothing about schedule data.
+ *
+ * Latent today, since production has no classes, events or resources. Wired now because the
+ * mechanism is fresh and the cost is four lines; left undone it becomes the thing nobody
+ * remembers when a venue first switches these on.
+ */
 export async function GET(request: NextRequest) {
+  return withScheduleFailClosed(() => handleClassInstancesGet(request));
+}
+
+async function handleClassInstancesGet(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const venueId = searchParams.get('venue_id');

@@ -700,7 +700,11 @@ A stage, not a bullet: five client components need a new data dependency, three 
 
   The migration's `INSERT ... SELECT` is idempotent by construction (`WHERE NOT EXISTS` plus the partial unique index on `source_leave_id`), so the repair is to run that exact statement again against each environment **after** the dual-write is deployed there. Running it before merely re-opens the same window.
 
-  **Status: staging caught up 2026-08-19** (the one row was a 12:00 to 12:45 partial leave on 2026-09-15, created 20:37 UTC on 18 August, after the backfill). **Production is still outstanding and must wait until the dual-write is deployed there.**
+  **✅ Both environments caught up 2026-08-19, and Stage 6a's data work is complete.**
+  - **Staging:** one row, a 12:00 to 12:45 partial leave on 2026-09-15 created at 20:37 UTC on 18 August, after the backfill. Now 9 leave rows, 9 mirrored.
+  - **Production:** one row, predicted exactly by the dry-run count and picked up after the merge deployed. Now **7 leave rows, 7 mirrored, 0 orphans, invariant 0**. The two environments have different populations; do not carry a count from one to the other, which is a mistake made once in this session.
+
+  **Leave is the only part of the composition model with live production data** (7 rows across real venues). Amended hours have never been used, and there are no resources, classes or events. It is therefore the one place a resolver or editor regression can reach a real venue today, which is worth weighing when sequencing the write-surface work below.
 
   **Verify with the invariant, not the counts:** `leave_without_mirror` must be 0 ignoring rows that are legitimately unmirrorable (no matching `unified_calendars` row, or an inverted time pair). Counts alone cannot distinguish "never inserted" from "inserted then deleted".
 

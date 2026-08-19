@@ -14,7 +14,7 @@
 | 5 (calendar resolver) | **DONE 2026-08-18.** 361 files / 3470 tests green. Harness debt cleared first (3 files, 32 fixtures, 2 defects found). |
 | 6a (expand) | ✅ **COMPLETE 2026-08-19**, except the resource half of (L), deferred with its prerequisite recorded (`[R3-89]`). Migration applied to staging and production and verified; dual-write, item 24, decisions (K) and (L), validation parity and apply-to-all breaks all on `staging` awaiting merge. |
 | 6b (contract) | §1.3 tier 2 and tier 3 prerequisites, **Q5**, **Q6**, **Q7**, **Q10**, and 6a live and soaked. |
-| 7 (fail closed) | **Decided IN 2026-08-19 (decision J). Not implemented.** Guest path only. |
+| 7 (fail closed) | ⏳ **Mostly done 2026-08-19 (decision J).** Mechanism plus the three routes carrying real guest traffic (`unified-availability`, `availability`, `appointment-calendar`) and both UI states, all proven on staging. **Remaining: `class-instances` and `resource-calendar`**, latent while production has no classes, events or resources. Guest paths only. |
 
 **Harness debt: CLEARED 2026-08-18 `[R3-73]`.** Stage 0b named four consumers it did not assert and said three were due before Stage 4; they were not done, and Stages 3 and 4 both changed code they run. Cleared as the first part of Stage 5:
 
@@ -786,7 +786,7 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **Verify grants on the hosted projects, not from the migrations.** Hosted Supabase grants `anon`/`authenticated` a full default privilege set through project-level defaults that live outside this repository, and table privileges are checked **before** RLS, so a local pgTAP pass proves nothing. Run `20270113120000`'s verification query against staging and production **separately** after each push, plus `npm run check:function-grants` per environment.
 
-### Stage 7 — Fail closed (`SA-C3` proper). ⏳ **IN PROGRESS, 2026-08-19.**
+### Stage 7 — Fail closed (`SA-C3` proper). ⏳ **MOSTLY DONE, 2026-08-19.** The three routes carrying real guest traffic are covered and proven; two latent ones remain.
 
 `loadScheduleContext`, the third `unavailable` state, HTTP 503 with `Retry-After`, a retry card in the booking UI. Independent of everything above and the only stage touching the guest booking UI.
 
@@ -797,7 +797,7 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 - `schedule-unavailable-response.ts` returns **503 with `Retry-After: 15` and `no-store`**, not 500: this is temporary and retrying is right, which is what 503 means. The body carries `unavailable: true` and the failing table names, and deliberately **no venue or calendar ids**, since it reaches an unauthenticated guest.
 - `/api/booking/unified-availability` uses both. **Proven end to end on staging** by injecting a failure deep inside the engine: the route returned 503 with the right headers instead of a slot list, and reverted cleanly to 200.
 
-**Added 2026-08-19, but NOT yet proven to fire `[R3-91]`:**
+**Added and PROVEN 2026-08-19 `[R3-91]`:**
 - `/api/booking/availability` wraps its whole handler, which covers appointments, events, classes and resources at once and cannot miss a branch the way per-return edits would. **This is the route the guest appointment flow actually uses**; `unified-availability` serves the embed and the mobile app, so wiring that one first covered the smaller audience.
 - A **retry card** in `AppointmentBookingFlow`, at both the single and group render sites. It is deliberately not the "no times available" card: that one advises trying a different date, which is wrong when the date is fine and the lookup is not. "Try again" replays the last lookup from a ref rather than reloading and losing the wizard state.
 - **The 503 handling matters more than it looks.** The fetch ignored `res.ok` and did `data.practitioners ?? []`, so a 503 rendered as "fully booked" -- the same screen a genuinely full day produces. A guest would have given up on a venue that was open.

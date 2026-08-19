@@ -12,7 +12,7 @@
 | 3 (venue resolver) | **DONE 2026-08-17.** 353 files / 3368 tests green. |
 | 4 (diary geometry) | **DONE 2026-08-17.** 354 files / 3377 tests green; diary and month verified in the app. |
 | 5 (calendar resolver) | **DONE 2026-08-18.** 361 files / 3470 tests green. Harness debt cleared first (3 files, 32 fixtures, 2 defects found). |
-| 6a (expand) | ⏳ **Part done.** Migration applied to staging and production 2026-08-19 and verified; dual-write and item 24 shipped to `staging` 2026-08-19. **Remaining: the write-surface consolidation, and production's backfill catch-up (`[R3-82]`).** |
+| 6a (expand) | ✅ **COMPLETE 2026-08-19**, except the resource half of (L), deferred with its prerequisite recorded (`[R3-89]`). Migration applied to staging and production and verified; dual-write, item 24, decisions (K) and (L), validation parity and apply-to-all breaks all on `staging` awaiting merge. |
 | 6b (contract) | §1.3 tier 2 and tier 3 prerequisites, **Q5**, **Q6**, **Q7**, **Q10**, and 6a live and soaked. |
 | 7 (fail closed) | **Decided IN 2026-08-19 (decision J). Not implemented.** Guest path only. |
 
@@ -29,7 +29,7 @@
 
 **Two traps for anyone adding fixtures to these paths.** The month path filters every date through the service booking window, whose default caps advance booking at **90 days**. `getUnifiedAvailableSlots` applies `isGuestBookingDateAllowed` before resolving anything, and `entityBookingWindowFromRow` hard-caps `max_advance_booking_days` at **365** — a real product rule. A fixed far-future date is rejected before the resolver is ever consulted, and the whole file then returns empty lists that look exactly like a resolver defect. The unified fixture computes its date relative to today for that reason.
 
-**Stages 0a to 5 are on `main` and in production.** Stage 6a's migration is applied to staging and production; its dual-write and the item 24 fix are implemented. **Every decision (A) to (J) is now taken**, including (J) fail-closed. What remains is 6a's write-surface consolidation, 6b's contraction, and Stage 7's implementation.
+**Stages 0a to 5 are in production.** **Stage 6a is complete on `staging`** and awaiting merge: migration (already applied to both databases), leave dual-write, event leave check, the `schedule-health` cron, decisions (K) and (L), validation parity and apply-to-all breaks. **Every decision (A) to (L) is taken.** What remains is the resource half of (L) (blocked on engine support, `[R3-89]`), 6b's contraction, and Stage 7's implementation.
 
 **Baseline:** tree of `6bc9ef4f`, now squash-merged and shipped as `ea9672f2` on `main` and `staging`. Since the v2 draft: 20 lines of unrelated visits-route code and 63 lines of test. **Nothing this plan cites has moved.** 344 test files, 261 migrations.
 

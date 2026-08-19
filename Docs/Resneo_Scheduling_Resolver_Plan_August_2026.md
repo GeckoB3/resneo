@@ -786,9 +786,18 @@ Items 3 to 6 are the write surface and are the **largest remaining block of work
 
 **Verify grants on the hosted projects, not from the migrations.** Hosted Supabase grants `anon`/`authenticated` a full default privilege set through project-level defaults that live outside this repository, and table privileges are checked **before** RLS, so a local pgTAP pass proves nothing. Run `20270113120000`'s verification query against staging and production **separately** after each push, plus `npm run check:function-grants` per environment.
 
-### Stage 7 — Fail closed (`SA-C3` proper). ✅ **DECIDED IN, 2026-08-19. Not yet implemented.**
+### Stage 7 — Fail closed (`SA-C3` proper). ⏳ **IN PROGRESS, 2026-08-19.**
 
 `loadScheduleContext`, the third `unavailable` state, HTTP 503 with `Retry-After`, a retry card in the booking UI. Independent of everything above and the only stage touching the guest booking UI.
+
+**⏳ IN PROGRESS. The mechanism is built and proven; the guest UI and the remaining routes are not.**
+
+**Done 2026-08-19:**
+- `schedule-read-context.ts` collects, per request, every schedule read that failed open. **It hooks the reporter all 44 fail-open sites already call**, rather than threading a return value through 11 files: the diff would have been enormous and its real risk is the one site someone forgets, silently keeping the old behaviour exactly where it matters. The `node:async_hooks` import lives in this module and registers a listener, because the engines reach browser bundles and a static Node import would break them.
+- `schedule-unavailable-response.ts` returns **503 with `Retry-After: 15` and `no-store`**, not 500: this is temporary and retrying is right, which is what 503 means. The body carries `unavailable: true` and the failing table names, and deliberately **no venue or calendar ids**, since it reaches an unauthenticated guest.
+- `/api/booking/unified-availability` uses both. **Proven end to end on staging** by injecting a failure deep inside the engine: the route returned 503 with the right headers instead of a slot list, and reverted cleanly to 200.
+
+**Still to do:** the retry card in the guest booking UI (until then a guest sees whatever the client does with a 503), and the other guest availability routes (`appointment-calendar`, `class-instances`, `resource-calendar`, `availability`). The month path matters most, since a whole month rendering as unavailable is more visible than one day.
 
 **Decision (J), taken 2026-08-19.** Today every availability fetcher reads `res.data ?? []`, so a failed read of the leave or closure table is indistinguishable from "nothing there" and the engine sells the day. The operator's call: **a wrong booking costs staff time and goodwill to untangle, while a retry message costs one refresh**, so the system should refuse to answer rather than answer wrongly. Stage 1 item 4 already made these failures visible in Sentry, which is the prerequisite; this stage makes them safe.
 

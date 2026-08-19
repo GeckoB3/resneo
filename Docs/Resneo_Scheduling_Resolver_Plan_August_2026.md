@@ -848,7 +848,21 @@ The shared helper has **8 fixtures** covering what the copies never tested: 503 
 
 **Two things stay fail open, recorded so they are not re-found.** `getCalendarGrid` reports nothing at all, so wrapping `venue/calendar-grid` would be inert and would read as protection: it needs instrumentation first. `cron/send-communications` reaches `fetchVenueClosureBlocksForDates`, so a failed read can let a reminder go out for a booking on a closed day, but fail closed does not apply where there is no client to retry.
 
-**`venue/waitlist` degrades per entry instead, and the two mechanisms must never be combined `[R3-96]`.** See §4 Stage 7a below.
+**`venue/waitlist` degrades per entry instead, and the two mechanisms must never be combined `[R3-96]`.** See Stage 7a below.
+
+### Stage 7a — per-entry degradation, and the nesting hazard `[R3-96]`
+
+**✅ COMPLETE 2026-08-19.** `GET /api/venue/waitlist` folds `can_offer` into each entry of one list response. A failed schedule read used to answer `can_offer: false` with "No matching availability", which both clients render as a **disabled Offer button** and a warning: the system told staff a waiting client could not be offered a slot, and removed their ability to try. A wrong answer, not a missing one.
+
+**Wrapping it was the obvious remedy and the wrong one.** There is no availability-only sub-view on either client; both render a single error state for the whole screen. A 503 would trade a wrong flag on some entries for **no waitlist at all for every entry**, including a tables-only venue whose entries never reach the check. The flag is also advisory in front of a gate that re-checks: `offerAppointmentWaitlistEntryManually` re-resolves the slot and returns 409. Fail closed buys less in front of a re-checking gate than it does on a picker, where the output IS the answer.
+
+So the route runs each entry's check in its own `withScheduleReadContext` and, on any reported failure, leaves `can_offer` unset and sets `offer_check_failed`. Both clients gate on an explicit `=== false`, so **the button stays enabled on builds that predate the flag** and the change degrades cleanly without an app release.
+
+**It keys on "a read failed", not on which way the answer came out.** A failed working-hours read yields no slots and the wrong disable above. A failed `bookings` read yields no occupancy, so the engine believes the day is empty and answers `available: true` — a wrong **enable**, pointing staff at a slot already taken. The mobile repo's harm argument covered only the first; narrowing the rule to `available === false` would reopen the second.
+
+**The hazard, which is the part worth keeping.** The collector reads `AsyncLocalStorage.getStore()`, which returns the **innermost** store. A per-entry context therefore **shadows** a route-level one, so `withScheduleFailClosed` added on top of this route would see an empty failure list for every per-entry read and return a clean 200 — while still converting failures from reads *outside* the loop into 503s. Partial, unpredictable, and **invisible to a handler-level injection fixture**, which is the style Stage 7 itself recommends (`[R3-91]`). The two mechanisms are mutually exclusive, not additive.
+
+This was proven rather than reasoned about, after being asserted twice from reading: three fixtures in `schedule-read-context.test.ts` pin the shadowing, the partial-protection case, and the concurrent isolation that makes per-entry attribution possible at all. `schedule-fail-closed-coverage.test.ts` lists the route under `MUST_NOT_WRAP`, because a comment fails when someone reads the file and a test fails when someone changes it.
 
 ---
 

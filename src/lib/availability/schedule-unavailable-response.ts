@@ -63,6 +63,20 @@ export function scheduleUnavailableResponse(failures: readonly ScheduleReadFailu
  *     asked for something invalid" into "come back later", which is worse advice and hides
  *     a client bug.
  *   - **no failures** -> leave it, whatever it is.
+ *
+ * **NEVER wrap a handler that opens its own `withScheduleReadContext` per item.** The
+ * collector reads `AsyncLocalStorage.getStore()`, which returns the INNERMOST store, so a
+ * per-item context shadows this one: every failure it captures is invisible here, and this
+ * wrapper returns a clean 200 having protected nothing. Failures from reads OUTSIDE that
+ * loop are still converted, so the result is partial and unpredictable rather than simply
+ * inert, and a handler-level injection fixture cannot tell the two apart. `venue/waitlist`
+ * degrades per entry for that reason and must stay unwrapped; `schedule-read-context.test.ts`
+ * pins the nesting behaviour and `schedule-fail-closed-coverage.test.ts` guards the route.
+ *
+ * **A wrapper is also inert on a path that reports nothing.** It converts a success only
+ * when a failure was REPORTED, so a route whose reads discard `error` gains an appearance
+ * of protection and no protection. `getCalendarGrid` was exactly that until it was
+ * instrumented. Check the path reports before wrapping it.
  */
 export async function withScheduleFailClosed(
   handler: () => Promise<NextResponse>,

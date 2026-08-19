@@ -59,10 +59,17 @@ const MUST_WRAP: readonly string[] = [
  */
 const MUST_NOT_WRAP: ReadonlyArray<{ route: string; because: string }> = [
   {
+    route: 'venue/waitlist',
+    because:
+      'degrades PER ENTRY inside its own withScheduleReadContext. A route-level wrapper is ' +
+      'shadowed by that context and would protect nothing while reading as protection.',
+  },
+  {
     route: 'venue/calendar-grid',
     because:
-      'getCalendarGrid discards `error` on five reads and reports none of them, so a wrapper ' +
-      'would be inert and read as protection. Instrumentation first, then wrap.',
+      'reported nothing at all until 2026-08-19, so a wrapper would have been inert. Now ' +
+      'instrumented; whether to wrap is a separate decision, and the label-only reads ' +
+      '(guests, service names) should be settled first.',
   },
 ];
 
@@ -73,7 +80,14 @@ describe('fail-closed coverage', () => {
     expect(src).toContain('withScheduleFailClosed(');
   });
 
+  /**
+   * Matches the CALL, not the name. `venue/waitlist` names the helper in a comment
+   * explaining why it must not use it, and that explanation is worth more than a assertion
+   * that forbids mentioning it.
+   */
   it.each(MUST_NOT_WRAP)('$route is deliberately not wrapped', ({ route }) => {
-    expect(routeSource(route)).not.toContain('withScheduleFailClosed');
+    const src = routeSource(route);
+    expect(src).not.toContain('withScheduleFailClosed(');
+    expect(src).not.toContain("import { withScheduleFailClosed }");
   });
 });

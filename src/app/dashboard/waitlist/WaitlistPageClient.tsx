@@ -30,6 +30,12 @@ interface WaitlistEntry {
   time_window_label?: string | null;
   can_offer?: boolean;
   offer_unavailable_reason?: string | null;
+  /**
+   * The availability pre-check could not be run for this entry: a schedule read failed open
+   * (SA-C3), so the server sent no `can_offer` rather than a `false` it could not stand
+   * behind. Advisory only, so the Offer button stays enabled and the server re-checks.
+   */
+  offer_check_failed?: boolean;
   party_size: number;
   guest_name: string;
   guest_first_name?: string | null;
@@ -236,6 +242,17 @@ function WaitlistEntryTrailing({
           title={entry.offer_unavailable_reason}
         >
           {entry.offer_unavailable_reason}
+        </span>
+      ) : null}
+      {/* Not a warning: nothing is wrong with the entry and the button still works. Muted
+          rather than amber so it reads as "we could not check", not "this cannot be
+          offered", which is the distinction the whole change exists to make. */}
+      {entry.status === 'waiting' && entry.offer_check_failed ? (
+        <span
+          className="text-right text-[10px] font-medium text-slate-500"
+          title="A schedule lookup failed, so availability could not be checked. Offering re-checks it."
+        >
+          Couldn&apos;t check availability
         </span>
       ) : null}
       {showOfferExpiry && entry.expires_at != null && showsTimedOfferExpiry(entry) ? (

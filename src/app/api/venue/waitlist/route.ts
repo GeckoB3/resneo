@@ -17,6 +17,7 @@ import { enrichWaitlistEntriesForDisplay } from '@/lib/booking/waitlist-entry-di
 import { formatWaitlistTimeWindowLabel } from '@/lib/booking/waitlist-time-window';
 import { offerAppointmentWaitlistEntryManually } from '@/lib/booking/manual-appointment-waitlist-offer';
 import { findAppointmentWaitlistAvailability } from '@/lib/booking/waitlist-offer-availability';
+import { withScheduleReadContext } from '@/lib/availability/schedule-read-context';
 import type { WaitlistEntryCandidate } from '@/lib/booking/offer-appointment-waitlist-on-cancel';
 import {
   isWaitlistKindAllowed,
@@ -122,19 +123,65 @@ export async function GET(request: NextRequest) {
 
         let can_offer: boolean | undefined;
         let offer_unavailable_reason: string | null = null;
+        let offer_check_failed: true | undefined;
         if (r.waitlist_kind === 'appointment' && r.status === 'waiting') {
-          const availability = await findAppointmentWaitlistAvailability(admin, staff.venue_id, {
-            desired_date: String(r.desired_date),
-            desired_time: r.desired_time ?? null,
-            desired_time_end: r.desired_time_end ?? null,
-            appointment_service_id: r.appointment_service_id ?? null,
-            service_item_id: r.service_item_id ?? null,
-            practitioner_id: r.practitioner_id ?? null,
-          });
-          can_offer = availability.available;
-          offer_unavailable_reason = availability.available
-            ? null
-            : (availability.reason ?? 'No matching availability.');
+          /**
+           * Stage 7a: degrade per ENTRY, not per response.
+           *
+           * This check reads the appointment engine, so it inherits the fail-open reads
+           * (SA-C3). A failed read used to answer `can_offer: false` with "No matching
+           * availability", which both clients render as a disabled Offer button and a
+           * warning: the system told staff a waiting client could not be offered a slot,
+           * and took away their ability to try. A wrong answer, not a missing one.
+           *
+           * **Why not `withScheduleFailClosed` like the availability routes.** `can_offer`
+           * is folded into each entry of one list response, and neither client has an
+           * availability-only sub-view: both render a single error state for the whole
+           * screen. A 503 would therefore convert a wrong flag on some entries into no
+           * waitlist at all for every entry, including a tables-only venue whose entries
+           * never reach this check. It is also an advisory pre-check in front of a gate
+           * that re-checks: `offerAppointmentWaitlistEntryManually` resolves the slot again
+           * and returns 409 when there is none, so failing closed here buys less than it
+           * does on a picker, where the output IS the answer.
+           *
+           * **The two are mutually exclusive, and combining them fails silently.** The
+           * collector reads `AsyncLocalStorage.getStore()`, which returns the INNERMOST
+           * store, so this per-entry context shadows any route-level one. A
+           * `withScheduleFailClosed` added on top would see an empty failure list for every
+           * per-entry read and return a clean 200, while still turning failures from reads
+           * OUTSIDE this loop into 503s: partial, unpredictable, and invisible to a
+           * handler-level injection fixture. Proven in `schedule-read-context.test.ts` and
+           * guarded by `MUST_NOT_WRAP` in `schedule-fail-closed-coverage.test.ts`.
+           *
+           * **Keys on "a read failed", not on which way the answer came out.** A failed
+           * working-hours read yields no slots and the wrong disable above; a failed
+           * bookings read yields no occupancy, so the engine believes the day is empty and
+           * answers `available: true` — a wrong ENABLE, pointing staff at a slot already
+           * taken. Blanking the flag on any reported failure covers both. Narrowing this to
+           * `available === false` would reopen the other half.
+           */
+          const { result: availability, failures } = await withScheduleReadContext(() =>
+            findAppointmentWaitlistAvailability(admin, staff.venue_id, {
+              desired_date: String(r.desired_date),
+              desired_time: r.desired_time ?? null,
+              desired_time_end: r.desired_time_end ?? null,
+              appointment_service_id: r.appointment_service_id ?? null,
+              service_item_id: r.service_item_id ?? null,
+              practitioner_id: r.practitioner_id ?? null,
+            }),
+          );
+          if (failures.length > 0) {
+            // Leave `can_offer` unset. Both clients gate on an explicit `=== false`, so the
+            // Offer button stays enabled on builds that predate `offer_check_failed`, and
+            // the 409 behind it is the backstop. No reason string: "No matching
+            // availability" would be the exact falsehood this removes.
+            offer_check_failed = true;
+          } else {
+            can_offer = availability.available;
+            offer_unavailable_reason = availability.available
+              ? null
+              : (availability.reason ?? 'No matching availability.');
+          }
         }
 
         return {
@@ -145,6 +192,7 @@ export async function GET(request: NextRequest) {
           time_window_label,
           can_offer,
           offer_unavailable_reason,
+          offer_check_failed,
         };
       }),
     );

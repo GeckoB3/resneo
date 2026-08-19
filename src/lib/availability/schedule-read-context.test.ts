@@ -96,3 +96,73 @@ describe('withScheduleReadContext', () => {
     expect(() => reportAvailabilityReadFailure(FAILURE, { message: 'timeout' })).not.toThrow();
   });
 });
+
+/**
+ * Nesting, pinned because a design depends on it and the failure mode is silent.
+ *
+ * `venue/waitlist` degrades PER ENTRY: it runs each entry's availability check in its own
+ * context and blanks that entry's `can_offer` when a read failed, instead of failing the
+ * whole response closed. That only works because the collector reads
+ * `AsyncLocalStorage.getStore()`, which returns the innermost store.
+ *
+ * The consequence is the part worth guarding: a route-level `withScheduleFailClosed` added
+ * on top of per-entry contexts is NOT additive. It cannot see the failures the inner
+ * contexts captured, so it returns a clean 200 and reads as protection while protecting
+ * nothing — except for reads outside the loop, which it still converts to 503s. Partial and
+ * unpredictable, and a handler-level injection fixture (the style Stage 7 used, `[R3-91]`)
+ * cannot tell the difference.
+ *
+ * If anyone ever changes the listener to broadcast to every active context, these fixtures
+ * go red, and they should: that would silently re-arm the outer wrapper and start returning
+ * 503s from the waitlist screen.
+ */
+describe('nested contexts', () => {
+  it('the inner context captures the failure and the outer sees nothing', async () => {
+    const outer = await withScheduleReadContext(async () => {
+      const inner = await withScheduleReadContext(async () => {
+        reportAvailabilityReadFailure(FAILURE, { message: 'timeout' });
+        return 'entry-result';
+      });
+      return inner;
+    });
+
+    expect(outer.failures).toEqual([]);
+    expect(outer.result.failures).toHaveLength(1);
+    expect(outer.result.result).toBe('entry-result');
+  });
+
+  it('a failure OUTSIDE the inner run is still seen by the outer: the protection is partial', async () => {
+    const outer = await withScheduleReadContext(async () => {
+      reportAvailabilityReadFailure({ ...FAILURE, table: 'outside_loop' }, { message: 'timeout' });
+      await withScheduleReadContext(async () => {
+        reportAvailabilityReadFailure({ ...FAILURE, table: 'inside_loop' }, { message: 'timeout' });
+      });
+      return null;
+    });
+
+    expect(outer.failures.map((f) => f.table)).toEqual(['outside_loop']);
+  });
+
+  /** What makes per-entry attribution possible: interleaved entries do not pool their failures. */
+  it('concurrent per-entry contexts attribute failures to the right entry', async () => {
+    const results = await Promise.all(
+      [
+        { key: 'a', delay: 20, fails: true },
+        { key: 'b', delay: 5, fails: false },
+        { key: 'c', delay: 10, fails: true },
+      ].map((entry) =>
+        withScheduleReadContext(async () => {
+          await new Promise((resolve) => setTimeout(resolve, entry.delay));
+          if (entry.fails) reportAvailabilityReadFailure({ ...FAILURE, table: entry.key }, { message: 'x' });
+          return entry.key;
+        }),
+      ),
+    );
+
+    expect(results.map((r) => ({ entry: r.result, failed: r.failures.length > 0 }))).toEqual([
+      { entry: 'a', failed: true },
+      { entry: 'b', failed: false },
+      { entry: 'c', failed: true },
+    ]);
+  });
+});

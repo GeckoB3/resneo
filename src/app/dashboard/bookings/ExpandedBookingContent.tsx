@@ -134,6 +134,7 @@ import { CardHoldDetailSection } from '@/components/booking/CardHoldDetailSectio
 import { useDashboardToolbarVenueOptional } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
 import { BookingLocationCallout } from '@/components/booking/BookingLocationCallout';
 import { resolveStaffBookingLocation } from '@/lib/booking/staff-booking-location';
+import { hasSettleableDeposit } from '@/lib/booking/deposit-action-eligibility';
 
 export interface BookingRow {
   id: string;
@@ -2094,7 +2095,16 @@ export function ExpandedBookingContent({
             />
           ) : null}
           <div className="flex flex-wrap gap-1">
-            {!cardHoldState && effectiveBooking.deposit_status !== 'Paid' && effectiveBooking.deposit_status !== 'Refunded' ? (
+            {/*
+              Offered only while a deposit is actually outstanding. This used to
+              read "not Paid and not Refunded", which left the three actions on
+              every booking whose deposit was 'Not Required' (any service with no
+              deposit at all). Recording cash there marked a £0.00 deposit as Paid
+              and the row then showed "£0.00 - Paid" beside its real outstanding
+              balance. Matches the route's own guard, so a button is never shown
+              for an action the server refuses.
+            */}
+            {!cardHoldState && hasSettleableDeposit(effectiveBooking.deposit_status) ? (
               <>
                 <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('send_payment_link'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Send payment link</button>
                 <button type="button" disabled={inlineActionLoading !== null || statusActionPending} onClick={() => { void runDepositAction('waive'); }} className="rounded-lg border border-slate-200 bg-white px-[9px] py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Waive</button>

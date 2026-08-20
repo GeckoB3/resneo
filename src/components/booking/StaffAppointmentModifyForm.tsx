@@ -312,6 +312,21 @@ export function StaffAppointmentModifyForm({
     isVisit ? visitSpanMinutes(visitSegments) : resolveBookingCoreDurationMinutes(booking),
   );
   const [variantId, setVariantId] = useState<string | null>(booking.service_variant_id ?? null);
+  /**
+   * Which service+variant the current duration was derived for. Seeded with what
+   * the booking arrived as, so opening the form never re-adopts a catalogue
+   * duration over the booking's own; it only moves when staff actually switch
+   * service or variant.
+   */
+  const durationSourceRef = useRef(
+    `${initialServiceId}|${booking.service_variant_id ?? ''}`,
+  );
+  /**
+   * Set once staff type a duration or pick a quick duration. A figure they chose
+   * themselves is theirs to keep, so a later service or variant switch reports the
+   * new catalogue length but does not overwrite it.
+   */
+  const durationEditedByStaffRef = useRef(false);
   /** Latest answer from the visit endpoint's dry run: what saving would lay out. */
   const [visitPlan, setVisitPlan] = useState<VisitPlanResponse | null>(null);
   /**
@@ -569,20 +584,57 @@ export function StaffAppointmentModifyForm({
   );
 
   /**
-   * The booking row carried no end time, so adopt the catalogue duration (the
-   * chosen variant's when there is one) as BOTH the value and the baseline:
-   * it is what this appointment is scheduled for, not an edit staff made.
+   * Adopt the catalogue duration (the chosen variant's when there is one) in the
+   * two cases where the form has no better answer:
+   *
+   *  1. The booking row carried no end time, so there is nothing to start from.
+   *     Sets the baseline too, so adopting one is not mistaken for a staff edit
+   *     and Save does not light up on a form nobody has touched.
+   *  2. The service or variant CHANGED, so the duration must follow it. Without
+   *     this, switching "Basic" (30 min) to "Premium" (60 min) left the field on
+   *     30 and the form posted that stale value, which the server prefers over the
+   *     variant's own duration. The booking was then saved as Premium, priced as
+   *     Premium, and given half the time Premium needs. Here the baseline
+   *     deliberately stays put: it is what the form OPENED with, and moving it
+   *     would hide the change from `hasChanges` and leave Save disabled on a form
+   *     that now differs from the stored row.
+   *
+   * Guarded by two refs rather than by comparing values, because neither
+   * condition is recoverable from the numbers alone:
+   *  - `durationSourceRef` is the service+variant the current duration belongs to.
+   *    A booking whose length differs from its catalogue entry (booked long, or
+   *    trimmed earlier) must keep it on open, so "differs from the catalogue" is
+   *    not evidence of a change.
+   *  - `durationEditedByStaffRef` marks a figure staff chose themselves, which
+   *    survives a later switch.
+   *
+   * Visits are excluded: their span is owned by the visit endpoint's dry run
+   * (see `visitPlan`), not by one service's catalogue duration.
    */
   useEffect(() => {
-    if (durationMinutes != null || !selectedService) return;
+    if (!selectedService || isVisit) return;
     const activeVariant = (selectedService.variants ?? []).find(
       (v) => v.is_active && v.id === variantId,
     );
     const adopted = activeVariant?.duration_minutes ?? selectedService.duration_minutes;
     if (!Number.isFinite(adopted) || adopted < MIN_APPOINTMENT_CORE_DURATION_MINUTES) return;
+
+    const sourceKey = `${selectedService.id}|${variantId ?? ''}`;
+    if (durationMinutes == null) {
+      durationSourceRef.current = sourceKey;
+      setDurationMinutes(adopted);
+      setBaselineDuration(adopted);
+      return;
+    }
+    // Only follow a real change of service or variant. A booking whose own
+    // duration differs from its catalogue entry (booked long, or trimmed by
+    // staff earlier) must keep that duration on open, which is why this cannot
+    // simply compare `adopted` against the current value.
+    if (sourceKey === durationSourceRef.current) return;
+    durationSourceRef.current = sourceKey;
+    if (durationEditedByStaffRef.current) return;
     setDurationMinutes(adopted);
-    setBaselineDuration(adopted);
-  }, [durationMinutes, selectedService, variantId]);
+  }, [durationMinutes, selectedService, variantId, isVisit]);
 
   const serviceLinesKey = useMemo(
     () => JSON.stringify((serviceLines ?? []).map((l) => [l.bookingId, l.serviceId, l.variantId])),
@@ -1428,7 +1480,10 @@ export function StaffAppointmentModifyForm({
             // The services set the length of a visit being re-serviced, so the
             // field reports it rather than competing with it.
             readOnly={servicesChanged}
-            onChange={(e) => setDurationMinutes(Number(e.target.value))}
+            onChange={(e) => {
+              durationEditedByStaffRef.current = true;
+              setDurationMinutes(Number(e.target.value));
+            }}
             className={`mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm ${
               servicesChanged ? 'bg-slate-100 text-slate-500' : ''
             }`}
@@ -1474,7 +1529,10 @@ export function StaffAppointmentModifyForm({
             <button
               key={m}
               type="button"
-              onClick={() => setDurationMinutes(m)}
+              onClick={() => {
+                durationEditedByStaffRef.current = true;
+                setDurationMinutes(m);
+              }}
               className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                 m === durationMinutes
                   ? 'bg-brand-600 text-white'

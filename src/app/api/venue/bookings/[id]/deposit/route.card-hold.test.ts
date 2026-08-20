@@ -540,3 +540,58 @@ describe('refund (§9.2e)', () => {
     expect(mockRefundCreate).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A booking with no deposit has nothing to settle. `send_payment_link` always
+ * refused these states; `waive` and `record_cash` did not, so recording cash on
+ * an ordinary no-deposit appointment wrote `deposit_status: 'Paid'` with
+ * `deposit_amount_pence: 0`. The row then read as settled while its real balance
+ * was untouched, and offered to refund a deposit of £0.
+ */
+describe('deposit actions require a settleable deposit', () => {
+  it('record_cash returns 409 when no deposit is required', async () => {
+    const { bookingUpdates } = setup({
+      hold: null,
+      booking: { status: 'Booked', deposit_status: 'Not Required', deposit_amount_pence: null },
+    });
+    const res = await POST(makeRequest({ action: 'record_cash' }), routeParams);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'invalid_state' });
+    // The critical assertion: nothing was written.
+    expect(bookingUpdates).toHaveLength(0);
+  });
+
+  it('record_cash returns 409 when the deposit is already paid', async () => {
+    const { bookingUpdates } = setup({
+      hold: null,
+      booking: { status: 'Booked', deposit_status: 'Paid', deposit_amount_pence: 2000 },
+    });
+    const res = await POST(makeRequest({ action: 'record_cash' }), routeParams);
+    expect(res.status).toBe(409);
+    expect(bookingUpdates).toHaveLength(0);
+  });
+
+  it('waive returns 409 when no deposit is required', async () => {
+    const { bookingUpdates } = setup({
+      hold: null,
+      booking: { status: 'Booked', deposit_status: 'Not Required', deposit_amount_pence: null },
+    });
+    const res = await POST(makeRequest({ action: 'waive' }), routeParams);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'invalid_state' });
+    expect(bookingUpdates).toHaveLength(0);
+  });
+
+  it('record_cash still works from Failed, the recovery path after a declined card', async () => {
+    const { bookingUpdates } = setup({
+      hold: null,
+      booking: { status: 'Booked', deposit_status: 'Failed', deposit_amount_pence: 1500 },
+    });
+    const res = await POST(makeRequest({ action: 'record_cash' }), routeParams);
+    expect(res.status).toBe(200);
+    expect(bookingUpdates[0]).toMatchObject({
+      deposit_status: 'Paid',
+      deposit_amount_pence: 1500,
+    });
+  });
+});

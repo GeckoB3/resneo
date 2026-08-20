@@ -1660,6 +1660,43 @@ export async function POST(request: NextRequest) {
         }
 
         /**
+         * Re-snapshot the display names when a self-reschedule lands on a
+         * DIFFERENT service. `service_name_snapshot` and
+         * `service_variant_name_snapshot` are written by a BEFORE INSERT trigger
+         * and every read prefers them, so without this the venue's calendar, day
+         * sheet, bookings list and the guest's visit history all kept showing the
+         * service originally booked. The guest's own manage page resolves the
+         * service live and showed the NEW one, so the two sides of the same
+         * appointment disagreed about what had been booked.
+         *
+         * Only on a service change: when the service is unchanged the variant is
+         * carried as-is above, so its existing snapshot is still the right name.
+         * The variant snapshot is cleared alongside, because `nextVariantId` is
+         * already forced to null for a different service, for the reason given
+         * where `previousVariantId` is resolved.
+         *
+         * Resolved HERE, before the slot re-check below, so the extra read does
+         * not widen the re-check-to-write window that SA-C1 exists to narrow.
+         */
+        const rescheduleNameSnapshot: Record<string, string | null> = {};
+        if (serviceChanged) {
+          const { data: nextSvcRow } = await supabase
+            .from(
+              currentBookingModel === "unified_scheduling"
+                ? "service_items"
+                : "appointment_services",
+            )
+            .select("name")
+            .eq("id", bodyAppointmentServiceId as string)
+            .maybeSingle();
+          const nextName = (nextSvcRow as { name?: string } | null)?.name;
+          if (typeof nextName === "string" && nextName.trim() !== "") {
+            rescheduleNameSnapshot.service_name_snapshot = nextName;
+          }
+          rescheduleNameSnapshot.service_variant_name_snapshot = null;
+        }
+
+        /**
          * SA-C1 on the reschedule path. This was the one appointment-writing
          * route the C3 interim never covered, so the window between the slot
          * check above and the write below stayed hundreds of milliseconds wide,
@@ -1719,6 +1756,7 @@ export async function POST(request: NextRequest) {
               ? { booking_end_time: rescheduleBookingEndTime }
               : {}),
             service_variant_id: nextVariantId,
+            ...rescheduleNameSnapshot,
             ...(rescheduleProcessingBlocks
               ? { processing_time_blocks: rescheduleProcessingBlocks }
               : {}),

@@ -2656,7 +2656,55 @@ export async function PATCH(
       }
 
       if (isAppointment && (body as { service_variant_id?: unknown }).service_variant_id !== undefined) {
-        bookingUpdate.service_variant_id = (body as { service_variant_id?: string | null }).service_variant_id;
+        const nextVariantId =
+          (body as { service_variant_id?: string | null }).service_variant_id ?? null;
+        const previousVariantId =
+          (booking as { service_variant_id?: string | null }).service_variant_id ?? null;
+        bookingUpdate.service_variant_id = nextVariantId;
+
+        /**
+         * Re-snapshot the option name alongside the id, for the same reason
+         * `service_name_snapshot` is re-snapshotted above: both columns are
+         * written by a BEFORE INSERT trigger and every read prefers them, so a
+         * booking whose variant was switched kept advertising the old option
+         * forever.
+         *
+         * The service-change block above only nulls this when the SERVICE moves,
+         * which is the case it was written for. A variant-only change is the
+         * common one ("Basic" to "Premium" on the same service) and fell through
+         * it, leaving a booking reading "Basic" while priced and delivered as
+         * Premium. Ordering matters: that block runs first and may null this, and
+         * this block then writes the correct name when a variant is also supplied.
+         */
+        if (nextVariantId !== previousVariantId) {
+          if (!nextVariantId) {
+            bookingUpdate.service_variant_name_snapshot = null;
+          } else {
+            const effectiveServiceId =
+              (bookingUpdate.service_item_id as string | undefined) ??
+              (bookingUpdate.appointment_service_id as string | undefined) ??
+              (booking.service_item_id as string | null) ??
+              (booking.appointment_service_id as string | null);
+            const nextVariant = effectiveServiceId
+              ? await loadActiveVariantForService({
+                  admin,
+                  venueId: scopeVenueId,
+                  serviceId: effectiveServiceId,
+                  variantId: nextVariantId,
+                })
+              : null;
+            // Same contract as the reschedule path above, which already rejects a
+            // variant that is inactive, belongs to another service, or to another
+            // venue. Previously a variant-only edit reached the write unchecked.
+            if (!nextVariant) {
+              return NextResponse.json(
+                { error: 'Invalid or inactive variant for this service' },
+                { status: 400 },
+              );
+            }
+            bookingUpdate.service_variant_name_snapshot = nextVariant.name ?? null;
+          }
+        }
       }
 
       // Add-ons (web parity with create): when staff change add-ons in the modify

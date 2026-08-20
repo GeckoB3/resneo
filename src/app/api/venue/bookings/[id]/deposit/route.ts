@@ -24,6 +24,7 @@ import {
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
+import { hasSettleableDeposit } from '@/lib/booking/deposit-action-eligibility';
 import type { BookingModel } from '@/types/booking-models';
 
 const schema = z.object({
@@ -229,6 +230,20 @@ export async function POST(
       }
       return NextResponse.json({ success: true });
     }
+    // As with record_cash above: nothing to waive unless a deposit is actually
+    // outstanding. Waiving a 'Not Required' booking wrote 'Waived' over a state
+    // that was already correct, which reads to staff as though a deposit had
+    // existed and been forgiven.
+    if (!hasSettleableDeposit(booking.deposit_status as string | null)) {
+      return NextResponse.json(
+        {
+          error:
+            'This booking has no deposit to waive. The deposit is not required, or is already settled.',
+          code: 'invalid_state',
+        },
+        { status: 409 },
+      );
+    }
     // Plan 8.3/D7: kill the open deposit PI BEFORE the state flip, while the
     // row still reads as owing (the helper skips settled rows). A guest with
     // an open payment tab must not be able to pay a waived deposit: the money
@@ -248,6 +263,28 @@ export async function POST(
       return NextResponse.json(
         {
           error: 'Cash cannot be recorded for a booking with a card hold. No deposit was requested for it.',
+          code: 'invalid_state',
+        },
+        { status: 409 },
+      );
+    }
+    /**
+     * There must actually be a deposit to record against. Without this the
+     * action wrote `deposit_status: 'Paid'` with `deposit_amount_pence: 0` onto
+     * a booking that never owed one, so the row rendered as "£0.00 - Paid" while
+     * its real balance sat untouched: settled and outstanding on the same screen,
+     * and then offering to "Refund deposit" for £0. `send_payment_link` below has
+     * always refused the same states; this action and `waive` had no such guard.
+     *
+     * Money genuinely taken in person is not this action's job. That is the
+     * in-person payment ledger (`POST /api/venue/bookings/[id]/charge` with
+     * `method: 'cash'`), which records an amount and recomputes the balance.
+     */
+    if (!hasSettleableDeposit(booking.deposit_status as string | null)) {
+      return NextResponse.json(
+        {
+          error:
+            'This booking has no deposit to record. The deposit is not required, or is already settled.',
           code: 'invalid_state',
         },
         { status: 409 },
@@ -416,8 +453,9 @@ export async function POST(
   // owed deposit are explicitly allowed: that is the accept-unpaid recovery
   // path, and GET /api/booking/pay serves them.
   if (!hold) {
-    const depositStatus = (booking.deposit_status as string | null) ?? null;
-    if (depositStatus !== 'Pending' && depositStatus !== 'Failed') {
+    // Same eligibility as `waive` and `record_cash` above, shared so the three
+    // cannot drift apart again; this one carried the rule on its own.
+    if (!hasSettleableDeposit(booking.deposit_status as string | null)) {
       return NextResponse.json(
         {
           error: 'This booking has no deposit to collect. The deposit is already settled.',

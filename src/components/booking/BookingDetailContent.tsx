@@ -37,6 +37,7 @@ import { CardHoldDetailSection } from '@/components/booking/CardHoldDetailSectio
 import { useDashboardToolbarVenueOptional } from '@/components/dashboard/toolbar-guest-search/DashboardToolbarVenueProvider';
 import { BookingLocationCallout } from '@/components/booking/BookingLocationCallout';
 import { resolveStaffBookingLocation } from '@/lib/booking/staff-booking-location';
+import { hasSettleableDeposit } from '@/lib/booking/deposit-action-eligibility';
 
 export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext }) {
   const {
@@ -633,7 +634,9 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                 />
               ) : (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {d.deposit_status !== 'Paid' && d.deposit_status !== 'Refunded' && (
+                {/* Only while a deposit is outstanding; see the note on the same
+                    gate in ExpandedBookingContent. */}
+                {hasSettleableDeposit(d.deposit_status) && (
                   <>
                     <button
                       type="button"

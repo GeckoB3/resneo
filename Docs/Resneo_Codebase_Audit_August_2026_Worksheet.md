@@ -40,6 +40,9 @@ Two-stage pipeline per domain: a finder agent audits the domain in depth, then a
 - 2026-08-21 ~19:00 UTC: round 1 hit the session usage limit. Completed: D1–D5 finder audits (5/9). Failed on limit: D6–D9 finders and all 9 verifiers. Workflow resumed 23:12 UTC from cache (run wf_d4aa0b97-5cf); completed audits replay, the rest run live.
 - Orchestrator first-hand reading so far (for adjudication): full read of `src/lib/availability/appointment-engine.ts` (1,861 ln); structural maps of `PractitionerCalendarView.tsx` (14 useState, 12 useEffect, 95 useCallback/useMemo, 32 fetch call sites, local re-implementations of `timeToMinutes`/`minutesToTime`/busy-interval helpers that exist in libs), `AppointmentBookingFlow.tsx` (14 useState, 19 useEffect, 49 useCallback/useMemo), `api/booking/create/route.ts` dispatch (one zod schema, model dispatch to `handleNonTableBooking` at :782). Independently confirmed: 20+ local re-implementations of `timeToMinutes` across components/routes/libs despite a canonical export in `src/lib/availability`.
 
+- 2026-08-22 08:05 UTC: all 9 finder audits complete: 141 findings (D1:13, D2:10, D3:14, D4:14, D5:26, D6:13, D7:15, D8:21, D9:15). Verifiers complete for D1 (8 confirmed / 2 adjusted / 3 refuted-as-duplicates), D2 (8/2/0), D4 (12/2/0). Remaining 6 verifiers re-launched after the second usage-limit window. Raw output in `Resneo_Codebase_Audit_August_2026_Worksheet_RawResults.md`.
+- 2026-08-22: orchestrator independently re-verified EV-1 (critical): `parent_event_id uuid REFERENCES experience_events(id) ON DELETE CASCADE` (migration 20260327000001:100, never altered by any later migration); `countBookingsBlockingEventDelete` counts only `.eq('experience_event_id', id)` with no sibling/parent check; neither DELETE route considers series children. Confirmed.
+
 ## Raw results
 
-(to be filled in as agent results arrive)
+See `Docs/Resneo_Codebase_Audit_August_2026_Worksheet_RawResults.md` (per-domain architecture summaries, quality assessments, all findings, and adversarial verdicts).

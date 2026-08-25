@@ -628,6 +628,13 @@ export async function POST(request: NextRequest) {
         guestId: guest.id,
         draftId: parsed.data.compliance_draft_id ?? null,
         submissions: parsed.data.compliance_submissions,
+        // Per-visit forms (validity 0) expire at the end of the appointment's day. One
+        // record has to satisfy every segment, so anchor it to the LAST segment date
+        // (booking_date is YYYY-MM-DD, so the string max is the latest date).
+        visitDate: validated.reduce<string | null>(
+          (latest, seg) => (latest === null || seg.booking_date > latest ? seg.booking_date : latest),
+          null,
+        ),
         captureIp: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip'),
         captureUserAgent: request.headers.get('user-agent'),
       });

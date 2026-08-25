@@ -15,6 +15,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  endOfCaptureDayInVenueTimezone,
+  endOfLocalDayForYmd,
   formatYmdInTimezone,
   getVenueLocalDateAndMinutes,
   venueLocalWallTimeToUtcMs,
@@ -207,6 +209,47 @@ describe('venueLocalWallTimeToUtcMs — other zones', () => {
   it('handles a half-hour offset zone', () => {
     expect(venueLocalWallTimeToUtcMs('2026-07-10', '09:35', 'Asia/Kolkata')).toBe(
       Date.parse('2026-07-10T04:05:00.000Z'),
+    );
+  });
+});
+
+describe('endOfLocalDayForYmd', () => {
+  it('ends a BST day one hour before UTC midnight', () => {
+    // 2026-05-18 is BST (UTC+1): the day ends at 2026-05-19T00:00 BST = 2026-05-18T23:00Z.
+    expect(endOfLocalDayForYmd('2026-05-18', TZ).toISOString()).toBe('2026-05-18T22:59:59.999Z');
+  });
+
+  it('ends a GMT day at UTC midnight', () => {
+    expect(endOfLocalDayForYmd('2026-11-05', TZ).toISOString()).toBe('2026-11-05T23:59:59.999Z');
+  });
+
+  it('handles both DST transition days', () => {
+    // Spring forward (2026-03-29): the day ends in BST, so an hour before UTC midnight.
+    expect(endOfLocalDayForYmd('2026-03-29', TZ).toISOString()).toBe('2026-03-29T22:59:59.999Z');
+    // Autumn back (2026-10-25): the day ends in GMT, so at UTC midnight, and is 25h long.
+    expect(endOfLocalDayForYmd('2026-10-25', TZ).toISOString()).toBe('2026-10-25T23:59:59.999Z');
+  });
+
+  it('honours other zones and falls back to Europe/London on a blank one', () => {
+    // New York on 2026-05-18 is EDT (UTC-4).
+    expect(endOfLocalDayForYmd('2026-05-18', 'America/New_York').toISOString()).toBe(
+      '2026-05-19T03:59:59.999Z',
+    );
+    expect(endOfLocalDayForYmd('2026-05-18', 'UTC').toISOString()).toBe('2026-05-18T23:59:59.999Z');
+    expect(endOfLocalDayForYmd('2026-05-18', '  ').toISOString()).toBe(
+      endOfLocalDayForYmd('2026-05-18', TZ).toISOString(),
+    );
+  });
+
+  it('agrees with endOfCaptureDayInVenueTimezone for the day an instant falls on', () => {
+    // 2026-05-18T23:30Z is already 2026-05-19 in London (BST), so the capture day is the 19th.
+    const lateEvening = new Date('2026-05-18T23:30:00Z');
+    expect(endOfCaptureDayInVenueTimezone(lateEvening, TZ).toISOString()).toBe(
+      endOfLocalDayForYmd('2026-05-19', TZ).toISOString(),
+    );
+    const midday = new Date('2026-05-18T12:00:00Z');
+    expect(endOfCaptureDayInVenueTimezone(midday, TZ).toISOString()).toBe(
+      endOfLocalDayForYmd('2026-05-18', TZ).toISOString(),
     );
   });
 });

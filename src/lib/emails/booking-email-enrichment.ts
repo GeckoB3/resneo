@@ -364,8 +364,16 @@ export async function enrichBookingEmailForAppointment(
 
       let sumPence = 0;
       let anyPrice = false;
+      /**
+       * A VISIT (one guest, several services) carries no `person_label` on any row; a
+       * PARTY carries one on every row, because create-group requires it. Falling back to
+       * "Guest" per row therefore stamped a made-up person on every service of a visit,
+       * which is what reminder emails were showing above each treatment. Decided once for
+       * the whole set, so a party with one gap still labels its other members.
+       */
+      const isVisit = !siblings.some((s) => (s.person_label as string | null)?.trim());
       groupAppointments = siblings.map((s) => {
-        const label = (s.person_label as string | null)?.trim() || 'Guest';
+        const label = isVisit ? '' : (s.person_label as string | null)?.trim() || 'Guest';
         const timeStr = typeof s.booking_time === 'string' ? s.booking_time.slice(0, 5) : '00:00';
         const pid = s.practitioner_id as string | null;
         const sid = s.appointment_service_id as string | null;

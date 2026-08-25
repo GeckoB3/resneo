@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 import { loadOutstandingBookingFormLinks } from "@/lib/compliance/form-links-service";
 import { enforceBookingCompliance } from "@/lib/compliance/enforce-booking";
+import { rescheduleBookingComplianceRecords } from "@/lib/compliance/records-service";
 import { stripe } from "@/lib/stripe";
 import { sendCancellationNotification } from "@/lib/communications/send-templated";
 import type { BookingEmailData } from "@/lib/emails/types";
@@ -1639,6 +1640,19 @@ export async function POST(request: NextRequest) {
           refund_window_hours: refundWindowHours,
           policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
         };
+
+        // A per-visit record was completed for THIS booking, so it moves with it when the
+        // guest reschedules. Runs before the gate, which would otherwise reject the move on
+        // the consent signed for the date being left behind. This cannot weaken the C1 guard
+        // below: it only carries forward a record already attached to this booking, and
+        // never conjures one for a requirement the guest has not met.
+        if (newDate !== booking.booking_date) {
+          await rescheduleBookingComplianceRecords(supabase, {
+            venueId: booking.venue_id as string,
+            bookingId,
+            newBookingDate: newDate,
+          });
+        }
 
         // Compliance gate (§5.1, audit C1): a guest self-reschedule onto a
         // regulated service/date must satisfy the same online block as the create

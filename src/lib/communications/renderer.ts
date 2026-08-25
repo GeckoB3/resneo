@@ -13,6 +13,10 @@ import {
 import { confirmationSubject } from '@/lib/emails/templates/booking-confirmation';
 import { buildCardHoldNoticeHtml, renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
+import {
+  bookingDisplayStart,
+  groupAppointmentTextLines,
+} from '@/lib/emails/group-appointment-display';
 import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from '@/lib/emails/account-portal-links';
@@ -339,12 +343,25 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
   postCtaTextLine?: string | null;
 } {
   const guestName = opts.booking.guest_name || 'Guest';
-  const date = formatDate(opts.booking.booking_date);
-  const time = formatTime(opts.booking.booking_time);
+  // A multi-service visit (and a party) is anchored on whichever row the email was sent
+  // for, which for a reminder is whichever service triggered it. The guest reads this as
+  // "when is my appointment", so it has to be the earliest line, not that row's time.
+  const displayStart = bookingDisplayStart(opts.booking);
+  const date = formatDate(displayStart.date);
+  const time = formatTime(displayStart.time);
   const partySize = opts.booking.party_size;
   const depositAmount = formatMoneyOrNull(opts.booking.deposit_amount_pence);
   const label = bookingLabel(opts.booking);
   const withStaffLabel = withStaff(label, opts.booking);
+  /**
+   * The service lines for the text part. A multi-service booking lists every service, so
+   * the text part says what the HTML part shows: it used to name only the service whose
+   * row triggered the send, silently dropping the rest of the visit.
+   */
+  const serviceTextLines =
+    opts.booking.group_appointments && opts.booking.group_appointments.length > 0
+      ? groupAppointmentTextLines(opts.booking.group_appointments, formatTime, formatDate)
+      : [`Service: ${withStaffLabel}`];
   const appointment = isAppointmentLane(opts.lane);
   const cancelOnly = isAppointmentCancelOnly(opts);
   const manageCtaLabel = manageBookingEmailCtaLabel(cancelOnly);
@@ -382,7 +399,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           appointment
             ? 'Your booking is confirmed. Here are the details:'
             : 'Your table is booked. Here are the details:',
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
@@ -430,7 +447,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           appointment
             ? 'Your appointment has been reserved, but a deposit is required to confirm it:'
             : 'Your table has been reserved, but a deposit is required to confirm it:',
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? null : `Guests: ${partySize}`,
@@ -492,7 +509,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           appointment
             ? "We're getting ready for your appointment and want to make sure everything is in order."
             : "We're getting ready for your visit and want to make sure everything is in order.",
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           ...(appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
             ? ['Extras:', ...opts.booking.addon_lines.map((l) => `  - ${l}`)]
             : []),
@@ -529,7 +546,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           appointment
             ? "Just a quick reminder that your deposit for your upcoming appointment hasn't been paid yet:"
             : "Just a quick reminder that your deposit for your upcoming booking hasn't been paid yet:",
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? null : `Guests: ${partySize}`,
@@ -561,7 +578,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Hi ${guestName},`,
           '',
           bodyCore,
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? null : `Guests: ${partySize}`,
@@ -596,7 +613,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           appointment
             ? 'This is a friendly reminder about your upcoming appointment:'
             : 'This is a friendly reminder about your upcoming booking:',
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           ...(appointment && opts.booking.addon_lines && opts.booking.addon_lines.length > 0
             ? ['Extras:', ...opts.booking.addon_lines.map((l) => `  - ${l}`)]
             : []),
@@ -630,7 +647,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Hi ${guestName},`,
           '',
           'Your booking has been updated. Here are the new details:',
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
@@ -662,7 +679,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Hi ${guestName},`,
           '',
           appointment ? 'Your appointment has been cancelled:' : 'Your booking has been cancelled:',
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? null : `Guests: ${partySize}`,
@@ -698,7 +715,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Hi ${guestName},`,
           '',
           cancelledLine,
-          appointment ? `Service: ${withStaffLabel}` : null,
+          ...(appointment ? serviceTextLines : []),
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? null : `Guests: ${partySize}`,
@@ -897,8 +914,8 @@ export function renderCommunicationEmail(
       venueLogoUrl: opts.venue.logo_url ?? null,
       heading: config.heading,
       mainContent: config.mainContent,
-      bookingDate: formatDate(opts.booking.booking_date),
-      bookingTime: formatTime(opts.booking.booking_time),
+      bookingDate: formatDate(bookingDisplayStart(opts.booking).date),
+      bookingTime: formatTime(bookingDisplayStart(opts.booking).time),
       partySize: opts.booking.party_size,
       venueAddress: resolvedLocation.rowValue,
       locationJoinUrl: resolvedLocation.joinUrl,

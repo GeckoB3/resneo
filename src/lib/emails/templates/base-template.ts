@@ -1,4 +1,5 @@
 import type { GroupAppointmentLine } from "../types";
+import { isVisitLines } from "../group-appointment-display";
 import {
   formatRefundDeadlineIso,
   isDepositRefundAvailableAt,
@@ -91,17 +92,26 @@ export function buildBookingDetailsCard(opts: {
   const rows: string[] = [];
 
   if (opts.groupAppointments && opts.groupAppointments.length > 0) {
+    // A party labels each row with the person; one guest's multi-service visit has no
+    // person to name (they are named in the greeting), so its rows lead with the service.
+    const visit = isVisitLines(opts.groupAppointments);
     const header =
       '<tr><td style="padding:0 0 8px 0;font-size:13px;font-weight:600;color:#0f172a">Details for this booking</td></tr>';
     const tableRows = opts.groupAppointments.map((g) => {
       const dt = formatDateShort(g.booking_date);
       const tm = formatTime(g.booking_time);
       const price = g.price_display ? escapeHtml(g.price_display) : "N/A";
+      const headline = visit
+        ? `${escapeHtml(g.service_name)} with ${escapeHtml(g.practitioner_name)}`
+        : escapeHtml(g.person_label.trim());
+      const detail = visit
+        ? price
+        : `${escapeHtml(g.service_name)} · ${escapeHtml(g.practitioner_name)} · ${price}`;
       return (
         `<tr><td style="padding:10px 0;border-top:1px solid #e5e5e5;font-size:13px;color:#333">` +
-        `<strong>${escapeHtml(g.person_label)}</strong><br/>` +
+        `<strong>${headline}</strong><br/>` +
         `<span style="color:#64748b">${dt} at ${tm}</span><br/>` +
-        `${escapeHtml(g.service_name)} · ${escapeHtml(g.practitioner_name)} · ${price}` +
+        `${detail}` +
         `</td></tr>`
       );
     });

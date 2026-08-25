@@ -1708,6 +1708,9 @@ async function handleNonTableBooking(
       guestId: guest.id,
       draftId: data.compliance_draft_id ?? null,
       submissions: data.compliance_submissions,
+      // Per-visit forms (validity 0) expire at the end of the appointment's day, not the
+      // day they were filled in, so an advance completion still satisfies the gate below.
+      visitDate: booking_date,
       captureIp: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip'),
       captureUserAgent: request.headers.get('user-agent'),
     });

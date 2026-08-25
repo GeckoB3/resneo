@@ -208,7 +208,7 @@ describe('computeExpiresAt', () => {
   it('null validity = lifetime (null)', () => {
     expect(computeExpiresAt(null, captured)).toBeNull();
   });
-  it('0 validity = per visit: end of the capture day in venue local time (audit M5)', () => {
+  it('0 validity with no known appointment = end of the capture day in venue local time', () => {
     // captured 2026-05-14T12:00Z; Europe/London (default) is BST (UTC+1), so the local day
     // ends at 2026-05-15T00:00 BST = 2026-05-14T23:00Z, i.e. 22:59:59.999Z.
     expect(computeExpiresAt(0, captured)?.toISOString()).toBe('2026-05-14T22:59:59.999Z');
@@ -219,3 +219,54 @@ describe('computeExpiresAt', () => {
     expect(computeExpiresAt(180, captured)?.toISOString()).toBe('2026-11-10T12:00:00.000Z');
   });
 });
+
+describe('computeExpiresAt — per-visit records anchored to the appointment', () => {
+  // The bug this covers: a per-visit form completed ahead of the appointment (inline at
+  // booking, or from the confirmation link) expired the same night, so it never satisfied
+  // the requirement on the day. Expiry now runs to the end of the VISIT day.
+  const captured = new Date('2026-05-14T12:00:00Z');
+
+  it('runs to the end of the appointment day, not the capture day', () => {
+    // Completed 4 days early; the appointment day (BST) ends at 2026-05-18T22:59:59.999Z.
+    expect(computeExpiresAt(0, captured, 'Europe/London', '2026-05-18')?.toISOString()).toBe(
+      '2026-05-18T22:59:59.999Z',
+    );
+  });
+
+  it('uses the offset in force on the appointment day, not on the capture day', () => {
+
+    // Captured in BST (UTC+1), appointment in GMT (UTC+0) after the October change.
+    expect(computeExpiresAt(0, captured, 'Europe/London', '2026-11-05')?.toISOString()).toBe(
+      '2026-11-05T23:59:59.999Z',
+    );
+  });
+
+  it('never expires earlier than the end of the capture day', () => {
+    // A past appointment date (a late capture, or a booking already moved) must not mint an
+    // already-expired record: it still covers the rest of the day it was completed on.
+    expect(computeExpiresAt(0, captured, 'Europe/London', '2026-05-01')?.toISOString()).toBe(
+      '2026-05-14T22:59:59.999Z',
+    );
+  });
+
+  it('matches the capture-day fallback when the appointment is the same day', () => {
+    expect(computeExpiresAt(0, captured, 'Europe/London', '2026-05-14')?.toISOString()).toBe(
+      '2026-05-14T22:59:59.999Z',
+    );
+  });
+
+  it('falls back to the capture day for a malformed or missing visit date', () => {
+    const fallback = '2026-05-14T22:59:59.999Z';
+    expect(computeExpiresAt(0, captured, 'Europe/London', '14/05/2026')?.toISOString()).toBe(fallback);
+    expect(computeExpiresAt(0, captured, 'Europe/London', '')?.toISOString()).toBe(fallback);
+    expect(computeExpiresAt(0, captured, 'Europe/London', null)?.toISOString()).toBe(fallback);
+  });
+
+  it('ignores the visit date for lifetime and fixed-period types', () => {
+    expect(computeExpiresAt(null, captured, 'Europe/London', '2026-05-18')).toBeNull();
+    expect(computeExpiresAt(180, captured, 'Europe/London', '2026-05-18')?.toISOString()).toBe(
+      '2026-11-10T12:00:00.000Z',
+    );
+  });
+});
+

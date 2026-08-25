@@ -7,6 +7,7 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
+import { visitCommsAnchorIds } from '@/lib/cron/visit-comms-anchor';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
@@ -32,10 +33,12 @@ import {
 const BOOKING_APPOINTMENT_FK_COLUMNS =
   'event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id';
 
+// `group_booking_id` is what ties a multi-service visit's rows together, so the loops can
+// send once per visit rather than once per service (see `visitCommsAnchorIds`).
 const BOOKING_SELECT_BASE =
-  `id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, ${BOOKING_APPOINTMENT_FK_COLUMNS}, guest:guests(first_name, last_name, email, phone)`;
+  `id, venue_id, guest_id, group_booking_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, ${BOOKING_APPOINTMENT_FK_COLUMNS}, guest:guests(first_name, last_name, email, phone)`;
 const BOOKING_SELECT_WITH_SUPPRESS =
-  `id, venue_id, guest_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, ${BOOKING_APPOINTMENT_FK_COLUMNS}, guest:guests(first_name, last_name, email, phone)`;
+  `id, venue_id, guest_id, group_booking_id, booking_model, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, ${BOOKING_APPOINTMENT_FK_COLUMNS}, guest:guests(first_name, last_name, email, phone)`;
 
 export interface UnifiedCommsResults {
   unified_reminder_1: number;
@@ -102,6 +105,21 @@ async function fetchCronBookings(opts: {
     throw fallback.error;
   }
   return normalizeBookings(fallback.data ?? []);
+}
+
+/**
+ * Does this row belong to the lane being processed? Shared by the loops and by the
+ * per-visit anchor pass, so the anchor is picked from exactly the rows that can send.
+ */
+function laneEligible(
+  row: BookingRow,
+  cdeOnly: boolean,
+  venueBookingModel: string | null | undefined,
+): boolean {
+  if (row.suppress_import_comms) return false;
+  if (cdeOnly !== isCdeBookingRow(row)) return false;
+  if (!cdeOnly && !isUnifiedAppointmentBookingRow(row, venueBookingModel)) return false;
+  return true;
 }
 
 /** Appointment FKs on a row stored as `table_reservation` (legacy mis-tag) at an appointment venue. */
@@ -238,13 +256,18 @@ async function runLaneReminder(opts: {
    */
   const closureBlocks = await fetchVenueClosureBlocksForDates(opts.supabase, opts.venue.id, dates);
 
+  const eligible = rows.filter((row) => laneEligible(row, opts.cdeOnly, opts.venue.booking_model));
+  /**
+   * One reminder per visit, not one per service. The window check below then runs against
+   * the earliest row, so the reminder lands the policy's lead time before the visit STARTS.
+   * Appointments only: see `visitCommsAnchorIds` for why CDE groups still send per row.
+   */
+  const anchors = opts.cdeOnly ? null : visitCommsAnchorIds(eligible, 'earliest');
+
   const venueData = venueRowToEmailData(opts.venue);
-  for (const row of rows) {
+  for (const row of eligible) {
     try {
-      if (row.suppress_import_comms) continue;
-      const isCde = isCdeBookingRow(row);
-      if (opts.cdeOnly !== isCde) continue;
-      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row, opts.venue.booking_model)) continue;
+      if (anchors && !anchors.has(row.id)) continue;
 
       const delta = msUntilBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
       if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {
@@ -368,13 +391,17 @@ async function runLanePostVisit(opts: {
     statuses: ['Completed'],
   });
 
+  const eligible = rows.filter((row) => laneEligible(row, opts.cdeOnly, opts.venue.booking_model));
+  /**
+   * One thank-you per visit, not one per service, anchored on the LAST service because
+   * that is when the visit actually ended.
+   */
+  const anchors = opts.cdeOnly ? null : visitCommsAnchorIds(eligible, 'latest');
+
   const venueData = venueRowToEmailData(opts.venue);
-  for (const row of rows) {
+  for (const row of eligible) {
     try {
-      if (row.suppress_import_comms) continue;
-      const isCde = isCdeBookingRow(row);
-      if (opts.cdeOnly !== isCde) continue;
-      if (!opts.cdeOnly && !isUnifiedAppointmentBookingRow(row, opts.venue.booking_model)) continue;
+      if (anchors && !anchors.has(row.id)) continue;
 
       const delta = msSinceBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
       if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {

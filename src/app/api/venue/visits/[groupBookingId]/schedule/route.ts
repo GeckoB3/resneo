@@ -26,6 +26,7 @@ import {
   complianceUnmetMessage,
   COMPLIANCE_REQUIREMENT_UNMET,
 } from '@/lib/compliance/enforce-booking';
+import { rescheduleBookingComplianceRecords } from '@/lib/compliance/records-service';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appointment-engine';
@@ -426,6 +427,19 @@ export async function PATCH(
 
     if (visitStartChanged) {
       for (const t of targets) {
+        // A per-visit record was completed for THIS booking, so it moves with the visit.
+        // Runs before the gate, which would otherwise reject the reschedule on the consent
+        // signed for the date being left behind. Skipped on a dry run, which must not write:
+        // the trade-off is that a dry run can still report a per-visit block that the real
+        // save would clear.
+        if (body.dry_run !== true) {
+          await rescheduleBookingComplianceRecords(admin, {
+            venueId: scopeVenueId,
+            bookingId: t.row.id as string,
+            newBookingDate: newDate,
+          });
+        }
+
         const compliance = await checkBookingCompliance(admin, {
           venueId: scopeVenueId,
           guestId: (t.row.guest_id as string | null) ?? null,

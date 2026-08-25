@@ -19,7 +19,8 @@ import {
 } from '@/lib/booking/service-location';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
-import { computeAvailability, fetchEngineInput } from '@/lib/availability';
+import { computeAvailability, fetchEngineInput, minutesToTime, timeToMinutes } from '@/lib/availability';
+import { validateResourceDuration } from '@/lib/booking/resource-duration-bounds';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
@@ -905,12 +906,29 @@ async function handleNonTableBooking(
   let appointmentProcessingSnapshot: ProcessingTimeBlock[] | null = null;
   /** Venue-local wall-clock end of the appointment's core segment (HH:mm:ss). */
   let appointmentBookingEndTime: string | null = null;
+  /** RS-1: server-derived resource span (HH:mm:ss). Never the request's own end. */
+  let resourceBookingEndTime: string | null = null;
 
   const SESSION_CAPACITY_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
   if (event_session_id && effectiveModel !== 'unified_scheduling') {
     return NextResponse.json(
       { error: 'event_session_id is only supported for unified_scheduling venues' },
+      { status: 400 },
+    );
+  }
+
+  // EV-4: `ticket_lines` is accepted by the schema on EVERY request, and the
+  // insert below fell back to the raw client array whenever the event branch had
+  // not produced validated lines. On any non-event model that meant a crafted
+  // POST could store its own labels, its own prices, and a `ticket_type_id`
+  // belonging to any venue: the tier's sales lookup is unscoped, so the foreign
+  // row then permanently blocked that tier's deletion. Reject the field outright
+  // unless this is a real event booking, where `validateEventTicketBooking`
+  // re-derives every line from the catalogue.
+  if (ticket_lines !== undefined && effectiveModel !== 'event_ticket') {
+    return NextResponse.json(
+      { error: 'ticket_lines is only valid for event ticket bookings.' },
       { status: 400 },
     );
   }
@@ -1569,11 +1587,29 @@ async function handleNonTableBooking(
     }
     const result = computeResourceAvailability(input, durationMinutes);
     const res = result.find((r) => r.id === resource_id);
+    // RS-1: the engine CLAMPS the requested duration into [min,max] before
+    // building its grid, so `slotAvailable` below only ever proves the clamped
+    // span is free. Without this gate a 09:00-23:00 request against a 3-hour cap
+    // validated as 3 hours and was then stored as 14, blocking the resource all
+    // day; the DB trigger deliberately waves resource windows through on the
+    // assumption the application checks them. Same rule as the staff modify
+    // validator, which is where it was already written.
+    if (res) {
+      const bounds = validateResourceDuration(durationMinutes, res);
+      if (!bounds.ok) {
+        return NextResponse.json({ error: bounds.reason }, { status: 400 });
+      }
+    }
     const slotAvailable = res?.slots.some((s) => s.start_time === timeStr);
     if (!slotAvailable) {
       return NextResponse.json({ error: 'This resource slot is no longer available' }, { status: 409 });
     }
-    const endForVenue = (booking_end_time.length === 5 ? booking_end_time : booking_end_time.slice(0, 5)).slice(0, 5);
+    // Derive the stored span from the duration we just approved, never from the
+    // request. `booking_end_time` accepts HH:MM:SS, and the duration arithmetic
+    // above reads only HH:MM, so a client sending 12:00:59 would otherwise have
+    // its seconds stored against a window validated without them.
+    resourceBookingEndTime = minutesToTime(timeToMinutes(timeStr) + durationMinutes) + ':00';
+    const endForVenue = resourceBookingEndTime.slice(0, 5);
     // Store a TRUE UTC instant for estimated_end_time: interpret the booking-date +
     // end wall-clock in the venue IANA timezone (DST-safe). Previously left null on
     // the create path; the resource-modify route should match this convention rather
@@ -1782,13 +1818,7 @@ async function handleNonTableBooking(
      * liked, and the engine trusts this column over everything else, so a single
      * forged booking could hold (or vacate) a practitioner's whole day.
      */
-    booking_end_time:
-      appointmentBookingEndTime ??
-      (resource_id && booking_end_time
-        ? booking_end_time.length === 5
-          ? booking_end_time + ':00'
-          : booking_end_time
-        : null),
+    booking_end_time: appointmentBookingEndTime ?? resourceBookingEndTime ?? null,
     event_session_id: event_session_id ?? null,
     capacity_used: capacity_used ?? party_size,
     addons_total_price_pence: chosenAddonTotals.total_price_pence,
@@ -1958,18 +1988,31 @@ async function handleNonTableBooking(
     }
   }
 
-  // Insert ticket lines for event bookings. Use the server-priced, server-labelled
-  // lines from validateEventTicketBooking (M1/C2) — never the client-supplied prices.
-  const ticketLinesToInsert = validatedEventTicketLines ?? ticket_lines;
-  if (ticketLinesToInsert && ticketLinesToInsert.length > 0) {
-    const lines = ticketLinesToInsert.map((tl) => ({
+  // Insert ticket lines for event bookings. ONLY the server-priced,
+  // server-labelled lines from validateEventTicketBooking (M1/C2); there is
+  // deliberately no fallback to the client-supplied `ticket_lines`, which the
+  // gate above rejects on every non-event model (EV-4).
+  if (validatedEventTicketLines && validatedEventTicketLines.length > 0) {
+    const lines = validatedEventTicketLines.map((tl) => ({
       booking_id: booking.id,
       ticket_type_id: tl.ticket_type_id,
       label: tl.label,
       quantity: tl.quantity,
       unit_price_pence: tl.unit_price_pence,
     }));
-    await supabase.from('booking_ticket_lines').insert(lines);
+    const { error: lineErr } = await supabase.from('booking_ticket_lines').insert(lines);
+    if (lineErr) {
+      // EV-4: this error used to be discarded, leaving a paid booking with zero
+      // ticket lines. Its tier seats then silently resold, because remaining
+      // tier capacity is computed from these rows. Roll back like the
+      // `booking_addons` block below, and like the staff route already does.
+      console.error('booking_ticket_lines insert failed:', lineErr);
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      return NextResponse.json(
+        { error: 'Failed to save the tickets for this booking' },
+        { status: 500 },
+      );
+    }
   }
 
   // Insert booking_addons snapshot rows (immutable record of what was chosen).

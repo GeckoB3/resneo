@@ -24,6 +24,7 @@ import {
 } from "@/lib/booking/guest-card-hold-summary";
 import { settleCardHoldsOnCancellation } from "@/lib/booking/card-hold-cancellation";
 import { cancelOpenDepositIntentForBookings } from "@/lib/booking/cancel-open-deposit-intent";
+import { classifyDepositRefundFailure } from "@/lib/booking/deposit-refund-convergence";
 import { planSharedDepositRefund } from "@/lib/booking/shared-deposit-refund";
 import { resolveRescheduleCancellationDeadline } from "@/lib/booking/reschedule-cancellation-deadline";
 import { formatCardHoldFeePence } from "@/lib/booking/card-hold-terms";
@@ -589,6 +590,8 @@ export async function POST(request: NextRequest) {
         booking.stripe_payment_intent_id;
 
       let refundSucceeded = false;
+      /** PM-1: the deposit is settled, but not through a live intent. */
+      let nothingToRefund = false;
       if (canRefund) {
         const { data: venue } = await supabase
           .from("venues")
@@ -633,9 +636,23 @@ export async function POST(request: NextRequest) {
             // above handles the other convergence case (a crash-retry of this
             // exact refund), which replays the original result rather than
             // raising at all.
-            const code = (refundErr as { code?: string } | null)?.code;
-            if (code === 'charge_already_refunded') {
+            //
+            // PM-1 adds the second convergence: a deposit settled in cash has
+            // its intent cancelled by `record_cash`, and refunding a cancelled
+            // intent throws. Before the fix that made the booking permanently
+            // uncancellable from this route, returning a 502 reading "Your
+            // booking has not been cancelled" on every attempt, forever. There
+            // is no money to return here, so cancel and leave deposit_status
+            // alone (the update below preserves it when refundSucceeded is
+            // false) rather than stamping a 'Refunded' that never happened.
+            const convergence = await classifyDepositRefundFailure(refundErr, {
+              paymentIntentId: booking.stripe_payment_intent_id as string,
+              stripeAccountId: venue.stripe_connected_account_id,
+            });
+            if (convergence === 'refunded') {
               refundSucceeded = true;
+            } else if (convergence === 'nothing_to_refund') {
+              nothingToRefund = true;
             } else {
               logBookingOp({
                 operation: "refund_failed",
@@ -652,7 +669,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      if (canRefund && !refundSucceeded) {
+      if (canRefund && !refundSucceeded && !nothingToRefund) {
         return NextResponse.json(
           {
             error:
@@ -1039,6 +1056,11 @@ export async function POST(request: NextRequest) {
             resourceId,
             newDate,
             timeStr,
+            // RS-3: this is the GUEST manage-link flow. Without this the shared
+            // validator ran with its staff defaults, so a guest could move their
+            // booking to a time that had already passed, inside the venue's notice
+            // window, or up to eleven months out.
+            audience: 'guest',
             durationMinutes: bodyDurationMinutes ?? null,
             bookingEndTime:
               bodyBookingEndTime ??

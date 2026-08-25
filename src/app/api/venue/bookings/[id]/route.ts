@@ -74,6 +74,7 @@ import {
 } from '@/lib/booking/booking-owes-capture';
 import { applyAcceptUnpaidSideEffects } from '@/lib/booking/accept-unpaid-booking';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
+import { classifyDepositRefundFailure } from '@/lib/booking/deposit-refund-convergence';
 import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
 import { resolveRescheduleCancellationDeadline } from '@/lib/booking/reschedule-cancellation-deadline';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
@@ -971,6 +972,8 @@ export async function PATCH(
           Boolean(deadline && new Date() <= deadline && hadPaidDeposit && paymentIntentForRefund);
 
         let refundSucceeded = false;
+        /** PM-1: the deposit is settled, but not through a live intent. */
+        let nothingToRefund = false;
         if (canRefund && paymentIntentForRefund) {
           const { data: venue } = await admin.from('venues').select('stripe_connected_account_id').eq('id', scopeVenueId).single();
           if (venue?.stripe_connected_account_id) {
@@ -996,20 +999,35 @@ export async function PATCH(
               );
               refundSucceeded = true;
             } catch (refundErr) {
-              logBookingOp({
-                operation: 'refund_failed',
-                venue_id: scopeVenueId,
-                booking_id: id,
-                booking_model: inferBookingRowModel(
-                  booking as Parameters<typeof inferBookingRowModel>[0],
-                ),
-                error: refundErr instanceof Error ? refundErr.message : String(refundErr),
+              // PM-1 / C11: converge where converging is honest. The money is
+              // already back (`charge_already_refunded`), or the intent on the
+              // row is dead and never took money (a `record_cash` settlement),
+              // in which case cancelling is correct and stamping 'Refunded'
+              // would not be. Anything else still fails the cancel.
+              const convergence = await classifyDepositRefundFailure(refundErr, {
+                paymentIntentId: paymentIntentForRefund,
+                stripeAccountId: venue.stripe_connected_account_id,
               });
+              if (convergence === 'refunded') {
+                refundSucceeded = true;
+              } else if (convergence === 'nothing_to_refund') {
+                nothingToRefund = true;
+              } else {
+                logBookingOp({
+                  operation: 'refund_failed',
+                  venue_id: scopeVenueId,
+                  booking_id: id,
+                  booking_model: inferBookingRowModel(
+                    booking as Parameters<typeof inferBookingRowModel>[0],
+                  ),
+                  error: refundErr instanceof Error ? refundErr.message : String(refundErr),
+                });
+              }
             }
           }
         }
 
-        if (canRefund && !refundSucceeded) {
+        if (canRefund && !refundSucceeded && !nothingToRefund) {
           return NextResponse.json(
             {
               error:
@@ -1184,6 +1202,10 @@ export async function PATCH(
             refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5\u201310 business days.`;
           } else if (hadPaidDeposit && !canRefund) {
             refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
+          } else if (nothingToRefund) {
+            // PM-1: settled off Stripe (cash recorded by the venue), so there is
+            // no card payment to reverse. Nothing failed, so do not say it did.
+            refund_message = `Your deposit of ${depositAmountStr} was not taken online, so the venue will arrange your refund with you directly.`;
           } else if (hadPaidDeposit && canRefund && !refundSucceeded) {
             refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
           } else if (keptCardHolds.length > 0) {

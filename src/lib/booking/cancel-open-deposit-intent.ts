@@ -17,6 +17,16 @@ import { DEPOSIT_OWED_STATUSES } from '@/lib/booking/booking-owes-capture';
  *   (that money belongs to the webhook / reconciliation from then on).
  * - Best-effort throughout: callers are on cancellation/settlement paths and a
  *   failed Stripe cancel must not fail them.
+ *
+ * Reports the intents that are definitively DEAD afterwards: ones Stripe accepted
+ * a cancel for, plus ones already `canceled` when we looked. `record_cash` uses
+ * that to clear the dead PI id off the booking row (PM-1); every other caller
+ * ignores it.
+ *
+ * An intent is never listed unless we READ its terminal state, so `succeeded` and
+ * `processing` intents (real money, owned by the webhook from then on) and
+ * intents we could not retrieve are excluded. A caller must never discard a
+ * payment reference for an intent that might still take money.
  */
 export async function cancelOpenDepositIntentForBookings(
   admin: SupabaseClient,
@@ -25,9 +35,10 @@ export async function cancelOpenDepositIntentForBookings(
     settledBookingIds: string[];
     venueId: string;
   },
-): Promise<void> {
+): Promise<{ deadPaymentIntentIds: string[] }> {
+  const deadPaymentIntentIds: string[] = [];
   const { settledBookingIds, venueId } = params;
-  if (settledBookingIds.length === 0) return;
+  if (settledBookingIds.length === 0) return { deadPaymentIntentIds };
 
   try {
     const { data: rowData, error: rowErr } = await admin
@@ -35,7 +46,7 @@ export async function cancelOpenDepositIntentForBookings(
       .select('id, stripe_payment_intent_id, deposit_status')
       .in('id', settledBookingIds)
       .eq('venue_id', venueId);
-    if (rowErr || !rowData?.length) return;
+    if (rowErr || !rowData?.length) return { deadPaymentIntentIds };
 
     const piIds = [
       ...new Set(
@@ -49,7 +60,7 @@ export async function cancelOpenDepositIntentForBookings(
           .map((r) => r.stripe_payment_intent_id as string),
       ),
     ];
-    if (piIds.length === 0) return;
+    if (piIds.length === 0) return { deadPaymentIntentIds };
 
     const { data: venueRow } = await admin
       .from('venues')
@@ -59,7 +70,7 @@ export async function cancelOpenDepositIntentForBookings(
     const accountId =
       (venueRow as { stripe_connected_account_id?: string | null } | null)
         ?.stripe_connected_account_id ?? null;
-    if (!accountId) return;
+    if (!accountId) return { deadPaymentIntentIds };
 
     for (const piId of piIds) {
       // A live sibling outside the settled set still owes this PI: leave it.
@@ -77,7 +88,13 @@ export async function cancelOpenDepositIntentForBookings(
 
       try {
         const pi = await stripe.paymentIntents.retrieve(piId, { stripeAccount: accountId });
-        if (pi.status === 'succeeded' || pi.status === 'processing' || pi.status === 'canceled') {
+        if (pi.status === 'succeeded' || pi.status === 'processing') {
+          continue;
+        }
+        if (pi.status === 'canceled') {
+          // Already dead (a retry of this settle, or an earlier sweep). Nothing
+          // to cancel, but it still counts as dead for the caller.
+          deadPaymentIntentIds.push(piId);
           continue;
         }
       } catch (retrieveErr) {
@@ -85,9 +102,12 @@ export async function cancelOpenDepositIntentForBookings(
         continue;
       }
 
-      await cancelAbandonedPaymentIntent(piId, accountId, { settledBookingIds });
+      const cancelled = await cancelAbandonedPaymentIntent(piId, accountId, { settledBookingIds });
+      if (cancelled) deadPaymentIntentIds.push(piId);
     }
   } catch (err) {
     console.error('[cancelOpenDepositIntent] failed:', err, { settledBookingIds });
   }
+
+  return { deadPaymentIntentIds };
 }

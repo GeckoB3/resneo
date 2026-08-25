@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess, requireManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { reparentEventSeriesBeforeDelete } from '@/lib/experience-events/reparent-event-series';
 import { checkExperienceEventBatchLimit } from '@/lib/tier-enforcement';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { expandWeeklyOccurrences, normaliseCustomDates } from '@/lib/scheduling/experience-event-dates';
@@ -755,6 +756,18 @@ export async function DELETE(request: NextRequest) {
         { error: canDelete.error, booking_count: canDelete.booking_count },
         { status: 409 },
       );
+    }
+
+    // EV-1: if this row is a series parent, hand the series to the next
+    // occurrence BEFORE deleting. The FK is ON DELETE SET NULL since
+    // 20270117120000, so without this the siblings survive but each keys as its
+    // own one-off series. A failed re-parent blocks the delete.
+    const reparented = await reparentEventSeriesBeforeDelete(admin, {
+      venueId: staff.venue_id,
+      eventId: id,
+    });
+    if (!reparented.ok) {
+      return NextResponse.json({ error: reparented.error }, { status: 500 });
     }
 
     const { error } = await admin

@@ -132,6 +132,36 @@ export async function resolveExperienceEventPatch(
     if (timeErr) return { ok: false, error: timeErr };
   }
 
+  // EV-9+ / EV-1: both PATCH schemas accept an arbitrary `parent_event_id` uuid
+  // and this resolver used to pass it straight through to the UPDATE. Nothing
+  // checked that the target belonged to the same venue, so one venue could
+  // re-point its event at another venue's, silently coupling the two series in
+  // the catalogue (which groups on `parent_event_id ?? id`) and, before
+  // 20270117120000 made the FK SET NULL, putting the delete cascade across a
+  // venue boundary. Both PATCH routes funnel through here, so scoping it once
+  // covers the collection and `[id]` handlers.
+  if (typeof patch.parent_event_id === 'string') {
+    if (patch.parent_event_id === eventId) {
+      return { ok: false, error: 'An event cannot be its own series parent.' };
+    }
+    const { data: parentRow, error: parentErr } = await admin
+      .from('experience_events')
+      .select('id')
+      .eq('id', patch.parent_event_id)
+      .eq('venue_id', venueId)
+      .maybeSingle();
+    if (parentErr) {
+      console.error('[resolveExperienceEventPatch] parent lookup failed:', parentErr, {
+        eventId,
+        parentEventId: patch.parent_event_id,
+      });
+      return { ok: false, error: 'Could not verify the series this event belongs to.' };
+    }
+    if (!parentRow) {
+      return { ok: false, error: 'That series does not belong to this venue.' };
+    }
+  }
+
   const payload: Record<string, unknown> = { ...patch };
   if (payload.start_time !== undefined) {
     payload.start_time = normalizeTimeForDb(String(payload.start_time));

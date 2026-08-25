@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { stripe } from '@/lib/stripe';
+import { classifyDepositRefundFailure } from '@/lib/booking/deposit-refund-convergence';
 import { cancelStaffBookingWithNotify } from './staff-cancel-booking';
 
 vi.mock('@/lib/stripe', () => ({
@@ -36,9 +37,13 @@ vi.mock('@/lib/class-commerce/restore-membership-allowance', () => ({
 vi.mock('@/lib/communications/send-class-commerce', () => ({
   sendClassCommerceComm: vi.fn(async () => undefined),
 }));
+vi.mock('@/lib/booking/deposit-refund-convergence', () => ({
+  classifyDepositRefundFailure: vi.fn(async () => 'failed'),
+}));
 
 const releaseMock = releaseCardHoldsForBookings as unknown as Mock;
 const refundCreateMock = stripe.refunds.create as unknown as Mock;
+const classifyMock = classifyDepositRefundFailure as unknown as Mock;
 
 type BookingRow = Record<string, unknown>;
 
@@ -116,6 +121,7 @@ function makeDb(opts: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  classifyMock.mockResolvedValue('failed');
 });
 
 describe('cancelStaffBookingWithNotify card-hold release', () => {
@@ -248,6 +254,44 @@ describe('cancelStaffBookingWithNotify shared-deposit refund amount (C11)', () =
 
     expect(result.cancelled).toBe(false);
     expect(result.refundFailed).toBe(true);
+  });
+
+  /**
+   * PM-1: a deposit settled in cash has its PaymentIntent cancelled at settle
+   * time, so the refund here throws. Before the fix that failed the cancel, and
+   * the booking could never be cancelled by anyone again.
+   */
+  it('cancels a cash-settled booking instead of failing on the dead intent', async () => {
+    refundCreateMock.mockRejectedValueOnce(new Error('cannot refund a canceled PaymentIntent'));
+    classifyMock.mockResolvedValue('nothing_to_refund');
+    const booking = refundableRow({ id: 'b1' });
+    const admin = makeDb({ booking, groupRows: [booking], piRows: [booking] });
+    const staffDb = makeDb({ booking, groupRows: [booking], piRows: [booking] });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(result.refundFailed).toBeUndefined();
+    // No money moved, so the caller must be able to tell the guest the truth.
+    expect(result.refundedOffStripe).toBe(true);
+  });
+
+  it('converges on a cancel when the charge was already refunded', async () => {
+    refundCreateMock.mockRejectedValueOnce({ code: 'charge_already_refunded' });
+    classifyMock.mockResolvedValue('refunded');
+    const booking = refundableRow({ id: 'b1' });
+    const admin = makeDb({ booking, groupRows: [booking], piRows: [booking] });
+    const staffDb = makeDb({ booking, groupRows: [booking], piRows: [booking] });
+
+    const result = await cancelStaffBookingWithNotify(admin, staffDb, 'venue-1', 'b1', {
+      actorId: 'staff-1',
+    });
+
+    expect(result.cancelled).toBe(true);
+    // Real refund semantics: the money IS back, so this is not the off-Stripe path.
+    expect(result.refundedOffStripe).toBeUndefined();
   });
 });
 

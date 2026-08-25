@@ -23,7 +23,7 @@ import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/
 import { candidateStartMinutes, sanitizeBookingStartTimes } from '@/lib/appointments/booking-interval';
 import type { OpeningHours } from '@/types/availability';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
-import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
+import { getVenueLocalDateAndMinutes, wholeDaysBetweenYmd } from '@/lib/venue/venue-local-clock';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import {
   reportAvailabilityReadFailure,
@@ -398,15 +398,6 @@ function intersectMinuteRanges(
     }
   }
   return out.sort((x, y) => x.start - y.start);
-}
-
-/** Whole days from `fromYmd` to `toYmd`, negative when `toYmd` is earlier. */
-function wholeDaysBetweenYmd(fromYmd: string, toYmd: string): number {
-  const [fy, fm, fd] = fromYmd.split('-').map(Number);
-  const [ty, tm, td] = toYmd.split('-').map(Number);
-  const from = Date.UTC(fy!, fm! - 1, fd!);
-  const to = Date.UTC(ty!, tm! - 1, td!);
-  return Math.round((to - from) / 86_400_000);
 }
 
 /**

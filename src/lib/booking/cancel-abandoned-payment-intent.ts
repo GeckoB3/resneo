@@ -14,21 +14,28 @@ import { stripe } from '@/lib/stripe';
  * must not mask the original error. Stripe rejects cancels of `succeeded` /
  * fully `processing` intents; that error is logged and swallowed too (the
  * webhook / reconciliation own that money from then on).
+ *
+ * Returns whether Stripe accepted the cancel. Callers that must know whether the
+ * intent is really dead use it (PM-1: `record_cash` clears the booking's PI id
+ * only when the intent it cancelled was actually cancelled); every other caller
+ * ignores it and keeps the original best-effort semantics.
  */
 export async function cancelAbandonedPaymentIntent(
   paymentIntentId: string | null | undefined,
   stripeAccountId: string | null | undefined,
   logContext: Record<string, unknown> = {},
-): Promise<void> {
-  if (!paymentIntentId || !stripeAccountId) return;
+): Promise<boolean> {
+  if (!paymentIntentId || !stripeAccountId) return false;
   try {
     await stripe.paymentIntents.cancel(paymentIntentId, undefined, {
       stripeAccount: stripeAccountId,
     });
+    return true;
   } catch (err) {
     console.error('[cancelAbandonedPaymentIntent] cancel failed:', err, {
       paymentIntentId,
       ...logContext,
     });
+    return false;
   }
 }

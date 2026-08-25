@@ -14,6 +14,24 @@ export function formatYmdInTimezone(utcMs: number, timeZone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+/**
+ * Whole calendar days from `fromYmd` to `toYmd`, negative when `toYmd` is
+ * earlier. Pure Y-M-D arithmetic with no timezone in it: both arguments are
+ * already venue-local dates, so this is exactly the "calendar days apart" a
+ * venue means by "48 hours notice".
+ *
+ * Shared by the appointment engine (`slotMinutesFromNow`) and the resource
+ * engine (`earliestGuestSlotStartMinute`); it was private to the former until
+ * RS-2 needed the same rule in the latter.
+ */
+export function wholeDaysBetweenYmd(fromYmd: string, toYmd: string): number {
+  const [fy, fm, fd] = fromYmd.split('-').map(Number);
+  const [ty, tm, td] = toYmd.split('-').map(Number);
+  const from = Date.UTC(fy!, fm! - 1, fd!);
+  const to = Date.UTC(ty!, tm! - 1, td!);
+  return Math.round((to - from) / 86_400_000);
+}
+
 export function addDaysToYmd(ymd: string, delta: number): string {
   const [y, m, d] = ymd.split('-').map(Number);
   const t = new Date(Date.UTC(y, m - 1, d + delta));

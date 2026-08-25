@@ -9,6 +9,7 @@ import { sendCancellationNotification } from '@/lib/communications/send-template
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
+import { classifyDepositRefundFailure } from '@/lib/booking/deposit-refund-convergence';
 import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
 import { isCascadingVisitGroup } from '@/lib/booking/group-booking-status-sync';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
@@ -41,6 +42,13 @@ export interface StaffCancelBookingResult {
   cancelled: boolean;
   /** Refund was required by policy but Stripe refund failed — booking left unchanged. */
   refundFailed?: boolean;
+  /**
+   * PM-1: policy allowed a refund but the intent on the row was already dead
+   * (a cash-settled deposit), so the booking was cancelled with no money moved
+   * and `deposit_status` untouched. Callers that tell the guest about a refund
+   * should say the venue will settle it directly.
+   */
+  refundedOffStripe?: boolean;
   reason?: 'not_found' | 'invalid_status' | 'refund_failed';
   /** Run inside `after()` so the HTTP response is not blocked. */
   scheduleNotification?: () => Promise<void>;
@@ -156,6 +164,8 @@ export async function cancelStaffBookingWithNotify(
     Boolean(deadline && new Date() <= deadline && hadPaidDeposit && paymentIntentForRefund);
 
   let refundSucceeded = false;
+  /** PM-1: the deposit is genuinely settled, but not through this intent. */
+  let nothingToRefund = false;
   if (canRefund && paymentIntentForRefund) {
     const { data: venueStripe } = await admin
       .from('venues')
@@ -183,12 +193,29 @@ export async function cancelStaffBookingWithNotify(
         );
         refundSucceeded = true;
       } catch (refundErr) {
-        console.error('[staff-cancel-booking] refund failed:', refundErr);
+        // PM-1 / C11 convergence: distinguish "the money is already back" and
+        // "there is no live intent to refund" from a real failure. Only the
+        // last leaves the booking uncancelled.
+        const convergence = await classifyDepositRefundFailure(refundErr, {
+          paymentIntentId: paymentIntentForRefund,
+          stripeAccountId: venueStripe.stripe_connected_account_id,
+        });
+        if (convergence === 'refunded') {
+          refundSucceeded = true;
+        } else if (convergence === 'nothing_to_refund') {
+          // A cash-settled (or otherwise off-Stripe) deposit. Cancel the
+          // booking, but leave deposit_status alone: stamping 'Refunded' would
+          // claim money moved when none did, and the venue still owes the
+          // guest their cash back.
+          nothingToRefund = true;
+        } else {
+          console.error('[staff-cancel-booking] refund failed:', refundErr);
+        }
       }
     }
   }
 
-  if (canRefund && !refundSucceeded) {
+  if (canRefund && !refundSucceeded && !nothingToRefund) {
     return { cancelled: false, refundFailed: true, reason: 'refund_failed' };
   }
 
@@ -378,6 +405,12 @@ export async function cancelStaffBookingWithNotify(
     refundLine = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5–10 business days.`;
   } else if (hadPaidDeposit && !canRefund && depositAmountStr) {
     refundLine = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than ${refundWindowHoursDisplay} hours before the start of your booking.`;
+  } else if (nothingToRefund && depositAmountStr) {
+    // PM-1: the deposit was settled off Stripe (a cash payment recorded by the
+    // venue), so there is no card payment to reverse. Saying "we could not
+    // process your refund" would be wrong: nothing failed, and the refund is
+    // the venue's to hand back the way it was taken.
+    refundLine = `Your deposit of ${depositAmountStr} was not taken online, so the venue will arrange your refund with you directly.`;
   } else if (hadPaidDeposit && canRefund && !refundSucceeded && depositAmountStr) {
     refundLine = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
   } else {
@@ -446,5 +479,5 @@ export async function cancelStaffBookingWithNotify(
     };
   }
 
-  return { cancelled: true, scheduleNotification };
+  return { cancelled: true, refundedOffStripe: nothingToRefund || undefined, scheduleNotification };
 }

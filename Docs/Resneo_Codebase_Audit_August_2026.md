@@ -10,6 +10,150 @@
 
 ---
 
+## 0. Remediation log and document corrections
+
+This section is maintained as the findings are worked. It records what has shipped, what the document itself got wrong, and where the audit did not look. Everything below section 1 is the original report at `491832c` unless an entry is marked **FIXED**.
+
+### 0.1 Status
+
+**Code audited at:** `491832c`. **Remediation branch:** `staging`.
+
+| Finding | Severity | Status | Notes |
+|---|---|---|---|
+| PM-1 | High | **FIXED** (2026-08-25) | Cash settle clears the dead intent; the four refund sites converge on a cancelled intent. See 0.2. |
+| EV-1 | Critical | **FIXED** (2026-08-25) | FK is SET NULL; the series is handed on before a parent is deleted. Migration NOT YET APPLIED. See 0.3. |
+| EV-4 | High | **FIXED** (2026-08-25) | Client `ticket_lines` rejected off the event model; no raw fallback; insert error rolls back. See 0.4. |
+| RS-1 | High | **FIXED** (2026-08-25) | Duration bounds shared with the modify path; the stored span is server-derived. See 0.5. |
+| RS-2 | High | **FIXED** (2026-08-25) | Notice is date-aware, matching the appointment engine. See 0.5. |
+| RS-3 | High | **FIXED** (2026-08-25) | `audience` on the shared validator; the guest picker stopped offering past slots. See 0.5. |
+
+Everything else in section 4 is **open** at the time of writing. The three commits between `491832c` and the start of this remediation (`66bcba3e`, `18dac985`, `1c494fd6`) are per-visit compliance work and fix no finding in this report. Worth noting as live evidence for P2: that compliance change added a near-identical `visitDate` block to BOTH `create-group` and `create-multi-service` in one commit, which is the duplication PB-3 describes, three days after this report named it.
+
+### 0.2 PM-1: fixed
+
+Shipped as two halves, because fixing only the write site would have left every already-affected booking stuck forever.
+
+**Prevent.** `cancelAbandonedPaymentIntent` now reports whether Stripe accepted the cancel, and `cancelOpenDepositIntentForBookings` returns `deadPaymentIntentIds`: the intents that are definitively dead afterwards (cancelled by us, or already `canceled` when read). `record_cash` (`deposit/route.ts`) clears `bookings.stripe_payment_intent_id` in the same UPDATE that flips the row to Paid, but **only** when the booking’s own intent is on that list. A shared group intent that a sibling still owes is left alive by the helper, reported as not-dead, and the reference is kept so the sibling’s refund can still resolve it. An intent that could not be read is never discarded. This also closes PM-1+: the row drops out of the reconciliation cron’s Paid arm, which selects on a non-null intent, so the nightly false "Paid"/"canceled" alert stops.
+
+**Cure.** New `src/lib/booking/deposit-refund-convergence.ts` classifies a failed `stripe.refunds.create` as `refunded` / `nothing_to_refund` / `failed`. Only two things short-circuit: `charge_already_refunded` (the money is back) and a PaymentIntent whose status reads `canceled` (it never took money). `succeeded`, `processing`, `requires_payment_method` and an unreadable intent all stay `failed`, because converging there would cancel a booking whose money is unaccounted for. Wired into all four deposit-refund sites: `staff-cancel-booking.ts`, `/api/confirm` guest cancel, the venue PATCH cancel branch, and the deposit route’s own `refund` action.
+
+**Behaviour now.** A cash-settled booking cancels from every path. `deposit_status` is NOT stamped `Refunded` on the off-Stripe path, because no money moved and the venue still owes the guest their cash. Guest comms get their own line ("Your deposit of £X was not taken online, so the venue will arrange your refund with you directly.") instead of the misleading "we were unable to process your refund automatically". The deposit route’s `refund` action returns 409 `not_refundable_online` with an actionable message rather than a bare 502. `cancelStaffBookingWithNotify` reports the case back to callers as `refundedOffStripe`.
+
+**Tests.** `deposit-refund-convergence.test.ts` (6, the classifier including the never-converge-on-unknown cases), `deposit/route.cash-settle.test.ts` (7, both halves at route level), and 2 added to `staff-cancel-booking.test.ts`. Full run at the time of the change: 85 files, 960 tests, all passing; `tsc --noEmit` clean.
+
+**Not done here.** PM-2 (one `settleSharedDepositRefund()` for the four sites) is still open. This change adds a shared *classifier* but deliberately does not restructure the four pasted refund blocks, which is its own work item.
+
+### 0.3 EV-1: fixed
+
+**Migration `20270117120000_event_series_parent_no_cascade.sql` is written but NOT YET APPLIED.** It needs the manual staging push, a test pass, then the production push, per the standing deploy order. The application changes are safe to deploy before it: they only make the delete narrower.
+
+**The FK.** `parent_event_id` moves from `ON DELETE CASCADE` to `ON DELETE SET NULL`. The old constraint is found by shape rather than by name (it was declared inline in 20260327000001 and carries a generated name), dropped, and re-added. Expand-only, so the old code is safe against the new schema during the window between the migration and the deploy.
+
+**SET NULL, not RESTRICT.** The report suggested RESTRICT first. RESTRICT would refuse to delete any parent that still has children, which breaks the ordinary act of removing one date from a series: a venue tidying up week 1 of a 20-week course would be blocked until it deleted the other 19. SET NULL keeps every sibling alive and lets the single delete mean what it says.
+
+**Re-parenting.** SET NULL alone is not enough, because the catalogue keys a series on `parent_event_id ?? id` (`event-ticket-engine.ts:179`), so nulling every sibling would fragment a 20-week course into 19 separate one-off cards. New `src/lib/experience-events/reparent-event-series.ts` runs before the delete in both DELETE routes: it promotes the earliest surviving occurrence (ordered by `event_date` then `id`, mirroring how the create route picks a parent) and re-points the rest at it. A failed re-parent BLOCKS the delete, and a re-point failure rolls the promotion back, because proceeding would let the FK scatter the series instead.
+
+**EV-9+ closed in the same change.** `resolveExperienceEventPatch` now venue-scopes `parent_event_id`: the target must exist in the same venue, and an event may not be its own parent. Both PATCH routes funnel through this resolver, so the collection and `[id]` handlers are covered at once. Previously the payload was `{ ...patch }` and the field went straight to the UPDATE unchecked.
+
+**Deliberately NOT done, against the report’s suggested fix.** Two of its three sub-fixes become wrong once the delete is single-row:
+
+- *Extending the delete guard to count bookings on `parent_event_id = id`.* Sibling bookings are no longer touched by deleting a parent, so blocking on them would refuse a delete that is now harmless.
+- *A "this deletes N future dates" confirmation.* It no longer does. The existing modal copy ("Ticket types and settings for **this event row** are discarded") was misleading before this change and is accurate after it, so it is left alone. A series-aware reassurance would be an improvement, but `EventManagerView` carries no `parent_event_id` or `is_recurring` on its rows, so it would mean threading new data through the list API: out of scope for this defect, and worth folding into EV-7 (series-level edit) when that is picked up.
+
+**Tests.** `reparent-event-series.test.ts` (6: no-op, promote-and-repoint, single sibling, and all three failure paths including the rollback), `experience-event-guards.test.ts` (6: same-venue accept, cross-venue refuse, self-parent refuse, lookup error, and the two no-lookup cases). Full run: 388 files, 3,764 tests, all passing; `tsc --noEmit` and eslint clean.
+
+**Historical damage is not repaired, and cannot be.** Any series destroyed by the old cascade is gone: the event rows no longer exist, so there is nothing to reconstruct them from. The surviving trace is bookings whose `experience_event_id` was SET NULL while their ticket lines remain. To check whether any environment carries this:
+
+```sql
+SELECT b.id, b.venue_id, b.booking_date, b.status, b.party_size, b.deposit_status
+FROM bookings b
+WHERE b.experience_event_id IS NULL
+  AND EXISTS (SELECT 1 FROM booking_ticket_lines l WHERE l.booking_id = b.id)
+ORDER BY b.booking_date DESC;
+```
+
+Rows returned are guests who paid for an occurrence that no longer exists and were never cancelled, refunded or told. They need handling by hand.
+
+### 0.4 EV-4: fixed
+
+Three changes in `booking/create/route.ts`, all of them narrowing.
+
+**The gate.** `ticket_lines` is declared on the route’s single zod schema, so it was accepted on every request whatever the model. It is now rejected with a 400 unless `effectiveModel === 'event_ticket'`. The schema field stays: deleting it would break real event bookings, and the gate is what scopes it.
+
+**No fallback.** `const ticketLinesToInsert = validatedEventTicketLines ?? ticket_lines` is gone. Only the server-derived lines from `validateEventTicketBooking` reach the insert. The `??` was the whole defect: `validatedEventTicketLines` is populated only inside the event branch, so on any other model it fell through to the client’s own labels, prices and `ticket_type_id`.
+
+**The error is checked.** The insert now destructures its error, deletes the booking and returns 500, matching the `booking_addons` block below it and the staff route, which already treated the same insert as fatal. Verified safe: the PaymentIntent for this branch is created after this point, so the rollback cannot orphan one.
+
+**Tests.** `public-create-ticket-lines-guard.test.ts` (4). These are bypass guards rather than behavioural tests, following the precedent and the stated reasoning of `public-create-routes-booking-window.test.ts` on this same route: the route is ~2,200 lines with Stripe, compliance and five model branches in the path and has no harness, and what regresses here is textual. One assertion is a literal negative match on `validatedEventTicketLines ?? ticket_lines`, so reinstating the defect fails the suite.
+
+**Residual, not fixed.** A tier’s pre-delete sales lookup (`sync-event-ticket-types.ts`) matches on `ticket_type_id` alone with no venue scope, which is why a foreign ticket line could block a venue from deleting its own tier. The gate stops new ones; any row already written stays. To check:
+
+```sql
+SELECT l.id, l.ticket_type_id, b.venue_id AS booking_venue, e.venue_id AS tier_venue
+FROM booking_ticket_lines l
+JOIN bookings b ON b.id = l.booking_id
+JOIN event_ticket_types t ON t.id = l.ticket_type_id
+JOIN experience_events e ON e.id = t.experience_event_id
+WHERE b.venue_id <> e.venue_id;
+```
+
+### 0.5 RS-1, RS-2, RS-3: fixed
+
+Taken together because they are three holes in the same seam: the resource engine is well disciplined and the guest-facing glue around it was not.
+
+**RS-1.** `computeResourceAvailability` CLAMPS its requested duration into `[min,max]` before building the grid, so a slot check only ever proves the clamped span is free. The staff modify validator had noticed and written its own bounds check; the public create path had none and stored the raw window. New `src/lib/booking/resource-duration-bounds.ts` holds the rule once (positive integer, within bounds, slot-interval multiple) and both paths call it. The create route also stops storing the client’s `booking_end_time`: it derives the span from the duration it just approved, into a `resourceBookingEndTime` variable that mirrors the existing `appointmentBookingEndTime`, which had already been hardened against exactly this for appointments. That also closes the seconds hole, since `booking_end_time` accepts `HH:MM:SS` while the duration arithmetic read only `HH:MM`.
+
+**RS-2.** `earliestGuestSlotStartMinute` returned null for every date that was not the venue-local today, so minimum notice was a no-op beyond "the rest of today" and a 48-hour room was bookable at 23:50 for 09:00 the next morning. It is now date-aware on the appointment engine’s rule: `minutesNow + noticeMinutes - dayOffset * 1440`, deliberately wall-clock so "48 hours notice" means the calendar and stays stable across DST. A cutoff at or below zero means the window closed before the date began; a cutoff above 1440 correctly blocks the whole date. The same-day-disabled null return is preserved exactly, because both callers read it as "resource unavailable". `wholeDaysBetweenYmd` moved from being private to `appointment-engine.ts` into `venue-local-clock.ts` so the two engines share one implementation rather than growing a 24th copy (AR-9).
+
+**RS-3.** The shared modify validator hardcoded `skipPastSlotFilter: true`, which suppresses the past-time cutoff and, with it, the notice and same-day rules that ride on the same cutoff. It now takes an `audience` parameter, defaulting to `staff` so existing callers are unchanged. `/api/confirm` passes `guest`, which turns the engine-side rules back on and adds the date-level `isGuestBookingDateAllowed` check the public create path already applies. `ResourceEngineInput` now carries `venueTimezone`, already resolved when the input was built, so the date check uses the same value the slot cutoff was computed from.
+
+**One extra change RS-3 forced.** `GuestResourceModifySlotPicker` passed `skipPastSlots: true`, copied from the staff picker. The name is inverted from its effect: it becomes `skipPastSlotFilter` on the engine input, so `true` SUPPRESSES the past-time filter and offers times that have already gone. Left alone, the server would now refuse a slot the picker had just shown as bookable. The guest picker passes `false`; the staff picker keeps `true`, because moving a booking into the past is a legitimate record correction for staff. `excludeBookingId` is unchanged on both.
+
+**Tests.** `resource-duration-bounds.test.ts` (8, including the reported 09:00-23:00-against-a-3-hour-cap case and the negative-window sub-case), `resource-booking-engine.notice.test.ts` (8, covering the 23:50 case, a partial-day cutoff on a future date, the preserved same-day behaviour, and day-view/month-pre-filter agreement), `validate-resource-booking-modification.audience.test.ts` (7, with the clock pinned so the fixture dates do not drift). Full run: 392 files, 3,791 tests, all passing; `tsc --noEmit` clean; eslint clean with no new warnings.
+
+**Not fixed here.** RS-6 (the public resource month route ignores `exclude_booking_id` and `skip_past_slots`) is still open, and is why the guest month view can still disagree with the day view. RS-9 (a duration-candidate fallback that emits a non-multiple) is unchanged, though `validateResourceDuration` now refuses such a duration on the create path too, so a booking can no longer be made at a length that can never be rescheduled.
+
+### 0.6 Corrections to this document
+
+Found while re-verifying the report against the code. The findings themselves held up: roughly twenty were independently re-verified across every severity band and every domain, and every checkable count in section 2 (file sizes, 23 `timeToMinutes`, 378 routes, 197 `getVenueStaff` importers, 23/23 uniform cron routes, 4 e2e specs / 288 lines, 6 parity files) was exact. These are the exceptions.
+
+1. **AR-15 is not complete.** It lists 7 em-dash locations and calls the verifier’s list "the complete one". A repo-wide scan for em-dashes used as prose punctuation inside user-facing string literals finds **~47 across 23 files**, including `staff-invite-email.ts` (an actual email), `venue/entity-delete-booking-guards.ts`, `linked-accounts/collectives.ts`, `referrals/credit-referrer.ts`, `calendar/hours-change-orphans.ts` and most of `src/lib/import`. Standalone dashes used as an empty-cell placeholder are excluded, per the house rule’s "used as punctuation" wording.
+
+2. **The "12 `as any`" figure in section 1 is wrong, and flattering.** There are 6 occurrences of `as any` in total, 3 outside tests, and 2 of those 3 are false matches (the phrase "as anything" in a help-article string, and a comment). The real escape hatch is `as unknown as`, at **112** occurrences. AR-2 already says the right thing ("~400-625 casts"); section 1 should not cite `as any` as a quality signal.
+
+3. **Section 1 overstates the client-trust property.** "Server create routes re-derive price, duration, deposit and slot validity from the catalogue and never trust the client" is true of the appointment path, and contradicted by this report’s own EV-4 (raw client `ticket_lines`, including prices and labels) and PB-1+ (guest-supplied `capacity_used` multiplying a deposit). Scope the claim to appointments.
+
+4. **The severity convention is applied inconsistently.** WC-1 is explicitly held at High rather than Critical because `waitlist_v2` gates it. The class findings (CL-1, CL-4, CL-5, CL-6, CL-7, CL-12) carry no equivalent note although `class_commerce_enabled` gates credit packs, memberships, courses and recurring reservations the same way. Both flags default **off** (`src/lib/feature-flags/resolve.ts`). Either CL-1 carries the caveat or WC-1 should not have been discounted.
+
+5. **The evidence file is not in this repository.** Both this report and the worksheet cite `Docs/Resneo_Codebase_Audit_August_2026_Worksheet_RawResults.md` for the full evidence chains and per-finding verdicts. It exists only on `origin/claude/resneo-codebase-audit-lu4gbf` (commit `13f92c63`) and was never merged, so a reader on `staging` or `main` cannot reach the evidence behind 141 findings.
+
+### 0.7 Reachability, which the report does not state
+
+Severity in section 4 is blast radius, not exposure. Flag defaults resolve **off** unless a venue opts in, except `guest_self_reschedule`, which defaults **on**. That reorders the work:
+
+| Finding | Gated by | Live by default |
+|---|---|---|
+| PM-1 | nothing; "Record cash" is a button on three staff surfaces | **Yes** |
+| RS-3 | `guest_self_reschedule` | **Yes**, the only flag defaulting on |
+| RS-1, RS-2 | nothing | **Yes**, any venue with resources |
+| EV-4 | nothing; accepted on every model on a public route | **Yes** |
+| EV-1 | nothing, but needs events + a series + deleting the parent | Yes, narrower trigger |
+| CL-1, CL-4, CL-5, CL-6, CL-7, CL-12 | `class_commerce_enabled` | No, off by default |
+| WC-1, WC-2, WC-3 | `waitlist_v2` | No, off by default |
+
+If `class_commerce_enabled` is switched on for a real venue, CL-1 becomes the most urgent finding in this report and should be fixed before that rollout, not after.
+
+### 0.8 Coverage gaps
+
+The nine domains follow the operator scope, but these subsystems were not audited and are not represented in section 4:
+
+- **`src/lib/linked-accounts` (6,303 lines): zero mentions.** It is imported by five core appointment booking routes including `booking/create` and `booking/availability`, so it sits in the highest-priority path rather than beside it.
+- **`src/lib/compliance` (5,936 lines):** appears only as "the compliance gate is already written two ways" inside PB-3. It gates appointment booking and it received all post-audit change.
+- **`src/lib/import` (9,041 lines):** em-dash mentions only.
+- `sales`, `referrals`, `billing` and onboarding are untouched. Roughly 25k lines of `src/lib` sit outside the audit before counting their routes and UI.
+- Open items tracked elsewhere are not reconciled here: "archived" appears zero times, so the archived-service-variant handover is absent, as is custom-duration-on-visits.
+---
+
 ## 1. Verdict in brief
 
 ResNeo is a substantially better-engineered codebase than its file sizes suggest, and materially better than when the May-August 2026 audits were written. The verdict splits cleanly along one line:
@@ -104,7 +248,7 @@ Findings are grouped by final (post-verification) severity, then by domain. Ever
 
 ### 4.1 Critical
 
-**EV-1 (bug) Deleting an event-series parent cascade-deletes every occurrence in the series and orphans their sold bookings.**
+**EV-1 [FIXED 2026-08-25, see 0.3] (bug) Deleting an event-series parent cascade-deletes every occurrence in the series and orphans their sold bookings.**
 `supabase/migrations/20260327000001_multi_model_foundation.sql:100` (orchestrator re-verified).
 `parent_event_id uuid REFERENCES experience_events(id) ON DELETE CASCADE`, never altered by any later migration. Since the C8 fix, every multi-date create designates the first (earliest) occurrence as series parent and points all siblings at it (`experience-events/route.ts:316-321, 441`). Both DELETE routes guard only the single target row: `assertExperienceEventDeletable` counts bookings `.eq('experience_event_id', id)` with `booking_date >= today` (`experience-event-guards.ts:12-31`), so siblings' bookings are never checked, and past bookings on the parent never block. Deleting the parent cascades to all sibling rows, cascades their `event_ticket_types`, and SET-NULLs their bookings' `experience_event_id`. The UI delete confirm (`EventManagerView.tsx:829-835`) gives no series warning. *Failure:* venue tidies up the week-1 card of a 20-week series after it has run; all 19 future occurrences vanish from sale and the calendar; their confirmed, often prepaid bookings stay `Booked` but lose their event link, disappearing from rosters and capacity counts; no guest is cancelled, refunded or notified. *Fix:* change the FK to `ON DELETE RESTRICT` (or SET NULL) **and** extend the delete guard to count bookings on rows with `parent_event_id = id`, offering an explicit series-cancel instead; add a "this deletes N future dates" confirmation for parents. Related: both PATCH schemas accept an arbitrary, un-venue-scoped `parent_event_id` (EV-9+ below), which makes the cascade reachable across venues; venue-scope it in the same change.
 
@@ -130,7 +274,7 @@ Findings are grouped by final (post-verification) severity, then by domain. Ever
 
 #### Payments
 
-**PM-1 (bug) `record_cash` leaves a cancelled deposit PI on a "Paid" row; later pre-deadline cancels hard-fail: the booking becomes uncancellable in-product.** `src/app/api/venue/bookings/[id]/deposit/route.ts:295-304`. Recording a cash deposit cancels the open PaymentIntent at Stripe but never clears `bookings.stripe_payment_intent_id`; every cancel path treats Paid+PI as Stripe-refundable, `refunds.create` against a cancelled PI throws a non-converged error, and guest cancel returns 502 "Your booking has not been cancelled" forever; staff cancel and the deposit route's refund/waive are blocked the same way. The reconciliation cron additionally inserts false "Paid"/"canceled" alerts for every cash-settled booking (PM-1+). A venue disconnecting Stripe triggers the same permanent 502. *Fix:* null the PI id when the settle cancels it, or treat PI status `canceled` as nothing-to-refund and proceed with the cancel using cash-deposit copy.
+**PM-1 [FIXED 2026-08-25, see 0.2] (bug) `record_cash` leaves a cancelled deposit PI on a "Paid" row; later pre-deadline cancels hard-fail: the booking becomes uncancellable in-product.** `src/app/api/venue/bookings/[id]/deposit/route.ts:295-304`. Recording a cash deposit cancels the open PaymentIntent at Stripe but never clears `bookings.stripe_payment_intent_id`; every cancel path treats Paid+PI as Stripe-refundable, `refunds.create` against a cancelled PI throws a non-converged error, and guest cancel returns 502 "Your booking has not been cancelled" forever; staff cancel and the deposit route's refund/waive are blocked the same way. The reconciliation cron additionally inserts false "Paid"/"canceled" alerts for every cash-settled booking (PM-1+). A venue disconnecting Stripe triggers the same permanent 502. *Fix:* null the PI id when the settle cancels it, or treat PI status `canceled` as nothing-to-refund and proceed with the cancel using cash-deposit copy.
 
 #### Classes
 
@@ -146,15 +290,15 @@ Findings are grouped by final (post-verification) severity, then by domain. Ever
 
 **EV-3 (gap) Per-ticket-tier capacity has no DB or serialised enforcement; concurrent purchases oversell a tier.** `supabase/migrations/20261225120000_cde_capacity_guards.sql:82-93`. The trigger's event arm sums only `party_size` vs event capacity; tier capacity is checked only against a pre-insert engine snapshot, and ticket lines are inserted *after* the booking row, outside the trigger's view. Two concurrent last-VIP purchases both succeed. Compounded by AR-1+: the tier-remaining computation is fed by a `booking_ticket_lines` read that fails silently, so a transient read failure can also oversell a tier single-threaded. *Fix:* write booking + ticket lines in one RPC/transaction and extend the trigger (or a constraint trigger on `booking_ticket_lines`) to re-check tier sums under the same advisory lock.
 
-**EV-4 (bug) Public create writes raw client `ticket_lines` for non-event bookings and swallows line-insert failures.** `src/app/api/booking/create/route.ts:1960-1969`. `validatedEventTicketLines ?? ticket_lines` falls back to the raw client array for any model (the schema allows it on every request; no model gate rejects it), storing client-chosen labels, prices and an arbitrary any-venue `ticket_type_id` (which permanently blocks that tier's deletion via the unscoped sales lookup in `sync-event-ticket-types.ts:131-134`). For genuine event bookings the insert error is ignored, leaving paid bookings with zero ticket lines whose tier seats silently resell; the staff route treats the same insert as fatal and rolls back. *Fix:* 400 on `ticket_lines` when the model is not `event_ticket`; insert only validated lines; check the error and roll back like the `booking_addons` block ten lines below.
+**EV-4 [FIXED 2026-08-25, see 0.4] (bug) Public create writes raw client `ticket_lines` for non-event bookings and swallows line-insert failures.** `src/app/api/booking/create/route.ts:1960-1969`. `validatedEventTicketLines ?? ticket_lines` falls back to the raw client array for any model (the schema allows it on every request; no model gate rejects it), storing client-chosen labels, prices and an arbitrary any-venue `ticket_type_id` (which permanently blocks that tier's deletion via the unscoped sales lookup in `sync-event-ticket-types.ts:131-134`). For genuine event bookings the insert error is ignored, leaving paid bookings with zero ticket lines whose tier seats silently resell; the staff route treats the same insert as fatal and rolls back. *Fix:* 400 on `ticket_lines` when the model is not `event_ticket`; insert only validated lines; check the error and roll back like the `booking_addons` block ten lines below.
 
 #### Resources
 
-**RS-1 (bug) Guest create validates a clamped duration but stores the raw window.** `src/app/api/booking/create/route.ts:1782-1788`. The engine clamps the requested duration into `[min,max]` before checking the slot, but the INSERT stores the guest's raw `booking_end_time`; the DB trigger explicitly waves through malformed windows on the assumption "the application validates resource windows", which it does not. A 09:00-23:00 request against a 3-hour cap validates as 3 hours and stores 14, blocking the resource all day; pricing uses the raw duration on full-payment resources but a deposit resource holds the overlong window for the flat deposit (RS-1+). The negative-window sub-case (free `Booked` row via negative price) survives only when venue hours are unconfigured (verifier caveat). *Fix:* reject unless duration is positive, within `[min,max]` and a slot-interval multiple (the modify validator's exact checks), and derive the stored end from start + validated duration.
+**RS-1 [FIXED 2026-08-25, see 0.5] (bug) Guest create validates a clamped duration but stores the raw window.** `src/app/api/booking/create/route.ts:1782-1788`. The engine clamps the requested duration into `[min,max]` before checking the slot, but the INSERT stores the guest's raw `booking_end_time`; the DB trigger explicitly waves through malformed windows on the assumption "the application validates resource windows", which it does not. A 09:00-23:00 request against a 3-hour cap validates as 3 hours and stores 14, blocking the resource all day; pricing uses the raw duration on full-payment resources but a deposit resource holds the overlong window for the flat deposit (RS-1+). The negative-window sub-case (free `Booked` row via negative price) survives only when venue hours are unconfigured (verifier caveat). *Fix:* reject unless duration is positive, within `[min,max]` and a slot-interval multiple (the modify validator's exact checks), and derive the stored end from start + validated duration.
 
-**RS-2 (gap) Resource minimum notice is enforced only same-day; any notice beyond "rest of today" is silently a no-op.** `resource-booking-engine.ts:315-324`. The cutoff returns null unless the date is today; the appointment engine applies notice on any date (the exact cross-midnight bug it fixed, SA-noted in its comment). Owners can configure up to 168 hours; a 48-hour notice room is bookable at 23:50 for 09:00 tomorrow. *Fix:* port the appointment engine's date-aware `slotMinutesFromNow` rule into the resource engine and the month pre-filter.
+**RS-2 [FIXED 2026-08-25, see 0.5] (gap) Resource minimum notice is enforced only same-day; any notice beyond "rest of today" is silently a no-op.** `resource-booking-engine.ts:315-324`. The cutoff returns null unless the date is today; the appointment engine applies notice on any date (the exact cross-midnight bug it fixed, SA-noted in its comment). Owners can configure up to 168 hours; a 48-hour notice room is bookable at 23:50 for 09:00 tomorrow. *Fix:* port the appointment engine's date-aware `slotMinutesFromNow` rule into the resource engine and the month pre-filter.
 
-**RS-3 (gap) Guest self-reschedule of resource bookings bypasses past-time, notice, same-day and max-advance rules.** `validate-resource-booking-modification.ts:70-77` + `confirm/route.ts:1034-1051`. The shared validator hardcodes `skipPastSlotFilter: true` (built for staff); `/api/confirm` reuses it verbatim for guests with no `isGuestBookingDateAllowed` and no past-start guard, and the guest picker deliberately requests past slots. A guest can reschedule to a slot that already passed or 11 months out. *Fix:* audience parameter on the validator; guest callers pass false and apply the entity window.
+**RS-3 [FIXED 2026-08-25, see 0.5] (gap) Guest self-reschedule of resource bookings bypasses past-time, notice, same-day and max-advance rules.** `validate-resource-booking-modification.ts:70-77` + `confirm/route.ts:1034-1051`. The shared validator hardcodes `skipPastSlotFilter: true` (built for staff); `/api/confirm` reuses it verbatim for guests with no `isGuestBookingDateAllowed` and no past-start guard, and the guest picker deliberately requests past slots. A guest can reschedule to a slot that already passed or 11 months out. *Fix:* audience parameter on the validator; guest callers pass false and apply the entity window.
 
 #### Waitlist
 
@@ -300,13 +444,13 @@ Sequenced by risk-per-effort. Phases 0-1 are deliberately small, independent cha
 
 ### Phase 0: money and data integrity (each item small, independently shippable)
 
-1. **EV-1:** FK to RESTRICT/SET NULL + series-aware delete guard + UI warning; venue-scope `parent_event_id` in both PATCH schemas (EV-9+).
+1. ~~**EV-1:** FK to RESTRICT/SET NULL + series-aware delete guard + UI warning; venue-scope `parent_event_id` in both PATCH schemas (EV-9+).~~ **DONE 2026-08-25** (see 0.3; the delete guard and UI warning were deliberately not done, and 0.3 says why).
 2. **CL-1/SA2-1:** route the PATCH cancel branch through `cancelStaffBookingWithNotify`; fixes credit/allowance burn, the 48-hour email copy (SA2-7), and the skipped lifecycle effects in one move.
 3. **EV-2:** `forceRefund` option for venue-fault cascades + email copy fix.
-4. **PM-1:** null the PI id on cash settle (plus the canceled-PI convergence in the cancel paths).
+4. ~~**PM-1:** null the PI id on cash settle (plus the canceled-PI convergence in the cancel paths).~~ **DONE 2026-08-25** (see 0.2).
 5. **PM-2:** one `settleSharedDepositRefund()` for the four sites.
-6. **RS-1/RS-2/RS-3:** validate-and-derive the stored resource window; date-aware notice; audience parameter on the modify validator.
-7. **EV-4:** reject foreign `ticket_lines`, check the insert, roll back.
+6. ~~**RS-1/RS-2/RS-3:** validate-and-derive the stored resource window; date-aware notice; audience parameter on the modify validator.~~ **DONE 2026-08-25** (see 0.5).
+7. ~~**EV-4:** reject foreign `ticket_lines`, check the insert, roll back.~~ **DONE 2026-08-25** (see 0.4).
 8. **CL-4 + CL-7:** `continue` on duplicate expire key; bound the first period window by `created_at`.
 9. **WC-1/WC-2/WC-3** (if `waitlist_v2` is to roll out): offer URL, cascade availability gate, policy-seed marker.
 10. **AE-1 + AR-1:** add the reporter to every uninstrumented availability read (excluding `blocked-range-models`); correct the SA-C3 "49 sites" record.

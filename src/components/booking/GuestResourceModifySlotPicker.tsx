@@ -104,8 +104,18 @@ export function GuestResourceModifySlotPicker({
     [initialBookingDate],
   );
 
+  // RS-3: `skipPastSlots` is inverted from how it reads. It becomes
+  // `skipPastSlotFilter` on the engine input, so `true` SUPPRESSES the past-time
+  // filter and offers times that have already gone. That was copied from the
+  // staff picker, where moving a booking into the past is a legitimate
+  // record-correction. For a guest it is not, and the shared modify validator now
+  // refuses it, so offering those slots would only produce an error on a time we
+  // had just shown as bookable.
+  //
+  // `excludeBookingId` stays: the guest's own booking must not block the slot it
+  // currently occupies.
   const slotModifyOptions = useMemo(
-    () => ({ excludeBookingId: bookingId, skipPastSlots: true as const }),
+    () => ({ excludeBookingId: bookingId, skipPastSlots: false as const }),
     [bookingId],
   );
 

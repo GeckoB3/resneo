@@ -23,6 +23,7 @@ import {
 } from '@/lib/booking/card-hold-charge';
 import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
+import { classifyDepositRefundFailure } from '@/lib/booking/deposit-refund-convergence';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { hasSettleableDeposit } from '@/lib/booking/deposit-action-eligibility';
 import type { BookingModel } from '@/types/booking-models';
@@ -292,14 +293,37 @@ export async function POST(
     }
     // Plan 8.3/D7: cash settles the debt; the card PI must die or the guest
     // could pay a second time online. Runs before the flip (see waive).
-    await cancelOpenDepositIntentForBookings(admin, {
+    const { deadPaymentIntentIds } = await cancelOpenDepositIntentForBookings(admin, {
       settledBookingIds: [id],
       venueId: scopeVenueId,
     });
     const amountPence = parsed.data.amount_pence ?? booking.deposit_amount_pence ?? 0;
+    // PM-1: the row is about to read Paid, and every cancel path treats
+    // Paid + a PI id as "refundable at Stripe". The intent we just killed can
+    // never be refunded, so leaving its id on the row made the booking
+    // permanently uncancellable: `refunds.create` threw, no caller converged,
+    // and guest cancel returned a 502 forever. Clear the reference so the row
+    // says what is true, which also drops it out of the reconciliation cron's
+    // Paid arm (it selects on a non-null PI) instead of alerting nightly that a
+    // "Paid" booking has a cancelled intent.
+    //
+    // Only when the intent is confirmed dead. If a group sibling still owes it,
+    // the helper leaves it alive and returns nothing, and this row keeps its
+    // reference so the sibling's refund can still resolve the shared intent.
+    const settledPaymentIntentId =
+      typeof booking.stripe_payment_intent_id === 'string' ? booking.stripe_payment_intent_id : null;
+    const intentIsDead =
+      settledPaymentIntentId !== null && deadPaymentIntentIds.includes(settledPaymentIntentId);
+    if (intentIsDead) {
+      console.info('[deposit route] cash settle clearing dead deposit intent', {
+        bookingId: id,
+        paymentIntentId: settledPaymentIntentId,
+      });
+    }
     await admin.from('bookings').update({
       deposit_status: 'Paid',
       deposit_amount_pence: amountPence,
+      ...(intentIsDead ? { stripe_payment_intent_id: null } : {}),
       updated_at: new Date().toISOString(),
     }).eq('id', id);
     return NextResponse.json({ success: true });
@@ -434,8 +458,26 @@ export async function POST(
       // Already fully refunded in Stripe (for example via the dashboard):
       // converge so our state matches Stripe's. Anything else fails, rather
       // than stamping a row 'Refunded' whose money never moved.
-      const code = (refundErr as { code?: string } | null)?.code;
-      if (code !== 'charge_already_refunded') {
+      const convergence = await classifyDepositRefundFailure(refundErr, {
+        paymentIntentId: booking.stripe_payment_intent_id as string,
+        stripeAccountId: venue.stripe_connected_account_id,
+      });
+      if (convergence === 'nothing_to_refund') {
+        // PM-1: a cash-settled deposit whose intent was cancelled at settle
+        // time. There is no online payment to reverse, so refusing with a 502
+        // left staff unable to close the booking out at all. Refuse clearly
+        // instead, and tell them what to actually do: the money was taken in
+        // person and has to go back the same way.
+        return NextResponse.json(
+          {
+            error:
+              'This deposit was not taken online, so it cannot be refunded here. Return it to the guest directly, then cancel or update the booking as normal.',
+            code: 'not_refundable_online',
+          },
+          { status: 409 },
+        );
+      }
+      if (convergence !== 'refunded') {
         console.error('[deposit route] deposit refund failed:', refundErr, { bookingId: id });
         return NextResponse.json(
           { error: 'The refund could not be completed. Please try again.' },

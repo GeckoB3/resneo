@@ -21,7 +21,7 @@ import {
   venueWideBlocksQueryForDate,
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
-import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
+import { sameDaySlotCutoffForBookingDate, wholeDaysBetweenYmd } from '@/lib/venue/venue-local-clock';
 import {
   calendarBreaks,
   calendarHours,
@@ -52,6 +52,13 @@ export interface ResourceEngineInput {
    * t <= minutesNow are excluded so guests cannot book times that have already passed.
    */
   sameDaySlotCutoff?: { venueDateYmd: string; minutesNow: number };
+  /**
+   * The venue's IANA timezone, already resolved when the input was built. Exposed
+   * so callers applying date-level guest rules (`isGuestBookingDateAllowed`) use
+   * the same value the slot cutoff was computed from, rather than re-querying it
+   * and risking a second source of truth (RS-3).
+   */
+  venueTimezone?: string;
 }
 
 export interface ResourceBooking {
@@ -311,16 +318,46 @@ export function mergedResourceEffectiveRangesForHost(
   return unionMinuteRanges(all);
 }
 
-/** Earliest bookable start minute on the venue-local calendar day (same-day + min notice). Returns null when same-day is disabled. */
+/**
+ * Earliest bookable start minute on `date`, as a minute offset within that
+ * venue-local calendar day.
+ *
+ * `null` means no cutoff applies. On TODAY specifically, `null` additionally
+ * carries "this resource does not take same-day bookings", which both callers
+ * read as "the resource is unavailable"; that overloading is why the notice rule
+ * was missing for other dates and is preserved deliberately.
+ *
+ * RS-2: this used to `return null` for every date that was not today, so minimum
+ * notice was silently a no-op beyond "the rest of today". Owners can configure up
+ * to 168 hours, and a 48-hour room was bookable at 23:50 for 09:00 the next
+ * morning. The rule is now date-aware, matching the appointment engine's
+ * `slotMinutesFromNow`: deliberately WALL-CLOCK, because a venue promising "48
+ * hours notice" means the calendar, which keeps the rule stable across DST.
+ *
+ * The returned minute may exceed 1440, which correctly blocks the whole date:
+ * every candidate start is below it.
+ */
 function earliestGuestSlotStartMinute(
   resource: VenueResource,
   date: string,
   sameDaySlotCutoff: { venueDateYmd: string; minutesNow: number } | undefined,
 ): number | null {
-  if (!sameDaySlotCutoff || date !== sameDaySlotCutoff.venueDateYmd) return null;
+  if (!sameDaySlotCutoff) return null;
+
+  const dayOffset = wholeDaysBetweenYmd(sameDaySlotCutoff.venueDateYmd, date);
+  // Past dates are refused by `resourceDateAllowedForGuestBooking` and the
+  // create route's own past-start guard; imposing a notice cutoff here as well
+  // would say nothing new.
+  if (dayOffset < 0) return null;
+
   const win = entityBookingWindowFromRow(resource as unknown as Record<string, unknown>);
-  if (!win.allow_same_day_booking) return null;
-  return sameDaySlotCutoff.minutesNow + Math.max(0, win.min_booking_notice_hours) * 60;
+  if (dayOffset === 0 && !win.allow_same_day_booking) return null;
+
+  const noticeMinutes = Math.max(0, win.min_booking_notice_hours) * 60;
+  const cutoff = sameDaySlotCutoff.minutesNow + noticeMinutes - dayOffset * 24 * 60;
+  // The notice window closed before this date began, so the whole day is open.
+  if (cutoff <= 0) return null;
+  return cutoff;
 }
 
 function resourceDateAllowedForGuestBooking(
@@ -653,6 +690,7 @@ export function buildResourceEngineInputFromParts(params: {
     resources,
     existingBookings,
     effectiveAvailabilityRangesByResourceId,
+    venueTimezone: tz,
     ...(sameDaySlotCutoff ? { sameDaySlotCutoff } : {}),
   };
 }

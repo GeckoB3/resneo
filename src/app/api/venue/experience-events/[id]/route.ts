@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { reparentEventSeriesBeforeDelete } from '@/lib/experience-events/reparent-event-series';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import {
   assertExperienceEventCalendarClearable,
@@ -235,6 +236,16 @@ export async function DELETE(
         { error: canDelete.error, booking_count: canDelete.booking_count },
         { status: 409 },
       );
+    }
+
+    // EV-1: see the collection DELETE. Hand the series on before removing a
+    // parent occurrence, and refuse the delete if that cannot be done.
+    const reparented = await reparentEventSeriesBeforeDelete(admin, {
+      venueId: staff.venue_id,
+      eventId: id,
+    });
+    if (!reparented.ok) {
+      return NextResponse.json({ error: reparented.error }, { status: 500 });
     }
 
     const { error } = await admin

@@ -119,9 +119,12 @@ function buildDefaultLanePolicies(): LaneCommunicationPolicies {
       hoursBefore: 24,
       hoursAfter: null,
     },
+    // Email as well as SMS: SMS is stripped for venues without the entitlement
+    // (policy-resolver), so an SMS-only default left those venues sending no deposit
+    // reminder at all before the booking was released.
     deposit_payment_reminder: {
       enabled: true,
-      channels: ['sms'],
+      channels: ['email', 'sms'],
       emailCustomMessage: null,
       smsCustomMessage: null,
       hoursBefore: 2,

@@ -34,6 +34,7 @@ vi.mock('@/lib/platform/cron-log', () => ({
 
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
+import { sendStaffPush } from '@/lib/communications/staff-push-notification';
 import { stripe } from '@/lib/stripe';
 import { selfHealSucceededPaymentIntent } from '@/lib/booking/self-heal-succeeded-payment';
 import { POST } from './route';
@@ -43,6 +44,7 @@ const mockSendCommunication = vi.mocked(sendCommunication);
 const mockPiRetrieve = vi.mocked(stripe.paymentIntents.retrieve);
 const mockPiCancel = vi.mocked(stripe.paymentIntents.cancel);
 const mockSelfHeal = vi.mocked(selfHealSucceededPaymentIntent);
+const mockStaffPush = vi.mocked(sendStaffPush);
 
 type RecordedCall = {
   table: string;
@@ -203,7 +205,7 @@ beforeEach(() => {
 });
 
 describe('online money sweep (plan 3.1)', () => {
-  it('cancels a booking_page deposit row whose PI is requires_payment_method, cancels the PI, notifies once', async () => {
+  it('cancels a booking_page deposit row whose PI is requires_payment_method, cancels the PI, tells staff only', async () => {
     const bookings = [onlineMoneyBooking()];
     wireAdmin({ bookings });
     mockPiRetrieve.mockResolvedValue({ id: 'pi_1', status: 'requires_payment_method', payment_method: null } as never);
@@ -213,7 +215,13 @@ describe('online money sweep (plan 3.1)', () => {
     expect(body.online_money_cancelled).toBe(1);
     expect(bookings[0]).toMatchObject({ status: 'Cancelled', deposit_status: 'Failed' });
     expect(mockPiCancel).toHaveBeenCalledWith('pi_1', undefined, { stripeAccount: 'acct_1' });
-    expect(autoCancelNotifications()).toHaveLength(1);
+    // The guest abandoned a self-serve checkout and never had a confirmation, so telling
+    // them their booking is cancelled would be news about a booking they never made.
+    expect(autoCancelNotifications()).toHaveLength(0);
+    // The venue still hears about it: a guest reaching payment and dropping out is the
+    // signal that surfaces a broken Stripe setup.
+    expect(mockStaffPush).toHaveBeenCalledTimes(1);
+    expect(mockStaffPush.mock.calls[0]![3]).toBe('payment_failed');
     expect(mockSelfHeal).not.toHaveBeenCalled();
   });
 
@@ -320,7 +328,7 @@ describe('online money sweep (plan 3.1)', () => {
     expect(bookings[0]).toMatchObject({ status: 'Pending' });
   });
 
-  it('group siblings sharing the PI are cancelled together with one notification', async () => {
+  it('group siblings sharing the PI are cancelled together, with one staff push and no guest email', async () => {
     const bookings = [
       onlineMoneyBooking({ id: 'b1', group_booking_id: 'grp1' }),
       onlineMoneyBooking({ id: 'b2', group_booking_id: 'grp1' }),
@@ -333,7 +341,8 @@ describe('online money sweep (plan 3.1)', () => {
     expect(body.online_money_cancelled).toBe(2);
     expect(bookings[0]).toMatchObject({ status: 'Cancelled' });
     expect(bookings[1]).toMatchObject({ status: 'Cancelled' });
-    expect(autoCancelNotifications()).toHaveLength(1);
+    expect(autoCancelNotifications()).toHaveLength(0);
+    expect(mockStaffPush).toHaveBeenCalledTimes(1);
     expect(mockPiCancel).toHaveBeenCalledTimes(1);
   });
 });
@@ -348,7 +357,10 @@ describe('no-PI arm (plan 3.3)', () => {
     expect(body.no_pi_cancelled).toBe(1);
     expect(bookings[0]).toMatchObject({ status: 'Cancelled', deposit_status: 'Failed' });
     expect(mockPiRetrieve).not.toHaveBeenCalled();
-    expect(autoCancelNotifications()).toHaveLength(1);
+    // Nothing could ever have paid this row. From the guest's side that is the same as
+    // abandonment: the payment step failed and they hold no booking.
+    expect(autoCancelNotifications()).toHaveLength(0);
+    expect(mockStaffPush).toHaveBeenCalledTimes(1);
   });
 
   it('leaves free bookings (no deposit owed) alone', async () => {
@@ -390,5 +402,18 @@ describe('phone sweep PI verification (plan 3.5)', () => {
     expect(body.cancelled).toBe(1);
     expect(bookings[0]).toMatchObject({ status: 'Cancelled' });
     expect(mockPiCancel).toHaveBeenCalledWith('pi_1', undefined, { stripeAccount: 'acct_1' });
+  });
+
+  it('does email the guest, unlike the online arms: staff took this booking and told them about it', async () => {
+    const bookings = [phoneBooking()];
+    wireAdmin({ bookings });
+    mockPiRetrieve.mockResolvedValue({ id: 'pi_1', status: 'requires_payment_method', payment_method: null } as never);
+
+    await runCron();
+
+    const notes = autoCancelNotifications();
+    expect(notes).toHaveLength(1);
+    // Deposit wording, not the card-hold variant.
+    expect(notes[0]!.payload).not.toHaveProperty('card_hold');
   });
 });

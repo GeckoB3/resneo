@@ -87,11 +87,24 @@ type HoldJoinRow = {
   };
 };
 
-/** Guest email/SMS + staff push, shared by every cancelling sweep. */
+/**
+ * Tell the venue, and tell the guest only when the guest was expecting a booking.
+ *
+ * `notifyGuest: false` is for a self-serve online booking abandoned at the payment step.
+ * A deposit-taking booking sends NO confirmation until the money lands (see the
+ * `!requiresDeposit` guard on `sendBookingConfirmationNotifications` in booking/create),
+ * so a guest who closed the card form has had nothing from us at all, and reasonably
+ * believes they never made a booking. "Your booking has been cancelled" would be the
+ * first and only email they get: news about a booking they do not think exists. The
+ * online card-hold sweep has always been silent to the guest for exactly this reason.
+ *
+ * The staff push always fires. That a guest reached payment and dropped out is precisely
+ * what a venue wants to know, and it is the signal that surfaces a broken Stripe setup.
+ */
 async function sendAutoCancelNotifications(
   supabase: SupabaseClient,
   booking: SweepBooking,
-  opts: { cardHold: boolean },
+  opts: { cardHold: boolean; notifyGuest: boolean },
 ): Promise<void> {
   const { data: guest } = await supabase
     .from('guests')
@@ -99,22 +112,24 @@ async function sendAutoCancelNotifications(
     .eq('id', booking.guest_id)
     .single();
   const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
-  await sendCommunication({
-    type: 'auto_cancel_notification',
-    venue_id: booking.venue_id,
-    booking_id: booking.id,
-    recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
-    payload: {
-      guest_name: formatGuestDisplayName(guest?.first_name, guest?.last_name),
-      venue_name: venue?.name,
-      booking_date: booking.booking_date,
-      booking_time: booking.booking_time,
-      party_size: booking.party_size,
-      // Card-hold copy variant (§12.1): "because card details were not added
-      // in time", never the deposit wording.
-      ...(opts.cardHold ? { card_hold: true } : {}),
-    },
-  });
+  if (opts.notifyGuest) {
+    await sendCommunication({
+      type: 'auto_cancel_notification',
+      venue_id: booking.venue_id,
+      booking_id: booking.id,
+      recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
+      payload: {
+        guest_name: formatGuestDisplayName(guest?.first_name, guest?.last_name),
+        venue_name: venue?.name,
+        booking_date: booking.booking_date,
+        booking_time: booking.booking_time,
+        party_size: booking.party_size,
+        // Card-hold copy variant (§12.1): "because card details were not added
+        // in time", never the deposit wording.
+        ...(opts.cardHold ? { card_hold: true } : {}),
+      },
+    });
+  }
   try {
     await sendStaffPush(
       {
@@ -333,7 +348,9 @@ async function handlePost(request: NextRequest) {
     }
 
     for (const b of dedupeByCaptureUnit(depositCancelled)) {
-      await sendAutoCancelNotifications(supabase, b, { cardHold: false });
+      // Phone booking: staff took it and told the guest they had one, so the guest
+      // needs to hear that it lapsed.
+      await sendAutoCancelNotifications(supabase, b, { cardHold: false, notifyGuest: true });
     }
 
     // -----------------------------------------------------------------------
@@ -425,7 +442,9 @@ async function handlePost(request: NextRequest) {
         }
 
         for (const b of cancelledStaff) {
-          await sendAutoCancelNotifications(supabase, b, { cardHold: true });
+          // Staff phone/walk-in card request: the guest was asked for card details on a
+          // booking they know about, so tell them it lapsed.
+          await sendAutoCancelNotifications(supabase, b, { cardHold: true, notifyGuest: true });
         }
         staffHoldCancelled = cancelledStaff.length;
       }
@@ -741,7 +760,8 @@ async function handlePost(request: NextRequest) {
           }
 
           for (const b of dedupeByCaptureUnit(cancelledGroup)) {
-            await sendAutoCancelNotifications(supabase, b, { cardHold: false });
+            // Self-serve online abandonment: staff hear about it, the guest does not.
+            await sendAutoCancelNotifications(supabase, b, { cardHold: false, notifyGuest: false });
           }
 
           onlineMoneyCancelled += cancelledIds.size;
@@ -821,7 +841,9 @@ async function handlePost(request: NextRequest) {
           console.error('[auto-cancel] no-PI events insert failed:', eventErr);
         }
         for (const b of dedupeByCaptureUnit(noPiCancelledRows)) {
-          await sendAutoCancelNotifications(supabase, b, { cardHold: false });
+          // Online row that could never be paid. Same as abandonment from the guest's
+          // side: they saw the payment step fail and hold no booking.
+          await sendAutoCancelNotifications(supabase, b, { cardHold: false, notifyGuest: false });
         }
         noPiCancelled = noPiCancelledRows.length;
       }

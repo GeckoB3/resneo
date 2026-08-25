@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { computeExpiresAt } from '@/lib/compliance/form-schema';
 import {
   bookingDatetime,
+
   isBlocking,
   isRecordValidForBooking,
   resolveRequirement,
@@ -207,5 +209,119 @@ describe('bookingDatetime', () => {
     expect(bookingDatetime('2026-06-10', null).getTime()).toBe(
       bookingDatetime('2026-06-10', '00:00:00').getTime(),
     );
+  });
+});
+
+describe('per-visit (validity 0) forms completed before the appointment day', () => {
+  // The reported bug: a per-visit form completed at booking time (or from the confirmation
+  // link) expired the same night, so on the day of the appointment the requirement resolved
+  // to EXPIRED and a blocking requirement rejected the booking the form was completed for.
+  // Per-visit expiry now runs to the end of the VISIT day, so an advance completion counts.
+  const VISIT_DAY = '2026-06-10';
+  const CAPTURED_AT = new Date('2026-06-07T14:00:00Z'); // three days early, at booking time
+  // 09:00 keeps the assertion true whatever timezone the test machine runs in: bookingDatetime
+  // builds a local wall-clock instant, and 09:00 local sits inside the visit day for every
+  // real UTC offset. The venue-timezone skew in that helper is tracked separately.
+  const APPOINTMENT = bookingDatetime(VISIT_DAY, '09:00:00');
+
+  const perVisitReq = (overrides: Partial<ResolverRequirement> = {}) =>
+    req({ validity_period_days: 0, ...overrides });
+  const perVisit = (expiresAt: Date | null) =>
+    rec({ captured_at: CAPTURED_AT, expires_at: expiresAt, result: 'signed', result_type: 'signed' });
+
+  it('satisfies the appointment it was completed for, and reads as current', () => {
+    const expiresAt = computeExpiresAt(0, CAPTURED_AT, 'Europe/London', VISIT_DAY);
+    expect(isRecordValidForBooking(perVisit(expiresAt), APPOINTMENT, null)).toBe(true);
+
+    const resolved = resolveRequirement(
+      perVisitReq({ enforcement: 'block_online' }),
+      [perVisit(expiresAt)],
+      APPOINTMENT,
+      CAPTURED_AT,
+    );
+    expect(resolved.state).toBe('satisfied');
+    expect(resolved.matchingRecord?.id).toBe('rec1');
+    expect(isBlocking(resolved.state, 'block_online', 'online')).toBe(false);
+    expect(isBlocking(resolved.state, 'block_all', 'staff')).toBe(false);
+  });
+
+  it('did not, when expiry was anchored to the capture day', () => {
+    // Regression guard: this is exactly the old behaviour, kept as the contrast case.
+    const captureDayExpiry = computeExpiresAt(0, CAPTURED_AT, 'Europe/London');
+    expect(isRecordValidForBooking(perVisit(captureDayExpiry), APPOINTMENT, null)).toBe(false);
+    expect(resolveRequirement(perVisitReq(), [perVisit(captureDayExpiry)], APPOINTMENT, CAPTURED_AT).state).toBe(
+      'expired',
+    );
+  });
+
+  it('is still per visit: it does not carry over to a later appointment', () => {
+    const expiresAt = computeExpiresAt(0, CAPTURED_AT, 'Europe/London', VISIT_DAY);
+    const nextDay = bookingDatetime('2026-06-11', '09:00:00');
+    expect(isRecordValidForBooking(perVisit(expiresAt), nextDay, null)).toBe(false);
+    expect(resolveRequirement(perVisitReq(), [perVisit(expiresAt)], nextDay, CAPTURED_AT).state).toBe('expired');
+  });
+
+  it('still satisfies a same-day capture with no known appointment (walk-in)', () => {
+    const sameDayCapture = new Date('2026-06-10T08:00:00Z');
+    const expiresAt = computeExpiresAt(0, sameDayCapture, 'Europe/London');
+    const later = bookingDatetime(VISIT_DAY, '15:00:00');
+    expect(
+      isRecordValidForBooking(
+        rec({ captured_at: sameDayCapture, expires_at: expiresAt, result: 'signed', result_type: 'signed' }),
+        later,
+        null,
+      ),
+    ).toBe(true);
+  });
+
+  it('still respects the lock period when completed too close to the appointment', () => {
+    // Completed 2h before a visit that requires 48h notice: valid for the day, but too late.
+    const lateCapture = new Date(APPOINTMENT.getTime() - 2 * 60 * 60 * 1000);
+    const expiresAt = computeExpiresAt(0, lateCapture, 'Europe/London', VISIT_DAY);
+    const record = rec({
+      captured_at: lateCapture,
+      expires_at: expiresAt,
+      result: 'signed',
+      result_type: 'signed',
+    });
+    expect(isRecordValidForBooking(record, APPOINTMENT, null)).toBe(true);
+    expect(isRecordValidForBooking(record, APPOINTMENT, 48)).toBe(false);
+    expect(resolveRequirement(perVisitReq({ lock_period_hours: 48 }), [record], APPOINTMENT, lateCapture).lockBlocked).toBe(
+      true,
+    );
+  });
+});
+
+describe('EXPIRING_SOON only where there is something to renew', () => {
+  // Every per-visit record expires inside the 30-day window by design, so labelling one
+  // "expiring soon" flags a record that is doing exactly what it should. Fixed-period and
+  // lifetime types keep the warning, which is the case it exists for.
+  const soon = new Date(NOW.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const perVisitRecord = rec({ expires_at: soon, result: 'signed', result_type: 'signed' });
+
+  it('does not flag a per-visit record', () => {
+    const resolved = resolveRequirement(
+      req({ validity_period_days: 0 }),
+      [perVisitRecord],
+      new Date(NOW.getTime() + 60 * 60 * 1000),
+      NOW,
+    );
+    expect(resolved.state).toBe('satisfied');
+    expect(resolved.matchingRecord?.id).toBe('rec1');
+  });
+
+  it('still flags a fixed-period record nearing expiry', () => {
+    const resolved = resolveRequirement(
+      req({ validity_period_days: 90 }),
+      [perVisitRecord],
+      new Date(NOW.getTime() + 60 * 60 * 1000),
+      NOW,
+    );
+    expect(resolved.state).toBe('expiring_soon');
+  });
+
+  it('keeps the old labelling when the loader did not supply the validity', () => {
+    const resolved = resolveRequirement(req(), [perVisitRecord], new Date(NOW.getTime() + 60 * 60 * 1000), NOW);
+    expect(resolved.state).toBe('expiring_soon');
   });
 });

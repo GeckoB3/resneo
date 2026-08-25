@@ -7,6 +7,10 @@ import {
   submitPublicForm,
 } from '@/lib/compliance/public-forms-service';
 import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
+import {
+  endOfCaptureDayInVenueTimezone,
+  endOfLocalDayForYmd,
+} from '@/lib/venue/venue-local-clock';
 
 const VENUE = 'venue-1';
 const GUEST = 'guest-1';
@@ -228,5 +232,72 @@ describe('publicServiceRequirements', () => {
     const reqs = await publicServiceRequirements(fake.asClient(), VENUE, 'svc-1');
     expect(reqs).toHaveLength(1);
     expect(reqs[0]!.enforcement).toBe('warn_client');
+  });
+});
+
+describe('submitPublicForm — per-visit forms completed before the appointment day', () => {
+  // The reported bug: a guest who completed a per-visit form from the confirmation link,
+  // days before the appointment, found it already expired on the day. The link already
+  // carries `booking_id`, so expiry now runs to the end of that appointment's day.
+  const TZ = 'Europe/London';
+  const VISIT_DAY = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+
+  function seedPerVisit(bookingOverrides: Record<string, unknown> = {}) {
+    return seed(
+      { booking_id: 'b1' },
+      {
+        compliance_types: [
+          { id: 't1', venue_id: VENUE, name: 'Treatment Consent', result_type: 'signed', validity_period_days: 0 },
+        ],
+        venues: [
+          {
+            id: VENUE,
+            name: 'Glow Studio',
+            timezone: TZ,
+            booking_model: 'unified_scheduling',
+            enabled_models: null,
+          },
+        ],
+        bookings: [
+          { id: 'b1', venue_id: VENUE, booking_date: VISIT_DAY, booking_time: '09:00:00', ...bookingOverrides },
+        ],
+      },
+    );
+  }
+
+  it('expires at the end of the booked appointment day, so it is still valid on the day', async () => {
+    const fake = seedPerVisit();
+    const res = await submitPublicForm(fake.asClient(), {
+      code: CODE,
+      responses: { f_name: 'Jane' },
+      ip: null,
+      userAgent: null,
+    });
+    expect(res.ok).toBe(true);
+    const record = (fake.tables.compliance_records ?? [])[0] as { expires_at: string; booking_id: string };
+    expect(record.booking_id).toBe('b1');
+    expect(record.expires_at).toBe(endOfLocalDayForYmd(VISIT_DAY, TZ).toISOString());
+    expect(new Date(record.expires_at).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('falls back to the capture day for a link with no booking attached', async () => {
+    const fake = seed(
+      { booking_id: null },
+      {
+        compliance_types: [
+          { id: 't1', venue_id: VENUE, name: 'Treatment Consent', result_type: 'signed', validity_period_days: 0 },
+        ],
+        venues: [{ id: VENUE, name: 'Glow Studio', timezone: TZ, booking_model: 'unified_scheduling', enabled_models: null }],
+      },
+    );
+    const res = await submitPublicForm(fake.asClient(), {
+      code: CODE,
+      responses: { f_name: 'Jane' },
+      ip: null,
+      userAgent: null,
+    });
+    expect(res.ok).toBe(true);
+    const record = (fake.tables.compliance_records ?? [])[0] as { expires_at: string };
+    expect(record.expires_at).toBe(endOfCaptureDayInVenueTimezone(new Date(), TZ).toISOString());
   });
 });

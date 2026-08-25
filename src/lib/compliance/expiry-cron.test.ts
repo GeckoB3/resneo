@@ -110,3 +110,61 @@ describe('runComplianceExpiry — reminder pass', () => {
     expect((fake.tables.compliance_records ?? [])[0]!.reminder_sent_at).toBeTruthy();
   });
 });
+
+describe('runComplianceExpiry — per-visit records are never chased', () => {
+  // Per-visit expiry runs to the end of the appointment day, so a form completed weeks
+  // ahead now sits in the reminder window for weeks. Reminding on one would tell the guest
+  // to redo a form they have already completed for that very appointment.
+  function setup(validityPeriodDays: number | null) {
+    return new FakeSupabase({
+      compliance_records: [
+        {
+          id: 'rec',
+          venue_id: 'v1',
+          guest_id: 'g1',
+          compliance_type_id: 't1',
+          status: 'completed',
+          expires_at: daysFromNow(5),
+          reminder_sent_at: null,
+          compliance_types: { validity_period_days: validityPeriodDays },
+        },
+      ],
+      venues: [venueRow('v1', true, 7)],
+    });
+  }
+
+  it('does not remind on a per-visit record inside the cadence window', async () => {
+    const fake = setup(0);
+    const sendReminder = vi.fn(async (_t: ExpiryReminderTarget) => true);
+    const res = await runComplianceExpiry(fake.asClient(), { now: NOW, sendReminder });
+    expect(sendReminder).not.toHaveBeenCalled();
+    expect(res.remindersAttempted).toBe(0);
+    expect((fake.tables.compliance_records ?? [])[0]!.reminder_sent_at).toBeNull();
+  });
+
+  it('still reminds on a fixed-period record in the same window', async () => {
+    const fake = setup(90);
+    const sendReminder = vi.fn(async (_t: ExpiryReminderTarget) => true);
+    const res = await runComplianceExpiry(fake.asClient(), { now: NOW, sendReminder });
+    expect(sendReminder).toHaveBeenCalledTimes(1);
+    expect(res.remindersSent).toBe(1);
+  });
+
+  it('still expires a per-visit record once its visit day has passed', async () => {
+    const fake = new FakeSupabase({
+      compliance_records: [
+        {
+          id: 'rec',
+          venue_id: 'v1',
+          status: 'completed',
+          expires_at: daysFromNow(-1),
+          compliance_types: { validity_period_days: 0 },
+        },
+      ],
+      venues: [venueRow('v1', true)],
+    });
+    const res = await runComplianceExpiry(fake.asClient(), { now: NOW, sendReminder: async () => true });
+    expect(res.expired).toBe(1);
+    expect((fake.tables.compliance_records ?? [])[0]!.status).toBe('expired');
+  });
+});

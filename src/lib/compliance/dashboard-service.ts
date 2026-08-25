@@ -14,6 +14,12 @@ function joinName(join: { name?: string } | { name?: string }[] | null | undefin
   return t?.name ?? 'Compliance record';
 }
 
+/** The joined type's validity period: null = lifetime, 0 = per visit, >0 = days. */
+function joinValidity(join: unknown): number | null {
+  const t = (Array.isArray(join) ? join[0] : join) as { validity_period_days?: number | null } | null | undefined;
+  return t?.validity_period_days ?? null;
+}
+
 /**
  * Aggregated data for the venue compliance dashboard (spec §3.5): records expiring
  * soon, upcoming bookings missing a required record, and pending form links.
@@ -99,7 +105,9 @@ export async function loadComplianceDashboard(
   const [expiringRes, awaitingRes, bookingsRes] = await Promise.all([
     admin
       .from('compliance_records')
-      .select('id, guest_id, compliance_type_id, expires_at, result, compliance_types!inner(name), guests!inner(first_name, last_name, name)')
+      .select(
+        'id, guest_id, compliance_type_id, expires_at, result, compliance_types!inner(name, validity_period_days), guests!inner(first_name, last_name, name)',
+      )
       .eq('venue_id', venueId)
       .eq('status', 'completed')
       .is('voided_at', null)
@@ -126,18 +134,23 @@ export async function loadComplianceDashboard(
       .limit(500),
   ]);
 
-  const expiring_soon: ExpiringRecordRow[] = (expiringRes.data ?? []).map((r) => {
-    const row = r as Record<string, unknown>;
-    return {
-      id: row.id as string,
-      guest_id: row.guest_id as string,
-      guest_name: guestName(row.guests as GuestJoin),
-      compliance_type_id: row.compliance_type_id as string,
-      compliance_type_name: joinName(row.compliance_types as Parameters<typeof joinName>[0]),
-      expires_at: row.expires_at as string,
-      result: (row.result as string | null) ?? null,
-    };
-  });
+  const expiring_soon: ExpiringRecordRow[] = (expiringRes.data ?? [])
+    // Per-visit records (validity 0) are excluded: they expire the night of the visit by
+    // design, so every one of them falls inside the 30-day window. Listing them here would
+    // bury the records that genuinely need chasing under paperwork nobody has to renew.
+    .filter((r) => joinValidity((r as Record<string, unknown>).compliance_types) !== 0)
+    .map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        id: row.id as string,
+        guest_id: row.guest_id as string,
+        guest_name: guestName(row.guests as GuestJoin),
+        compliance_type_id: row.compliance_type_id as string,
+        compliance_type_name: joinName(row.compliance_types as Parameters<typeof joinName>[0]),
+        expires_at: row.expires_at as string,
+        result: (row.result as string | null) ?? null,
+      };
+    });
 
   const awaiting_submission: AwaitingLinkRow[] = (awaitingRes.data ?? []).map((r) => {
     const row = r as Record<string, unknown>;
@@ -179,7 +192,9 @@ async function resolveMissingForBookings(
     reqQueries.push(
       admin
         .from('service_compliance_requirements')
-        .select('id, compliance_type_id, enforcement, lock_period_hours, appointment_service_id, compliance_types!inner(name, is_active)')
+        .select(
+          'id, compliance_type_id, enforcement, lock_period_hours, appointment_service_id, compliance_types!inner(name, is_active, validity_period_days)',
+        )
         .eq('venue_id', venueId)
         .in('appointment_service_id', apptServiceIds),
     );
@@ -188,7 +203,9 @@ async function resolveMissingForBookings(
     reqQueries.push(
       admin
         .from('service_compliance_requirements')
-        .select('id, compliance_type_id, enforcement, lock_period_hours, service_item_id, compliance_types!inner(name, is_active)')
+        .select(
+          'id, compliance_type_id, enforcement, lock_period_hours, service_item_id, compliance_types!inner(name, is_active, validity_period_days)',
+        )
         .eq('venue_id', venueId)
         .in('service_item_id', serviceItemIds),
     );
@@ -202,7 +219,8 @@ async function resolveMissingForBookings(
   const typeIds = new Set<string>();
   for (const row of reqRows) {
     const svcId = (row.appointment_service_id ?? row.service_item_id) as string;
-    const typeJoin = row.compliance_types as { name?: string; is_active?: boolean } | { name?: string; is_active?: boolean }[] | null;
+    type TypeJoin = { name?: string; is_active?: boolean; validity_period_days?: number | null };
+    const typeJoin = row.compliance_types as TypeJoin | TypeJoin[] | null;
     const t = Array.isArray(typeJoin) ? typeJoin[0] : typeJoin;
     const req: ResolverRequirement = {
       id: row.id as string,
@@ -211,6 +229,7 @@ async function resolveMissingForBookings(
       enforcement: row.enforcement as ResolverRequirement['enforcement'],
       lock_period_hours: (row.lock_period_hours as number | null) ?? null,
       type_is_active: t?.is_active ?? true,
+      validity_period_days: t?.validity_period_days ?? null,
     };
     const list = reqsByService.get(svcId) ?? [];
     list.push(req);

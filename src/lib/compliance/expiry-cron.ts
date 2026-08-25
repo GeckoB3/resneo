@@ -103,7 +103,7 @@ export async function runComplianceExpiry(
   const horizonIso = new Date(now.getTime() + MAX_REMINDER_HORIZON_DAYS * MS_PER_DAY).toISOString();
   const { data: candidates, error: candErr } = await admin
     .from('compliance_records')
-    .select('id, venue_id, guest_id, compliance_type_id, expires_at')
+    .select('id, venue_id, guest_id, compliance_type_id, expires_at, compliance_types!inner(validity_period_days)')
     .eq('status', 'completed')
     .not('expires_at', 'is', null)
     .is('reminder_sent_at', null)
@@ -119,13 +119,23 @@ export async function runComplianceExpiry(
     return { expired, remindersAttempted, remindersSent, errors };
   }
 
-  const rows = (candidates ?? []) as Array<{
-    id: string;
-    venue_id: string;
-    guest_id: string;
-    compliance_type_id: string;
-    expires_at: string;
-  }>;
+  // Per-visit records (validity 0) run to the end of the appointment day, so a form
+  // completed weeks ahead now sits in the reminder window for weeks. Reminding on one
+  // would tell the guest to redo a form they have already completed for that very
+  // appointment, so they are never chased: they lapse after the visit by design.
+  const rows = (candidates ?? [])
+    .filter((r) => {
+      const join = (r as { compliance_types?: unknown }).compliance_types;
+      const t = (Array.isArray(join) ? join[0] : join) as { validity_period_days?: number | null } | null | undefined;
+      return (t?.validity_period_days ?? null) !== 0;
+    })
+    .map((r) => r as {
+      id: string;
+      venue_id: string;
+      guest_id: string;
+      compliance_type_id: string;
+      expires_at: string;
+    });
 
   // Resolve each venue's compliance config once (cadence + flag + tier gate).
   const venueIds = [...new Set(rows.map((r) => r.venue_id))];

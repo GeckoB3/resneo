@@ -92,15 +92,26 @@ export function venueLocalWallTimeToUtcMs(dateYmd: string, timeHHmm: string, tim
 }
 
 /**
- * End of the calendar day (last millisecond) of `capturedAtUtc` in the venue timezone,
- * as a UTC Date. Used for "per visit" compliance records (validity_period_days = 0), which
- * are valid for the day they were captured in venue local time, then need renewing.
+ * End of a given calendar day (last millisecond) in the venue timezone, as a UTC Date.
+ * Used for "per visit" compliance records (validity_period_days = 0), which are valid for
+ * one calendar day in venue local time and then need renewing.
+ */
+export function endOfLocalDayForYmd(dayYmd: string, venueTimezone: string): Date {
+  const tz = venueTimezone.trim() || 'Europe/London';
+  const nextMidnightUtcMs = venueLocalWallTimeToUtcMs(addDaysToYmd(dayYmd, 1), '00:00', tz);
+  return new Date(nextMidnightUtcMs - 1);
+}
+
+/**
+ * End of the calendar day (last millisecond) of `capturedAtUtc` in the venue timezone.
+ * This is the fallback for a per-visit record captured with no known appointment (an
+ * in-venue walk-in capture). When the appointment IS known, callers use
+ * {@link endOfLocalDayForYmd} with the booking date instead, so a form completed in
+ * advance stays valid for the visit it was completed for.
  */
 export function endOfCaptureDayInVenueTimezone(capturedAtUtc: Date, venueTimezone: string): Date {
   const tz = venueTimezone.trim() || 'Europe/London';
-  const dayYmd = formatYmdInTimezone(capturedAtUtc.getTime(), tz);
-  const nextMidnightUtcMs = venueLocalWallTimeToUtcMs(addDaysToYmd(dayYmd, 1), '00:00', tz);
-  return new Date(nextMidnightUtcMs - 1);
+  return endOfLocalDayForYmd(formatYmdInTimezone(capturedAtUtc.getTime(), tz), tz);
 }
 
 /**

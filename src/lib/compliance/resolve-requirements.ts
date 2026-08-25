@@ -42,6 +42,12 @@ export interface ResolverRequirement {
   lock_period_hours: number | null;
   /** Whether the underlying type is archived (surfaced as a read-only warning). */
   type_is_active: boolean;
+  /**
+   * The type's validity period (null = lifetime, 0 = per visit, >0 = days). Only used to
+   * decide whether EXPIRING_SOON is meaningful, so it is optional: a loader that omits it
+   * gets the old labelling, never a wrong block. Loaded by the DB loaders below.
+   */
+  validity_period_days?: number | null;
   /** Where a client-online form is offered online (spec §9.3). Optional: only loaded by the DB loader. */
   online_collection?: ComplianceOnlineCollection;
 }
@@ -104,7 +110,12 @@ export function resolveRequirement(
     sorted.find((r) => isRecordValidForBooking(r, bookingDatetime, requirement.lock_period_hours)) ?? null;
 
   if (validRecord) {
+    // A per-visit record (validity 0) is MEANT to lapse after the visit, so there is
+    // nothing to renew and EXPIRING_SOON is noise: every one of them expires inside the
+    // 30-day window, which would label a perfectly good record as needing attention.
+    const perVisit = requirement.validity_period_days === 0;
     const expiringSoon =
+      !perVisit &&
       validRecord.expires_at !== null &&
       validRecord.expires_at.getTime() - now.getTime() <= COMPLIANCE_EXPIRING_SOON_DAYS * MS_PER_DAY;
     return {
@@ -220,6 +231,13 @@ function toDate(value: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** The `compliance_types` embed the requirement loaders select. */
+interface TypeJoin {
+  name?: string;
+  is_active?: boolean;
+  validity_period_days?: number | null;
+}
+
 export interface LoadResolveParams {
   venueId: string;
   guestId: string | null;
@@ -254,7 +272,7 @@ export async function loadAndResolveServiceRequirements(
   let query = admin
     .from('service_compliance_requirements')
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, compliance_types!inner(id, name, is_active)',
+      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, compliance_types!inner(id, name, is_active, validity_period_days)',
     )
     .eq('venue_id', venueId);
   query = appointmentServiceId
@@ -274,7 +292,7 @@ export async function loadAndResolveServiceRequirements(
       enforcement: ComplianceEnforcement;
       lock_period_hours: number | null;
       online_collection: ComplianceOnlineCollection | null;
-      compliance_types: { name?: string; is_active?: boolean } | { name?: string; is_active?: boolean }[] | null;
+      compliance_types: TypeJoin | TypeJoin[] | null;
     };
     const typeJoin = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
     return {
@@ -284,6 +302,7 @@ export async function loadAndResolveServiceRequirements(
       enforcement: r.enforcement,
       lock_period_hours: r.lock_period_hours,
       type_is_active: typeJoin?.is_active ?? true,
+      validity_period_days: typeJoin?.validity_period_days ?? null,
       online_collection: r.online_collection ?? 'confirmation_link',
     };
   });

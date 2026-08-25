@@ -5,6 +5,10 @@ import {
   submissionStoragePathsAreSafe,
 } from '@/lib/compliance/booking-capture';
 import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
+import {
+  endOfCaptureDayInVenueTimezone,
+  endOfLocalDayForYmd,
+} from '@/lib/venue/venue-local-clock';
 
 const VENUE = 'venue-1';
 const GUEST = 'guest-1';
@@ -118,5 +122,73 @@ describe('captureBookingComplianceSubmissions guards', () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.recordIds).toHaveLength(1);
     expect((fake.tables.compliance_records ?? []).length).toBe(1);
+  });
+});
+
+describe('captureBookingComplianceSubmissions — per-visit forms completed during booking', () => {
+  // The booking row does not exist yet at capture time, so the create routes pass the
+  // appointment date down. Without it a per-visit form filled in during the booking flow
+  // expired the same night and the compliance gate rejected the very booking it was
+  // completed for.
+  const TZ = 'Europe/London';
+  const VISIT_DAY = '2027-06-10';
+
+  function fakePerVisit() {
+    return new FakeSupabase({
+      venues: [{ id: VENUE, name: 'Glow Studio', timezone: TZ }],
+      compliance_types: [
+        {
+          id: 't1',
+          venue_id: VENUE,
+          result_type: 'signed',
+          validity_period_days: 0,
+          capture_methods: ['client_online'],
+          current_version_id: 'v1',
+          is_active: true,
+        },
+      ],
+      compliance_type_versions: [
+        {
+          id: 'v1',
+          venue_id: VENUE,
+          compliance_type_id: 't1',
+          version_number: 1,
+          form_schema: {
+            schema_version: '1.0',
+            title: 'Treatment Consent',
+            fields: [{ id: 'note', type: 'text', label: 'Note' }],
+          },
+        },
+      ],
+      compliance_records: [],
+    });
+  }
+
+  it('expires at the end of the appointment day, not the day it was filled in', async () => {
+    const fake = fakePerVisit();
+    const res = await captureBookingComplianceSubmissions(fake.asClient(), {
+      venueId: VENUE,
+      guestId: GUEST,
+      draftId: DRAFT,
+      submissions: [{ compliance_type_id: 't1', responses: {} }],
+      visitDate: VISIT_DAY,
+    });
+    expect(res.ok).toBe(true);
+    const record = (fake.tables.compliance_records ?? [])[0] as { expires_at: string };
+    expect(record.expires_at).toBe(endOfLocalDayForYmd(VISIT_DAY, TZ).toISOString());
+    expect(new Date(record.expires_at).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('still captures without a visit date, expiring at the end of the capture day', async () => {
+    const fake = fakePerVisit();
+    const res = await captureBookingComplianceSubmissions(fake.asClient(), {
+      venueId: VENUE,
+      guestId: GUEST,
+      draftId: DRAFT,
+      submissions: [{ compliance_type_id: 't1', responses: {} }],
+    });
+    expect(res.ok).toBe(true);
+    const record = (fake.tables.compliance_records ?? [])[0] as { expires_at: string };
+    expect(record.expires_at).toBe(endOfCaptureDayInVenueTimezone(new Date(), TZ).toISOString());
   });
 });

@@ -58,6 +58,13 @@ export async function captureBookingComplianceSubmissions(
     /** Client draft id used for any pre-booking file uploads; null when no files were uploaded. */
     draftId: string | null;
     submissions: BookingComplianceSubmission[];
+    /**
+     * Per-visit types only (validity 0): the appointment date these forms are being
+     * completed for, as YYYY-MM-DD in venue local time. The booking row does not exist yet
+     * at capture time, so the date is passed in rather than read back from `booking_id`.
+     * For a multi-segment booking pass the LAST date, so one record covers every segment.
+     */
+    visitDate?: string | null;
     captureIp?: string | null;
     captureUserAgent?: string | null;
   },
@@ -117,6 +124,7 @@ export async function captureBookingComplianceSubmissions(
         validityPeriodDays: type.validity_period_days,
         formSchema: parsed.schema,
         bookingId: null,
+        visitDate: params.visitDate ?? null,
         captureChannel: 'client_booking',
         capturedByStaffId: null,
         captureIp: params.captureIp ?? null,

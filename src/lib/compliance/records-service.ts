@@ -21,6 +21,13 @@ export interface CaptureContext {
   validityPeriodDays: number | null;
   formSchema: ComplianceFormSchema;
   bookingId?: string | null;
+  /**
+   * Per-visit types only (validity 0): the appointment date this record is being completed
+   * for, as YYYY-MM-DD in venue local time. Set it when the booking row does not exist yet
+   * (inline capture during booking creation). Otherwise `bookingId` is enough: the date is
+   * read from that booking.
+   */
+  visitDate?: string | null;
   captureChannel: ComplianceCaptureChannel;
   capturedByStaffId: string | null;
   captureIp?: string | null;
@@ -69,9 +76,14 @@ export async function captureComplianceRecord(
 
   const capturedAt = new Date();
   const result = computeResult(ctx.formSchema, uploaded.responses, ctx.resultType);
-  // "Per visit" types (validity 0) expire at the end of the capture day in venue local time,
-  // so load the venue timezone only for that case (avoids a query on every capture).
+  // "Per visit" types (validity 0) expire at the end of the VISIT day in venue local time,
+  // so the venue timezone and the appointment date are read only for that case (avoids the
+  // queries on every other capture). The visit date is the caller's explicit `visitDate`
+  // (the inline booking flow, where the booking row does not exist yet), else the date of
+  // the booking this record is attached to, else unknown, which falls back to the capture
+  // day for an in-venue walk-in capture.
   let venueTimezone: string | undefined;
+  let visitDate: string | null = null;
   if (ctx.validityPeriodDays === 0) {
     const { data: venueRow } = await admin
       .from('venues')
@@ -79,8 +91,18 @@ export async function captureComplianceRecord(
       .eq('id', ctx.venueId)
       .maybeSingle();
     venueTimezone = (venueRow as { timezone?: string | null } | null)?.timezone ?? undefined;
+    visitDate = ctx.visitDate ?? null;
+    if (!visitDate && ctx.bookingId) {
+      const { data: bookingRow } = await admin
+        .from('bookings')
+        .select('booking_date')
+        .eq('id', ctx.bookingId)
+        .eq('venue_id', ctx.venueId)
+        .maybeSingle();
+      visitDate = (bookingRow as { booking_date?: string | null } | null)?.booking_date ?? null;
+    }
   }
-  const expiresAt = computeExpiresAt(ctx.validityPeriodDays, capturedAt, venueTimezone);
+  const expiresAt = computeExpiresAt(ctx.validityPeriodDays, capturedAt, venueTimezone, visitDate);
 
   const { data: record, error } = await admin
     .from('compliance_records')
@@ -122,6 +144,114 @@ export async function captureComplianceRecord(
   });
 
   return { ok: true, record: record as Record<string, unknown> };
+}
+
+/**
+ * Move a booking's per-visit compliance records onto the booking's new date.
+ *
+ * A per-visit record (validity 0) belongs to the appointment it was completed for, which
+ * is what `booking_id` records. When that appointment is rescheduled the record travels
+ * with it: expiry is recomputed against the new date, and a record the nightly job has
+ * already retired is returned to 'completed' when the new expiry is still ahead. Without
+ * this, moving a booking silently invalidates the consent signed for it, and a `block_all`
+ * requirement then rejects the reschedule itself.
+ *
+ * Only records attached to THIS booking are touched, so nothing the guest completed for a
+ * different appointment is extended.
+ *
+ * Call this BEFORE the compliance gate on the new date, or the gate rejects the very
+ * reschedule that would have carried the record forward. Best-effort throughout: a
+ * compliance problem must never fail a booking (spec §7), so failures are logged and the
+ * count returned, never thrown.
+ */
+export async function rescheduleBookingComplianceRecords(
+  admin: SupabaseClient,
+  params: { venueId: string; bookingId: string; newBookingDate: string; now?: Date },
+): Promise<number> {
+  const now = params.now ?? new Date();
+  try {
+    const { data: rows, error } = await admin
+      .from('compliance_records')
+      .select(
+        'id, guest_id, compliance_type_id, captured_at, expires_at, status, compliance_types!inner(validity_period_days)',
+      )
+      .eq('venue_id', params.venueId)
+      .eq('booking_id', params.bookingId)
+      .is('voided_at', null)
+      .in('status', ['completed', 'expired']);
+    if (error) {
+      console.error('[rescheduleBookingComplianceRecords] load failed:', error.message, params);
+      return 0;
+    }
+
+    const perVisit = (rows ?? []).filter((r) => {
+      const join = (r as { compliance_types?: unknown }).compliance_types;
+      const t = (Array.isArray(join) ? join[0] : join) as { validity_period_days?: number | null } | null | undefined;
+      return t?.validity_period_days === 0;
+    }) as Array<{
+      id: string;
+      guest_id: string;
+      compliance_type_id: string;
+      captured_at: string;
+      expires_at: string | null;
+      status: string;
+    }>;
+    if (perVisit.length === 0) return 0;
+
+    const { data: venueRow } = await admin
+      .from('venues')
+      .select('timezone')
+      .eq('id', params.venueId)
+      .maybeSingle();
+    const venueTimezone = (venueRow as { timezone?: string | null } | null)?.timezone ?? undefined;
+
+    let moved = 0;
+    for (const record of perVisit) {
+      const expiresAt = computeExpiresAt(0, new Date(record.captured_at), venueTimezone, params.newBookingDate);
+      if (!expiresAt) continue;
+      const nextExpiry = expiresAt.toISOString();
+      // A record already on the right day and not retired needs no write.
+      if (nextExpiry === record.expires_at && record.status === 'completed') continue;
+      const nextStatus =
+        record.status === 'expired' && expiresAt.getTime() > now.getTime() ? 'completed' : record.status;
+
+      const { error: updErr } = await admin
+        .from('compliance_records')
+        .update({ expires_at: nextExpiry, status: nextStatus, updated_at: now.toISOString() })
+        .eq('id', record.id)
+        .eq('venue_id', params.venueId);
+      if (updErr) {
+        console.error('[rescheduleBookingComplianceRecords] update failed:', updErr.message, { id: record.id });
+        continue;
+      }
+      moved += 1;
+
+      await writeComplianceAuditEvent(admin, {
+        venueId: params.venueId,
+        eventType: 'record.updated',
+        actorType: 'system',
+        guestId: record.guest_id,
+        complianceRecordId: record.id,
+        complianceTypeId: record.compliance_type_id,
+        metadata: {
+          reason: 'booking_rescheduled',
+          booking_id: params.bookingId,
+          new_booking_date: params.newBookingDate,
+          previous_expires_at: record.expires_at,
+          expires_at: nextExpiry,
+          ...(nextStatus !== record.status ? { previous_status: record.status, status: nextStatus } : {}),
+        },
+      });
+    }
+    return moved;
+  } catch (err) {
+    console.error(
+      '[rescheduleBookingComplianceRecords] failed:',
+      err instanceof Error ? err.message : err,
+      params,
+    );
+    return 0;
+  }
 }
 
 /** Load type (result_type, validity) + current version schema for a staff capture. */

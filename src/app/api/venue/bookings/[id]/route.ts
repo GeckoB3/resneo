@@ -7,6 +7,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 import { checkBookingCompliance, complianceUnmetMessage, COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/enforce-booking';
+import { rescheduleBookingComplianceRecords } from '@/lib/compliance/records-service';
 import { stripe } from '@/lib/stripe';
 import type { EngineInput } from '@/types/availability';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
@@ -2841,6 +2842,17 @@ export async function PATCH(
       // only on `block_all`; an admin may acknowledge via override_compliance.
       // No-ops when the feature is off or the booking is not Model B.
       if (isAppointment) {
+        // A per-visit record was completed for THIS booking, so it moves with it. This runs
+        // before the gate below, which would otherwise reject the reschedule on the consent
+        // signed for the date being left behind.
+        if (newDate !== booking.booking_date) {
+          await rescheduleBookingComplianceRecords(admin, {
+            venueId: scopeVenueId,
+            bookingId: id,
+            newBookingDate: newDate,
+          });
+        }
+
         const effApptSvc =
           (bookingUpdate.appointment_service_id as string | undefined) ??
           (booking.appointment_service_id as string | null) ??

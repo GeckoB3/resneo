@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { endOfCaptureDayInVenueTimezone } from '@/lib/venue/venue-local-clock';
+import { endOfCaptureDayInVenueTimezone, endOfLocalDayForYmd } from '@/lib/venue/venue-local-clock';
 
 /**
  * Compliance form schema (spec §4.3.1) — the versioned JSONB document stored on
@@ -372,19 +372,37 @@ export function computeResult(
 
 // ─── Expiry computation (spec §4.4.2) ───────────────────────────────────────────
 
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Compute a record's `expires_at` from the type's validity period:
  *   null → lifetime (returns null)
- *   0    → "per visit": valid until the end of the capture day in venue local time
+ *   0    → "per visit": valid until the end of the VISIT day in venue local time, falling
+ *          back to the capture day when no appointment is known (in-venue walk-in capture)
  *   >0   → capturedAt + N days
- * `venueTimezone` is only used for the per-visit (0) case; defaults to Europe/London.
+ * `venueTimezone` and `visitDateYmd` are only used for the per-visit (0) case; the
+ * timezone defaults to Europe/London.
+ *
+ * Anchoring per-visit expiry to the appointment is what lets a guest complete the form
+ * ahead of time (inline at booking, or from the confirmation link) and still have it
+ * count on the day. Expiry never moves *earlier* than the end of the capture day, so a
+ * stale or past `visitDateYmd` cannot mint an already-expired record, and a form filled
+ * in on the day of an appointment that has already started stays valid for the rest of
+ * that day.
  */
 export function computeExpiresAt(
   validityPeriodDays: number | null | undefined,
   capturedAt: Date,
   venueTimezone?: string,
+  visitDateYmd?: string | null,
 ): Date | null {
   if (validityPeriodDays == null) return null;
-  if (validityPeriodDays === 0) return endOfCaptureDayInVenueTimezone(capturedAt, venueTimezone ?? 'Europe/London');
+  if (validityPeriodDays === 0) {
+    const tz = venueTimezone ?? 'Europe/London';
+    const endOfCaptureDay = endOfCaptureDayInVenueTimezone(capturedAt, tz);
+    if (!visitDateYmd || !YMD_RE.test(visitDateYmd)) return endOfCaptureDay;
+    const endOfVisitDay = endOfLocalDayForYmd(visitDateYmd, tz);
+    return endOfVisitDay.getTime() > endOfCaptureDay.getTime() ? endOfVisitDay : endOfCaptureDay;
+  }
   return new Date(capturedAt.getTime() + validityPeriodDays * 24 * 60 * 60 * 1000);
 }

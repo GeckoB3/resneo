@@ -445,10 +445,40 @@ At capture time:
 if compliance_type.validity_period_days IS NULL:
     expires_at = NULL                                    -- lifetime
 elif compliance_type.validity_period_days = 0:
-    expires_at = captured_at                             -- single-use, immediately expired
+    -- "per visit": valid for the appointment it was completed for, so it can be
+    -- completed in advance (inline at booking, or from the confirmation link).
+    visit_day = explicit visit_date                      -- inline capture, booking row not written yet
+             OR bookings.booking_date for booking_id     -- form link / staff capture against a booking
+             OR NULL                                     -- walk-in capture, no appointment known
+    expires_at = end of (visit_day OR captured_at's day) in the venue timezone
+    expires_at = GREATEST(expires_at, end of captured_at's day)   -- never expire earlier than the capture day
 else:
     expires_at = captured_at + (validity_period_days || ' days')::interval
 ```
+
+Per-visit expiry originally ran to `captured_at` (audit M5), then to the end of the capture
+day, so a form completed before the appointment day was already expired on the day and a
+blocking requirement rejected the booking it was completed for. Anchoring to the visit day
+is what makes advance completion work. `endOfLocalDayForYmd` (`venue-local-clock.ts`) is the
+single source of the day boundary; `20270115120000_backfill_per_visit_compliance_expiry.sql`
+repaired the records written under the old rule.
+
+Three consequences follow from a per-visit record belonging to one appointment:
+
+* **A reschedule carries it forward.** `rescheduleBookingComplianceRecords`
+  (`records-service.ts`) recomputes `expires_at` for the validity-0 records attached to the
+  booking, and revives one the nightly job has already retired. Every reschedule path calls
+  it BEFORE its compliance gate (`bookings/[id]`, `visits/[id]/schedule`, guest self-service
+  in `confirm`), or the gate would reject the move on the consent signed for the date being
+  left behind. Best-effort: it never fails a booking. It is skipped on the visit route's dry
+  run, which must not write.
+* **EXPIRING_SOON never applies.** A per-visit record is meant to lapse after the visit, so
+  there is nothing to renew. `resolveRequirement` reads the requirement's
+  `validity_period_days` and keeps the state at SATISFIED, and the dashboard's
+  "Expiring soon" panel filters per-visit records out.
+* **No expiry reminder is sent.** The nightly reminder pass skips validity-0 records, which
+  now sit in the reminder window for as long as the appointment is away. Chasing one would
+  tell the guest to redo a form they have already completed for that appointment.
 
 ### 4.5 `service_compliance_requirements`
 

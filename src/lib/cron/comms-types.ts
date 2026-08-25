@@ -27,6 +27,8 @@ export interface CronBookingRow {
   deposit_status: string | null;
   cancellation_deadline: string | null;
   status: string;
+  /** Ties a multi-service visit's rows together, so cron sends once per visit. */
+  group_booking_id?: string | null;
   experience_event_id: string | null;
   class_instance_id: string | null;
   resource_id: string | null;

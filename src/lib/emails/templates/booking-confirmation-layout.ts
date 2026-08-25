@@ -12,6 +12,11 @@
 
 import type { BookingEmailData, BookingTicketPriceLine, GroupAppointmentLine, VenueEmailData } from '@/lib/emails/types';
 import {
+  bookingDisplayStart,
+  isVisitLines,
+  linesShareOneDay,
+} from '@/lib/emails/group-appointment-display';
+import {
   confirmationPaymentPolicyText,
   formatMoneyOrNull,
 } from '@/lib/communications/booking-confirmation-pricing';
@@ -60,7 +65,10 @@ function heroPhrase(booking: BookingEmailData, isAppt: boolean): { before: strin
 }
 
 function dateTimeLine(booking: BookingEmailData): string {
-  return `${formatDate(booking.booking_date)} at ${formatTime(booking.booking_time)}`;
+  // Anchored on the earliest line for a multi-service visit or a party, not on whichever
+  // row the email was sent for (see bookingDisplayStart).
+  const start = bookingDisplayStart(booking);
+  return `${formatDate(start.date)} at ${formatTime(start.time)}`;
 }
 
 // ─── Card wrapper ─────────────────────────────────────────────────────────────
@@ -699,8 +707,11 @@ function buildTransactionalDetailRows(opts: {
 }): string {
   const isAppt = opts.emailVariant === 'appointment';
 
-  // Group appointments: one labelled row per person
+  // Several lines: a party (one row per person, name-led) or one guest's visit
+  // (one row per service, service-led, because the guest is named in the greeting).
   if (opts.groupAppointments && opts.groupAppointments.length > 0) {
+    const visit = isVisitLines(opts.groupAppointments);
+    const oneDay = linesShareOneDay(opts.groupAppointments);
     const itemRows = opts.groupAppointments.map((g, idx) => {
       const isLast = idx === opts.groupAppointments!.length - 1 && !opts.priceDisplay;
       // Per-person add-ons and (when they change the price) the person subtotal,
@@ -714,15 +725,21 @@ function buildTransactionalDetailRows(opts: {
       const subtotalHtml = g.subtotal_display?.trim()
         ? `<p style="margin:4px 0 0;font-size:13px;font-weight:600;color:${TEXT_DARK};font-family:${FONT}">Subtotal: ${escapeHtml(g.subtotal_display.trim())}</p>`
         : '';
+      // A visit says the day once in the hero chip, so its rows lead with the time.
+      const when = oneDay
+        ? escapeHtml(formatTime(g.booking_time))
+        : `${escapeHtml(formatDate(g.booking_date))} at ${escapeHtml(formatTime(g.booking_time))}`;
+      const service = `${escapeHtml(g.service_name)} with ${escapeHtml(g.practitioner_name)}`;
+      const price = g.price_display?.trim() ? ` &middot; ${escapeHtml(g.price_display.trim())}` : '';
+      const headline = visit ? service : escapeHtml(g.person_label.trim());
+      const detail = visit
+        ? `${when}${price}`
+        : `${when} &middot; ${service}${price}`;
       return (
         `<tr>` +
         `<td style="padding:14px 0;${isLast ? '' : `border-bottom:1px solid ${RULE};`}vertical-align:top">` +
-        `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK};line-height:1.4;font-family:${FONT}">${escapeHtml(g.person_label)}</p>` +
-        `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">` +
-        `${escapeHtml(formatDate(g.booking_date))} at ${escapeHtml(formatTime(g.booking_time))} &middot; ` +
-        `${escapeHtml(g.service_name)} with ${escapeHtml(g.practitioner_name)}` +
-        (g.price_display?.trim() ? ` &middot; ${escapeHtml(g.price_display.trim())}` : '') +
-        `</p>` +
+        `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK};line-height:1.4;font-family:${FONT}">${headline}</p>` +
+        `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">${detail}</p>` +
         addonLinesHtml +
         subtotalHtml +
         `</td>` +

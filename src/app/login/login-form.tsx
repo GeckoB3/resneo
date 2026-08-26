@@ -31,11 +31,16 @@ export function LoginForm({
   const siteOrigin = process.env.NEXT_PUBLIC_BASE_URL
     ? normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL)
     : (typeof window !== 'undefined' ? window.location.origin : '');
+  // Both of these are `emailRedirectTo` targets for Supabase's own email templates
+  // (Magic Link for the OTP fallback below, Reset Password for forgot-password), which the
+  // mobile app also depends on. Those templates send `?token_hash=`, which only
+  // `/auth/confirm` verifies. `/auth/callback` handles `?code=` alone and would reject it.
+  // `/auth/confirm` forwards a code or an error on to `/auth/callback`, so either shape works.
   const callbackUrl =
     redirectTo?.trim()
-      ? `${siteOrigin}/auth/callback?next=${encodeURIComponent(redirectTo.trim())}`
-      : `${siteOrigin}/auth/callback`;
-  const passwordSetupCallbackUrl = `${siteOrigin}/auth/callback?next=${encodeURIComponent(SET_PASSWORD_PATH)}`;
+      ? `${siteOrigin}/auth/confirm?next=${encodeURIComponent(redirectTo.trim())}`
+      : `${siteOrigin}/auth/confirm`;
+  const passwordSetupCallbackUrl = `${siteOrigin}/auth/confirm?next=${encodeURIComponent(SET_PASSWORD_PATH)}`;
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();

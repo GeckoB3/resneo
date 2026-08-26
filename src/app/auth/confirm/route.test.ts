@@ -58,6 +58,15 @@ describe('GET /auth/confirm', () => {
     expect(url.searchParams.get('next') ?? '').not.toContain('evil.test');
   });
 
+  it('preserves the set-password next used by the password-reset flow', async () => {
+    // `login-form.tsx` sends resetPasswordForEmail here with next=/auth/set-password.
+    // If that were dropped, a reset recipient would land signed in but never be asked
+    // to choose a password.
+    const url = await locationOf('?code=abc123&next=%2Fauth%2Fset-password');
+    expect(url.pathname).toBe('/auth/callback');
+    expect(url.searchParams.get('next')).toBe('/auth/set-password');
+  });
+
   it('still fails closed when there is nothing usable in the link', async () => {
     const url = await locationOf('');
     expect(url.pathname).not.toBe('/auth/callback');

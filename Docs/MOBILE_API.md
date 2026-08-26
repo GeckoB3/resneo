@@ -55,7 +55,17 @@ Do **not** use `createClient()` in new venue route handlers — that reads cooki
 Add the mobile deep link to **Authentication → URL Configuration → Redirect URLs**:
 
 ```
-reserveniapp://callback
+resneo://callback
 ```
 
 Required for magic-link sign-in from the mobile app.
+
+**Add it to every project (staging and production) separately.** This list is per-project and is
+not carried over by a migration. If the URL is missing, GoTrue does not return an error: it
+silently substitutes the project's `SITE_URL`, so the email link lands on the website homepage and
+the user is never signed in.
+
+The value must match `Linking.createURL('callback')` exactly, which resolves to the `expo.scheme`
+in `app.json` (`resneo`) with two slashes. It was `reserveniapp://callback` before the
+ReserveNI-to-Resneo rebrand; that entry is dead and can be removed. The same URL serves
+password-reset and invite emails, so a missing entry breaks those too.

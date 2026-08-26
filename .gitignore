@@ -38,6 +38,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the E2E template, which carries no secrets and is the only record of
+# which variables the smoke suite needs. The real .env.e2e stays ignored above.
+!.env.e2e.example
 
 # vercel
 .vercel

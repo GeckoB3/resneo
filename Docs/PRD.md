@@ -20,7 +20,7 @@ appointment, class, event and hospitality businesses*
 
 **CONFIDENTIAL**
 
-# 0. Document status (May 2026)
+# 0. Document status (May 2026, revised 26 Aug 2026)
 
 This PRD was originally written (v2.0, February 2026) as the **MVP build
 specification for a restaurant-only product**. Reserve NI has since grown
@@ -43,14 +43,22 @@ Read this document with that in mind:
   Accounts) is current.
 - **Sections 6 (pricing) and 11–12 (timeline / beyond MVP)** predate the
   Appointments Light/Plus tiers and the current roadmap. Treat the
-  roadmap documents as authoritative where they conflict.
+  roadmap documents as authoritative where they conflict. The tier names
+  in §6.1 do not exist; the live `pricing_tier` values are
+  `appointments_plus`, `founding`, `professional` and `restaurant`.
+- **Section 5.3 and Section 4's status list** are *design intent*, not
+  schema. Their enum values drifted from the database and were corrected
+  on 26 Aug 2026. For the authoritative inventory use `Docs/schema.sql`;
+  for any single table, the migration that creates it.
 
 **Authoritative current documents:**
 
 - `Docs/Resneo-Appointments-Review-And-Roadmap.md` — current state,
   competitive position, and the appointments-first development roadmap.
-- `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`
-  — classes, events and resources review.
+- `Docs/Resneo_Codebase_Audit_August_2026.md` — classes, events and
+  resources review (§2.6 to §2.8), and the current findings register.
+  *(This entry previously named a May 2026 review that is now in
+  `Docs/archive/`.)*
 - `Docs/Resneo_Booking_Models_Reference.md` — canonical definitions of
   the booking models.
 - `Docs/Resneo_Unified_Booking_Functionality.md` — multi-model parity
@@ -374,7 +382,7 @@ everything on it.
                          and the full communication history    
                          for that booking.                     
 
-  **Booking status       Mark bookings as: Confirmed, Arrived, **Must Have**
+  **Booking status       Mark bookings as: Confirmed, Seated,   **Must Have**
   management**           No-Show, Cancelled. Each triggers     
                          appropriate actions (refund trigger,  
                          no-show flag). No-show can only be    
@@ -1055,12 +1063,14 @@ cross-venue queries are needed in later phases.
                          no_show_grace_minutes (default 15).
 
   **Bookings**           Individual booking record. Links to venue and
-                         guest. Status enum: Pending, Confirmed, Arrived,
-                         No-Show, Cancelled. Source enum: Widget,
-                         BookingPage, Phone, WalkIn. Party size, date,
+                         guest. Status enum: Pending, Booked, Confirmed,
+                         Cancelled, No-Show, Completed, Seated. Source
+                         enum: online, phone, walk-in, booking_page,
+                         import, widget. Party size, date,
                          time, dietary notes, occasion, special requests.
-                         Deposit status: None, Pending, Paid, Refunded,
-                         Forfeited. Stripe payment intent ID. The
+                         Deposit status: Not Required, Pending, Paid,
+                         Refunded, Forfeited, Failed, Waived, Card Held,
+                         Charged. Stripe payment intent ID. The
                          cancellation policy version that was in effect
                          at the time of booking is stored on the record
                          (cancellation_policy_snapshot) so that policy

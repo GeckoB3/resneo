@@ -2,6 +2,10 @@
 -- Reserve NI — Database schema reference (curated map)
 -- =============================================================================
 -- Last regenerated: 5 Jul 2026, from supabase/migrations/ (234 migrations).
+-- Reconciled 26 Aug 2026 against 265 migrations: 126 tables exist, all listed.
+-- Drift measured, not assumed: 2 tables were missing (added below), 0 ghost
+-- entries, and all four enum lists were already correct. No migration in the
+-- history contains a DROP TABLE, so entries here cannot go stale by removal.
 --
 -- THIS FILE IS NOT THE SOURCE OF TRUTH.
 -- The canonical schema is the ordered migration set in `supabase/migrations/`.
@@ -92,8 +96,15 @@
 --                                  resource_id, event_session_id, calendar_id
 -- booking_ticket_lines             Ticket / line breakdown (Models C/D)
 -- booking_short_links              Short links for manage/confirm pages
--- events                           IMMUTABLE append-only booking audit log
+-- events                           Booking audit log. INSERT-only by RLS grant, NOT by
+--                                  trigger: events_append_only was dropped in
+--                                  20260624150000_events_allow_booking_purge.sql so booking
+--                                  purges can cascade. venue_id is NOT NULL.
 -- webhook_events                   Stripe / external webhook idempotency log
+-- booking_payments                 In-person payment ledger: card_present / cash / external
+--                                  / online, per booking, with tips and refund state
+--                                  (20270101121000_booking_payments_ledger.sql). RLS on with
+--                                  no policies, i.e. service_role only.
 -- reconciliation_alerts            Payment / data reconciliation findings
 -- cron_runs                        Run history for scheduled cron jobs (success,
 --                                  duration, response detail); powers platform health page
@@ -125,6 +136,9 @@
 -- unified_calendars                Bookable calendar columns
 -- calendar_service_assignments     Which services a calendar offers
 -- calendar_blocks                  Calendar-level blocks
+-- calendar_date_overrides          Per-date calendar availability overrides; secondary mirror
+--                                  of practitioner_leave_periods, which stays authoritative
+--                                  (20270114120000_calendar_date_overrides.sql)
 -- availability_blocks              Availability block entries
 -- party_size_durations             Duration by party size
 -- processing time blocks           (columns on services/bookings — see 20260830* migration)
@@ -175,7 +189,12 @@
 -- class_payment_allocations        Payment ↔ entitlement allocation
 
 -- --- Resources (Model E) -----------------------------------------------------
--- venue_resources                  Bookable facilities / equipment
+-- venue_resources                  FROZEN. Superseded by unified_calendars rows with
+--                                  calendar_type='resource' (20260502120000_resources_to_
+--                                  unified_calendars.sql). The table still exists but the
+--                                  resource booking engine never reads it, and columns added
+--                                  after the migration exist only on unified_calendars. Only
+--                                  two references remain in src/, both type-level.
 
 -- --- Waitlist ----------------------------------------------------------------
 -- waitlist_entries                 Waitlist joins (restaurant + appointment waitlist v2)
@@ -284,4 +303,7 @@
 -- request_account_deletion            Start the GDPR deletion grace period
 -- refresh_guest_booking_aggregates    Recompute guest visit/spend aggregates
 -- lookup_auth_user_id_by_email        service_role email → auth user id
--- reconcileCollectivesAfterLinkChange Collective membership cascade (see linked accounts)
+--
+-- NOT an RPC: reconcileCollectivesAfterLinkChange is a TypeScript function in
+-- src/lib/linked-accounts/collectives.ts, not a Postgres function. Grepping the
+-- migrations for it will find nothing.

@@ -5,6 +5,15 @@
 `Docs/APP_GAP_REPORT_R20_WEB_DELTA.md`.
 **Date:** 2026-08-19.
 
+> **Superseded in part. R20-1 is closed by `R20-1_WEB_RESPONSE_4.md` (2026-08-19).**
+> Read that document first. Two things in this one are corrected there:
+> §4.1's count of the reads `getCalendarGrid` discards is **seven**, not five;
+> and the work list in §6 and the asks in §7 are **all complete**, though nothing
+> here is marked done. Do not pick up §6 as a to-do list.
+> *(Banner added 2026-08-26.)*
+
+---
+
 ---
 
 ## 1 Answer to the question you asked

@@ -51,7 +51,12 @@ export function AuthMagicForm({
           : typeof window !== 'undefined'
             ? window.location.origin
             : '';
-        const callbackUrl = `${siteOrigin}/auth/callback?next=${encodeURIComponent(redirect)}`;
+        // Target `/auth/confirm`, not `/auth/callback`. This fallback is the only web path that
+        // still uses Supabase's own "Magic Link" template, which the mobile app also depends on.
+        // That template sends `?token_hash=`, which only `/auth/confirm` verifies; `/auth/callback`
+        // handles `?code=` alone and would reject it. `/auth/confirm` forwards a `code` or an
+        // error back to `/auth/callback`, so this works under either template shape.
+        const callbackUrl = `${siteOrigin}/auth/confirm?next=${encodeURIComponent(redirect)}`;
         const supabase = createClient();
         const { error } = await supabase.auth.signInWithOtp({
           email: trimmed,

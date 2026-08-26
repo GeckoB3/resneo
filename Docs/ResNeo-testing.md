@@ -1209,6 +1209,12 @@ route the app authenticates against.
 
 ## 14. Test data currently on the dev server
 
+> **Stale as of 2026-08-26. This section was accurate on 2026-08-20 and has not been
+> re-verified since.** It describes live dev-database state, which drifts on its own.
+> Re-check against the dev server before relying on any row named here. Everything
+> else in this document was re-verified on 2026-08-26 and holds, including all six
+> outstanding defects, which still reproduce.
+
 Left in place deliberately so the outstanding tests can continue from here. Nothing
 has been cleaned up yet.
 
@@ -1245,9 +1251,10 @@ has been cleaned up yet.
 The two Pending bookings are holding their slots, which is correct behaviour and
 also why Andrew's availability has gaps this evening.
 
-**One booking is deliberately left in a broken state as evidence.** The 20:30 TEST A8
+~~**One booking is deliberately left in a broken state as evidence.** The 20:30 TEST A8
 shows the F7 chimera, "Basic, 30 min, £80.00", and is worth keeping until that is
-fixed.
+fixed.~~ **F7 has since been fixed, so this row no longer demonstrates anything.** It can be
+cleaned up. *(Struck 2026-08-26.)*
 
 The 20:00 Root Tint overlapping it is **not** a defect, as the G2 entry in 12.2
 explains, and can

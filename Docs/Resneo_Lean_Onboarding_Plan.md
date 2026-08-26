@@ -1,6 +1,6 @@
 # Lean onboarding: move catalogue setup and Stripe into "What's next"
 
-Status: Phases 0, 1, and 2 shipped (migrations applied, merged to main). Phase 3 implemented on branch `phase-3-remove-dead-onboarding-steps`, needs no migration.
+Status: **All four phases shipped and merged** (verified 2026-08-26). Phase 3 needed no migration and is no longer on a branch: `src/app/onboarding/page.tsx` is 1,994 lines against the plan's post-Phase-3 prediction of ~2,075, down from 4,650, and `OnboardingAppointmentServiceList` and `OnboardingInlineAddCalendarControls` return zero matches across `src/`. The branch `phase-3-remove-dead-onboarding-steps` no longer exists. This document is now an **as-built record**, not an open plan.
 Owner: TBC.
 Scope: Appointments-plan onboarding (`src/app/onboarding/page.tsx`) and the dashboard setup checklist (`src/app/dashboard/SetupChecklist.tsx`).
 

@@ -20,6 +20,9 @@ function getBaseUrl(requestUrl: string): string {
  * Supabase email templates may send:
  *   {{ .SiteURL }}/auth/confirm?token_hash=xxx&type=magiclink
  *
+ * Safe to use as an `emailRedirectTo` target regardless of which shape the template
+ * currently produces: a PKCE `code` or an `error` is forwarded to `/auth/callback` (see below).
+ *
  * Staff invites from `/api/venue/staff/invite` use PKCE `/auth/callback?next=/auth/set-password` instead;
  * this route still handles invite/magiclink when templates point here without `next`.
  */
@@ -86,6 +89,22 @@ export async function GET(request: Request) {
     }
     console.error('Auth confirm failed:', error.message);
     return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, mapAuthErrorMessageToDetail(error.message))}`);
+  }
+
+  // No token_hash. That means the Supabase template is still sending `{{ .ConfirmationURL }}`,
+  // so GoTrue has redirected here with a PKCE `code` (or with `error`/`error_description` for a
+  // spent link). Neither can be handled server-side: the PKCE verifier lives in the browser, and
+  // `/auth/callback` already renders reason-specific copy for the error params. Hand off to it
+  // with the query intact rather than flattening everything to `exchange_failed`.
+  //
+  // This is what makes `/auth/confirm` safe as an `emailRedirectTo` under *either* template
+  // shape, so the template can be switched to `token_hash` independently of this deploy.
+  const code = searchParams.get('code');
+  const authError = searchParams.get('error') ?? searchParams.get('error_description');
+  if (code || authError) {
+    const forwarded = new URLSearchParams(searchParams);
+    forwarded.set('next', fallbackNext);
+    return NextResponse.redirect(`${base}/auth/callback?${forwarded.toString()}`);
   }
 
   return NextResponse.redirect(`${base}${getAuthFailurePath(fallbackNext, 'exchange_failed')}`);

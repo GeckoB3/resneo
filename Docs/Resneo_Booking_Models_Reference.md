@@ -2,6 +2,8 @@
 
 This document is the **single place** we align on what each `BookingModel` means in product and code. It reflects the **current** setup (see `src/types/booking-models.ts` and `src/lib/business-config.ts`). It does not prescribe implementation tasks; for delivery plans see `Docs/Resneo_Unified_Booking_Functionality.md` and related specs.
 
+**Last verified against the code: 2026-08-26.** All six enum values, the full `BookingFlowRouter` mapping table and the signup-card constants were checked row by row and hold. Two corrections were made: the `resource_booking` storage table and the status of `practitioner_appointment`. Both are marked inline.
+
 ---
 
 ## Why this matters
@@ -22,10 +24,10 @@ Using the same vocabulary in docs, support, and engineering avoids confusion bet
 |------------|---------------------|
 | `table_reservation` | **Restaurant / hospitality** - covers, tables, combinations, deposits. |
 | `unified_scheduling` | **Appointment-style businesses using the Unified Scheduling Engine** - calendars, `service_items`, online booking. **This is what new appointment signups use.** |
-| `practitioner_appointment` | **Legacy** appointment model - **same product behaviour as `unified_scheduling`** in almost all code paths; kept for existing `venues` rows. |
+| `practitioner_appointment` | **Legacy** appointment model - **same product behaviour as `unified_scheduling`** in almost all code paths. Enum value retained; **no venue rows use it.** |
 | `event_ticket` | **Ticketed / dated experiences** - `experience_events`, ticket lines, `EventBookingFlow`. |
 | `class_session` | **Recurring group classes** - class types, timetable, instances, `ClassBookingFlow`. |
-| `resource_booking` | **Bookable rooms / courts / equipment** - `venue_resources`, slots, `ResourceBookingFlow`. |
+| `resource_booking` | **Bookable rooms / courts / equipment** - `unified_calendars` rows with `calendar_type='resource'`, slots, `ResourceBookingFlow`. *(Corrected 2026-08-26: `venue_resources` was frozen by `20260502120000_resources_to_unified_calendars.sql`. Post-migration columns exist only on `unified_calendars`, so a query written against `venue_resources` raises `42703` or degrades silently to empty.)* |
 
 ---
 
@@ -55,7 +57,7 @@ Using the same vocabulary in docs, support, and engineering avoids confusion bet
 
 ### `practitioner_appointment` (legacy)
 
-**Use for:** **Historical** venues only - rows where `venues.booking_model` was set before the product standardised on `unified_scheduling`, or venues never migrated.
+**Use for:** Nothing. **Every venue is on unified scheduling** (confirmed 2026-07-23, re-confirmed 2026-08-26). The enum value is retained so the type stays exhaustive, but no `venues` row carries it, which means the `practitioner_appointment` branch in any code path is unreachable. Treat such branches as dead code to delete rather than to fix.
 
 **Behaviour:** Code treats **`practitioner_appointment` and `unified_scheduling` identically** wherever `isUnifiedSchedulingVenue()` is used (`src/lib/booking/unified-scheduling.ts`): same public flow (`AppointmentBookingFlow`), same sidebar pattern, same unified comms eligibility, etc.
 
@@ -128,6 +130,6 @@ Default labels per model live in `DEFAULT_TERMINOLOGY` in `src/types/booking-mod
 
 ## Related documents
 
-- `Docs/Resneo_Unified_Booking_Functionality.md` - multi-model product and delivery plan (`enabled_models`, settings, calendar, etc.).
+- `Docs/Resneo_Unified_Booking_Functionality.md` - multi-model product and delivery plan (settings, calendar, the public `?tab=` slug contract). Note it predates `active_booking_models` and describes `enabled_models` as the thing you set; the rule above wins.
 - `Docs/archive/ReserveNI_Unified_Scheduling_Engine_Plan.md` - Unified Scheduling Engine (USE) build guide (archived — engine shipped; retained for architecture rationale).
 - `Docs/Resneo_Bookable_Services_Landscape_Plan.md` - broader services landscape.

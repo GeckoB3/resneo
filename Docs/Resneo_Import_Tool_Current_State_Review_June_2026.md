@@ -10,7 +10,7 @@
 
 A build pass implemented the prioritised fixes below. **Verification:** production build passes; `tsc --noEmit` clean; full vitest suite **1569 tests / 223 files pass** (incl. new engine integration tests + helper tests); ESLint + `lint-no-raw-modals` clean. Not yet verified by a live end-to-end browser run (the flow is admin-auth-gated behind upload/session steps) — recommend a manual run-through after applying migrations.
 
-**New migrations to apply:** `20261226120000_bookings_total_price_pence_guard.sql`, `20261226120100_import_guest_tx.sql`, `20261226120200_import_session_execute_lease.sql`, `20261226120300_import_column_mappings_value_map.sql`.
+~~**New migrations to apply:**~~ **All four shipped on 2026-06-24 (`20b12dc9`) and are long applied on both environments.** `20261226120000_bookings_total_price_pence_guard.sql`, `20261226120100_import_guest_tx.sql`, `20261226120200_import_session_execute_lease.sql`, `20261226120300_import_column_mappings_value_map.sql`. The code calls them unconditionally with no fallback (`run-execute.ts:737,880`; `execute/route.ts:118`), so an unapplied state would hard-fail every import rather than degrade. **Do not read this line as an outstanding action, and do not schedule the manual run-through it once implied.** *(Corrected 2026-08-26.)*
 
 **Done & verified**
 - **H1** — past/historical bookings now flow through the references step and the resolved-id staged executor (extraction stages *all* rows; the `is_future_booking`-only filters were removed in extraction + executor). Integration-tested.

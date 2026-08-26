@@ -1,6 +1,6 @@
 # ResNeo Customer Portal: Plan to World-Class Standard
 
-**Status:** Re-verified against the code on **2026-08-26**, at `staging` @ `e55554cc`. Nothing in it has been built yet. The 2026-08-09 review is superseded: fourteen migrations landed after it, including a security-hardening wave that rewrites the highest-severity item in this document.
+**Status:** Re-verified against the code on **2026-08-26**, at `staging` @ `e55554cc`, with the pre-flight and auth-chain work of that day folded in at `main` @ `770aef53`. No *portal* work has been built yet: what shipped on 2026-08-26 was pre-flight (§0A) plus the F8 auth chain (§5D.4), which was live-defect repair, not a phase. The 2026-08-09 review is superseded: fourteen migrations landed after it, including a security-hardening wave that rewrites the highest-severity item in this document.
 **Owner:** TBC
 **Created:** 2026-08-06
 **Scope:** The customer-facing web portal at `/account`, its API surface under `/api/account/*` and `/api/v1/*`, and the shared guest-action logic it depends on. Native app delivery is out of scope; the constraints that keep it possible later are in §5D and are binding on every phase.
@@ -62,7 +62,7 @@ The Register lists **33 open findings gated on "Promoting the customer portal"**
 
 None of the following is a phase task, and each one blocks or invalidates work that is scheduled. They are small. Do them first.
 
-**Status at 2026-08-26: F1, F3 and F6 are done, F2 is partly done. F8 is diagnosed and is a <u>live production defect</u> awaiting a one-line dashboard change. F4, F5, F7 and F9 need a human with credentials or authority this plan does not have.**
+**Status at 2026-08-26: F1, F3, F6 and F8 are done, F2 is partly done. F8 turned out to be four defects rather than one, all now fixed and deployed: magic-link and password-reset sign-in work on web and in the shipped app. F4, F5, F7 and F9 need a human with credentials or authority this plan does not have.**
 
 | # | What | Why it cannot wait | Owner | Done |
 | --- | --- | --- | --- | --- |
@@ -73,9 +73,9 @@ None of the following is a phase task, and each one blocks or invalidates work t
 | **F5** | **Run all four e2e specs after F1 and F2 and record the result in `Docs/E2E_SMOKE.md`.** | Establishes whether the safety net exists before P0-4 is scheduled against it. | | ☐ |
 | **F6 ✅** | **DONE 2026-08-26.** Declared `@supabase/supabase-js@^2.98.0` and updated the lockfile. It was present only transitively via `@supabase/ssr` while **314 files import it directly**, so an `@supabase/ssr` bump could have moved it underneath them. Resolved version unchanged; `npm run typecheck` clean. | Phase 0 adds four more scripts that import it. | Claude | ☑ |
 | **F7** | **Agree the AASA path set with the app repo at `C:\Resneo-app`**, and obtain the two identifiers that are genuinely missing: the **Apple Team ID** and the Play app-signing **SHA-256**. The bundle id and package name are already known (both `com.resneo.app`; iOS `bundleIdentifier` at `app.json:18`, Android `package` at `app.json:33`), and draft association files sit unshipped in the app repo's `Docs/universal-links/` with those two as placeholders. | Decides which emails open the app rather than a browser, so it must precede P3-4d changing the emails. | | ☐ |
-| **F8** | **Add `resneo://callback` to the *production* project's Redirect URLs allowlist (`njualfobtudvlugqkqho` -> Authentication -> URL Configuration).** **CONFIRMED BROKEN IN PRODUCTION 2026-08-26** by a user test: a production build's magic link landed on the resneo.com homepage, unauthenticated. That is GoTrue's silent fallback to `SITE_URL` for a non-allowlisted `emailRedirectTo`. Proved on staging with `admin.generateLink` (generates without sending): `resneo://callback` was **honoured** there, while an unlisted URL was rewritten to staging's `SITE_URL` with no error. So staging has the entry and production does not, and `eas.json`'s `production` profile points at `njualfobtudvlugqkqho` / `www.resneo.com`. Exact string is two-slashed: `app.json` scheme is `resneo`, and `Linking.createURL('callback')` (expo-linking 56, `isTripleSlashed` defaults false) yields `resneo://callback`. | **Magic-link *and* password-reset sign-in are both broken in the shipped app right now** (`getAuthCallbackRedirectUrl` and `getPasswordResetRedirectUrl` both return this URL). The app side is sound: `completeAuthSession` handles both `?code=` and `token_hash`, so the allowlist entry is the whole fix. | | ☐ |
+| **F8 ✅** | **DONE 2026-08-26.** `resneo://callback` added to the production Redirect URLs allowlist. That unblocked, then exposed, three further defects, all fixed and deployed (`a3d205f`, `a34caf3` in Resneo-app; `684f31fb`, `13a5e9c2`, `d4205915` in this repo). See the **2026-08-26 (auth chain)** changelog row and §5D.4 for the durable constraints this produced. | Magic-link and password-reset sign-in were fully broken in the shipped app, and web password reset was broken for a period on 2026-08-26. All four now verified working on web and app by the operator. | Operator + repo | ☑ |
 
-| **F9** | **Compare staging and production auth settings before Phase 3.** The staging project reports `mailer_autoconfirm: true` (Confirm email off). §5A already requires the two projects to match before Phase 3, and `claim_user_account()`'s `email_confirmed_at` gate behaves differently depending on it, so P3-4c's acceptance is only meaningful if they agree. *(Surfaced 2026-08-26 while checking F8; **no longer hypothetical** -- F8 confirmed the two projects' Redirect URL allowlists already diverge, staging holding `resneo://callback` and production not, so auth config drift between them is demonstrated fact.)* | A staging pass on P3-4 proves nothing if the auth settings differ from production. | | ☐ |
+| **F9** | **Compare staging and production auth settings before Phase 3.** The staging project reports `mailer_autoconfirm: true` (Confirm email off). §5A already requires the two projects to match before Phase 3, and `claim_user_account()`'s `email_confirmed_at` gate behaves differently depending on it, so P3-4c's acceptance is only meaningful if they agree. *(Surfaced 2026-08-26 while checking F8. **Drift is proven, not hypothetical**: the Redirect URL allowlists differed, staging holding `resneo://callback` and production not, which is what broke the app. The allowlists and both email templates have since been aligned across the two projects by hand. `mailer_autoconfirm` and the rest of the auth settings remain unverified.)* | A staging pass on P3-4 proves nothing if the auth settings differ from production. **None of this is carried by a migration**, so every future auth setting has to be applied to both projects deliberately. | | ☐ |
 
 **When pre-flight is done, start at §5E.1.** That section carries the order of attack, the file clusters, the deploy rounds and the first PR of every phase.
 
@@ -175,7 +175,7 @@ This is the first impression for essentially every customer, and it is the weake
 | 6 | Switch to email app, wait for delivery | Email app |
 | 7 | Open a second, unbranded email (`src/app/api/auth/send-magic-link/route.ts:123-127`) | Email 2 |
 | 8 | Click "Sign in to ResNeo" | Email 2 |
-| 9 | `verifyOtp` (`src/app/auth/confirm/route.ts:47`), `claim_user_account` (`:49`), resolve destination (`:66`) | `/auth/confirm` |
+| 9 | `verifyOtp` (`src/app/auth/confirm/route.ts:93`), `claim_user_account` (`:95`), resolve destination (`:112`) | `/auth/confirm` |
 | 10 | Arrive at a generic bookings list | `/account/bookings` |
 
 Specific defects inside that flow:
@@ -411,7 +411,7 @@ Two Register findings are deliberately pushed to §5C rather than absorbed: `Q-1
 
 - **No custom access token hook exists.** None of the **265** migrations defines one, and `[auth.hook.custom_access_token]` is commented out in `supabase/config.toml:274-276`. A Supabase JWT cannot carry an application-defined claim today. `app_metadata` is not a substitute: it is per user, not per session, so writing a scope there would also downgrade that customer's other, fully authenticated sessions on other devices.
 
-- **`claim_user_account()` requires a confirmed email.** `20270103123000_claim_requires_confirmed_email.sql:68-72` gates guest-row linking on `auth.users.email_confirmed_at`, with the comment "Only claim on a session whose owner has proved they hold the inbox." The migration records at `:20-23` that "of 354 auth users, 56 carry email_confirmed_at", and at `:25-28` a deliberate decision not to backfill. Any new sign-in path must establish its session through Supabase's own OTP verification, which sets that flag; a bespoke minted session would silently stop linking guest rows. Note `/auth/confirm:49` already calls the RPC on every magic-link confirm, so the repair AD7 predicts is automatic on that path.
+- **`claim_user_account()` requires a confirmed email.** `20270103123000_claim_requires_confirmed_email.sql:68-72` gates guest-row linking on `auth.users.email_confirmed_at`, with the comment "Only claim on a session whose owner has proved they hold the inbox." The migration records at `:20-23` that "of 354 auth users, 56 carry email_confirmed_at", and at `:25-28` a deliberate decision not to backfill. Any new sign-in path must establish its session through Supabase's own OTP verification, which sets that flag; a bespoke minted session would silently stop linking guest rows. Note `/auth/confirm:95` already calls the RPC on every magic-link confirm, so the repair AD7 predicts is automatic on that path.
 
 - **Confirm email is off on the production Supabase project, by decision** (`Docs/Resneo_Remediation_Register.md:61`). Combined with the line above, this means a customer who signs up with a password gets a session immediately but **cannot inherit any guest records** until they next click a magic link. Any portal onboarding that offers password-first would strand the customer in an empty portal.
 
@@ -520,7 +520,7 @@ The account link in transactional emails carries a signed, user-scoped token tha
 
 The justification is consistency, not convenience. The same email already carries a manage link, which lets whoever holds it cancel a booking and trigger a refund with no second factor. Requiring a full email round trip to *read* the same booking applies a higher bar to a strictly lower-risk action. `Docs/Resneo_User_Accounts_Reference.md` §5.3 already contemplates this, recording "the original email could contain a magic link with a longer expiry (e.g. 7 days) for first-time login. Acceptable for the very first booking; not for subsequent bookings."
 
-**How the session is established.** `admin.auth.admin.generateLink({ type: 'magiclink' })` followed by a server-side `supabase.auth.verifyOtp(...)`, exactly the mechanism already in `POST /api/auth/send-magic-link:87` and `GET /auth/confirm:47`. Two consequences follow, and both are wanted: the session is an ordinary Supabase session that every existing route and RLS predicate already understands, and `verifyOtp` sets `auth.users.email_confirmed_at`, which is what `claim_user_account()` now requires before it will link guest rows.
+**How the session is established.** `admin.auth.admin.generateLink({ type: 'magiclink' })` followed by a server-side `supabase.auth.verifyOtp(...)`, exactly the mechanism already in `POST /api/auth/send-magic-link:87` and `GET /auth/confirm:93`. Two consequences follow, and both are wanted: the session is an ordinary Supabase session that every existing route and RLS predicate already understands, and `verifyOtp` sets `auth.users.email_confirmed_at`, which is what `claim_user_account()` now requires before it will link guest rows.
 
 **How "limited" is recorded and enforced.** Not as a JWT claim. There is no custom access token hook on this project, and `app_metadata` is per user rather than per session.
 
@@ -1071,7 +1071,7 @@ This is the highest-value item in Phase 3. It is the first impression for essent
 - **Acceptance:** a route test enumerates every route under `/api/account/*` and `/api/v1/*` and asserts each one either rejects a limited session or is on an explicit reviewed permit list, so a route added later fails the test until someone classifies it. Specific assertions: 403 on `/api/account/payment-methods`, `/api/account/memberships/checkout`, `/api/account/credits/purchase`, `/api/account/delete-request`, `/api/account/devices`, `/api/account/password` and `/api/account/marketing-preferences`; 200 on `/api/account/bookings`. A separate manual check confirms that calling the Supabase Auth API directly with a limited session's token is refused by the project's reauthentication setting.
 
 **P3-4c. Entry route**
-- `GET /auth/portal?t=<token>` verifies the token, establishes a Supabase session via `admin.auth.admin.generateLink({ type: 'magiclink' })` plus server-side `verifyOtp` (the mechanism already used by `/api/auth/send-magic-link:87` and `/auth/confirm:47`), calls `claim_user_account()`, records the session in `portal_limited_sessions`, then redirects to the target.
+- `GET /auth/portal?t=<token>` verifies the token, establishes a Supabase session via `admin.auth.admin.generateLink({ type: 'magiclink' })` plus server-side `verifyOtp` (the mechanism already used by `/api/auth/send-magic-link:87` and `/auth/confirm:93`), calls `claim_user_account()`, records the session in `portal_limited_sessions`, then redirects to the target.
 - Do not mint a session by any other means. `verifyOtp` is what sets `auth.users.email_confirmed_at`, without which `claim_user_account()` will not link guest rows.
 - Any failure falls through to `/auth/magic` with the email pre-filled, never to an error page.
 - **Acceptance:** expired, revoked, malformed and absent tokens all land on a usable sign-in form. A user arriving with no prior `email_confirmed_at` has it set, and a guest row at a new venue links on that same visit.
@@ -1325,8 +1325,8 @@ The stated intent is to let customers sign in to this dashboard from the ResNeo 
 - Four customer surfaces have no route, and Phases 2 to 4 add three more (see C1).
 - Middleware cannot see a Bearer user.
 - AD7, as designed, establishes a **browser cookie session**, which a native client cannot consume.
-- **The scheme is `resneo://`, and `resneo://callback` is unreachable from ResNeo code.** Two earlier errors here: the scheme was renamed at the rebrand, and an earlier draft listed the callback under "already true". `POST /api/auth/send-magic-link` hardcodes `redirectTo` to `${baseUrl}/auth/callback` (`route.ts:85`), and `buildMagicLinkConfirmNextQuery` passes `next` through `toSameOriginPath`, which rejects anything not beginning with `/`. So no ResNeo route can target the app's callback.
-- **And the documented allowlist entry was for the wrong scheme, which broke production.** `Docs/MOBILE_API.md:58` used to instruct operators to add **`reserveniapp://callback`**, the pre-rebrand scheme. **Confirmed 2026-08-26: production never got `resneo://callback`,** so the shipped 1.0.7 magic-link and password-reset flows land on the resneo.com homepage unauthenticated (GoTrue substitutes `SITE_URL` for a non-allowlisted redirect, silently). Staging *does* have the entry. `MOBILE_API.md` has been corrected; the production dashboard entry is F8 and is still owed.
+- **The scheme is `resneo://`.** ~~and `resneo://callback` is unreachable from ResNeo code~~ **No longer true as of 2026-08-26**: `GET /auth/confirm` now hands an email link to the app by rendering an interstitial that opens `resneo://callback?token_hash=...&type=...` (`src/lib/auth/app-deep-link.ts`). It is still true of `POST /api/auth/send-magic-link`, which hardcodes `redirectTo` to `${baseUrl}/auth/callback` (`route.ts:85`) and passes `next` through `toSameOriginPath`, which rejects anything not beginning with `/`. So the branded send route cannot target the app; the shared Supabase template plus `/auth/confirm` is the path that can. See §5D.4.
+- **The documented allowlist entry was for the wrong scheme, which broke production.** `Docs/MOBILE_API.md:58` used to instruct operators to add **`reserveniapp://callback`**, the pre-rebrand scheme, and production had been configured from it. So the shipped 1.0.7 magic-link and password-reset flows landed on the resneo.com homepage unauthenticated: GoTrue substitutes `SITE_URL` for a non-allowlisted redirect, **silently, with no error to the caller**. **Fixed 2026-08-26**: the entry was added to production, and `MOBILE_API.md` corrected with a warning that the list is per-project and fails silently.
 - `GET /api/v1/auth/magic-link/callback` is `export { GET } from '@/app/auth/confirm/route'`, which sets a cookie and returns a redirect on every path including failure. It is documented as the mobile sign-in callback and **cannot serve one**.
 
 The seventeen constraints below are each tied to a task. They are listed here so a reviewer can check compliance in one place.
@@ -1372,7 +1372,7 @@ Everything else it calls is `/api/venue/*` (219 pairs), `/api/booking/*` (9), or
 
 **Three things earlier drafts asserted that are false, and one that was dangerous:**
 
-- **The URL scheme is `resneo://`, not `reserveniapp://`** (`app.json:8`). It was renamed at the ReserveNI-to-Resneo rebrand. The shipped magic-link and password-reset flows depend on `resneo://callback` **today**, so the open question is whether *that* is in the Supabase allowlist.
+- **The URL scheme is `resneo://`, not `reserveniapp://`** (`app.json:8`). It was renamed at the ReserveNI-to-Resneo rebrand. The shipped magic-link and password-reset flows depend on `resneo://callback`. ~~the open question is whether *that* is in the Supabase allowlist~~ **Answered 2026-08-26: it was not, on production, and that was the root cause of a live outage.** Now present on both projects. `Linking.createURL('callback')` is two-slashed (expo-linking 56, `isTripleSlashed` defaults false), so the exact string is `resneo://callback`.
 - **The app already runs `claim_user_account()`**, directly over PostgREST after sign-in (`providers/AuthProvider.tsx:218`, `app/(auth)/callback.tsx:70`). P3-4i's "add a Bearer-reachable route for it" is therefore a convenience, not a blocker.
 - **The app calls `/api/account/delete-request` and `/cancel` directly**, and reads deletion status straight from `user_profiles` under RLS. C7's example ("an app can start an account deletion but not cancel it") was wrong, and it was the main argument for a bulk alias backfill. With it gone, and with the five aliased routes turning out to be exactly what the app calls, the backfill was dropped: see C7a and C7b.
 - **C11's "a default that is not silently `staff`" would break production.** Build 1.0.7 is in the stores and its device payload carries no audience field (`registerDevice.ts:97-103`). A `NOT NULL` column without a default fails every device registration and **kills staff push for every existing user**. It must default to `staff`; a strict CHECK can only be gated behind a client-version header that no shipped build sends.
@@ -1438,6 +1438,67 @@ Two things follow.
 **The single most consequential item is C5 plus P3-4i.** AD7 is being built regardless; adding the JSON token exchange and the OTP surfacing at that moment is cheap, and it means the app's first-entry story is settled by the same design that settles the web's. Building AD7 cookie-only and revisiting it in Phase 5 means designing first entry twice.
 
 **Open questions.** The app's contract is no longer one of them: it was read directly and is in §5D.0. What remains is genuine project state that only the Supabase dashboard settles: whether the access token carries a `session_id` claim (§0A F3), and whether **`resneo://callback`** is in the Redirect URLs allowlist. The second is more urgent than it looks, because the shipped 1.0.7 magic-link and password-reset flows already depend on it, so if it is absent those flows are broken today.
+
+### 5D.4 Email links and the app: constraints proven on 2026-08-26
+
+Fixing F8 took four rounds because each defect masked the next. The findings below are
+durable and bind every auth or transactional email this plan adds. All are deployed.
+
+**1. A Supabase email template can never link to `resneo://` directly.** Supabase renders
+templates with Go's `html/template`, which filters any scheme outside its safe list in a URL
+context and substitutes the marker `ZgotmplZ`, producing a dead link. Click-tracking
+rewriters (SendGrid, live on this project) share the limitation. **Any deep link must be
+carried as a query *value* on an https URL**, where Go percent-encodes rather than filters.
+Proof came from the broken link itself: only the value at URL-start was replaced, while
+`{{ .TokenHash }}` in the query rendered normally.
+
+**2. `{{ .RedirectTo }}` frequently already carries a query string.** Appending
+`?token_hash=` to it produces a second `?`, which is not a separator: the token is swallowed
+into the preceding parameter and the route sees no token at all. This broke web password
+reset for a period. Templates must use a single `?` and `&` separators.
+
+**Both templates therefore read:**
+`{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=<magiclink|recovery>&redirect_to={{ .RedirectTo }}`
+
+**3. `GET /auth/confirm` is now the universal landing route for email links**, on either
+surface. It verifies `token_hash` for web, forwards a PKCE `code` or GoTrue error params to
+`/auth/callback`, reads `next` out of `redirect_to`, and hands app links to the app without
+verifying them, since the token is single-use and the app must be the one to spend it. A
+side effect worth keeping: link scanners that fetch the https URL no longer burn app links
+before the recipient opens them. The hand-off is an interstitial, not a 302, because mobile
+browsers routinely drop redirects to non-http schemes that nobody tapped.
+
+**4. Recovery links are deliberately excluded from the app hand-off.** Shipped 1.0.7 loses a
+race on them: the callback screen lives in the `(auth)` group, which the root layout guards on
+`!session`, so completing the link creates the session, unmounts the screen mid-exchange, and
+the routing to set-password is skipped behind an `if (!active) return`. The user is signed in
+with their password unchanged. Magic links survive by accident, since the guard flip lands
+them on the dashboard anyway. **`/auth/confirm` therefore completes app-requested resets on
+the web**, which works for every app version. The race is fixed in the app repo (`a34caf3`);
+the exclusion can be lifted once builds at or below 1.0.7 no longer matter, and the route
+carries a comment saying so.
+
+**5. The app's Supabase client was on the implicit flow, not PKCE.** `supabase-js` defaults to
+`flowType: 'implicit'`, which the app never overrode, so `signInWithOtp` sent no
+`code_challenge` and GoTrue returned the session in the URL *fragment*. The callback screen
+was written for the PKCE code exchange and had no branch for it. Fixed in `a3d205f`, which
+also adds a `setSession` branch for fragment links (**links minted by `admin.generateLink`
+never carry a challenge, so they are always implicit** -- this matters directly to P0-9's
+e2e sign-in helper and to AD7) and guards `Linking.parse`, which throws when Expo's runtime
+constants are absent.
+
+**6. Both app fixes are unshipped and OTA-eligible.** `a3d205f` and `a34caf3` are on
+`Resneo-app main` and touch only `.ts`/`.tsx`: no `app.json`, no native directories, no
+dependency changes. `expo-updates ~56.0.20` is configured with a `production` channel and
+`runtimeVersion: {policy: "appVersion"}`, so an OTA published against **1.0.7** reaches
+current installs without store review. Until it ships, **app sign-in depends entirely on
+these email templates**; after it ships, either template shape works and the app is
+independent of them.
+
+**7. Supabase project config is not carried by migrations, and the two projects had already
+drifted.** Redirect URL allowlists, `SITE_URL`, email templates, SMTP sender and
+`mailer_autoconfirm` are all per-project and applied by hand. The allowlist divergence is what
+caused the outage. Allowlists and both templates are now aligned; see F9 for what is not.
 
 ---
 
@@ -1717,6 +1778,7 @@ And the team can change the portal safely, because:
 | | **Final two-repo verification, same day.** One item was **unsafe** and is now fixed: **P0-13's `notification_preferences` namespace breaks shipped build 1.0.7**, because the app resolves flat staff keys off the raw column (`types/notification-preferences.ts:87-93`) and would read defaults for every preference, then overwrite the real ones on the next toggle. This is B1's failure mode from a different cause, and C11 pointed at B1 while §5D.0's table had no row for it. Added as **B7**, with a dual-shape GET requirement written into P0-13. A second item was impossible as stated: the envelope carve-out was scoped as "`/api/account/*` but never the six pairs", and **all six pairs are served by `/api/account/*` handlers**, so it is now an explicit exclusion list of handler files. Also corrected: "of P0-12's seven routes the app calls none" was wrong (it calls two, both already in §5D.0's own table); the app calls four more namespaces than stated; twelve gap reports rather than twenty-two; the view projects 55 columns rather than 54; §9's rows sum to 18 to 20 weeks, not 19 to 23; §9's Phase 0 row still listed the dropped backfill; and roughly a dozen line citations that pointed at block tails rather than the statements they named. |
 | **2026-08-26 (sixth pass)** | **Full three-agent re-verification against both repos at their unchanged baselines** (`e55554cc` web code, `08eacc6` app), one agent per scope: §§0-4, §§5-11, and every app-side claim. Thirty-two findings fixed, none architectural; the highest-value results were negative in the best sense: AD8's 55-column allowlist verified column-by-column against the migration set, the §5 graph verified edge-by-edge against every task body, §7's renumbered items and all their cross-references verified, §9's arithmetic verified, and **an exhaustive independent re-enumeration of the app's entire API surface confirmed the §5D.0 six-pair blast-radius table misses nothing**. |
 | | Corrections of note: **the calendar-cap 403 is matched structurally on `upgrade_required: true`, not prose-first**, so one of the three "will break if copy changes" claims was wrong (the other two stand); `accountBookingsMagicLinkUrl` has **four** call sites, not five, and the `account_bookings_link` override exists at all four but **nothing ever sets it**, so it is a trap for future callers rather than a current gap, and P3-4d should delete the dead field; AD6 wrongly called `createRouteHandlerClientFromHeaders` the dominant account-route pattern (zero account routes use it; all 26 thread `request`); P0-13 still opened with "Two additive migrations" against three sections saying the namespace is not additive; `/api/confirm` touches thirteen tables, not seven; P4-8 brands twelve emails, not eleven; four of the five excluded handlers have v1 re-exports, not three; `/b/{code}` manage links redirect to the `?hmac=` page, not the `[token]` path; plus a dozen line-citation drifts (renderer `:393` not `:375`, card-hold release `:285`, waitlist `:863`, `AuthMagicForm:126`, `BASELINE_METRICS:12`, `card_holds.sql:14`, confirm-token `:13`, AccountNav `:51-58`, 260 not 259, 18 not 19 `vi.mock`s, 5,903-line flow) and small internal reconciliations (C16's missing table cell, C7b's duplicated sentence, the §2.3 enabling-task list, the P0-15 round/cluster note, P0-6's new-file wording, the §9 new-task count). |
+| **2026-08-26 (auth chain)** | **F8 closed, after four defects each masked by the one before. Magic-link and password-reset sign-in now verified working on web and in the shipped app.** (1) `resneo://callback` was missing from production's Redirect URL allowlist, so GoTrue silently substituted `SITE_URL`; root cause was `MOBILE_API.md` naming the pre-rebrand scheme, and production had been configured from it. (2) With that fixed the app still failed: its Supabase client defaulted to `flowType: 'implicit'`, so GoTrue returned the session in the URL fragment, a shape the callback screen had no branch for. (3) Moving both email templates to `token_hash` fixed the app without a release but broke web password reset, because `{{ .RedirectTo }}` already ends in `?next=`, so appending `?token_hash=` made a second `?` and the token was swallowed into `next`; the app link was separately dead because Go's `html/template` refuses a custom scheme in an href and emits `ZgotmplZ`. (4) With the https hand-off in place, app password reset signed users in without changing their password: shipped 1.0.7 loses a race where creating the session unmounts the callback screen before it can route to set-password. **Deployed fixes**: templates now `{{ .SiteURL }}/auth/confirm?token_hash=...&type=...&redirect_to={{ .RedirectTo }}` on both projects; `/auth/confirm` is the universal landing route with an app hand-off that does not spend the token; recovery excluded from that hand-off until 1.0.7 leaves the fleet; web `684f31fb`, `13a5e9c2`, `d4205915`. **Unshipped**: app `a3d205f` (PKCE + implicit branch) and `a34caf3` (unmount race), both OTA-eligible against 1.0.7. Durable constraints are in **§5D.4**; two were found by tests written during the work, including a reflected XSS in the hand-off page's own inline script. |
 | **2026-08-26 (F8 diagnosed)** | **F8 is a live production defect, and the fix is one dashboard entry.** A user tested magic-link sign-in from a production build and landed on the resneo.com homepage, not signed in. That is GoTrue's documented-by-behaviour fallback: a non-allowlisted `emailRedirectTo` is silently replaced by `SITE_URL`, with no error to the caller. Reproduced the mechanism on staging using `admin.generateLink` (which returns the link without sending mail): `resneo://callback` came back **honoured**, and a deliberately unlisted URL came back rewritten to staging's `SITE_URL`. Since `eas.json`'s `production` profile targets `njualfobtudvlugqkqho` with `www.resneo.com`, the landing page *is* production's `SITE_URL` and the entry is missing there. The app is not at fault: it sends the right URL (`app.json` scheme `resneo`; `Linking.createURL` two-slashed) and `completeAuthSession` already accepts both `?code=` and `token_hash`. **Both magic-link and password-reset are affected**, since both redirect helpers return the same URL. This also converts F9 from a suspicion into a confirmed instance of staging/production auth drift. |
 | **2026-08-26 (pre-flight)** | **F1, F3 and F6 done; F2 partly done; F9 added.** **F3 is the consequential one: `session_id` IS present** on this project's access tokens, uuid-shaped, verified by minting a session on staging (GoTrue v2.195.0) and decoding it. **AD7 is built in full, the descoped fallback is off the table, and Phase 3's 1.5-week swing is closed.** F1 fixed `e2e/helpers/manage-link.ts` to mint the expiring `${exp}.${sig}` HMAC and to target `/manage/{id}?hmac=`, since the `[token]` path forwards its segment as `token` and is checked against `confirm_token_hash`, which an HMAC can never match; the fix was proved against a transcription of `verifyBookingHmac` (old shape rejected, new accepted, wrong-booking / wrong-secret / expired all rejected). F6 declared `@supabase/supabase-js@^2.98.0`, which **314 files import directly** while it was present only transitively. F2 added a committed `.env.e2e.example` carrying every variable the suite reads, plus a `.gitignore` negation so the template is tracked and the real file is not. New **F9**: staging reports `mailer_autoconfirm: true`, and §5A already requires staging and production auth settings to agree before Phase 3, so the two should be compared before P3-4c's acceptance is trusted. F4, F5, F7 and F8 need credentials or authority the repo does not hold. |
 

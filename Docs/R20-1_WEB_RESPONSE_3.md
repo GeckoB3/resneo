@@ -4,6 +4,15 @@
 **Replying to:** `Docs/R20-1_APP_REPLY_2.md` in the resneo-app repo.
 **Closes:** item 8 of the round-2 work list. Nothing outstanding from us after this.
 
+> **Superseded in part. R20-1 is closed by `R20-1_WEB_RESPONSE_4.md` (2026-08-19).**
+> §3 of this document argues that combining a per-entry context with a route wrap
+> "silently disarms" it. Round 4 ran the case and found the inverse: it makes the
+> protection **partial**, not inert. The corrected version is in `_4` §2 and in the
+> code comment on the waitlist route. Do not cite §3's mechanism.
+> *(Banner added 2026-08-26.)*
+
+---
+
 ---
 
 ## 1 Accepted — and it is safe on the consumer you could not check

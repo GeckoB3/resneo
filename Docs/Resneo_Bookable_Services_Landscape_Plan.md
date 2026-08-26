@@ -1,11 +1,44 @@
 # Resneo - Bookable Services Landscape & Unified Architecture
 
 **From Restaurant Bookings to Every Bookable Service in Northern Ireland**
-**Originally March 2026** · **Last reviewed:** May 2026
+**Originally March 2026** · **Last reviewed:** 26 August 2026
 
 This document is the **conceptual master reference** for Resneo's booking
 models: what each scheduling pattern means, which business types map to it, and
 the shared architecture that lets one codebase serve them all.
+
+> ## Partly superseded. Read the taxonomy, not the schema. *(2026-08-26.)*
+>
+> **Still authoritative and found nowhere else:** the five-model taxonomy, the
+> business-type-to-model mapping for ~100 NI trades, and the "build five booking
+> engines, not fifty dashboards" rationale (§1.1, §1.2, §2's concepts, §3.1,
+> §3.3, §3.5, §7). That is why this document is kept.
+>
+> **Superseded, and wrong if acted on:**
+> - **§5.5 names `venue_resources` as the Model E core table.** It was frozen by
+>   `20260502120000_resources_to_unified_calendars.sql`. Resources are
+>   `unified_calendars` rows with `calendar_type='resource'`, and columns added
+>   after that migration exist only there, so a query written from §5.5 raises
+>   `42703` or degrades silently to empty.
+> - **§5.2 names `practitioners` / `appointment_services` / `practitioner_services`
+>   as the Model B core tables.** That is the legacy branch and no venue uses it.
+>   The live path is `service_items`, gated by `venueUsesUnifiedServiceItems`
+>   (`src/app/api/venue/appointment-services/route.ts:611`).
+> - **§3.2 keys Model B bookings on `practitioner_id` + `appointment_service_id`.**
+>   Live rows key on `calendar_id` + `service_item_id`.
+> - **§7.2 says "Other" defaults to `practitioner_appointment`.** It maps to
+>   `unified_scheduling` (`src/lib/business-config.ts:144-148`), and
+>   `practitioner_appointment` is absent from `SIGNUP_SUPPORTED_BOOKING_MODELS`.
+> - **§1.3 and §3.5 link `src/lib/terminology.ts`**, which does not exist.
+> - **§2's feature matrix** still marks event, timetable and resource dashboards
+>   "(partial)", contradicting its own §1.3 and §4.1.
+> - **§6.3's onboarding sequence** predates the lean flow; see
+>   `Docs/Resneo_Lean_Onboarding_Plan.md`.
+>
+> For schema use `Docs/schema.sql` plus the migration set; for booking-model
+> definitions `Docs/Resneo_Booking_Models_Reference.md`; for current
+> functionality `Docs/Resneo_Codebase_Audit_August_2026.md`; for pricing
+> `Docs/PRD.md`.
 
 > **Status (May 2026):** All five booking models are **implemented and shipped**.
 > The original version of this document was written while Models C–E (events,

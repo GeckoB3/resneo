@@ -4,9 +4,15 @@
 > delivery plan to bring Models C/D/E (events, classes, resources) to parity with
 > Models A/B. That parity work has **shipped** — multi-model venues run end-to-end
 > across public booking, staff tools, the unified calendar, bookings list/detail,
-> reports and dashboard home. See
-> `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`
-> for the current per-model review and any remaining polish items.
+> reports and dashboard home. For the current per-model review see
+> `Docs/Resneo_Codebase_Audit_August_2026.md` (§2.6 to §2.8).
+>
+> **Re-verified 2026-08-26.** Four locked decisions below have since been
+> overtaken by shipped work and are corrected inline: the secondaries allow-list,
+> staff notifications, guest modify, and the `enabled_models` source of truth.
+> The pointer above previously named
+> `Docs/Resneo-Class-Event-Resource-Functionality-Review-And-Plan-May-2026.md`,
+> which is now in `Docs/archive/`.
 >
 > The document is **retained as a reference**, not a to-do list. The parts that
 > remain authoritative are the **locked product decisions** below and the policy
@@ -30,7 +36,7 @@ This document is **implementation guidance only** (no application code in this f
 | Topic | Decision | Where detailed |
 |-------|----------|----------------|
 | **Refunds / ticket lines** | **Option (a)** - whole booking only in v1 (no partial line refunds or quantity edits). | **Partial refunds and ticket lines (v1 decision)** under Payments |
-| **Staff alerts for new bookings** | **Do not implement** for C/D/E in v1; Model B does not send them either. | **Operational extras** |
+| ~~**Staff alerts for new bookings**~~ | ~~Do not implement for C/D/E in v1.~~ **Superseded: shipped for every model.** See the Staff notification row below. | **Operational extras** |
 | **Staff calendar implementation** | **Option A** - extend **`PractitionerCalendarView`** into a multi-feed Schedule view (not a separate-only `VenueScheduleView` shell). | **4.2 Staff calendar** |
 
 ---
@@ -96,7 +102,7 @@ When the **primary** is **restaurant (Model A)** and secondaries (e.g. `event_ti
 
 | Rule | Detail |
 |------|--------|
-| **Secondaries allow-list (v1)** | Only **`event_ticket`**, **`class_session`**, **`resource_booking`** may appear in `enabled_models`. Do not add `table_reservation` or duplicate the primary as a secondary. |
+| **Secondaries allow-list** | **`unified_scheduling`**, **`event_ticket`**, **`class_session`**, **`resource_booking`**. Do not add `table_reservation` or duplicate the primary as a secondary. *(Corrected 2026-08-26: `unified_scheduling` was added so restaurants can offer appointments. Live list is `SECONDARY_ALLOWLIST` in `src/lib/booking/enabled-models.ts:17`.)* |
 | **Combinations** | **Allow any combination** of C/D/E secondaries together (e.g. events + classes + resources) if the venue enables them - **no MVP blacklist** of pairs unless a technical conflict appears (none expected in current architecture). |
 | **Validation** | Reject: duplicate entries, repeating `booking_model`, invalid enum values, values outside the allow-list. |
 | **Restaurants + secondaries** | **Allowed** - e.g. primary `table_reservation` with `event_ticket` - subject to **Primary `table_reservation` + secondary models** rules (waitlist stays table-only). |
@@ -178,20 +184,33 @@ Document final rules in Settings UI and enforce in API routes.
 | Feature | Scope |
 |---------|--------|
 | **Print / PDF roster** (classes, events) | **Phase 2** unless quick win: export CSV from roster view counts as MVP. |
-| **Staff notification** on new C/D/E booking (email/SMS to venue) | **Out of v1 - locked.** Model B **does not** currently send staff alerts for new appointments; **do not** implement new staff-facing “new booking” alerts for C, D, or E in this programme. Staff discover bookings via **Bookings** list, **dashboard home**, **calendar**, and **roster** views. **Phase 2:** revisit if product adds global staff alerts for B + C/D/E together. |
-| **Guest modify booking** (change time) | **Out of v1** for C/D/E unless `/api/confirm` already supports `modify` for B - align with existing confirm route capabilities. |
+| **Staff notification** on new C/D/E booking (email/SMS to venue) | ~~Out of v1 - locked.~~ **SHIPPED. This row is superseded.** `sendOwnerBookingNotification` (`src/lib/communications/owner-booking-notification.ts`) is called unconditionally from `src/lib/communications/send-templated.ts:170` on every confirmed booking, with the lane inferred from `booking_model`, so C/D/E are included. `src/lib/communications/staff-push-notification.ts` mirrors it for push. *(Corrected 2026-08-26.)* |
+| **Guest modify booking** (change time) | ~~Out of v1 for C/D/E.~~ **SHIPPED for classes and resources.** `/api/confirm` handles CDE guest self-reschedule behind the `guest_self_reschedule` flag (`src/app/api/confirm/route.ts:336-396`, `target_class_instance_id` at `:396`). **Events still cancel-and-rebook.** *(Corrected 2026-08-26.)* |
 | **Duplicate booking** | **Out of v1** unless trivial; staff can create a new booking. |
 
 ---
 
 ## Architectural decision: multi-model foundation
 
+> **`enabled_models` is no longer the source of truth. Do not write to it.**
+> Corrected 2026-08-26. `venues.active_booking_models` (added in
+> `supabase/migrations/20260610120000_venues_active_booking_models.sql`) is
+> authoritative, resolved tier-aware by `resolveActiveBookingModels`
+> (`src/lib/booking/active-models.ts:66`). `enabledModels` is derived:
+> `src/lib/venue-mode.ts:29` states it is "a compatibility view of
+> `activeBookingModels` with the default removed". The sections below still
+> describe `enabled_models` as the thing you set. It is still a populated
+> column, so reads and manual checks against it remain valid, but a PATCH
+> aimed at it is writing to the derived value.
+> `Docs/Resneo_Booking_Models_Reference.md` carries the current rule.
+
 ### How it works (Vagaro/Mindbody pattern)
 
 | Concept | Role |
 |--------|------|
 | `venues.booking_model` | **Primary** model - default public booking experience, main onboarding path, base terminology, and “anchor” for billing/plan assumptions where applicable. |
-| `venues.enabled_models` | JSONB array of **additional** `BookingModel` values (no duplicates; must not repeat `booking_model`). |
+| `venues.active_booking_models` | **Authoritative** list of every model the venue exposes. Set this. |
+| `venues.enabled_models` | **Derived compatibility view** of the above, with the primary removed. JSONB array of additional `BookingModel` values. Read-only in practice. |
 | Dashboard | `DashboardSidebar` renders nav for **primary + all enabled secondaries** (deduplicated); ordering: primary group first, then secondaries in a stable order (e.g. enum order). |
 | Public booking | `/book/[slug]` leads with primary flow; secondaries appear as tabs when `enabled_models.length > 0`. URL and tab state - see **Public URL and tab state (Sprint 3)**. |
 | Settings | Admin enables secondaries, runs mini-setup, and configures notification defaults/overrides (see below). |
@@ -255,7 +274,7 @@ Signup (`/signup/business-type`, plan, payment) stays the source of truth for `b
 
 ### Wizard behaviour
 
-- **`src/lib/business-type-defaults.ts`** (re-exports **`src/lib/business-config.ts`**): Maps `business_type` → defaults (services, class types, sample events/resources, terminology hints) for **pre-fill** only.
+- **`src/lib/business-config.ts`**: Maps `business_type` → defaults (services, class types, sample events/resources, terminology hints) for **pre-fill** only. *(Corrected 2026-08-26: `src/lib/business-type-defaults.ts` does not exist.)*
 - **`src/app/onboarding/page.tsx`:**  
   - Derives **step list** from `venue.booking_model` **and** any already-enabled `enabled_models` (usually empty at first onboarding).  
   - For **primary** `unified_scheduling` / `practitioner_appointment`, keep existing unified steps (hours, services, etc.).  
@@ -306,7 +325,7 @@ Keep a single mental map so availability and create stay consistent:
 
 ### 1.1 Onboarding driven by signup
 
-- Pre-population uses **`getBusinessConfig`** / **`BUSINESS_TYPE_CONFIG`** from **`src/lib/business-config.ts`** (see also **`src/lib/business-type-defaults.ts`**).
+- Pre-population uses **`getBusinessConfig`** / **`BUSINESS_TYPE_CONFIG`** from **`src/lib/business-config.ts`**.
 - Extend onboarding steps for C/D/E primaries (admin) and for secondaries when present.
 - Final checklist with deep links.
 
@@ -568,7 +587,7 @@ Add a **pre-release checklist** row per new route in team process (not necessari
 | Area | Files / notes |
 |------|----------------|
 | DB | Migrations: `enabled_models`, `checked_in_at`, policy/notification JSON |
-| Defaults | `src/lib/business-config.ts`, `src/lib/business-type-defaults.ts` (re-export) |
+| Defaults | `src/lib/business-config.ts` |
 | Onboarding | `src/app/onboarding/page.tsx` |
 | Venue mode | `src/lib/venue-mode.ts` |
 | Sidebar | `src/app/dashboard/DashboardSidebar.tsx` |
@@ -637,7 +656,7 @@ Server-side **structured logging** on critical paths - does not change guest-fac
 15. **`?tab=` URL:** Deep link opens correct tab; invalid tab falls back to primary; embed URL matches.
 16. **Observability:** Critical paths emit structured logs with `booking_id` / `venue_id` / `booking_model` where applicable.
 17. **Whole-booking refunds:** No UI or API for partial ticket cancellation or partial Stripe refund in v1; only full-booking cancel path.
-18. **No staff alerts:** Confirm no new “new booking” email/SMS to venue staff was added for C/D/E (parity with B: none).
+18. ~~**No staff alerts:** Confirm no new "new booking" email/SMS to venue staff was added for C/D/E (parity with B: none).~~ **Do not run this check.** Staff alerts shipped for every model. Running it as written would report a working feature as a regression. *(Struck 2026-08-26; see the Staff notification row above.)*
 19. **Guests / CRM:** Guest detail / history shows bookings for all models the venue uses; labels per **Guests / CRM (acceptance)**.
 
 ### Minimum E2E matrix (automate or manual before release)

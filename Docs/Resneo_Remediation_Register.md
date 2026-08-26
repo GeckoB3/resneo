@@ -1,9 +1,11 @@
 # ResNeo Remediation Register
 
-**Status:** Open. 51 findings: 9 closed, 42 open, **none live today**. Everything remaining is gated behind enabling a feature (see §3A and the summary table in §3C). `G11c` in the closed list came from the portal plan, not this register, so it is not in that count.
+**Status:** Open. 53 findings: 9 closed, 44 open, **none live today**. *(S-05 and S-06 migrated in from the CDE review on 2026-08-26.)* Everything remaining is gated behind enabling a feature (see §3A and the summary table in §3C). `G11c` in the closed list came from the portal plan, not this register, so it is not in that count.
 **Created:** 2026-08-06
-**Last reconciled against the code:** 2026-08-06
-**Supersedes as primary artifact:** `Resneo_Customer_Portal_World_Class_Plan.md` (see §9)
+**Last reconciled against the code:** 2026-08-06. **Partially re-reconciled 2026-08-26** (see the note below and §8).
+**Relationship to the portal plan:** see §9. This register no longer supersedes it.
+
+> **Re-reconciliation note, 2026-08-26.** This register was last fully reconciled on 2026-08-06, **before** the August security-hardening wave (`20270106120000` through `20270113120000`, 13 to 19 August). Two consequences: at least one §8 claim was falsified by that wave and is corrected there; and the open counts in §3C have not been re-checked against it. Treat §3C as a floor, not a verified total, until a full pass is run.
 
 > Read §3A before acting on anything below. Sections 4 to 6 rank findings by severity *if triggered*, and most of them cannot currently be triggered. §3B records the ones this document originally over-stated.
 
@@ -328,6 +330,26 @@ Expected to be empty, or every row explicable. Run periodically; fold into the `
 
 *Fix:* add `revoked_at IS NULL`, add `TO authenticated`, split `FOR ALL` into per-command policies. Prerequisite for any customer policy on `bookings` meaning anything.
 
+**S-05. `bookings/list` returns full guest PII with no calendar-scope gate.** Medium. **VERIFIED**
+
+Migrated into this register on 2026-08-26 from `Docs/archive/Resneo-Classes-Events-Resources-Review-June-2026.md` (its S2), which was this finding's only record. Re-verified at `e55554cc`.
+
+The single PII gate in `src/app/api/venue/bookings/list/route.ts:347` is `const canSeeLinkedPii = !linkedGuestHistoryGrant || linkedGuestHistoryGrant.pii;`. `linkedGuestHistoryGrant` is null for an own-venue caller, so the negation makes it `true` unconditionally. `guest_email` and `guest_phone` are then returned at `:393-394` and the client address at `:418-421`, across up to `BOOKINGS_LIST_MAX_ROWS = 1000` rows (`:43`), with no check against the caller's managed calendars. A staff member with no assigned calendars still receives every guest's contact details for the venue.
+
+*Note on severity:* this is own-venue data reaching own-venue staff, so it is a **least-privilege** failure rather than a tenancy breach. Whether it is a defect at all depends on a product decision that has not been recorded: are calendar-scoped staff meant to be walled off from their own venue's guest contact details? `api-venue-permissions-matrix.md` scopes *mutations* that way but is silent on reads. Settle that first; the fix is trivial once the intent is known.
+
+*Fix:* gate the PII columns on `getStaffManagedCalendarIds` the way the mutation routes already do, or record the decision that own-venue staff may see all of it.
+
+**S-06. Fulfill endpoints trust a client-supplied `stripe_account_id`.** Medium. **VERIFIED**
+
+Migrated into this register on 2026-08-26 from the same June review (its S3). Re-verified at `e55554cc`.
+
+`src/app/api/account/credits/fulfill/route.ts:8-11` accepts `stripe_account_id` in the request body and passes it straight to `stripe.paymentIntents.retrieve(..., { stripeAccount })` at `:32-34`. `src/app/api/account/courses/fulfill/route.ts` does the same. The connected-account id should come from the venue row, not the caller.
+
+*Note on severity:* exploitability is **low**, and the June review said so. The retrieve is followed by `if (pi.metadata?.user_id !== user.id) return 403` (`:36`), so a caller can only reach PaymentIntents already stamped with their own user id. This is a defence-in-depth fix, not a live hole.
+
+*Fix:* resolve the connected account from `venue_customer_stripe` / the venue row using the authenticated user and the product being fulfilled, and drop the field from the request schema.
+
 ---
 
 ## 5. Tier 1: portal correctness
@@ -471,15 +493,21 @@ Recorded so they are not re-raised.
 
 ## 9. Relationship to the customer portal plan
 
-`Resneo_Customer_Portal_World_Class_Plan.md` remains in the repository as a record of the intended end state and of the customer-journey analysis, which stands. It should **not** be executed as written. Three of its eight architecture decisions are wrong:
+> **Updated 2026-08-26.** This section reviewed the **pre-2026-08-09 draft** of the portal plan. The plan has since been revised twice, most recently by a full re-verification against `staging` @ `e55554cc`, and it now answers this section point by point in its own §0.1. **Three of the criticisms below still stand and the plan has adopted all three** (AD1's actor, the two-controls claim, the strangler shape). The rest are superseded or were wrong; each is marked. The plan is no longer "not to be executed as written", but it is still **not implemented**, and the Tier 0 findings above still gate promoting the portal.
 
-- **AD8** (customer RLS policy on `bookings`) fails closed. `public.guests` has RLS with its customer SELECT policy deliberately dropped, so the policy subquery returns zero rows. There is also no `GRANT` on `bookings` anywhere in version control, and the stated acceptance test passes on the broken policy because zero rows is a subset of "only that customer's rows". The correct shape is a zero-argument `SECURITY DEFINER` helper mirroring `current_staff_venue_ids()`, schema-qualified, granted to `authenticated` only, and explicitly not parameterised. Its claim of "two independent controls" is also false: both reduce to `guests.user_id = auth.uid()`, which S-03 shows is set by unverified email match.
-- **AD1**'s actor union carries `guestIds`, which is authorisation data rather than proof. The correct actor is `{ kind: 'session'; userId: string }` with the helper resolving ownership itself.
-- **AD7**'s scoped session cannot be carried in Supabase `app_metadata`, which is per user rather than per session, and enabling the custom access token hook to do it puts a Postgres function in the token issue path for every role on every refresh. Middleware also does not match `/api/account`.
+`Resneo_Customer_Portal_World_Class_Plan.md` records the intended end state and the customer-journey analysis, which stands. As reviewed on 2026-08-06, three of its eight architecture decisions were wrong:
 
-Two further blockers: the mandated `customer_portal_v2` flag cannot be built, because flags are venue-scoped and the portal is account-scoped and cross-venue; and passkeys appear in the plan's definition of done with no implementation anywhere in the codebase.
+- **AD8.** ~~(customer RLS policy on `bookings`) fails closed...~~ **Largely overtaken. Corrected 2026-08-26.** The plan's AD8 stopped being an RLS policy on 2026-08-09 and is now a `bookings_account_safe` view, so the fails-closed critique no longer applies to the shipped design. Two clauses of this entry were also wrong or have since become wrong:
+  - *"There is also no `GRANT` on `bookings` anywhere in version control"* is **false as of 2026-08-15**: `supabase/migrations/20270112120000_bookings_column_grants.sql` does `REVOKE ALL ON public.bookings FROM authenticated` and grants nine columns.
+  - The `SECURITY DEFINER` helper shape remains the right advice **if** a policy were ever wanted, and the plan now records why a view beats one: a useful policy would need the twenty revoked columns granted back to `authenticated`, which is the same role staff use, reopening C5/N5.
 
-When portal work resumes, the recommended shape is a strangler rather than a rebuild: extract the existing `ManageBookingView` into a presentational component over a booking DTO and mount it from both surfaces with different actors, rather than rebuilding to parity and policing drift with snapshot tests.
+  **What survives, and the plan has adopted it:** the *"two independent controls"* claim was false, because both reduce to `guests.user_id = auth.uid()`. The plan's AD8 and §10 item 16 now say two **layers** against a coding mistake, not two independent controls. Note the supporting clause has itself moved on: `S-03` is **closed**, so the predicate is no longer set by unverified email match; the independence argument holds on its own logic regardless.
+- **AD1**'s actor union carries `guestIds`, which is authorisation data rather than proof. The correct actor is `{ kind: 'session'; userId: string }` with the helper resolving ownership itself. **Still valid; adopted by the plan on 2026-08-26.**
+- **AD7**'s scoped session cannot be carried in Supabase `app_metadata`, which is per user rather than per session. **Superseded:** the plan moved to a `portal_limited_sessions` table on 2026-08-09. The appended clause *"Middleware also does not match `/api/account`"* is **wrong**: `src/middleware.ts:302-306` excludes only `_next/static`, `_next/image`, `favicon.ico`, `api/webhooks`, `api/cron` and image extensions. The real constraint, which the plan now carries, is subtler and worse: middleware builds a **cookie-only** client (`:78-97`), so it cannot see a Bearer user at all. Per-session enforcement must therefore be a route-level helper, never middleware. The venue billing gate at `:175-178` is already bypassed by the staff app for exactly this reason.
+
+Two further blockers, **both superseded on 2026-08-09**: the mandated `customer_portal_v2` flag cannot be built, because flags are venue-scoped and the portal is account-scoped and cross-venue (the plan removed flags for this reason); and passkeys appeared in the plan's definition of done with no implementation anywhere in the codebase (moved to the plan's §5C).
+
+When portal work resumes, the recommended shape is a strangler rather than a rebuild: extract the existing `ManageBookingView` into a presentational component over a booking DTO and mount it from both surfaces with different actors, rather than rebuilding to parity and policing drift with snapshot tests. **Still valid; adopted by the plan on 2026-08-26 as its AD9.**
 
 ---
 
@@ -493,3 +521,4 @@ When portal work resumes, the recommended shape is a strangler rather than a reb
 | 2026-08-06 | Fixed the three live findings (`S-02`, `Q-17`, `C-07`) and added the §3C summary table. |
 | 2026-08-06 | Closed `S-03` after measuring production: all 677 unlinked guest rows with an email had no auth user, so every one was claimable. **Recorded that this entry was wrong twice in opposite directions**: the original fix was mechanically right, the correction to it was not, because the claim only fills NULLs and cannot unlink anyone. No finding is now live. |
 | 2026-08-06 | Recorded the `S-03` decision: Confirm email stays off and no auth-user backfill, with the residual route, the four grounds, the detection query that replaces both, and the conditions that should trigger a revisit. |
+| 2026-08-26 | **Partial re-reconciliation.** Migrated `S-05` and `S-06` in from the CDE review before archiving it, since this register was about to become their only home. Corrected §8's "no `GRANT` on `bookings` anywhere in version control", falsified by `20270112120000` on 2026-08-15. Rewrote §9: the portal plan has been re-verified and now answers this section, three criticisms stand and are adopted, the rest are superseded, and the "middleware does not match `/api/account`" claim was wrong. Header no longer claims to supersede the plan. **§3C's open counts have not been re-checked against the August security wave.** |

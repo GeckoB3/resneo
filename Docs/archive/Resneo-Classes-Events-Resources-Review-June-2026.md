@@ -1,5 +1,41 @@
 # Reserve NI — Classes, Events & Resources: State Review & Remediation Plan
 
+> ## ARCHIVED 2026-08-26. Do not read the status tables as current.
+>
+> The remediation this review drove **landed** and is corroborated by
+> `Docs/Resneo_Codebase_Audit_August_2026.md` §2.6 to §2.8 ("CDE remediation
+> genuinely landed; real defence in depth"). What has since drifted:
+>
+> - **Class and resource guest self-move shipped.** The deferred list still says
+>   these are cancel-and-rebook. `ManageBookingView.tsx:334-346` defines
+>   `canGuestModifyClass` with no credit-funded exclusion, and `/api/confirm`
+>   accepts `action:'modify'` with `target_class_instance_id` (`route.ts:396`).
+>   **Events** still cancel-and-rebook, so that part stands.
+> - **§5.3's staff `event-offerings` horizon was fixed**, and the fix cites this
+>   document: `event-offerings/route.ts:48-65`, `MAX_EVENT_ADVANCE_DAYS = 365`.
+> - **Staff resource `cancellation_deadline` refresh was fixed**
+>   (`venue/bookings/[id]/route.ts:1923-1952`).
+> - **S1's "1 Aug 2026" cutoff has expired.** `src/lib/short-manage-link.ts:12`
+>   now rejects legacy links unconditionally. It reads as forward-looking and is
+>   history over dead code.
+> - **C4 overstates the timetable removal.** Generation is gone, but
+>   `class_timetable` survives as the read-side slot source
+>   (`venue/classes/route.ts:168,263`; `account/class-recurring/route.ts:94,151`).
+> - **§1's verdict table and §2's line 175 contradict this document's own
+>   lines 41-43** and are wrong: `/account/events` and `/account/resources` both
+>   exist, and staff class slot-move and CDE guest self-modify both shipped.
+>
+> **Two findings were migrated out before archiving, because this was their only
+> record:** S2 and S3 are now **S-05** and **S-06** in
+> `Docs/Resneo_Remediation_Register.md`, re-verified at `e55554cc`.
+>
+> **The deferred feature list in "Deferred (net-new features needing schema/API
+> work)" was not migrated.** Those are roadmap items rather than defects, and
+> they remain readable here: resource calendar drag-reschedule, multi-resource
+> booking with per-resource photos, class waitlist, partial ticket refund, and
+> CDE import create-new.
+
+
 **Version:** 2.0
 **Date:** 22 June 2026
 **Scope:** End‑to‑end review of the **classes** (`class_session`), **ticketed events** (`event_ticket`) and **bookable resources** (`resource_booking`) systems — setup & customisation, public booking flows, staff‑created bookings, calendar & bookings‑screen management, booking‑detail screens, guest manage/confirm lifecycle, account portal, class commerce, and shared plumbing (comms, reports, import, embed, setup). Appointments (`unified_scheduling`) is treated as the reference implementation throughout.

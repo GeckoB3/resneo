@@ -2,7 +2,7 @@
 
 **Version:** 1.0 (consolidated)
 **Date:** 21 May 2026
-**Last reviewed:** 4 July 2026 (factual-accuracy pass: compliance module, referrals, and feature-flag defaults corrected to match shipped code).
+**Last reviewed:** 26 August 2026 (second factual-accuracy pass). Roughly 75 to 80 percent of the ~120 status cells still hold. Four things had gone materially wrong and are corrected inline, each marked with its date: **§7's "open strategic question" on checkout and POS was decided and shipped**; **review requests** and the **native staff app** were listed as unbuilt and are shipped; and **§12's appendix contradicted §3.6** on compliance. §8's phase plan still schedules some of this for 2027 and should be re-cut before it is used for sequencing. Previous pass: 4 July 2026 (compliance module, referrals, feature-flag defaults).
 **Supersedes:** `Resneo-Appointments-Functionality-Review-And-Plan-May-2026.md` (v1.0) and
 `Resneo-Appointments-Functionality-Review-And-Plan-May2026.md` (v3.0) — both removed.
 **Scope:** Appointment-style businesses using **appointments**, **classes**, **ticketed events**, and
@@ -53,10 +53,11 @@ on** (it persists only an explicit `false`; omitted means on, per `FLAG_DEFAULT_
 - **Calendar blocks UI** — create/edit/delete on the practitioner calendar (not flagged)
 - **Unified booking detail** — one `BookingDetailSurface` across calendar, list, contacts, floor plan
 - **UI primitives** (Radix Dialog/Sheet) migrated across operational paths
+- **Staff-first booking flow**, flag `staff_first_booking_flow` *(added 2026-08-26; the closed flag list is now **seven** keys, `src/lib/feature-flags/types.ts:10-18`)*
 
 The competitive story has shifted from *"we're missing desk workflows"* to *"we match Booksy/Fresha
-on daily desk operations in code; we still trail on compliance, growth channels, native mobile, and
-end-of-visit payment."*
+on daily desk operations in code; we still trail on compliance and growth channels."* *(Updated
+2026-08-26: native mobile and end-of-visit payment have since shipped and are no longer gaps.)*
 
 **Verdict.** Reserve NI is **credible for founding-venue pilots** on the wedge buyer — independents
 who run *appointments + classes/events/rooms*, collectives, and migrations from spreadsheets or
@@ -144,7 +145,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | **Guest self-reschedule** | ⚑ | `guest-appointment-modify-policy.ts`; flag `guest_self_reschedule` (**defaults on**, unlike the other flags) |
 | **Appointment waitlist** | ⚑ | Join / offer / auto-offer on cancel / expiry cron; flag `waitlist_v2` |
 | Late-reschedule fee enforcement | ○ | Deferred to Phase 1b (needs saved cards) |
-| Native staff mobile app | ○ | Responsive web only |
+| Native staff mobile app | ● | **Shipped**: Expo/React Native staff app in the `resneo-app` repo, Bearer auth via `createVenueRouteClient`, Expo push (`src/lib/push/expo-push.ts`, `src/lib/communications/staff-push-notification.ts`). Contract in `Docs/MOBILE_API.md`. *(Corrected 2026-08-26; §8 P5.1 still schedules this for 2027 and is wrong.)* |
 
 **Primary routes:** `/dashboard/calendar`, `/dashboard/practitioner-calendar`, `/dashboard/bookings`,
 `/dashboard/appointment-services`, `/dashboard/calendar-availability`.
@@ -217,7 +218,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Deposit reminders (cron) | ● | `deposit-reminder-2h` |
 | Card hold deposits (no-show fee) | ● | Shipped (5 July 2026): card saved at booking, £0 taken; explicit admin **Charge no-show fee** action after a no-show; auto-release 14 days after the booking or on cancel; all five booking models incl. the staff phone/walk-in card-request link; flag `card_hold_deposits` (default off); spec `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` |
 | Saved cards (guest) | ◐ | SetupIntent endpoint exists; card-hold no-show fees charge off-session, general balance charging not wired |
-| **Checkout at appointment** (balance, tips, receipt) | ○ | See §7 — open strategic question |
+| **Checkout at appointment** (balance, tips, receipt) | ● | **Shipped** (Option B): card-present, cash and external payments, refunds, ledger and receipt. Tips alone remain unbuilt. See §7. |
 | Appointment packages (prepaid bundles) | ◐ | Class packs exist; not general appointment packages |
 | Gift cards / vouchers | ○ | Not built |
 | Commission / payroll | ○ | Not built |
@@ -233,7 +234,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Reschedule notification | ● | Staff drag + guest-initiated modify |
 | WhatsApp | ○ | Channel abstraction ready; implementation not built |
 | Two-way SMS inbox | ○ | Not built |
-| Review requests post-visit | ○ | Not built |
+| Review requests post-visit | ● | **Shipped**: `src/lib/reviews/google-review-link.ts`, `review-request-eligibility.ts`, `src/lib/emails/review-request-block.ts` wired into `communications/renderer.ts:24`; migrations `20270101124000_venue_google_review_request.sql`, `20270101125000_guest_last_review_request.sql` |
 
 ### 3.9 Online booking & distribution
 
@@ -387,15 +388,30 @@ parity in GTM.
 ### Tier 6 — UX debt (mostly retired)
 
 Unified booking detail, calmer calendar cards, and Dialog/Sheet primitives on operational paths are
-**done**. Remaining: ~30 legacy hand-rolled modals in settings/timetable/import (Wave E), `FormField`
+**done**. Remaining: **17** legacy hand-rolled modals in settings/timetable/import (Wave E; the live
+count is `scripts/lint-no-raw-modals-allowlist.txt`, enforced by `npm run lint:modals`), `FormField`
 rollout, and mobile calendar polish at reception. Treat as **ongoing**, not a pilot gate.
 
 ---
 
-## 7. Open strategic question — checkout & POS
+## 7. ~~Open strategic question~~ — checkout & POS **[RESOLVED AND SHIPPED]**
+
+> **This section is history. Do not treat it as an open decision.** *(Updated 2026-08-26.)*
+> Option **B was chosen and both sides shipped.** See
+> `Docs/TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md`, whose status line reads
+> **"Implementation status (as of 2026-07-24): BOTH SIDES IMPLEMENTED."**
+> Backend: `src/app/api/venue/bookings/[id]/charge/route.ts:31`
+> (`method: z.enum(['card_present','cash','external'])`, refunds at `:34`),
+> ledger `20270101121000_booking_payments_ledger.sql`, receipt
+> `src/lib/emails/templates/payment-receipt.ts`, venue toggle
+> `InPersonPaymentsSection.tsx`. Mobile: Terminal provider, both hardware paths,
+> take-payment sheet, cash and refunds.
+> **Only tips remain unbuilt** (`booking_payments_ledger.sql:37`,
+> `tip_amount_pence … RESERVED, unused in v1`).
+> The analysis below is retained for the rationale, not for the ask.
 
 Earlier planning treated chair-side payment as **permanently out of scope**. This document
-**re-opens it** as a deliberate decision to make before Phase 1b payment work begins.
+**re-opened it** as a deliberate decision to make before Phase 1b payment work began.
 
 ### 7.1 The question
 
@@ -427,9 +443,7 @@ explicitly out of scope**. Rationale:
 - For venues that genuinely prefer their external terminal, checkout-lite still adds value via a
   **"record external payment"** action that marks the booking paid without processing the card.
 
-**Decision needed before Phase 1b:** confirm B vs A, and confirm that retail catalogue / inventory /
-terminal hardware (C) remain out of scope. The roadmap below assumes **B is approved**; if A is
-chosen instead, drop P1b.4 and accept the competitive scoring in §4.
+~~**Decision needed before Phase 1b:** confirm B vs A...~~ **Decision taken: B, and shipped.** Retail catalogue, inventory and terminal hardware (C) remain out of scope. *(Resolved 2026-08-26; see the banner at the head of §7.)*
 
 ---
 
@@ -624,7 +638,12 @@ Impact ↑
 
 ## 12. Appendix — feature parity checklist
 
-| Feature | Reserve NI (May 2026) | Target (mid-2027) |
+> **Where this appendix and the body disagree, the body wins.** *(Note added 2026-08-26.)*
+> The "Reserve NI" column was written in May 2026 and has drifted. Corrected here:
+> consultation forms, patch test tracking, and end-of-visit checkout. §3.6 and §3.7
+> carry the accurate picture.
+
+| Feature | Reserve NI (Aug 2026) | Target (mid-2027) |
 |---------|-----------------------|-------------------|
 | Day/week/month calendar | Yes | Yes + mobile-optimised |
 | Drag-reschedule | Yes | Yes |
@@ -638,12 +657,12 @@ Impact ↑
 | Event tickets + tiers | Yes | Yes |
 | Resource booking | Yes | Yes |
 | Deposits / online pay | Yes | Yes |
-| End-of-visit checkout + tips | No | Checkout-lite (Phase 1b) |
+| End-of-visit checkout + tips | **Yes, except tips** | Checkout-lite (Phase 1b) |
 | Appointment packages | No | Yes |
 | Gift cards | No | Yes |
 | Class credits/memberships | Yes | Yes |
-| Consultation forms | No | Yes |
-| Patch test tracking | No | Yes |
+| Consultation forms | **Yes** | Yes |
+| Patch test tracking | **Yes** | Yes |
 | Pet / animal profiles | No | Yes |
 | CRM + tags + documents | Yes | Yes + photos |
 | Salon loyalty (automated) | Manual ledger | Yes |

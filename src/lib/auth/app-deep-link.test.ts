@@ -72,6 +72,33 @@ describe('renderAppHandoffPage', () => {
     expect(html).toContain('Open the ResNeo app');
   });
 
+  it('emits exactly one script element that cannot terminate early', () => {
+    // Regression: a closing script tag inside a comment in the inline script ended the
+    // element, spilling the rest of the comment onto the page as visible text and killing
+    // the auto-redirect. Nothing but code belongs between those tags.
+    const html = renderAppHandoffPage(
+      'resneo://callback?token_hash=abc&type=magiclink',
+      'https://example.test/login',
+    );
+    const opens = html.split('<script').length - 1;
+    const closes = html.split('</scr' + 'ipt>').length - 1;
+    expect(opens).toBe(1);
+    expect(closes).toBe(1);
+
+    const script = html.slice(html.indexOf('<script'), html.indexOf('</scr' + 'ipt>'));
+    expect(script).not.toContain('//');
+    expect(script).not.toContain('/*');
+  });
+
+  it('does not leak the deep link into the visible page text', () => {
+    const html = renderAppHandoffPage('resneo://callback?token_hash=SECRET123&type=magiclink', 'https://example.test/login');
+    const visible = html
+      .replace(/<script[\s\S]*?<\/script>/g, '')
+      .replace(/<style[\s\S]*?<\/style>/g, '')
+      .replace(/<[^>]+>/g, ' ');
+    expect(visible).not.toContain('SECRET123');
+  });
+
   it('keeps the token out of any other origin', () => {
     const html = renderAppHandoffPage('resneo://callback?token_hash=x&type=magiclink', 'https://example.test/login');
     expect(html).toContain('name="referrer" content="no-referrer"');

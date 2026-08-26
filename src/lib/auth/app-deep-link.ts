@@ -51,12 +51,22 @@ function escapeHtml(value: string): string {
 }
 
 /**
- * Interstitial that opens the app. A plain 302 to a custom scheme is unreliable: mobile
- * browsers routinely drop redirects to non-http schemes that no one tapped. So this tries
- * automatically and still gives the reader something to tap when that is blocked.
+ * Interstitial that opens the app.
  *
- * Self-contained by design. No external requests, and `no-referrer` so the one-time token
- * in this URL is never sent to another origin.
+ * A plain 302 to a custom scheme is unreliable: mobile browsers routinely drop redirects to
+ * non-http schemes that nobody tapped. So this tries automatically and still gives the
+ * reader something to tap when that is blocked. Most people never see it.
+ *
+ * Two rules for the emitted markup, both learned the hard way:
+ *  - No comments or prose inside the inline script. A closing script tag anywhere in that
+ *    text, even inside a JavaScript comment, ends the element then and there, spilling the
+ *    remainder onto the page as visible text and silently killing the redirect.
+ *  - The link appears exactly once, HTML-escaped, in the href. The script reads it back off
+ *    the DOM instead of having it interpolated in, so nothing attacker-influencable is ever
+ *    serialised into a script context.
+ *
+ * Self-contained: no external requests, and no-referrer so the single-use token in this
+ * URL is never sent to another origin.
  */
 export function renderAppHandoffPage(deepLink: string, signInUrl: string): string {
   const href = escapeHtml(deepLink);
@@ -65,37 +75,36 @@ export function renderAppHandoffPage(deepLink: string, signInUrl: string): strin
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light">
 <title>Opening the ResNeo app</title>
 <style>
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-         background:#f8fafc; color:#0f172a; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
-  main { max-width:22rem; padding:2rem 1.5rem; text-align:center; }
-  h1 { font-size:1.25rem; margin:0 0 .5rem; color:#003B6F; }
-  p { margin:0 0 1.5rem; line-height:1.5; color:#475569; }
-  a.button { display:inline-block; padding:.75rem 1.5rem; border-radius:.75rem; background:#003B6F;
-             color:#fff; font-weight:600; text-decoration:none; }
-  a.alt { display:inline-block; margin-top:1.25rem; color:#475569; font-size:.875rem; }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       padding:1.5rem;background:#f6f8fb;color:#0f172a;
+       font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+  main{width:100%;max-width:20rem;text-align:center}
+  .mark{width:2.75rem;height:2.75rem;margin:0 auto 1.25rem;border-radius:.875rem;
+        background:#003B6F;position:relative}
+  .mark::after{content:"";position:absolute;left:50%;top:50%;width:.9rem;height:.9rem;
+               margin:-.45rem 0 0 -.45rem;border-radius:50%;background:#00C2C7}
+  h1{margin:0 0 .5rem;font-size:1.125rem;font-weight:600;color:#003B6F}
+  p{margin:0 0 1.5rem;color:#5b6b7f;font-size:.9375rem}
+  .btn{display:block;padding:.875rem 1.25rem;border-radius:.75rem;background:#003B6F;
+       color:#fff;font-weight:600;text-decoration:none}
+  .alt{display:inline-block;margin-top:1.25rem;color:#5b6b7f;font-size:.875rem}
 </style>
 </head>
 <body>
 <main>
+  <div class="mark"></div>
   <h1>Opening the ResNeo app</h1>
-  <p>If the app does not open on its own, tap the button below.</p>
-  <p><a id="app-link" class="button" href="${href}">Open the ResNeo app</a></p>
+  <p>If it does not open on its own, tap below.</p>
+  <a id="app-link" class="btn" href="${href}">Open the ResNeo app</a>
   <a class="alt" href="${webHref}">Sign in on the web instead</a>
 </main>
-<script>
-  // Read the target from the DOM rather than interpolating it into this script. Serialising
-  // a URL into a script block is not safe by escaping alone: a "</script>" inside the value
-  // ends the element regardless of JavaScript string quoting. The href above is the single
-  // place the link appears, and it is HTML-escaped.
-  // location.replace keeps this page out of the back stack, so going back does not re-fire
-  // a link that has already been spent.
-  var appLink = document.getElementById('app-link');
-  if (appLink) { window.location.replace(appLink.href); }
-</script>
+<script>var a=document.getElementById("app-link");if(a){window.location.replace(a.href);}</script>
 </body>
 </html>`;
 }

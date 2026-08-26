@@ -120,6 +120,17 @@ export async function GET(request: Request) {
         }
       }
 
+      // A recovery link is a request to choose a new password, so land there whatever the
+      // destination logic decided. Neither existing mechanism covers this case:
+      // `resolvePostLoginDestination` does not treat SET_PASSWORD_PATH as an honoured
+      // `next`, and `withSetPasswordGateIfNeeded` only fires when `has_set_password` is
+      // false, which is never true of someone who already has a password. Without this a
+      // reset behaves exactly like a magic link: signed in, dropped on the dashboard, and
+      // the password never actually changed.
+      if (type === 'recovery' && !destination.startsWith(SET_PASSWORD_PATH)) {
+        destination = `${SET_PASSWORD_PATH}?next=${encodeURIComponent(destination)}`;
+      }
+
       return NextResponse.redirect(`${base}${destination}`);
     }
     console.error('Auth confirm failed:', error.message);

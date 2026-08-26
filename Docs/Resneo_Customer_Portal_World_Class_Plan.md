@@ -14,7 +14,9 @@
 2. Whether to raise `otp_expiry` from 3600 (P3-4g). Applies to staff invites and password recovery too. Note that `[auth.rate_limit] email_sent = 2` per hour (`supabase/config.toml:189`) bounds any resend cooldown designed alongside it.
 3. The target session window for returning customers (P3-4h). `jwt_expiry = 3600`, `enable_refresh_token_rotation = true`, `refresh_token_reuse_interval = 10` (`supabase/config.toml:158,164,167`). These govern staff sessions too.
 
-**Confirm before P3-4b starts:** that Supabase access tokens on this project carry a `session_id` claim. **This is still unresolved and nothing in the repository settles it.** `grep -rn "session_id" src/` returns only `event_session_id` and import-session ids; the pinned client library version says nothing about the deployed GoTrue version. The whole enforcement model in AD7 is keyed on this claim. Decode a real access token from this project before writing any P3-4b code.
+4. **Does the portal-token exchange issue a refresh token?** (AD7, P3-4i.) This changes what `portal_limited_sessions` means and must be settled before P3-4a writes the migration. See AD7's "Lifetime of a limited session".
+
+**Confirm before P3-4b starts:** that Supabase access tokens on this project carry a `session_id` claim. **This is still unresolved and nothing in the repository settles it.** `grep -rn "session_id" src/` returns only `event_session_id` and import-session ids; the pinned client library version says nothing about the deployed GoTrue version. The whole enforcement model in AD7 is keyed on this claim, and the answer swings Phase 3 between AD7's full build and its descoped fallback, which is roughly two weeks priced as one number. Decode a real access token from this project. It is a thirty-minute task and it should be done this week, not when Phase 3 starts.
 
 ---
 
@@ -54,6 +56,22 @@ One correction to the Register itself: `S-03` ("guest rows claimed by unverified
 The Register lists **33 open findings gated on "Promoting the customer portal"**: `C-01` to `C-06`, `C-08` to `C-12`, `Q-01` to `Q-12`, `Q-14` to `Q-16`, `Q-18` to `Q-23`, `Q-25`. Earlier drafts covered roughly half and never referenced the Register. §2.2 now folds in the remainder, and §2.3 maps every one of the 33 to a task.
 
 **One piece of Register context reframes the plan's whole risk profile.** From its §3A: "Almost nobody uses the customer portal. Most of `C-*` and all of `Q-*` describe a surface with no traffic." That is why these findings gate *promoting* the portal rather than blocking anything today, and it is the strongest available argument for doing Phase 0 properly rather than shipping surface first.
+
+---
+
+## 0A. Pre-flight: do these before Phase 0 starts
+
+None of the following is a phase task, none has an owner today, and each one blocks or invalidates work that is scheduled. They are small. Do them first.
+
+| # | What | Why it cannot wait | Owner | Done |
+| --- | --- | --- | --- | --- |
+| **F1** | **Fix `e2e/helpers/manage-link.ts`.** It mints the legacy expiry-less HMAC (`manage:${bookingId}`), which `verifyBookingHmac` has rejected since `LEGACY_MANAGE_LINK_ACCEPT_UNTIL_MS` passed on 2026-08-01 (`src/lib/short-manage-link.ts:214`). Mint `${exp}.${sig}` instead, and route `guest-self-reschedule.spec.ts` through `?hmac=` rather than the `[token]` path segment, which is checked against `confirm_token_hash` and can never match. | **Two of the four e2e specs have been red for over three weeks and nobody knows**, because the CI job is gated off. P0-4's acceptance is "all four existing e2e specs pass unchanged" and P2-3's is "mirroring `guest-self-reschedule.spec.ts`". The plan's safety net for its most financially sensitive refactor does not currently run. | | ☐ |
+| **F2** | **Make the e2e job runnable.** Set `RUN_E2E_SMOKE=true` and create the Actions secrets it needs; the workflow's own comments say they do not exist. Add the `.env.e2e` template referenced by `playwright.config.ts`, `global-setup.ts` and the seed script but absent from the repo. Provision Stripe Connect on the fixture venue. | Four acceptance criteria say "green in CI". None can be demonstrated today. | | ☐ |
+| **F3** | **Decode a staging access token** and record whether it carries `session_id`. | Decides whether AD7 is built or descoped. Thirty minutes. | | ☐ |
+| **F4** | **Take the four project-level decisions** in the header above. | F3 plus these gate all of P3-4. | | ☐ |
+| **F5** | **Run all four e2e specs after F1 and F2 and record the result in `Docs/E2E_SMOKE.md`.** | Establishes whether the safety net exists before P0-4 is scheduled against it. | | ☐ |
+| **F6** | **Declare `@supabase/supabase-js` as a dependency.** Every script imports it; it is not in `package.json`. | Phase 0 adds four more scripts that import it. | | ☐ |
+| **F7** | **Agree the AASA path set with the `reserveni-app` repo**, and obtain the Apple Team ID, bundle id, Android package name and SHA-256 fingerprint. | Decides which emails open the app rather than a browser, so it must precede P3-4d changing the emails. The identifiers live in a repository that is not in this checkout. | | ☐ |
 
 ---
 
@@ -404,11 +422,13 @@ These should be settled before any code is written. Each is a decision, not an o
 Create `src/lib/booking/guest-actions/` exporting pure service functions:
 
 ```
-cancelBookingForGuest(admin, { bookingId, actor }): Promise<CancelResult>
-rescheduleBookingForGuest(admin, { bookingId, newSlot, actor }): Promise<RescheduleResult>
-confirmAttendanceForGuest(admin, { bookingId, actor }): Promise<ConfirmResult>
-loadGuestBookingDetail(admin, { bookingId, actor }): Promise<GuestBookingDetail>
+cancelBookingForGuest({ admin, session }, { bookingId, actor }): Promise<CancelResult>
+rescheduleBookingForGuest({ admin, session }, { bookingId, newSlot, actor }): Promise<RescheduleResult>
+confirmAttendanceForGuest({ admin, session }, { bookingId, actor }): Promise<ConfirmResult>
+loadGuestBookingDetail({ admin, session }, { bookingId, actor }): Promise<GuestBookingDetail>
 ```
+
+**Two clients, not one, and this is a correction to an earlier draft.** Earlier drafts took `admin` alone while also requiring that "the booking must have been read through `bookings_account_safe` on the session client before the action service is called". Nothing in that signature could enforce it, so AD8's second layer degraded to a convention a caller could forget. The service now takes both: for `actor.kind === 'session'` it loads the booking from `bookings_account_safe` on `session` **itself** and refuses if the row is absent, so the ownership read cannot be skipped by a call site. `session` is `null` for token and HMAC actors. The two-client shape has precedent in `cancelStaffBookingWithNotify(admin, staffDb, ...)` (`src/lib/booking/staff-cancel-booking.ts:63-69`).
 
 `actor` is a discriminated union:
 
@@ -421,7 +441,7 @@ type GuestActionActor =
 
 **The session actor carries `userId` only.** Earlier drafts also carried `guestIds`, and the Remediation Register §9 was right to reject that: `guestIds` is the *result* of an authorisation decision, so passing it in means the service trusts its caller to have made that decision correctly. `loadAccountSafeGuests` already derives them from `auth.uid()` through the session client (`src/lib/account/account-bookings.ts:321`), so the helper can and must resolve ownership itself.
 
-Authorisation is resolved by a single `assertActorMayActOnBooking(admin, actor, booking)` helper. Token and HMAC paths keep their current semantics exactly. The session path resolves the caller's guest ids from `userId` inside the helper, **and** the booking must have been read through `bookings_account_safe` on the session client before the action service is called (AD8).
+Authorisation is resolved by a single `assertActorMayActOnBooking({ admin, session }, actor, booking)` helper. Token and HMAC paths keep their current semantics exactly. The session path resolves the caller's guest ids from `userId` inside the helper and performs the `bookings_account_safe` read itself, so both of AD8's layers are enforced by the service rather than by its callers.
 
 **Every function returns a result, never a `Response`.** The service layer cannot import `next/server`. Each returns a discriminated union:
 
@@ -431,7 +451,9 @@ type GuestActionResult<T> =
   | { ok: false; code: GuestActionErrorCode; message: string; status: number };
 ```
 
-`message` is the customer-facing string and is the **only** place that copy lives, so `/api/confirm`, the portal routes and `/manage` cannot drift. `status` preserves today's exact HTTP codes, including the `410` on an already-used token (`/api/confirm/route.ts:441-445`). Side effects that currently run through `after()` are returned as a list of deferred tasks the route adapter schedules, so the service stays testable without a request context. None of the five `after()` blocks is load-bearing on the response body, so this is mechanical.
+`message` is the customer-facing string and is the **only** place that copy lives, so `/api/confirm`, the portal routes and `/manage` cannot drift. `code` is drawn from the shared union frozen by P0-11, so a client can branch on the outcome without matching English prose. `status` preserves today's exact HTTP codes, including the `410` on an already-used token (`/api/confirm/route.ts:441-445`).
+
+Side effects that currently run through `after()` are returned so the route adapter schedules them, keeping the service testable without a request context. **Reuse the existing shape rather than inventing one:** `cancelStaffBookingWithNotify` already returns an optional `scheduleNotification?: () => Promise<void>` for exactly this purpose. None of the five `after()` blocks is load-bearing on the response body, so this is mechanical.
 
 `POST /api/confirm` is refactored to a thin adapter over these functions. Behaviour must not change. **The guard is P0-9's characterisation suite, not the existing e2e specs**, which are all appointment-shaped and cover none of the class, event or card-hold paths (G6).
 
@@ -514,7 +536,23 @@ That is a global auth setting affecting staff and sales users too, so it is a de
 - `PATCH /api/account/marketing-preferences` (`route.ts:11`) writes `guests.marketing_consent`, `marketing_consent_at` and `marketing_opt_out` (`:41-45`). A forwarded email would let the recipient flip a **GDPR consent record** on someone else's guest row at every venue they use.
 - `PATCH /api/account/profile` (`route.ts:49`) writes `notification_preferences` among other fields (`:104-112`). Once P4-3 makes those live, a limited session could turn every reminder off. Classify the whole route, not only its email branch.
 
-Denied actions redirect to a step-up sign-in at `/auth/magic`. Step-up needs no unwind logic: a completed magic-link sign-in issues a **new** session with a new `session_id`, which is not in `portal_limited_sessions` and is therefore full by construction.
+**Lifetime of a limited session, and the trap in the obvious implementation.**
+
+`portal_limited_sessions` is a **denylist**, and the absence of a row must never by itself mean "full". Implemented the natural way, as `WHERE session_id = ? AND expires_at > now()`, a limited session becomes a **full** session simply by waiting for the row to age out, with its holder having proved nothing. AD7's own step-up argument is what inverts here: "not in the table, therefore full by construction" is the desired property for a *new* session and a hole for an *expired row*.
+
+Three rules follow, and they must be settled before P3-4a writes the migration because they change what the column means:
+
+1. **Row expiry revokes the session**, it does not release the constraint. When a row passes `expires_at`, revoke the underlying GoTrue session with `admin.auth.admin.signOut(accessToken, 'local')` and only then delete the row. A swept row and a live session must never coexist.
+2. **The limited exchange issues no refresh token** (P3-4i). A refresh token would keep a limited session alive indefinitely with a stable `session_id`, which on a phone means the customer's permanent signed-in state is a limited one and they meet an unexplained 403 the first time they try to spend money. Without it the session dies at `jwt_expiry` and anything durable forces a step-up, which is the intent.
+3. **Fail closed on a lookup error.** If the table cannot be read, treat the session as limited.
+
+**Step-up, and why the web design does not transfer.**
+
+On the web, a denied action redirects to `/auth/magic`. A native client receives JSON and cannot follow a redirect into a browser form and come back holding a session, so the redirect cannot be the contract. Specify it as a response instead:
+
+- Denied routes return **403** with `code: 'STEP_UP_REQUIRED'` and a body carrying the account email and the OTP endpoint. The web client turns that into the `/auth/magic` redirect it does today; a native client completes it with `verifyOtp` against the `email_otp` that P3-4i surfaces.
+- **On successful step-up, revoke the limited session and delete its row.** Earlier drafts said step-up "needs no unwind logic" because a fresh sign-in mints a new `session_id`. That is true of the new session and says nothing about the old one, which otherwise survives, still valid, still forwarded in whatever email it came from. The unwind is one call and it is not optional.
+- `STEP_UP_REQUIRED` is part of the error-code union frozen by P0-11, so it must exist in Phase 0 even though nothing returns it until Phase 3.
 
 **Token properties.**
 
@@ -642,7 +680,17 @@ Each task carries an ID, the files involved, and acceptance criteria. Tasks with
 P0-6  (account-safe view)      ──> P1-1, P2-1                    [BLOCKING]
 P0-7  (design system)          ──> P1-2, P1-3, P1-5, P2-2, P2-3, P2-4, P2-6
 P0-9  (characterisation tests) ──> P0-4 (extract guest actions)  [BLOCKING]
-P0-4  (extract guest actions)  ──> P2-1 ──> P2-2, P2-3, P2-4
+P0-0  (recording test double)  ──> P0-3, P0-9, P0-11, P1-1     [BLOCKING]
+P0-4  (extract guest actions)  ──> P2-1 ──> P2-4 ──> P2-2, P2-3
+P2-4  (detail extraction)      ──> P2-2, P2-3                   [was a CYCLE]
+P2-2, P2-3                     ──> P2-5 (cannot remove links first)
+P2-3a (capacity guard)         ──> P2-3
+P0-1a ──> P0-8, P0-6 verification, P1-3, P0-9 fixtures
+P0-11 ──> P0-1c (or the route tests are written twice)
+P0-13 ──> P0-14 ──> P4-3
+P0-6  ──> P4-2, P4-5, P4-7 (all resolve ownership through the view)
+P3-4b ──> P3-4c (P3-4c writes to P3-4b's table)
+P3-4e ──> P3-4i (the OTP rides in the branded email)
 P0-2  (booking instants)       ──> P1-1, P1-2
 P0-3  (remove N+1)             ──> P1-1, P2-5
 P0-10 (instrumentation sink)   ──> baseline capture, and it cannot be done later
@@ -658,6 +706,10 @@ P3-4b (limited sessions)       ──> P4-5, P4-6
 P4-3  (preference matrix)      ──> P5-2 (customer push)
 ```
 
+**There was a cycle in Phase 2 and it is now broken.** AD9 makes P2-2's acceptance true only if the extraction has already happened, while P2-3 says it fixes the `/manage` form controls "while extracting it under AD9", and P2-4's own section list includes the action bar that P2-2 and P2-3 build. Listing all three as siblings under P2-1 hid it. **P2-4 now lands first as a pure extraction**, with the action bar taking handlers as props; P2-2 and P2-3 then supply the handlers. Do not schedule them as siblings.
+
+**Two stated dependencies are not real.** `P0-7 → P1-3` is false: `AccountNav.tsx` is entirely `<Link>`-based with **zero** raw `<button>` elements, so P0-7 has nothing to do in the only file P1-3 edits. P1-3's real constraint is an ordering against P0-8, which adds `aria-current` to the nav P1-3 then rewrites. And `P0-2 → P1-2` is redundant rather than false; it is transitive through P1-1.
+
 **P0-6 blocks Phase 2 absolutely.** Every route added in Phase 2 inherits whichever access-control model exists when it is written. Adding five routes on the current model and retrofitting afterwards means auditing five routes instead of fixing one pattern. It also blocks P1-1, which earlier drafts left out of the graph despite P1-1's own body requiring the view.
 
 **P0-7 should precede Phases 1 and 2** for cost, not correctness. Those phases rebuild the same components; migrating to primitives afterwards means touching them twice. **P0-8 carries the same argument and earlier drafts wrongly called it dependency-free**: it edits `AccountNav` plus the exact six client components P0-7 migrates and P1-5 relocates. Sequence it after P0-7.
@@ -666,7 +718,16 @@ P4-3  (preference matrix)      ──> P5-2 (customer push)
 
 ### Phase 0: Foundations (must precede all UI work)
 
-**P0-1. Test harness for the portal**
+**P0-0. A Supabase test double that both records and writes** (new; blocks P0-3, P0-9, P0-11, P1-1)
+
+Four tasks assert on query counts or on writes, and **no existing double supports either**. `src/lib/testing/supabase-fake.ts` applies real filters and records `calls`, but is read-only: no `insert`, `update`, `delete`, `rpc`, `auth`, `range()` or joins. `src/lib/compliance/test-utils/fake-supabase.ts` writes state but has no call log. Every complex route test in the repo hand-rolls its own recorder.
+
+- Extract the `makeDb(responder) -> { db, calls }` recorder already used in `src/app/api/venue/bookings/[id]/charge/route.test.ts` and the Stripe webhook tests into `src/lib/testing/recording-supabase.ts`, recording `{ table, op, payload, filters }`.
+- Add per-call error injection for at least `23505`, `23P01` and `PGRST116`, which P0-3, P2-3a and P0-9 all need.
+- Add a `queryCount()` helper and an `after()` stub exported as `vi.fn((cb) => cb())`. **Not a bare `vi.fn()`**: that silently swallows every deferred email, SMS and push, which is exactly the failure P0-9 is written to avoid.
+- **Acceptance:** P0-3's query-count assertion and one P0-9 write assertion are both expressible using only this module.
+
+**P0-1. Test harness for the portal.** **This is four tasks, and it is the largest hidden item in Phase 0.** Split as **P0-1a** harness and recorder, **P0-1b** fixture seeder and teardown, **P0-1c** route tests, **P0-1d** Playwright auth setup. There is no authenticated-session mechanism in Playwright at all today: no `storageState`, no setup project, one chromium project, and `global-setup.ts` seeds nothing. P0-1d is building an auth layer from zero, plus a teardown story, plus the 375px mobile project that P1-2 and P1-3 acceptance criteria assume exists. Budget it as its own week. **Pre-flight F1 and F2 must be done first**, or none of it can be demonstrated.
 - Add `src/app/account/**` component tests using the existing vitest setup (`vitest@^4.0.18`, `npm run test`, co-located `*.test.ts(x)`). **Component tests need `/** @vitest-environment happy-dom */` at the top of the file**: `vitest.config.ts` sets `environment: 'node'` globally with no `environmentMatchGlobs`, and all 23 existing `*.test.tsx` files carry that docblock. "The existing vitest setup" does not give React DOM for free.
 - Add route tests for all 26 `/api/account/*` routes covering: unauthenticated 401, cross-user access denial, happy path. There is good precedent: 11 `route.test.ts` files exist, 24 files mock `@/lib/supabase`, 17 mock `@/lib/stripe`, and two richer fakes exist at `src/lib/testing/supabase-fake.ts` and `src/lib/compliance/test-utils/fake-supabase.ts`.
 - **Build an e2e sign-in helper first.** `e2e/helpers/` has `book-appointment`, `env`, `manage-link` and `stripe-payment`, and nothing that produces an authenticated session. The helper mints a session server-side with `admin.auth.admin.generateLink` and visits `/auth/confirm`, which is the same path a real customer takes and therefore also exercises `claim_user_account()`. Nothing else in the portal e2e work is possible until this exists. Note `[inbucket]` is enabled locally (`supabase/config.toml:99-102`) but CI e2e runs against a hosted project where it is unavailable, so the helper must not depend on reading an inbox.
@@ -699,7 +760,7 @@ P4-3  (preference matrix)      ──> P5-2 (customer push)
 - **Acceptance:** the P0-9 characterisation suite passes byte-identically before and after, and all four existing e2e specs pass unchanged. No behaviour change in emails sent, refunds issued, credits restored, waitlist offers cascaded, or card holds settled.
 
 **P0-5. Loading and error states** (closes G7 in part, G24)
-- Add `loading.tsx` and `error.tsx` to every one of the **thirteen** page routes under `/account`. Today two have `loading.tsx` (`events`, `resources`) and none has `error.tsx`, so a data error unwinds to `src/app/error.tsx` and destroys the portal chrome and navigation. State in the task what a route-local boundary adds over the root one: it preserves the nav and offers a scoped retry.
+- **Scope to the five surviving routes, not all thirteen.** P1-3 and P1-5 turn nine of the thirteen into redirects three weeks later, so building loading and error boundaries for all of them spends most of the task on files that are about to become one-line redirects. The survivors are `/account`, `/account/bookings`, `/account/bookings/[bookingId]`, `/account/profile` and the new `/account/passes`. If Phase 1 slips or is descoped, revisit. **The same scoping applies to P0-8's `metadata` exports.** Add `loading.tsx` and `error.tsx` to those five. Today two have `loading.tsx` (`events`, `resources`) and none has `error.tsx`, so a data error unwinds to `src/app/error.tsx` and destroys the portal chrome and navigation. State in the task what a route-local boundary adds over the root one: it preserves the nav and offers a scoped retry.
 - Use `DashboardSkeletons` (`src/components/ui/dashboard/DashboardSkeletons.tsx`, 14 exports) where shape is known. The two existing loading files use `PageHeader` plus local markup and should be migrated too.
 - **Give every client section a real state machine (G24).** The five `load()` functions in `src/components/account/*` have no `try`/`catch` and parse JSON before checking `res.ok`. Replace with distinct `loading | ready | failed` states, a retry affordance, and a failed state visually distinct from the genuine empty state. `AccountPaymentMethodsSection` currently tells a customer to make a purchase in order to fix a server error.
 - **Acceptance:** every route has both files; no route falls back to a blank screen or to the root boundary on error; a forced fetch rejection in each of the five sections renders a retry rather than an empty state.
@@ -715,7 +776,10 @@ P4-3  (preference matrix)      ──> P5-2 (customer push)
 - Keep admin hydration as-is (`loadVenueMap:339`, `buildAccountCdeContext:235`, `loadClassInstanceSpots:192`). Ownership is already established by the time they run.
 - Document the rule in `Docs/Multi_model_RLS_and_API_audit.md`: ownership is established through the account-safe view; derived context may be read as admin.
 - **Acceptance:** the four assertions in AD8, added to the existing pgTAP suite under `supabase/tests/` so they run under `npm run test:rls` and the `rls-pgtap` CI job, plus a fifth asserting the view is not `security_invoker`. Existing portal behaviour is unchanged and the full suite passes.
-- **Hosted-grants check.** Migrations do not reproduce the hosted permission environment on this project. After `db push` to each environment, verify the grant on the new view directly against that database, the way `npm run check:function-grants` is used for functions. A view that exists with no `authenticated` grant fails closed and empties every portal.
+- **Add `REVOKE ALL ON public.bookings_account_safe FROM anon;` explicitly.** Hosted Supabase applies project-level default privileges outside the migration history. The acceptance checks that `authenticated` *has* the grant and never that `anon` does not.
+- **Add a sixth pgTAP assertion:** `results_eq` over `information_schema.columns` against the exact column allowlist, so a later `CREATE OR REPLACE VIEW` that widens the projection fails CI. §6 calls adding a column a security decision; nothing currently enforces that.
+- **The pgTAP fixture this needs does not exist and is half a day on its own.** Every existing fixture authenticates by **email claim** (`SET LOCAL request.jwt.claims TO '{"role":"authenticated","email":...}'`). This view's predicate is `auth.uid()`, the **`sub`** claim, and `guests.user_id` is an FK to `auth.users`. **No pgTAP file in this repo has ever created an `auth.users` row or set a `sub` claim.** The task must insert two `auth.users` rows (satisfying the not-null set, and noting the `on_auth_user_created` trigger will insert `user_profiles`), link `guests.user_id`, then set role and a `sub` claim. Put it in a **new** file, `supabase/tests/account_safe_views_test.sql`: `supabase test db` runs every file in the directory and the two existing suites carry fixture scars a third should not inherit.
+- **Hosted-grants check, and the tool for it does not exist either.** Migrations do not reproduce the hosted permission environment on this project. `npm run check:function-grants` inspects **function** EXECUTE grants only; there is no table or view grant checker. Write `scripts/check-table-grants.mjs` as part of this task, or the "verify hosted grants" ritual has no tool. A view that exists with no `authenticated` grant fails closed and empties every portal.
 
 **P0-7. Adopt the design system in the portal** (closes G15, G30)
 
@@ -724,7 +788,7 @@ P4-3  (preference matrix)      ──> P5-2 (customer push)
 - Adopt `SectionCard` and `EmptyState`, imported by full path (`@/components/ui/dashboard/SectionCard`) because that directory has **no barrel**. `PageHeader` is already adopted in all 16 files that need it, so it is not part of this task.
 - **Add an in-flight guard to the eight portal mutation handlers (G30)**, which `/manage` already has and the portal does not. Doing it here is free, because every one of those handlers is being touched to swap in `Button`, which carries a `disabled` state.
 - No visual redesign in this task. It is a like-for-like migration so that Phases 1 and 2 build on primitives rather than compounding the debt.
-- **Acceptance:** zero raw `<button>` elements remain under `src/app/account` and `src/components/account`, asserted by grep; every mutation handler disables its control while in flight; no visual regression beyond primitive defaults. **Do not cite `npm run lint:modals` as evidence for this task.** It flags only files containing both `role="dialog"` and `fixed inset-0`, passes today, and would pass after zero work on P0-7. It should stay green, but it proves nothing here.
+- **Acceptance, three checks that can fail** ("no visual regression beyond primitive defaults" cannot, and is replaced): (1) grep for `<button` under the two portal directories returns zero; (2) a component test per converted control asserts the accessible name is unchanged and that `disabled` is set while a mutation is in flight, with the eight handlers listed by file and line in the task; (3) a Playwright screenshot baseline for the nine screens, reviewed once by a named person. **Split into five PRs by component group.** **Do not cite `npm run lint:modals` as evidence for this task.** It flags only files containing both `role="dialog"` and `fixed inset-0`, passes today, and would pass after zero work on P0-7. It should stay green, but it proves nothing here.
 
 **P0-8. Accessibility remediation** (closes G16). **Sequence after P0-7.**
 
@@ -737,7 +801,7 @@ Six known defects, two at Level A. Not a review step.
 - Errors that block progress use `role="alert"`; confirmations use `role="status"`.
 - Fix the contrast failures (`text-slate-400` at 2.54:1; inline links at 1.75:1 with no underline) and raise the 16 to 20px list actions to meet WCAG 2.5.8.
 - **Tooling is not installed and must be budgeted.** There is no `@axe-core/playwright`, `axe-core`, `jest-axe`, `vitest-axe`, `pa11y` or `lighthouse` in `package.json`. An automated axe pass requires adding a dependency, wiring it into Playwright (which also requires P0-1's auth helper to reach any `/account` route), and adding a CI job. Earlier drafts asserted the acceptance criterion without noticing that none of it exists.
-- **Acceptance:** an automated axe pass over every `/account` route reports no violations at AA, using tooling added by this task; a manual screen-reader pass confirms that saving the profile and failing a checkout are both announced.
+- **Acceptance, mechanical rather than a judgement** ("a manual screen-reader pass confirms" is not a check): axe reports zero AA violations on every surviving route; each route exports a unique `metadata.title`, asserted by an enumerating test; the skip link is the first tab stop, asserted by a keyboard test; `aria-current` is present on the active nav item and filter tab; `Toast` mounts with `role="status"` and `role="alert"` for a forced success and a forced failure in each of the six client sections; grep for `text-slate-400` under the two portal directories returns zero; every list action's bounding box is at least 24 by 24 CSS px.
 
 **P0-9. Characterisation tests for the guest action paths** (blocks P0-4, part of G6)
 
@@ -746,7 +810,20 @@ P0-4 refactors the single most financially sensitive route in the product, and t
 - Integration tests against `POST /api/confirm` as it stands today, covering, for each of `confirm`, `cancel` and `modify`: appointment, class session, course multi-session, event ticket and resource booking; token and HMAC auth; deposit refund, card-hold settlement and late-cancellation fee; credit restoration; waitlist offer cascade; compliance enforcement blocking an action.
 - Assert on outcomes that matter: booking status, emails and SMS queued, Stripe calls made with their arguments, credits and holds written.
 - **Stub `after()` first.** The route calls `after()` from `next/server` at five sites (`:905, 1171, 1370, 1853, 2015`), and nothing in the repo currently mocks it. Assertions on emails or SMS queued inside those callbacks will silently not fire otherwise, which would make the suite pass while testing nothing.
-- **Acceptance:** the suite passes on `HEAD` before any refactor commit, and is the gate P0-4 must clear unchanged.
+**The harness decision the task must make: this is a mocked-supabase vitest suite, not an integration suite.** Precedent is `src/app/api/venue/bookings/route.card-hold.test.ts` (515 lines, 19 `vi.mock`s, a `from(table)` switch that throws on an unexpected table, and `after` already mocked). The route touches only seven tables directly, and every heavy reader is a static module-scope import that can be mocked wholesale. Note comms have **two** entry points, `sendCancellationNotification` for cancel and `executeBookingModificationGuestNotification` for modify (dynamic import); mocking only the first leaves modify uncovered.
+
+**The matrix, 41 rows.** Every row asserts the same columns: HTTP status, full response body, the `bookings` update payload by exact keys, whether `confirm_token_used_at` was written, Stripe call and arguments, comms call and arguments after the `after()` flush, `events` inserts, waitlist arguments, lifecycle arguments, and `logBookingOp` arguments.
+
+- **Confirm, 7 rows.** Pending to 400; already-confirmed-with-timestamp to 200 idempotent; confirmed-without-timestamp to 200 attendance only; Booked to 200 with token stamped and lifecycle fired; invalid transition to 400; used token to 410; **HMAC on the same fixture to 200 with the token not consumed**.
+- **Cancel, 13 rows.** Plain appointment; paid deposit before deadline with refund arguments; **refund fails retryably, so 502 and the booking is NOT cancelled** (`/api/confirm:673`, the highest-value row in the suite and one no earlier draft mentioned); refund fails as nothing-to-refund, 200 with variant copy; shared or group deposit with partial amount; card hold before deadline released; card hold after deadline kept with fee copy; class paid by credit with restore plus `class_credit_restored`; class paid by membership with allowance restored; class after deadline with no restore; event ticket with no restore and a waitlist payload carrying `experience_event_id`; resource with notice hours from resource rules; open deposit intent cancelled.
+- **Modify, 19 rows.** Appointment unified happy path (writes `calendar_id` and `service_item_id`, nulls the legacy pair) and appointment legacy happy path (the reverse); slot unavailable 409; slot taken at recheck 409; compliance unmet 409 with details; stale `updated_at` 412; flag off 403 with appointment copy; date changed, so compliance records rescheduled, deadline recomputed, **token not consumed**; resource happy; resource `23P01` to 409; resource flag off 403 with resource copy; class happy with instance swap; class entitlement-paid 409; class target full 409; table happy; table engine mismatch 503; large-party redirect 400; **event ticket falls through to the table branch, which is characterised, not fixed**; status outside `Booked|Confirmed|Pending` to 400.
+- **Cross-cutting, 2 rows.** Unknown action 400; missing booking 404, noting the row is loaded before auth so a bad id 404s regardless of signature.
+
+**"Byte-identical", defined operationally.** Each row freezes `{status, body, dbWrites[], externalCalls[]}` to a committed snapshot, with `vi.setSystemTime` fixed, ids from a seeded generator, and the external-call log sorted by module and function. **The gate is that P0-4 lands with zero modified snapshot files.** Any intended difference requires a separate, reviewed commit that says so.
+
+**One trap to avoid.** Do not couple assertions to the shape of the `after()` stub. Assert the observable outcome (email queued, refund issued) instead, or AD1's change of mechanism will break the suite despite no behaviour change, and a week will go into deciding whether that is a regression.
+
+- **Acceptance:** the suite passes on `HEAD` before any refactor commit, and is the gate P0-4 must clear with zero snapshot changes.
 
 **P0-10. Somewhere to write portal metrics** (enables §5B)
 
@@ -767,15 +844,25 @@ Every route Phases 1 to 4 add inherits whatever conventions exist when it is wri
 - Add a machine-readable `code` field to every `/api/account/*` error. There are currently zero. Today a client must string-match English prose to tell "This course is full" from "You are already enrolled", which are both 409 from the same file (`courses/checkout/route.ts:101,116`).
 - Adopt one success envelope convention. Current shapes include `{ok:true}`, `{bookings}`, `{devices}`, `{profile, user, notice, email_error}`, `{deletion_scheduled_at}` and `{enrollment_id}`.
 - **Add explicit cache headers to all 26 authenticated account routes (G26)**, matching the `no-store` convention already used in five other route groups. An authenticated GET without one can be served stale, which is the same class of defect as the venue-catalog staleness bug.
-- **Write down the rule that every new `/api/account/*` route ships its `/api/v1/*` alias in the same commit.** The v1 namespace is one-line re-exports and is documented as the live mobile surface; aliasing costs one file, retrofitting means auditing the whole surface twice.
-- **Acceptance:** a route test enumerates every route under `/api/account/*` and asserts the 401 literal, the presence of an error `code` on every non-2xx path, and a cache header; a second test asserts every `/api/account/*` route has a `/api/v1/*` counterpart or is on an explicit reviewed exclusion list.
+- **Enumerate the error-code set, do not just require the field.** A `code` with no stable vocabulary buys a client nothing. Export a shared TS union from one module. Minimum set the app needs: `STEP_UP_REQUIRED`, `LIMITED_SESSION`, `ALREADY_CANCELLED`, `PAST_CANCELLATION_DEADLINE`, `SELF_RESCHEDULE_DISABLED`, `SLOT_TAKEN`, `CLIENT_TOO_OLD`. `ALREADY_CANCELLED` is not hypothetical: `/api/confirm:538-545` guards a double cancel with a 400 and prose, so a mobile retry after a timeout cannot tell "I already did this" from "you may not do this".
+- **Backfill the v1 aliases, do not merely require them for new routes (C7).** Only **5 of 26** account routes are aliased today. The other 21 include all of Passes and plans, `payment-methods`, `password`, `marketing-preferences` and `delete-request/cancel`, so an app can start an account deletion and cannot cancel it. Three v1 routes are divergent parallel implementations rather than re-exports; put those on a named allowlist with a convergence task. **The exclusion list starts empty**, or the enforcement test is green on day one and proves nothing.
+- **Add the query contract to `GET /api/account/bookings` (C6):** `model`, `when`, `limit`, `cursor`. Moved here from P4-7 because P1-3's redirect targets are named after these filters and P0-2 owns the classification rule. Without it the app pulls 100 rows and re-implements the rule P0-2 just centralised.
+- **Add `GET /api/account/marketing-preferences`.** It exports PATCH only, so consent state cannot be read over HTTP at all.
+- **Version policy (C13):** v1 responses are additive-only. A field is never removed or retyped; removals require `/api/v2`; no phase release may change a v1 response shape. **Decide before any codemod whether the new 401 literal and envelope apply to v1 at all**: v1 routes are one-line re-exports, so changing them is a breaking change for the shipped app. The safe default is to freeze v1's current shapes and apply the new envelope to new routes only.
+- **Client version header (C14):** parse `X-ResNeo-Client: <platform>/<version>` and reserve `426` with `code: CLIENT_TOO_OLD`. Nothing enforces it yet; it exists in Phase 0 because a header cannot be retrofitted onto builds already in the store.
+- **Idempotency (C15):** every POST that creates a Stripe object accepts and honours `Idempotency-Key`. `courses/checkout` already builds one; `credits/purchase` does not, so a retried purchase mints a second PaymentIntent.
+- **Split into three PRs:** **P0-11a** codes, `no-store` headers, `src/lib/api/error-codes.ts` and a `jsonError()` helper; **P0-11b** the v1 alias backfill and the query contract; **P0-11c** the §5D.1 enforcement matrix, which is the highest-leverage piece for the app roadmap.
+- **Acceptance:** the §5D.1 checks pass, all of them derived from the filesystem rather than hand-typed.
 
 **P0-12. Purge cookie-only auth SDK calls** (new; closes G27)
 
 Six routes are broken for any non-cookie client and **three fail silently**, including account deletion (G27). This is a present-tense defect: `POST /api/v1/auth/logout` is documented as the mobile logout endpoint and revokes nothing.
 
 - Replace `supabase.auth.updateUser` and `supabase.auth.signOut` on the request-scoped client with admin-API equivalents fed the caller's token: `admin.auth.admin.updateUserById`, `admin.auth.admin.signOut(accessToken, scope)`. Affected: `/api/account/password`, `/api/v1/auth/password/set`, `/api/v1/me/email/change`, `/api/account/profile` (email branch), `/api/account/sign-out-everywhere`, `/api/v1/auth/logout`, `/api/account/delete-request`.
+- **Also fix the three public booking create routes**, which G27 missed by looking only inside `/api/account` and `/api/v1`. `create/route.ts:291`, `create-group/route.ts:204` and `create-multi-service/route.ts:208` build the account-login gate's client with `createClient()`, so **a Bearer app cannot book at any venue with `require_account_login_for_bookings` on**, which is the app's rebook path. The same file already uses `createRouteHandlerClient(request)` at `create/route.ts:826`, so one request resolves the user under two auth models.
 - Also make `/api/auth/resolve-next` (`:15`) use `createRouteHandlerClient(request)` instead of `createClient()`, so the one other route that runs `claim_user_account()` is Bearer-capable. It costs nothing.
+- **Delete the caller's `user_devices` rows on global sign-out and on deletion request.** Nothing removes a device registration today, so after P5-2 ships a customer push sender, a signed-out phone keeps receiving booking push and a soft-deleted account keeps receiving it through the 30-day grace period. Compounding the above: `delete-request`'s `signOut` is a no-op for a Bearer caller, so such an account keeps a live token **and** a live push registration.
+- **Ship the unscoped-token-delete fix from P0-13 here or same-day**, separately from the migrations: `staff-push-notification.ts:250` prunes with `.delete().in('push_token', ...)` and no `user_id` scope, making it a global delete by token value.
 - Add a lint rule or route test asserting no handler under `src/app/api/account/` or `src/app/api/v1/` calls `supabase.auth.updateUser`, `signOut` or `refreshSession` on the request client.
 - **Acceptance:** a Bearer-only request (no cookies) to each of the seven routes produces the correct outcome, verified against staging with curl; specifically, `sign-out-everywhere` genuinely revokes, and a deleted account's refresh token stops working.
 
@@ -807,6 +894,15 @@ The profile UI promises "Operational emails: booking confirmations and reminders
 
 - Add an optional `body?: ReactNode` rendered beneath `message`, leaving the existing string API untouched so no current caller changes.
 - **Acceptance:** existing `ConfirmDialog` callers are unchanged; a dialog renders structured content; `npm run test:ui-foundation` passes.
+
+**P0-17. Make membership checkout native-compatible** (new; implements C9)
+
+`memberships/checkout` is the only money route returning a hosted-Checkout `{url}` (`route.ts:89-90,113`) rather than a `client_secret`. Its `success_url` is `/account/memberships?checkout=success`, which in an app webview with no cookie hits middleware, resolves no user, and redirects to `/login`, so a completed purchase reads as a failure.
+
+- Convert to SetupIntent plus a server-side subscription create, returning `client_secret` and `stripe_account_id` like `credits/purchase` and `courses/checkout` already do.
+- Change `success_url` to a path that renders for an unauthenticated viewer.
+- **This is a Stripe Billing rework, not a contract tweak.** It was previously folded into P0-11 and unbudgeted. Size it separately.
+- **Acceptance:** the route returns no Stripe `session.url`, asserted by the C9 grep test; a subscription is created on the correct connected account, asserted with a mocked Stripe; a webview with no cookie completing the flow lands somewhere that renders.
 ### Phase 1: The hub
 
 **P1-1. Hub aggregate loader** (AD5). **Depends on P0-2, P0-3, P0-6.**
@@ -847,7 +943,7 @@ Earlier drafts claimed "all twelve are placed below" while omitting Profile enti
 - **On fragments, which earlier drafts got wrong.** A URL fragment is never sent to the server, so no server-side redirect can "preserve the fragment". Per RFC 7231 §7.1.2 the client re-applies its original fragment to the redirect target **only when `Location` carries no fragment of its own**; a fragment in `Location` wins. The stated redirect of `/account/security#password` to `/account/profile#security` would therefore **destroy** the anchor it claimed to preserve. The table above targets `#password` directly for that reason. Where a source path may carry several fragments, add a client-side anchor remap on `/account/profile` rather than pretending the server can see them.
 - Redirects use `permanentRedirect()` (308) or `redirect()` (307) from `next/navigation`, matching the existing precedent at `src/app/account/layout.tsx:16`. `next.config.ts` defines no `redirects()` block.
 - Note `/account/bookings/[bookingId]` is a fourteenth reachable route that is not a nav item; P2-4 rebuilds it and any enumeration test should include it.
-- **Acceptance:** no horizontal scroll on the nav at 375px; exactly one navigation system reaches any destination; **an e2e test** (it must be an e2e, because `src/middleware.ts:121,151-159` redirects unauthenticated `/account*` to `/login`, so a unit test would only ever assert a 307 to the login page) enumerates the twelve old paths plus `/account/bookings/[bookingId]` and asserts each returns 200 or redirects to a 200.
+- **Acceptance** ("exactly one navigation system" is a wish and is replaced by three checks): `AccountNav` renders exactly four items plus the conditional dashboard link, asserted by a component test; `src/app/account/classes/page.tsx` is deleted, asserted by grep; the hub renders at most six internal links. Plus: no horizontal scroll on the nav at 375px; **an e2e test** (it must be an e2e, because `src/middleware.ts:121,151-159` redirects unauthenticated `/account*` to `/login`, so a unit test would only ever assert a 307 to the login page) enumerates the twelve old paths plus `/account/bookings/[bookingId]` and asserts each returns 200 or redirects to a 200.
 
 **P1-5. Passes and plans consolidation.** **Depends on P0-7.**
 
@@ -877,7 +973,7 @@ It sat in Phase 3 in earlier drafts, but P1-3 collapses the nav onto it in Phase
 
 **P2-2. Cancel in portal.** **Depends on P0-16.**
 - `ConfirmDialog` from primitives, using the `body` slot added by P0-16. Must show, before confirming: cancellation deadline, whether a deposit is refundable, any card-hold late-cancellation fee (`formatCardHoldFeePence`, `src/lib/booking/card-hold-terms.ts:28`, already imported by `src/app/account/bookings/[bookingId]/page.tsx:17`), and for class sessions whether credits are restored.
-- **Acceptance:** the fee and refund copy match what the token surface shows for the same booking. Under AD9 this is true by construction rather than by snapshot, because both surfaces render the same component over the same DTO.
+- **Acceptance:** a construction claim is not an assertion, so assert it. Both routes import the same component (import test), and rendering that component with a token actor and a session actor over one DTO yields identical text nodes except the action bar (snapshot diff).
 
 **P2-2a. Cancel a course in one action** (new; closes Register Q-21)
 - Cancelling a course currently means cancelling every session individually.
@@ -892,14 +988,14 @@ It sat in Phase 3 in earlier drafts, but P1-3 collapses the nav onto it in Phase
 
 **P2-3a. Appointment reschedule capacity guard** (new; closes G28, Register Q-24)
 - `enforce_cde_capacity` explicitly excludes appointment rows, and the appointment arm has no `23P01` handling, so two concurrent reschedules can double-book a slot. P2-3 puts a new, faster surface in front of that hole and must not ship without closing it.
-- **Acceptance:** two concurrent reschedules into the same slot produce one success and one clean, customer-legible failure, asserted by a test that forces the race.
+- **Acceptance, re-specified because no harness in this repo can force the race.** There is no `pg` client, no vitest-to-Postgres integration layer, and pgTAP runs on a single connection inside one transaction. Instead: implement the guard in the database (a partial unique index, or extend `enforce_cde_capacity` to appointment rows); assert **serially** in pgTAP that the second write raises `23505` or `23P01`; assert in a route test with injected error that the route maps that to a 409 with `code: 'SLOT_TAKEN'`. Keep a genuine two-connection race as a manual staging step, recorded with a date.
 
 **P2-4. Booking detail: extract, do not rebuild** (AD9; closes G8a, Register Q-22)
 - Extract `ManageBookingView` into a presentational component over a booking DTO plus an actor, and mount it from both `/manage` and `/account/bookings/[bookingId]`.
 - Sections: status and countdown, when and where (with map link and `location_type` handling for client-address and online bookings, using all four `client_address_*` columns from P0-6's view), service and practitioner, price breakdown, deposit and card-hold state, outstanding forms, **`service_items.pre_appointment_instructions`** (G8a: today it renders in emails via `src/lib/communications/renderer.ts:375` and nowhere in the portal), special requests and notes, venue contact, action bar, timeline.
 - **Distinguish venue-cancelled from self-cancelled** (Q-22). `cancellation_actor_type` is in P0-6's view for this purpose; `cancelled_by_staff_id` stays staff-only.
 - Add to calendar via `buildGoogleCalendarAddUrlForBooking` (`src/lib/emails/calendar-links.ts:79`) plus an `.ics` download. Note it takes email-shaped types, so an adapter from `AccountBookingRow` is needed.
-- **Acceptance:** parity with the token surface on every field a guest can see, guaranteed by shared code rather than asserted; plus the fields only the portal knows (cross-venue history).
+- **Acceptance:** `ManageBookingView.tsx` contains no JSX beyond mounting the shared component; both routes import it; the DTO type is exported from exactly one place; a snapshot per booking model under both actors. **The DTO is the response body of `GET /api/v1/me/bookings/[id]`, and the page renders that same builder's output** (C1), so AD9 cannot ship a rich page over a thin route.
 
 **P2-5. Retire the outbound manage links**
 - Remove the manage link from **five render sites across four files**: `src/app/account/bookings/page.tsx:114` and `:144`, `src/app/account/bookings/[bookingId]/page.tsx:133`, `src/app/account/events/page.tsx:80`, `src/app/account/resources/page.tsx:75`. Earlier drafts named two files. If P1-3 lands first the events and resources pages redirect, but their files still exist until deleted.
@@ -1084,7 +1180,7 @@ Earlier drafts scoped this as documentation and asserted that "all routes needed
 - Add routes for: the events hub and resources hub (`loadAccountUpcomingBookingsByModel` has no route equivalent), the profile's linked-venue guest relationships (`GET /api/account/profile` returns only `{profile, user}`), and card-hold state on a booking (read inline at `src/app/account/bookings/[bookingId]/page.tsx:72-73`).
 - Add the `/api/v1/*` aliases, per P0-11.
 - Then document the customer surface in `Docs/MOBILE_API.md`, which today covers only 11 venue routes and never mentions `/api/account`.
-- **Acceptance:** no page under `/account/**` reads data that has no route equivalent, asserted by review of every server component.
+- **Acceptance:** asserted mechanically, not by review. Every loader exported from `src/lib/account/*` appears in at least one file under `src/app/api/`, and no `page.tsx` under `src/app/account` calls `getSupabaseAdminClient(` or `supabase.from(` directly. This is the C1 check from §5D.1.
 
 **P5-2. Customer push infrastructure.** **Depends on P0-13, P4-3.**
 - Build `src/lib/communications/customer-push-notification.ts` mirroring the staff sender, over the existing channel-agnostic Expo transport (`src/lib/push/expo-push.ts:26`).
@@ -1200,30 +1296,130 @@ Named so they do not creep in mid-build. Each may be worth doing; none is part o
 
 The stated intent is to let customers sign in to this dashboard from the ResNeo app in due course. That does not require building app UI now. It does require that the web build stop adding surfaces the app cannot consume, because every one of those is a rewrite later.
 
-**What is already true.** A versioned customer API exists at `/api/v1/*` (14 routes, live since 2026-04-29, documented as the live external and mobile surface). `createRouteHandlerClient` genuinely honours `Authorization: Bearer` and PostgREST honours it too, so reads and table writes work today. `Docs/MOBILE_API.md` already registers `reserveniapp://callback` as a Supabase redirect URL.
+**What is already true.** A versioned customer API exists at `/api/v1/*` (14 routes, live since 2026-04-29, documented as the live external and mobile surface). `createRouteHandlerClient` genuinely honours `Authorization: Bearer` and PostgREST honours it too, so reads and table writes work today.
 
-**What is not true.** Seven auth-adjacent routes are broken for a non-cookie client and three fail silently (G27). Four customer surfaces have no route at all. Middleware cannot see a Bearer user. And AD7, as designed, establishes a **browser cookie session**, which a native client cannot consume.
+**What is not true, including one thing an earlier draft of this section overstated.**
+
+- Seven auth-adjacent routes are broken for a non-cookie client and three fail silently (G27).
+- **The three public booking create routes are also cookie-only for their auth gate**, which G27 missed by looking only inside `/api/account` and `/api/v1`. `create/route.ts:291`, `create-group/route.ts:204` and `create-multi-service/route.ts:208` each build the gate's client with `createClient()`. The same file uses the Bearer-capable `createRouteHandlerClient(request)` 500 lines later (`create/route.ts:826`), so one request resolves the user under two different auth models. **A Bearer app cannot book at any venue with `require_account_login_for_bookings` on**, which is the app's rebook path.
+- Four customer surfaces have no route, and Phases 2 to 4 add three more (see C1).
+- Middleware cannot see a Bearer user.
+- AD7, as designed, establishes a **browser cookie session**, which a native client cannot consume.
+- **`reserveniapp://callback` is registered in Supabase but unreachable from ResNeo code.** An earlier draft listed it under "already true". `POST /api/auth/send-magic-link` hardcodes `redirectTo` to `${baseUrl}/auth/callback` (`route.ts:85`), and `buildMagicLinkConfirmNextQuery` passes `next` through `toSameOriginPath`, which rejects anything not beginning with `/`. The allowlist entry exists; nothing can target it.
+- `GET /api/v1/auth/magic-link/callback` is `export { GET } from '@/app/auth/confirm/route'`, which sets a cookie and returns a redirect on every path including failure. It is documented as the mobile sign-in callback and **cannot serve one**.
 
 The twelve constraints below are each tied to a task. They are listed here so a reviewer can check compliance in one place.
 
+**Read the enforcement table after this one, and treat it as the more important of the two.** A constraint with no failing check is a comment. This repository has already proved that twice over: `Docs/ACCOUNT_PUBLIC_VS_STAFF_ROUTES.md` asserted a closed gate that was open for four months, and `src/lib/availability/schedule-fail-closed-coverage.test.ts:5-18` records four routes that reached a fail-open read because "every one of them was missed by an enumeration that had been typed by hand rather than derived". That file then reads route source from disk so the next one fails the test instead of waiting for an audit. It is the model for everything below.
+
 | # | Constraint | Evidence | Enforced by |
 | --- | --- | --- | --- |
-| C1 | Every customer-facing read and write exists as a JSON route, not only a server-component loader | `loadAccountUpcomingBookingsByModel` has no route; `GET /api/account/profile` omits the guest relationships the page renders; card-hold state is read inline at `bookings/[bookingId]/page.tsx:72-73` | P5-1 |
-| C2 | No route depends on a cookie-only session. Specifically, no handler calls `supabase.auth.updateUser`, `signOut` or `refreshSession` on the request client | Seven routes do today, three silently (G27) | **P0-12** |
+| C1 | Every customer-facing read and write exists as a JSON route, not only a server-component loader, **and the page renders that route's own builder output**. Generalises AD5 from the hub to every page | `loadAccountUpcomingBookingsByModel` has no route; `GET /api/account/profile:42` returns `{profile, user}` while the page also renders `loadAccountSafeGuests` plus admin-resolved venue names; card-hold state is read inline at `bookings/[bookingId]/page.tsx:72`; `marketing-preferences` exports PATCH with **no GET**, so consent state is unreadable over HTTP | **Per-task acceptance in P1-1, P2-1, P2-4, P3-2, P4-1**, swept by P0-11, no longer deferred to P5-1 |
+| C2 | No route **on a customer-reachable path** depends on a cookie-only session: no `createClient()`, and no `supabase.auth.updateUser` / `signOut` / `refreshSession` on the request client. Scope is `/api/account`, `/api/v1` **and `/api/booking`** | Seven routes do today, three silently (G27), **plus the three booking create routes** | **P0-12** |
 | C3 | The hub aggregate has a route, and the route is the source of truth | `src/app/account/page.tsx:69-75` fetches inline today | AD5, P1-1 |
 | C4 | A redirect is never the only success signal | `/auth/confirm:85,88,91` redirects on every path including failure; `POST /api/v1/auth/logout` returns 200 whether or not anything was revoked | P0-12, P3-4i |
 | C5 | Per-session enforcement is a route-level helper, never middleware | Middleware builds a cookie-only client (`src/middleware.ts:78-97`); the venue billing gate at `:175-178` is already bypassed by the staff app for exactly this reason | AD7, P3-4b |
-| C6 | Pagination bounds are query parameters on the route, not constants in the loader | Zero `/api/account/*` routes accept `limit`, `cursor`, `offset` or `page`; both bookings call sites hardcode 100 | P4-7 |
-| C7 | Every new `/api/account/*` route ships its `/api/v1/*` alias in the same commit | The v1 namespace is one-line re-exports and is the documented mobile surface | **P0-11** |
+| C6 | **The whole query contract lives on the route**, not only pagination: `model`, `when`, `limit`, `cursor`. Otherwise the app re-implements the classification rule P0-2 has just centralised | Zero `/api/account/*` routes accept any of them; both bookings call sites hardcode 100; `Resneo_User_Accounts_Reference.md` §11.4 already advertises this endpoint as "filterable", which is untrue | **P0-11** (moved from P4-7, because P1-3's redirect targets are named after these filters) |
+| C7 | Every `/api/account/*` route has a `/api/v1/*` alias, **and the alias is a re-export rather than a parallel implementation**. Applies to the existing surface, not only new routes | **Only 5 of 26 are aliased today**: `bookings`, `delete-request`, `devices`, `devices/[id]`, `profile`. All of Passes and plans is absent, and an app can start an account deletion but not cancel it. Three v1 routes are divergent duplicates rather than re-exports | **P0-11**, including a backfill of the other 21. The exclusion list starts **empty** |
 | C8 | The error contract is frozen: one 401 literal, a machine-readable `code` on every error, one success envelope | `'Unauthorised'` vs `'Unauthenticated'`; zero `code` fields; six different success shapes | **P0-11** |
-| C9 | Money routes return a `client_secret`, not a hosted-Checkout `url` | Three routes do; `memberships/checkout:89-90,113` returns `{url}` with an `/account/...` `success_url` | P0-11 |
+| C9 | Money routes return a `client_secret`, not a hosted-Checkout `url` | Three routes do; `memberships/checkout:89-90,113` returns `{url}` with a `success_url` of `/account/memberships?checkout=success`, which in an app webview with no cookie lands on `/login` and reads as a failed purchase | **P0-17**, its own task. This is a Stripe Billing rework (SetupIntent plus server-side subscription create), not a contract tweak, and it was previously unbudgeted |
 | C10 | The ISO instant ships in the payload, not only in web helpers | `account-bookings.ts:344-346` returns bare `booking_date` and `booking_time` strings with the zone delivered separately | **P0-2** |
 | C11 | `user_devices` carries an audience discriminator and `notification_preferences` is namespaced, before a second client writes to either | No such column; `sendStaffPush` selects every device for a `user_id`; one jsonb column holds two disjoint schemas | **P0-13** |
-| C12 | `/.well-known/apple-app-site-association` and `assetlinks.json` are served from this repo | `public/` has no `.well-known` directory | **P3-4i** |
+| C12 | `/.well-known/apple-app-site-association` and `assetlinks.json` are served from this repo **as route handlers, not static files** | `public/` has no `.well-known` directory. A static file would fail Apple anyway: the file has no extension so Next serves a generic content type, `next.config.ts` adds `nosniff`, and `src/middleware.ts:302-306` does not exclude `.well-known`, so auth resolution runs on every fetch | **P3-4i**, plus a middleware matcher exclusion |
+| C13 | The `/api/v1` response contract is **additive-only**: a field is never removed or retyped, removals require `/api/v2`, and no phase release changes a v1 response shape | `/api/v1` is a namespace with no stated rule about what may change inside it. P0-11 freezes shapes without saying what unfreezing costs | **P0-11** |
+| C14 | Clients send `X-ResNeo-Client: <platform>/<version>`, and the server can answer `426` with `code: CLIENT_TOO_OLD` | `user_devices.app_version` is collected (`devices/route.ts:12`) and read by nothing. A header cannot be retrofitted onto builds already in the store | **P0-11**, parsed in Phase 0 even though nothing enforces it yet |
+| C15 | Every POST that creates a Stripe object accepts and honours `Idempotency-Key` | `courses/checkout` builds one; **`credits/purchase` does not**, so a retried purchase on a flaky connection mints a second PaymentIntent | **P0-11**, and P2-1's three action routes |
+
+### 5D.1 Enforcement: how each constraint fails a build
+
+**Every enumeration below is derived from the filesystem, never hand-typed.** That is not a style preference. `src/lib/availability/schedule-fail-closed-coverage.test.ts:5-18` records four routes that reached a fail-open read and concludes that "every one of them was missed by an enumeration that had been typed by hand rather than derived", then reads route source from disk so the next one fails the file. `src/lib/communications/policies.defaults.test.ts:21-25` walks `supabase/migrations/` the same way. Those are the only two derived enumerations in the repository, and nothing walks the route tree.
+
+Everything here runs in jobs that already gate every PR: the `test` job runs `vitest run` unconditionally, and `rls-pgtap` is genuinely blocking. **Nothing below needs a secret**, which matters because the repo holds none.
+
+| Constraint | The check that actually fails | Lives in |
+| --- | --- | --- |
+| C1, C3 | Walk `src/app/account/**/page.tsx`. Fail on any `getSupabaseAdminClient(` or `supabase.from(` in a page file: every page must call a `src/lib/account/*` loader that a `route.ts` also calls | vitest, new `src/lib/account/portal-surface-coverage.test.ts` |
+| C2 | Walk `src/app/api/{account,v1,booking}/**/route.ts`. Fail on `createClient()`, or on `auth.updateUser` / `signOut` / `refreshSession` against the request client | vitest, plus raise the ESLint `no-restricted-syntax` selector from `warn` to `error` (today it is `warn` and `npm run lint` has no `--max-warnings 0`, so it cannot fail anything) |
+| C6 | Route test asserting `?model`, `?when`, `?limit`, `?cursor` are honoured; filesystem test that no `/api/account` handler passes a numeric literal as a loader `limit` | vitest route test |
+| C7 | For every `src/app/api/account/**/route.ts`, assert a matching v1 file exists **and its source is a re-export**. Exclusion list starts empty; the three known divergent duplicates go on a named allowlist with a convergence task | vitest |
+| C8, AD7 default-deny | Import every handler, call with no auth, assert 401, the single error literal, and a `code` from the shared union. Same enumeration asserts every route appears in `src/lib/auth/portal-session-policy.ts`, so a route added later fails until someone classifies it | vitest route test |
+| C9 | Grep test: no handler under `src/app/api/account/` returns a Stripe `session.url` | vitest |
+| C10 | One shared zod schema for the booking payload, asserted to contain `starts_at` and `time_zone`, used by both the route and its test | vitest |
+| C11 | `user_devices` has the audience column, `NOT NULL` with a CHECK and a default that is not silently `staff`; a customer profile PATCH cannot write into the `staff` namespace | pgTAP |
+| C12 | Fetch `/.well-known/apple-app-site-association`; assert 200, `content-type: application/json`, no redirect | vitest route test |
+| C13 | Snapshot every `/api/v1/*` response shape. A removed or retyped field fails; an added one does not | vitest |
+| C14, C15 | Route test: a request with no `X-ResNeo-Client` still succeeds; a repeated `Idempotency-Key` on each money route returns the first outcome rather than creating a second Stripe object | vitest route test |
+| AD8 view | Already correctly specified as pgTAP, and it is the one constraint in this plan that already has teeth today | pgTAP, `rls-pgtap` |
+
+Building this matrix is **P0-11c** and it is the single highest-leverage task for the app roadmap. Without it, §5D is a table of good intentions with the same life expectancy as the security document this project spent a week correcting.
 
 **The single most consequential item is C5 plus P3-4i.** AD7 is being built regardless; adding the JSON token exchange, the OTP surfacing and the Bearer-reachable `claim_user_account()` at that moment is cheap, and it means the app's first-entry story is settled by the same design that settles the web's. Building AD7 cookie-only and revisiting it in Phase 5 means designing first entry twice.
 
 **Open questions this repository cannot answer.** The `reserveni-app` repository is not present here, so the app's actual header, error and pagination expectations are inferred from `Docs/MOBILE_API.md` and from the payload comment at `src/lib/communications/staff-push-notification.ts:7-8`. Reading that repository would settle them. Whether the access token carries `session_id`, and whether `reserveniapp://callback` is actually registered in the Supabase Redirect URLs allowlist, are both project state that only the dashboard settles.
+
+---
+
+## 5E. Kickoff
+
+The sections above say what to build. This one says what to do on Monday.
+
+### 5E.1 Order of attack
+
+Do pre-flight §0A first. Then:
+
+| # | Task | Why here |
+| --- | --- | --- |
+| 1 | **P0-1a** (helper and fixture only, not the route tests) | Nothing in this plan can be *verified* until it exists. It gates P0-9 and therefore the critical path, gates P0-8's axe pass, and is the only regression net for P0-6 |
+| 2 | **P0-6 migration alone**, no code readers | Highest fan-out blocker, and as a database object with no readers it is verifiable in isolation. Its worst failure mode, a view with no `authenticated` grant, empties every portal silently. Find that in week 1, not week 6 |
+| 3 | **P0-0** recording test double | Blocks P0-3, P0-9, P0-11 and P1-1, and every one of them would otherwise hand-roll its own |
+| 4 | **P0-12** | Closes a live defect: account deletion leaves a working token and the documented mobile logout revokes nothing. Half a week, verified by cookie-free curl, and nothing depends on it, which is exactly why it gets done while that cluster is empty |
+| 5 | **P0-16** | One file, one optional prop, no caller changes. Two hours removes a blocking edge for all of Phase 2 |
+| 6 | **P0-9** | Longest lead time on the critical path. Starts the day fixtures land and does not yield the engineer to anything else |
+| 7 | **P0-10** | Small effort, but its value is elapsed production time. The pre-release baseline is unobtainable once Phase 1 ships |
+| 8 | **P0-11** | Must precede P0-1c's route tests and every route Phases 1 and 2 add. Sequenced after them, it invalidates them |
+| 9 | **P0-6 code switch, then P0-3, then P0-2** | One owner, one file, that order: the view before the batching before the instants |
+
+Then P0-4 once P0-9 is green, P0-13 into P0-14, P0-17, and the client-component cluster (P0-7, P0-8, P0-5, P0-15) last, with P0-1c against the frozen contract.
+
+### 5E.2 The four file clusters, one owner each
+
+Nine Phase 0 tasks land in six files. Assign by cluster, not by task.
+
+| Cluster | Files | Tasks |
+| --- | --- | --- |
+| **A. Booking loaders** | `src/lib/account/account-bookings.ts`, `account-booking-filters.ts` and the five surfaces riding them | P0-2, P0-3, P0-6, later P1-1 and P4-7 |
+| **B. Guest actions** | `/api/confirm` (2,050 lines), `src/lib/booking/guest-actions/`, `/api/v1/me/bookings/[id]` | P0-9, P0-4 |
+| **C. Client components** | the five in `src/components/account/` plus `profile/ProfileClient.tsx` | P0-2's tz select, P0-5, P0-7, P0-8, P0-14's copy, P0-15, later P1-4, P1-5, P2-6 |
+| **D. Route handlers** | ~30 under `/api/account/*` and `/api/v1/*` | P0-11, P0-12, P0-13's PATCH, P0-17, P0-1c |
+
+Two handovers to make explicit: `/api/v1/me/bookings/[id]` passes from cluster A to cluster B when P0-4 starts, and the bookings list route passes from A to D when P0-11 lands.
+
+**Cluster C is the argument for a fourth engineer.** It is three to four and a half person-weeks and it is entirely serial (P0-7 then P0-8 then P0-5). With three engineers it does not start until week 4 and lands in the phase's tail.
+
+### 5E.3 Deploy rounds
+
+§5A's ritual is per round, not per phase. Phase 0 carries four migrations and needs **five rounds**.
+
+| Round | Contents | Why it cannot merge with its neighbour |
+| --- | --- | --- |
+| **R1** | Migrations only: `bookings_account_safe`, `portal_events`, `user_devices.audience`. No code readers | All three are additive creates and travel safely together. Kept free of code so the riskiest object is proven on production before anything reads it |
+| **R2** | Code only: the P0-6 loader switch, P0-3, P0-2, P0-12, P0-16, P0-15, P0-9, P0-1a, the `portal_events` emitters (fail-soft) and prune cron, the `user_devices` audience writer, and **tolerant `notification_preferences` readers and writers** | Depends on R1 being on production. The tolerant readers must be live before R3 |
+| **R3** | Migration only: the `notification_preferences` namespace and backfill, after the dry-run diff over real staging rows | The one true seam. It cannot travel with its code in either direction |
+| **R4** | Code only: narrow `PATCH /api/account/profile` to the customer namespace, P0-14, P0-11, P0-17, P0-1c | Reads and writes a shape that exists only after R3 |
+| **R5** | Cluster C: P0-7, P0-8, P0-5 | No migration. Split from R4 so the contract freeze is not held behind an axe pass and a new CI job |
+
+**§5A's "every phase is revertible as a single merge" is false for Phase 0, and this is the exception.** The `notification_preferences` namespace breaks in **both** directions: a flat reader against a namespaced blob reads every staff preference as default, and a namespaced reader against a flat blob does the same. `parseStaffNotificationPrefs` is handed the whole column (`staff-push-notification.ts:193`), so this is not theoretical. The only safe order is tolerant code, then migration, then narrowed writer.
+
+Put in the release notes: **from R3 onward, R2's tolerant readers must not be reverted**, and R3 has no revert at all because the jsonb is rewritten in place. Reverting R4 alone restores the wholesale profile PATCH, which will flatten a namespaced blob and destroy a dual-role user's staff push settings on their next profile save. Phases 1 to 4 keep the phase-atomicity rule; Phase 0 does not, on §5A's own grounds that it is behaviour-preserving.
+
+### 5E.4 First PR of each phase
+
+- **Phase 0:** P0-16, the `ConfirmDialog` body slot. One file, no callers change, and it unblocks Phase 2.
+- **Phase 1:** lift the `credits`, `memberships` and `loadVenueMap` logic into `src/lib/account/`. A pure refactor with no behaviour change, and P1-1 cannot start without it. **P1-1's own text concedes this and no earlier draft budgeted it**, which is part of why Phase 1's two weeks looks thin.
+- **Phase 2:** AD9 step (a), extracting the presentational component and DTO mounted only at `/manage`. Behaviour-preserving on a surface that already exists; the portal mount is PR 2.
+- **Phase 3:** P3-4d's redirect target alone, with no token. One builder plus five call sites, degrades safely, and the plan already says it can ship with Phase 1.
+- **Phase 4:** P4-6, card removal plus the Stripe-id removal. Self-contained, closes two gaps.
+- **Phase 5:** one missing route per PR, the events hub first.
 
 ---
 
@@ -1305,15 +1501,23 @@ Two changes sit outside the migrations and outside application code entirely, an
 
 | Phase | Content | Estimate |
 | --- | --- | --- |
-| 0 | Foundations: tests, timezone and status, N+1, action extraction, loading and error states, account-safe view, characterisation tests, metrics sink, design-system migration, accessibility remediation, **API contract freeze, cookie-only auth purge, device and preference schema, live notification toggles, deep-link checkout fix, ConfirmDialog body** | 6 to 7 weeks |
+| 0 | Foundations: **test double and harness**, tests, timezone and status, N+1, action extraction, loading and error states, account-safe view, characterisation tests, metrics sink, design-system migration, accessibility remediation, API contract freeze **including the v1 backfill and the enforcement matrix**, cookie-only auth purge, device and preference schema, live notification toggles, deep-link checkout fix, ConfirmDialog body, **membership checkout rework** | **16 to 22 person-weeks.** 6.5 to 7.5 weeks at four engineers; **8 to 9 at three**; 9 to 12 at one |
 | 1 | Hub, navigation, IA dedup, passes and plans consolidation, copy pass | 2 weeks |
 | 2 | In-portal cancel, reschedule, confirm, **detail extraction (AD9)**, confirmation dialogs, capacity guard, bundle fix | 2.5 to 3 weeks |
 | 3 | One-click entry (P3-4), **native session establishment (P3-4i)**, rebook, venue history, discovery | 2.5 to 3 weeks |
 | 4 | Forms, receipts, notification matrix, waitlist, export, card removal, pagination, email branding, deletion obligations, retention | 3 weeks |
-| **Total (web, world-class)** | | **16 to 18 weeks** |
+| **Total (web, world-class)** | | **19 to 23 weeks at three engineers**, and Phase 3 is unpriced until §0A F3 is answered |
 | 5 | Mobile enablement (ResNeo side only) | 1.5 weeks |
 
 Phase 0 is non-negotiable and must ship before Phase 1, and **P0-6 must ship before Phase 2 under any scope reduction**. Phases 3 and 4 can be reordered against commercial priority. A credible reduced scope is Phases 0 to 2, which delivers a portal that is genuinely useful, at 10.5 to 12 weeks.
+
+**Phase 0's duration is set by one chain that cannot be parallelised.** `P0-1a → P0-9 → P0-4` is four to six and a half weeks of strictly serial work: fixtures gate the characterisation suite, the suite must be green on HEAD before the first refactor commit, and P0-4's acceptance is a byte-identical re-run that cannot be split or overlapped. That chain consumes 65 to 90 percent of the phase, so **a slip there cannot be recovered by adding people.** Everything else has slack.
+
+**The three most likely to blow out**, unchanged in identity from the previous review but now better understood:
+
+1. **P0-4 with P0-9.** A 1,670-line handler with 44 JSON returns in POST, ten distinct success shapes, five `after()` sites and twelve dynamic imports, refactored against a suite that must be built first, for a route with **zero existing tests** and two e2e specs that are currently red (§0A F1). If the characterisation suite proves expensive, the pressure will be to refactor without it, which is precisely the failure this plan exists to prevent.
+2. **The P0-7 → P0-8 → P1-5 → P1-3 chain.** A large mechanical migration, blocking a second large task, blocking all of Phase 1, in the most contended file cluster. Its acceptance criteria were previously unfalsifiable, which is why it looked cheap.
+3. **P3-4.** Gated on an unverified platform fact and two unowned project settings, with a descoped fallback that changes the cost by an order of magnitude, plus identifiers from a repository not in this checkout. Highest variance in the plan: three days or three weeks, and nobody can say which until §0A F3 is done.
 
 **On the estimate increase, from 13 to 14.5 weeks to 16 to 18.** Phase 0 grew again, and for the same reason it grew before: this review found more things the previous version assumed were in acceptable shape. Six are new tasks rather than re-scoping:
 
@@ -1394,3 +1598,16 @@ And the team can change the portal safely, because:
 | | **(12) Corrections of fact throughout**, including: `/api/confirm` is 2,050 lines with a 1,670-line POST, not 1,770 and 1,400; there are 265 migrations, not 251; thirteen portal routes, not eleven; six WCAG failures, two at Level A, not two; ten copy leaks, not three; thirteen unbranded emails, not two; `events` is no longer append-only by trigger; `visit_count` is dead and `total_spent_minor` counts deposits only; `booking_payments` has no terminal id and no card brand; `GET /api/account/payment-methods` does not require `venue_id` and leaks two Stripe ids; the appointment reschedule pattern in `ManageBookingView` is not the availability call earlier drafts pointed at; the account callout is already in the main reminder; `renderBaseTemplate` is not what the booking confirmation uses; middleware does match `/api/account` but cannot see a Bearer user; P4-6's card-hold blocking requirement is unbuildable because holds use a dedicated booking-scoped Stripe customer, and the matching §8 risk row is removed. |
 | | **(13) §5A now describes the project's actual deploy ritual**, including the production `db push` before the merge to `main` and the hosted-grants verification that migrations do not reproduce, and states plainly that reverting a merge does not unapply a migration. |
 | | **(14) §10 item 16 no longer claims two independent controls.** Total 13 to 14.5 weeks becomes **16 to 18**, with the reasons itemised in §9. |
+| **2026-08-26 (second pass)** | **Implementation-readiness review.** The facts were re-confirmed unchanged at `e55554cc`; this pass asked whether the plan is *executable*, and found it was a design document rather than a work document. Changes: |
+| | **(1) A live regression, not a planning gap.** `e2e/helpers/manage-link.ts` mints the legacy expiry-less HMAC, which `verifyBookingHmac` has rejected since 2026-08-01. **Two of the four e2e specs have been red for over three weeks**, invisible because the CI job is gated off. P0-4's acceptance rests on them. Now §0A F1, a pre-flight task. |
+| | **(2) New §0A pre-flight.** Seven items with no owner that block or invalidate scheduled work, including making the e2e job runnable at all and decoding a token to settle `session_id`, which swings Phase 3 by roughly two weeks. |
+| | **(3) AD1 contradicted AD8 at the seam.** The service took `admin` alone while also requiring an account-safe read on the session client, which nothing in the signature could enforce. It now takes both clients and does the ownership read itself. |
+| | **(4) AD7 had a hole: a limited session self-upgrades to full.** With `expires_at` checked as part of the lookup, a limited session becomes full by waiting, its holder having proved nothing; with a refresh token it lives indefinitely on a phone with a stable `session_id`. The table is now a denylist whose absence never means full, row expiry revokes the session rather than releasing the constraint, and the limited exchange issues no refresh token. Step-up also gained an app-shaped contract, since a native client cannot follow a redirect into a browser form, and it now revokes the old session, which earlier drafts said was unnecessary. |
+| | **(5) A cycle in Phase 2.** AD9 made P2-2's acceptance depend on P2-4 while the graph listed them as siblings. P2-4 now lands first as a pure extraction with the action bar taking handlers as props. |
+| | **(6) §5D was a table with no teeth.** New §5D.1 gives every constraint a check that fails a build, all derived from the filesystem rather than hand-typed, following `schedule-fail-closed-coverage.test.ts:5-18`, which records four routes missed by exactly that mistake. Building it is P0-11c. |
+| | **(7) The mobile gap was larger than stated.** Only **5 of 26** account routes have a v1 alias, so all of Passes and plans is unreachable from the documented mobile surface and an app can start an account deletion but not cancel it. C7 now covers a backfill with an empty exclusion list. The three public booking create routes are also cookie-only, so a Bearer app cannot book at a venue with account-login on. `reserveniapp://callback` is registered in Supabase but unreachable from ResNeo code, which §5D previously listed under "already true". Added C13 to C15 (versioning policy, client-version header, idempotency). |
+| | **(8) Roughly a third of acceptance criteria could not fail** and are replaced with checks, including "no visual regression beyond primitive defaults", "parity guaranteed by shared code rather than asserted" and "asserted by review of every server component". P2-3a's race test was unrunnable with any harness in the repo and is re-specified. |
+| | **(9) New tasks:** P0-0 (a Supabase double that both records and writes; neither existing fake does both) and P0-17 (membership checkout is a Stripe Billing rework, previously folded into P0-11 and unbudgeted). P0-1 split into four. P0-9 gained a 41-row matrix and an operational definition of "byte-identical". P0-6 gained the `auth.users` pgTAP fixture nobody has ever written here, plus `scripts/check-table-grants.mjs`, which does not exist. |
+| | **(10) New §5E kickoff:** ordered first tasks, four file clusters with one owner each, five deploy rounds, and the first PR of every phase. **§5A's phase-atomicity rule is now explicitly exempted for Phase 0**, because the `notification_preferences` namespace breaks in both directions and needs tolerant code, then migration, then narrowed writer. |
+| | **(11) Estimate corrected to 19 to 23 weeks at three engineers.** Phase 0 is 16 to 22 person-weeks, and its `P0-1a → P0-9 → P0-4` chain is 4 to 6.5 weeks of serial work that adding people cannot shorten. Two stated dependencies were removed as unreal, and P0-5 and P0-8 rescoped from thirteen routes to the five that survive P1-3. |
+

@@ -16,12 +16,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * The verify path needs a client that fails cleanly, so tests asserting a link is *not*
  * handed to the app still exercise the fall-through instead of throwing on an undefined stub.
  */
+const stub = vi.hoisted(() => ({
+  verifyError: { message: 'Token has expired' } as { message: string } | null,
+  destination: '/dashboard',
+}));
+
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(async () => ({
-    auth: { verifyOtp: vi.fn(async () => ({ error: { message: 'Token has expired' } })) },
+    auth: {
+      verifyOtp: vi.fn(async () => ({ error: stub.verifyError })),
+      getUser: vi.fn(async () => ({
+        data: { user: { id: 'user-1', email: 'a@b.test', user_metadata: {} } },
+      })),
+    },
+    rpc: vi.fn(async () => ({ error: null })),
   })),
 }));
-vi.mock('@/lib/supabase', () => ({ getSupabaseAdminClient: vi.fn() }));
+vi.mock('@/lib/supabase', () => ({ getSupabaseAdminClient: vi.fn(() => ({})) }));
+vi.mock('@/lib/post-login-destination', () => ({
+  resolvePostLoginDestination: vi.fn(async () => stub.destination),
+  withSetPasswordGateIfNeeded: vi.fn((d: string) => d),
+}));
 
 import { createClient } from '@/lib/supabase/server';
 import { GET } from './route';
@@ -44,6 +59,25 @@ async function locationOf(query: string): Promise<URL> {
 describe('GET /auth/confirm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    stub.verifyError = { message: 'Token has expired' };
+    stub.destination = '/dashboard';
+  });
+
+  it('sends a verified recovery link to set-password, not to the dashboard', async () => {
+    // A reset link that signs the user in and drops them on their dashboard has silently
+    // skipped the password change they asked for. Neither resolvePostLoginDestination (which
+    // does not honour a set-password `next`) nor the has_set_password gate (which never fires
+    // for someone who already has a password) covers this, so the route forces it.
+    stub.verifyError = null;
+    const url = await locationOf('?token_hash=abcdef123456&type=recovery');
+    expect(url.pathname).toBe('/auth/set-password');
+    expect(url.searchParams.get('next')).toBe('/dashboard');
+  });
+
+  it('leaves a verified magic link on its resolved destination', async () => {
+    stub.verifyError = null;
+    const url = await locationOf('?token_hash=abcdef123456&type=magiclink');
+    expect(url.pathname).toBe('/dashboard');
   });
 
   it('forwards a PKCE code to /auth/callback, preserving it and next', async () => {

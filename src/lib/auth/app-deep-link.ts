@@ -65,8 +65,11 @@ function escapeHtml(value: string): string {
  *    the DOM instead of having it interpolated in, so nothing attacker-influencable is ever
  *    serialised into a script context.
  *
- * Self-contained: no external requests, and no-referrer so the single-use token in this
- * URL is never sent to another origin.
+ * No third-party requests, and no-referrer so the single-use token in this URL is never
+ * sent to another origin. The brand mark is the site's own /apple-icon.png (generated from
+ * public/Logo.png by scripts/generate-resneo-favicon.mjs): same origin as this page, so it
+ * needs no inlining, and its alt is empty so a miss degrades to nothing rather than to a
+ * broken-image glyph next to a security-sensitive prompt.
  */
 export function renderAppHandoffPage(deepLink: string, signInUrl: string): string {
   const href = escapeHtml(deepLink);
@@ -85,10 +88,7 @@ export function renderAppHandoffPage(deepLink: string, signInUrl: string): strin
        padding:1.5rem;background:#f6f8fb;color:#0f172a;
        font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
   main{width:100%;max-width:20rem;text-align:center}
-  .mark{width:2.75rem;height:2.75rem;margin:0 auto 1.25rem;border-radius:.875rem;
-        background:#003B6F;position:relative}
-  .mark::after{content:"";position:absolute;left:50%;top:50%;width:.9rem;height:.9rem;
-               margin:-.45rem 0 0 -.45rem;border-radius:50%;background:#00C2C7}
+  .mark{display:block;width:3.5rem;height:3.5rem;margin:0 auto 1.25rem}
   h1{margin:0 0 .5rem;font-size:1.125rem;font-weight:600;color:#003B6F}
   p{margin:0 0 1.5rem;color:#5b6b7f;font-size:.9375rem}
   .btn{display:block;padding:.875rem 1.25rem;border-radius:.75rem;background:#003B6F;
@@ -98,7 +98,7 @@ export function renderAppHandoffPage(deepLink: string, signInUrl: string): strin
 </head>
 <body>
 <main>
-  <div class="mark"></div>
+  <img class="mark" src="/apple-icon.png" alt="" width="56" height="56">
   <h1>Opening the ResNeo app</h1>
   <p>If it does not open on its own, tap below.</p>
   <a id="app-link" class="btn" href="${href}">Open the ResNeo app</a>

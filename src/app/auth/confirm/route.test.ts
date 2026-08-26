@@ -129,11 +129,16 @@ describe('GET /auth/confirm', () => {
     expect(res.headers.get('referrer-policy')).toBe('no-referrer');
   });
 
-  it('carries the recovery type through, so the app asks for a new password', async () => {
-    const res = await GET(
-      get('?token_hash=TH-2&type=recovery&redirect_to=resneo%3A%2F%2Fcallback'),
+  it('completes an app-requested recovery on the web, never in the app', async () => {
+    // Shipped 1.0.7 loses a race on recovery deep links (session creation unmounts the
+    // callback screen before it can route to set-password), leaving the user signed in
+    // with their password unchanged. The web flow works for every app version, so
+    // recovery is excluded from the hand-off even when redirect_to is the app.
+    stub.verifyError = null;
+    const url = await locationOf(
+      '?token_hash=abcdef123456&type=recovery&redirect_to=resneo%3A%2F%2Fcallback',
     );
-    expect(await res.text()).toContain('type=recovery');
+    expect(url.pathname).toBe('/auth/set-password');
   });
 
   it('never bounces to a scheme other than the app', async () => {

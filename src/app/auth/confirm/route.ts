@@ -65,7 +65,15 @@ export async function GET(request: Request) {
   // Hand off to the mobile app before verifying anything: the token is single-use, and the
   // app has to be the one to spend it. Verifying here would consume the link and leave the
   // app with nothing. Only the app's own scheme is ever bounced to.
-  if (tokenHash && type && isAppDeepLink(redirectToParam)) {
+  //
+  // Recovery links are the exception: they complete on the web even when the app requested
+  // them. App build 1.0.7's callback screen loses a race on recovery links: creating the
+  // session unmounts the (auth) group mid-exchange, its cleanup flips the screen's `active`
+  // flag, and the routing to set-password is skipped, so the user is signed in with their
+  // password unchanged. That build cannot be fixed from here, and this route cannot know
+  // the tapping user's app version, so recovery goes through the web verify below, which
+  // forces /auth/set-password. Revisit once builds at or below 1.0.7 no longer matter.
+  if (tokenHash && type && type !== 'recovery' && isAppDeepLink(redirectToParam)) {
     const deepLink = buildAppCallbackUrl(tokenHash, type);
     if (deepLink) {
       return new NextResponse(renderAppHandoffPage(deepLink, `${base}/login`), {

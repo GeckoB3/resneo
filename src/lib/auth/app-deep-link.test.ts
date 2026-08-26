@@ -99,6 +99,11 @@ describe('renderAppHandoffPage', () => {
     expect(visible).not.toContain('SECRET123');
   });
 
+  it('shows the real brand mark, not a placeholder', () => {
+    const html = renderAppHandoffPage('resneo://callback?token_hash=x&type=magiclink', 'https://example.test/login');
+    expect(html).toContain('src="/apple-icon.png"');
+  });
+
   it('keeps the token out of any other origin', () => {
     const html = renderAppHandoffPage('resneo://callback?token_hash=x&type=magiclink', 'https://example.test/login');
     expect(html).toContain('name="referrer" content="no-referrer"');

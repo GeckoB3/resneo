@@ -7,6 +7,7 @@ import { sanitizeAuthNextPath, resolveAuthNextPath } from '@/lib/safe-auth-redir
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { resolvePostLoginDestination, withSetPasswordGateIfNeeded } from '@/lib/post-login-destination';
 import { readSignupPendingFromMetadata } from '@/lib/signup-pending-selection';
+import { buildAppCallbackUrl, isAppDeepLink, renderAppHandoffPage } from '@/lib/auth/app-deep-link';
 
 function getBaseUrl(requestUrl: string): string {
   if (process.env.NEXT_PUBLIC_BASE_URL) return normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
@@ -36,7 +37,23 @@ export async function GET(request: Request) {
     | 'recovery'
     | 'email_change'
     | null;
-  const rawNext = searchParams.get('next');
+  const redirectToParam = searchParams.get('redirect_to');
+
+  // The email templates pass the caller's redirect as `&redirect_to=`, because a template
+  // cannot put a custom scheme in an href (see lib/auth/app-deep-link.ts) and because
+  // appending `?token_hash=` to a redirect that already carries a query string produces a
+  // second `?`, which silently swallows the token into the preceding parameter.
+  // For web callers that redirect still carries the `next` we care about, so read it out.
+  let nextFromRedirect: string | null = null;
+  if (redirectToParam && !isAppDeepLink(redirectToParam)) {
+    try {
+      nextFromRedirect = new URL(redirectToParam).searchParams.get('next');
+    } catch {
+      nextFromRedirect = null;
+    }
+  }
+
+  const rawNext = searchParams.get('next') ?? nextFromRedirect;
   const fallbackNext =
     rawNext != null && rawNext !== ''
       ? resolveAuthNextPath(rawNext)
@@ -44,6 +61,24 @@ export async function GET(request: Request) {
         ? SET_PASSWORD_PATH
         : sanitizeAuthNextPath(null);
   const base = getBaseUrl(request.url);
+
+  // Hand off to the mobile app before verifying anything: the token is single-use, and the
+  // app has to be the one to spend it. Verifying here would consume the link and leave the
+  // app with nothing. Only the app's own scheme is ever bounced to.
+  if (tokenHash && type && isAppDeepLink(redirectToParam)) {
+    const deepLink = buildAppCallbackUrl(tokenHash, type);
+    if (deepLink) {
+      return new NextResponse(renderAppHandoffPage(deepLink, `${base}/login`), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          // The URL holds a single-use credential: never cached, never sent onward.
+          'Cache-Control': 'no-store, max-age=0',
+          'Referrer-Policy': 'no-referrer',
+        },
+      });
+    }
+  }
 
   if (tokenHash && type) {
     const supabase = await createClient();

@@ -369,7 +369,7 @@ Every gap has at least one task that closes it, and every Remediation Register f
 | G22 Locale written, never read | Q-16 | P1-4 | 1 |
 | G23 Free-text timezone crashes four routes | C-03 | **P0-2** **(done 2026-08-27)** | 0 |
 | G24 Network failure looks like empty | C-04 | P0-5 | 0 |
-| G25 Deep-link checkout can charge the wrong plan | C-08 | **P0-15 (new)** | 0 |
+| G25 Deep-link checkout can charge the wrong plan | C-08 | **P0-15 (new)** **(done 2026-08-27)** | 0 |
 | G26 No cache headers on 26 routes | Q-18 | **P0-11** | 0 |
 | G27 Seven auth routes broken for non-cookie clients | | **P0-12 (new)** | 0 |
 | G28 Reschedule has no capacity guard | Q-24 | **P2-3a (new)** | 2 |
@@ -898,7 +898,7 @@ The profile UI promises "Operational emails: booking confirmations and reminders
 - Wire the first reader: `marketing_email` into the marketing send path (which already has a per-guest `marketing_opt_out` check at `src/lib/communications/index.ts:29-37` to sit beside), and `operational_email` into the platform-originated transactional path, with security notices explicitly exempt and the copy corrected to say so.
 - **Acceptance:** a customer with `operational_email: false` receives no ResNeo-originated operational email and still receives security notices; asserted by a sender test. The copy in `ProfileClient.tsx:315-317` matches the behaviour exactly.
 
-**P0-15. Fix deep-link checkout venue and plan resolution** (new; closes G25)
+**P0-15. Fix deep-link checkout venue and plan resolution** (new; closes G25) *(DONE 2026-08-27. The mis-charge was reproduced first: with the deep-link target placed SECOND in the fixture catalogue, all four deep-link paths posted `venue_id: 'venue-first'`. `startCheckout`, `enrollFree` and `startPaidCheckout` now take an explicit venue and product, defaulting to the form state so the buttons are unchanged, and both checkout functions refuse a product that is not at the given venue rather than charging the wrong Stripe Connect account. `AccountCreditsSection` was checked and needed nothing: its `startPurchase` already takes both as required arguments. 8 component tests in `src/components/account/deep-link-checkout.test.tsx`, four of which fail against the previous code.)*
 
 - `startCheckout()` in `AccountMembershipsSection` and `AccountCoursesSection` takes no arguments, reads state the same render pass is still setting, and falls back to the first catalog entry. Pass the venue and product explicitly, as the credits section already does with `startPurchase(deepLinkVenueId, deepLinkProductId)`.
 - Reproduce the mis-charge first, so the fix is verified against a demonstrated failure rather than a mechanism.

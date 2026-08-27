@@ -109,8 +109,14 @@ export function AccountMembershipsSection() {
     }
   }, [deepLinkPlanId, purchaseCatalog.products]);
 
-  // Auto-start Stripe Checkout when arriving with ?venue=&plan=&autostart=1 —
-  // deferred so the setState cascade inside startCheckout runs after commit.
+  // Auto-start Stripe Checkout when arriving with ?venue=&plan=&autostart=1.
+  //
+  // The venue and plan are passed EXPLICITLY (P0-15, G25). They used not to be:
+  // startCheckout() took no arguments and read the two pieces of state that the
+  // preselect effects above set in this same commit, so the deferred call ran
+  // with the render's stale values and both fell through to their fallbacks.
+  // A customer following a link to one venue's plan was charged for a
+  // different venue's, on that venue's Stripe Connect account.
   useEffect(() => {
     if (autoStartedRef.current) return;
     if (!autostart || !deepLinkVenueId || !deepLinkPlanId) return;
@@ -121,22 +127,36 @@ export function AccountMembershipsSection() {
     }
     autoStartedRef.current = true;
     queueMicrotask(() => {
-      void startCheckout();
+      void startCheckout(deepLinkVenueId, deepLinkPlanId);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autostart, deepLinkVenueId, deepLinkPlanId, purchaseCatalog.products]);
 
-  async function startCheckout() {
+  /**
+   * Start checkout for an explicit venue and plan, defaulting to whatever the
+   * form is showing. The button passes nothing and gets the selects; the deep
+   * link passes what the URL asked for and does not depend on state that may
+   * not have committed yet.
+   */
+  async function startCheckout(venueIdArg?: string, productIdArg?: string) {
     setError(null);
     setMsg(null);
-    if (!resolvedCheckoutVenue || !effectiveCheckoutProduct) {
+    const venueId = venueIdArg || resolvedCheckoutVenue;
+    const productId = productIdArg || effectiveCheckoutProduct;
+    if (!venueId || !productId) {
       setError('Choose a venue and membership plan.');
+      return;
+    }
+    // A plan that is not on this venue would be charged on the wrong Stripe
+    // Connect account, which is the whole failure this guard exists for.
+    if (!purchaseCatalog.products.some((p) => p.id === productId && p.venue_id === venueId)) {
+      setError('That membership plan is not available at this venue.');
       return;
     }
     const res = await fetch('/api/account/memberships/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id: resolvedCheckoutVenue, product_id: effectiveCheckoutProduct }),
+      body: JSON.stringify({ venue_id: venueId, product_id: productId }),
     });
     const data = await res.json();
     if (!res.ok) {

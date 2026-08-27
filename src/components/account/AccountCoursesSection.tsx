@@ -188,17 +188,24 @@ export function AccountCoursesSection() {
   const effectiveProductIdPaid =
     productIdPaid && courseChoicesPaid.some((c) => c.id === productIdPaid) ? productIdPaid : firstPaidId;
 
-  async function enrollFree() {
+  /**
+   * Enroll in an explicit venue and free course, defaulting to whatever the
+   * form is showing. See the comment on the autostart effect for why the
+   * arguments exist (P0-15, G25).
+   */
+  async function enrollFree(venueIdArg?: string, productIdArg?: string) {
     setError(null);
     setMsg(null);
-    if (!resolvedVenueId || !effectiveProductIdFree) {
+    const venue_id = venueIdArg || resolvedVenueId;
+    const product_id = productIdArg || effectiveProductIdFree;
+    if (!venue_id || !product_id) {
       setError('Choose a venue and a free (£0) course package.');
       return;
     }
     const res = await fetch('/api/account/courses/enroll', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id: resolvedVenueId, product_id: effectiveProductIdFree }),
+      body: JSON.stringify({ venue_id, product_id }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -230,9 +237,14 @@ export function AccountCoursesSection() {
     void load();
   }
 
-  // Auto-start when arriving with ?venue=&course=&autostart=1 — deferred out of
-  // the effect body so the setState cascade inside enrollFree/startPaidCheckout
-  // runs after this render commits.
+  // Auto-start when arriving with ?venue=&course=&autostart=1.
+  //
+  // The venue and course are passed EXPLICITLY (P0-15, G25). They used not to
+  // be: enrollFree() and startPaidCheckout() took no arguments and read the
+  // state that the preselect effects above set in this same commit, so the
+  // deferred call ran with the render's stale values and both fell through to
+  // their fallbacks. A customer following a link to one venue's course was
+  // charged for a different venue's, on that venue's Stripe Connect account.
   useEffect(() => {
     if (autoStartedRef.current) return;
     if (!autostart || !deepLinkVenueId || !deepLinkCourseId) return;
@@ -243,26 +255,38 @@ export function AccountCoursesSection() {
     autoStartedRef.current = true;
     queueMicrotask(() => {
       if (course.price_pence === 0) {
-        void enrollFree();
+        void enrollFree(deepLinkVenueId, deepLinkCourseId);
       } else {
-        void startPaidCheckout();
+        void startPaidCheckout(deepLinkVenueId, deepLinkCourseId);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autostart, deepLinkVenueId, deepLinkCourseId, purchaseCatalog.courses]);
 
-  async function startPaidCheckout() {
+  /**
+   * Start payment for an explicit venue and paid course, defaulting to whatever
+   * the form is showing.
+   */
+  async function startPaidCheckout(venueIdArg?: string, productIdArg?: string) {
     setError(null);
     setMsg(null);
     setPaidCheckout(null);
-    if (!resolvedVenueId || !effectiveProductIdPaid) {
+    const venue_id = venueIdArg || resolvedVenueId;
+    const product_id = productIdArg || effectiveProductIdPaid;
+    if (!venue_id || !product_id) {
       setError('Choose a venue and a paid course.');
+      return;
+    }
+    // A course that is not at this venue would be charged on the wrong Stripe
+    // Connect account, which is the whole failure this guard exists for.
+    if (!purchaseCatalog.courses.some((c) => c.id === product_id && c.venue_id === venue_id)) {
+      setError('That course is not available at this venue.');
       return;
     }
     const res = await fetch('/api/account/courses/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id: resolvedVenueId, product_id: effectiveProductIdPaid }),
+      body: JSON.stringify({ venue_id, product_id }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -274,8 +298,8 @@ export function AccountCoursesSection() {
       return;
     }
     setPaidCheckout({
-      venue_id: resolvedVenueId,
-      product_id: effectiveProductIdPaid,
+      venue_id,
+      product_id,
       client_secret: data.client_secret,
       stripe_account_id: data.stripe_account_id,
       amount_pence: data.amount_pence ?? 0,

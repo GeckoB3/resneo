@@ -347,20 +347,20 @@ Every gap has at least one task that closes it, and every Remediation Register f
 | G4a Short-link collision 500s the list | C-01 | P0-3 **(done 2026-08-27)** | 0 |
 | G5 Timezone-incorrect filtering | C-12 | P0-2 **(done 2026-08-27)** | 0 |
 | G5a Status classification wrong three ways | C-11 | P0-2 **(done 2026-08-27)** | 0 |
-| G6 Near-zero test coverage | | P0-1, P0-9 | 0 |
+| G6 Near-zero test coverage | | P0-1 **(a, b, d done; c open)**, P0-9 **(done)** | 0 |
 | G7 Polish, loading, error, titles, false empty states | Q-09, Q-05, Q-02, Q-03 | P0-5, P0-8, P1-2 | 0, 1 |
 | G8 Held data never surfaced | | P3-2, P4-1, P4-2 | 3, 4 |
 | G8a Preparation instructions never reach the portal | C-10 | P2-4 | 2 |
-| G8b List cannot say what the appointment is | C-09 | **P0-6** (view columns), P1-2, P2-4 | 0 |
+| G8b List cannot say what the appointment is | C-09 | **P0-6** (view columns) **(done 2026-08-27)**, P1-2, P2-4 | 0 |
 | G9 Preferences email-only | | P4-3 | 4 |
 | G10 No customer push | | P5-2 | 5 |
 | G11 Two emails and three clicks to enter | | P3-4a to P3-4h | 3 |
 | G11c Unrate-limited send endpoint | | **P3-4f, shipped** | Done |
-| G12 No database-side control on booking reads | | **P0-6 (blocks Phase 2)** | 0 |
+| G12 No database-side control on booking reads | | **P0-6 (blocks Phase 2)** **(done 2026-08-27)** | 0 |
 | G13 Inconsistent or absent confirmation | C-05, Q-10 | P2-6 | 2 |
 | G14 Saved cards cannot be removed | Q-11 | P4-6 | 4 |
-| G15 No design-system adoption | Q-10 | P0-7 | 0 |
-| G16 Six WCAG failures, two Level A | Q-02, Q-03, Q-06, Q-07, Q-08 | P0-8 | 0 |
+| G15 No design-system adoption | Q-10 | P0-7 **(done 2026-08-27; SectionCard declined, see the task)** | 0 |
+| G16 Six WCAG failures, two Level A | Q-02, Q-03, Q-06, Q-07, Q-08 | P0-8 **(done 2026-08-27)** | 0 |
 | G17 History truncates silently at 100 | C-06 | P4-7 | 4 |
 | G18 Three navigation systems | Q-23 | P1-3, P1-5 | 1 |
 | G19 Stripe jargon in consumer copy | Q-15 | P1-4 | 1 |
@@ -370,11 +370,11 @@ Every gap has at least one task that closes it, and every Remediation Register f
 | G23 Free-text timezone crashes four routes | C-03 | **P0-2** **(done 2026-08-27)** | 0 |
 | G24 Network failure looks like empty | C-04 | P0-5 | 0 |
 | G25 Deep-link checkout can charge the wrong plan | C-08 | **P0-15 (new)** **(done 2026-08-27)** | 0 |
-| G26 No cache headers on 26 routes | Q-18 | **P0-11** | 0 |
-| G27 Seven auth routes broken for non-cookie clients | | **P0-12 (new)** | 0 |
+| G26 No cache headers on 26 routes | Q-18 | **P0-11** **(done 2026-08-27, in middleware)** | 0 |
+| G27 Seven auth routes broken for non-cookie clients | | **P0-12 (new)** **(done 2026-08-27)** | 0 |
 | G28 Reschedule has no capacity guard | Q-24 | **P2-3a (new)** | 2 |
 | G29 Stripe ids in the payment-methods response | | P4-6 | 4 |
-| G30 No in-flight guard on eight handlers | Q-25 | P0-7 | 0 |
+| G30 No in-flight guard on eight handlers **(nine, not eight)** | Q-25 | P0-7 **(done 2026-08-27)** | 0 |
 | G31 Live obligations survive account deletion | Q-13 | **P4-9 (new)** | 4 |
 | Baseline metrics have nowhere to be written | | P0-10 | 0 |
 | Bundle: emailed cancel link statically imports 5,068-line flow | Q-01 | **P2-5a (new)** | 2 |
@@ -731,7 +731,7 @@ P4-3  (preference matrix)      ──> P5-2 (customer push)
 
 ### Phase 0: Foundations (must precede all UI work)
 
-**P0-0. A Supabase test double that both records and writes** (new; blocks P0-3, P0-9, P0-11, P1-1)
+**P0-0. A Supabase test double that both records and writes** (new; blocks P0-3, P0-9, P0-11, P1-1) *(DONE 2026-08-27: `src/lib/testing/recording-supabase.ts`. `makeRecordingDb(responder)` records every call as `{table, op, payload, columns, filters}`, accepts writes, injects `23505`/`23P01`/`PGRST116` per call, and exposes `queryCount()`. `makeAfterStub()` RUNS its callback, which is the whole reason it exists: the precedent suite mocks `after` with a bare `vi.fn()` and silently swallows every deferred email. Everything since has used it: P0-3's query-count assertion, all 41 P0-9 rows, P0-11, P0-13 and P0-17.)*
 
 Four tasks assert on query counts or on writes, and **no existing double supports either**. `src/lib/testing/supabase-fake.ts` applies real filters and records `calls`, but is read-only: no `insert`, `update`, `delete`, `rpc`, `auth`, `range()` or joins. `src/lib/compliance/test-utils/fake-supabase.ts` writes state but has no call log. Every complex route test in the repo hand-rolls its own recorder.
 
@@ -1732,6 +1732,9 @@ And the team can change the portal safely, because:
 | 2026-08-09 | **Rollout flags removed at the product owner's direction.** §5A no longer proposes `customer_portal_v2` or `portal_one_click_entry`. |
 | 2026-08-09 | Added P0-9 (characterisation tests) and P0-10 (a metrics sink). Reclassified G11d as a project configuration decision. Added venue scope to P4-6. Phase 0 3 to 3.5 weeks becomes 4 to 4.5; total 12 to 13.5 becomes 13 to 14.5. |
 | 2026-08-09 | **Completeness pass. Six gaps closed, no new scope.** AD7's limited session gained the money and obligation denials; P1-3 gained a placement table and P3-3 moved to Phase 1 as P1-5; passkeys moved to §5C; P0-1 gained the e2e sign-in helper and two-venue fixture; AD1 pointed at P0-9 rather than the e2e specs; P1-1, P4-2, P4-5 and §5A's thresholds gained the detail they lacked. Total unchanged at 13 to 14.5 weeks. |
+| **2026-08-27** | **Phase 0 implementation. Fifteen tasks landed on `staging`; three remain.** Done: **P0-0** (recording test double), **P0-1a/b/d** (portal e2e harness, two-venue fixture, Playwright auth layer with a 375px project and a teardown), **P0-2** (instant-based classification, `starts_at`/`ends_at`/`time_zone`, G23 timezone validation), **P0-3** (batched CDE lookups, manage link minted on intent, the `23505` re-select), **P0-4** (guest actions extracted; `/api/confirm` 2,050 lines to 470; the v1 HMAC self-mint replaced with a session actor), **P0-6** (both halves), **P0-7** (buttons, fields, empty states), **P0-8** (axe wired and clean on five surfaces), **P0-9** (41 characterisation rows), **P0-10**, **P0-11**, **P0-12**, **P0-13's R1 and R2 halves**, **P0-15**, **P0-16**, **P0-17** (SetupIntent replaces hosted Checkout). Open: **P0-1c** (route tests), **P0-5** (loading and error states), **P0-14**, and P0-13's R3 migration and R4 narrowing. Two deliberate declines, both recorded in their tasks: `SectionCard` adoption (its `Header` would restyle every card heading, which P0-7 forbids; recommended for P0-5, which restructures those cards anyway) and `GET /api/confirm`'s presentation payload (P0-9 characterised the POST only, so nothing could prove a move unchanged). **Deploy state: everything above is on `staging` only.** Four migrations are applied to staging and none to production, and R3 cannot run until R2's tolerant readers are live on production. |
+| | **Two counts in this document were wrong and are corrected in place**: P0-7 had 24 hand-rolled buttons, not 22, and nine mutation handlers without an in-flight guard, not eight. |
+| | **P0-7's screenshot pass and P0-8's axe spec each caught a defect nothing else would have.** `cn` concatenates classes without resolving Tailwind conflicts, so a variant's `disabled:bg-brand-300` beat a caller's amber and the disabled *Request account deletion* button changed colour. And `/account/security` was a `'use client'` page, which may not export `metadata`: adding one failed the build and, under `next dev`, served a document with no `<html lang>` and no `<title>`. |
 | **2026-08-26** | **Full re-verification against `staging` @ `e55554cc`, by multi-agent review with every claim checked against the code. The document had drifted materially and in places was wrong.** Summary of what changed: |
 | | **(1) The plan now sits inside the documentation set rather than beside it.** New §0 names `Docs/Resneo_User_Accounts_Reference.md`, `Docs/Resneo_Remediation_Register.md`, `Docs/Resneo_Forensic_Audit_August_2026.md`, `Docs/MOBILE_API.md`, `Docs/DESIGN_SYSTEM.md` and `Docs/BASELINE_METRICS.md` as authorities and records which wins on conflict. The Register's §9 review of this plan is answered point by point: six of its criticisms are superseded or wrong, three still stand and are now adopted (AD1's actor, the two-controls claim, the strangler shape). Its 33 findings gated on promoting the portal are absorbed into §2.2 and mapped in §2.3. |
 | | **(2) G12's reasoning is rewritten.** `supabase/migrations/20270112120000_bookings_column_grants.sql` landed 2026-08-15, six days after the last review, revoking all of `bookings` from `authenticated` and re-granting nine columns. That kills the old second argument against an RLS policy (staff columns are already unreachable), weakens the first (the codebase's own `SECURITY DEFINER` RLS helpers would make a policy work), and supplies the real current argument for a view: making a policy useful would mean granting `authenticated` twenty columns back, reopening the C5/N5 hole that migration closed. **AD8's acceptance test was factually wrong** and is corrected: a direct `bookings` query now returns `42501 insufficient_privilege`, not zero rows. |

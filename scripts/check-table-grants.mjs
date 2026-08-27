@@ -19,6 +19,7 @@
  *     every portal read, which is the failure this check is written to catch.
  *   - guests_account_safe: authenticated holds SELECT. (anon's hosted default
  *     grant predates this work and is reported, not failed; see below.)
+ *   - portal_events: neither anon nor authenticated holds anything (P0-10).
  *   - bookings: authenticated has NO relation-wide SELECT, and its column-only
  *     SELECT is exactly the nine operational columns from 20270112120000.
  *     Widening that set reopens C5/N5 over PostgREST and Realtime.
@@ -125,6 +126,19 @@ async function main() {
     (gasAuth?.table_privileges ?? []).includes('SELECT'),
     `live: ${fmt(gasAuth)}. Portal guest resolution fails closed without it.`,
   );
+
+  // -- portal_events (P0-10) -------------------------------------------------
+  // Service role only. RLS is enabled with no policies, but grants are checked
+  // BEFORE RLS, and hosted defaults grant client roles on new tables: exactly
+  // how bookings_account_safe became writable (20270119120000).
+  for (const role of ['anon', 'authenticated']) {
+    const row = grant('portal_events', role);
+    check(
+      `portal_events: ${role} holds nothing`,
+      row === null,
+      `live: ${fmt(row)}. Portal metrics are service-role only.`,
+    );
+  }
 
   // -- bookings base table ---------------------------------------------------
   const bAuth = grant('bookings', 'authenticated');

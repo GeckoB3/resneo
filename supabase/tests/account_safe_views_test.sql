@@ -44,16 +44,16 @@ VALUES
 -- venue-to-venue (the linked-accounts suite owns that boundary).
 INSERT INTO venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
-  ('00000000-0000-0000-0000-00000000c0v1', 'ASV Venue', 'asv-venue',
+  ('00000000-0000-0000-0000-00000000c0f1', 'ASV Venue', 'asv-venue',
    'venue@asv.test', 'appointments', 'active', 'unified_scheduling');
 
 -- Each customer's guest row is linked by user_id: the exact predicate the view
 -- filters on.
 INSERT INTO guests (id, venue_id, user_id, first_name, last_name, email, phone)
 VALUES
-  ('00000000-0000-0000-0000-00000000c0a2', '00000000-0000-0000-0000-00000000c0v1',
+  ('00000000-0000-0000-0000-00000000c0a2', '00000000-0000-0000-0000-00000000c0f1',
    '00000000-0000-0000-0000-00000000c0a1', 'Customer', 'A', 'customer-a@asv.test', '+447000000101'),
-  ('00000000-0000-0000-0000-00000000c0b2', '00000000-0000-0000-0000-00000000c0v1',
+  ('00000000-0000-0000-0000-00000000c0b2', '00000000-0000-0000-0000-00000000c0f1',
    '00000000-0000-0000-0000-00000000c0b1', 'Customer', 'B', 'customer-b@asv.test', '+447000000102');
 
 -- Two bookings for A (the "only A's rows" assertion needs a count above one to
@@ -63,13 +63,13 @@ INSERT INTO bookings
   (id, venue_id, guest_id, booking_date, booking_time, booking_end_time,
    party_size, status, source, booking_model, special_requests, dietary_notes)
 VALUES
-  ('00000000-0000-0000-0000-00000000c0a5', '00000000-0000-0000-0000-00000000c0v1',
+  ('00000000-0000-0000-0000-00000000c0a5', '00000000-0000-0000-0000-00000000c0f1',
    '00000000-0000-0000-0000-00000000c0a2', '2026-06-01', '10:00', '10:30',
    1, 'Confirmed', 'online', 'unified_scheduling', 'Ground floor please', 'Nut allergy'),
-  ('00000000-0000-0000-0000-00000000c0a6', '00000000-0000-0000-0000-00000000c0v1',
+  ('00000000-0000-0000-0000-00000000c0a6', '00000000-0000-0000-0000-00000000c0f1',
    '00000000-0000-0000-0000-00000000c0a2', '2026-06-08', '10:00', '10:30',
    1, 'Booked', 'online', 'unified_scheduling', NULL, NULL),
-  ('00000000-0000-0000-0000-00000000c0b5', '00000000-0000-0000-0000-00000000c0v1',
+  ('00000000-0000-0000-0000-00000000c0b5', '00000000-0000-0000-0000-00000000c0f1',
    '00000000-0000-0000-0000-00000000c0b2', '2026-06-01', '11:00', '11:30',
    1, 'Confirmed', 'online', 'unified_scheduling', 'Window seat', NULL);
 

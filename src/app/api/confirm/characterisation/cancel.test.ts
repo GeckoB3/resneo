@@ -38,12 +38,19 @@ const hoisted = vi.hoisted(() => ({
   refundPlan: { amountPence: null as number | null, idempotencyKey: 'idem-key-1' },
   // Runs the callback: a bare vi.fn() swallows every deferred comm and the
   // suite would pass while asserting nothing. See harness.ts.
-  afterStub: vi.fn((cb: () => unknown) => cb()),
+  afterPromises: [] as Promise<unknown>[],
 }));
 
 vi.mock('next/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/server')>()),
-  after: hoisted.afterStub,
+  after: (cb: () => unknown) => {
+    // Tracked, because the route calls after() WITHOUT awaiting it: freezing
+    // the response immediately would race the comms it triggered, and the
+    // assertion would flap rather than fail honestly.
+    const p = Promise.resolve(cb());
+    hoisted.afterPromises.push(p);
+    return p;
+  },
 }));
 
 vi.mock('@/lib/supabase', () => ({ getSupabaseAdminClient: () => hoisted.db!.db }));
@@ -159,6 +166,7 @@ async function run(opts: Omit<RunOptions, 'action'> & { tables?: Record<string, 
   hoisted.log = makeCallLog();
   const { POST } = await import('../route');
   const res = await POST(makeRequest({ ...opts, action: 'cancel' }));
+  await Promise.allSettled(hoisted.afterPromises);
   return freeze(res, hoisted.db, hoisted.log);
 }
 
@@ -186,6 +194,7 @@ describe('POST /api/confirm - action=cancel (P0-9, 13 rows)', () => {
     hoisted.restoredSessions = 0;
     hoisted.waitlist = { offered: false, mode: 'notify_in_order', waitlistEntryId: 'wl-1' };
     hoisted.refundPlan = { amountPence: null, idempotencyKey: 'idem-key-1' };
+    hoisted.afterPromises = [];
   });
   afterEach(() => vi.useRealTimers());
 

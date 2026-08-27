@@ -28,12 +28,19 @@ const hoisted = vi.hoisted(() => ({
    * the suite would pass while asserting nothing. The precedent suite
    * (`route.card-hold.test.ts`) makes exactly that mistake.
    */
-  afterStub: vi.fn((cb: () => unknown) => cb()),
+  afterPromises: [] as Promise<unknown>[],
 }));
 
 vi.mock('next/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/server')>()),
-  after: hoisted.afterStub,
+  after: (cb: () => unknown) => {
+    // Tracked, because the route calls after() WITHOUT awaiting it: freezing
+    // the response immediately would race the comms it triggered, and the
+    // assertion would flap rather than fail honestly.
+    const p = Promise.resolve(cb());
+    hoisted.afterPromises.push(p);
+    return p;
+  },
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -78,6 +85,7 @@ async function run(opts: RunOptions) {
   hoisted.log = makeCallLog();
   const { POST } = await import('../route');
   const res = await POST(makeRequest(opts));
+  await Promise.allSettled(hoisted.afterPromises);
   return freeze(res, hoisted.db, hoisted.log);
 }
 
@@ -87,6 +95,7 @@ describe('POST /api/confirm - action=confirm (P0-9, 7 rows)', () => {
     vi.setSystemTime(new Date(FIXED_NOW));
     hoisted.hmacValid = true;
     hoisted.tokenValid = true;
+    hoisted.afterPromises = [];
   });
   afterEach(() => {
     vi.useRealTimers();

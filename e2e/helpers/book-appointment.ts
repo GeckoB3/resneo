@@ -106,7 +106,21 @@ export async function completeDetailsAndPay(page: Page, guestEmail: string): Pro
 
   await page.getByRole('button', { name: /pay deposit|pay now/i }).click();
 
-  await expect(page.getByRole('heading', { name: /confirmed/i })).toBeVisible({ timeout: 60_000 });
+  // Race the confirmation against the payment error, rather than waiting 60s for a heading
+  // that a rejected payment will never render. A silent timeout says only "no confirmation";
+  // this says what Stripe actually objected to, which is the difference between diagnosing
+  // a CI-only failure from the log and having to reproduce it.
+  const confirmed = page.getByRole('heading', { name: /confirmed/i });
+  const paymentError = page.getByTestId('payment-error');
+  await Promise.race([
+    confirmed.waitFor({ state: 'visible', timeout: 60_000 }).catch(() => {}),
+    paymentError.waitFor({ state: 'visible', timeout: 60_000 }).catch(() => {}),
+  ]);
+  if (await paymentError.isVisible().catch(() => false)) {
+    throw new Error(`Payment was rejected: ${(await paymentError.textContent())?.trim()}`);
+  }
+
+  await expect(confirmed).toBeVisible({ timeout: 60_000 });
 }
 
 /**

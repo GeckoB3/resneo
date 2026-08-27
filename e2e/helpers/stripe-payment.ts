@@ -48,10 +48,24 @@ async function tryFillFrame(frame: ReturnType<Page['frameLocator']>): Promise<bo
   const cardNumber = frame.getByRole('textbox', { name: /card number/i });
   if ((await cardNumber.count()) > 0) {
     await cardNumber.fill(TEST_CARD.number);
+
+    // Read it back. Stripe re-mounts the element while it initialises, and a fill that
+    // lands mid-remount is silently discarded: the field looks filled to the code that
+    // just wrote it, then submits empty. Returning false lets the caller poll again.
+    if (!(await cardNumber.inputValue().catch(() => ''))) return false;
+
     const expiry = frame.getByRole('textbox', { name: /expiration|expiry/i });
     if ((await expiry.count()) > 0) await expiry.fill(TEST_CARD.expiry);
     const cvc = frame.getByRole('textbox', { name: /cvc|security code/i });
     if ((await cvc.count()) > 0) await cvc.fill(TEST_CARD.cvc);
+
+    // Which of these the element asks for depends on the country Stripe infers from the
+    // caller's IP, so a runner abroad can be shown fields a local run never sees. Fill
+    // whatever is present rather than assuming the UK layout.
+    const country = frame.getByRole('combobox', { name: /country|region/i });
+    if ((await country.count()) > 0) {
+      await country.selectOption({ label: 'United Kingdom' }).catch(() => {});
+    }
     const zip = frame.getByRole('textbox', { name: /zip|postal/i });
     if ((await zip.count()) > 0) await zip.fill(TEST_CARD.zip);
     return true;

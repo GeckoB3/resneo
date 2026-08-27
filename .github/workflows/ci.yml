@@ -216,6 +216,13 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
           PAYMENT_TOKEN_SECRET: ${{ secrets.PAYMENT_TOKEN_SECRET }}
+          # The web server Playwright starts inherits this step's env, so anything the app
+          # needs at runtime has to be listed here as well as in the build and seed steps.
+          # Their absence showed up as "STRIPE_WEBHOOK_SECRET is not set" and
+          # "E2E_STRIPE_CONNECTED_ACCOUNT_ID is not set" in the run log.
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          E2E_STRIPE_CONNECTED_ACCOUNT_ID: ${{ secrets.E2E_STRIPE_CONNECTED_ACCOUNT_ID }}
+          NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
 
       - name: Upload Playwright report
         if: failure()

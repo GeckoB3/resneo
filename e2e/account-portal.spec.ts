@@ -59,4 +59,43 @@ test.describe('P0-1 portal smoke: sign in, view bookings, open detail', () => {
     });
     await expect(heading.first()).toBeVisible();
   });
+
+  test('mints the manage link on intent, not on render (P0-3)', async ({ page }) => {
+    // The list used to mint a short link for every row while rendering, so a
+    // GET wrote a row per booking. It is now minted by POST when a customer
+    // asks, which means the button has to actually work: an anchor with a
+    // pre-baked href could not silently break, and a button can.
+    await signInAsPortalCustomer(page);
+
+    // Intercepted rather than observed, because the successful case navigates
+    // away and the response body is gone by the time an assertion could read
+    // it: the first version of this test failed on exactly that.
+    const mintCalls: string[] = [];
+    let mintedUrl: string | null = null;
+    await page.route('**/manage-link', async (route) => {
+      mintCalls.push(route.request().method());
+      const response = await route.fetch();
+      const body = (await response.json()) as { url?: string };
+      mintedUrl = body.url ?? null;
+      await route.fulfill({ response });
+    });
+
+    // Registered BEFORE the navigation, so a mint during render would be seen.
+    await page.goto('/account/bookings');
+    await expect(page.getByRole('heading', { name: 'Your bookings' })).toBeVisible();
+    expect(mintCalls, 'the bookings list minted a manage link on render').toEqual([]);
+
+    await page.getByRole('link', { name: 'Details' }).first().click();
+    await expect(page).toHaveURL(/\/account\/bookings\/[0-9a-f-]{36}/);
+    expect(mintCalls, 'the booking detail page minted a manage link on render').toEqual([]);
+
+    await page.getByRole('button', { name: 'Manage booking' }).click();
+
+    // It resolves to the guest manage page, signed with its HMAC.
+    await expect(page).toHaveURL(/\/manage\/[0-9a-f-]{36}\?hmac=/);
+
+    // One POST, and a real /b/{code} short link.
+    expect(mintCalls).toEqual(['POST']);
+    expect(mintedUrl).toMatch(/\/b\/[0-9A-Za-z]{6}$/);
+  });
 });

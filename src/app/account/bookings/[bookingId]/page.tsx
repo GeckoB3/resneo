@@ -17,6 +17,7 @@ import {
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 type PageProps = { params: Promise<{ bookingId: string }> };
 
@@ -129,12 +130,11 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
             title={headerTitle}
             subtitle={headerSubtitleParts.join(' · ')}
             actions={
-              <a
-                href={booking.manage_booking_link}
-                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-              >
-                Manage booking
-              </a>
+              <ManageBookingLink
+                bookingId={booking.id}
+                label="Manage booking"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-70"
+              />
             }
           />
         </div>

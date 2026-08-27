@@ -1,6 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
-import { resolveCdeBookingContext, type CdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
 import type { BookingModel } from '@/types/booking-models';
 
@@ -82,7 +80,6 @@ export interface AccountBookingRow {
   venue: AccountVenueRow | null;
   /** CDE name + extras (event/class/resource). Null for table/appointment rows. */
   cde_context?: AccountCdeContext | null;
-  manage_booking_link: string;
 }
 
 export type AccountBookingDisplayItem =
@@ -200,97 +197,334 @@ function minutesBetween(start: string | null | undefined, end: string | null | u
   return diff > 0 ? diff : null;
 }
 
+/** Shapes of the batched lookup rows, kept local to the account loaders. */
+type ClassInstanceRow = {
+  start_time?: string | null;
+  class_type_id?: string | null;
+  capacity_override?: number | null;
+};
+type ClassTypeRow = { name?: string | null; capacity?: number | null };
+type ResourceLabels = { resourceName: string | null; hostCalendarName: string | null };
+type ClassSpots = { capacity: number; booked: number; remaining: number };
+
 /**
- * Capacity + how-full for a class instance, with no attendee PII (guest-safe).
- * capacity = instance override ?? class type capacity; booked = Σ party_size of
- * capacity-consuming bookings on the instance.
+ * Everything the CDE context needs for a whole page of bookings, fetched with
+ * set-based reads instead of per-row ones (P0-3, closes G4).
+ *
+ * Before this, rendering the list called `resolveCdeBookingContext` once per
+ * row, which issued between one and three reads each, and then minted a
+ * short-link row per booking, so a GET wrote to the database. A hundred
+ * bookings meant hundreds of queries and a hundred writes on a read. The whole
+ * page now costs nine reads at worst, whatever the row count.
+ */
+interface AccountCdeMaps {
+  events: Map<string, { name: string | null; end_time: string | null }>;
+  /** Keyed by BOOKING id, not event id: ticket lines belong to the booking. */
+  ticketLines: Map<string, AccountTicketLine[]>;
+  instances: Map<string, ClassInstanceRow>;
+  classTypes: Map<string, ClassTypeRow>;
+  resources: Map<string, ResourceLabels>;
+  classSpots: Map<string, ClassSpots>;
+}
+
+function emptyCdeMaps(): AccountCdeMaps {
+  return {
+    events: new Map(),
+    ticketLines: new Map(),
+    instances: new Map(),
+    classTypes: new Map(),
+    resources: new Map(),
+    classSpots: new Map(),
+  };
+}
+
+type LookupRow = Record<string, unknown>;
+
+function uniqueIds(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((v): v is string => typeof v === 'string' && v.length > 0))];
+}
+
+const NO_ROWS = (): Promise<LookupRow[]> => Promise.resolve([]);
+
+/**
+ * Run one batched lookup, degrading to an empty result rather than throwing (G4a).
+ *
+ * A booking list must not disappear because a class type could not be read. The
+ * affected rows lose a title or a subtitle; every other row, and the customer's
+ * ability to see and cancel their bookings, is unaffected.
+ */
+async function batchRead(
+  label: string,
+  run: () => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<LookupRow[]> {
+  try {
+    const { data, error } = await run();
+    if (error) {
+      console.error(`[account-bookings] ${label}:`, error.message);
+      return [];
+    }
+    return (data ?? []) as LookupRow[];
+  } catch (e) {
+    console.error(`[account-bookings] ${label}:`, e);
+    return [];
+  }
+}
+
+const asText = (v: unknown): string | null =>
+  typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
+const asNumber = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+
+/**
+ * Capacity and how-full for a set of class instances, with no attendee PII
+ * (guest-safe). capacity = instance override ?? class type capacity;
+ * booked = sum of party_size over capacity-consuming bookings on the instance.
+ *
+ * Capacity comes from the instance and class-type maps the caller already
+ * holds, so this costs exactly one query however many instances are asked for.
  */
 async function loadClassInstanceSpots(
   admin: Pick<SupabaseClient, 'from'>,
-  classInstanceId: string,
-): Promise<{ capacity: number; booked: number; remaining: number } | null> {
-  const { data: inst } = await admin
-    .from('class_instances')
-    .select('capacity_override, class_type_id')
-    .eq('id', classInstanceId)
-    .maybeSingle();
-  if (!inst) return null;
+  classInstanceIds: string[],
+  instances: Map<string, ClassInstanceRow>,
+  classTypes: Map<string, ClassTypeRow>,
+): Promise<Map<string, ClassSpots>> {
+  const out = new Map<string, ClassSpots>();
+  if (classInstanceIds.length === 0) return out;
 
-  const override = (inst as { capacity_override?: number | null }).capacity_override ?? null;
-  let capacity = override != null && override > 0 ? override : 0;
-  if (capacity <= 0) {
-    const { data: ct } = await admin
-      .from('class_types')
-      .select('capacity')
-      .eq('id', (inst as { class_type_id: string }).class_type_id)
-      .maybeSingle();
-    capacity = (ct as { capacity?: number } | null)?.capacity ?? 0;
-  }
-
-  const { data: bookingRows } = await admin
-    .from('bookings')
-    .select('party_size, status')
-    .eq('class_instance_id', classInstanceId)
-    .in('status', [...CAPACITY_CONSUMING_STATUSES]);
-  const booked = (bookingRows ?? []).reduce(
-    (sum, r) => sum + ((r as { party_size?: number }).party_size ?? 1),
-    0,
+  const rows = await batchRead('class spots', () =>
+    admin
+      .from('bookings')
+      .select('class_instance_id, party_size, status')
+      .in('class_instance_id', classInstanceIds)
+      .in('status', [...CAPACITY_CONSUMING_STATUSES]),
   );
 
-  return { capacity, booked, remaining: Math.max(0, capacity - booked) };
+  const bookedById = new Map<string, number>();
+  for (const r of rows) {
+    const id = asText(r.class_instance_id);
+    if (!id) continue;
+    bookedById.set(id, (bookedById.get(id) ?? 0) + (asNumber(r.party_size) ?? 1));
+  }
+
+  for (const id of classInstanceIds) {
+    // No instance row means no capacity to report, matching the previous
+    // per-row loader, which returned null when the instance was missing.
+    const inst = instances.get(id);
+    if (!inst) continue;
+    const override = inst.capacity_override ?? null;
+    let capacity = override != null && override > 0 ? override : 0;
+    if (capacity <= 0) {
+      capacity = (inst.class_type_id ? classTypes.get(inst.class_type_id)?.capacity : null) ?? 0;
+    }
+    const booked = bookedById.get(id) ?? 0;
+    out.set(id, { capacity, booked, remaining: Math.max(0, capacity - booked) });
+  }
+  return out;
 }
 
 /**
- * Build the guest-facing CDE context for a single booking row, reusing the shared
- * `resolveCdeBookingContext` resolver and adding event ticket tiers / resource duration.
- * Returns null for table/appointment rows (no CDE FK).
+ * Load the CDE context lookups for a page of bookings.
  *
- * `includeClassSpots` adds the class capacity/how-full summary (an extra read or two),
- * so the single-booking detail page can show it without bloating the list loaders.
+ * Ids are gathered in the same precedence order the per-row builder resolves in
+ * (event, then class, then resource), so a row carrying more than one FK only
+ * pulls the lookup it will actually use.
+ *
+ * Three waves, because two lookups are named by the first: class types by the
+ * instances, and a resource's host calendar by the resource. Class spots ride
+ * the third wave and are only asked for by the single-booking detail page.
  */
-async function buildAccountCdeContext(
+async function loadAccountCdeMaps(
   admin: Pick<SupabaseClient, 'from'>,
-  row: RawBookingRow,
+  rows: RawBookingRow[],
   opts?: { includeClassSpots?: boolean },
-): Promise<AccountCdeContext | null> {
-  const base: CdeBookingContext | null = await resolveCdeBookingContext(admin, {
-    experience_event_id: row.experience_event_id ?? null,
-    class_instance_id: row.class_instance_id ?? null,
-    resource_id: row.resource_id ?? null,
-    booking_end_time: row.booking_end_time ?? null,
-  });
-  if (!base) return null;
+): Promise<AccountCdeMaps> {
+  const maps = emptyCdeMaps();
+  if (rows.length === 0) return maps;
 
-  const ctx: AccountCdeContext = {
-    inferred_model: base.inferred_model,
-    title: base.title,
-    subtitle: base.subtitle ?? null,
-  };
+  const eventRows = rows.filter((r) => r.experience_event_id);
+  const classRows = rows.filter((r) => !r.experience_event_id && r.class_instance_id);
+  const resourceRows = rows.filter(
+    (r) => !r.experience_event_id && !r.class_instance_id && r.resource_id,
+  );
 
+  const eventIds = uniqueIds(eventRows.map((r) => r.experience_event_id));
+  const eventBookingIds = uniqueIds(eventRows.map((r) => r.id));
+  const instanceIds = uniqueIds(classRows.map((r) => r.class_instance_id));
+  const resourceIds = uniqueIds(resourceRows.map((r) => r.resource_id));
+
+  const [events, lines, instances, resources] = await Promise.all([
+    eventIds.length
+      ? batchRead('experience_events', () =>
+          admin.from('experience_events').select('id, name, end_time').in('id', eventIds),
+        )
+      : NO_ROWS(),
+    eventBookingIds.length
+      ? batchRead('booking_ticket_lines', () =>
+          admin
+            .from('booking_ticket_lines')
+            .select('booking_id, label, quantity, unit_price_pence')
+            .in('booking_id', eventBookingIds),
+        )
+      : NO_ROWS(),
+    instanceIds.length
+      ? batchRead('class_instances', () =>
+          admin
+            .from('class_instances')
+            .select('id, start_time, class_type_id, capacity_override')
+            .in('id', instanceIds),
+        )
+      : NO_ROWS(),
+    resourceIds.length
+      ? batchRead('unified_calendars', () =>
+          admin
+            .from('unified_calendars')
+            .select('id, name, display_on_calendar_id')
+            .in('id', resourceIds),
+        )
+      : NO_ROWS(),
+  ]);
+
+  for (const r of events) {
+    const id = asText(r.id);
+    if (id) maps.events.set(id, { name: asText(r.name), end_time: asText(r.end_time) });
+  }
+
+  for (const r of lines) {
+    const bookingId = asText(r.booking_id);
+    const quantity = asNumber(r.quantity) ?? 0;
+    // Zero-quantity tiers were filtered out per row before; keep that.
+    if (!bookingId || quantity <= 0) continue;
+    const list = maps.ticketLines.get(bookingId) ?? [];
+    list.push({
+      label: asText(r.label) ?? 'Ticket',
+      quantity,
+      unit_price_pence: asNumber(r.unit_price_pence) ?? 0,
+    });
+    maps.ticketLines.set(bookingId, list);
+  }
+
+  for (const r of instances) {
+    const id = asText(r.id);
+    if (!id) continue;
+    maps.instances.set(id, {
+      start_time: asText(r.start_time),
+      class_type_id: asText(r.class_type_id),
+      capacity_override: asNumber(r.capacity_override),
+    });
+  }
+
+  // A resource and its host calendar are both `unified_calendars` rows. Names
+  // already in hand are reused, so the second read only asks for hosts that
+  // are not themselves one of the resources on this page.
+  const nameById = new Map<string, string | null>();
+  const hostIdByResource = new Map<string, string>();
+  for (const r of resources) {
+    const id = asText(r.id);
+    if (!id) continue;
+    nameById.set(id, asText(r.name));
+    maps.resources.set(id, { resourceName: asText(r.name), hostCalendarName: null });
+    const host = asText(r.display_on_calendar_id);
+    if (host) hostIdByResource.set(id, host);
+  }
+
+  const classTypeIds = uniqueIds(instances.map((r) => asText(r.class_type_id)));
+  const hostIdsToFetch = uniqueIds([...hostIdByResource.values()]).filter(
+    (id) => !nameById.has(id),
+  );
+
+  const [types, hosts] = await Promise.all([
+    classTypeIds.length
+      ? batchRead('class_types', () =>
+          admin.from('class_types').select('id, name, capacity').in('id', classTypeIds),
+        )
+      : NO_ROWS(),
+    hostIdsToFetch.length
+      ? batchRead('unified_calendars (hosts)', () =>
+          admin.from('unified_calendars').select('id, name').in('id', hostIdsToFetch),
+        )
+      : NO_ROWS(),
+  ]);
+
+  for (const r of types) {
+    const id = asText(r.id);
+    if (id) maps.classTypes.set(id, { name: asText(r.name), capacity: asNumber(r.capacity) });
+  }
+  for (const r of hosts) {
+    const id = asText(r.id);
+    if (id) nameById.set(id, asText(r.name));
+  }
+  for (const [resourceId, hostId] of hostIdByResource) {
+    const entry = maps.resources.get(resourceId);
+    if (entry) entry.hostCalendarName = nameById.get(hostId) ?? null;
+  }
+
+  if (opts?.includeClassSpots && instanceIds.length > 0) {
+    maps.classSpots = await loadClassInstanceSpots(
+      admin,
+      instanceIds,
+      maps.instances,
+      maps.classTypes,
+    );
+  }
+
+  return maps;
+}
+
+/**
+ * Build the guest-facing CDE context for one booking from the batched maps.
+ * Pure and synchronous: every read it needs has already happened.
+ *
+ * Returns null for table/appointment rows (no CDE FK). Precedence is event,
+ * then class, then resource, matching `resolveCdeBookingContext`, which the
+ * staff surfaces still use per row.
+ *
+ * `includeClassSpots` adds the class capacity summary, so the single-booking
+ * detail page can show it without the list paying for the extra read.
+ */
+function buildAccountCdeContext(
+  row: RawBookingRow,
+  maps: AccountCdeMaps,
+  opts?: { includeClassSpots?: boolean },
+): AccountCdeContext | null {
   if (row.experience_event_id) {
-    const { data: lines } = await admin
-      .from('booking_ticket_lines')
-      .select('label, quantity, unit_price_pence')
-      .eq('booking_id', row.id);
-    const ticketLines = (lines ?? [])
-      .map((l) => ({
-        label: (l as { label?: string }).label ?? 'Ticket',
-        quantity: (l as { quantity?: number }).quantity ?? 0,
-        unit_price_pence: (l as { unit_price_pence?: number }).unit_price_pence ?? 0,
-      }))
-      .filter((l) => l.quantity > 0);
+    const ev = maps.events.get(row.experience_event_id);
+    const end = ev?.end_time ? ev.end_time.slice(0, 5) : null;
+    const ctx: AccountCdeContext = {
+      inferred_model: 'event_ticket',
+      title: ev?.name ?? 'Event',
+      subtitle: end ? `Ends ${end}` : null,
+    };
+    const ticketLines = maps.ticketLines.get(row.id) ?? [];
     if (ticketLines.length > 0) ctx.ticket_lines = ticketLines;
+    return ctx;
+  }
+
+  if (row.class_instance_id) {
+    const inst = maps.instances.get(row.class_instance_id);
+    const classType = inst?.class_type_id ? maps.classTypes.get(inst.class_type_id) : undefined;
+    const start = inst?.start_time ? inst.start_time.slice(0, 5) : null;
+    const ctx: AccountCdeContext = {
+      inferred_model: 'class_session',
+      title: classType?.name ?? 'Class',
+      subtitle: start ? `Starts ${start}` : null,
+    };
+    if (opts?.includeClassSpots) {
+      ctx.class_spots = maps.classSpots.get(row.class_instance_id) ?? null;
+    }
+    return ctx;
   }
 
   if (row.resource_id) {
-    ctx.duration_minutes = minutesBetween(row.booking_time, row.booking_end_time);
+    const resource = maps.resources.get(row.resource_id);
+    return {
+      inferred_model: 'resource_booking',
+      title: resource?.resourceName ?? 'Resource',
+      subtitle: resource?.hostCalendarName ?? null,
+      duration_minutes: minutesBetween(row.booking_time, row.booking_end_time),
+    };
   }
 
-  if (opts?.includeClassSpots && row.class_instance_id) {
-    ctx.class_spots = await loadClassInstanceSpots(admin, row.class_instance_id);
-  }
-
-  return ctx;
+  return null;
 }
 
 /**
@@ -367,18 +601,19 @@ async function loadVenueMap(
   return new Map((venues ?? []).map((v) => [v.id, v as AccountVenueRow]));
 }
 
-/** Hydrate a raw bookings row into an AccountBookingRow (venue + CDE context + manage link). */
-async function hydrateAccountBookingRow(
-  admin: SupabaseClient,
+/**
+ * Hydrate a raw bookings row into an AccountBookingRow (venue + CDE context).
+ *
+ * Synchronous since P0-3: every lookup it needs was batched by the caller, and
+ * the manage link it used to mint on render now comes from
+ * `POST /api/account/bookings/[id]/manage-link` when a customer asks for it.
+ */
+function hydrateAccountBookingRow(
   b: RawBookingRow,
   venueMap: Map<string, AccountVenueRow>,
+  maps: AccountCdeMaps,
   opts?: { includeClassSpots?: boolean },
-): Promise<AccountBookingRow> {
-  const [cde_context, manage_booking_link] = await Promise.all([
-    buildAccountCdeContext(admin, b, opts),
-    createOrGetBookingShortLink({ venueId: b.venue_id, bookingId: b.id, purpose: 'manage' }),
-  ]);
-
+): AccountBookingRow {
   return {
     id: b.id,
     venue_id: b.venue_id,
@@ -400,9 +635,27 @@ async function hydrateAccountBookingRow(
     experience_event_id: b.experience_event_id ?? null,
     resource_id: b.resource_id ?? null,
     venue: venueMap.get(b.venue_id) ?? null,
-    cde_context,
-    manage_booking_link,
+    cde_context: buildAccountCdeContext(b, maps, opts),
   };
+}
+
+/**
+ * Venue map and CDE lookups for a page of rows, fetched together.
+ *
+ * Both are admin reads, which is allowed because ownership was already
+ * established by reading `bookings_account_safe` as the caller (AD8).
+ */
+async function hydrateAccountBookingRows(
+  admin: SupabaseClient,
+  rows: RawBookingRow[],
+  opts?: { includeClassSpots?: boolean },
+): Promise<AccountBookingRow[]> {
+  const venueIds = [...new Set(rows.map((b) => b.venue_id))];
+  const [venueMap, maps] = await Promise.all([
+    loadVenueMap(admin, venueIds),
+    loadAccountCdeMaps(admin, rows, opts),
+  ]);
+  return rows.map((b) => hydrateAccountBookingRow(b, venueMap, maps, opts));
 }
 
 export async function loadAccountBookings(
@@ -427,11 +680,7 @@ export async function loadAccountBookings(
     throw new Error('Failed to load account bookings');
   }
 
-  const rows = (bookings ?? []) as RawBookingRow[];
-  const venueIds = [...new Set(rows.map((b) => b.venue_id))];
-  const venueMap = await loadVenueMap(admin, venueIds);
-
-  return Promise.all(rows.map((b) => hydrateAccountBookingRow(admin, b, venueMap)));
+  return hydrateAccountBookingRows(admin, (bookings ?? []) as RawBookingRow[]);
 }
 
 /**
@@ -470,10 +719,7 @@ export async function loadAccountUpcomingBookingsByModel(
   const rows = ((bookings ?? []) as RawBookingRow[]).filter(
     (b) => b.status !== 'Cancelled',
   );
-  const venueIds = [...new Set(rows.map((b) => b.venue_id))];
-  const venueMap = await loadVenueMap(admin, venueIds);
-
-  return Promise.all(rows.map((b) => hydrateAccountBookingRow(admin, b, venueMap)));
+  return hydrateAccountBookingRows(admin, rows);
 }
 
 export async function loadAccountBookingById(
@@ -500,7 +746,8 @@ export async function loadAccountBookingById(
   }
   if (!booking) return null;
 
-  const raw = booking as RawBookingRow;
-  const venueMap = await loadVenueMap(admin, [raw.venue_id]);
-  return hydrateAccountBookingRow(admin, raw, venueMap, { includeClassSpots: true });
+  const [row] = await hydrateAccountBookingRows(admin, [booking as RawBookingRow], {
+    includeClassSpots: true,
+  });
+  return row ?? null;
 }

@@ -130,7 +130,7 @@ Nothing under `/account` can start a new booking. The only `/book/` reference in
 `loadAccountBookings` (`src/lib/account/account-bookings.ts:392`) calls `hydrateAccountBookingRow` (`:355`) per row. Each hydration awaits `createOrGetBookingShortLink` (`:363`), which is two selects plus an insert or update (`src/lib/booking-short-links.ts:58`, `:84`, `:102`, `:124`), plus `buildAccountCdeContext` (`:235`), which itself calls `resolveCdeBookingContext` (up to three queries), a `booking_ticket_lines` read (`:256`), and optionally `loadClassInstanceSpots` (two to three more). At the default limit of 100 that is several hundred queries per page load and up to 100 writes, minting short links for bookings the customer may never open. There is no `loading.tsx` on that route, so nothing streams until it all settles.
 
 **G4a. A short-link collision 500s the entire bookings list.** `[Register: C-01]`
-The unique index is on `(booking_id, purpose) WHERE revoked_at IS NULL`, not on `code`. On a `23505` the retry loop (`src/lib/booking-short-links.ts:121-147`) generates a fresh random *code* for the same `(booking_id, purpose)` and collides identically; all twelve attempts fail and it throws, unguarded, inside nested `Promise.all` calls. The customer loses their whole booking history to a link they never used. The Register rates the concurrency rare at current volume, but P0-3 removes the call from the read path anyway and should also degrade per-row hydration failures rather than failing the list.
+The unique index is on `(booking_id, purpose) WHERE revoked_at IS NULL`, not on `code`. On a `23505` the retry loop (`src/lib/booking-short-links.ts:121-147`) generates a fresh random *code* for the same `(booking_id, purpose)` and collides identically; all twelve attempts fail and it throws, unguarded, inside nested `Promise.all` calls. The customer loses their whole booking history to a link they never used. The Register rates the concurrency rare at current volume. **Closed 2026-08-27 by P0-3**, in both halves: the call is off the read path entirely, and the retry now re-selects on `23505` rather than generating a fresh code, because a `(booking_id, purpose)` collision cannot be retried away. Batched hydration degrades per lookup, so a class type that will not read costs those rows a title and nothing else.
 
 **G5. Timezone-incorrect filtering.** `[Register: C-12]`
 `src/lib/account/account-booking-filters.ts:4-14` compares `booking_date` against a UTC date string built at `src/app/account/bookings/page.tsx:39` and ignores `booking_time` entirely. A booking earlier today still counts as upcoming; a booking in a venue on the other side of the date line lands in the wrong tab. The UI admits it at `src/app/account/bookings/page.tsx:154`: "Times are shown in each venue's local timezone. Filters use the UTC calendar day."
@@ -343,8 +343,8 @@ Every gap has at least one task that closes it, and every Remediation Register f
 | G1 Hub carries no data | | P1-1, P1-2 | 1 |
 | G2 Actions leave the portal, plus the HMAC self-mint cancel | | P0-4, P2-1 to P2-5 | 0, 2 |
 | G3 No rebook | | P3-1 | 3 |
-| G4 N+1 and writes on a GET | C-02 | P0-3 | 0 |
-| G4a Short-link collision 500s the list | C-01 | P0-3 | 0 |
+| G4 N+1 and writes on a GET | C-02 | P0-3 **(done 2026-08-27)** | 0 |
+| G4a Short-link collision 500s the list | C-01 | P0-3 **(done 2026-08-27)** | 0 |
 | G5 Timezone-incorrect filtering | C-12 | P0-2 | 0 |
 | G5a Status classification wrong three ways | C-11 | P0-2 | 0 |
 | G6 Near-zero test coverage | | P0-1, P0-9 | 0 |
@@ -757,7 +757,7 @@ Four tasks assert on query counts or on writes, and **no existing double support
 - Update `src/app/account/bookings/page.tsx:154` to drop the "Filters use the UTC calendar day" caveat.
 - **Acceptance:** unit tests covering a booking earlier today (past), later today (upcoming), a `Completed` booking (past), and venues in `Australia/Sydney` and `America/Los_Angeles` around UTC midnight; a profile PATCH with `timeZone: 'GMT+1'` is rejected with a 400 rather than persisted; `starts_at` appears in the bookings JSON payload.
 
-**P0-3. Remove the list-render N+1 and its failure mode** (AD3, closes G4, G4a)
+**P0-3. Remove the list-render N+1 and its failure mode** (AD3, closes G4, G4a) *(DONE 2026-08-27. `hydrateAccountBookingRow` is now synchronous and the CDE lookups are batched into at most six set-based reads, so the whole list costs nine queries whatever the row count, asserted at 100 and again at 400 rows in `src/app/api/account/bookings/route.test.ts` (the repo's first query-count assertion). `manage_booking_link` is gone from the row and is minted on intent by `POST /api/account/bookings/[id]/manage-link`, so the GET writes nothing at all. Batch failures degrade per lookup; the ownership read still fails loudly. The short-link `23505` loop now re-selects the winning row. All five UI call sites moved to a `ManageBookingLink` button, proved end to end by a new portal e2e that clicks it through `/b/{code}` to the signed manage page.)*
 - Drop `manage_booking_link` from `hydrateAccountBookingRow` (`src/lib/account/account-bookings.ts:355-388`).
 - Batch `buildAccountCdeContext` (`:235`) into set-based queries keyed by `class_instance_id`, `experience_event_id`, `resource_id`.
 - Add `POST /api/account/bookings/[id]/manage-link`. **Exempt from C7a**: P2-5 deletes it, so aliasing it would publish a route on the versioned surface only to remove it two phases later. Put it on the C7a exclusion list with that reason and a pointer to P2-5.
@@ -1419,7 +1419,7 @@ Everything here runs in jobs that already gate every PR: the `test` job runs `vi
 | C10 | One shared zod schema for the booking payload, asserted to contain `starts_at` and `time_zone`, used by both the route and its test | vitest |
 | C11 | `user_devices` has the audience column, `NOT NULL` **defaulting to `staff`** so 1.0.7's payload still inserts; a customer profile PATCH cannot write into the `staff` namespace | pgTAP |
 | C12 | Fetch `/.well-known/apple-app-site-association`; assert 200, `content-type: application/json`, no redirect | vitest route test |
-| C13 | Snapshot every `/api/v1/*` response shape. A removed or retyped field fails; an added one does not. **Take the baseline after P0-3**, which deliberately drops `manage_booking_link` from the booking row and so from `GET /api/v1/me/bookings`. That removal is safe because the app never calls that route (§5D.0), and it is the one sanctioned exception to C13 | vitest |
+| C13 | Snapshot every `/api/v1/*` response shape. A removed or retyped field fails; an added one does not. **Take the baseline after P0-3**, which deliberately drops `manage_booking_link` from the booking row and so from `GET /api/v1/me/bookings`. That removal is safe because the app never calls that route (§5D.0), and it is the one sanctioned exception to C13. **P0-3 landed 2026-08-27, so the baseline is now takeable and nothing else may remove a v1 field.** | vitest |
 | C14, C15 | Route test: a request with no `X-ResNeo-Client` still succeeds **and must continue to, permanently**; a repeated `Idempotency-Key` on each money route and on P2-1's three POST actions returns the first outcome rather than acting twice | vitest route test |
 | AD8 view | Already correctly specified as pgTAP, and it is the one constraint in this plan that already has teeth today | pgTAP, `rls-pgtap` |
 

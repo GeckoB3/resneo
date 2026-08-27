@@ -16,6 +16,7 @@ import {
   type AccountBookingFilter,
 } from '@/lib/account/account-booking-filters';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 /** One-line summary "Class · Mon 4 August · 18:30 · Confirmed", venue-TZ + friendly status. */
 function bookingSummaryLine(row: AccountBookingRow, profileTz: string | null): string {
@@ -111,9 +112,11 @@ export default async function AccountBookingsPage({
                               <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
                                 Details
                               </Link>
-                              <a href={b.manage_booking_link} className="text-brand-700 hover:underline">
-                                Cancel this session
-                              </a>
+                              <ManageBookingLink
+                                bookingId={b.id}
+                                label="Cancel this session"
+                                className="text-brand-700 hover:underline disabled:opacity-60"
+                              />
                             </span>
                           </li>
                         );
@@ -141,9 +144,11 @@ export default async function AccountBookingsPage({
                   <Link href={`/account/bookings/${item.row.id}`} className="text-brand-700 hover:underline">
                     Details
                   </Link>
-                  <a href={item.row.manage_booking_link} className="text-brand-700 hover:underline">
-                    Manage
-                  </a>
+                  <ManageBookingLink
+                    bookingId={item.row.id}
+                    label="Manage"
+                    className="text-brand-700 hover:underline disabled:opacity-60"
+                  />
                 </div>
               </li>
             ),

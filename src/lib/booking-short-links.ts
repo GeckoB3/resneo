@@ -46,7 +46,11 @@ function resolvePublicUrl(publicOrigin?: string): string {
 
 /**
  * Returns an existing active short URL for the booking+purpose, or creates one.
- * Collisions on `code` are retried with a new random code.
+ *
+ * Collisions on `code` are retried with a new random code. A collision on the
+ * partial unique index over (booking_id, purpose) means a concurrent caller won
+ * the race, so the winning row is re-selected and returned instead; see the
+ * comment at the retry for why retrying that case cannot work.
  */
 export async function createOrGetBookingShortLink(opts: CreateBookingShortLinkOpts): Promise<string> {
   const admin = getSupabaseAdminClient();
@@ -134,6 +138,34 @@ export async function createOrGetBookingShortLink(opts: CreateBookingShortLinkOp
     }
 
     if (insErr.code === '23505') {
+      // TWO different unique constraints raise 23505 here, and only one of them
+      // is worth retrying (G4a).
+      //
+      // The table has a partial unique index on (booking_id, purpose) WHERE
+      // revoked_at IS NULL as well as the primary key on `code`. If a
+      // concurrent caller inserted the row for this same booking and purpose
+      // between our lookup above and this insert, generating a fresh random
+      // `code` cannot help: every one of the twelve attempts violates the same
+      // (booking_id, purpose) index, and the loop used to fall out and throw.
+      // That throw was unguarded inside the account list's per-row Promise.all,
+      // so a customer lost their whole booking history to a link they never
+      // clicked.
+      //
+      // So look for the winner. If a live row now exists, the race is what
+      // happened and that row is the answer. If none does, this really was a
+      // `code` collision against some other booking, and a fresh code is the
+      // right retry.
+      const { data: winnerRow } = await admin
+        .from('booking_short_links')
+        .select('code')
+        .eq('booking_id', opts.bookingId)
+        .eq('purpose', opts.purpose)
+        .is('revoked_at', null)
+        .maybeSingle();
+      const winner = (winnerRow as { code?: string } | null)?.code;
+      if (winner) {
+        return `${baseUrl}/b/${winner}`;
+      }
       continue;
     }
 

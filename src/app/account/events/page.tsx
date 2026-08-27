@@ -9,6 +9,7 @@ import {
   type AccountTicketLine,
 } from '@/lib/account/account-bookings';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 function ticketSummary(lines: AccountTicketLine[] | undefined, partySize: number): string {
   if (lines && lines.length > 0) {
@@ -77,9 +78,11 @@ export default async function AccountEventsHubPage() {
                   <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
                     Details
                   </Link>
-                  <a href={b.manage_booking_link} className="text-brand-700 hover:underline">
-                    Manage
-                  </a>
+                  <ManageBookingLink
+                    bookingId={b.id}
+                    label="Manage"
+                    className="text-brand-700 hover:underline disabled:opacity-60"
+                  />
                 </div>
               </li>
             );

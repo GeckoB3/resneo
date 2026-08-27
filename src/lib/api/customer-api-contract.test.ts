@@ -127,18 +127,48 @@ describe('response envelope carve-out', () => {
  * path and works, so a backfill protects nothing today and would publish
  * routes on a versioned surface before anything consumes them.
  */
+
+/**
+ * Routes created by this plan that are deliberately NOT aliased into /api/v1,
+ * each with the phase that removes it. Distinct from the pre-existing list,
+ * which is closed: this one is for exemptions taken with a reason.
+ */
+const C7A_EXEMPT: Record<string, string> = {
+  // P0-3 added it so the portal could mint a manage link on intent rather than
+  // on every list render. P2-5 performs cancel and reschedule in the portal and
+  // deletes it, so aliasing it would publish a route on the versioned surface
+  // only to remove it two phases later. Leaving an authenticated route that
+  // mints a cancel-without-login token with no consumer is a liability, which
+  // is why P2-5 removes it rather than keeping it around.
+  'account/bookings/[id]/manage-link/route.ts': 'removed by P2-5',
+};
+
 describe('v1 alias rule (C7a/C7b)', () => {
   it('records the dated exclusion list of pre-existing account routes', () => {
-    // Dated 2026-08-27. Routes added AFTER this date need a v1 alias; these do
-    // not. The count is asserted so that adding a route without an alias, and
-    // without consciously updating this list, fails here.
+    // Dated 2026-08-27. Routes added AFTER this date need a v1 alias, or an
+    // entry in C7A_EXEMPT with the phase that removes them; these do not. The
+    // count is asserted so that adding a route without an alias, and without
+    // consciously updating this list, fails here.
+    //
+    // 27 since P0-3 added account/bookings/[id]/manage-link, which is exempt.
     const accountRoutes = routeFiles('account').map(rel).sort();
     expect(
       accountRoutes.length,
       'An /api/account route was added or removed. If added: give it a v1 alias (C7a) ' +
-        'and bump this count. Do NOT add it to the pre-existing exclusion list, which is ' +
-        'dated 2026-08-27 and closed.',
-    ).toBe(26);
+        'or a C7A_EXEMPT entry, and bump this count. Do NOT add it to the pre-existing ' +
+        'exclusion list, which is dated 2026-08-27 and closed.',
+    ).toBe(27);
+  });
+
+  it('every C7a exemption still exists, so the reason cannot outlive the route', () => {
+    // When P2-5 deletes the manage-link route, this fails until the entry goes
+    // too. An exemption list that quietly describes nothing is how the next
+    // route gets waved through without one.
+    for (const [file, reason] of Object.entries(C7A_EXEMPT)) {
+      expect(fs.existsSync(path.join(API, file)), `${file} is C7a-exempt (${reason}) but does not exist`).toBe(
+        true,
+      );
+    }
   });
 
   it('names the three divergent v1 duplicates for convergence', () => {

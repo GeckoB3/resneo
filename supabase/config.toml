@@ -221,7 +221,13 @@ max_frequency = "1s"
 # Number of characters used in the email OTP.
 otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+# 24 hours, decided 2026-08-27. This governs magic links, password recovery AND staff
+# invites, which cannot be set separately; the binding case is invites, where an hour
+# meant an invite sent on a Friday evening was dead by Saturday. Tokens stay single-use.
+# Keep the hosted dashboard value on both projects in step with this: config.toml does
+# not configure hosted projects. Any change here must also update the user-facing copy
+# that states the lifetime (see `grep -rn "expires in 24 hours" src`).
+otp_expiry = 86400
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]

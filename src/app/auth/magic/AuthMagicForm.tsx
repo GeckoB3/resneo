@@ -90,7 +90,7 @@ export function AuthMagicForm({
         </div>
         <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
           <p className="font-medium">Link sent</p>
-          <p className="mt-1">Open the link on this device to see your bookings. The link expires in 1 hour.</p>
+          <p className="mt-1">Open the link on this device to see your bookings. The link expires in 24 hours.</p>
           <button
             type="button"
             onClick={() => setStatus('idle')}

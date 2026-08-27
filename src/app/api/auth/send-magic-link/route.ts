@@ -117,13 +117,13 @@ export async function POST(request: NextRequest) {
       'Open this link to sign in:',
       confirmUrl,
       '',
-      'This link expires in 1 hour. If you did not request this, you can ignore it.',
+      'This link expires in 24 hours. If you did not request this, you can ignore it.',
     ].join('\n');
 
     const html = `
       <p>Here is your sign-in link for <strong>ResNeo</strong>.</p>
       <p><a href="${confirmUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">Sign in to ResNeo</a></p>
-      <p style="font-size:12px;color:#64748b;">This link expires in 1 hour. If you did not request this, you can ignore it.</p>
+      <p style="font-size:12px;color:#64748b;">This link expires in 24 hours. If you did not request this, you can ignore it.</p>
     `;
 
     try {

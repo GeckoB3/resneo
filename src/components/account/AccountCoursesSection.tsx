@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { Button } from '@/components/ui/primitives';
 
 interface EnrollmentRow {
   id: string;
@@ -78,13 +79,9 @@ function CoursePurchaseForm({
     <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
       <PaymentElement options={{ layout: 'tabs' }} />
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={!stripe} loading={loading}>
         {loading ? 'Processing…' : 'Pay and enroll'}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -117,6 +114,13 @@ export function AccountCoursesSection() {
   const [productIdFree, setProductIdFree] = useState('');
   const [productIdPaid, setProductIdPaid] = useState('');
   const [error, setError] = useState<string | null>(null);
+  /**
+   * In-flight guards (G30). All three call routes that create enrollments,
+   * PaymentIntents or refunds, so a double tap was a double side effect.
+   */
+  const [enrolling, setEnrolling] = useState(false);
+  const [startingPaid, setStartingPaid] = useState(false);
+  const [cancellingEnrollment, setCancellingEnrollment] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [paidCheckout, setPaidCheckout] = useState<{
     venue_id: string;
@@ -194,6 +198,7 @@ export function AccountCoursesSection() {
    * arguments exist (P0-15, G25).
    */
   async function enrollFree(venueIdArg?: string, productIdArg?: string) {
+    if (enrolling) return;
     setError(null);
     setMsg(null);
     const venue_id = venueIdArg || resolvedVenueId;
@@ -202,39 +207,54 @@ export function AccountCoursesSection() {
       setError('Choose a venue and a free (£0) course package.');
       return;
     }
-    const res = await fetch('/api/account/courses/enroll', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id, product_id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Enroll failed');
-      return;
+    setEnrolling(true);
+    try {
+      const res = await fetch('/api/account/courses/enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue_id, product_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Enroll failed');
+        return;
+      }
+      setMsg('Enrolled.');
+      void load();
+    } finally {
+      setEnrolling(false);
     }
-    setMsg('Enrolled.');
-    void load();
   }
 
   async function cancelEnrollment(id: string) {
+    if (cancellingEnrollment) return;
     setError(null);
     setMsg(null);
     if (!window.confirm('Cancel this enrollment? If within the refund window your payment will be refunded.')) {
       return;
     }
-    const res = await fetch('/api/account/courses/cancel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enrollment_id: id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Cancel failed');
-      return;
+    setCancellingEnrollment(id);
+    try {
+      const res = await fetch('/api/account/courses/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enrollment_id: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Cancel failed');
+        return;
+      }
+      const refunded = (data as { refund_amount_pence?: number }).refund_amount_pence ?? 0;
+      setMsg(
+        refunded > 0
+          ? `Cancelled. Refund of £${(refunded / 100).toFixed(2)} is being processed.`
+          : 'Cancelled.',
+      );
+      void load();
+    } finally {
+      setCancellingEnrollment(null);
     }
-    const refunded = (data as { refund_amount_pence?: number }).refund_amount_pence ?? 0;
-    setMsg(refunded > 0 ? `Cancelled. Refund of £${(refunded / 100).toFixed(2)} is being processed.` : 'Cancelled.');
-    void load();
   }
 
   // Auto-start when arriving with ?venue=&course=&autostart=1.
@@ -268,6 +288,7 @@ export function AccountCoursesSection() {
    * the form is showing.
    */
   async function startPaidCheckout(venueIdArg?: string, productIdArg?: string) {
+    if (startingPaid) return;
     setError(null);
     setMsg(null);
     setPaidCheckout(null);
@@ -283,27 +304,32 @@ export function AccountCoursesSection() {
       setError('That course is not available at this venue.');
       return;
     }
-    const res = await fetch('/api/account/courses/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id, product_id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Checkout failed');
-      return;
-    }
-    if (!data.client_secret || !data.stripe_account_id) {
-      setError('Could not start payment');
-      return;
-    }
-    setPaidCheckout({
+    setStartingPaid(true);
+    try {
+      const res = await fetch('/api/account/courses/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue_id, product_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Checkout failed');
+        return;
+      }
+      if (!data.client_secret || !data.stripe_account_id) {
+        setError('Could not start payment');
+        return;
+      }
+      setPaidCheckout({
       venue_id,
       product_id,
-      client_secret: data.client_secret,
-      stripe_account_id: data.stripe_account_id,
-      amount_pence: data.amount_pence ?? 0,
-    });
+        client_secret: data.client_secret,
+        stripe_account_id: data.stripe_account_id,
+        amount_pence: data.amount_pence ?? 0,
+      });
+    } finally {
+      setStartingPaid(false);
+    }
   }
 
   return (
@@ -343,13 +369,16 @@ export function AccountCoursesSection() {
                     ) : null}
                   </div>
                   {active && e.can_cancel_now ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
+                      loading={cancellingEnrollment === e.id}
                       onClick={() => void cancelEnrollment(e.id)}
-                      className="rounded border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50"
+                      className="!border-amber-300 px-2 py-1 text-xs !text-amber-800 hover:!bg-amber-50"
                     >
                       Cancel enrollment
-                    </button>
+                    </Button>
                   ) : null}
                 </li>
               );
@@ -404,14 +433,14 @@ export function AccountCoursesSection() {
                   )}
                 </select>
               </label>
-              <button
+              <Button
                 type="button"
                 disabled={!effectiveProductIdFree}
+                loading={enrolling}
                 onClick={() => void enrollFree()}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Enroll free
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -436,14 +465,15 @@ export function AccountCoursesSection() {
                   )}
                 </select>
               </label>
-              <button
+              <Button
                 type="button"
                 disabled={!effectiveProductIdPaid}
+                loading={startingPaid}
                 onClick={() => void startPaidCheckout()}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className="!bg-slate-900 hover:!bg-slate-800 disabled:!bg-slate-400"
               >
                 Pay with card
-              </button>
+              </Button>
             </div>
 
             {paidCheckout ? (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@/components/ui/primitives';
 
 /**
  * "Manage" affordance on the account booking surfaces (P0-3).
@@ -41,14 +42,19 @@ export function ManageBookingLink({
   }
 
   return (
-    <button
+    // `variant="link"` keeps the primitive's focus and disabled handling while
+    // leaving the caller's className in charge of appearance: these render
+    // inline in a list row and as a filled CTA on the detail page, and forcing
+    // one variant on both would change the look of one of them.
+    <Button
       type="button"
+      variant="link"
       onClick={open}
-      disabled={state === 'loading'}
+      loading={state === 'loading'}
       aria-busy={state === 'loading'}
       className={className}
     >
       {state === 'loading' ? 'Opening…' : state === 'failed' ? 'Try again' : label}
-    </button>
+    </Button>
   );
 }

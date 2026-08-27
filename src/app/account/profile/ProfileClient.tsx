@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { supportedTimeZones } from '@/lib/time/iana-time-zone';
+import { Button } from '@/components/ui/primitives';
 import {
   mergePreferenceNamespace,
   readPreferenceNamespace,
@@ -63,6 +64,9 @@ export function ProfileClient({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** In-flight guards (G30) for the two device handlers, which had none. */
+  const [registeringDevice, setRegisteringDevice] = useState(false);
+  const [removingDevice, setRemovingDevice] = useState<string | null>(null);
 
   const prefs = useMemo(() => {
     // Reads whichever shape the column is in, across P0-13's R3 migration. A
@@ -141,40 +145,50 @@ export function ProfileClient({
   }
 
   async function removeDevice(deviceId: string) {
-    const res = await fetch(`/api/account/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
-    if (res.ok) {
-      setKnownDevices((rows) => rows.filter((d) => d.id !== deviceId));
-    } else {
-      setError('Could not remove device.');
+    if (removingDevice) return;
+    setRemovingDevice(deviceId);
+    try {
+      const res = await fetch(`/api/account/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setKnownDevices((rows) => rows.filter((d) => d.id !== deviceId));
+      } else {
+        setError('Could not remove device.');
+      }
+    } finally {
+      setRemovingDevice(null);
     }
   }
 
   async function registerThisDevice() {
+    if (registeringDevice) return;
+    setRegisteringDevice(true);
     setError(null);
-    const res = await fetch('/api/account/devices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        platform: 'web',
-        // Declared explicitly (P0-13): this is the customer portal, and a
-        // device left at the default would receive staff booking alerts for
-        // anyone who is both a customer and a staff member.
-        audience: 'customer',
-        device_name: typeof navigator === 'undefined' ? 'Web browser' : navigator.userAgent.slice(0, 120),
-      }),
-    });
-    const body = (await res.json().catch(() => ({}))) as { device?: Device; error?: string };
-    if (res.ok && body.device) {
-      // Re-registering an existing device returns the refreshed row, so replace it
-      // in place rather than adding a second entry for the same device.
-      setKnownDevices((rows) => [
-        body.device!,
-        ...rows.filter((d) => d.id !== body.device!.id),
-      ]);
-      setMessage('This browser has been registered.');
-      return;
+    try {
+      const res = await fetch('/api/account/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform: 'web',
+          // Declared explicitly (P0-13): this is the customer portal, and a
+          // device left at the default would receive staff booking alerts for
+          // anyone who is both a customer and a staff member.
+          audience: 'customer',
+          device_name:
+            typeof navigator === 'undefined' ? 'Web browser' : navigator.userAgent.slice(0, 120),
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { device?: Device; error?: string };
+      if (res.ok && body.device) {
+        // Re-registering an existing device returns the refreshed row, so replace
+        // it in place rather than adding a second entry for the same device.
+        setKnownDevices((rows) => [body.device!, ...rows.filter((d) => d.id !== body.device!.id)]);
+        setMessage('This browser has been registered.');
+        return;
+      }
+      setError(body.error ?? 'Could not register this browser.');
+    } finally {
+      setRegisteringDevice(false);
     }
-    setError(body.error ?? 'Could not register this browser.');
   }
 
   function updateNotificationPreference(key: 'operational_email' | 'marketing_email', value: boolean) {
@@ -400,13 +414,15 @@ export function ProfileClient({
             <h2 className="text-lg font-semibold text-slate-900">Devices</h2>
             <p className="mt-1 text-sm text-slate-600">Browsers you have registered for account security.</p>
           </div>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            loading={registeringDevice}
             onClick={() => void registerThisDevice()}
-            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50"
+            className="min-h-10 shrink-0 rounded-xl px-4 py-2.5 shadow-sm"
           >
             Register this browser
-          </button>
+          </Button>
         </div>
         {knownDevices.length === 0 ? (
           <p className="mt-4 text-sm text-slate-600">No devices registered yet.</p>
@@ -420,13 +436,15 @@ export function ProfileClient({
                     Last seen {device.last_seen_at ? device.last_seen_at.slice(0, 10) : device.created_at.slice(0, 10)}
                   </p>
                 </div>
-                <button
+                <Button
                   type="button"
+                  variant="link"
+                  loading={removingDevice === device.id}
                   onClick={() => void removeDevice(device.id)}
-                  className="text-sm font-semibold text-red-700 transition-colors hover:text-red-800"
+                  className="text-sm font-semibold !text-red-700 transition-colors hover:!text-red-800"
                 >
                   Remove
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -446,14 +464,14 @@ export function ProfileClient({
             </p>
           ) : null}
         </div>
-        <button
+        <Button
           type="button"
-          disabled={saving}
+          loading={saving}
           onClick={() => void saveProfile()}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+          className="min-h-11 shrink-0 rounded-xl px-6 py-2.5 shadow-sm"
         >
           {saving ? 'Saving…' : 'Save changes'}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { Button } from '@/components/ui/primitives';
 
 /**
  * Confirming the card for a membership (P0-17, closes C9).
@@ -66,13 +67,9 @@ function MembershipCardForm({
     <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
       <PaymentElement options={{ layout: 'tabs' }} />
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={!stripe} loading={loading}>
         {loading ? 'Confirming…' : 'Confirm and subscribe'}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -141,6 +138,9 @@ export function AccountMembershipsSection() {
     client_secret: string;
     stripe_account_id: string;
   } | null>(null);
+  /** In-flight guards (G30). Both of these call money routes. */
+  const [startingCheckout, setStartingCheckout] = useState(false);
+  const [cancelling, setCancelling] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -227,6 +227,7 @@ export function AccountMembershipsSection() {
    * not have committed yet.
    */
   async function startCheckout(venueIdArg?: string, productIdArg?: string) {
+    if (startingCheckout) return;
     setError(null);
     setMsg(null);
     const venueId = venueIdArg || resolvedCheckoutVenue;
@@ -242,24 +243,29 @@ export function AccountMembershipsSection() {
       return;
     }
     setCardSetup(null);
-    const res = await fetch('/api/account/memberships/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id: venueId, product_id: productId }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Checkout failed');
-      return;
+    setStartingCheckout(true);
+    try {
+      const res = await fetch('/api/account/memberships/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue_id: venueId, product_id: productId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Checkout failed');
+        return;
+      }
+      if (!data.client_secret || !data.stripe_account_id) {
+        setError('Could not start checkout');
+        return;
+      }
+      setCardSetup({
+        client_secret: data.client_secret as string,
+        stripe_account_id: data.stripe_account_id as string,
+      });
+    } finally {
+      setStartingCheckout(false);
     }
-    if (!data.client_secret || !data.stripe_account_id) {
-      setError('Could not start checkout');
-      return;
-    }
-    setCardSetup({
-      client_secret: data.client_secret as string,
-      stripe_account_id: data.stripe_account_id as string,
-    });
   }
 
   /**
@@ -275,20 +281,26 @@ export function AccountMembershipsSection() {
   }
 
   async function cancelMembership(id: string) {
+    if (cancelling) return;
     setError(null);
     setMsg(null);
-    const res = await fetch('/api/account/memberships/cancel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ membership_id: id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Cancel failed');
-      return;
+    setCancelling(id);
+    try {
+      const res = await fetch('/api/account/memberships/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ membership_id: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Cancel failed');
+        return;
+      }
+      setMsg('Cancellation scheduled at period end.');
+      void load();
+    } finally {
+      setCancelling(null);
     }
-    setMsg('Cancellation scheduled at period end.');
-    void load();
   }
 
   return (
@@ -341,13 +353,15 @@ export function AccountMembershipsSection() {
                     ) : null}
                   </div>
                   {m.stripe_subscription_id && !m.cancel_at_period_end ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="link"
+                      loading={cancelling === m.id}
                       onClick={() => void cancelMembership(m.id)}
-                      className="text-xs font-semibold text-amber-800 hover:underline"
+                      className="text-xs font-semibold !text-amber-800 hover:underline"
                     >
                       Cancel at period end
-                    </button>
+                    </Button>
                   ) : null}
                 </li>
               );
@@ -398,14 +412,14 @@ export function AccountMembershipsSection() {
                 )}
               </select>
             </label>
-            <button
+            <Button
               type="button"
               disabled={!effectiveCheckoutProduct}
+              loading={startingCheckout}
               onClick={() => void startCheckout()}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               Continue
-            </button>
+            </Button>
           </div>
         )}
 

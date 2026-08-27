@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { Button } from '@/components/ui/primitives';
 
 export function AccountPasswordForm() {
   const router = useRouter();
@@ -85,13 +86,9 @@ export function AccountPasswordForm() {
       </div>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {message ? <p className="text-sm text-emerald-800">{message}</p> : null}
-      <button
-        type="submit"
-        disabled={loading}
-        className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-      >
+      <Button type="submit" loading={loading} className="rounded-md">
         {loading ? 'Saving…' : 'Save password'}
-      </button>
+      </Button>
     </form>
   );
 }

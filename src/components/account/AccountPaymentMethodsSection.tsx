@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { Button } from '@/components/ui/primitives';
 
 function SetupForm({ clientSecret, stripeAccountId: _stripeAccountId, onComplete }: { clientSecret: string; stripeAccountId: string; onComplete: () => void }) {
   const stripe = useStripe();
@@ -41,9 +42,9 @@ function SetupForm({ clientSecret, stripeAccountId: _stripeAccountId, onComplete
     <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
       <PaymentElement options={{ layout: 'tabs' }} />
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
-      <button type="submit" disabled={!stripe || loading} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+      <Button type="submit" disabled={!stripe} loading={loading}>
         {loading ? 'Saving…' : 'Save card'}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -63,6 +64,8 @@ export function AccountPaymentMethodsSection() {
   const [venueId, setVenueId] = useState('');
   const [methods, setMethods] = useState<Array<{ id: string; brand: string | null; last4: string | null }>>([]);
   const [setup, setSetup] = useState<{ client_secret: string; stripe_account_id: string } | null>(null);
+  /** In-flight guard (G30): two taps used to mint two SetupIntents. */
+  const [startingSetup, setStartingSetup] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadVenues = useCallback(async () => {
@@ -89,23 +92,29 @@ export function AccountPaymentMethodsSection() {
   }, [loadVenues]);
 
   async function startSetup() {
+    if (startingSetup) return;
     setError(null);
     setSetup(null);
     if (!venueId) {
       setError('Pick a venue.');
       return;
     }
-    const res = await fetch('/api/account/payment-methods/setup-intent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id: venueId }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not start setup');
-      return;
+    setStartingSetup(true);
+    try {
+      const res = await fetch('/api/account/payment-methods/setup-intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue_id: venueId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Could not start setup');
+        return;
+      }
+      setSetup({ client_secret: data.client_secret, stripe_account_id: data.stripe_account_id });
+    } finally {
+      setStartingSetup(false);
     }
-    setSetup({ client_secret: data.client_secret, stripe_account_id: data.stripe_account_id });
   }
 
   return (
@@ -155,13 +164,15 @@ export function AccountPaymentMethodsSection() {
               ))}
             </ul>
           )}
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            loading={startingSetup}
             onClick={() => void startSetup()}
-            className="mt-4 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+            className="mt-4"
           >
             Add card
-          </button>
+          </Button>
         </div>
       ) : null}
 

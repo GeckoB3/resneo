@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@/components/ui/primitives';
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { AccountPasswordForm } from './AccountPasswordForm';
@@ -107,14 +108,15 @@ export default function AccountSecurityPage() {
         <p className="mt-2 text-sm text-slate-600">
           Sign out on this device and invalidate refresh tokens for other devices.
         </p>
-        <button
+        <Button
           type="button"
-          disabled={signingOutEverywhere}
+          variant="secondary"
+          loading={signingOutEverywhere}
           onClick={() => void signOutEverywhere()}
-          className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60"
+          className="mt-4 min-h-10 rounded-xl px-4 py-2.5 shadow-sm"
         >
           {signingOutEverywhere ? 'Signing out...' : 'Sign out everywhere'}
-        </button>
+        </Button>
       </div>
 
       <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/90 to-amber-50/40 p-6 shadow-sm shadow-amber-900/5 sm:p-7">
@@ -133,22 +135,24 @@ export default function AccountSecurityPage() {
         </label>
         {message ? <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">{message}</p> : null}
         {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p> : null}
-        <button
+        <Button
           type="button"
-          disabled={loading || deleteConfirmation !== 'DELETE MY ACCOUNT'}
+          disabled={deleteConfirmation !== 'DELETE MY ACCOUNT'}
+          loading={loading}
           onClick={() => void requestDeletion()}
-          className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-900 disabled:opacity-60"
+          className="mt-4 min-h-10 rounded-xl !bg-amber-800 px-4 py-2.5 shadow-sm hover:!bg-amber-900 disabled:!bg-amber-800/50"
         >
           {loading ? 'Submitting…' : 'Request account deletion'}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          disabled={loading}
+          variant="secondary"
+          loading={loading}
           onClick={() => void cancelDeletion()}
-          className="ml-3 mt-4 inline-flex min-h-10 items-center justify-center rounded-xl border border-amber-300/90 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 shadow-sm transition-colors hover:bg-amber-100 disabled:opacity-60"
+          className="ml-3 mt-4 min-h-10 rounded-xl !border-amber-300/90 px-4 py-2.5 !text-amber-950 shadow-sm hover:!bg-amber-100"
         >
           Cancel deletion request
-        </button>
+        </Button>
       </div>
     </div>
   );

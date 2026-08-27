@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { Button } from '@/components/ui/primitives';
 
 interface BalanceRow {
   id: string;
@@ -76,13 +77,9 @@ function CreditPurchaseForm({
     <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
       <PaymentElement options={{ layout: 'tabs' }} />
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={!stripe} loading={loading}>
         {loading ? 'Processing…' : 'Pay'}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -314,6 +311,13 @@ function BuyPackPicker({
       : null) ?? catalog.venues[0]?.id ?? '';
   const [venueId, setVenueId] = useState(initialVenueId);
   const [productId, setProductId] = useState(preselectProductId ?? '');
+  /**
+   * In-flight guard (G30). `onBuy` issues a PaymentIntent on the venue's
+   * connected account, so two taps meant two intents. It stays true until this
+   * panel unmounts, which is what happens on success: the parent swaps it for
+   * the Payment Element.
+   */
+  const [buying, setBuying] = useState(false);
   // Track venue prop changes (catalog loads async).
   useEffect(() => {
     if (preselectVenueId && catalog.venues.some((v) => v.id === preselectVenueId)) {
@@ -371,14 +375,18 @@ function BuyPackPicker({
           ))}
         </select>
       </label>
-      <button
+      <Button
         type="button"
         disabled={!venueId || !effectiveProductId}
-        onClick={() => onBuy(venueId, effectiveProductId)}
-        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        loading={buying}
+        onClick={() => {
+          setBuying(true);
+          onBuy(venueId, effectiveProductId);
+        }}
+        className="!bg-slate-900 hover:!bg-slate-800 disabled:!bg-slate-400"
       >
         Pay
-      </button>
+      </Button>
     </div>
   );
 }

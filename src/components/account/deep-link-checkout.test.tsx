@@ -166,7 +166,7 @@ describe('memberships deep link (G25)', () => {
     });
 
     render(<AccountMembershipsSection />);
-    await screen.findByText('Start membership (Stripe Checkout)');
+    await screen.findByText('Start a membership');
     expect(posts).toEqual([]);
   });
 
@@ -180,7 +180,7 @@ describe('memberships deep link (G25)', () => {
     });
 
     render(<AccountMembershipsSection />);
-    await screen.findByText('Start membership (Stripe Checkout)');
+    await screen.findByText('Start a membership');
     expect(posts).toEqual([]);
   });
 
@@ -193,7 +193,9 @@ describe('memberships deep link (G25)', () => {
     });
 
     render(<AccountMembershipsSection />);
-    const button = await screen.findByRole('button', { name: 'Go to checkout' });
+    // 'Continue' since P0-17: the button no longer leaves the page for hosted
+    // Checkout, it reveals the card form in place.
+    const button = await screen.findByRole('button', { name: 'Continue' });
     button.click();
     await waitFor(() => expect(posts.length).toBe(1));
     // No deep link: the selects show the first venue and its first plan, and

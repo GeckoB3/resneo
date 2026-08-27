@@ -29,7 +29,8 @@ import {
 } from '@/lib/webhooks/stripe-event-idempotency';
 import { fulfillClassCreditPurchaseFromPaymentIntent } from '@/lib/class-commerce/fulfill-credit-purchase';
 import { fulfillCourseEnrollmentFromPaymentIntent } from '@/lib/class-commerce/fulfill-course-enrollment';
-import { RESERVE_NI_PI_PURPOSE } from '@/types/class-commerce';
+import { RESERVE_NI_PI_PURPOSE, RESERVE_NI_SUBSCRIPTION_PURPOSE } from '@/types/class-commerce';
+import { createMembershipSubscriptionFromSetupIntent } from '@/lib/class-commerce/create-membership-subscription';
 import { syncClassMembershipFromStripeSubscription } from '@/lib/class-commerce/sync-membership-from-stripe';
 import { recordSalesRevenueRefund } from '@/lib/sales/invoice-revenue';
 import { restoreClassCreditsForBooking } from '@/lib/class-commerce/restore-class-credits';
@@ -590,6 +591,29 @@ export async function POST(request: NextRequest) {
       // and clients that never came back.
       const si = event.data.object as Stripe.SetupIntent;
       const meta = si.metadata ?? {};
+
+      // A membership purchase (P0-17). The SetupIntent replaced hosted
+      // Checkout, so this is where the subscription actually gets created:
+      // by now the card is saved, and the webhook is the only participant
+      // guaranteed to run. `customer.subscription.created` follows and the
+      // existing sync records the membership.
+      if (meta.reserve_ni_purpose === RESERVE_NI_SUBSCRIPTION_PURPOSE.CLASS_MEMBERSHIP) {
+        if (!connectedAccountId) {
+          console.warn(`[Stripe webhook] membership setup ${si.id} arrived with no connected account, skipping`);
+          return NextResponse.json({ received: true });
+        }
+        try {
+          const outcome = await createMembershipSubscriptionFromSetupIntent(supabase, si, connectedAccountId);
+          console.log(`[Stripe webhook] membership setup ${si.id}:`, outcome);
+        } catch (e) {
+          // Rethrow so Stripe retries: the customer has a saved card and no
+          // membership, and that is exactly the state a retry fixes.
+          console.error('[Stripe webhook] membership subscription create failed', e);
+          throw e;
+        }
+        return NextResponse.json({ received: true });
+      }
+
       if (meta.reserve_ni_purpose !== RESERVE_NI_PI_PURPOSE.CARD_HOLD_SETUP) {
         console.log(`[Stripe webhook] setup_intent.succeeded ${si.id} is not a card-hold setup, skipping`);
         return NextResponse.json({ received: true });

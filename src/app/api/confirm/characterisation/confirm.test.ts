@@ -5,7 +5,7 @@
  * modified snapshot files; an intended difference needs its own reviewed
  * commit. See ./harness.ts for the three harness decisions.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import {
   FIXED_NOW,
   baseBooking,
@@ -79,6 +79,21 @@ vi.mock('@/lib/table-management/lifecycle', async (importOriginal) => {
 vi.mock('@/lib/observability/booking-ops-log', () => ({
   logBookingOp: (...args: unknown[]) => hoisted.log!.record('booking-ops-log', 'logBookingOp')(...args),
 }));
+
+/**
+ * Compile the route's module graph before any row runs.
+ *
+ * `run()` dynamically imports the route, and the FIRST import pays for the
+ * whole graph: the three guest-action services and everything they pull in.
+ * That landed on row 1 and pushed it past vitest's 5s default under a loaded
+ * full-suite run, so these files failed intermittently while passing on their
+ * own. Warming it here costs the same time in a hook with its own budget and
+ * attributes it honestly, rather than hiding it behind a larger per-test
+ * timeout.
+ */
+beforeAll(async () => {
+  await import('../route');
+}, 60_000);
 
 async function run(opts: RunOptions) {
   hoisted.db = makeAdminDb(opts);

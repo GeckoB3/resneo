@@ -35,4 +35,18 @@ test.describe('default browser context is signed out', () => {
     await page.goto('/account/bookings');
     expect(new URL(page.url()).pathname).toBe('/login');
   });
+
+  test('the membership return page RENDERS without a cookie (C9)', async ({ page }) => {
+    // The C9 acceptance. Hosted Checkout used to return the customer to
+    // /account/memberships?checkout=success, which the test above shows
+    // redirects to /login: in an app webview with no cookie a completed
+    // subscription purchase read as a failure. The replacement return_url has
+    // to be a page an anonymous viewer can actually see.
+    const res = await page.goto('/membership/complete');
+    expect(res?.status()).toBe(200);
+    expect(new URL(page.url()).pathname, 'the return page must not bounce to /login').toBe(
+      '/membership/complete',
+    );
+    await expect(page.getByRole('heading', { name: 'Your card is confirmed' })).toBeVisible();
+  });
 });

@@ -8,7 +8,7 @@
  * modify, which is correct and must stay that way). Characterisation records
  * what is; P0-4 preserves it; changing it needs its own reviewed commit.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import {
   FIXED_NOW,
   IDS,
@@ -163,6 +163,21 @@ const VENUE_ROW = {
   email: null,
   reply_to_email: null,
 };
+
+/**
+ * Compile the route's module graph before any row runs.
+ *
+ * `run()` dynamically imports the route, and the FIRST import pays for the
+ * whole graph: the three guest-action services and everything they pull in.
+ * That landed on row 1 and pushed it past vitest's 5s default under a loaded
+ * full-suite run, so these files failed intermittently while passing on their
+ * own. Warming it here costs the same time in a hook with its own budget and
+ * attributes it honestly, rather than hiding it behind a larger per-test
+ * timeout.
+ */
+beforeAll(async () => {
+  await import('../route');
+}, 60_000);
 
 async function run(opts: Omit<RunOptions, 'action'>) {
   const tables: Record<string, unknown> = { venues: VENUE_ROW, guests: {}, ...(opts.tables ?? {}) };

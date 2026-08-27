@@ -2,7 +2,91 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+
+/**
+ * Confirming the card for a membership (P0-17, closes C9).
+ *
+ * This replaced `window.location.href = session.url`. The hosted Checkout page
+ * sent the customer back to `/account/memberships?checkout=success`, which
+ * middleware protects: in an app webview with no cookie that redirected to
+ * `/login`, so a completed purchase read as a failure. Confirming in place
+ * removes the round trip entirely, and the `return_url` below is a public page
+ * for the 3DS case that still redirects.
+ *
+ * The card is all that is confirmed here. The subscription is created by the
+ * `setup_intent.succeeded` webhook, which is why the copy says "setting up"
+ * rather than claiming the membership is live.
+ */
+function MembershipCardForm({
+  clientSecret,
+  onComplete,
+}: {
+  clientSecret: string;
+  onComplete: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setErr(null);
+    setLoading(true);
+    try {
+      const { error: submitError } = await elements.submit();
+      if (submitError) {
+        setErr(submitError.message ?? 'Check your card details.');
+        return;
+      }
+      const { error: se } = await stripe.confirmSetup({
+        elements,
+        clientSecret,
+        confirmParams: {
+          // Public, so a webview with no cookie lands somewhere that renders.
+          return_url: `${window.location.origin}/membership/complete`,
+        },
+        redirect: 'if_required',
+      });
+      if (se) {
+        setErr(se.message ?? 'We could not confirm your card.');
+        return;
+      }
+      onComplete();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
+      <PaymentElement options={{ layout: 'tabs' }} />
+      {err ? <p className="text-sm text-red-600">{err}</p> : null}
+      <button
+        type="submit"
+        disabled={!stripe || loading}
+        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+      >
+        {loading ? 'Confirming…' : 'Confirm and subscribe'}
+      </button>
+    </form>
+  );
+}
+
+/** One Stripe instance per connected account, as the other money sections do. */
+const stripeCache = new Map<string, ReturnType<typeof loadStripe>>();
+
+function stripeForAccount(accountId: string) {
+  const key = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '';
+  if (!stripeCache.has(accountId)) {
+    stripeCache.set(accountId, loadStripe(key, { stripeAccount: accountId }));
+  }
+  return stripeCache.get(accountId)!;
+}
 
 interface AllowanceStatusUnlimited {
   unlimited: true;
@@ -53,6 +137,10 @@ export function AccountMembershipsSection() {
   }>({ venues: [], products: [] });
   const [checkoutVenue, setCheckoutVenue] = useState('');
   const [checkoutProduct, setCheckoutProduct] = useState('');
+  const [cardSetup, setCardSetup] = useState<{
+    client_secret: string;
+    stripe_account_id: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -153,6 +241,7 @@ export function AccountMembershipsSection() {
       setError('That membership plan is not available at this venue.');
       return;
     }
+    setCardSetup(null);
     const res = await fetch('/api/account/memberships/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -163,7 +252,26 @@ export function AccountMembershipsSection() {
       setError(data.error ?? 'Checkout failed');
       return;
     }
-    if (data.url) window.location.href = data.url as string;
+    if (!data.client_secret || !data.stripe_account_id) {
+      setError('Could not start checkout');
+      return;
+    }
+    setCardSetup({
+      client_secret: data.client_secret as string,
+      stripe_account_id: data.stripe_account_id as string,
+    });
+  }
+
+  /**
+   * After the card confirms, the subscription is created by the webhook, so the
+   * membership is not in the list yet. Reloading once immediately and once a
+   * few seconds later covers the usual case without pretending to be live.
+   */
+  function onCardConfirmed() {
+    setCardSetup(null);
+    setMsg('Card confirmed. We are setting up your membership now.');
+    void load();
+    window.setTimeout(() => void load(), 4000);
   }
 
   async function cancelMembership(id: string) {
@@ -249,7 +357,7 @@ export function AccountMembershipsSection() {
       </div>
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
-        <h2 className="text-sm font-semibold text-slate-900">Start membership (Stripe Checkout)</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Start a membership</h2>
         <p className="mt-1 text-xs text-slate-500">Plans listed here have Stripe prices configured on the venue account.</p>
         {purchaseCatalog.venues.length === 0 ? (
           <p className="mt-3 text-sm text-slate-500">No membership products with Stripe prices yet.</p>
@@ -296,10 +404,29 @@ export function AccountMembershipsSection() {
               onClick={() => void startCheckout()}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
-              Go to checkout
+              Continue
             </button>
           </div>
         )}
+
+        {cardSetup ? (
+          <div className="mt-5 rounded-xl border border-slate-200 p-4">
+            <h3 className="text-sm font-semibold text-slate-900">Confirm your card</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Your card is charged by the venue on their own Stripe account. You can cancel the
+              membership at any time from this page.
+            </p>
+            <Elements
+              stripe={stripeForAccount(cardSetup.stripe_account_id)}
+              options={{ clientSecret: cardSetup.client_secret, appearance: { theme: 'stripe' } }}
+            >
+              <MembershipCardForm
+                clientSecret={cardSetup.client_secret}
+                onComplete={onCardConfirmed}
+              />
+            </Elements>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -71,20 +71,49 @@ npm run test:e2e
 
 The `e2e-smoke` job in `.github/workflows/ci.yml` runs only when the repository variable **`RUN_E2E_SMOKE`** is set to `true` (Settings → Secrets and variables → Actions → Variables). GitHub does not allow `secrets` in job-level `if` expressions.
 
-When enabled, configure these **secrets** for the job steps:
+**Status: green as of 2026-08-27** (10 tests, ~1.8 min). Configured and verified
+against the **staging** Supabase project. Never point it at production: the specs
+create real bookings and take real test-mode Stripe payments.
 
-- `E2E_VENUE_SLUG`
-- `E2E_OPTIONS_SERVICE_NAME` (optional; the default matches the seed script)
-- `E2E_STRIPE_CONNECTED_ACCOUNT_ID`
-- Plus standard app secrets (Supabase, Stripe, `PAYMENT_TOKEN_SECRET`)
+Configure these **secrets**, all pointing at staging:
 
-And this repository **variable**, alongside `RUN_E2E_SMOKE`:
+| Secret | Note |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Takes the **publishable** key. The app reads `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? ..._ANON_KEY`, so the older name still resolves. |
+| `SUPABASE_SECRET_KEY` | |
+| `STRIPE_SECRET_KEY` | `sk_test_…` |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `pk_test_…` |
+| `STRIPE_WEBHOOK_SECRET` | |
+| `PAYMENT_TOKEN_SECRET` | Must match the app under test, or every `?hmac=` link 403s. |
+| `E2E_STRIPE_CONNECTED_ACCOUNT_ID` | `acct_…`, written onto both fixture venues by the seed. |
 
-- `E2E_STAFF_FIRST_VENUE_SLUG` = `e2e-smoke-staff-first`
+And these repository **variables**:
 
-It is a variable rather than a secret because the slug is not sensitive and is
-fixed in the seed script. Without it the staff-first specs skip, which means a
-green run would not have covered that ordering at all.
+| Variable | Value |
+|---|---|
+| `RUN_E2E_SMOKE` | `true` |
+| `E2E_VENUE_SLUG` | `e2e-smoke-appointments` |
+| `E2E_VENUE_NAME` | `E2E Smoke Salon` |
+| `E2E_SERVICE_NAME` | `E2E Smoke Consultation` |
+| `E2E_OPTIONS_SERVICE_NAME` | `E2E Smoke Options Consultation` |
+| `E2E_STAFF_FIRST_VENUE_SLUG` | `e2e-smoke-staff-first` |
+
+**The fixture names are variables, not secrets, on purpose.** None is sensitive, and
+as secrets GitHub masked them everywhere they appeared, so the run log read
+`[e2e] Smoke fixture venue slug: ***` and `/book/***`: precisely the information
+needed to diagnose a failing run.
+
+**`E2E_VENUE_SLUG` is the one that must never go missing.** Without it every
+appointment spec **skips** and the job passes having tested nothing
+(`e2e/global-setup.ts:12-17`). The same applies to `E2E_STAFF_FIRST_VENUE_SLUG`
+and the staff-first ordering. A green run is only meaningful if both are set.
+
+**Anything the app needs at runtime belongs in the Playwright step's env, not only
+in build and seed**, because the web server Playwright starts inherits that step's
+environment.
+
+If `RUN_E2E_SMOKE` is unset or not `true`, the job is skipped.
 
 If `RUN_E2E_SMOKE` is unset or not `true`, the job is skipped.
 
@@ -114,6 +143,11 @@ If `RUN_E2E_SMOKE` is unset or not `true`, the job is skipped.
 | Payment step missing | Service needs `payment_requirement: deposit` and venue needs Connect |
 | Stripe iframe timeout | Confirm `pk_test` / `sk_test` keys and Connect account ID |
 | Invalid confirm link | `PAYMENT_TOKEN_SECRET` must match the running app |
+| "Phone is required" while the digits are visible | The field parses against the country selector and rejects the 07700 900xxx drama range. Use a real-shaped number; `AppointmentBookingFlow.flow-order.test.tsx` records the same trap |
+| Day never becomes clickable | The calendar day cells are `gridcell`, not `button`: grid semantics re-map the role |
+| Form field not found by label | The public branch of `DetailsStep` bypasses `FormField`, so its inputs have no `id` and the labels are not associated. Use placeholder or `name` |
+| Payment never confirms | The helper now fails with Stripe's own message rather than timing out. Read that message first |
+| Confirmation email not sent | Expected: SendGrid is not configured for this job, so that path is **not covered** by the suite |
 
 ## Files
 

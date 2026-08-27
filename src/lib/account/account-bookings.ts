@@ -1,4 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  addDaysToYmd,
+  toIsoWithOffset,
+  venueLocalWallTimeToUtcMs,
+} from '@/lib/venue/venue-local-clock';
+import { resolveDisplayTimeZone } from '@/lib/time/iana-time-zone';
+import {
+  accountBookingEndMs,
+  accountBookingStartMs,
+  isCancelledAccountStatus,
+  isUpcomingBooking,
+} from '@/lib/account/account-booking-filters';
 import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
 import type { BookingModel } from '@/types/booking-models';
 
@@ -80,6 +92,22 @@ export interface AccountBookingRow {
   venue: AccountVenueRow | null;
   /** CDE name + extras (event/class/resource). Null for table/appointment rows. */
   cde_context?: AccountCdeContext | null;
+  /**
+   * The booking's start as an unambiguous instant, e.g.
+   * `2026-09-01T18:00:00+01:00` (P0-2, C10).
+   *
+   * `booking_date` and `booking_time` are venue wall-clock strings and carry no
+   * zone, so every client that has them has to know the venue's timezone and
+   * apply the DST rule itself to work out when the booking actually is. That is
+   * how the web surface got it wrong for two years, and shipping the same two
+   * strings to the mobile app invites the same bug a second time. These three
+   * fields are the answer, and the wall-clock pair stays for compatibility.
+   */
+  starts_at: string;
+  /** End instant, or null when the booking has no end time. */
+  ends_at: string | null;
+  /** The IANA zone `starts_at` and `ends_at` are expressed in. */
+  time_zone: string;
 }
 
 export type AccountBookingDisplayItem =
@@ -102,6 +130,14 @@ export type AccountBookingDisplayItem =
  * action payloads may be read as admin.
  */
 const ACCOUNT_BOOKINGS_VIEW = 'bookings_account_safe';
+
+/**
+ * The cancelled statuses as a PostgREST `in` list. Quoted because three of the
+ * five contain a hyphen or a space, which PostgREST would otherwise split.
+ */
+const CANCELLED_STATUS_SQL_LIST = ['Cancelled', 'Canceled', 'No-Show', 'NoShow', 'No Show']
+  .map((s) => `"${s}"`)
+  .join(',');
 
 const ACCOUNT_BOOKING_COLUMNS =
   'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, cancellation_deadline, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id';
@@ -148,34 +184,50 @@ export function friendlyAccountBookingStatus(status: string | null | undefined):
 
 /** Resolve the display timezone for a booking (venue TZ, then caller fallback, then London). */
 export function accountBookingTimeZone(
-  row: Pick<AccountBookingRow, 'venue'>,
+  row: Pick<AccountBookingRow, 'venue'> & { time_zone?: string | null },
   fallbackTz?: string | null,
 ): string {
-  const venueTz = row.venue?.timezone?.trim();
-  if (venueTz) return venueTz;
-  const fb = fallbackTz?.trim();
-  return fb || 'Europe/London';
+  // Degrades rather than throwing: a stored value that Intl will not accept
+  // must cost a customer the right zone, not the whole page (G23).
+  return resolveDisplayTimeZone(row.time_zone ?? row.venue?.timezone ?? null, fallbackTz);
 }
 
 /**
- * Format a stored date + wall-clock time in the given IANA timezone.
- * Booking date/time are venue wall-clock values, so we anchor them to that zone for a
- * consistent guest-facing rendering across the list, detail and hub surfaces.
+ * Format a booking's start for display in `timeZone` (P0-2, part of G5).
+ *
+ * The old version took the stored wall-clock strings and did two different
+ * things with them. The date was anchored to NOON UTC and formatted in
+ * `timeZone`, so for any zone more than twelve hours from UTC the label landed
+ * on the wrong calendar day, and the weekday with it. The time was returned as
+ * a raw `slice(0, 5)` of the stored string, which meant the `timeZone` argument
+ * did not affect it at all: asking for a booking in `America/Los_Angeles` gave
+ * you the London time with a Los Angeles date.
+ *
+ * Now both halves come from one instant, so they cannot disagree, and asking
+ * for a different zone actually shifts the time.
+ *
+ * `sourceTimeZone` is the venue zone the stored wall-clock values are expressed
+ * in. It defaults to `timeZone`, which is what the callers pass today (the
+ * display zone IS the venue zone unless a customer has overridden it), so the
+ * common case needs no extra argument.
  */
 export function formatAccountBookingDateTime(
   dateStr: string,
   timeStr: string | null | undefined,
   timeZone: string,
-  opts?: { withWeekday?: boolean },
+  opts?: { withWeekday?: boolean; sourceTimeZone?: string | null },
 ): { date: string; time: string | null } {
+  const raw = timeStr ? String(timeStr).slice(0, 5) : null;
   const dParts = dateStr.split('-').map(Number);
   if (dParts.length !== 3 || dParts.some((n) => Number.isNaN(n))) {
-    return { date: dateStr, time: timeStr ? String(timeStr).slice(0, 5) : null };
+    return { date: dateStr, time: raw };
   }
-  const [y, mo, d] = dParts;
-  const tz = timeZone.trim() || 'Europe/London';
 
-  const dateOut = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0)).toLocaleDateString('en-GB', {
+  const tz = resolveDisplayTimeZone(timeZone);
+  const sourceTz = resolveDisplayTimeZone(opts?.sourceTimeZone ?? null, tz);
+  const instant = venueLocalWallTimeToUtcMs(dateStr, raw ?? '12:00', sourceTz);
+
+  const date = new Date(instant).toLocaleDateString('en-GB', {
     ...(opts?.withWeekday ? { weekday: 'long' as const } : {}),
     day: 'numeric',
     month: 'long',
@@ -183,7 +235,17 @@ export function formatAccountBookingDateTime(
     timeZone: tz,
   });
 
-  return { date: dateOut, time: timeStr ? String(timeStr).slice(0, 5) : null };
+  // No stored time means no time to show. Midday was only ever an anchor for
+  // the date label and must not surface as "12:00".
+  if (!raw) return { date, time: null };
+
+  const time = new Date(instant).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: tz,
+  });
+  return { date, time };
 }
 
 function minutesBetween(start: string | null | undefined, end: string | null | undefined): number | null {
@@ -614,6 +676,13 @@ function hydrateAccountBookingRow(
   maps: AccountCdeMaps,
   opts?: { includeClassSpots?: boolean },
 ): AccountBookingRow {
+  const venue = venueMap.get(b.venue_id) ?? null;
+  // The instant is built in the VENUE's zone, because that is the zone the
+  // stored wall-clock strings are in. A customer's own timezone preference is a
+  // DISPLAY choice and is applied when rendering, never when resolving.
+  const time_zone = resolveDisplayTimeZone(venue?.timezone ?? null);
+  const instantRow = { ...b, status: b.status, time_zone };
+
   return {
     id: b.id,
     venue_id: b.venue_id,
@@ -634,8 +703,13 @@ function hydrateAccountBookingRow(
     class_instance_id: b.class_instance_id ?? null,
     experience_event_id: b.experience_event_id ?? null,
     resource_id: b.resource_id ?? null,
-    venue: venueMap.get(b.venue_id) ?? null,
+    venue,
     cde_context: buildAccountCdeContext(b, maps, opts),
+    starts_at: toIsoWithOffset(accountBookingStartMs(instantRow), time_zone),
+    ends_at: b.booking_end_time
+      ? toIsoWithOffset(accountBookingEndMs(instantRow), time_zone)
+      : null,
+    time_zone,
   };
 }
 
@@ -685,13 +759,22 @@ export async function loadAccountBookings(
 
 /**
  * Load upcoming bookings of a single CDE model for the per-model hub pages
- * (/account/events, /account/resources). Ordered soonest-first, future dates only.
+ * (/account/events, /account/resources). Ordered soonest-first.
+ *
+ * "Upcoming" is decided against instants, not against a UTC calendar day
+ * (P0-2, G5). The SQL bound is deliberately one day WIDER than today's UTC
+ * date, because a venue as far behind UTC as -12:00 can still be on yesterday's
+ * local date while UTC has rolled over, and a bound of "today or later" drops
+ * a booking that has not happened yet. The precise cut is then made per row in
+ * the venue's own zone. The cost is at most one day of already-finished rows
+ * counting against `limit`, which is the right trade against silently hiding a
+ * booking a customer still has.
  */
 export async function loadAccountUpcomingBookingsByModel(
   supabase: SupabaseClient,
   admin: SupabaseClient,
   model: Extract<BookingModel, 'event_ticket' | 'resource_booking'>,
-  todayUtcDate: string,
+  nowMs: number = Date.now(),
   limit = 50,
 ): Promise<AccountBookingRow[]> {
   const guests = await loadAccountSafeGuests(supabase);
@@ -700,13 +783,20 @@ export async function loadAccountUpcomingBookingsByModel(
 
   const fkColumn = model === 'event_ticket' ? 'experience_event_id' : 'resource_id';
 
+  // Cancellations are excluded IN THE QUERY, not afterwards (G5a). Filtering
+  // after `.limit()` meant a customer with fifty cancelled events saw an empty
+  // page: the limit was spent on rows that were then thrown away. And the old
+  // filter compared against the exact string 'Cancelled', so the four other
+  // stored spellings ('Canceled', 'No-Show', 'NoShow', 'No Show') came through
+  // as upcoming.
   const { data: bookings, error: bErr } = await supabase
     .from(ACCOUNT_BOOKINGS_VIEW)
     .select(ACCOUNT_BOOKING_COLUMNS)
     .in('guest_id', guestIds)
     .eq('booking_model', model)
-    .gte('booking_date', todayUtcDate)
+    .gte('booking_date', addDaysToYmd(new Date(nowMs).toISOString().slice(0, 10), -1))
     .not(fkColumn, 'is', null)
+    .not('status', 'in', `(${CANCELLED_STATUS_SQL_LIST})`)
     .order('booking_date', { ascending: true })
     .order('booking_time', { ascending: true })
     .limit(limit);
@@ -716,10 +806,16 @@ export async function loadAccountUpcomingBookingsByModel(
     throw new Error('Failed to load account bookings');
   }
 
+  // Belt and braces: the predicate above is the one that matters, but a status
+  // spelling the database has and this list does not must not reach the page as
+  // an upcoming booking.
   const rows = ((bookings ?? []) as RawBookingRow[]).filter(
-    (b) => b.status !== 'Cancelled',
+    (b) => !isCancelledAccountStatus(b.status),
   );
-  return hydrateAccountBookingRows(admin, rows);
+  // Hydrate first: `time_zone` is resolved there, and it is what makes the
+  // upcoming test correct for a venue in a zone other than the server's.
+  const hydrated = await hydrateAccountBookingRows(admin, rows);
+  return hydrated.filter((b) => isUpcomingBooking(b, nowMs));
 }
 
 export async function loadAccountBookingById(

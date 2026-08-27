@@ -98,4 +98,36 @@ test.describe('P0-1 portal smoke: sign in, view bookings, open detail', () => {
     expect(mintCalls).toEqual(['POST']);
     expect(mintedUrl).toMatch(/\/b\/[0-9A-Za-z]{6}$/);
   });
+
+  test('every account surface renders, with the timezone now a picker (P0-2)', async ({ page }) => {
+    // P0-2 changed the signature the two hub loaders are called with, and
+    // nothing else covers those pages. It also swapped the timezone field from
+    // free text to a select, which is the half of G23 a schema test cannot see.
+    const pageErrors: string[] = [];
+    page.on('pageerror', (e) => {
+      // React's dev-only Server Components performance track emits
+      // "cannot have a negative time stamp" from performance.measure for some
+      // async server components. It is instrumentation, not the page: checked
+      // against a production build (next build + next start), where these four
+      // routes raise no page errors at all. Everything else still fails here.
+      if (/Failed to execute 'measure' on 'Performance'/.test(String(e))) return;
+      pageErrors.push(String(e));
+    });
+
+    await signInAsPortalCustomer(page);
+    for (const path of [
+      '/account/bookings?filter=upcoming',
+      '/account/bookings?filter=past',
+      '/account/events',
+      '/account/resources',
+      '/account/profile',
+    ]) {
+      const res = await page.goto(path);
+      expect(res?.status(), path).toBeLessThan(400);
+      await expect(page.locator('h1').first(), path).toBeVisible();
+    }
+
+    await expect(page.locator('select#profile-timezone')).toBeVisible();
+    expect(pageErrors).toEqual([]);
+  });
 });

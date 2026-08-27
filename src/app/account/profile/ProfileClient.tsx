@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { supportedTimeZones } from '@/lib/time/iana-time-zone';
 import { useRouter } from 'next/navigation';
 
 type Profile = {
@@ -48,6 +49,9 @@ export function ProfileClient({
   devices: Device[];
 }) {
   const router = useRouter();
+  // Built once: the list is ~420 entries and the component re-renders on every
+  // keystroke in the fields above it.
+  const timeZoneOptions = useMemo(() => supportedTimeZones(), []);
   const [profile, setProfile] = useState(initialProfile);
   const [email, setEmail] = useState(initialEmail);
   const [marketing, setMarketing] = useState(marketingRelationships);
@@ -264,14 +268,29 @@ export function ProfileClient({
           </label>
           <label className="block text-sm font-medium text-slate-800" htmlFor="profile-timezone">
             Timezone
-            <input
+            <select
               id="profile-timezone"
               name="timezone"
               value={profile.timezone}
               onChange={(e) => setProfile((p) => ({ ...p, timezone: e.target.value }))}
               className={inputClass}
-              placeholder="Europe/London"
-            />
+            >
+              {/*
+                A select rather than free text (G23): the server now rejects
+                anything that is not a real IANA zone, so an input could only
+                produce a 400 the customer has to guess their way out of.
+                A value already stored that is not in the list is kept as its
+                own option, so opening this page cannot silently change it.
+              */}
+              {!timeZoneOptions.includes(profile.timezone) && profile.timezone !== '' ? (
+                <option value={profile.timezone}>{profile.timezone} (not recognised)</option>
+              ) : null}
+              {timeZoneOptions.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-login-dest">
             Default destination after login

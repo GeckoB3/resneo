@@ -19,7 +19,7 @@ function ticketSummary(lines: AccountTicketLine[] | undefined, partySize: number
 }
 
 export default async function AccountEventsHubPage() {
-  const todayUtcDate = new Date().toISOString().slice(0, 10);
+  const nowMs = new Date().getTime();
   const supabase = await createClient();
   const {
     data: { user },
@@ -33,7 +33,7 @@ export default async function AccountEventsHubPage() {
     supabase,
     getSupabaseAdminClient(),
     'event_ticket',
-    todayUtcDate,
+    nowMs,
   );
 
   return (

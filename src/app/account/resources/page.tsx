@@ -11,7 +11,7 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 export default async function AccountResourcesHubPage() {
-  const todayUtcDate = new Date().toISOString().slice(0, 10);
+  const nowMs = new Date().getTime();
   const supabase = await createClient();
   const {
     data: { user },
@@ -25,7 +25,7 @@ export default async function AccountResourcesHubPage() {
     supabase,
     getSupabaseAdminClient(),
     'resource_booking',
-    todayUtcDate,
+    nowMs,
   );
 
   return (

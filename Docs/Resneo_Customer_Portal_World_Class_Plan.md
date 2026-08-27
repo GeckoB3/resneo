@@ -345,8 +345,8 @@ Every gap has at least one task that closes it, and every Remediation Register f
 | G3 No rebook | | P3-1 | 3 |
 | G4 N+1 and writes on a GET | C-02 | P0-3 **(done 2026-08-27)** | 0 |
 | G4a Short-link collision 500s the list | C-01 | P0-3 **(done 2026-08-27)** | 0 |
-| G5 Timezone-incorrect filtering | C-12 | P0-2 | 0 |
-| G5a Status classification wrong three ways | C-11 | P0-2 | 0 |
+| G5 Timezone-incorrect filtering | C-12 | P0-2 **(done 2026-08-27)** | 0 |
+| G5a Status classification wrong three ways | C-11 | P0-2 **(done 2026-08-27)** | 0 |
 | G6 Near-zero test coverage | | P0-1, P0-9 | 0 |
 | G7 Polish, loading, error, titles, false empty states | Q-09, Q-05, Q-02, Q-03 | P0-5, P0-8, P1-2 | 0, 1 |
 | G8 Held data never surfaced | | P3-2, P4-1, P4-2 | 3, 4 |
@@ -367,7 +367,7 @@ Every gap has at least one task that closes it, and every Remediation Register f
 | G20 Unbranded transactional emails | | P3-4e, P4-8 | 3, 4 |
 | G21 Notification toggles are decorative | | **P0-13** (namespace), **P0-14 (moved from Phase 4)**, P4-3 | 0, 4 |
 | G22 Locale written, never read | Q-16 | P1-4 | 1 |
-| G23 Free-text timezone crashes four routes | C-03 | **P0-2** | 0 |
+| G23 Free-text timezone crashes four routes | C-03 | **P0-2** **(done 2026-08-27)** | 0 |
 | G24 Network failure looks like empty | C-04 | P0-5 | 0 |
 | G25 Deep-link checkout can charge the wrong plan | C-08 | **P0-15 (new)** | 0 |
 | G26 No cache headers on 26 routes | Q-18 | **P0-11** | 0 |
@@ -748,7 +748,7 @@ Four tasks assert on query counts or on writes, and **no existing double support
 - Add `e2e/account-portal.spec.ts` covering sign in, view bookings, open detail.
 - **Acceptance:** every one of the 26 routes has at least an auth test; the portal e2e passes locally and in CI **with `vars.RUN_E2E_SMOKE` set** (the Playwright job is gated on that repo variable at `.github/workflows/ci.yml:160` and does not run by default, so "green in CI" is not otherwise demonstrable); the two-venue fixture is documented in `Docs/E2E_SMOKE.md` alongside the existing ones. Note `Docs/E2E_SMOKE.md` currently documents only two of the four existing specs and should be brought up to date in the same pass.
 
-**P0-2. Timezone-correct booking instants and status classification** (AD4, closes G5, G5a, G23)
+**P0-2. Timezone-correct booking instants and status classification** (AD4, closes G5, G5a, G23) *(DONE 2026-08-27. Classification is now instant-based: `venueLocalWallTimeToUtcMs` in the VENUE's zone, compared against `Date.now()`, so a booking earlier today is past, one later today is upcoming, and one in progress is upcoming. `Completed` joins the five cancelled spellings as terminal, and the events and resources loaders exclude cancellations IN the query with the SQL bound widened by a day, so the `.limit()` is no longer spent on rows that are then discarded. `formatAccountBookingDateTime` builds one instant and renders both halves from it, so its `timeZone` argument now affects the time as well as the date and the noon-UTC anchor is gone. `starts_at`, `ends_at` and `time_zone` are on `AccountBookingRow` and so on every customer payload carrying a booking (`ends_at` is an addition beyond the task text: without it a client has to re-derive the end instant from a wall-clock string, which is the drift this closes). G23 is shut on both sides: `isValidIanaTimeZone` constrains the customer profile and both venue schemas, both timezone inputs are now selects that preserve an unrecognised stored value as its own option, and `resolveDisplayTimeZone` degrades on read so a row already holding `GMT+1` cannot take a page down. The UTC caveat is off the bookings page. `Intl.DateTimeFormat` instances are cached by zone, which the per-row instant work made necessary. 37 new unit tests plus a portal e2e over all five account surfaces.)*
 - Rewrite `src/lib/account/account-booking-filters.ts` to take instants built with `venueLocalWallTimeToUtcMs` (`src/lib/venue/venue-local-clock.ts:104`). **Do not create a new instant module**; §2.4 and AD4 record why.
 - Fix `formatAccountBookingDateTime` (`src/lib/account/account-bookings.ts:152`), which currently anchors the weekday label to noon UTC and returns the time as a raw slice, so its `timeZone` argument affects only the date label.
 - Fix the three further classification defects in G5a: treat `Completed` as past, filter cancellations before applying `.limit()` in the events and resources loaders, and match all five cancelled-status variants rather than the exact string `Cancelled`.

@@ -37,7 +37,7 @@ export default async function AccountBookingsPage({
 }) {
   const sp = (await searchParams) ?? {};
   const filter = parseAccountBookingFilter(sp.filter);
-  const todayUtcDate = new Date().toISOString().slice(0, 10);
+  const nowMs = new Date().getTime();
 
   const supabase = await createClient();
   const {
@@ -50,7 +50,9 @@ export default async function AccountBookingsPage({
 
   const bookings = await loadAccountBookings(supabase, getSupabaseAdminClient(), 100);
 
-  const filtered = filterAccountBookings(bookings, filter, todayUtcDate);
+  // The customer's own timezone is only a fallback: each booking is classified
+  // in its VENUE's zone, which is the zone its stored times are in (P0-2).
+  const filtered = filterAccountBookings(bookings, filter, nowMs, profileTz);
   const displayItems = buildAccountBookingDisplayList(filtered);
 
   const tabs: Array<{ id: AccountBookingFilter; label: string }> = [
@@ -156,7 +158,7 @@ export default async function AccountBookingsPage({
         </ul>
       )}
       <p className="text-xs text-slate-500">
-        Times are shown in each venue’s local timezone. Filters use the UTC calendar day.
+        Times are shown in each venue’s local timezone.
       </p>
     </div>
   );

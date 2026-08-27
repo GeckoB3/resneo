@@ -45,7 +45,10 @@ const GUESTS = [
 
 const VENUES = [
   { id: 'v1', name: 'The Wharf', slug: 'the-wharf', timezone: 'Europe/London' },
-  { id: 'v2', name: 'Northside Studio', slug: 'northside', timezone: 'Europe/London' },
+  // Deliberately a different zone: it is what makes the starts_at assertions
+  // below able to fail if the instant were built in the server's zone (P0-2).
+  { id: 'v2', name: 'Northside Studio', slug: 'northside', timezone: 'Australia/Sydney' },
+  { id: 'v3', name: 'Zoneless Rooms', slug: 'zoneless', timezone: null },
 ];
 
 /** 40 event rows on 2 events, 30 class rows on 3 instances, 20 resource rows on 2 resources, 10 tables. */
@@ -289,6 +292,51 @@ describe('GET /api/account/bookings', () => {
     hoisted.db.inject((c) => c.table === 'bookings_account_safe', { message: 'denied' });
     const { res } = await listBookings();
     expect(res.status).toBe(500);
+  });
+
+  it('carries the booking instant, not just wall-clock strings (P0-2, C10)', async () => {
+    // booking_date + booking_time have no zone in them, so every client that
+    // gets only those has to know the venue's timezone and apply the DST rule
+    // itself. That is how the web surface got it wrong for two years; shipping
+    // the same two strings to the mobile app would invite it again.
+    const { body } = await listBookings();
+    const byId = new Map(body.bookings!.map((b) => [b.id as string, b]));
+
+    // b0 is on v1 (London, BST in September): 18:00 local is 17:00 UTC.
+    expect(byId.get('b0')).toMatchObject({
+      time_zone: 'Europe/London',
+      starts_at: '2026-09-01T18:00:00+01:00',
+      ends_at: '2026-09-01T19:30:00+01:00',
+    });
+    // b1 is on v2 (Sydney, AEST in September): the same wall time, ten hours
+    // earlier in UTC. Identical booking_date and booking_time, different
+    // instant, which is precisely the information the wall-clock pair loses.
+    expect(byId.get('b1')).toMatchObject({
+      time_zone: 'Australia/Sydney',
+      starts_at: '2026-09-01T18:00:00+10:00',
+    });
+    expect(Date.parse(byId.get('b1')!.starts_at as string)).toBeLessThan(
+      Date.parse(byId.get('b0')!.starts_at as string),
+    );
+
+    // Every row carries them, and they round-trip to a real instant.
+    for (const b of body.bookings!) {
+      expect(typeof b.starts_at).toBe('string');
+      expect(Number.isNaN(Date.parse(b.starts_at as string)), b.id as string).toBe(false);
+    }
+  });
+
+  it('falls back to London for a venue with no timezone', async () => {
+    hoisted.db = makeRecordingDb((call) =>
+      call.table === 'bookings_account_safe'
+        ? { data: [{ ...BOOKINGS[90], id: 'z1', venue_id: 'v3' }] }
+        : responder(call),
+    );
+    const { body } = await listBookings();
+    expect(body.bookings![0]).toMatchObject({
+      time_zone: 'Europe/London',
+      starts_at: '2026-09-01T18:00:00+01:00',
+    });
   });
 
   it('rejects an anonymous caller before reading anything', async () => {

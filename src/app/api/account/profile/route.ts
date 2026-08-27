@@ -3,6 +3,7 @@ import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { getCallerAccessToken, updateAuthUserAsCaller } from '@/lib/auth/caller-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
+import { isValidIanaTimeZone } from '@/lib/time/iana-time-zone';
 
 const patchSchema = z.object({
   display_name: z.union([z.string(), z.null()]).optional(),
@@ -11,7 +12,17 @@ const patchSchema = z.object({
   phone: z.union([z.string(), z.null()]).optional(),
   email: z.string().email().optional(),
   locale: z.string().min(2).max(20).optional(),
-  timezone: z.string().min(2).max(64).optional(),
+  // Constrained to real IANA zones (G23). Free text here meant a customer could
+  // save 'GMT+1' and then be unable to load the very page that would let them
+  // fix it, because every toLocaleDateString({ timeZone }) call threw.
+  timezone: z
+    .string()
+    .min(2)
+    .max(64)
+    .refine(isValidIanaTimeZone, {
+      message: 'Choose a timezone from the list, for example Europe/London.',
+    })
+    .optional(),
   default_login_destination: z.enum(['account', 'dashboard', 'ask']).nullable().optional(),
   notification_preferences: z.record(z.string(), z.unknown()).optional(),
 });

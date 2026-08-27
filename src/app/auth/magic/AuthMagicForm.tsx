@@ -88,7 +88,10 @@ export function AuthMagicForm({
             If that email is registered, a secure sign-in link is on its way. It may take a minute to arrive.
           </p>
         </div>
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+        <div
+          role="status"
+          className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900"
+        >
           <p className="font-medium">Link sent</p>
           <p className="mt-1">Open the link on this device to see your bookings. The link expires in 24 hours.</p>
           <button
@@ -131,10 +134,12 @@ export function AuthMagicForm({
           {status === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
         </button>
         {status === 'error' ? (
-          <p className="text-sm text-red-700">Something went wrong. Try again shortly.</p>
+          <p role="alert" className="text-sm text-red-700">
+            Something went wrong. Try again shortly.
+          </p>
         ) : null}
         {status === 'throttled' ? (
-          <p className="text-sm text-amber-800">
+          <p role="alert" className="text-sm text-amber-800">
             We have sent several sign-in links to this address already. Check your inbox and spam folder, then try
             again in a few minutes.
           </p>

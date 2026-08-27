@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { supportedTimeZones } from '@/lib/time/iana-time-zone';
 import { Button, FormField, Input } from '@/components/ui/primitives';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { useToast } from '@/components/ui/Toast';
 import {
   mergePreferenceNamespace,
   readPreferenceNamespace,
@@ -38,7 +39,7 @@ type Device = {
 };
 
 const inputClass =
-  'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/80';
+  'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/80';
 
 const sectionClass =
   'rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7';
@@ -62,8 +63,28 @@ export function ProfileClient({
   const [email, setEmail] = useState(initialEmail);
   const [marketing, setMarketing] = useState(marketingRelationships);
   const [knownDevices, setKnownDevices] = useState(devices);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessageState] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+
+  /**
+   * Announcing wrappers (P0-8). Named for the setters they replace so
+   * every existing call site announces without being edited.
+   */
+  const { addToast } = useToast();
+  const setMessage = useCallback(
+    (m: string | null) => {
+      setMessageState(m);
+      if (m) addToast(m, 'success');
+    },
+    [addToast],
+  );
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
   const [saving, setSaving] = useState(false);
   /** In-flight guards (G30) for the two device handlers, which had none. */
   const [registeringDevice, setRegisteringDevice] = useState(false);

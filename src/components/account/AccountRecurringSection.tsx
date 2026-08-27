@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Button, FormField, Input } from '@/components/ui/primitives';
 
@@ -74,7 +75,17 @@ export function AccountRecurringSection() {
   const [maxOccurrences, setMaxOccurrences] = useState('');
   const [intervalWeeks, setIntervalWeeks] = useState('1');
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+
+  /** Announcing wrapper (P0-8); see the note in ProfileClient. */
+  const { addToast } = useToast();
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
   const [info, setInfo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -94,7 +105,7 @@ export function AccountRecurringSection() {
       class_types: (rc?.class_types ?? []) as CatalogType[],
       timetable_slots: (rc?.timetable_slots ?? []) as TimetableSlot[],
     });
-  }, []);
+  }, [setError]);
 
   useEffect(() => {
     queueMicrotask(() => {

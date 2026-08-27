@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Button, FormField } from '@/components/ui/primitives';
 
@@ -114,7 +115,17 @@ export function AccountCoursesSection() {
   const [venueId, setVenueId] = useState('');
   const [productIdFree, setProductIdFree] = useState('');
   const [productIdPaid, setProductIdPaid] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+
+  /** Announcing wrappers (P0-8); see the note in ProfileClient. */
+  const { addToast } = useToast();
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
   /**
    * In-flight guards (G30). All three call routes that create enrollments,
    * PaymentIntents or refunds, so a double tap was a double side effect.
@@ -122,7 +133,14 @@ export function AccountCoursesSection() {
   const [enrolling, setEnrolling] = useState(false);
   const [startingPaid, setStartingPaid] = useState(false);
   const [cancellingEnrollment, setCancellingEnrollment] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsgState] = useState<string | null>(null);
+  const setMsg = useCallback(
+    (m: string | null) => {
+      setMsgState(m);
+      if (m) addToast(m, 'success');
+    },
+    [addToast],
+  );
   const [paidCheckout, setPaidCheckout] = useState<{
     venue_id: string;
     product_id: string;
@@ -149,7 +167,7 @@ export function AccountCoursesSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       courses: (pc?.courses ?? []) as CatalogCourse[],
     });
-  }, [deepLinkVenueId]);
+  }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
     queueMicrotask(() => {

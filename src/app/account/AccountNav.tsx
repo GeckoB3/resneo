@@ -44,7 +44,14 @@ export function AccountNav({ showVenueDashboard }: { showVenueDashboard: boolean
       <div className="mx-auto max-w-5xl px-4">
         <div className="-mx-1 flex gap-0.5 overflow-x-auto py-2 sm:flex-wrap sm:overflow-visible sm:py-2.5">
           {PRIMARY_NAV.map((item) => (
-            <Link key={item.href} href={item.href} className={linkClass(item.href)}>
+            <Link
+              key={item.href}
+              href={item.href}
+              // The active item was signalled by colour alone, which a screen
+              // reader cannot see and a colour-blind user may not either.
+              aria-current={linkActive(pathname, item.href) ? 'page' : undefined}
+              className={linkClass(item.href)}
+            >
               {item.label}
             </Link>
           ))}

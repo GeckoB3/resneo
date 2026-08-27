@@ -75,6 +75,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@ladle/react": "^5.1.1",
     "@playwright/test": "^1.60.0",
     "@swc/helpers": "^0.5.21",

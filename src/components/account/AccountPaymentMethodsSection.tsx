@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Button, FormField } from '@/components/ui/primitives';
 
@@ -67,7 +68,17 @@ export function AccountPaymentMethodsSection() {
   const [setup, setSetup] = useState<{ client_secret: string; stripe_account_id: string } | null>(null);
   /** In-flight guard (G30): two taps used to mint two SetupIntents. */
   const [startingSetup, setStartingSetup] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+
+  /** Announcing wrapper (P0-8); see the note in ProfileClient. */
+  const { addToast } = useToast();
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
 
   const loadVenues = useCallback(async () => {
     const res = await fetch('/api/account/class-commerce-venues');
@@ -84,7 +95,7 @@ export function AccountPaymentMethodsSection() {
       return;
     }
     setMethods((data.payment_methods ?? []) as Array<{ id: string; brand: string | null; last4: string | null }>);
-  }, []);
+  }, [setError]);
 
   useEffect(() => {
     queueMicrotask(() => {

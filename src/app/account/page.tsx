@@ -4,6 +4,20 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { authenticatedUserHasStaffMembership } from '@/lib/venue-auth';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
+/**
+ * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
+ * otherwise falls back to the root layout's title, so all thirteen portal
+ * routes announced the same thing and a screen-reader user could not tell from
+ * the tab or the announcement which one they were on.
+ *
+ * Scoped to the surviving routes, matching P0-5: P1-3 and P1-5 turn nine of
+ * the thirteen into one-line redirects, and a redirect does not need a title.
+ */
+export const metadata = {
+  title: 'My account',
+  description: 'Your bookings, passes and profile in one place.',
+};
+
 const portalCardClass =
   'group relative flex flex-col rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200/80 hover:shadow-md hover:shadow-brand-900/5';
 

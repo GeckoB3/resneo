@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Button, FormField } from '@/components/ui/primitives';
 
@@ -142,8 +143,25 @@ export function AccountMembershipsSection() {
   /** In-flight guards (G30). Both of these call money routes. */
   const [startingCheckout, setStartingCheckout] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  const [msg, setMsgState] = useState<string | null>(null);
+
+  /** Announcing wrappers (P0-8); see the note in ProfileClient. */
+  const { addToast } = useToast();
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
+  const setMsg = useCallback(
+    (m: string | null) => {
+      setMsgState(m);
+      if (m) addToast(m, 'success');
+    },
+    [addToast],
+  );
 
   const load = useCallback(async () => {
     await Promise.resolve();
@@ -163,7 +181,7 @@ export function AccountMembershipsSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       products: (pc?.products ?? []) as CatalogProduct[],
     });
-  }, [deepLinkVenueId]);
+  }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
     queueMicrotask(() => {

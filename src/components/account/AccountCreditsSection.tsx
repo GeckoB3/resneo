@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Button, FormField } from '@/components/ui/primitives';
 
@@ -118,7 +119,17 @@ export function AccountCreditsSection() {
     venues: Array<{ id: string; name: string }>;
     products: CatalogProduct[];
   }>({ venues: [], products: [] });
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+
+  /** Announcing wrapper (P0-8); see the note in ProfileClient. */
+  const { addToast } = useToast();
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
   const [purchase, setPurchase] = useState<{
     venue_id: string;
     product_id: string;
@@ -146,7 +157,7 @@ export function AccountCreditsSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       products: (pc?.products ?? []) as CatalogProduct[],
     });
-  }, [deepLinkVenueId]);
+  }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -184,7 +195,7 @@ export function AccountCreditsSection() {
         stripe_account_id: data.stripe_account_id,
       });
     },
-    [],
+    [setError],
   );
 
   function afterPaid() {

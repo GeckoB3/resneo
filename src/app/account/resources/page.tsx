@@ -40,7 +40,7 @@ export default async function AccountResourcesHubPage() {
         <div className="rounded-2xl border border-slate-200/80 bg-white p-6 text-center shadow-sm shadow-slate-900/5">
           <p className="text-slate-600">No upcoming resource bookings.</p>
           <p className="mt-1 text-sm text-slate-500">Courts, rooms or equipment you book will appear here.</p>
-          <Link href="/account/bookings" className="mt-4 inline-block text-sm font-semibold text-brand-700 hover:underline">
+          <Link href="/account/bookings" className="mt-4 inline-block text-sm font-semibold inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
             View all bookings
           </Link>
         </div>
@@ -70,13 +70,13 @@ export default async function AccountResourcesHubPage() {
                   </p>
                 </div>
                 <div className="flex gap-3 text-sm font-medium">
-                  <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
+                  <Link href={`/account/bookings/${b.id}`} className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
                     Details
                   </Link>
                   <ManageBookingLink
                     bookingId={b.id}
                     label="Manage"
-                    className="text-brand-700 hover:underline disabled:opacity-60"
+                    className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2 disabled:opacity-60"
                   />
                 </div>
               </li>

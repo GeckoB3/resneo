@@ -6,6 +6,7 @@ import { authenticatedUserHasStaffMembership } from '@/lib/venue-auth';
 import { redirect } from 'next/navigation';
 import { AccountSignOutButton } from '@/app/account/AccountSignOutButton';
 import { AccountNav } from '@/app/account/AccountNav';
+import { ToastProvider } from '@/components/ui/Toast';
 
 export default async function AccountLayout({ children }: { children: ReactNode }) {
   const supabase = await createClient();
@@ -24,6 +25,23 @@ export default async function AccountLayout({ children }: { children: ReactNode 
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/*
+        Skip link (WCAG 2.4.1, Level A). First tab stop on every portal page,
+        which matters here more than most: the sticky header and the account
+        nav put roughly fifteen links between the top of the document and the
+        page content, so a keyboard user had to tab through all of them on
+        every navigation.
+
+        Visually hidden until focused rather than always visible, using size
+        and clip rather than `sr-only` alone so it becomes a real, positioned
+        element when it takes focus.
+      */}
+      <a
+        href="#account-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-brand-600 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-white focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-brand-300"
+      >
+        Skip to main content
+      </a>
       <div
         className="pointer-events-none fixed inset-0 -z-10 opacity-[0.45]"
         aria-hidden
@@ -59,12 +77,31 @@ export default async function AccountLayout({ children }: { children: ReactNode 
         </div>
         <AccountNav showVenueDashboard={showVenueDashboard} />
       </header>
-      <main className="mx-auto max-w-5xl px-4 pb-16 pt-8 sm:px-6 sm:pt-10">{children}</main>
+      {/*
+        The live region every portal section announces through (P0-8). Mounted
+        here rather than per page so one region serves the whole portal: several
+        would compete, and a screen reader announces whichever it notices.
+
+        A client component rendered from this server layout, so `children` stays
+        server-rendered; only the provider and its consumers cross the boundary.
+      */}
+      <ToastProvider>
+      <main
+        id="account-main"
+        // Focusable only as a skip-link target: without this the browser moves
+        // the viewport but leaves focus where it was, so the next Tab returns
+        // the user to the nav they just skipped.
+        tabIndex={-1}
+        className="mx-auto max-w-5xl px-4 pb-16 pt-8 outline-none sm:px-6 sm:pt-10"
+      >
+        {children}
+      </main>
+      </ToastProvider>
       <footer className="border-t border-slate-200/80 bg-white/80 py-6 text-center text-xs text-slate-500 backdrop-blur-sm">
         <div className="mx-auto max-w-5xl px-4">
           <p>
             Need help?{' '}
-            <Link href="/help" className="font-medium text-brand-700 hover:underline">
+            <Link href="/help" className="font-medium inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
               Visit help centre
             </Link>
             {' · '}

@@ -18,6 +18,20 @@ import {
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
+/**
+ * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
+ * otherwise falls back to the root layout's title, so all thirteen portal
+ * routes announced the same thing and a screen-reader user could not tell from
+ * the tab or the announcement which one they were on.
+ *
+ * Scoped to the surviving routes, matching P0-5: P1-3 and P1-5 turn nine of
+ * the thirteen into one-line redirects, and a redirect does not need a title.
+ */
+export const metadata = {
+  title: 'Your bookings',
+  description: 'Reservations and visits linked to your account.',
+};
+
 /** One-line summary "Class · Mon 4 August · 18:30 · Confirmed", venue-TZ + friendly status. */
 function bookingSummaryLine(row: AccountBookingRow, profileTz: string | null): string {
   const tz = accountBookingTimeZone(row, profileTz);
@@ -73,6 +87,9 @@ export default async function AccountBookingsPage({
           <Link
             key={t.id}
             href={t.id === 'all' ? '/account/bookings' : `/account/bookings?filter=${t.id}`}
+            // `true` rather than `page`: these are filters over one page, not
+            // separate pages, so `page` would claim something untrue.
+            aria-current={filter === t.id ? 'true' : undefined}
             className={
               filter === t.id
                 ? 'rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-brand-600/25'
@@ -111,13 +128,13 @@ export default async function AccountBookingsPage({
                               {time ? ` · ${time}` : ''} · {friendlyAccountBookingStatus(b.status)}
                             </span>
                             <span className="flex gap-3 font-medium">
-                              <Link href={`/account/bookings/${b.id}`} className="text-brand-700 hover:underline">
+                              <Link href={`/account/bookings/${b.id}`} className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
                                 Details
                               </Link>
                               <ManageBookingLink
                                 bookingId={b.id}
                                 label="Cancel this session"
-                                className="text-brand-700 hover:underline disabled:opacity-60"
+                                className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2 disabled:opacity-60"
                               />
                             </span>
                           </li>
@@ -143,13 +160,13 @@ export default async function AccountBookingsPage({
                   </p>
                 </div>
                 <div className="flex gap-3 text-sm font-medium">
-                  <Link href={`/account/bookings/${item.row.id}`} className="text-brand-700 hover:underline">
+                  <Link href={`/account/bookings/${item.row.id}`} className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
                     Details
                   </Link>
                   <ManageBookingLink
                     bookingId={item.row.id}
                     label="Manage"
-                    className="text-brand-700 hover:underline disabled:opacity-60"
+                    className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2 disabled:opacity-60"
                   />
                 </div>
               </li>

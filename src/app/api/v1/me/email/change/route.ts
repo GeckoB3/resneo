@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user?.id) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  if (!user?.id) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
   const parsed = schema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   // intact; the admin updateUserById would apply the address instantly. The
   // session-storage variant silently no-opped for Bearer callers (P0-12).
   const accessToken = await getCallerAccessToken(request, supabase);
-  if (!accessToken) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  if (!accessToken) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
   const { error } = await updateAuthUserAsCaller(accessToken, { email: nextEmail });
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });

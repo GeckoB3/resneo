@@ -296,6 +296,23 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL(dest, request.url));
   }
 
+  /**
+   * G26 / P0-11: authenticated customer API responses must never be cached.
+   *
+   * Set here rather than in each of the 26 `/api/account/*` handlers, and the
+   * `/api/v1/*` surface with them, for two reasons: it cannot be forgotten by
+   * a route added later, and it changes no response BODY, which matters
+   * because six of those handlers are the shipped app's blast radius (§5D.0)
+   * and their shapes are frozen.
+   *
+   * An authenticated GET without an explicit directive can be served stale,
+   * which is the same defect class as the venue-catalogue staleness bug: the
+   * customer sees a value they already changed and cannot clear the cache.
+   */
+  if (pathname.startsWith('/api/account/') || pathname.startsWith('/api/v1/')) {
+    response.headers.set('Cache-Control', 'no-store');
+  }
+
   return response;
 }
 

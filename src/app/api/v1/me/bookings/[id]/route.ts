@@ -12,7 +12,7 @@ export async function GET(request: Request, { params }: Params) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
   const booking = await loadAccountBookingById(supabase, getSupabaseAdminClient(), id);
   if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -25,7 +25,7 @@ export async function DELETE(request: Request, { params }: Params) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
   const booking = await loadAccountBookingById(supabase, getSupabaseAdminClient(), id);
   if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 });

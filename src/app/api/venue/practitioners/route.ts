@@ -459,6 +459,7 @@ export async function POST(request: NextRequest) {
           current: limitCheck.current,
           limit: limitCheck.limit,
           upgrade_required: true,
+          code: 'FORBIDDEN',
         },
         { status: 403 }
       );

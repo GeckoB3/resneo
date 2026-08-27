@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const { data, error } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
     if (error) {
@@ -53,7 +53,7 @@ export async function PATCH(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const body = await request.json().catch(() => ({}));
     const parsed = patchSchema.safeParse(body);
@@ -132,7 +132,7 @@ export async function PATCH(request: NextRequest) {
       const accessToken = await getCallerAccessToken(request, supabase);
       const { error: authErr } = accessToken
         ? await updateAuthUserAsCaller(accessToken, { email: nextEmail })
-        : { error: { message: 'Unauthenticated', status: 401 } };
+        : { error: { message: 'Unauthorised', status: 401 } };
       if (authErr) {
         console.error('[account/profile PATCH] updateUser email:', authErr.message);
         email_error = authErr.message;

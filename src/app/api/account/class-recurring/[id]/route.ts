@@ -34,7 +34,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const { id } = await ctx.params;
     const owned = await loadOwned(user.id, id);
@@ -77,7 +77,7 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const { id } = await ctx.params;
     const owned = await loadOwned(user.id, id);

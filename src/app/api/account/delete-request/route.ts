@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const { data, error } = await supabase.rpc('request_account_deletion');
     if (error) {

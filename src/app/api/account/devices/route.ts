@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const { data, error } = await supabase
       .from('user_devices')
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const parsed = deviceSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) {

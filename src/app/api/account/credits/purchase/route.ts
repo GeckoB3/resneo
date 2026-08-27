@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user?.email) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
     }
 
     const json = await request.json().catch(() => ({}));

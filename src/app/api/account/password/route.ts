@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
     }
 
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     // SDK call it replaces (P0-12).
     const accessToken = await getCallerAccessToken(request, supabase);
     if (!accessToken) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
     }
     const { error } = await updateAuthUserAsCaller(accessToken, {
       password: parsed.data.password,

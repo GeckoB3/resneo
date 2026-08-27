@@ -12,13 +12,13 @@ export async function POST(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     // Server-side revocation. The request-client signOut reads the session from
     // storage, so for a Bearer caller "sign out everywhere" revoked nothing and
     // reported success (P0-12, G27).
     const accessToken = await getCallerAccessToken(request, supabase);
-    if (!accessToken) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!accessToken) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
     const { error } = await signOutCaller(accessToken, 'global');
     if (error) {
       console.error('[account/sign-out-everywhere]', error.message);

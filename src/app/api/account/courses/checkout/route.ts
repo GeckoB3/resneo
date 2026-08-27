@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user?.email) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
     }
 
     const json = await request.json().catch(() => ({}));
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Could not verify capacity' }, { status: 500 });
       }
       if ((activeCount ?? 0) + (pendingCount ?? 0) >= maxE) {
-        return NextResponse.json({ error: 'This course is full' }, { status: 409 });
+        return NextResponse.json({ error: 'This course is full', code: 'CLASS_FULL' }, { status: 409 });
       }
     }
 
@@ -113,7 +113,10 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (activeEnroll) {
-      return NextResponse.json({ error: 'You are already enrolled in this course' }, { status: 409 });
+      return NextResponse.json(
+        { error: 'You are already enrolled in this course', code: 'ALREADY_ENROLLED' },
+        { status: 409 },
+      );
     }
 
     const { data: pendingEnroll } = await admin

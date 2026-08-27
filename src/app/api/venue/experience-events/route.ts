@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
           current: batchCheck.current,
           limit: batchCheck.limit,
           upgrade_required: true,
+          code: 'FORBIDDEN',
         },
         { status: 403 },
       );

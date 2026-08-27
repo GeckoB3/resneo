@@ -36,6 +36,13 @@ The script seeds **two** venues and is safe to re-run:
 | Default appointments fixture | `E2E_VENUE_SLUG` | The standard service-first flow: deposit, card hold, and an options-and-extras service. |
 | Staff-first fixture | `e2e-smoke-staff-first` (fixed) | The staff-first flow. Two calendars, "E2E Alex" and "E2E Bailey", offering overlapping but different services at different prices, so a service list that ignored the chosen person would show. |
 
+A third seeder, `scripts/seed-e2e-portal-customer.mjs`, creates the **portal
+customer**: one auth user with guest rows and deterministic bookings at BOTH venues
+above (an upcoming Booked and a past Completed per venue, wiped and re-inserted on
+every run so specs can assert exact bookings). It requires the venue seeder to have
+run first. Cross-venue identity is the portal's distinguishing behaviour, which is
+why the fixture spans both venues rather than one.
+
 The staff-first slug is deliberately not configurable: if both fixtures could be
 pointed at one venue, the suite would test one ordering twice and the other not
 at all. The seed script and `globalSetup` both refuse that.
@@ -98,6 +105,7 @@ And these repository **variables**:
 | `E2E_SERVICE_NAME` | `E2E Smoke Consultation` |
 | `E2E_OPTIONS_SERVICE_NAME` | `E2E Smoke Options Consultation` |
 | `E2E_STAFF_FIRST_VENUE_SLUG` | `e2e-smoke-staff-first` |
+| `E2E_PORTAL_CUSTOMER_EMAIL` | `e2e-portal-customer@resneo-e2e.invalid` (the portal spec skips without it) |
 
 **The fixture names are variables, not secrets, on purpose.** None is sensitive, and
 as secrets GitHub masked them everywhere they appeared, so the run log read
@@ -157,6 +165,9 @@ If `RUN_E2E_SMOKE` is unset or not `true`, the job is skipped.
 | `e2e/appointment-book-pay-confirm.spec.ts` | Book → pay → confirm smoke |
 | `e2e/guest-self-reschedule.spec.ts` | Manage-link reschedule smoke |
 | `e2e/helpers/book-appointment.ts` | Shared public booking flow |
+| `e2e/helpers/account-session.ts` | Signs in as the portal customer via a server-minted `token_hash` and the real `/auth/confirm` route, so every sign-in exercises `verifyOtp` and `claim_user_account()`; no inbox involved |
+| `e2e/account-portal.spec.ts` | Portal smoke: sign in, cross-venue bookings list, open detail |
+| `scripts/seed-e2e-portal-customer.mjs` | Portal customer fixture: seeder and teardown in one |
 | `e2e/helpers/stripe-payment.ts` | Stripe Payment Element fill |
 | `e2e/helpers/manage-link.ts` | HMAC confirm + manage URL builders |
 | `scripts/seed-e2e-smoke-venue.mjs` | Fixture venue seed |

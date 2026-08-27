@@ -61,6 +61,39 @@ E2E_BASE_URL=http://localhost:3000
 Leaving `E2E_STAFF_FIRST_VENUE_SLUG` unset skips the staff-first specs and runs
 the rest.
 
+## Projects and the auth layer (P0-1d)
+
+Four Playwright projects, and the boundaries between them matter:
+
+| Project | Runs | Notes |
+|---------|------|-------|
+| `setup` | `e2e/auth.setup.ts` | Signs the portal customer in once and saves the browser state to `e2e/.auth/portal-customer.json` |
+| `chromium` | Everything except `*.mobile.spec.ts` | Desktop. **Signed out by default** |
+| `mobile` | `*.mobile.spec.ts` only | The same browser at **375 x 812**, the width P1-2 and P1-3's acceptance criteria are written against |
+| `cleanup` | `e2e/global.teardown.ts` | Deletes the saved session, reports leftover fixture bookings |
+
+Three rules that are easy to break by accident:
+
+1. **`storageState` is never set on a project.** A spec opts in with
+   `test.use({ storageState: PORTAL_CUSTOMER_STATE })`. Most of this suite is
+   the public booking flow, and signing those specs in changes what they test:
+   a signed-in guest gets prefilled details and a different path through the
+   form. `e2e/auth-isolation.spec.ts` is the tripwire and fails if this rule is
+   broken.
+2. **The sign-in path is still tested for real.** `account-portal.spec.ts`
+   signs in through `/auth/confirm` once per run rather than reusing the saved
+   cookie, so `verifyOtp`, `claim_user_account()` and the post-login
+   destination logic stay covered. The saved session exists so the *other*
+   specs do not each pay for it.
+3. **A mobile spec must be named `*.mobile.spec.ts`.** The desktop project
+   ignores that pattern and the mobile project matches only it. Without both
+   halves the paid specs run twice, which on a Stripe fixture venue means real
+   duplicate charges.
+
+`e2e/.auth/` holds a live session cookie for a real staging user. It is
+gitignored, deleted by the cleanup project, and outside the `playwright-report/`
+path CI uploads on failure. Do not commit it or add it to an artifact.
+
 ## Run locally
 
 ```bash
@@ -72,6 +105,11 @@ npx playwright install chromium
 
 # Run smoke (starts dev server automatically when not in CI)
 npm run test:e2e
+```
+
+```bash
+# Just the 375px suite
+npm run test:e2e:mobile
 ```
 
 ## CI
@@ -166,7 +204,12 @@ If `RUN_E2E_SMOKE` is unset or not `true`, the job is skipped.
 | `e2e/guest-self-reschedule.spec.ts` | Manage-link reschedule smoke |
 | `e2e/helpers/book-appointment.ts` | Shared public booking flow |
 | `e2e/helpers/account-session.ts` | Signs in as the portal customer via a server-minted `token_hash` and the real `/auth/confirm` route, so every sign-in exercises `verifyOtp` and `claim_user_account()`; no inbox involved |
-| `e2e/account-portal.spec.ts` | Portal smoke: sign in, cross-venue bookings list, open detail |
+| `e2e/account-portal.spec.ts` | Portal smoke: sign in, cross-venue bookings list, open detail, manage link |
+| `e2e/account-portal.mobile.spec.ts` | The portal at 375px: no sideways scroll, tappable controls |
+| `e2e/auth.setup.ts` | Setup project: signs in once and saves the browser state |
+| `e2e/global.teardown.ts` | Cleanup project: deletes the saved session, reports leftover fixture bookings |
+| `e2e/auth-isolation.spec.ts` | Tripwire: fails if `storageState` is ever set at project level |
+| `e2e/helpers/auth-state.ts` | Where the saved session lives, and why it is a credential |
 | `scripts/seed-e2e-portal-customer.mjs` | Portal customer fixture: seeder and teardown in one |
 | `e2e/helpers/stripe-payment.ts` | Stripe Payment Element fill |
 | `e2e/helpers/manage-link.ts` | HMAC confirm + manage URL builders |

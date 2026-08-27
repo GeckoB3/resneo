@@ -182,12 +182,31 @@ export async function POST(request: NextRequest) {
       .filter(Boolean);
 
     if (sessionInstanceIds.length > 0) {
-      // Resolve guest row(s) for this user at this venue.
-      const { data: guestRows } = await admin
-        .from('guests')
+      /**
+       * Ownership comes from the account-safe view on the SESSION client, not
+       * from a hand-built admin filter (AD8 / P0-6). The rule is that the row
+       * establishing ownership is read through the view; action payloads may
+       * then be written as admin.
+       *
+       * The previous version derived guest ids with an admin read of `guests`
+       * keyed on `enrollment.user_id`. That is correct only for as long as
+       * `enrollment.user_id` is guaranteed to be the caller, which is a
+       * property of code elsewhere in this handler rather than of this query.
+       * Reading `guests_account_safe` as the caller makes it a property of the
+       * database: the view's own WHERE is `user_id = auth.uid()`, so the ids
+       * can only ever be the caller's.
+       */
+      const { data: guestRows, error: guestErr } = await supabase
+        .from('guests_account_safe')
         .select('id')
-        .eq('venue_id', enrollment.venue_id)
-        .eq('user_id', enrollment.user_id);
+        .eq('venue_id', enrollment.venue_id);
+      if (guestErr) {
+        console.error('[account/courses/cancel] guest resolve failed:', guestErr.message);
+        return NextResponse.json(
+          { error: 'Could not verify your booking', code: 'INTERNAL_ERROR' },
+          { status: 500 },
+        );
+      }
       const guestIds = ((guestRows ?? []) as Array<{ id: string }>).map((g) => g.id);
       if (guestIds.length > 0) {
         await admin

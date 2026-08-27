@@ -90,6 +90,22 @@ export type AccountBookingDisplayItem =
   | { kind: 'single'; row: AccountBookingRow };
 
 /** Columns selected from `bookings` for every account loader (kept in one place). */
+/**
+ * The customer-safe projection (AD8 / P0-6). Ownership is established by
+ * reading this view on the SESSION client: its own WHERE clause is
+ * `guest_id IN (SELECT id FROM guests WHERE user_id = auth.uid())`, so a
+ * customer cannot see another's booking even if an application filter were
+ * dropped. The `.in('guest_id', ...)` filters below are kept as the second
+ * layer: the pair is not two independent controls (both reduce to the same
+ * predicate) but it does defend against a coding mistake in either.
+ *
+ * Derived context still reads as admin AFTER ownership is established. The
+ * rule, recorded in Docs/Multi_model_RLS_and_API_audit.md: the row that
+ * establishes ownership comes from the account-safe view; derived context and
+ * action payloads may be read as admin.
+ */
+const ACCOUNT_BOOKINGS_VIEW = 'bookings_account_safe';
+
 const ACCOUNT_BOOKING_COLUMNS =
   'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, cancellation_deadline, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id';
 
@@ -398,8 +414,8 @@ export async function loadAccountBookings(
   const guestIds = guests.map((g) => g.id);
   if (guestIds.length === 0) return [];
 
-  const { data: bookings, error: bErr } = await admin
-    .from('bookings')
+  const { data: bookings, error: bErr } = await supabase
+    .from(ACCOUNT_BOOKINGS_VIEW)
     .select(ACCOUNT_BOOKING_COLUMNS)
     .in('guest_id', guestIds)
     .order('booking_date', { ascending: false })
@@ -435,8 +451,8 @@ export async function loadAccountUpcomingBookingsByModel(
 
   const fkColumn = model === 'event_ticket' ? 'experience_event_id' : 'resource_id';
 
-  const { data: bookings, error: bErr } = await admin
-    .from('bookings')
+  const { data: bookings, error: bErr } = await supabase
+    .from(ACCOUNT_BOOKINGS_VIEW)
     .select(ACCOUNT_BOOKING_COLUMNS)
     .in('guest_id', guestIds)
     .eq('booking_model', model)
@@ -471,8 +487,8 @@ export async function loadAccountBookingById(
   const guestIds = guests.map((g) => g.id);
   if (guestIds.length === 0) return null;
 
-  const { data: booking, error } = await admin
-    .from('bookings')
+  const { data: booking, error } = await supabase
+    .from(ACCOUNT_BOOKINGS_VIEW)
     .select(ACCOUNT_BOOKING_COLUMNS)
     .eq('id', bookingId)
     .in('guest_id', guestIds)

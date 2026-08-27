@@ -30,7 +30,10 @@ test.describe('P1a.2 guest self-reschedule smoke', () => {
 
     await page.getByRole('button', { name: e2e.serviceName }).click();
 
-    const days = page.getByRole('button', { name: /has availability/i });
+    // `gridcell`, not `button`: see the note in helpers/book-appointment.ts. With the wrong
+    // role this returned 0 and the block below silently skipped picking a day rather than
+    // failing, so the spec carried on against an unchanged date.
+    const days = page.getByRole('gridcell', { name: /has availability/i });
     const dayCount = await days.count();
     if (dayCount > 1) {
       await days.nth(1).click();
@@ -43,10 +46,25 @@ test.describe('P1a.2 guest self-reschedule smoke', () => {
     const slotIndex = slotCount > 1 ? 1 : 0;
     await slots.nth(slotIndex).click();
 
+    // The reschedule flow routes through the same "Review your services" step as booking,
+    // where a guest can add another treatment before committing. The save button only
+    // appears past it. Conditional, for the same reason as in helpers/book-appointment.ts.
+    const continueToDetails = page.getByRole('button', { name: /continue to details/i });
+    if (await continueToDetails.isVisible().catch(() => false)) {
+      await continueToDetails.click();
+    }
+
     const saveChanges = page.getByRole('button', { name: /save appointment changes/i });
     await saveChanges.waitFor({ state: 'visible', timeout: 30_000 });
     await saveChanges.click();
 
-    await expect(page.getByText(/appointment has been updated/i)).toBeVisible({ timeout: 30_000 });
+    // Match the confirmation panel's real copy. It reads "Appointment Updated" with
+    // "Your changes have been saved." beneath; the older "appointment has been updated"
+    // wording no longer appears anywhere, so the assertion failed on a reschedule that
+    // had in fact succeeded.
+    await expect(
+      page.getByRole('heading', { name: /appointment updated/i }),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/your changes have been saved/i)).toBeVisible();
   });
 });

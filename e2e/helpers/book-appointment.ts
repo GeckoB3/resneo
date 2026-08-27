@@ -49,7 +49,12 @@ export async function declineCookiesIfPresent(page: Page): Promise<void> {
  * available time when the day is thinner than that.
  */
 export async function pickAvailableSlot(page: Page, preferIndex = 0): Promise<void> {
-  const availableDay = page.getByRole('button', { name: /has availability/i }).first();
+  // `gridcell`, not `button`. The day cells ARE <button> elements, but
+  // `ResourceCalendarMonth` puts them inside grid semantics, which re-maps their implicit
+  // role, so `getByRole('button')` never matches and the wait times out on a calendar that
+  // is rendering available days perfectly well. The label itself comes from
+  // `ResourceCalendarMonth`'s aria-label (`<ymd>, has availability`).
+  const availableDay = page.getByRole('gridcell', { name: /has availability/i }).first();
   await availableDay.waitFor({ state: 'visible', timeout: 60_000 });
   await availableDay.click();
 
@@ -64,12 +69,36 @@ export async function pickAvailableSlot(page: Page, preferIndex = 0): Promise<vo
  * screen. Shared by every booking spec so they exercise one checkout path.
  */
 export async function completeDetailsAndPay(page: Page, guestEmail: string): Promise<void> {
-  await page.getByLabel('First name').fill('E2E');
-  await page.getByLabel('Surname').fill('Smoke');
-  await page.getByLabel('Email').fill(guestEmail);
-  await page.locator('#details-phone').fill('07700900123');
-  const terms = page.getByRole('checkbox');
-  await terms.check();
+  // The flow gained a "Review your services" step between picking a time and the details
+  // form, where a guest can add another treatment to the same visit. Conditional rather
+  // than assumed: not every entry point routes through it, and a spec that hard-required
+  // it would break the moment one of them stopped.
+  const continueToDetails = page.getByRole('button', { name: /continue to details/i });
+  if (await continueToDetails.isVisible().catch(() => false)) {
+    await continueToDetails.click();
+  }
+
+  // The banner is anchored to the bottom of the viewport and overlaps the pay button on
+  // shorter pages, so clear it before the form rather than after.
+  await declineCookiesIfPresent(page);
+
+  // By placeholder and name, not by label. `DetailsStep` renders two variants and the
+  // public one bypasses `FormField`, so its inputs get no `id` and the `<label>` above each
+  // field is not associated with it: `getByLabel` matches nothing. The component's own unit
+  // tests use `getByPlaceholderText` for the same reason. (The missing association is a real
+  // accessibility gap in the public booking form, not just a test problem.)
+  await page.getByPlaceholder('First name').fill('E2E');
+  await page.getByPlaceholder('Surname').fill('Smoke');
+  await page.locator('input[name="email"]').fill(guestEmail);
+  // Not the 07700 900xxx drama range: the field parses what is typed against the country
+  // selector beside it, and rejects that range as unparseable, reporting "Phone is required"
+  // while still displaying the digits. `AppointmentBookingFlow.flow-order.test.tsx:1049`
+  // records the same trap and uses this London number, so keep the two in step.
+  await page.locator('#details-phone').fill('02071234567');
+  // Name the checkbox: the form has two (marketing opt-in and terms), so a bare
+  // getByRole('checkbox') is a strict-mode violation, and ticking the wrong one would
+  // consent this guest to marketing.
+  await page.locator('input[name="acceptTerms"]').check();
   await page.getByRole('button', { name: /continue to payment/i }).click();
 
   await page.getByRole('button', { name: /pay deposit|pay now/i }).waitFor({ timeout: 30_000 });

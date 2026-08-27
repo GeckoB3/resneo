@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { hasSalesAgentJwtRole } from '@/lib/sales/auth';
@@ -12,7 +12,9 @@ import { readSignupPendingFromMetadata } from '@/lib/signup-pending-selection';
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    // Bearer-capable: this is the one other route that runs claim_user_account(),
+    // and it costs nothing to let a mobile caller use it (P0-12).
+    const supabase = await createRouteHandlerClient(request);
     const {
       data: { user },
     } = await supabase.auth.getUser();

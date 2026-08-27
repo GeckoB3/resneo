@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
+import { getCallerAccessToken, updateAuthUserAsCaller } from '@/lib/auth/caller-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
@@ -126,7 +127,12 @@ export async function PATCH(request: NextRequest) {
     let emailNotice: string | null = null;
     let email_error: string | null = null;
     if (wantsEmailChange && nextEmail) {
-      const { error: authErr } = await supabase.auth.updateUser({ email: nextEmail });
+      // As the caller: keeps the double-confirm flow, and actually works for a
+      // Bearer request, where supabase.auth.updateUser silently no-ops (P0-12).
+      const accessToken = await getCallerAccessToken(request, supabase);
+      const { error: authErr } = accessToken
+        ? await updateAuthUserAsCaller(accessToken, { email: nextEmail })
+        : { error: { message: 'Unauthenticated', status: 401 } };
       if (authErr) {
         console.error('[account/profile PATCH] updateUser email:', authErr.message);
         email_error = authErr.message;

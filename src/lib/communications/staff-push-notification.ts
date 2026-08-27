@@ -247,7 +247,16 @@ export async function sendStaffPush(
       priority: 'high',
     });
     if (invalidTokens.length > 0) {
-      await admin.from('user_devices').delete().in('push_token', invalidTokens);
+      // Scoped to the users this send addressed. Unscoped, this was a GLOBAL
+      // delete by token value: any other user who happened to hold the same
+      // token string lost their registration too, and once a customer app also
+      // writes to this table, a dead staff token would silently deregister the
+      // customer device sharing it (P0-12).
+      await admin
+        .from('user_devices')
+        .delete()
+        .in('push_token', invalidTokens)
+        .in('user_id', allowed);
     }
 
     return { sent: sent > 0, reason: sent > 0 ? undefined : 'not_sent' };

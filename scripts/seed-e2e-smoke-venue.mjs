@@ -442,6 +442,24 @@ async function main() {
   const defaultVenueId = await seedDefaultVenue(admin);
   const staffFirstVenueId = await seedStaffFirstVenue(admin);
 
+  // Teardown of accumulated smoke bookings. Every paid spec writes real bookings
+  // through the UI, and repeated runs eat the calendar from the front: on
+  // 2026-08-27 the suite had consumed every remaining slot in the month on the
+  // default venue and all four booking specs failed on "no availability". These
+  // venues exist solely for the suite, so the seeder is the authority on their
+  // state: each seed run starts them empty. The portal customer's deterministic
+  // bookings are re-created by scripts/seed-e2e-portal-customer.mjs, which runs
+  // AFTER this script (CI runs the two in that order; do the same locally).
+  const { error: wipeErr, count: wiped } = await admin
+    .from('bookings')
+    .delete({ count: 'exact' })
+    .in('venue_id', [defaultVenueId, staffFirstVenueId]);
+  if (wipeErr) {
+    console.error('[e2e-seed] booking wipe failed:', wipeErr.message);
+    process.exit(1);
+  }
+  console.log(`[e2e-seed] Wiped ${wiped ?? 0} accumulated smoke booking(s).`);
+
   // Print what each venue ended up with: a wrong flag here is the difference
   // between testing two orderings and testing one of them twice.
   const { data: seeded } = await admin

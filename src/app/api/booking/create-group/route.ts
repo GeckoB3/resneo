@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { stripe } from '@/lib/stripe';
 import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
 import { findOrCreateGuest } from '@/lib/guests';
@@ -201,7 +201,12 @@ export async function POST(request: NextRequest) {
       parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
     );
 
-    const authClient = await createClient();
+    // Bearer-capable, not cookie-only: with createClient() a mobile Bearer
+    // caller resolved as signed OUT here, so no app could book at any venue
+    // with require_account_login_for_bookings on. The same file already
+    // resolves the user with createRouteHandlerClient further down; one
+    // request must not answer under two auth models (P0-12).
+    const authClient = await createRouteHandlerClient(request);
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
       requireAccountLogin: Boolean(
         (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,

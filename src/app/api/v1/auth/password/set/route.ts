@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
+import { getCallerAccessToken, updateAuthUserAsCaller } from '@/lib/auth/caller-auth';
 import { z } from 'zod';
 
 const schema = z.object({
@@ -18,7 +19,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { error } = await supabase.auth.updateUser({
+  // As the caller: supabase.auth.updateUser reads the session from storage and
+  // silently no-ops for the Bearer requests this v1 route exists to serve (P0-12).
+  const accessToken = await getCallerAccessToken(request, supabase);
+  if (!accessToken) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const { error } = await updateAuthUserAsCaller(accessToken, {
     password: parsed.data.password,
     data: { has_set_password: true },
   });

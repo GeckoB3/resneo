@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
+import { getCallerAccessToken, updateAuthUserAsCaller } from '@/lib/auth/caller-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
@@ -50,7 +51,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { error } = await supabase.auth.updateUser({ email: nextEmail });
+  // As the caller, which keeps the double-confirm ("Secure email change") flow
+  // intact; the admin updateUserById would apply the address instantly. The
+  // session-storage variant silently no-opped for Bearer callers (P0-12).
+  const accessToken = await getCallerAccessToken(request, supabase);
+  if (!accessToken) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const { error } = await updateAuthUserAsCaller(accessToken, { email: nextEmail });
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }

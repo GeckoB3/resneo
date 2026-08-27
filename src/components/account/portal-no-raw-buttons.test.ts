@@ -11,9 +11,9 @@ import path from 'node:path';
  * says so. That is how the 24 got there.
  *
  * Deliberately NOT `npm run lint:modals`, which the plan calls out: that rule
- * only flags files containing both `role="dialog"` and `fixed inset-0`. It
- * passes today and would have passed after zero work on this task, so citing
- * it as evidence here would have been citing something that proves nothing.
+ * looks for hand-rolled modal shells, passes today, and would have passed
+ * after zero work on this task. Citing it as evidence here would have been
+ * citing something that proves nothing about buttons.
  */
 
 const PORTAL_DIRS = [

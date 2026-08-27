@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { supportedTimeZones } from '@/lib/time/iana-time-zone';
-import { Button } from '@/components/ui/primitives';
+import { Button, FormField, Input } from '@/components/ui/primitives';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import {
   mergePreferenceNamespace,
   readPreferenceNamespace,
@@ -213,9 +214,8 @@ export function ProfileClient({
           sign-in address; changing it may require confirmation from your new inbox.
         </p>
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-first-name">
-            First name
-            <input
+          <FormField label="First name" htmlFor="profile-first-name">
+            <Input
               id="profile-first-name"
               name="first_name"
               autoComplete="given-name"
@@ -223,10 +223,9 @@ export function ProfileClient({
               onChange={(e) => setProfile((p) => ({ ...p, first_name: e.target.value }))}
               className={inputClass}
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-last-name">
-            Surname
-            <input
+          </FormField>
+          <FormField label="Surname" htmlFor="profile-last-name">
+            <Input
               id="profile-last-name"
               name="last_name"
               autoComplete="family-name"
@@ -234,10 +233,14 @@ export function ProfileClient({
               onChange={(e) => setProfile((p) => ({ ...p, last_name: e.target.value }))}
               className={inputClass}
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-email">
-            Email
-            <input
+          </FormField>
+          <FormField
+            label="Email"
+            htmlFor="profile-email"
+            className="sm:col-span-2"
+            description="This updates your login email in our authentication system. If you change it, check both inboxes until you confirm."
+          >
+            <Input
               id="profile-email"
               name="email"
               type="email"
@@ -246,14 +249,9 @@ export function ProfileClient({
               onChange={(e) => setEmail(e.target.value)}
               className={inputClass}
             />
-            <span className="mt-1.5 block text-xs text-slate-500">
-              This updates your login email in our authentication system. If you change it, check both inboxes until you
-              confirm.
-            </span>
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-phone">
-            Phone number
-            <input
+          </FormField>
+          <FormField label="Phone number" htmlFor="profile-phone" className="sm:col-span-2">
+            <Input
               id="profile-phone"
               name="phone"
               type="tel"
@@ -263,11 +261,13 @@ export function ProfileClient({
               className={inputClass}
               placeholder="e.g. 07700 900000"
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-display-name">
-            Preferred display name{' '}
-            <span className="font-normal text-slate-500">(optional)</span>
-            <input
+          </FormField>
+          <FormField
+            label="Preferred display name (optional)"
+            htmlFor="profile-display-name"
+            className="sm:col-span-2"
+          >
+            <Input
               id="profile-display-name"
               name="display_name"
               autoComplete="nickname"
@@ -276,7 +276,7 @@ export function ProfileClient({
               className={inputClass}
               placeholder="How we greet you in the app"
             />
-          </label>
+          </FormField>
         </div>
       </section>
 
@@ -284,18 +284,21 @@ export function ProfileClient({
         <h2 className="text-lg font-semibold text-slate-900">Regional &amp; login</h2>
         <p className="mt-1 text-sm text-slate-600">Locale and timezone affect how dates and times are shown to you.</p>
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-locale">
-            Locale
-            <input
+          <FormField label="Locale" htmlFor="profile-locale">
+            <Input
               id="profile-locale"
               name="locale"
               value={profile.locale}
               onChange={(e) => setProfile((p) => ({ ...p, locale: e.target.value }))}
               className={inputClass}
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-timezone">
-            Timezone
+          </FormField>
+          {/*
+            No Select primitive exists, so the control stays a native select
+            and keeps `inputClass` so it still matches the Inputs beside it.
+            FormField takes over the label and the htmlFor wiring.
+          */}
+          <FormField label="Timezone" htmlFor="profile-timezone">
             <select
               id="profile-timezone"
               name="timezone"
@@ -319,9 +322,12 @@ export function ProfileClient({
                 </option>
               ))}
             </select>
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-login-dest">
-            Default destination after login
+          </FormField>
+          <FormField
+            label="Default destination after login"
+            htmlFor="profile-login-dest"
+            className="sm:col-span-2"
+          >
             <select
               id="profile-login-dest"
               name="default_login_destination"
@@ -338,7 +344,7 @@ export function ProfileClient({
               <option value="account">Account</option>
               <option value="dashboard">Venue dashboard</option>
             </select>
-          </label>
+          </FormField>
         </div>
       </section>
 
@@ -425,7 +431,7 @@ export function ProfileClient({
           </Button>
         </div>
         {knownDevices.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-600">No devices registered yet.</p>
+          <EmptyState size="compact" title="No devices registered yet" description="Register a browser to help us spot unfamiliar sign-ins." />
         ) : (
           <ul className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-100">
             {knownDevices.map((device) => (

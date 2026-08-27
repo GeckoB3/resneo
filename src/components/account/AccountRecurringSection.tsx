@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
-import { Button } from '@/components/ui/primitives';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Button, FormField, Input } from '@/components/ui/primitives';
 
 interface RecRow {
   id: string;
@@ -236,7 +237,7 @@ export function AccountRecurringSection() {
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Your rules</h2>
         {rows.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">None yet.</p>
+          <EmptyState size="compact" title="No repeat bookings yet" description="Rules you create below will appear here." />
         ) : (
           <ul className="mt-2 space-y-2 text-sm">
             {rows.map((r) => {
@@ -303,11 +304,10 @@ export function AccountRecurringSection() {
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">New rule</h2>
         {!hasCatalog ? (
-          <p className="mt-3 text-sm text-slate-500">No active class types found.</p>
+          <EmptyState size="compact" title="No active class types found" description="A venue needs a published class timetable before you can set up a repeat booking." />
         ) : (
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="text-xs text-slate-600">
-              Venue
+            <FormField label="Venue">
               <select
                 value={resolvedVenueId}
                 onChange={(e) => {
@@ -323,9 +323,8 @@ export function AccountRecurringSection() {
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="text-xs text-slate-600">
-              Class type
+            </FormField>
+            <FormField label="Class type">
               <select
                 value={effectiveClassTypeId}
                 onChange={(e) => {
@@ -344,9 +343,8 @@ export function AccountRecurringSection() {
                   ))
                 )}
               </select>
-            </label>
-            <label className="text-xs text-slate-600">
-              Scheduled slot
+            </FormField>
+            <FormField label="Scheduled slot">
               <select
                 value={effectiveSlotKey}
                 onChange={(e) => setSlotKey(e.target.value)}
@@ -366,9 +364,8 @@ export function AccountRecurringSection() {
                   })
                 )}
               </select>
-            </label>
-            <label className="text-xs text-slate-600">
-              Repeat every
+            </FormField>
+            <FormField label="Repeat every">
               <select
                 value={intervalWeeks}
                 onChange={(e) => setIntervalWeeks(e.target.value)}
@@ -379,28 +376,24 @@ export function AccountRecurringSection() {
                 <option value="3">3 weeks</option>
                 <option value="4">4 weeks (monthly)</option>
               </select>
-            </label>
-            <label className="text-xs text-slate-600">
-              End date (optional)
-              <input
+            </FormField>
+            <FormField label="End date (optional)">
+              <Input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="mt-1 w-full rounded border border-slate-300 px-2 py-2 text-sm"
               />
-            </label>
-            <label className="text-xs text-slate-600">
-              Max bookings (optional)
-              <input
+            </FormField>
+            <FormField label="Max bookings (optional)">
+              <Input
                 type="number"
                 min={1}
                 max={104}
                 value={maxOccurrences}
                 onChange={(e) => setMaxOccurrences(e.target.value)}
                 placeholder="e.g. 12"
-                className="mt-1 w-full rounded border border-slate-300 px-2 py-2 text-sm"
               />
-            </label>
+            </FormField>
             <div className="sm:col-span-2">
               <Button
                 type="button"

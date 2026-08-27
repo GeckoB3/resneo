@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
-import { Button } from '@/components/ui/primitives';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Button, FormField } from '@/components/ui/primitives';
 
 interface EnrollmentRow {
   id: string;
@@ -345,7 +346,7 @@ export function AccountCoursesSection() {
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Enrollments</h2>
         {enrollments.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">None yet.</p>
+          <EmptyState size="compact" title="No enrollments yet" description="Courses you enroll in will appear here." />
         ) : (
           <ul className="mt-2 space-y-2 text-sm">
             {enrollments.map((e) => {
@@ -388,12 +389,18 @@ export function AccountCoursesSection() {
       </div>
 
       {purchaseCatalog.venues.length === 0 ? (
-        <p className="text-sm text-slate-500">No published course packages yet.</p>
+        <EmptyState size="compact" title="No published course packages yet" description="When a venue publishes a course you can book, it will show up here." />
       ) : (
         <>
           <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
-            <h2 className="text-sm font-semibold text-slate-900">Venue</h2>
-            <label className="mt-3 block text-xs text-slate-600">
+            {/*
+              This was an EMPTY <label> wrapping the select, with the word
+              "Venue" living in an <h2> above it, so the field had no
+              accessible name at all: nothing to migrate, because it was never
+              a label. FormField supplies a real one, which makes the heading
+              redundant rather than duplicated.
+            */}
+            <FormField label="Venue" className="mt-1">
               <select
                 value={resolvedVenueId}
                 onChange={(e) => {
@@ -409,14 +416,13 @@ export function AccountCoursesSection() {
                   </option>
                 ))}
               </select>
-            </label>
+            </FormField>
           </div>
 
           <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Free course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-              <label className="min-w-0 flex-1 text-xs text-slate-600">
-                Package
+              <FormField label="Package" className="min-w-0 flex-1">
                 <select
                   value={effectiveProductIdFree}
                   onChange={(e) => setProductIdFree(e.target.value)}
@@ -432,7 +438,7 @@ export function AccountCoursesSection() {
                     ))
                   )}
                 </select>
-              </label>
+              </FormField>
               <Button
                 type="button"
                 disabled={!effectiveProductIdFree}
@@ -447,8 +453,7 @@ export function AccountCoursesSection() {
           <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Paid course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-              <label className="min-w-0 flex-1 text-xs text-slate-600">
-                Package
+              <FormField label="Package" className="min-w-0 flex-1">
                 <select
                   value={effectiveProductIdPaid}
                   onChange={(e) => setProductIdPaid(e.target.value)}
@@ -464,7 +469,7 @@ export function AccountCoursesSection() {
                     ))
                   )}
                 </select>
-              </label>
+              </FormField>
               <Button
                 type="button"
                 disabled={!effectiveProductIdPaid}

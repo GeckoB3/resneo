@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/primitives';
+import { Button, FormField, Input } from '@/components/ui/primitives';
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { AccountPasswordForm } from './AccountPasswordForm';
@@ -125,14 +125,20 @@ export default function AccountSecurityPage() {
           Requests a 30-day grace period, then removes platform access and anonymises linked guest PII at venues per
           GDPR retention rules.
         </p>
-        <label className="mt-4 block text-sm font-medium text-slate-700">
-          Type DELETE MY ACCOUNT to confirm
-          <input
+        {/*
+          The amber focus ring is kept: this field sits in the destructive
+          panel and its colour is the signal that it does. The important
+          modifier is needed because `cn` concatenates rather than resolving
+          Tailwind conflicts, so the primitive's brand ring would otherwise win
+          by stylesheet order.
+        */}
+        <FormField label="Type DELETE MY ACCOUNT to confirm" className="mt-4">
+          <Input
             value={deleteConfirmation}
             onChange={(e) => setDeleteConfirmation(e.target.value)}
-            className="mt-1 w-full rounded-xl border border-amber-200/80 bg-white px-3 py-2.5 text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            className="min-h-11 !border-amber-200/80 px-3 py-2.5 focus-visible:!border-amber-400 focus-visible:!ring-amber-200"
           />
-        </label>
+        </FormField>
         {message ? <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">{message}</p> : null}
         {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p> : null}
         <Button

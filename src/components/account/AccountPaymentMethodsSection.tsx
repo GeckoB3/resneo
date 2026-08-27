@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
-import { Button } from '@/components/ui/primitives';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Button, FormField } from '@/components/ui/primitives';
 
 function SetupForm({ clientSecret, stripeAccountId: _stripeAccountId, onComplete }: { clientSecret: string; stripeAccountId: string; onComplete: () => void }) {
   const stripe = useStripe();
@@ -127,7 +128,12 @@ export function AccountPaymentMethodsSection() {
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
-        <label className="text-sm font-medium text-slate-800">Venue</label>
+        {/*
+          This label had no htmlFor and did not wrap the control, so it was not
+          associated with the select at all: the field had no accessible name.
+          FormField wires one.
+        */}
+        <FormField label="Venue">
         <select
           className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           value={venueId}
@@ -145,6 +151,7 @@ export function AccountPaymentMethodsSection() {
             </option>
           ))}
         </select>
+        </FormField>
         {venues.length === 0 ? (
           <p className="mt-2 text-xs text-slate-500">No linked venues yet. Book or buy credits at a venue first.</p>
         ) : null}
@@ -154,7 +161,7 @@ export function AccountPaymentMethodsSection() {
         <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
           <h2 className="text-sm font-semibold text-slate-900">Saved cards</h2>
           {methods.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">No saved cards for this venue yet.</p>
+            <EmptyState size="compact" title="No saved cards for this venue" description="Add a card to pay faster next time." />
           ) : (
             <ul className="mt-2 space-y-1 text-sm">
               {methods.map((m) => (

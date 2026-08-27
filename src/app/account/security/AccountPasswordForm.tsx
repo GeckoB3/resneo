@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Button } from '@/components/ui/primitives';
+import { Button, FormField, Input } from '@/components/ui/primitives';
 
 export function AccountPasswordForm() {
   const router = useRouter();
@@ -47,16 +47,18 @@ export function AccountPasswordForm() {
     }
   }
 
-  const inputClass =
-    'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500';
-
   return (
     <form onSubmit={(ev) => void onSubmit(ev)} className="mt-4 space-y-4">
-      <div>
-        <label htmlFor="account-new-password" className="block text-sm font-medium text-slate-700">
-          New password
-        </label>
-        <input
+      {/*
+        Like-for-like: these two labels were already `text-sm font-medium
+        text-slate-700`, which is exactly what FormField's Label renders, so
+        nothing about them moves. FormField also owns the htmlFor wiring now,
+        which is why the explicit ids stay: autofill and password managers key
+        off them, and letting FormField generate one would change them on every
+        render.
+      */}
+      <FormField label="New password" htmlFor="account-new-password">
+        <Input
           id="account-new-password"
           type="password"
           autoComplete="new-password"
@@ -64,15 +66,11 @@ export function AccountPasswordForm() {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={8}
-          className={inputClass}
           placeholder="At least 8 characters"
         />
-      </div>
-      <div>
-        <label htmlFor="account-confirm-password" className="block text-sm font-medium text-slate-700">
-          Confirm password
-        </label>
-        <input
+      </FormField>
+      <FormField label="Confirm password" htmlFor="account-confirm-password">
+        <Input
           id="account-confirm-password"
           type="password"
           autoComplete="new-password"
@@ -80,10 +78,9 @@ export function AccountPasswordForm() {
           onChange={(e) => setConfirm(e.target.value)}
           required
           minLength={8}
-          className={inputClass}
           placeholder="Repeat password"
         />
-      </div>
+      </FormField>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {message ? <p className="text-sm text-emerald-800">{message}</p> : null}
       <Button type="submit" loading={loading} className="rounded-md">

@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
-import { Button } from '@/components/ui/primitives';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Button, FormField } from '@/components/ui/primitives';
 
 /**
  * Confirming the card for a membership (P0-17, closes C9).
@@ -316,7 +317,7 @@ export function AccountMembershipsSection() {
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Your memberships</h2>
         {memberships.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">None yet.</p>
+          <EmptyState size="compact" title="No memberships yet" description="Memberships you subscribe to will appear here." />
         ) : (
           <ul className="mt-3 space-y-2 text-sm">
             {memberships.map((m) => {
@@ -374,11 +375,10 @@ export function AccountMembershipsSection() {
         <h2 className="text-sm font-semibold text-slate-900">Start a membership</h2>
         <p className="mt-1 text-xs text-slate-500">Plans listed here have Stripe prices configured on the venue account.</p>
         {purchaseCatalog.venues.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">No membership products with Stripe prices yet.</p>
+          <EmptyState size="compact" title="No membership plans yet" description="When a venue publishes a plan you can join, it will show up here." />
         ) : (
           <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="min-w-0 flex-1 text-xs text-slate-600">
-              Venue
+            <FormField label="Venue" className="min-w-0 flex-1">
               <select
                 value={resolvedCheckoutVenue}
                 onChange={(e) => {
@@ -393,9 +393,8 @@ export function AccountMembershipsSection() {
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="min-w-0 flex-1 text-xs text-slate-600">
-              Plan
+            </FormField>
+            <FormField label="Plan" className="min-w-0 flex-1">
               <select
                 value={effectiveCheckoutProduct}
                 onChange={(e) => setCheckoutProduct(e.target.value)}
@@ -411,7 +410,7 @@ export function AccountMembershipsSection() {
                   ))
                 )}
               </select>
-            </label>
+            </FormField>
             <Button
               type="button"
               disabled={!effectiveCheckoutProduct}

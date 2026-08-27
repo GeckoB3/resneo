@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
-import { Button } from '@/components/ui/primitives';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Button, FormField } from '@/components/ui/primitives';
 
 interface BalanceRow {
   id: string;
@@ -339,13 +340,18 @@ function BuyPackPicker({
     productId && productChoices.some((p) => p.id === productId) ? productId : firstProductId;
 
   if (catalog.venues.length === 0 || catalog.products.length === 0) {
-    return <p className="mt-3 text-sm text-slate-500">No published credit packs are available yet.</p>;
+    return (
+      <EmptyState
+        size="compact"
+        title="No published credit packs yet"
+        description="When a venue publishes a credit pack you can buy, it will show up here."
+      />
+    );
   }
 
   return (
     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-      <label className="min-w-0 flex-1 text-xs text-slate-600">
-        Venue
+      <FormField label="Venue" className="min-w-0 flex-1">
         <select
           value={venueId}
           onChange={(e) => {
@@ -360,9 +366,8 @@ function BuyPackPicker({
             </option>
           ))}
         </select>
-      </label>
-      <label className="min-w-0 flex-1 text-xs text-slate-600">
-        Pack
+      </FormField>
+      <FormField label="Pack" className="min-w-0 flex-1">
         <select
           value={effectiveProductId}
           onChange={(e) => setProductId(e.target.value)}
@@ -374,7 +379,7 @@ function BuyPackPicker({
             </option>
           ))}
         </select>
-      </label>
+      </FormField>
       <Button
         type="button"
         disabled={!venueId || !effectiveProductId}

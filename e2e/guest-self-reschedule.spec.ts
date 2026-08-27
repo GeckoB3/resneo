@@ -46,6 +46,12 @@ test.describe('P1a.2 guest self-reschedule smoke', () => {
     const slotIndex = slotCount > 1 ? 1 : 0;
     await slots.nth(slotIndex).click();
 
+    // Capture what the summary shows BEFORE the change, so the assertion after it proves a
+    // refresh happened without hardcoding a time the fixture might not offer.
+    const timeTile = page.getByTestId('detail-time');
+    const timeBefore = (await timeTile.textContent())?.trim() ?? '';
+    expect(timeBefore).toMatch(/^\d{2}:\d{2}$/);
+
     // The reschedule flow routes through the same "Review your services" step as booking,
     // where a guest can add another treatment before committing. The save button only
     // appears past it. Conditional, for the same reason as in helpers/book-appointment.ts.
@@ -66,5 +72,12 @@ test.describe('P1a.2 guest self-reschedule smoke', () => {
       page.getByRole('heading', { name: /appointment updated/i }),
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/your changes have been saved/i)).toBeVisible();
+
+    // The summary above the flow must follow the change. It used to keep the old time,
+    // because the flow only told its host about a save through the staff-only "Done"
+    // footer, so a guest saw "Your changes have been saved" directly beneath the time they
+    // had just moved away from.
+    await expect(timeTile).not.toHaveText(timeBefore, { timeout: 15_000 });
+    await expect(timeTile).toHaveText(/^\d{2}:\d{2}$/);
   });
 });

@@ -212,6 +212,18 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
     }
   }, [bookingId, token, hmac]);
 
+  /**
+   * A modify succeeded, but the guest is still reading the flow's own confirmation.
+   * Refresh the details behind it so the summary tiles above show the new date and time
+   * rather than the old ones. Deliberately does NOT close the flow: `handleModifySaved`
+   * does that, and it only ever fires from the staff "Done" footer.
+   */
+  const handleModifyRefresh = useCallback(() => {
+    fetchDetails().catch((e) =>
+      console.error('[ManageBookingView] post-modify refresh failed:', e),
+    );
+  }, [fetchDetails]);
+
   const handleModifySaved = useCallback(() => {
     setShowModify(false);
     setModifySuccess(true);
@@ -510,6 +522,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
                   initialTime={details.booking_time}
                   preselectedPractitionerId={details.practitioner_id}
                   onBookingCreated={handleModifySaved}
+                  onBookingModified={handleModifyRefresh}
                   editBooking={{
                     id: bookingId,
                     booking_date: details.booking_date,
@@ -1109,7 +1122,12 @@ function DetailTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2.5">
       <p className="text-xs font-medium text-slate-400">{label}</p>
-      <p className="mt-0.5 text-sm font-semibold text-slate-800">{value}</p>
+      <p
+        data-testid={`detail-${label.toLowerCase().replace(/\s+/g, '-')}`}
+        className="mt-0.5 text-sm font-semibold text-slate-800"
+      >
+        {value}
+      </p>
     </div>
   );
 }

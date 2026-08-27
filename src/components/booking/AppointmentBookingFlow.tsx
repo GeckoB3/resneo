@@ -543,6 +543,14 @@ interface AppointmentBookingFlowProps {
   bookingAudience?: BookingFlowAudience;
   onBookingCreated?: () => void;
   /**
+   * Fired once an EXISTING booking has been saved, as distinct from
+   * {@link onBookingCreated}, which asks the host to dismiss the confirmation and is
+   * wired to the staff-only "Done" footer. A host showing its own summary of the booking
+   * needs to know it changed while the guest is still reading the confirmation, so this
+   * fires on both audiences and does not imply dismissal.
+   */
+  onBookingModified?: () => void;
+  /**
    * Fires the moment a booking is created/updated (POST success) rather than when staff
    * dismiss the confirmation screen ({@link onBookingCreated}) — lets host calendars
    * refresh their grid while the modal is still open.
@@ -633,6 +641,7 @@ export function AppointmentBookingFlow({
   collectiveServiceItemId,
   bookingAudience = 'public',
   onBookingCreated,
+  onBookingModified,
   onBookingSubmitted,
   initialDate,
   initialTime,
@@ -2728,6 +2737,10 @@ export function AppointmentBookingFlow({
         cancellation_notice_hours: refundNoticeHours,
       });
       setStep('confirmation');
+      // Tell the host the booking moved. Without this a manage page keeps rendering the
+      // old date and time beside a confirmation saying the change was saved, which reads
+      // as the reschedule not having worked.
+      onBookingModified?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update appointment');
     } finally {
@@ -2736,6 +2749,7 @@ export function AppointmentBookingFlow({
   }, [
     date,
     editBooking,
+    onBookingModified,
     refundNoticeHours,
     selectedPractitionerId,
     selectedServiceId,

@@ -27,7 +27,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(6);
+SELECT plan(7);
 
 -- =============================================================================
 -- Fixtures - seeded as the (superuser) session role, which bypasses RLS.
@@ -207,6 +207,20 @@ SELECT is(
     'venue_id'
   ]::name[],
   'The view projects exactly the 55-column allowlist');
+
+-- 7. The view is SELECT-only for client roles. It is auto-updatable (single
+--    table, simple WHERE) and runs as owner, so an INSERT/UPDATE/DELETE grant
+--    here is a write that bypasses the base-table column grants. A hosted
+--    project granted authenticated all four on creation (caught by
+--    check-table-grants.mjs); 20270119120000 revokes the writes. On a fresh
+--    build the writes were never granted, so this documents intent and fails a
+--    future migration that re-grants them.
+SELECT ok(
+  has_table_privilege('authenticated', 'public.bookings_account_safe', 'SELECT')
+  AND NOT has_table_privilege('authenticated', 'public.bookings_account_safe', 'INSERT')
+  AND NOT has_table_privilege('authenticated', 'public.bookings_account_safe', 'UPDATE')
+  AND NOT has_table_privilege('authenticated', 'public.bookings_account_safe', 'DELETE'),
+  'bookings_account_safe grants authenticated SELECT only, no writes');
 
 SELECT * FROM finish();
 ROLLBACK;

@@ -2,6 +2,10 @@
 
 import { useMemo, useState } from 'react';
 import { supportedTimeZones } from '@/lib/time/iana-time-zone';
+import {
+  mergePreferenceNamespace,
+  readPreferenceNamespace,
+} from '@/lib/notifications/notification-preferences';
 import { useRouter } from 'next/navigation';
 
 type Profile = {
@@ -61,7 +65,10 @@ export function ProfileClient({
   const [saving, setSaving] = useState(false);
 
   const prefs = useMemo(() => {
-    const p = profile.notification_preferences ?? {};
+    // Reads whichever shape the column is in, across P0-13's R3 migration. A
+    // flat read against a namespaced blob would silently show both of these as
+    // their defaults and then write those defaults back on the next save.
+    const p = readPreferenceNamespace(profile.notification_preferences, 'customer');
     return {
       operational_email: p.operational_email !== false,
       marketing_email: p.marketing_email === true,
@@ -149,6 +156,10 @@ export function ProfileClient({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         platform: 'web',
+        // Declared explicitly (P0-13): this is the customer portal, and a
+        // device left at the default would receive staff booking alerts for
+        // anyone who is both a customer and a staff member.
+        audience: 'customer',
         device_name: typeof navigator === 'undefined' ? 'Web browser' : navigator.userAgent.slice(0, 120),
       }),
     });
@@ -169,10 +180,13 @@ export function ProfileClient({
   function updateNotificationPreference(key: 'operational_email' | 'marketing_email', value: boolean) {
     setProfile((p) => ({
       ...p,
-      notification_preferences: {
-        ...(p.notification_preferences ?? {}),
-        [key]: value,
-      },
+      // Merged into the customer namespace rather than spread over the whole
+      // column, so a dual-role user's staff push settings survive this save.
+      notification_preferences: mergePreferenceNamespace(
+        p.notification_preferences,
+        'customer',
+        { [key]: value },
+      ),
     }));
   }
 

@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { z } from 'zod';
 
+// `audience` is additive on the response (C13): it tells a client which app a
+// device belongs to, which is the only way to label a dual-role user's device
+// list honestly. The list itself is deliberately NOT filtered by audience: they
+// are all the user's own devices, and sign-out-everywhere has to reach every
+// one of them.
 const DEVICE_SELECT =
-  'id, platform, push_token, device_name, app_version, os_version, last_seen_at, created_at';
+  'id, platform, push_token, device_name, app_version, os_version, audience, last_seen_at, created_at';
 
 const deviceSchema = z.object({
   platform: z.enum(['ios', 'android', 'web']),
@@ -11,6 +16,14 @@ const deviceSchema = z.object({
   device_name: z.string().max(200).nullable().optional(),
   app_version: z.string().max(80).nullable().optional(),
   os_version: z.string().max(80).nullable().optional(),
+  /**
+   * Which app is registering (P0-13). OPTIONAL, and it has to stay optional:
+   * build 1.0.7 is in the stores and sends no audience field, so requiring one
+   * would fail every registration from it and kill staff push for every
+   * existing user. An absent value means the staff app, which is the only
+   * client shipping today.
+   */
+  audience: z.enum(['staff', 'customer']).optional(),
 });
 
 export async function GET(request: Request) {
@@ -55,6 +68,7 @@ export async function POST(request: NextRequest) {
     const attributes = {
       ...parsed.data,
       push_token: pushToken,
+      audience: parsed.data.audience ?? 'staff',
       last_seen_at: new Date().toISOString(),
     };
 

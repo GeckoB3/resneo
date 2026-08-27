@@ -20,6 +20,9 @@
  *   - guests_account_safe: authenticated holds SELECT. (anon's hosted default
  *     grant predates this work and is reported, not failed; see below.)
  *   - portal_events: neither anon nor authenticated holds anything (P0-10).
+ *   - user_devices: authenticated holds relation-wide SELECT/INSERT/UPDATE/DELETE,
+ *     which is what makes P0-13's new `audience` column writable. A column-level
+ *     grant set would not cover a newly added column.
  *   - bookings: authenticated has NO relation-wide SELECT, and its column-only
  *     SELECT is exactly the nine operational columns from 20270112120000.
  *     Widening that set reopens C5/N5 over PostgREST and Realtime.
@@ -139,6 +142,23 @@ async function main() {
       `live: ${fmt(row)}. Portal metrics are service-role only.`,
     );
   }
+
+  // -- user_devices (P0-13) --------------------------------------------------
+  // The audience column is added by migration 20270121120000, and the client
+  // writes it through the session client under RLS. A relation-wide grant
+  // covers every column including new ones; a COLUMN-level grant would not, and
+  // the new column would be silently unwritable. Device registration would then
+  // start failing on a table whose failure mode is "push notifications quietly
+  // stop", which is close to undetectable in production.
+  const devAuth = grant('user_devices', 'authenticated');
+  check(
+    'user_devices: authenticated holds relation-wide SELECT, INSERT, UPDATE, DELETE',
+    ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].every((p) =>
+      (devAuth?.table_privileges ?? []).includes(p),
+    ),
+    `live: ${fmt(devAuth)}. Relation-wide grants are what make the new audience ` +
+      'column writable; column-level grants would not cover it.',
+  );
 
   // -- bookings base table ---------------------------------------------------
   const bAuth = grant('bookings', 'authenticated');

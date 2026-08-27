@@ -904,7 +904,7 @@ The profile UI promises "Operational emails: booking confirmations and reminders
 - Reproduce the mis-charge first, so the fix is verified against a demonstrated failure rather than a mechanism.
 - **Acceptance:** a deep link to a specific venue and plan charges that venue and plan, asserted by a component test that renders with the deep-link params and inspects the checkout call arguments.
 
-**P0-16. Give `ConfirmDialog` a body slot** (new; blocks P2-2 and P2-6)
+**P0-16. Give `ConfirmDialog` a body slot** (new; blocks P2-2 and P2-6) *(DONE 2026-08-27: optional `body?: ReactNode` rendered beneath `message` in `Dialog`'s existing scrollable body slot. `message` stays a required string and remains the accessible description, so a caller adding a body cannot leave the dialog undescribed. All existing callers unchanged (none passes `body`), `npm run test:ui-foundation` green, and a new `ConfirmDialog.test.tsx` pins both the no-body path and the description guarantee.)*
 
 `ConfirmDialog` (`src/components/ui/primitives/ConfirmDialog.tsx:6-15`) takes `message: string`, passes it straight to `Dialog`'s `description`, and hardcodes children to `null` (`:56`). P2-2 must show a cancellation deadline, deposit refundability, a card-hold fee and credit restoration; P2-6 must state "what stops, when it stops, what is refunded". Neither fits a single string.
 

@@ -137,28 +137,75 @@ SELECT ok(
 
 -- 6. The projection is exactly the 55-column allowlist. A later
 --    CREATE OR REPLACE VIEW that widens (or narrows) it fails here first.
-SELECT results_eq(
-  $$ SELECT column_name::text
-       FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'bookings_account_safe'
-      ORDER BY column_name $$,
+--    Compared as name[] from pg_attribute: information_schema identifiers carry
+--    collation "C", and results_eq against default-collation text literals dies
+--    with "could not determine which collation to use". The name type has no
+--    collation resolution to get wrong, and ASCII order is stable for these
+--    lowercase identifiers.
+SELECT is(
+  (SELECT array_agg(a.attname ORDER BY a.attname)
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'bookings_account_safe'
+      AND a.attnum > 0 AND NOT a.attisdropped),
   ARRAY[
-    'addons_total_duration_minutes', 'addons_total_price_pence', 'amount_paid_pence',
-    'appointment_service_id', 'booking_date', 'booking_end_time', 'booking_model',
-    'booking_time', 'booking_total_price_pence', 'calendar_id', 'cancellation_actor_type',
-    'cancellation_deadline', 'cancellation_policy_snapshot', 'capacity_used',
-    'checked_in_at', 'class_instance_id', 'class_recurring_reservation_id',
-    'client_address_city', 'client_address_line1', 'client_address_line2',
-    'client_address_postcode', 'client_arrived_at', 'collective_id',
-    'collective_service_item_id', 'confirm_token_used_at', 'created_at',
-    'deposit_amount_pence', 'deposit_status', 'dietary_notes', 'estimated_end_time',
-    'event_session_id', 'experience_event_id', 'group_booking_id', 'guest_attendance_confirmed_at',
-    'guest_id', 'id', 'location_type', 'occasion', 'party_size', 'payment_state',
-    'person_label', 'practitioner_id', 'resource_id', 'service_id', 'service_item_id',
-    'service_name_snapshot', 'service_variant_id', 'service_variant_name_snapshot',
-    'source', 'special_requests', 'status', 'ticket_type_id', 'tip_amount_pence',
-    'updated_at', 'venue_id'
-  ],
+    'addons_total_duration_minutes',
+    'addons_total_price_pence',
+    'amount_paid_pence',
+    'appointment_service_id',
+    'booking_date',
+    'booking_end_time',
+    'booking_model',
+    'booking_time',
+    'booking_total_price_pence',
+    'calendar_id',
+    'cancellation_actor_type',
+    'cancellation_deadline',
+    'cancellation_policy_snapshot',
+    'capacity_used',
+    'checked_in_at',
+    'class_instance_id',
+    'class_recurring_reservation_id',
+    'client_address_city',
+    'client_address_line1',
+    'client_address_line2',
+    'client_address_postcode',
+    'client_arrived_at',
+    'collective_id',
+    'collective_service_item_id',
+    'confirm_token_used_at',
+    'created_at',
+    'deposit_amount_pence',
+    'deposit_status',
+    'dietary_notes',
+    'estimated_end_time',
+    'event_session_id',
+    'experience_event_id',
+    'group_booking_id',
+    'guest_attendance_confirmed_at',
+    'guest_id',
+    'id',
+    'location_type',
+    'occasion',
+    'party_size',
+    'payment_state',
+    'person_label',
+    'practitioner_id',
+    'resource_id',
+    'service_id',
+    'service_item_id',
+    'service_name_snapshot',
+    'service_variant_id',
+    'service_variant_name_snapshot',
+    'source',
+    'special_requests',
+    'status',
+    'ticket_type_id',
+    'tip_amount_pence',
+    'updated_at',
+    'venue_id'
+  ]::name[],
   'The view projects exactly the 55-column allowlist');
 
 SELECT * FROM finish();

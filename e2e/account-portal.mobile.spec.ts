@@ -63,6 +63,35 @@ test.describe('portal at 375px', () => {
     await expect(page).toHaveURL(/\/account\/bookings\/[0-9a-f-]{36}/);
   });
 
+  test('the next booking is visible without scrolling (P1-2)', async ({ page }) => {
+    /*
+      P1-2's stated acceptance, which until now was measured once by hand and
+      never guarded. It is guarded here because P1-3's nav can change the
+      answer: the four items fit one row under some font metrics and wrap to
+      two under others, and the second row costs 38px of the fold.
+
+      Measured at the time of writing: one row puts the card top at y=366, two
+      rows at y=404, both of 812. So the wrap is affordable, and this is the
+      test that says so if it ever stops being.
+    */
+    await page.goto('/account');
+    const card = page.locator('main').filter({ hasText: 'Next up' }).first();
+    await expect(card, 'the fixture customer should have an upcoming booking').toBeVisible();
+
+    const label = page.getByText('Next up', { exact: true });
+    await expect(label).toBeVisible();
+
+    // Nothing has scrolled, and the card's primary action is on screen.
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    const action = page.getByRole('link', { name: 'View details' });
+    const box = await action.boundingBox();
+    expect(box, 'the card has no View details link').not.toBeNull();
+    expect(
+      box!.y + box!.height,
+      'the next booking card is below the fold at 375px',
+    ).toBeLessThanOrEqual(812);
+  });
+
   test('the detail page and its manage button fit the viewport', async ({ page }) => {
     await page.goto('/account/bookings');
     await page.getByRole('link', { name: 'Details' }).first().click();

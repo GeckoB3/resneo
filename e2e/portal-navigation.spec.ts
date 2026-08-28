@@ -78,17 +78,84 @@ test.describe('P1-3: one navigation system', () => {
     }
   });
 
-  test('the nav does not scroll sideways at 375px', async ({ page }) => {
+  test('every nav item is on screen at 375px', async ({ page }) => {
     // Roughly eight of the old twelve items were off-screen here with no cue
     // that they existed, which is half of what G18 was about.
+    //
+    // This asserted only `scrollWidth - clientWidth` at first, and passed on
+    // Windows while failing in CI by 3px: the items fit a 375px row under one
+    // platform's font metrics and not the other's. The row wraps now, so that
+    // measurement can no longer fail for anyone, which also means it can no
+    // longer carry the test on its own. What matters to a customer is that no
+    // item is hidden, so that is what is checked, and it holds whether the
+    // items land on one row or two.
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/account/bookings');
     await expect(page.getByRole('heading', { name: 'Your bookings', level: 1 })).toBeVisible();
 
-    const overflow = await page
-      .locator('nav[aria-label="Account sections"] > div > div')
-      .evaluate((el) => el.scrollWidth - el.clientWidth);
-    expect(overflow, 'the account nav overflows its row at 375px').toBeLessThanOrEqual(1);
+    const row = page.locator('nav[aria-label="Account sections"] > div > div');
+    expect(
+      await row.evaluate((el) => el.scrollWidth - el.clientWidth),
+      'the account nav row overflows sideways at 375px',
+    ).toBeLessThanOrEqual(1);
+
+    // The page as a whole must not scroll sideways either, which is the thing
+    // a customer actually feels.
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+      'the page scrolls sideways at 375px',
+    ).toBeLessThanOrEqual(1);
+
+    const items = page.locator('nav[aria-label="Account sections"] a');
+    const count = await items.count();
+    expect(count, 'no nav items found; this test would pass vacuously').toBe(FINAL_NAV.length);
+
+    const clipped: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const item = items.nth(i);
+      const label = (await item.textContent())?.trim() ?? '';
+      if (!(await item.isVisible())) {
+        clipped.push(`${label} (not visible)`);
+        continue;
+      }
+      const box = await item.boundingBox();
+      if (!box) {
+        clipped.push(`${label} (no box)`);
+        continue;
+      }
+      if (box.x < 0 || box.x + box.width > 375 + 1) {
+        clipped.push(`${label} (${Math.round(box.x)}..${Math.round(box.x + box.width)} of 375)`);
+      }
+    }
+    expect(clipped, 'nav items cut off at 375px').toEqual([]);
+  });
+
+  test('and at 320px, where the row has to wrap on every platform', async ({ page }) => {
+    // 375px is the acceptance width, but whether the items fit it on one row
+    // depends on the font metrics of whoever is running the test. 320px is
+    // narrow enough that they cannot fit anywhere, so this is the case that
+    // exercises the wrap on Windows as well as on CI. Without it, the wrapping
+    // path would only ever be covered on the machine that already failed.
+    await page.setViewportSize({ width: 320, height: 812 });
+    await page.goto('/account/bookings');
+    await expect(page.getByRole('heading', { name: 'Your bookings', level: 1 })).toBeVisible();
+
+    const rows = await page
+      .locator('nav[aria-label="Account sections"] a')
+      .evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().top))).size);
+    expect(rows, 'the nav did not wrap at 320px, so something is clipped').toBeGreaterThan(1);
+
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+      'the page scrolls sideways at 320px',
+    ).toBeLessThanOrEqual(1);
+
+    for (const label of FINAL_NAV) {
+      await expect(
+        page.locator('nav[aria-label="Account sections"]').getByRole('link', { name: label }),
+        label,
+      ).toBeVisible();
+    }
   });
 
   test('the hub offers at most six ways on, and no longer repeats the nav', async ({ page }) => {

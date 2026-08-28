@@ -51,10 +51,9 @@ export function AccountNav({ showVenueDashboard }: { showVenueDashboard: boolean
   const linkClass = (href: string) => {
     const active = linkActive(pathname, href);
     return [
-      // `px-2.5` below `sm`, measured rather than chosen: at `px-3` the four
-      // items overflow a 375px row by 3px, which clips the edge of "Help" with
-      // no cue that anything is cut off. Four items is the whole point of
-      // P1-3, so they have to fit.
+      // `px-2.5` below `sm` buys about 16px, which is usually the difference
+      // between one row and two at 375px. It is a nicety, not the fix: the row
+      // wraps, so nothing is clipped either way.
       'shrink-0 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium transition-colors sm:px-3',
       active
         ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-200/80'
@@ -68,7 +67,21 @@ export function AccountNav({ showVenueDashboard }: { showVenueDashboard: boolean
       aria-label="Account sections"
     >
       <div className="mx-auto max-w-5xl px-4">
-        <div className="-mx-1 flex gap-0.5 overflow-x-auto py-2 sm:flex-wrap sm:overflow-visible sm:py-2.5">
+        {/*
+          Wraps at every width, rather than forcing one row and scrolling it
+          below `sm`.
+
+          The four items fit a 375px row on Windows and overflow it by 3px on
+          CI's Linux, purely because the fonts measure differently, so "Help"
+          was clipped there with no cue that anything was cut off. Padding was
+          tuned to win that 3px and it worked locally and failed in CI, which
+          is the signal that the margin was smaller than the variation it had
+          to survive. Wrapping removes the class of problem instead: if the
+          items fit they sit on one row, and if any platform measures them
+          wider they move to a second row. Neither outcome hides a nav item,
+          which is the property that actually matters.
+        */}
+        <div className="-mx-1 flex flex-wrap gap-0.5 py-2 sm:py-2.5">
           {PRIMARY_NAV.map((item) => (
             <Link
               key={item.href}

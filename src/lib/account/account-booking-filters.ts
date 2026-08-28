@@ -132,3 +132,80 @@ export function filterAccountBookings<T extends AccountBookingInstantRow>(
   }
   return bookings;
 }
+
+/**
+ * The type filter over the bookings list (P1-3, closes part of G18).
+ *
+ * `/account/events` and `/account/resources` were separate pages listing one
+ * booking model each. They are now this filter, so the customer has one list of
+ * their bookings with a way to narrow it, rather than three lists that each
+ * held part of the answer.
+ *
+ * The URL keys are consumer words, not the stored enum: a customer sharing
+ * `?model=event` should not have to know the row says `event_ticket`. The two
+ * appointment models collapse into one key deliberately, because the split
+ * between `practitioner_appointment` and `unified_scheduling` is an internal
+ * scheduling distinction and `bookingModelShortLabel` already prints both as
+ * "Appointment".
+ */
+export type AccountBookingModelFilter =
+  | 'all'
+  | 'appointment'
+  | 'class'
+  | 'event'
+  | 'resource'
+  | 'table';
+
+/** Which stored `booking_model` values each key covers. */
+const MODEL_FILTER_MEMBERS: Record<Exclude<AccountBookingModelFilter, 'all'>, readonly string[]> = {
+  appointment: ['practitioner_appointment', 'unified_scheduling'],
+  class: ['class_session'],
+  event: ['event_ticket'],
+  resource: ['resource_booking'],
+  table: ['table_reservation'],
+};
+
+/** Consumer label for each key. Order is the order the pills appear in. */
+export const ACCOUNT_BOOKING_MODEL_LABELS: ReadonlyArray<{
+  id: Exclude<AccountBookingModelFilter, 'all'>;
+  label: string;
+}> = [
+  { id: 'appointment', label: 'Appointments' },
+  { id: 'class', label: 'Classes' },
+  { id: 'event', label: 'Events' },
+  { id: 'resource', label: 'Resources' },
+  { id: 'table', label: 'Tables' },
+];
+
+export function parseAccountBookingModel(
+  raw: string | string[] | undefined | null,
+): AccountBookingModelFilter {
+  const values = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
+  for (const value of values) {
+    const v = value?.trim().toLowerCase();
+    if (v && v !== 'all' && v in MODEL_FILTER_MEMBERS) {
+      return v as AccountBookingModelFilter;
+    }
+  }
+  return 'all';
+}
+
+/** The filter key a stored booking model belongs to, or null if unrecognised. */
+export function accountBookingModelKey(
+  bookingModel: string | null | undefined,
+): Exclude<AccountBookingModelFilter, 'all'> | null {
+  const stored = (bookingModel ?? '').trim();
+  for (const [key, members] of Object.entries(MODEL_FILTER_MEMBERS)) {
+    if (members.includes(stored)) return key as Exclude<AccountBookingModelFilter, 'all'>;
+  }
+  return null;
+}
+
+export function filterAccountBookingsByModel<T extends { booking_model?: string | null }>(
+  bookings: T[],
+  model: AccountBookingModelFilter,
+): T[] {
+  if (model === 'all') return bookings;
+  const members = MODEL_FILTER_MEMBERS[model];
+  return bookings.filter((b) => members.includes((b.booking_model ?? '').trim()));
+}

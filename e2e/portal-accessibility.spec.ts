@@ -21,27 +21,43 @@ import { PORTAL_CUSTOMER_STATE } from './helpers/auth-state';
 const e2e = getE2eConfig();
 
 /**
- * The five surviving routes, matching P0-5's and P0-8's scoping. P1-3 and P1-5
- * turn nine of the thirteen into one-line redirects, so auditing all thirteen
- * would spend most of the run on pages about to stop existing.
+ * The four surviving routes with a title of their own, matching P0-5's and
+ * P0-8's scoping. P1-5 and P1-3 turned nine of the thirteen into redirects, so
+ * this is now the whole portal rather than a sample of it; the booking detail
+ * page is the fifth and is audited separately below because it needs an id.
  */
-const SURVIVING_ROUTES: Array<{ path: string; title: string; readyHeading?: string }> = [
+/**
+ * `ready` is a heading that exists ONLY on the real page, never on its
+ * skeleton. That distinction is the whole point: P0-5's `loading.tsx` files
+ * deliberately print the real `PageHeader` to avoid a layout shift, so waiting
+ * for an `<h1>` matches the skeleton on most routes and axe would audit a page
+ * with no controls on it and report clean.
+ */
+const SURVIVING_ROUTES: Array<{
+  path: string;
+  title: string;
+  ready?: { name: string; level: 1 | 2 };
+}> = [
   { path: '/account', title: 'My account' },
   { path: '/account/bookings', title: 'Your bookings' },
   {
     path: '/account/passes',
     title: 'Passes and plans',
-    // The one route where waiting is not optional. Its panel is a client
-    // section behind Suspense, and its `loading.tsx` deliberately renders no
-    // heading (the heading belongs to whichever tab resolves), so without this
-    // axe would audit a skeleton carrying no controls and report clean. That
-    // an h1 exists at all is therefore the readiness signal here, which is the
-    // opposite of the other routes: their skeletons print the real heading on
-    // purpose, so waiting for it would prove nothing.
-    readyHeading: 'Class credits',
+    // Its panel is a client section behind Suspense, and its `loading.tsx`
+    // renders no heading at all (the heading belongs to whichever tab
+    // resolves). So on this one route an `<h1>` existing IS the signal.
+    ready: { name: 'Class credits', level: 1 },
   },
-  { path: '/account/profile', title: 'Profile and preferences' },
-  { path: '/account/security', title: 'Security and data' },
+  {
+    path: '/account/profile',
+    title: 'Profile and preferences',
+    // NOT the `<h1>`: `profile/loading.tsx` prints "Profile & preferences"
+    // too, so waiting for it would match the skeleton. "Delete account" is the
+    // last section on the page and exists only once the real page has
+    // rendered, so it proves all nine sections are there for axe to audit,
+    // including the three P1-3 folded in.
+    ready: { name: 'Delete account', level: 2 },
+  },
 ];
 
 test.describe('portal accessibility', () => {
@@ -58,8 +74,10 @@ test.describe('portal accessibility', () => {
       // redirect to /login, where axe would audit a page nobody asked about
       // and report clean.
       expect(new URL(page.url()).pathname, 'not signed in; axe would audit /login').toBe(route.path);
-      if (route.readyHeading) {
-        await expect(page.getByRole('heading', { name: route.readyHeading, level: 1 })).toBeVisible();
+      if (route.ready) {
+        await expect(
+          page.getByRole('heading', { name: route.ready.name, level: route.ready.level }),
+        ).toBeVisible();
       }
 
       const results = await new AxeBuilder({ page })
@@ -121,9 +139,21 @@ test.describe('portal accessibility', () => {
       'Bookings',
     );
 
-    await page.goto('/account/bookings?filter=past');
+    await page.goto('/account/bookings?filter=past&model=event');
     // `true` rather than `page`: a filter is not a separate page.
-    await expect(page.locator('[aria-current="true"]')).toHaveText('Past');
+    //
+    // Scoped per group since P1-3. The list has TWO filter rows now, date and
+    // type, and each marks its own active pill, so an unscoped
+    // `[aria-current="true"]` matches two elements. Asserting both is the
+    // point rather than a workaround: the failure this guards against is one
+    // row marking the other's selection.
+    await expect(page.getByRole('group', { name: 'Filter by date' })).toContainText('Past');
+    await expect(
+      page.getByRole('group', { name: 'Filter by date' }).locator('[aria-current="true"]'),
+    ).toHaveText('Past');
+    await expect(
+      page.getByRole('group', { name: 'Filter by booking type' }).locator('[aria-current="true"]'),
+    ).toHaveText('Events');
   });
 
   test('every link and button meets the 24px target floor (WCAG 2.5.8)', async ({ page }) => {

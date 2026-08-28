@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccountSafeGuests } from '@/lib/account/account-bookings';
 import { ProfileClient } from './ProfileClient';
+import { AccountPaymentMethodsSection } from '@/components/account/AccountPaymentMethodsSection';
+import { AccountSecuritySection } from '@/components/account/AccountSecuritySection';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
 /**
@@ -16,8 +18,20 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
  */
 export const metadata = {
   title: 'Profile and preferences',
-  description: 'Your contact details, notification settings and registered devices.',
+  description:
+    'Your contact details, notification settings, saved cards, password and registered devices.',
 };
+
+/**
+ * Where the retired routes land (P1-3). `/account/payment-methods` redirects to
+ * `#payment-methods` and `/account/security` to `#password`, so these two ids
+ * are part of the routing contract rather than decoration: renaming one breaks
+ * a redirect, which `retired-routes.test.ts` asserts against this list.
+ */
+export const PROFILE_SECTION_ANCHORS = [
+  { id: 'payment-methods', label: 'Saved payment methods' },
+  { id: 'password', label: 'Password and account' },
+] as const;
 
 type ProfileRow = {
   display_name: string | null;
@@ -72,8 +86,26 @@ export default async function AccountProfilePage() {
       <PageHeader
         eyebrow="Account"
         title="Profile & preferences"
-        subtitle="Update your contact details, how you sign in, notification settings, venue marketing consent, and registered devices."
+        subtitle="Your contact details, how you sign in, notification settings, venue marketing consent, saved cards and registered devices."
       />
+      {/*
+        P1-3 folded payment methods and security in here, so this page now runs
+        to nine sections. Two of them are the target of a redirect and would
+        otherwise be reachable only by scrolling past everything else, so the
+        page says up front what is on it. Plain anchors, no JavaScript: they
+        work before hydration and they are what the redirects already point at.
+      */}
+      <nav aria-label="On this page" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {PROFILE_SECTION_ANCHORS.map((section) => (
+          <a
+            key={section.id}
+            href={`#${section.id}`}
+            className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+          >
+            {section.label}
+          </a>
+        ))}
+      </nav>
       <ProfileClient
         initialEmail={user.email ?? ''}
         initialProfile={profile}
@@ -92,6 +124,33 @@ export default async function AccountProfilePage() {
           created_at: string;
         }>}
       />
+
+      {/*
+        Everything below arrived from a route of its own (P1-3). Each keeps the
+        heading and the section id it had, because the redirects point at those
+        ids and because a customer who bookmarked "my saved cards" should still
+        recognise what they land on.
+      */}
+      <AccountPaymentMethodsSection />
+      <AccountSecuritySection />
+
+      {/*
+        Where "Set up your business" went (P1-2). It was a card on the hub,
+        beside a customer's own bookings, which is the wrong pitch in the wrong
+        place. It moved to the foot of `ProfileClient` then, and moves again
+        now that two more sections sit below it: a page footer that is not at
+        the foot of the page is just a line in the middle of one.
+      */}
+      <p className="border-t border-slate-200/80 pt-6 text-xs text-slate-500">
+        Run a business?{' '}
+        <a
+          href="/signup/business-type"
+          className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+        >
+          Take bookings on ResNeo
+        </a>
+        .
+      </p>
     </div>
   );
 }

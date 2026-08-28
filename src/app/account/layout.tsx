@@ -53,8 +53,21 @@ export default async function AccountLayout({ children }: { children: ReactNode 
       <header className="sticky top-0 z-30 border-b border-slate-200/90 bg-white/90 shadow-sm shadow-slate-900/5 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Link href="/" className="shrink-0 rounded-lg outline-none ring-brand-500/40 focus-visible:ring-2">
-              <img src="/Logo.png" alt="ResNeo" className="h-9 w-auto sm:h-10" />
+            {/*
+              The wordmark goes to the hub, not to the marketing home (P1-3).
+              Overview lost its nav item when the nav collapsed to four, and
+              this is where a customer already expects "take me back to the
+              start" to be. The marketing home is still one click away in the
+              footer, which is where a signed-in customer is far less likely to
+              want it. `alt` names the destination rather than just the brand,
+              since for a screen reader "ResNeo" alone does not say where the
+              link goes.
+            */}
+            <Link
+              href="/account"
+              className="shrink-0 rounded-lg outline-none ring-brand-500/40 focus-visible:ring-2"
+            >
+              <img src="/Logo.png" alt="ResNeo account overview" className="h-9 w-auto sm:h-10" />
             </Link>
             <div className="hidden h-8 w-px bg-slate-200 sm:block" aria-hidden />
             <div className="min-w-0">

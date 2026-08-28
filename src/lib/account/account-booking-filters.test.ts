@@ -7,6 +7,10 @@ import {
   isPastBooking,
   isUpcomingBooking,
   parseAccountBookingFilter,
+  ACCOUNT_BOOKING_MODEL_LABELS,
+  accountBookingModelKey,
+  filterAccountBookingsByModel,
+  parseAccountBookingModel,
 } from '@/lib/account/account-booking-filters';
 
 /**
@@ -193,5 +197,115 @@ describe('DST', () => {
     );
     expect(winter).toBe(Date.parse('2026-01-15T12:00:00Z'));
     expect(summer).toBe(Date.parse('2026-07-15T11:00:00Z'));
+  });
+});
+
+/**
+ * The type filter that replaced `/account/events` and `/account/resources`
+ * (P1-3).
+ *
+ * Two pages became one filter, so the filter now carries what those pages
+ * guaranteed. The case that matters most is `unified_scheduling`: it is the
+ * model every venue on the platform actually uses, and a filter that knew only
+ * `practitioner_appointment` would show a customer an empty "Appointments" view
+ * while their appointments sat one pill away under "All".
+ */
+describe('the booking type filter', () => {
+  const row = (booking_model: string) => ({ booking_model });
+
+  it('accepts every key it offers a pill for', () => {
+    for (const { id } of ACCOUNT_BOOKING_MODEL_LABELS) {
+      expect(parseAccountBookingModel(id)).toBe(id);
+    }
+  });
+
+  it('falls back to all rather than throwing on an unknown or missing key', () => {
+    expect(parseAccountBookingModel('event_ticket')).toBe('all');
+    expect(parseAccountBookingModel('vouchers')).toBe('all');
+    expect(parseAccountBookingModel('')).toBe('all');
+    expect(parseAccountBookingModel(undefined)).toBe('all');
+    expect(parseAccountBookingModel(null)).toBe('all');
+    expect(parseAccountBookingModel('all')).toBe('all');
+  });
+
+  it('takes the first recognised value from a repeated param', () => {
+    expect(parseAccountBookingModel(['event', 'class'])).toBe('event');
+    expect(parseAccountBookingModel(['nonsense', 'class'])).toBe('class');
+  });
+
+  it('is case and whitespace tolerant, since these keys are shared in URLs', () => {
+    expect(parseAccountBookingModel(' Event ')).toBe('event');
+  });
+
+  it('groups BOTH appointment models under one key', () => {
+    // `unified_scheduling` is what every venue on the platform books through;
+    // `practitioner_appointment` is the older shape. The split is internal, and
+    // `bookingModelShortLabel` already prints both as "Appointment".
+    expect(accountBookingModelKey('unified_scheduling')).toBe('appointment');
+    expect(accountBookingModelKey('practitioner_appointment')).toBe('appointment');
+
+    const rows = [row('unified_scheduling'), row('practitioner_appointment'), row('class_session')];
+    expect(filterAccountBookingsByModel(rows, 'appointment')).toHaveLength(2);
+  });
+
+  it('maps each stored model to the key whose pill claims it', () => {
+    expect(accountBookingModelKey('event_ticket')).toBe('event');
+    expect(accountBookingModelKey('resource_booking')).toBe('resource');
+    expect(accountBookingModelKey('class_session')).toBe('class');
+    expect(accountBookingModelKey('table_reservation')).toBe('table');
+    expect(accountBookingModelKey('something_new')).toBeNull();
+    expect(accountBookingModelKey(null)).toBeNull();
+  });
+
+  it('selects only the model asked for', () => {
+    const rows = [
+      row('event_ticket'),
+      row('resource_booking'),
+      row('class_session'),
+      row('table_reservation'),
+      row('unified_scheduling'),
+    ];
+    expect(filterAccountBookingsByModel(rows, 'event')).toEqual([row('event_ticket')]);
+    expect(filterAccountBookingsByModel(rows, 'resource')).toEqual([row('resource_booking')]);
+    expect(filterAccountBookingsByModel(rows, 'all')).toHaveLength(5);
+  });
+
+  it('partitions: every recognised row lands in exactly one pill', () => {
+    // A stored model that no key claims would otherwise be invisible under
+    // every filter except All, which is how a new booking model would silently
+    // disappear from a customer's list.
+    const rows = ACCOUNT_BOOKING_MODEL_LABELS.flatMap(() => []) as Array<{ booking_model: string }>;
+    const all = [
+      'event_ticket',
+      'resource_booking',
+      'class_session',
+      'table_reservation',
+      'unified_scheduling',
+      'practitioner_appointment',
+    ].map(row);
+    rows.push(...all);
+
+    const counted = ACCOUNT_BOOKING_MODEL_LABELS.reduce(
+      (sum, { id }) => sum + filterAccountBookingsByModel(rows, id).length,
+      0,
+    );
+    expect(counted).toBe(all.length);
+  });
+
+  it('drops a row whose model no pill claims, rather than showing it under one', () => {
+    const rows = [row('event_ticket'), row('something_new')];
+    for (const { id } of ACCOUNT_BOOKING_MODEL_LABELS) {
+      expect(filterAccountBookingsByModel(rows, id).map((r) => r.booking_model)).not.toContain(
+        'something_new',
+      );
+    }
+    expect(filterAccountBookingsByModel(rows, 'all')).toHaveLength(2);
+  });
+
+  it('offers a label for every key and no duplicates', () => {
+    const ids = ACCOUNT_BOOKING_MODEL_LABELS.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(ACCOUNT_BOOKING_MODEL_LABELS.map((m) => m.label)).size).toBe(ids.length);
+    expect(ids).toEqual(['appointment', 'class', 'event', 'resource', 'table']);
   });
 });

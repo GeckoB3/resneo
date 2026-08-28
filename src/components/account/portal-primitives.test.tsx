@@ -8,7 +8,7 @@ import { AccountCreditsSection } from './AccountCreditsSection';
 import { AccountMembershipsSection } from './AccountMembershipsSection';
 import { AccountPaymentMethodsSection } from './AccountPaymentMethodsSection';
 import { AccountRecurringSection } from './AccountRecurringSection';
-import { AccountSecurityClient } from '@/app/account/security/AccountSecurityClient';
+import { AccountSecuritySection } from './AccountSecuritySection';
 
 /**
  * P0-7 acceptance, checks (1) and (2).
@@ -162,7 +162,7 @@ describe('accessible names survive the primitive migration', () => {
 
   it('security', async () => {
     installApi({});
-    render(<AccountSecurityClient />);
+    render(<AccountSecuritySection />);
     await waitFor(() => {
       const names = buttonNames();
       expect(names).toContain('Sign out everywhere');
@@ -273,7 +273,7 @@ describe('mutation controls disable while in flight (G30)', () => {
     // from `disabled` to `loading`, and those are only equivalent if the
     // primitive really does set `disabled` from `loading`.
     const api = installApi({});
-    render(<AccountSecurityClient />);
+    render(<AccountSecuritySection />);
     const btn = await screen.findByRole('button', { name: 'Sign out everywhere' });
 
     btn.click();

@@ -32,9 +32,12 @@ const e2e = getE2eConfig();
 const DIR = process.env.SHOT_DIR ?? 'test-results/portal-screenshots';
 
 const SCREENS: Array<[string, string]> = [
+  ['hub', '/account'],
   ['bookings', '/account/bookings'],
+  ['bookings-events', '/account/bookings?model=event'],
+  // Payments and security are sections of the profile since P1-3, so the page
+  // that used to be three screenshots is one.
   ['profile', '/account/profile'],
-  ['security', '/account/security'],
   // The four commerce screens are tabs since P1-5. Addressed at their new URLs
   // rather than through the redirect, so a broken redirect shows up as a
   // failing test in `portal-passes.spec.ts` instead of as four screenshots
@@ -43,11 +46,14 @@ const SCREENS: Array<[string, string]> = [
   ['passes-memberships', '/account/passes?tab=memberships'],
   ['passes-courses', '/account/passes?tab=courses'],
   ['passes-recurring', '/account/passes?tab=recurring'],
-  ['payment-methods', '/account/payment-methods'],
 ];
 
 /** Widths worth a look of their own. 375 is what P1-2 and P1-3 are written against. */
-const NARROW_SCREENS: Array<[string, string]> = [['passes-375', '/account/passes']];
+const NARROW_SCREENS: Array<[string, string]> = [
+  ['passes-375', '/account/passes'],
+  ['hub-375', '/account'],
+  ['bookings-375', '/account/bookings'],
+];
 
 test.describe('portal screenshots', () => {
   test.use({ storageState: PORTAL_CUSTOMER_STATE });

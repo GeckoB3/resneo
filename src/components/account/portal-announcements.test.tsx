@@ -9,7 +9,7 @@ import { AccountCreditsSection } from './AccountCreditsSection';
 import { AccountMembershipsSection } from './AccountMembershipsSection';
 import { AccountPaymentMethodsSection } from './AccountPaymentMethodsSection';
 import { AccountRecurringSection } from './AccountRecurringSection';
-import { AccountSecurityClient } from '@/app/account/security/AccountSecurityClient';
+import { AccountSecuritySection } from './AccountSecuritySection';
 
 /**
  * P0-8: async outcomes have to be announced (WCAG 4.1.3, Status Messages).
@@ -160,7 +160,7 @@ describe('a forced failure is announced with role="alert"', () => {
 
   it('security', async () => {
     installFailingApi({}, 'Could not sign out everywhere');
-    withToast(<AccountSecurityClient />);
+    withToast(<AccountSecuritySection />);
     (await screen.findByRole('button', { name: 'Sign out everywhere' })).click();
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
   });

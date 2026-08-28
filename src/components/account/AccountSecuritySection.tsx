@@ -4,11 +4,20 @@ import { useCallback, useState } from 'react';
 import { Button, FormField, Input } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/Toast';
 import Link from 'next/link';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
-import { AccountPasswordForm } from './AccountPasswordForm';
+import { AccountPasswordForm } from '@/components/account/AccountPasswordForm';
 
-export function AccountSecurityClient() {
+/**
+ * Password, sessions and account deletion, as sections of the profile page
+ * rather than a route of their own (P1-3, closes part of G18).
+ *
+ * It rendered a `PageHeader` when it was `/account/security`. That is gone:
+ * the profile page owns the `<h1>` now, and a second one here would have put
+ * two page titles on one screen. The three `<h2>` cards below are unchanged,
+ * including `id="password"`, which is what `/account/security` now redirects
+ * to and therefore has to keep its name.
+ */
+export function AccountSecuritySection() {
   const [message, setMessageState] = useState<string | null>(null);
   const [error, setErrorState] = useState<string | null>(null);
 
@@ -100,12 +109,6 @@ export function AccountSecurityClient() {
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        eyebrow="Account"
-        title="Security & data"
-        subtitle="Manage how you sign in, active sessions, and account deletion. If you usually use a magic link from email, you can still add a password for quicker sign-in."
-      />
-
       <div id="password" className="scroll-mt-28 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7">
         <h2 className="text-lg font-semibold text-slate-900">Password</h2>
         <p className="mt-2 text-sm text-slate-600">

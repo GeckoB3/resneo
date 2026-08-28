@@ -11,9 +11,14 @@ import {
 } from '@/lib/account/account-bookings';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import {
+  ACCOUNT_BOOKING_MODEL_LABELS,
+  accountBookingModelKey,
   filterAccountBookings,
+  filterAccountBookingsByModel,
   parseAccountBookingFilter,
+  parseAccountBookingModel,
   type AccountBookingFilter,
+  type AccountBookingModelFilter,
 } from '@/lib/account/account-booking-filters';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { ManageBookingLink } from '@/components/account/ManageBookingLink';
@@ -44,13 +49,57 @@ function bookingSummaryLine(row: AccountBookingRow, profileTz: string | null): s
   return parts.join(' · ');
 }
 
+/**
+ * The extra line the retired per-model pages carried (P1-3).
+ *
+ * `/account/events` printed the ticket breakdown and `/account/resources` the
+ * duration and end time. Folding those pages into this list as a filter must
+ * not quietly drop what they showed: "2 x Adult, 1 x Child" is the thing a
+ * customer opens their tickets to check, and replacing it with "Event · Sat 5
+ * September · 19:00 · Confirmed" would be a worse list, not a shorter one.
+ */
+function bookingModelDetailLine(row: AccountBookingRow): string | null {
+  const key = accountBookingModelKey(row.booking_model);
+  if (key === 'event') {
+    const lines = row.cde_context?.ticket_lines;
+    if (lines && lines.length > 0) {
+      return lines.map((l) => `${l.quantity} x ${l.label}`).join(', ');
+    }
+    return `${row.party_size} ${row.party_size === 1 ? 'ticket' : 'tickets'}`;
+  }
+  if (key === 'resource') {
+    const parts: string[] = [];
+    const duration = row.cde_context?.duration_minutes;
+    if (duration) parts.push(`${duration} min`);
+    if (row.booking_end_time) parts.push(`Ends ${row.booking_end_time.slice(0, 5)}`);
+    if (row.cde_context?.subtitle) parts.push(row.cde_context.subtitle);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  return null;
+}
+
+/** A bookings-list URL carrying both filter dimensions, omitting the defaults. */
+function bookingsHref(filter: AccountBookingFilter, model: AccountBookingModelFilter): string {
+  const params = new URLSearchParams();
+  if (filter !== 'all') params.set('filter', filter);
+  if (model !== 'all') params.set('model', model);
+  const qs = params.toString();
+  return qs ? `/account/bookings?${qs}` : '/account/bookings';
+}
+
+const pillClass = (active: boolean) =>
+  active
+    ? 'rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-brand-600/25'
+    : 'rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm shadow-slate-900/5 transition-colors hover:border-slate-300 hover:bg-slate-50';
+
 export default async function AccountBookingsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ filter?: string }>;
+  searchParams?: Promise<{ filter?: string; model?: string | string[] }>;
 }) {
   const sp = (await searchParams) ?? {};
   const filter = parseAccountBookingFilter(sp.filter);
+  const model = parseAccountBookingModel(sp.model);
   const nowMs = new Date().getTime();
 
   const supabase = await createClient();
@@ -66,7 +115,10 @@ export default async function AccountBookingsPage({
 
   // The customer's own timezone is only a fallback: each booking is classified
   // in its VENUE's zone, which is the zone its stored times are in (P0-2).
-  const filtered = filterAccountBookings(bookings, filter, nowMs, profileTz);
+  const filtered = filterAccountBookingsByModel(
+    filterAccountBookings(bookings, filter, nowMs, profileTz),
+    model,
+  );
   const displayItems = buildAccountBookingDisplayList(filtered);
 
   const tabs: Array<{ id: AccountBookingFilter; label: string }> = [
@@ -75,6 +127,22 @@ export default async function AccountBookingsPage({
     { id: 'past', label: 'Past' },
   ];
 
+  /*
+    Only the types this customer actually has, plus whichever is selected.
+    A salon customer has no events and never will, and offering them an
+    "Events" pill that can only ever return nothing is a worse list than no
+    pill at all. The selected one is kept regardless so a shared or redirected
+    URL is always representable: `/account/events` lands here as `?model=event`
+    even for a customer with none, and the pill has to be able to show that
+    state rather than silently reading as "All".
+  */
+  const presentModels = new Set(
+    bookings.map((b) => accountBookingModelKey(b.booking_model)).filter(Boolean),
+  );
+  const modelTabs = ACCOUNT_BOOKING_MODEL_LABELS.filter(
+    (m) => presentModels.has(m.id) || model === m.id,
+  );
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -82,28 +150,63 @@ export default async function AccountBookingsPage({
         title="Your bookings"
         subtitle="Reservations and visits linked to your account. Open a booking for details or use the venue manage link where available."
       />
-      <div className="flex flex-wrap gap-2">
+      {/*
+        Both pill rows are named groups. There are two of them since P1-3, and
+        without names a screen reader announces two undifferentiated runs of
+        links: "All, Upcoming, Past, All types, Appointments" with nothing
+        saying that the first three and the last two do different things.
+      */}
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by date">
         {tabs.map((t) => (
           <Link
             key={t.id}
-            href={t.id === 'all' ? '/account/bookings' : `/account/bookings?filter=${t.id}`}
+            // Each dimension keeps the other, so narrowing to Events and then
+            // to Upcoming does not silently drop back to every type.
+            href={bookingsHref(t.id, model)}
             // `true` rather than `page`: these are filters over one page, not
             // separate pages, so `page` would claim something untrue.
             aria-current={filter === t.id ? 'true' : undefined}
-            className={
-              filter === t.id
-                ? 'rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-brand-600/25'
-                : 'rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm shadow-slate-900/5 transition-colors hover:border-slate-300 hover:bg-slate-50'
-            }
+            className={pillClass(filter === t.id)}
           >
             {t.label}
           </Link>
         ))}
       </div>
+      {modelTabs.length > 0 ? (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by booking type">
+          <Link
+            href={bookingsHref(filter, 'all')}
+            aria-current={model === 'all' ? 'true' : undefined}
+            className={pillClass(model === 'all')}
+          >
+            All types
+          </Link>
+          {modelTabs.map((m) => (
+            <Link
+              key={m.id}
+              href={bookingsHref(filter, m.id)}
+              aria-current={model === m.id ? 'true' : undefined}
+              className={pillClass(model === m.id)}
+            >
+              {m.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
       {bookings.length === 0 ? (
         <p className="text-slate-600">No bookings linked to this account yet.</p>
       ) : displayItems.length === 0 ? (
-        <p className="text-slate-600">No bookings in this view.</p>
+        <p className="text-slate-600">
+          {model === 'all'
+            ? 'No bookings in this view.'
+            : `No ${(ACCOUNT_BOOKING_MODEL_LABELS.find((m) => m.id === model)?.label ?? '').toLowerCase()} in this view.`}{' '}
+          <Link
+            href="/account/bookings"
+            className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+          >
+            See all bookings
+          </Link>
+        </p>
       ) : (
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
           {displayItems.map((item) =>
@@ -158,6 +261,9 @@ export default async function AccountBookingsPage({
                     {item.row.cde_context && item.row.venue?.name ? `${item.row.venue.name} · ` : ''}
                     {bookingSummaryLine(item.row, profileTz)}
                   </p>
+                  {bookingModelDetailLine(item.row) ? (
+                    <p className="mt-0.5 text-xs text-slate-500">{bookingModelDetailLine(item.row)}</p>
+                  ) : null}
                 </div>
                 <div className="flex gap-3 text-sm font-medium">
                   <Link href={`/account/bookings/${item.row.id}`} className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
-import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
@@ -153,12 +152,22 @@ export function AccountPaymentMethodsSection() {
   }
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        eyebrow="Account"
-        title="Payment methods"
-        subtitle="Cards are saved per venue on that venue’s Stripe Connect account (not platform-wide). Only venues where you have class credits, courses, or memberships appear below."
-      />
+    <div className="space-y-6">
+      {/*
+        A section of the profile page since P1-3, not a route of its own, so
+        the `PageHeader` that stood here is now an `<h2>`: the profile page
+        owns the `<h1>`, and a second one would have put two page titles on one
+        screen. `id` is on the heading's own wrapper because
+        `/account/payment-methods` redirects to `#payment-methods`, so the
+        anchor has to land on the top of the section rather than inside it.
+      */}
+      <div id="payment-methods" className="scroll-mt-28">
+        <h2 className="text-lg font-semibold text-slate-900">Saved payment methods</h2>
+        <p className="mt-1 max-w-2xl text-sm text-slate-600">
+          Cards are saved with each venue separately, not across ResNeo. Venues appear here once you
+          have credits, a course or a membership with them.
+        </p>
+      </div>
       {status === 'failed' ? (
         <PortalLoadFailed
           message={error}
@@ -202,7 +211,7 @@ export function AccountPaymentMethodsSection() {
 
       {venueId ? (
         <SectionCard className="p-5 sm:p-6">
-          <h2 className="text-sm font-semibold text-slate-900">Saved cards</h2>
+          <h3 className="text-sm font-semibold text-slate-900">Saved cards</h3>
           {methods.length === 0 ? (
             <EmptyState size="compact" title="No saved cards for this venue" description="Add a card to pay faster next time." />
           ) : (
@@ -228,7 +237,7 @@ export function AccountPaymentMethodsSection() {
 
       {setup ? (
         <SectionCard className="p-5 sm:p-6">
-          <h2 className="text-sm font-semibold text-slate-900">Add card</h2>
+          <h3 className="text-sm font-semibold text-slate-900">Add card</h3>
           <Elements stripe={stripeForAccount(setup.stripe_account_id)} options={{ clientSecret: setup.client_secret, appearance: { theme: 'stripe' } }}>
             <SetupForm
               clientSecret={setup.client_secret}

@@ -150,14 +150,26 @@ describe('v1 alias rule (C7a/C7b)', () => {
     // count is asserted so that adding a route without an alias, and without
     // consciously updating this list, fails here.
     //
-    // 27 since P0-3 added account/bookings/[id]/manage-link, which is exempt.
+    // 28: P0-3 added account/bookings/[id]/manage-link, which is C7A_EXEMPT,
+    // and P1-1 added account/home, which has its v1 alias at v1/me/home.
     const accountRoutes = routeFiles('account').map(rel).sort();
     expect(
       accountRoutes.length,
       'An /api/account route was added or removed. If added: give it a v1 alias (C7a) ' +
         'or a C7A_EXEMPT entry, and bump this count. Do NOT add it to the pre-existing ' +
         'exclusion list, which is dated 2026-08-27 and closed.',
-    ).toBe(27);
+    ).toBe(28);
+  });
+
+  it('routes this plan created have their v1 alias', () => {
+    // C7a. The count above notices a new route; this notices a new route that
+    // was added without the alias, which is the failure C7a actually names.
+    for (const [account, alias] of [['account/home/route.ts', 'v1/me/home/route.ts']]) {
+      expect(fs.existsSync(path.join(API, account)), `${account} should exist`).toBe(true);
+      expect(fs.existsSync(path.join(API, alias)), `${account} needs its v1 alias at ${alias}`).toBe(
+        true,
+      );
+    }
   });
 
   it('every C7a exemption still exists, so the reason cannot outlive the route', () => {

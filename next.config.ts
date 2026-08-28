@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { NextConfig } from "next";
+import { LEGACY_PASSES_ROUTES, passesHref } from "./src/app/account/passes/passes-tabs";
 
 const nextConfig: NextConfig = {
   // Allow a second concurrent `next dev` (e.g. a parallel Claude session) to use its
@@ -15,6 +16,25 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  },
+  /**
+   * Routes retired by the customer portal work (P1-5).
+   *
+   * Here rather than as a `redirect()` in each page: a config redirect answers
+   * with a real 307 before middleware and before any rendering, where a page
+   * level redirect inside the streaming account layout only reaches the
+   * customer as a client-side hop after hydration. It also carries the incoming
+   * query through, which the class booking flow's deep links depend on. The
+   * table and the reasoning live in `src/app/account/passes/passes-tabs.ts`.
+   *
+   * `permanent: false` (307) deliberately. See the note beside the table.
+   */
+  async redirects() {
+    return LEGACY_PASSES_ROUTES.map(({ from, tab }) => ({
+      source: from,
+      destination: passesHref(tab),
+      permanent: false,
+    }));
   },
   async headers() {
     const sharedSecurity: { key: string; value: string }[] = [

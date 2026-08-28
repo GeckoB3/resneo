@@ -3,17 +3,26 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+/**
+ * P1-3 collapses this to four items. The one change P1-5 had to make first:
+ * the five entries that pointed at retired routes are now the single "Passes
+ * and plans" item.
+ *
+ * Not scope creep, a regression it would otherwise have shipped. `linkActive`
+ * compares pathnames, so leaving five items aimed at paths that now 307 away
+ * meant a customer standing on `/account/passes` saw NO item marked current:
+ * the nav would have stopped telling them where they were. Pointing all five
+ * at the new path instead would have been worse, marking five items current at
+ * once. P1-3 still owns the full restructure and its own acceptance tests; this
+ * only keeps the nav honest in the meantime.
+ */
 const PRIMARY_NAV: Array<{ href: string; label: string }> = [
   { href: '/account', label: 'Overview' },
   { href: '/account/bookings', label: 'Bookings' },
   { href: '/account/events', label: 'Events' },
-  { href: '/account/classes', label: 'Classes' },
+  { href: '/account/passes', label: 'Passes and plans' },
   { href: '/account/resources', label: 'Resources' },
   { href: '/account/profile', label: 'Profile' },
-  { href: '/account/credits', label: 'Credits' },
-  { href: '/account/courses', label: 'Courses' },
-  { href: '/account/memberships', label: 'Memberships' },
-  { href: '/account/recurring', label: 'Recurring' },
   { href: '/account/payment-methods', label: 'Payments' },
   { href: '/account/security', label: 'Security' },
 ];

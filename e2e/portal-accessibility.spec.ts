@@ -25,9 +25,21 @@ const e2e = getE2eConfig();
  * turn nine of the thirteen into one-line redirects, so auditing all thirteen
  * would spend most of the run on pages about to stop existing.
  */
-const SURVIVING_ROUTES: Array<{ path: string; title: string }> = [
+const SURVIVING_ROUTES: Array<{ path: string; title: string; readyHeading?: string }> = [
   { path: '/account', title: 'My account' },
   { path: '/account/bookings', title: 'Your bookings' },
+  {
+    path: '/account/passes',
+    title: 'Passes and plans',
+    // The one route where waiting is not optional. Its panel is a client
+    // section behind Suspense, and its `loading.tsx` deliberately renders no
+    // heading (the heading belongs to whichever tab resolves), so without this
+    // axe would audit a skeleton carrying no controls and report clean. That
+    // an h1 exists at all is therefore the readiness signal here, which is the
+    // opposite of the other routes: their skeletons print the real heading on
+    // purpose, so waiting for it would prove nothing.
+    readyHeading: 'Class credits',
+  },
   { path: '/account/profile', title: 'Profile and preferences' },
   { path: '/account/security', title: 'Security and data' },
 ];
@@ -46,6 +58,9 @@ test.describe('portal accessibility', () => {
       // redirect to /login, where axe would audit a page nobody asked about
       // and report clean.
       expect(new URL(page.url()).pathname, 'not signed in; axe would audit /login').toBe(route.path);
+      if (route.readyHeading) {
+        await expect(page.getByRole('heading', { name: route.readyHeading, level: 1 })).toBeVisible();
+      }
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

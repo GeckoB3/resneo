@@ -14,15 +14,15 @@ import path from 'node:path';
  *
  * Scoped to the survivors, matching P0-8's metadata scoping: P1-3 and P1-5 turn
  * nine of the thirteen routes into one-line redirects, and a boundary on a
- * redirect is work spent on a file about to stop existing. `/account/passes` is
- * on the plan's list of five but does not exist yet, so it is absent here and
- * will fail this test into existence when P1 adds it.
+ * redirect is work spent on a file about to stop existing. `/account/passes`
+ * joined the list when P1-5 created it, which is what the previous version of
+ * this comment predicted would happen.
  */
 
 const ACCOUNT = path.join(process.cwd(), 'src', 'app', 'account');
 
 /** The routes that survive P1-3 and P1-5, relative to `src/app/account`. */
-const SURVIVING = ['', 'bookings', 'bookings/[bookingId]', 'profile', 'security'];
+const SURVIVING = ['', 'bookings', 'bookings/[bookingId]', 'passes', 'profile', 'security'];
 
 describe('P0-5: every surviving portal route has both boundaries', () => {
   for (const route of SURVIVING) {
@@ -59,6 +59,6 @@ describe('P0-5: every surviving portal route has both boundaries', () => {
     // Without this, renaming the account directory would make every assertion
     // above pass by finding nothing to check.
     expect(fs.existsSync(path.join(ACCOUNT, 'page.tsx'))).toBe(true);
-    expect(SURVIVING.length).toBe(5);
+    expect(SURVIVING.length).toBe(6);
   });
 });

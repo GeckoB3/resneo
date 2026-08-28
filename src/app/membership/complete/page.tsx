@@ -42,7 +42,11 @@ export default function MembershipCompletePage() {
           email, and the membership will appear in your account.
         </p>
         <Link
-          href="/account/memberships"
+          // The retired path still 307s here (P1-5), but this is the 3DS
+          // return page: the customer has just been through a card challenge,
+          // and sending them through a redirect hop as well is a wait they do
+          // not need. Linked directly for that reason.
+          href="/account/passes?tab=memberships"
           className="mt-6 inline-flex min-h-10 items-center justify-center rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
         >
           View my memberships

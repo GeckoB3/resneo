@@ -16,6 +16,13 @@ type Profile = {
   first_name: string | null;
   last_name: string | null;
   phone: string | null;
+  /**
+   * Still round-tripped, deliberately (P1-4). This form stopped offering a
+   * Locale control because nothing reads the column (G22), but `saveProfile`
+   * spreads the whole profile, so the stored value is preserved rather than
+   * cleared. Removing it from the type would make the web form silently blank
+   * a field another client may be setting.
+   */
   locale: string;
   timezone: string;
   default_login_destination: 'account' | 'dashboard' | 'ask' | null;
@@ -302,18 +309,27 @@ export function ProfileClient({
       </section>
 
       <section className={sectionClass}>
-        <h2 className="text-lg font-semibold text-slate-900">Regional &amp; login</h2>
-        <p className="mt-1 text-sm text-slate-600">Locale and timezone affect how dates and times are shown to you.</p>
+        <h2 className="text-lg font-semibold text-slate-900">Dates and sign-in</h2>
+        {/*
+          The Locale field is gone (P1-4, closes G22).
+
+          `user_profiles.locale` was written by this form and read nowhere in
+          the entire codebase, while the heading above it said "Locale and
+          timezone affect how dates and times are shown to you". Half of that
+          sentence was false, and a setting that visibly does nothing when you
+          change it costs more trust than the setting was ever worth. Making it
+          work is a multi-language project, named in the plan's out-of-scope
+          list.
+
+          The column and `PATCH /api/account/profile` are untouched on purpose:
+          the API is frozen by P0-11 and the mobile app is a separate consumer,
+          so removing a field it may send is a contract change rather than a
+          copy change. This form simply stops offering it.
+        */}
+        <p className="mt-1 text-sm text-slate-600">
+          Your timezone decides how dates and times are shown to you across ResNeo.
+        </p>
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
-          <FormField label="Locale" htmlFor="profile-locale">
-            <Input
-              id="profile-locale"
-              name="locale"
-              value={profile.locale}
-              onChange={(e) => setProfile((p) => ({ ...p, locale: e.target.value }))}
-              className={inputClass}
-            />
-          </FormField>
           {/*
             No Select primitive exists, so the control stays a native select
             and keeps `inputClass` so it still matches the Inputs beside it.

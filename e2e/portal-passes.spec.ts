@@ -39,7 +39,7 @@ const TAB_HEADING: Record<string, string> = {
   credits: 'Class credits',
   courses: 'Courses',
   memberships: 'Memberships',
-  recurring: 'Recurring class reservations',
+  recurring: 'Repeat class bookings',
 };
 
 test.describe('P1-5: passes and plans', () => {

@@ -110,7 +110,7 @@ const HEADING = {
   credits: 'Class credits',
   courses: 'Courses',
   memberships: 'Memberships',
-  recurring: 'Recurring class reservations',
+  recurring: 'Repeat class bookings',
 } as const;
 
 describe('the passes tabs', () => {

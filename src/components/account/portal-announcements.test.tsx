@@ -153,7 +153,7 @@ describe('a forced failure is announced with role="alert"', () => {
   it('recurring', async () => {
     installFailingApi(PAYLOADS.recurring, 'Create failed');
     withToast(<AccountRecurringSection />);
-    const create = await screen.findByRole('button', { name: 'Create rule' });
+    const create = await screen.findByRole('button', { name: 'Set up repeat booking' });
     create.click();
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Create failed'));
   });

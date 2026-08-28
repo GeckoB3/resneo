@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField } from '@/components/ui/primitives';
+import { formatAccountDate, friendlyCreditReason } from '@/lib/account/account-commerce-copy';
 
 interface BalanceRow {
   id: string;
@@ -184,13 +185,6 @@ export function AccountCreditsSection() {
   const venueName = (id: string) => venues.find((v) => v.id === id)?.name ?? id.slice(0, 8);
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Pack';
 
-  const formatExpiry = (iso: string | null): string | null => {
-    if (!iso) return null;
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
-
   const startPurchase = useCallback(
     async (venue_id: string, product_id: string) => {
       setError(null);
@@ -246,7 +240,7 @@ export function AccountCreditsSection() {
       <PageHeader
         eyebrow="Account"
         title="Class credits"
-        subtitle="Balances are per venue. Buy packs from a venue that sells them; redeem when booking paid classes (where enabled)."
+        subtitle="Credits are held with each venue separately. Buy a pack from a venue that sells them, then use your credits when you book a class there."
       />
       {status === 'failed' ? (
         <PortalLoadFailed
@@ -262,11 +256,11 @@ export function AccountCreditsSection() {
       <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Balances</h2>
         {balances.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">No credit batches yet.</p>
+          <p className="mt-2 text-sm text-slate-500">You have no credits yet.</p>
         ) : (
           <ul className="mt-3 space-y-2 text-sm">
             {balances.map((b) => {
-              const expiry = formatExpiry(b.expires_at);
+              const expiry = formatAccountDate(b.expires_at);
               return (
                 <li key={b.id} className="flex items-start justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
                   <span className="min-w-0">
@@ -287,7 +281,7 @@ export function AccountCreditsSection() {
 
       <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Buy a pack</h2>
-        <p className="mt-1 text-xs text-slate-500">Choose a venue, then a published credit pack.</p>
+        <p className="mt-1 text-xs text-slate-500">Choose a venue, then the pack you want.</p>
         <BuyPackPicker
           catalog={purchaseCatalog}
           preselectVenueId={deepLinkVenueId}
@@ -313,14 +307,15 @@ export function AccountCreditsSection() {
       ) : null}
 
       <SectionCard className="p-5 sm:p-6">
-        <h2 className="text-sm font-semibold text-slate-900">Recent ledger</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Recent activity</h2>
         {ledger.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">No activity yet.</p>
         ) : (
           <ul className="mt-3 max-h-64 space-y-1 overflow-auto text-xs text-slate-700">
             {ledger.map((l) => (
               <li key={l.id}>
-                {l.created_at.slice(0, 10)} · {l.reason} · {l.delta_credits > 0 ? '+' : ''}
+                {formatAccountDate(l.created_at)} · {friendlyCreditReason(l.reason)} ·{' '}
+                {l.delta_credits > 0 ? '+' : ''}
                 {l.delta_credits} · {venueName(l.venue_id)}
               </li>
             ))}
@@ -379,8 +374,8 @@ function BuyPackPicker({
     return (
       <EmptyState
         size="compact"
-        title="No published credit packs yet"
-        description="When a venue publishes a credit pack you can buy, it will show up here."
+        title="No credit packs on sale yet"
+        description="When a venue puts a credit pack on sale, it will show up here."
       />
     );
   }

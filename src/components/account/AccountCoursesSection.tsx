@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField } from '@/components/ui/primitives';
+import { friendlyCourseStatus } from '@/lib/account/account-commerce-copy';
 
 interface EnrollmentRow {
   id: string;
@@ -372,7 +373,7 @@ export function AccountCoursesSection() {
       <PageHeader
         eyebrow="Account"
         title="Courses"
-        subtitle="Enroll in free course packages instantly, or pay for paid courses with your card (processed on the venue’s Stripe account)."
+        subtitle="Join a course that runs over several sessions. Free courses are confirmed straight away; for paid courses the venue takes the payment from your card."
       />
       {status === 'failed' ? (
         <PortalLoadFailed
@@ -399,7 +400,7 @@ export function AccountCoursesSection() {
                   <div className="min-w-0">
                     <div className="font-medium text-slate-900">{productName(e.course_product_id)}</div>
                     <div className="text-xs text-slate-600">
-                      {venueName(e.venue_id)} · {e.status}
+                      {venueName(e.venue_id)} · {friendlyCourseStatus(e.status)}
                       {e.first_session_date ? ` · starts ${e.first_session_date}` : ''}
                     </div>
                     {active ? (
@@ -432,7 +433,7 @@ export function AccountCoursesSection() {
       </SectionCard>
 
       {status !== 'ready' ? null : purchaseCatalog.venues.length === 0 ? (
-        <EmptyState size="compact" title="No published course packages yet" description="When a venue publishes a course you can book, it will show up here." />
+        <EmptyState size="compact" title="No courses on sale yet" description="When a venue opens a course for booking, it will show up here." />
       ) : (
         <>
           <SectionCard className="p-5 sm:p-6">

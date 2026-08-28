@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField } from '@/components/ui/primitives';
+import { membershipStandingLine } from '@/lib/account/account-commerce-copy';
 
 /**
  * Confirming the card for a membership (P0-17, closes C9).
@@ -343,7 +344,7 @@ export function AccountMembershipsSection() {
       <PageHeader
         eyebrow="Account"
         title="Memberships"
-        subtitle="Subscriptions bill on each venue’s Stripe Connect account."
+        subtitle="Memberships are billed by the venue you joined, not by ResNeo. Each venue is separate, so you can hold more than one."
       />
       {status === 'failed' ? (
         <PortalLoadFailed
@@ -373,9 +374,7 @@ export function AccountMembershipsSection() {
                   <div>
                     <div className="font-medium">{productName(m.product_id)}</div>
                     <div className="text-xs text-slate-500">
-                      {venueName(m.venue_id)} · {m.status}
-                      {m.current_period_end ? ` · renews ${m.current_period_end.slice(0, 10)}` : ''}
-                      {m.cancel_at_period_end ? ' · cancelling' : ''}
+                      {venueName(m.venue_id)} · {membershipStandingLine(m)}
                     </div>
                     {allowance ? (
                       <div className="mt-1 text-xs text-slate-700">
@@ -404,7 +403,7 @@ export function AccountMembershipsSection() {
                       onClick={() => void cancelMembership(m.id)}
                       className="text-xs font-semibold !text-amber-800 hover:underline"
                     >
-                      Cancel at period end
+                      Cancel at renewal
                     </Button>
                   ) : null}
                 </li>
@@ -416,9 +415,9 @@ export function AccountMembershipsSection() {
 
       <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Start a membership</h2>
-        <p className="mt-1 text-xs text-slate-500">Plans listed here have Stripe prices configured on the venue account.</p>
+        <p className="mt-1 text-xs text-slate-500">These are the plans each venue is currently offering.</p>
         {status !== 'ready' ? null : purchaseCatalog.venues.length === 0 ? (
-          <EmptyState size="compact" title="No membership plans yet" description="When a venue publishes a plan you can join, it will show up here." />
+          <EmptyState size="compact" title="No membership plans yet" description="When a venue opens a plan you can join, it will show up here." />
         ) : (
           <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
             <FormField label="Venue" className="min-w-0 flex-1">
@@ -469,8 +468,8 @@ export function AccountMembershipsSection() {
           <div className="mt-5 rounded-xl border border-slate-200 p-4">
             <h3 className="text-sm font-semibold text-slate-900">Confirm your card</h3>
             <p className="mt-1 text-xs text-slate-500">
-              Your card is charged by the venue on their own Stripe account. You can cancel the
-              membership at any time from this page.
+              The venue takes the payment, and you can cancel the membership from this page at
+              any time.
             </p>
             <Elements
               stripe={stripeForAccount(cardSetup.stripe_account_id)}

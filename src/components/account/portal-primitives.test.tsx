@@ -174,7 +174,7 @@ describe('accessible names survive the primitive migration', () => {
   it('recurring', async () => {
     installApi(RECURRING_PAYLOAD);
     render(<AccountRecurringSection />);
-    await waitFor(() => expect(buttonNames()).toContain('Create rule'));
+    await waitFor(() => expect(buttonNames()).toContain('Set up repeat booking'));
   });
 });
 

@@ -7,6 +7,7 @@ import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField, Input } from '@/components/ui/primitives';
+import { formatAccountDate, friendlyRecurringStatus } from '@/lib/account/account-commerce-copy';
 
 interface RecRow {
   id: string;
@@ -39,25 +40,28 @@ interface TimetableSlot {
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 function formatRule(rule: RecRow['rule']): string {
-  if (!rule || rule.weekday == null || !rule.start_time) return 'Rule not configured';
+  if (!rule || rule.weekday == null || !rule.start_time) return 'Not set up yet';
   const day = WEEKDAY_NAMES[rule.weekday] ?? `weekday ${rule.weekday}`;
   const time = String(rule.start_time).slice(0, 5);
   const interval =
     rule.interval_weeks && rule.interval_weeks > 1 ? ` every ${rule.interval_weeks} weeks` : ' weekly';
-  const end = rule.end_date ? ` until ${rule.end_date}` : '';
-  const max = rule.max_occurrences ? ` (max ${rule.max_occurrences})` : '';
+  const end = rule.end_date ? ` until ${formatAccountDate(rule.end_date) ?? rule.end_date}` : '';
+  const max = rule.max_occurrences ? ` (up to ${rule.max_occurrences} bookings)` : '';
   return `${day} ${time}${interval}${end}${max}`;
 }
 
 function friendlyError(raw: string | null): string | null {
   if (!raw) return null;
-  if (/Class type not found/i.test(raw)) return 'This class type has been removed by the venue. Delete this rule.';
+  if (/Class type not found/i.test(raw))
+    return 'The venue has removed this class. Delete this repeat booking.';
   if (/No upcoming sessions|No matching dates|No matching dates in window/i.test(raw))
     return "The venue has no scheduled sessions for this class. We'll check again next week.";
   if (/Auto-booking is only supported/i.test(raw))
     return "This class requires payment, so it can't be booked automatically. Book it manually each week.";
-  if (/Invalid or missing rule/i.test(raw)) return 'This rule is invalid. Delete it and create a new one.';
-  if (/max_occurrences reached/i.test(raw)) return 'Booked the full series. You can delete this rule.';
+  if (/Invalid or missing rule/i.test(raw))
+    return 'Something is wrong with this repeat booking. Delete it and set it up again.';
+  if (/max_occurrences reached/i.test(raw))
+    return 'We have booked every session you asked for. You can delete this now.';
   return raw;
 }
 
@@ -193,7 +197,7 @@ export function AccountRecurringSection() {
         setError(data.error ?? 'Create failed');
         return;
       }
-      setInfo('Recurring rule created. The nightly cron will start materialising bookings.');
+      setInfo('Repeat booking saved. We add each week’s booking overnight, so it will show in your bookings by tomorrow.');
       setEndDate('');
       setMaxOccurrences('');
       setIntervalWeeks('1');
@@ -251,8 +255,8 @@ export function AccountRecurringSection() {
     <div className="space-y-8">
       <PageHeader
         eyebrow="Account"
-        title="Recurring class reservations"
-        subtitle="Set up a weekday + time and we'll book the class for you each week. Requires an active membership that allows recurring booking."
+        title="Repeat class bookings"
+        subtitle="Pick a day and time, and we will book that class for you each week. You need a membership that includes repeat booking."
       />
       {status === 'failed' ? (
         <PortalLoadFailed
@@ -271,9 +275,9 @@ export function AccountRecurringSection() {
       ) : null}
 
       <SectionCard className="p-5 sm:p-6">
-        <h2 className="text-sm font-semibold text-slate-900">Your rules</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Your repeat bookings</h2>
         {rows.length === 0 ? (
-          <EmptyState size="compact" title="No repeat bookings yet" description="Rules you create below will appear here." />
+          <EmptyState size="compact" title="No repeat bookings yet" description="Anything you set up below will appear here." />
         ) : (
           <ul className="mt-2 space-y-2 text-sm">
             {rows.map((r) => {
@@ -284,8 +288,10 @@ export function AccountRecurringSection() {
                     <div className="min-w-0">
                       <div className="font-medium text-slate-900">{typeName(r.class_type_id)}</div>
                       <div className="text-xs text-slate-600">
-                        {venueName(r.venue_id)} · {r.status}
-                        {r.next_materialize_on ? ` · next ${r.next_materialize_on}` : ''}
+                        {venueName(r.venue_id)} · {friendlyRecurringStatus(r.status)}
+                        {r.next_materialize_on
+                          ? ` · next booking ${formatAccountDate(r.next_materialize_on) ?? r.next_materialize_on}`
+                          : ''}
                       </div>
                       <div className="mt-0.5 text-xs text-slate-700">{formatRule(r.rule)}</div>
                     </div>
@@ -338,9 +344,9 @@ export function AccountRecurringSection() {
       </SectionCard>
 
       <SectionCard className="p-5 sm:p-6">
-        <h2 className="text-sm font-semibold text-slate-900">New rule</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Set up a repeat booking</h2>
         {!hasCatalog ? (
-          <EmptyState size="compact" title="No active class types found" description="A venue needs a published class timetable before you can set up a repeat booking." />
+          <EmptyState size="compact" title="No classes available yet" description="A venue needs a class timetable up and running before you can set up a repeat booking." />
         ) : (
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <FormField label="Venue">
@@ -437,7 +443,7 @@ export function AccountRecurringSection() {
                 loading={busy === 'create'}
                 onClick={() => void createRule()}
               >
-                {busy === 'create' ? 'Creating…' : 'Create rule'}
+                {busy === 'create' ? 'Setting up…' : 'Set up repeat booking'}
               </Button>
             </div>
           </div>

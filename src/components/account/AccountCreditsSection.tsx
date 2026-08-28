@@ -7,6 +7,7 @@ import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField } from '@/components/ui/primitives';
 
 interface BalanceRow {
@@ -120,6 +121,8 @@ export function AccountCreditsSection() {
     products: CatalogProduct[];
   }>({ venues: [], products: [] });
   const [error, setErrorState] = useState<string | null>(null);
+  /** Load state machine (P0-5, G24): failed is not the same as empty. */
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   /** Announcing wrapper (P0-8); see the note in ProfileClient. */
   const { addToast } = useToast();
@@ -142,10 +145,21 @@ export function AccountCreditsSection() {
     await Promise.resolve();
     setError(null);
     const qs = deepLinkVenueId ? `?venue=${encodeURIComponent(deepLinkVenueId)}` : '';
-    const res = await fetch(`/api/account/credits${qs}`);
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not load credits');
+    let data: Record<string, unknown>;
+    try {
+      const res = await fetch(`/api/account/credits${qs}`);
+      // Checked BEFORE parsing: an error page is rarely JSON, and parsing it
+      // first threw past every branch below and left the empty state showing.
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not load credits');
+        setStatus('failed');
+        return;
+      }
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+      setStatus('failed');
       return;
     }
     setBalances((data.balances ?? []) as BalanceRow[]);
@@ -157,6 +171,7 @@ export function AccountCreditsSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       products: (pc?.products ?? []) as CatalogProduct[],
     });
+    setStatus('ready');
   }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
@@ -232,6 +247,15 @@ export function AccountCreditsSection() {
         title="Class credits"
         subtitle="Balances are per venue. Buy packs from a venue that sells them; redeem when booking paid classes (where enabled)."
       />
+      {status === 'failed' ? (
+        <PortalLoadFailed
+          message={error}
+          onRetry={() => {
+            setStatus('loading');
+            void load();
+          }}
+        />
+      ) : null}
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField, Input } from '@/components/ui/primitives';
 
 interface RecRow {
@@ -76,6 +77,8 @@ export function AccountRecurringSection() {
   const [intervalWeeks, setIntervalWeeks] = useState('1');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setErrorState] = useState<string | null>(null);
+  /** Load state machine (P0-5, G24): failed is not the same as empty. */
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   /** Announcing wrapper (P0-8); see the note in ProfileClient. */
   const { addToast } = useToast();
@@ -89,10 +92,21 @@ export function AccountRecurringSection() {
   const [info, setInfo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/account/class-recurring');
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not load');
+    let data: Record<string, unknown>;
+    try {
+      const res = await fetch('/api/account/class-recurring');
+      // Checked BEFORE parsing: an error page is rarely JSON, and parsing it
+      // first threw past every branch below and left the empty state showing.
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not load');
+        setStatus('failed');
+        return;
+      }
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+      setStatus('failed');
       return;
     }
     setRows((data.reservations ?? []) as RecRow[]);
@@ -105,6 +119,7 @@ export function AccountRecurringSection() {
       class_types: (rc?.class_types ?? []) as CatalogType[],
       timetable_slots: (rc?.timetable_slots ?? []) as TimetableSlot[],
     });
+    setStatus('ready');
   }, [setError]);
 
   useEffect(() => {
@@ -238,6 +253,15 @@ export function AccountRecurringSection() {
         title="Recurring class reservations"
         subtitle="Set up a weekday + time and we'll book the class for you each week. Requires an active membership that allows recurring booking."
       />
+      {status === 'failed' ? (
+        <PortalLoadFailed
+          message={error}
+          onRetry={() => {
+            setStatus('loading');
+            void load();
+          }}
+        />
+      ) : null}
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>
       ) : null}

@@ -5,6 +5,7 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { useToast } from '@/components/ui/Toast';
+import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { Button, FormField } from '@/components/ui/primitives';
 
@@ -68,6 +69,8 @@ export function AccountPaymentMethodsSection() {
   const [setup, setSetup] = useState<{ client_secret: string; stripe_account_id: string } | null>(null);
   /** In-flight guard (G30): two taps used to mint two SetupIntents. */
   const [startingSetup, setStartingSetup] = useState(false);
+  /** Load state machine (P0-5, G24): failed is not the same as empty. */
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [error, setErrorState] = useState<string | null>(null);
 
   /** Announcing wrapper (P0-8); see the note in ProfileClient. */
@@ -81,20 +84,39 @@ export function AccountPaymentMethodsSection() {
   );
 
   const loadVenues = useCallback(async () => {
-    const res = await fetch('/api/account/class-commerce-venues');
-    const data = await res.json();
-    if (res.ok) setVenues((data.venues ?? []) as Array<{ id: string; name: string }>);
-  }, []);
+    try {
+      const res = await fetch('/api/account/class-commerce-venues');
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not load your venues');
+        setStatus('failed');
+        return;
+      }
+      const data = (await res.json()) as { venues?: unknown[] };
+      setVenues((data.venues ?? []) as Array<{ id: string; name: string }>);
+      setStatus('ready');
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+      setStatus('failed');
+    }
+  }, [setError]);
 
   const loadMethods = useCallback(async (vid: string) => {
     setError(null);
-    const res = await fetch(`/api/account/payment-methods?venue_id=${encodeURIComponent(vid)}`);
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not list cards');
-      return;
+    try {
+      const res = await fetch(`/api/account/payment-methods?venue_id=${encodeURIComponent(vid)}`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not list cards');
+        return;
+      }
+      const data = (await res.json()) as { payment_methods?: unknown[] };
+      setMethods(
+        (data.payment_methods ?? []) as Array<{ id: string; brand: string | null; last4: string | null }>,
+      );
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
     }
-    setMethods((data.payment_methods ?? []) as Array<{ id: string; brand: string | null; last4: string | null }>);
   }, [setError]);
 
   useEffect(() => {
@@ -136,6 +158,15 @@ export function AccountPaymentMethodsSection() {
         title="Payment methods"
         subtitle="Cards are saved per venue on that venue’s Stripe Connect account (not platform-wide). Only venues where you have class credits, courses, or memberships appear below."
       />
+      {status === 'failed' ? (
+        <PortalLoadFailed
+          message={error}
+          onRetry={() => {
+            setStatus('loading');
+            void loadVenues();
+          }}
+        />
+      ) : null}
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
@@ -163,7 +194,7 @@ export function AccountPaymentMethodsSection() {
           ))}
         </select>
         </FormField>
-        {venues.length === 0 ? (
+        {status === 'ready' && venues.length === 0 ? (
           <p className="mt-2 text-xs text-slate-500">No linked venues yet. Book or buy credits at a venue first.</p>
         ) : null}
       </div>

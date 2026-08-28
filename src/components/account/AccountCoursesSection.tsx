@@ -7,6 +7,7 @@ import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField } from '@/components/ui/primitives';
 
 interface EnrollmentRow {
@@ -116,6 +117,8 @@ export function AccountCoursesSection() {
   const [productIdFree, setProductIdFree] = useState('');
   const [productIdPaid, setProductIdPaid] = useState('');
   const [error, setErrorState] = useState<string | null>(null);
+  /** Load state machine (P0-5, G24): failed is not the same as empty. */
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   /** Announcing wrappers (P0-8); see the note in ProfileClient. */
   const { addToast } = useToast();
@@ -153,10 +156,21 @@ export function AccountCoursesSection() {
     await Promise.resolve();
     setError(null);
     const qs = deepLinkVenueId ? `?venue=${encodeURIComponent(deepLinkVenueId)}` : '';
-    const res = await fetch(`/api/account/courses${qs}`);
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not load');
+    let data: Record<string, unknown>;
+    try {
+      const res = await fetch(`/api/account/courses${qs}`);
+      // Checked BEFORE parsing: an error page is rarely JSON, and parsing it
+      // first threw past every branch below and left the empty state showing.
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not load');
+        setStatus('failed');
+        return;
+      }
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+      setStatus('failed');
       return;
     }
     setEnrollments((data.enrollments ?? []) as EnrollmentRow[]);
@@ -167,6 +181,7 @@ export function AccountCoursesSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       courses: (pc?.courses ?? []) as CatalogCourse[],
     });
+    setStatus('ready');
   }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
@@ -358,12 +373,21 @@ export function AccountCoursesSection() {
         title="Courses"
         subtitle="Enroll in free course packages instantly, or pay for paid courses with your card (processed on the venue’s Stripe account)."
       />
+      {status === 'failed' ? (
+        <PortalLoadFailed
+          message={error}
+          onRetry={() => {
+            setStatus('loading');
+            void load();
+          }}
+        />
+      ) : null}
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
       {msg ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</div> : null}
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Enrollments</h2>
-        {enrollments.length === 0 ? (
+        {status !== 'ready' ? null : enrollments.length === 0 ? (
           <EmptyState size="compact" title="No enrollments yet" description="Courses you enroll in will appear here." />
         ) : (
           <ul className="mt-2 space-y-2 text-sm">
@@ -406,7 +430,7 @@ export function AccountCoursesSection() {
         )}
       </div>
 
-      {purchaseCatalog.venues.length === 0 ? (
+      {status !== 'ready' ? null : purchaseCatalog.venues.length === 0 ? (
         <EmptyState size="compact" title="No published course packages yet" description="When a venue publishes a course you can book, it will show up here." />
       ) : (
         <>

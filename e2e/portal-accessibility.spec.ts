@@ -113,6 +113,12 @@ test.describe('portal accessibility', () => {
 
   test('every link and button meets the 24px target floor (WCAG 2.5.8)', async ({ page }) => {
     await page.goto('/account/bookings');
+    // Wait for the real content, and specifically for something the SKELETON
+    // does not have. P0-5's loading.tsx renders the same PageHeader on purpose,
+    // to avoid a layout shift, so waiting for the heading matches the skeleton
+    // and `main` still holds no controls. The filter links only exist once the
+    // page itself has rendered. The vacuity guard below caught both mistakes.
+    await expect(page.getByRole('link', { name: 'Past' })).toBeVisible();
     const controls = page.locator('main a, main button');
     const count = await controls.count();
     expect(count, 'no controls found; this test would pass vacuously').toBeGreaterThan(3);

@@ -7,6 +7,7 @@ import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { Button, FormField } from '@/components/ui/primitives';
 
 /**
@@ -144,6 +145,8 @@ export function AccountMembershipsSection() {
   const [startingCheckout, setStartingCheckout] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [error, setErrorState] = useState<string | null>(null);
+  /** Load state machine (P0-5, G24): failed is not the same as empty. */
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [msg, setMsgState] = useState<string | null>(null);
 
   /** Announcing wrappers (P0-8); see the note in ProfileClient. */
@@ -167,10 +170,21 @@ export function AccountMembershipsSection() {
     await Promise.resolve();
     setError(null);
     const qs = deepLinkVenueId ? `?venue=${encodeURIComponent(deepLinkVenueId)}` : '';
-    const res = await fetch(`/api/account/memberships${qs}`);
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not load');
+    let data: Record<string, unknown>;
+    try {
+      const res = await fetch(`/api/account/memberships${qs}`);
+      // Checked BEFORE parsing: an error page is rarely JSON, and parsing it
+      // first threw past every branch below and left the empty state showing.
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not load');
+        setStatus('failed');
+        return;
+      }
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+      setStatus('failed');
       return;
     }
     setMemberships((data.memberships ?? []) as MembershipRow[]);
@@ -181,6 +195,7 @@ export function AccountMembershipsSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       products: (pc?.products ?? []) as CatalogProduct[],
     });
+    setStatus('ready');
   }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
@@ -329,12 +344,21 @@ export function AccountMembershipsSection() {
         title="Memberships"
         subtitle="Subscriptions bill on each venue’s Stripe Connect account."
       />
+      {status === 'failed' ? (
+        <PortalLoadFailed
+          message={error}
+          onRetry={() => {
+            setStatus('loading');
+            void load();
+          }}
+        />
+      ) : null}
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
       {msg ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</div> : null}
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Your memberships</h2>
-        {memberships.length === 0 ? (
+        {status !== 'ready' ? null : memberships.length === 0 ? (
           <EmptyState size="compact" title="No memberships yet" description="Memberships you subscribe to will appear here." />
         ) : (
           <ul className="mt-3 space-y-2 text-sm">
@@ -392,7 +416,7 @@ export function AccountMembershipsSection() {
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Start a membership</h2>
         <p className="mt-1 text-xs text-slate-500">Plans listed here have Stripe prices configured on the venue account.</p>
-        {purchaseCatalog.venues.length === 0 ? (
+        {status !== 'ready' ? null : purchaseCatalog.venues.length === 0 ? (
           <EmptyState size="compact" title="No membership plans yet" description="When a venue publishes a plan you can join, it will show up here." />
         ) : (
           <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">

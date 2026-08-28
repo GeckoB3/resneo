@@ -89,6 +89,14 @@ export interface AccountBookingRow {
   class_instance_id?: string | null;
   experience_event_id?: string | null;
   resource_id?: string | null;
+  /**
+   * The unified-scheduling pair, carried through since P0-6 widened the view's
+   * column allowlist (G8b). Without these the portal could not say what an
+   * appointment was or who it was with: `calendar_id` names the practitioner
+   * and `service_item_id` the service.
+   */
+  calendar_id?: string | null;
+  service_item_id?: string | null;
   venue: AccountVenueRow | null;
   /** CDE name + extras (event/class/resource). Null for table/appointment rows. */
   cde_context?: AccountCdeContext | null;
@@ -162,6 +170,8 @@ type RawBookingRow = {
   class_instance_id?: string | null;
   experience_event_id?: string | null;
   resource_id?: string | null;
+  calendar_id?: string | null;
+  service_item_id?: string | null;
 };
 
 const FRIENDLY_STATUS_LABELS: Record<string, string> = {
@@ -703,6 +713,8 @@ function hydrateAccountBookingRow(
     class_instance_id: b.class_instance_id ?? null,
     experience_event_id: b.experience_event_id ?? null,
     resource_id: b.resource_id ?? null,
+    calendar_id: b.calendar_id ?? null,
+    service_item_id: b.service_item_id ?? null,
     venue,
     cde_context: buildAccountCdeContext(b, maps, opts),
     starts_at: toIsoWithOffset(accountBookingStartMs(instantRow), time_zone),

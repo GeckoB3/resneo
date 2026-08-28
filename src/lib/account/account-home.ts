@@ -46,11 +46,28 @@ export interface AccountHomeMembershipSummary {
   cancelling_count: number;
 }
 
+/**
+ * What an appointment actually IS, which the portal could not say before
+ * (G8b). `bookings_account_safe` carries `calendar_id` and `service_item_id`
+ * since P0-6 widened its column allowlist; these are their names.
+ *
+ * Resolved for the NEXT booking only. The hub shows one, and doing it for all
+ * hundred would be the N+1 P1-1's budget exists to prevent.
+ */
+export interface AccountHomeAppointmentLabel {
+  /** The service booked, e.g. "Cut and finish". */
+  service: string | null;
+  /** Who it is with: the calendar the booking sits on. */
+  practitioner: string | null;
+}
+
 export interface AccountHomeData {
   /** The next booking that has not finished, or null. Fully hydrated. */
   next_booking: AccountBookingRow | null;
   /** Forms still to complete for that booking. Empty when there is none. */
   next_booking_form_links: Array<{ name: string; url: string }>;
+  /** Service and practitioner for `next_booking`, when it is an appointment. */
+  next_booking_appointment: AccountHomeAppointmentLabel;
   /** How many bookings are still to come, including `next_booking`. */
   upcoming_count: number;
   /** Every venue the customer has booked with, by name. */
@@ -73,6 +90,7 @@ export function emptyAccountHome(): AccountHomeData {
   return {
     next_booking: null,
     next_booking_form_links: [],
+    next_booking_appointment: { service: null, practitioner: null },
     upcoming_count: 0,
     venues: [],
     credits: { total_remaining: 0, venue_count: 0, next_expiry: null },
@@ -104,9 +122,12 @@ export async function loadAccountHome(
 
   // Only for the one booking shown. Loading them for all 100 would be the N+1
   // this loader exists to avoid, and the hub shows one.
-  const formLinks = nextBooking
-    ? await loadOutstandingBookingFormLinks(admin, nextBooking.venue_id, nextBooking.id)
-    : [];
+  const [formLinks, appointment] = nextBooking
+    ? await Promise.all([
+        loadOutstandingBookingFormLinks(admin, nextBooking.venue_id, nextBooking.id),
+        loadAppointmentLabel(admin, nextBooking),
+      ])
+    : [[], { service: null, practitioner: null } as AccountHomeAppointmentLabel];
 
   // Venues the customer has actually booked with, deduplicated, name-sorted.
   const venueById = new Map<string, AccountVenueRow>();
@@ -117,6 +138,7 @@ export async function loadAccountHome(
   return {
     next_booking: nextBooking,
     next_booking_form_links: formLinks,
+    next_booking_appointment: appointment,
     upcoming_count: upcoming.length,
     venues: [...venueById.values()].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
     credits,
@@ -199,4 +221,39 @@ async function loadMembershipSummary(
     active_count: live.length,
     cancelling_count: live.filter((r) => r.cancel_at_period_end === true).length,
   };
+}
+
+/**
+ * Name the service and the practitioner on an appointment booking (G8b).
+ *
+ * Every venue is on unified scheduling, so the ids that matter are
+ * `service_item_id` and `calendar_id`; the legacy `appointment_service_id` and
+ * `practitioner_id` pair is dead on this codebase and deliberately not read.
+ *
+ * Best-effort: a name that will not load costs the card a line, not the
+ * booking. The date, time and venue are what the customer needs most.
+ */
+async function loadAppointmentLabel(
+  admin: SupabaseClient,
+  booking: AccountBookingRow,
+): Promise<AccountHomeAppointmentLabel> {
+  const serviceId = booking.service_item_id ?? null;
+  const calendarId = booking.calendar_id ?? null;
+  if (!serviceId && !calendarId) return { service: null, practitioner: null };
+
+  const [service, practitioner] = await Promise.all([
+    serviceId
+      ? admin.from('service_items').select('name').eq('id', serviceId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    calendarId
+      ? admin.from('unified_calendars').select('name').eq('id', calendarId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  const name = (r: { data: unknown }) => {
+    const value = (r.data as { name?: string | null } | null)?.name;
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+  };
+
+  return { service: name(service), practitioner: name(practitioner) };
 }

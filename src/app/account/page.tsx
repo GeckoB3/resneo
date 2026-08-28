@@ -3,6 +3,9 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { authenticatedUserHasStaffMembership } from '@/lib/venue-auth';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { NextBookingCard } from '@/components/account/NextBookingCard';
+import { loadAccountHome } from '@/lib/account/account-home';
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -84,10 +87,19 @@ export default async function AccountHomePage() {
     user?.email ||
     'Guest';
 
-  const firstName = display.split(/\s+/)[0] ?? display;
-  const greeting = firstName === 'Guest' ? 'Welcome' : `Welcome back, ${firstName}`;
+  // An email address is not a name. Falling back to one wrapped the greeting
+  // over four lines at 375px and pushed the next booking below the fold, which
+  // is the one thing P1-2 requires to be above it.
+  const hasName = Boolean(
+    (profile as { display_name?: string | null } | null)?.display_name?.trim(),
+  );
+  const firstName = hasName ? (display.split(/\s+/)[0] ?? display) : null;
+  const greeting = firstName ? `Welcome back, ${firstName}` : 'Welcome back';
 
   const admin = getSupabaseAdminClient();
+  // The customer's own timezone is a DISPLAY fallback only: each booking is
+  // rendered in its venue's zone, which is the zone its stored times are in.
+  const profileTz = (profile?.timezone as string | null | undefined)?.trim() || null;
   const showVenueDashboard = await authenticatedUserHasStaffMembership(admin, user!.id, user?.email);
 
   const shortcuts: Array<{
@@ -162,6 +174,9 @@ export default async function AccountHomePage() {
       description: 'Password, sessions, and account data.',
       icon: 'shield',
     },
+    // "Set up your business" is gone from here (P1-2). Selling a venue product
+    // beside a customer's own bookings is the wrong pitch in the wrong place;
+    // it lives as one quiet link in the profile page footer instead.
     ...(showVenueDashboard
       ? [
           {
@@ -171,34 +186,58 @@ export default async function AccountHomePage() {
             icon: 'building' as const,
           },
         ]
-      : [
-          {
-            href: '/signup/business-type',
-            title: 'Set up your business',
-            description: 'Create a venue and start taking bookings on ResNeo.',
-            icon: 'building' as const,
-          },
-        ]),
+      : []),
   ];
+
+  const home = await loadAccountHome(supabase, admin);
 
   return (
     <div className="space-y-10">
       <PageHeader
         eyebrow="Overview"
         title={greeting}
-        subtitle={
-          <>
-            Signed in as <span className="font-medium text-slate-800">{display}</span>
-            {user?.email ? (
-              <span className="text-slate-500">
-                {' '}
-                · {user.email}
-              </span>
-            ) : null}
-            . Use the shortcuts below or the navigation bar to manage your ResNeo activity.
-          </>
-        }
       />
+
+      {/*
+        The hub answers "when is my next appointment" before it offers a menu
+        (P1-2, G1). It used to be a grid of links to other pages, so the most
+        common reason to open a customer portal was the one thing it did not
+        answer.
+      */}
+      {home.next_booking ? (
+        <NextBookingCard
+          booking={home.next_booking}
+          appointment={home.next_booking_appointment}
+          formLinks={home.next_booking_form_links}
+          profileTz={profileTz}
+        />
+      ) : (
+        <EmptyState
+          title="No upcoming bookings"
+          description="When you book with a venue on ResNeo, your next appointment appears here."
+          action={
+            <Link
+              href="/account/bookings"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+            >
+              See your booking history
+            </Link>
+          }
+        />
+      )}
+
+      {home.upcoming_count > 1 ? (
+        <p className="text-sm text-slate-600">
+          You have{' '}
+          <Link
+            href="/account/bookings?filter=upcoming"
+            className="inline-flex min-h-6 items-center font-semibold text-brand-700 underline underline-offset-2"
+          >
+            {home.upcoming_count} upcoming bookings
+          </Link>{' '}
+          across {home.venues.length} {home.venues.length === 1 ? 'venue' : 'venues'}.
+        </p>
+      ) : null}
 
       <section aria-labelledby="account-shortcuts-heading">
         <h2 id="account-shortcuts-heading" className="sr-only">

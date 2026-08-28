@@ -494,6 +494,22 @@ export function ProfileClient({
             </p>
           ) : null}
         </div>
+        {/*
+          Where "Set up your business" went (P1-2). It was a card on the hub,
+          beside a customer's own bookings, which is the wrong pitch in the
+          wrong place. One quiet line at the foot of the profile is enough for
+          the few customers who are also owners.
+        */}
+        <p className="text-xs text-slate-500">
+          Run a business?{' '}
+          <a
+            href="/signup/business-type"
+            className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+          >
+            Take bookings on ResNeo
+          </a>
+          .
+        </p>
         <Button
           type="button"
           loading={saving}

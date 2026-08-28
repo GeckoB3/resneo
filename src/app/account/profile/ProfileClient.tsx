@@ -372,10 +372,11 @@ export function ProfileClient({
       <section className={sectionClass}>
         <h2 className="text-lg font-semibold text-slate-900">Notification preferences</h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          These apply to your <span className="font-medium text-slate-800">ResNeo account</span> (booking confirmations
-          from the platform, security notices, optional product updates). Use{' '}
-          <span className="font-medium text-slate-800">Venue marketing</span> below for promotional email per venue you
-          have booked with.
+          These apply to email sent by{' '}
+          <span className="font-medium text-slate-800">ResNeo</span> about your account. Emails from a
+          venue about a specific booking, such as your confirmation and reminders, always come to you
+          and are set per venue under{' '}
+          <span className="font-medium text-slate-800">Venue marketing</span> below.
         </p>
         <div className="mt-5 space-y-4 text-sm text-slate-700">
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
@@ -386,8 +387,10 @@ export function ProfileClient({
               className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
             <span>
-              Operational emails: booking confirmations and reminders sent by ResNeo, plus security notices for your
-              account.
+              Account emails from ResNeo, such as service notices and changes to your account.{' '}
+              <span className="text-slate-500">
+                Security emails, like sign-in links and password changes, are always sent.
+              </span>
             </span>
           </label>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">

@@ -226,3 +226,71 @@ describe('withStaffMirror (§5D.0 B7)', () => {
     expect(withStaffMirror(FLAT)).toEqual(FLAT);
   });
 });
+
+/**
+ * The exact shape migration 20270122120000 produces (P0-13's R3 half).
+ *
+ * The migration keeps the flat staff keys ALONGSIDE the namespace, so that it
+ * is safe in either order relative to the code deploy and so build 1.0.7,
+ * which reads the flat keys directly, keeps working. That dual shape is not
+ * one this module was originally written for, so it is pinned here: if a
+ * reader stopped coping with it, the failure would be a staff member's
+ * preferences silently reading as defaults, on a column with no revert.
+ *
+ * The fixture is production's single populated row as measured 2026-08-27:
+ * `booking_scope` and `no_show`, both staff keys.
+ */
+const MIGRATED_DUAL_SHAPE = {
+  // Retained flat, for 1.0.7.
+  booking_scope: 'mine',
+  no_show: false,
+  // Added by the migration.
+  staff: { booking_scope: 'mine', no_show: false },
+  customer: {},
+};
+
+describe('the shape migration 20270122120000 writes', () => {
+  it('is detected as namespaced, despite the flat keys sitting beside it', () => {
+    expect(isNamespaced(MIGRATED_DUAL_SHAPE)).toBe(true);
+  });
+
+  it('reads staff preferences from the NAMESPACE, not the flat mirror', () => {
+    const prefs = parseStaffNotificationPrefs(MIGRATED_DUAL_SHAPE);
+    expect(prefs.booking_scope).toBe('mine');
+    expect(prefs.no_show).toBe(false);
+  });
+
+  it('preserves the production row exactly: flat and namespaced agree', () => {
+    // The invariant the migration asserts in SQL, checked again from the
+    // reader's side. A mis-partition would show up as these disagreeing.
+    const flat = { booking_scope: 'mine', no_show: false };
+    expect(parseStaffNotificationPrefs(MIGRATED_DUAL_SHAPE)).toEqual(
+      parseStaffNotificationPrefs(flat),
+    );
+  });
+
+  it('reads an empty customer namespace as defaults, not as staff keys', () => {
+    const customer = readPreferenceNamespace(MIGRATED_DUAL_SHAPE, 'customer');
+    expect(customer).toEqual({});
+    expect(customer.no_show).toBeUndefined();
+  });
+
+  it('a customer save writes into the namespace and leaves the staff keys alone', () => {
+    const next = mergeIncomingPreferences(MIGRATED_DUAL_SHAPE, { marketing_email: true });
+    expect(readPreferenceNamespace(next, 'customer').marketing_email).toBe(true);
+    expect(parseStaffNotificationPrefs(next).booking_scope).toBe('mine');
+    expect(parseStaffNotificationPrefs(next).no_show).toBe(false);
+  });
+
+  it("1.0.7's flat PATCH still lands in the staff namespace", () => {
+    const next = mergeIncomingPreferences(MIGRATED_DUAL_SHAPE, { no_show: true });
+    expect(parseStaffNotificationPrefs(next).no_show).toBe(true);
+  });
+
+  it('the 415 empty rows migrate to an empty pair and read as defaults', () => {
+    const empty = { staff: {}, customer: {} };
+    expect(isNamespaced(empty)).toBe(true);
+    expect(parseStaffNotificationPrefs(empty)).toEqual(DEFAULT_STAFF_NOTIFICATION_PREFS);
+    expect(readPreferenceNamespace(empty, 'customer')).toEqual({});
+  });
+});

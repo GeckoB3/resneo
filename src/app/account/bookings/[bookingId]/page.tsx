@@ -17,6 +17,7 @@ import {
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { createOrGetPaymentShortLink } from '@/lib/booking-short-links';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 /**
@@ -154,7 +155,7 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7">
+      <SectionCard className="p-6 sm:p-7">
         <dl className="grid gap-4 sm:grid-cols-2">
           {cde ? (
             <div className="sm:col-span-2">
@@ -274,7 +275,7 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
             cancel each session from your bookings list or contact the venue.
           </p>
         ) : null}
-      </div>
+      </SectionCard>
     </div>
   );
 }

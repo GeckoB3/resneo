@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
@@ -385,7 +386,7 @@ export function AccountCoursesSection() {
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
       {msg ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</div> : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Enrollments</h2>
         {status !== 'ready' ? null : enrollments.length === 0 ? (
           <EmptyState size="compact" title="No enrollments yet" description="Courses you enroll in will appear here." />
@@ -428,13 +429,13 @@ export function AccountCoursesSection() {
             })}
           </ul>
         )}
-      </div>
+      </SectionCard>
 
       {status !== 'ready' ? null : purchaseCatalog.venues.length === 0 ? (
         <EmptyState size="compact" title="No published course packages yet" description="When a venue publishes a course you can book, it will show up here." />
       ) : (
         <>
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+          <SectionCard className="p-5 sm:p-6">
             {/*
               This was an EMPTY <label> wrapping the select, with the word
               "Venue" living in an <h2> above it, so the field had no
@@ -459,9 +460,9 @@ export function AccountCoursesSection() {
                 ))}
               </select>
             </FormField>
-          </div>
+          </SectionCard>
 
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+          <SectionCard className="p-5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Free course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
               <FormField label="Package" className="min-w-0 flex-1">
@@ -490,9 +491,9 @@ export function AccountCoursesSection() {
                 Enroll free
               </Button>
             </div>
-          </div>
+          </SectionCard>
 
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+          <SectionCard className="p-5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Paid course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
               <FormField label="Package" className="min-w-0 flex-1">
@@ -547,7 +548,7 @@ export function AccountCoursesSection() {
                 </Elements>
               </div>
             ) : null}
-          </div>
+          </SectionCard>
         </>
       )}
     </div>

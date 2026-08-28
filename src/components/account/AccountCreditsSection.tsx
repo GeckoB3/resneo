@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
@@ -258,7 +259,7 @@ export function AccountCreditsSection() {
       ) : null}
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Balances</h2>
         {balances.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">No credit batches yet.</p>
@@ -282,9 +283,9 @@ export function AccountCreditsSection() {
             })}
           </ul>
         )}
-      </div>
+      </SectionCard>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Buy a pack</h2>
         <p className="mt-1 text-xs text-slate-500">Choose a venue, then a published credit pack.</p>
         <BuyPackPicker
@@ -293,10 +294,10 @@ export function AccountCreditsSection() {
           preselectProductId={deepLinkProductId}
           onBuy={(v, p) => void startPurchase(v, p)}
         />
-      </div>
+      </SectionCard>
 
       {purchase ? (
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+        <SectionCard className="p-5 sm:p-6">
           <h2 className="text-sm font-semibold text-slate-900">Complete payment</h2>
           <Elements
             stripe={stripeForAccount(purchase.stripe_account_id)}
@@ -308,10 +309,10 @@ export function AccountCreditsSection() {
               onDone={() => void afterPaid()}
             />
           </Elements>
-        </div>
+        </SectionCard>
       ) : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Recent ledger</h2>
         {ledger.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">No activity yet.</p>
@@ -325,7 +326,7 @@ export function AccountCreditsSection() {
             ))}
           </ul>
         )}
-      </div>
+      </SectionCard>
     </div>
   );
 }

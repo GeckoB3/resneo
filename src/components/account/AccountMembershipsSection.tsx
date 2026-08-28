@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
@@ -356,7 +357,7 @@ export function AccountMembershipsSection() {
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
       {msg ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</div> : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Your memberships</h2>
         {status !== 'ready' ? null : memberships.length === 0 ? (
           <EmptyState size="compact" title="No memberships yet" description="Memberships you subscribe to will appear here." />
@@ -411,9 +412,9 @@ export function AccountMembershipsSection() {
             })}
           </ul>
         )}
-      </div>
+      </SectionCard>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Start a membership</h2>
         <p className="mt-1 text-xs text-slate-500">Plans listed here have Stripe prices configured on the venue account.</p>
         {status !== 'ready' ? null : purchaseCatalog.venues.length === 0 ? (
@@ -482,7 +483,7 @@ export function AccountMembershipsSection() {
             </Elements>
           </div>
         ) : null}
-      </div>
+      </SectionCard>
     </div>
   );
 }

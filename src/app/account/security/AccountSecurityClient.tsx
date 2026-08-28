@@ -5,6 +5,7 @@ import { Button, FormField, Input } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/Toast';
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { AccountPasswordForm } from './AccountPasswordForm';
 
 export function AccountSecurityClient() {
@@ -125,7 +126,7 @@ export function AccountSecurityClient() {
         </p>
       </div>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7">
+      <SectionCard className="p-6 sm:p-7">
         <h2 className="text-lg font-semibold text-slate-900">Sessions</h2>
         <p className="mt-2 text-sm text-slate-600">
           Sign out on this device and invalidate refresh tokens for other devices.
@@ -139,7 +140,7 @@ export function AccountSecurityClient() {
         >
           {signingOutEverywhere ? 'Signing out...' : 'Sign out everywhere'}
         </Button>
-      </div>
+      </SectionCard>
 
       <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/90 to-amber-50/40 p-6 shadow-sm shadow-amber-900/5 sm:p-7">
         <h2 className="text-lg font-semibold text-amber-950">Delete account</h2>

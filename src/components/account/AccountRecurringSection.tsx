@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
@@ -269,7 +270,7 @@ export function AccountRecurringSection() {
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{info}</div>
       ) : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Your rules</h2>
         {rows.length === 0 ? (
           <EmptyState size="compact" title="No repeat bookings yet" description="Rules you create below will appear here." />
@@ -334,9 +335,9 @@ export function AccountRecurringSection() {
             })}
           </ul>
         )}
-      </div>
+      </SectionCard>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">New rule</h2>
         {!hasCatalog ? (
           <EmptyState size="compact" title="No active class types found" description="A venue needs a published class timetable before you can set up a repeat booking." />
@@ -441,7 +442,7 @@ export function AccountRecurringSection() {
             </div>
           </div>
         )}
-      </div>
+      </SectionCard>
     </div>
   );
 }

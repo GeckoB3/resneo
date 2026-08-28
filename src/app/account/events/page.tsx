@@ -9,6 +9,7 @@ import {
   type AccountTicketLine,
 } from '@/lib/account/account-bookings';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 function ticketSummary(lines: AccountTicketLine[] | undefined, partySize: number): string {
@@ -45,13 +46,13 @@ export default async function AccountEventsHubPage() {
       />
 
       {bookings.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-6 text-center shadow-sm shadow-slate-900/5">
+        <SectionCard className="p-6 text-center">
           <p className="text-slate-600">No upcoming event tickets.</p>
           <p className="mt-1 text-sm text-slate-500">Tickets you book for venue events will appear here.</p>
           <Link href="/account/bookings" className="mt-4 inline-block text-sm font-semibold inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
             View all bookings
           </Link>
-        </div>
+        </SectionCard>
       ) : (
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
           {bookings.map((b) => {

@@ -1073,44 +1073,67 @@ It sat in Phase 3 in earlier drafts, but P1-3 collapses the nav onto it in Phase
 
 This is the highest-value item in Phase 3. It is the first impression for essentially every customer.
 
-**DESCOPED 2026-08-29, and the reason is measured rather than judged.** AD7 made a project-level auth setting its prerequisite, on the assumption that enabling `secure_password_change` would stop a limited session changing the account password. `npm run probe:secure-password-change`, run against staging with the setting ON, shows it does not: a session backdated 72 hours is refused with `reauthentication_needed`, and a session minted seconds earlier by `verifyOtp`, which is exactly what a limited session is, changes the password with no nonce. GoTrue exempts recent logins by design and a limited session is always recent. **So P3-4b's scope boundary cannot be closed, and P3-4b and P3-4c as written are not buildable.** This section replaces them.
+**REWORKED 2026-08-29. AD7's enforcement model is dead; its GOAL is not.**
 
-**What the customer sees today, which is the thing being fixed.** The confirmation email carries TWO links. "Manage this booking" is a `/m/v3` HMAC short link that resolves straight to the booking, one click, no sign-in, and already permits cancel and reschedule. "Your bookings across venues" points at `/auth/magic`, where the customer must press a button to be sent a SECOND email, then click that. So G11's "two emails and three clicks" is entirely about the second link; the first is already one click.
+`npm run probe:secure-password-change`, run against staging with the setting ON, shows the prerequisite does not work: a session backdated 72 hours is refused with `reauthentication_needed`, but a session minted seconds earlier by `verifyOtp`, which is exactly what a limited session is, changes the password with no nonce. GoTrue exempts recent logins by design and a limited session is always recent. **So P3-4b's scope boundary cannot be closed and P3-4b is dropped.** What replaces it is not a smaller version of AD7 but a different answer to the same question.
 
-**Two ways to descope, and they are a real choice rather than a formality. Pick one before building.**
+**What the customer sees today, which is the thing being fixed.** The confirmation email carries TWO links. "Manage this booking" is a `/m/v3` HMAC short link that resolves straight to the booking: one click, no sign-in, and it already permits cancel and reschedule. "Your bookings across venues" points at `/auth/magic`, where the customer must press a button to be sent a SECOND email and then click that. G11's "two emails and three clicks" is entirely about the second link.
 
-**OPTION 1: AD7's stated fallback. No token in the email at all.**
-- Point the account line at the booking's own manage link rather than at `/auth/magic`, and add "See all your bookings" from the manage page into the normal sign-in.
-- Delivers the common case: a customer who wants the booking they just made lands on it in one click with no second email. A customer who wants the whole portal takes the sign-in path they take today, but from a page rather than an email.
-- **Adds no auth surface whatsoever**, which after the AD7 finding is the point.
-- **Cost: P3-4a is then unused.** The token table and library would be shipped and called by nothing. That is a real cost and it should be stated rather than quietly carried: either accept it as infrastructure for a later full build, or revert P3-4a.
-- Roughly a day.
+### The design: a first-entry sign-in link with a magic link's lifetime
 
-**OPTION 2: token-scoped READ of the portal. No session, no access token in the browser.**
-- The account line carries a P3-4a token: `/account/bookings?t=<token>`. The server verifies it, resolves the user, and renders that customer's bookings **authorised by the token**, exactly as `/manage` is authorised by its HMAC today. **No Supabase session is minted and no access token reaches the browser**, so GoTrue is never reachable with the customer's identity and the hole this section exists because of cannot open.
-- Extends AD9's actor model rather than duplicating it: `GuestBookingDetailView` already renders for `token`, `hmac` and `session` actors, and this adds the same distinction to the LIST.
-- Delivers more of G11 than Option 1: one click to **all** your bookings, no second email, still no new authentication.
-- **Cost, and it needs a decision: a forwarded email would expose every booking that customer has across every venue, where today it exposes one.** That is strictly more than the manage link grants, and it is the reason this is not obviously the better option. It is still far less than account takeover, which is what AD7 as written would have risked.
-- Everything beyond the bookings list and detail (hub, passes, profile, payment methods) stays session-only, so the token grants reading and acting on bookings and nothing else.
-- Roughly a week, most of it in making the list page actor-aware and proving the boundary.
+**Full session, full dashboard, no limited-session machinery at all.** The confirmation email's account link carries a P3-4a token; `/auth/portal?t=` verifies it and establishes an ordinary Supabase session through `generateLink` + `verifyOtp`, exactly as `/auth/confirm` does today. The customer lands signed in, with everything: bookings, passes, purchases, profile.
 
-**Disposition of the sub-tasks under either option.**
+**This is not a new risk posture. It is one the documentation already took.** `Docs/Resneo_User_Accounts_Reference.md` §5.3, quoted in AD7 itself: *"the original email could contain a magic link with a longer expiry (e.g. 7 days) for first-time login. Acceptable for the very first booking; not for subsequent bookings."* The platform already treats an email link as authentication, because that is what a magic link IS. The only question is whether a confirmation email deserves the same trust as a requested sign-in link, and the answer is: **it does, for as long as a sign-in link would last, and no longer.**
+
+**Three levers bound it, and all three are the point rather than decoration.**
+
+1. **TTL drops from 30 days to 24 hours**, matching `otp_expiry` and therefore every other sign-in link on the platform. A confirmation forwarded to a partner next month grants nothing. `PORTAL_TOKEN_TTL_DAYS` in `src/lib/auth/portal-token.ts` becomes hours, and the constant is renamed so nobody restores the old value thinking it is a tuning knob.
+2. **First entry only**, per §5.3. A customer who has already been seen in the portal gets today's link, not a session. Suppressed with `user_profiles.portal_first_seen_at`, the same column P3-4h uses.
+3. **Only where it removes a real wall: customers with no password set.** Anyone who has set one already has a one-step way in and does not need this.
+
+**Reusable and never single-use survives unchanged**, and is unrelated to the TTL: it exists because corporate link scanners fetch every URL in inbound mail and would consume a single-use token before the customer clicked.
+
+**What is accepted, plainly.** Within that window, whoever holds the email holds the account, including its saved cards. That is a real escalation from today's "can cancel one booking", it is the whole of the decision, and it is bounded to 24 hours on a first booking for a customer with no password.
+
+### What happens when the token has expired
+
+**Land on `/login`, with the email prefilled and the booking as the destination**, never on an error page and never on a dead end.
+
+`/login` is the right target rather than AD7's `/auth/magic`, and the difference matters: `/login` offers **all three** ways in, password (`login-form.tsx:49`), magic link (`:112`) and forgot-password (`:140`), while `/auth/magic` offers only the magic link. A customer arriving on an expired link may have set a password since it was issued, and must not be made to work out which door is theirs.
+
+- Redirect to `/login?email=<address>&redirectTo=/account/bookings/{id}&reason=<expired>`. `redirectTo` is attacker-controlled and `login-form.tsx:71-77` already defends it with `safeSameOriginPath`, so carrying the booking path through is safe. `reason` and `detail` are already accepted by `login/page.tsx:14`.
+- **`/login` needs an `email` query parameter added.** It takes `redirectTo`, `error`, `reason` and `detail` today and does not prefill the address, so the customer would otherwise have to retype it. Small, and part of this task.
+- **Say why.** "This link has expired. Sign in to see your booking." A silent sign-in form reads as the link having been broken, and the customer contacts the venue.
+- The same landing serves missing, malformed and revoked tokens. No branch of this may produce an error page.
+- `/auth/magic` is retained for anyone arriving without a token at all, and its button-gated send must not regress to auto-send on mount; `AuthMagicForm.tsx:10-15` records why.
+
+### Disposition of the sub-tasks
 
 | | Fate |
 | --- | --- |
-| **P3-4a** token infrastructure | **Shipped.** Unused under Option 1, load-bearing under Option 2. |
-| **P3-4b** limited sessions and step-up | **Dropped.** Its boundary is unenforceable; see the measurement above. `STEP_UP_REQUIRED` stays in P0-11's frozen union, unused, because removing a member of a frozen union is a bigger change than leaving one unused. |
-| **P3-4c** entry route | **Dropped under Option 1.** Under Option 2 it becomes a token-authorised page rather than a session-minting route, and must NOT call `generateLink`/`verifyOtp` at all. |
-| **P3-4d** email link changes | **Survives, reshaped.** Same four call sites across three files. Points at the manage link (Option 1) or the token URL (Option 2). The `context=customer` question (G11f) still needs resolving either way. |
-| **P3-4e** brand the sign-in email | **Survives, and matters MORE.** With no one-click session, the sign-in email is now on the critical path for every customer who wants the portal rather than an occasional fallback. |
+| **P3-4a** token infrastructure | **Shipped and load-bearing.** Only the TTL changes. |
+| **P3-4b** limited sessions and step-up | **Dropped.** Unenforceable; see the measurement. `STEP_UP_REQUIRED` stays in P0-11's frozen union, unused, because removing a member of a frozen union is a larger change than leaving one idle. |
+| **P3-4c** entry route | **Survives, simplified.** No `portal_limited_sessions` row to write and no `assertFullSession` anywhere. It verifies, establishes a session, calls `claim_user_account()`, redirects. The expiry landing above is its main remaining subtlety. |
+| **P3-4d** email link changes | **Survives.** Four call sites across three files. Gated on the three levers, so most emails keep today's link. `context=customer` (G11f) still needs resolving. |
+| **P3-4e** brand the sign-in email | **Survives.** Still the way in for every returning customer and everyone outside the window. |
 | **P3-4f** rate-limit the send endpoint | Shipped. |
-| **P3-4g** fallback flow polish | **Survives, and matters MORE**, for the same reason as P3-4e. This is no longer a fallback; it is the way in. |
-| **P3-4h** reduce repeat friction | **Survives, and is now the main lever on G11.** If a customer sets a password once, every later visit is a direct sign-in with no email at all. That is the strongest remaining answer to "two emails and three clicks", and it argues for doing P3-4h EARLY rather than last. |
-| **P3-4i** native session establishment | **Reshaped.** There is no portal-token-to-session exchange to build. The app keeps the OTP path, and the association files and `claim_user_account()` work are unaffected. |
+| **P3-4g** fallback flow polish | **Survives, and now covers the expiry landing above**, which is the same surface reached by a different route. |
+| **P3-4h** reduce repeat friction | **Survives, and should come EARLY rather than last.** Lever 3 makes it structural: a password set once removes the email from every later visit, and is what a first-entry customer should be offered while they are signed in. |
+| **P3-4i** native session establishment | **Survives.** `POST /api/v1/auth/portal-token/exchange` returns tokens rather than a cookie, with the same three levers applied server-side. |
 
-**What is given up, stated plainly.** §10 item 1, arriving already signed in. Under both options the customer is not authenticated by clicking an email; they hold a scoped capability, as they do today with the manage link. Anything the portal offers beyond bookings still requires a real sign-in.
+### Acceptance
 
-**Acceptance, whichever option is taken.** The confirmation email's account line reaches something useful in ONE click with no second email; `/auth/magic` remains button-gated and must not regress to auto-send on mount (`AuthMagicForm.tsx:10-15` records why); and a test asserts that no email link mints a session, so a future change cannot quietly reintroduce AD7's original design without the boundary it needs.
+- The confirmation email's account link reaches the signed-in portal in ONE click, with no second email, for a first-time customer with no password.
+- A token older than its window lands on `/login`, prefilled, told why, with the booking still as its destination, and can complete by password OR magic link.
+- A customer who has been seen in the portal before, or who has a password, receives today's link and NOT a session link. Asserted by a test on the link builder, because this is the lever most easily lost in a later refactor.
+- Revoked and malformed tokens land in the same place as expired ones, and nothing produces an error page.
+- A test asserts the TTL is hours rather than days, so the 30-day value cannot return as a "tuning" change.
+
+### Retained fallbacks, if the escalation above is judged unacceptable
+
+**Option 1, AD7's stated fallback**: point the account line at the booking's manage link and add "See all your bookings" into normal sign-in. No new auth surface; P3-4a becomes unused. About a day.
+
+**Option 2, token-scoped READ**: a page OUTSIDE the `/account` tree, `/bookings?t=`, rendering the list authorised by the token with no session and no access token in the browser, each row handing off to that booking's existing manage link. **Do not implement this by teaching `src/app/account/layout.tsx` about the token**: that gate covers the whole tree, so a token accepted there would open every page unless each one separately refused, which is precisely the fail-open shape that killed AD7. About a week.
 
 **P3-4a. Portal token infrastructure** *(DONE 2026-08-29. `supabase/migrations/20270130120000_account_portal_tokens.sql` and `src/lib/auth/portal-token.ts`, with `issuePortalToken`, `verifyPortalToken` and `revokePortalTokensForBooking`. Applied to staging; production takes it with the rest of the set. **The `===` in `verifyConfirmToken` is fixed, not copied**, as the task directed: string equality returns at the first differing byte, so how long a refusal took depended on how much of the hash the caller had right, and a token was recoverable a byte at a time by measurement. It is `timingSafeEqual` now, with a length guard that is NOT redundant: that function THROWS on differing lengths, so a truncated or foreign value in `confirm_token_hash` would have turned a refused link into a 500 on a path every guest reaches from an email. The helper had **no test at all** despite ten call sites minting tokens with it and two verifying against it; it has eleven now. **Reusable, never single-use, and no write on verify** is implemented as an absence: the table has no use-count column, so no future reader can add one by habit, and the acceptance test asserts twenty consecutive verifications succeed AND that nothing was written, in one row, because an implementation that merely COUNTED uses would pass the first assertion alone. The reason is that corporate link scanners fetch every URL in inbound mail, so a single-use token is consumed before the customer clicks and their own IT department hands them a dead link. **Verification re-checks the stored hash rather than trusting that the query matched.** The `.eq` finds the row; `verifyConfirmToken` accepts it. That costs one comparison and means a lookup which ever became fuzzy, through a rewrite or a case-insensitive collation, could not turn a near-miss into an acceptance. **Fails closed on every uncertainty**, including a read error, which is the state during an incident and exactly when it matters. **Service role only, proved on the live database rather than asserted**: RLS enabled with no policies, `anon` and `authenticated` holding nothing, and the table is now registered in `scripts/check-table-grants.mjs`, because P0-6 records that hosted Supabase grants client roles on new tables outside the migration history, which is precisely how `bookings_account_safe` became writable. A client that could read this table would hold every live entry token for every customer, which is a session each. **Proof.** 20 library tests and 11 on the primitives, mutation-swept with 10 mutations, every one caught, including accepting a revoked token, accepting one AT its expiry instant, trusting the lookup blindly, failing OPEN on a read error, and storing the plaintext. Plus five constraint checks run against staging inside a rolled-back transaction, which the recording double cannot see: the scope default and its CHECK, the primary key refusing a duplicate hash, `ON DELETE CASCADE` from `auth.users`, and twenty reads leaving the row bit-identical. `Docs/Resneo_User_Accounts_Reference.md` §5.2 now records this as the documented exception to its parallel-schemes rule, and says why it is an exception about STORAGE rather than a second way of making tokens: it grants a SESSION rather than a scoped capability, so it must be revocable, which a stateless HMAC with the expiry in its payload cannot be. **Not built here, and correctly so:** `portal_limited_sessions` belongs to P3-4b, which is what makes a session limited; this task only mints, verifies and revokes the token that starts one.)*
 - New table `account_portal_tokens`: `token_hash` (primary key), `user_id`, `scope` (`limited`), `issued_for_booking_id` (nullable, for revocation), `expires_at`, `revoked_at`, `created_at`. Hash only, never plaintext.

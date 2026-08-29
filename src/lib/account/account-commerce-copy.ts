@@ -148,3 +148,120 @@ export function membershipStandingLine(m: {
   if (m.cancel_at_period_end) return `${status}, ends ${date}`;
   return `${status}, renews ${date}`;
 }
+
+/**
+ * What a destructive commerce action will do, stated before the customer
+ * commits to it (P2-6, G13).
+ *
+ * These live here rather than inside each section because the sections are
+ * three separate client components that had drifted into three different
+ * standards: two `window.confirm` strings and, for the membership, nothing at
+ * all. What they have in common is the shape of the answer a customer needs,
+ * which is what stops, when it stops, what money moves, and whether it can be
+ * undone. Strings rather than JSX so they can be asserted without a DOM.
+ */
+
+/**
+ * Cancelling a membership at period end.
+ *
+ * The date is the point of it. Cancellation is SCHEDULED, not immediate, and
+ * before P2-6 the only hint of that was the button label "Cancel at renewal";
+ * the confirmation afterwards said "Cancellation scheduled at period end",
+ * which names no period and no end.
+ */
+export function membershipCancellationLines(m: {
+  current_period_end: string | null;
+  /**
+   * Only its PRESENCE is read, so it is typed as unknown rather than as the
+   * section's `AllowanceStatus` union: narrowing it here would tie this copy
+   * to a shape it does not look inside, and every future variant of that union
+   * would have to be taught to a module that only asks "is there one".
+   */
+  allowance_status?: unknown;
+}): string[] {
+  const date = formatAccountDate(m.current_period_end);
+  const lines = [
+    date
+      ? `Your membership stays active until ${date}, and it stops after that.`
+      : 'Your membership stays active until the end of the period you have paid for, and it stops after that.',
+    'You will not be charged again.',
+  ];
+  if (m.allowance_status) {
+    lines.push(
+      date
+        ? `Classes included in your membership stop being available on ${date}.`
+        : 'Classes included in your membership stop being available when it ends.',
+    );
+  }
+  // Only honest since P2-6 added POST /api/account/memberships/resume. Before
+  // that there was no route anywhere that could undo this, from any surface.
+  lines.push(
+    date
+      ? `You can change your mind from this page any time before ${date}.`
+      : 'You can change your mind from this page until it ends.',
+  );
+  return lines;
+}
+
+/**
+ * Cancelling a course enrollment.
+ *
+ * Only ever shown for an enrollment the section has already established is
+ * inside its cancellation window, which is why there is no branch for one that
+ * is not: the button does not render, and if the window closes while the page
+ * is open the server refuses and the error is shown. The refund is PRORATED to
+ * the sessions not yet delivered and computed server-side at cancel time, so
+ * this says a refund is due without naming a figure it cannot work out.
+ */
+export function courseCancellationEnrollmentLines(e: {
+  cancel_by_date: string | null;
+}): string[] {
+  const by = formatAccountDate(e.cancel_by_date);
+  return [
+    'Your place on the course is given up, along with every session still to come.',
+    by
+      ? `You are inside the cancellation window, which runs until ${by}, so a refund is due.`
+      : 'You are inside the cancellation window, so a refund is due.',
+    // Prorated to the sessions not yet delivered, and worded so it is true
+    // either way rather than warning about a shortfall that, inside the
+    // window, there usually is not: the window closes before the course
+    // starts, so in the normal case every session is still to come.
+    'You are refunded for the sessions that have not happened yet.',
+    'This cannot be undone. You would need to enrol again.',
+  ];
+}
+
+/**
+ * Deleting a recurring booking rule.
+ *
+ * Deliberately says what does NOT happen as well: bookings the rule has
+ * already made stay booked, and a customer who reads "delete" as "cancel
+ * everything" would otherwise turn up expecting to have been refunded.
+ */
+export function recurringRuleDeletionLines(r: {
+  next_materialize_on: string | null;
+}): string[] {
+  const next = formatAccountDate(r.next_materialize_on);
+  return [
+    'No further bookings will be made for you automatically.',
+    next
+      ? `The next one would have been booked on ${next}.`
+      : 'Nothing further is scheduled to be booked.',
+    'Sessions already booked are NOT cancelled, and stay in your bookings.',
+    'This cannot be undone. You would need to set the repeat up again.',
+  ];
+}
+
+/**
+ * Removing a known device.
+ *
+ * Not in P2-6's stated inventory, but it deletes something of the customer's,
+ * which is the rule the inventory is drawn from. Short because the stakes are:
+ * it is reversible from the same page.
+ */
+export function deviceRemovalLines(): string[] {
+  return [
+    'This device stops receiving notifications from ResNeo.',
+    'You stay signed in on it, and you can add it again from this page.',
+  ];
+}

@@ -9,8 +9,12 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
-import { Button, FormField } from '@/components/ui/primitives';
-import { membershipStandingLine } from '@/lib/account/account-commerce-copy';
+import { Button, ConfirmDialog, FormField } from '@/components/ui/primitives';
+import {
+  formatAccountDate,
+  membershipCancellationLines,
+  membershipStandingLine,
+} from '@/lib/account/account-commerce-copy';
 
 /**
  * Confirming the card for a membership (P0-17, closes C9).
@@ -146,6 +150,15 @@ export function AccountMembershipsSection() {
   /** In-flight guards (G30). Both of these call money routes. */
   const [startingCheckout, setStartingCheckout] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  /*
+    P2-6: the MEMBERSHIP awaiting confirmation, not a boolean, because the
+    dialog names that membership's own period end. That date is the whole
+    point: cancellation is SCHEDULED, and before this the only hint of that
+    was the button label.
+  */
+  const [pendingCancel, setPendingCancel] = useState<MembershipRow | null>(null);
+  /** Undoing one, which had no route anywhere until P2-6 added it. */
+  const [resuming, setResuming] = useState<string | null>(null);
   const [error, setErrorState] = useState<string | null>(null);
   /** Load state machine (P0-5, G24): failed is not the same as empty. */
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
@@ -332,10 +345,53 @@ export function AccountMembershipsSection() {
         setError(data.error ?? 'Cancel failed');
         return;
       }
-      setMsg('Cancellation scheduled at period end.');
+      // Names the date, because "scheduled at period end" names no period
+      // and no end. `formatAccountDate` is the portal's one date format.
+      const endsOn = formatAccountDate(
+        memberships.find((m) => m.id === id)?.current_period_end ?? null,
+      );
+      setMsg(
+        endsOn
+          ? `Cancellation scheduled. Your membership stays active until ${endsOn}.`
+          : 'Cancellation scheduled. Your membership stays active until the end of the period you have paid for.',
+      );
       void load();
     } finally {
       setCancelling(null);
+    }
+  }
+
+  /**
+   * Undo a scheduled cancellation (P2-6).
+   *
+   * The Register calls this the cheapest mitigation for an accidental
+   * cancellation, and it is cheap because the subscription has not ended yet.
+   * Not behind a dialog: it is the SAFE direction, and asking someone to
+   * confirm that they want to keep paying for something they already had is
+   * friction pointed the wrong way.
+   */
+  async function resumeMembership(id: string) {
+    if (resuming) return;
+    setError(null);
+    setMsg(null);
+    setResuming(id);
+    try {
+      const res = await fetch('/api/account/memberships/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ membership_id: id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not resume this membership.');
+        return;
+      }
+      setMsg('Your membership will keep running. Nothing else to do.');
+      void load();
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+    } finally {
+      setResuming(null);
     }
   }
 
@@ -400,10 +456,28 @@ export function AccountMembershipsSection() {
                       type="button"
                       variant="link"
                       loading={cancelling === m.id}
-                      onClick={() => void cancelMembership(m.id)}
+                      onClick={() => setPendingCancel(m)}
                       className="text-xs font-semibold !text-amber-800 hover:underline"
                     >
                       Cancel at renewal
+                    </Button>
+                  ) : null}
+                  {/*
+                    The way back (P2-6). Offered wherever the cancellation was
+                    scheduled, which is the only place a customer will look for
+                    it, and it is what makes the dialog's "you can change your
+                    mind" line true rather than a promise about a route that
+                    did not exist.
+                  */}
+                  {m.stripe_subscription_id && m.cancel_at_period_end ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      loading={resuming === m.id}
+                      onClick={() => void resumeMembership(m.id)}
+                      className="text-xs font-semibold !text-brand-700 hover:underline"
+                    >
+                      Keep my membership
                     </Button>
                   ) : null}
                 </li>
@@ -483,6 +557,42 @@ export function AccountMembershipsSection() {
           </div>
         ) : null}
       </SectionCard>
+
+      {/*
+        P2-6 (G13). Cancelling a membership had NO confirmation at all: one
+        click on "Cancel at renewal" and it was scheduled. The only warning was
+        that button's own label, and the message afterwards said "Cancellation
+        scheduled at period end", which names no period and no end.
+
+        The date is what this dialog exists to say. Cancellation is scheduled
+        rather than immediate, so the honest question is not "are you sure" but
+        "you keep this until the 14th, and then you do not".
+      */}
+      <ConfirmDialog
+        open={pendingCancel !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingCancel(null);
+        }}
+        title="Cancel this membership"
+        message="Your membership runs to the end of the period you have paid for. Here is what happens:"
+        body={
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700">
+            {membershipCancellationLines(
+              pendingCancel ?? { current_period_end: null, allowance_status: null },
+            ).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        }
+        confirmLabel="Yes, cancel at renewal"
+        cancelLabel="Keep my membership"
+        onConfirm={() => {
+          // Read before clearing: the dialog closes on confirm.
+          const target = pendingCancel;
+          setPendingCancel(null);
+          if (target) void cancelMembership(target.id);
+        }}
+      />
     </div>
   );
 }

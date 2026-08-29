@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { supportedTimeZones } from '@/lib/time/iana-time-zone';
-import { Button, FormField, Input } from '@/components/ui/primitives';
+import { Button, ConfirmDialog, FormField, Input } from '@/components/ui/primitives';
+import { deviceRemovalLines } from '@/lib/account/account-commerce-copy';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -96,6 +97,10 @@ export function ProfileClient({
   /** In-flight guards (G30) for the two device handlers, which had none. */
   const [registeringDevice, setRegisteringDevice] = useState(false);
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
+  /** The device awaiting confirmation; the row, so the dialog can name it. */
+  const [pendingDeviceRemoval, setPendingDeviceRemoval] = useState<
+    (typeof devices)[number] | null
+  >(null);
 
   const prefs = useMemo(() => {
     // Reads whichever shape the column is in, across P0-13's R3 migration. A
@@ -173,6 +178,12 @@ export function ProfileClient({
     }
   }
 
+  /*
+    P2-6: the device awaiting confirmation. Not in the task's stated inventory,
+    but "Remove" deletes something of the customer's, which is the rule that
+    inventory is drawn from, and it was a single unguarded click on a red
+    button in a list.
+  */
   async function removeDevice(deviceId: string) {
     if (removingDevice) return;
     setRemovingDevice(deviceId);
@@ -486,7 +497,7 @@ export function ProfileClient({
                   type="button"
                   variant="link"
                   loading={removingDevice === device.id}
-                  onClick={() => void removeDevice(device.id)}
+                  onClick={() => setPendingDeviceRemoval(device)}
                   className="text-sm font-semibold !text-red-700 transition-colors hover:!text-red-800"
                 >
                   Remove
@@ -519,6 +530,34 @@ export function ProfileClient({
           {saving ? 'Saving…' : 'Save changes'}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={pendingDeviceRemoval !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDeviceRemoval(null);
+        }}
+        title={
+          pendingDeviceRemoval
+            ? `Remove ${pendingDeviceRemoval.device_name || pendingDeviceRemoval.platform}`
+            : 'Remove this device'
+        }
+        message="Here is what happens:"
+        body={
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700">
+            {deviceRemovalLines().map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        }
+        confirmLabel="Yes, remove it"
+        cancelLabel="Keep it"
+        onConfirm={() => {
+          // Read before clearing: the dialog closes on confirm.
+          const target = pendingDeviceRemoval;
+          setPendingDeviceRemoval(null);
+          if (target) void removeDevice(target.id);
+        }}
+      />
     </div>
   );
 }

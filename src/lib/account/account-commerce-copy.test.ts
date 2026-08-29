@@ -11,7 +11,11 @@ import {
   friendlyCreditReason,
   friendlyMembershipStatus,
   friendlyRecurringStatus,
+  courseCancellationEnrollmentLines,
+  deviceRemovalLines,
+  membershipCancellationLines,
   membershipStandingLine,
+  recurringRuleDeletionLines,
 } from '@/lib/account/account-commerce-copy';
 
 /**
@@ -176,5 +180,108 @@ describe('the enum lists have not drifted from the database', () => {
         expect(labels[value], `${typeName}.${value} leaks a stored value`).not.toContain('_');
       }
     }
+  });
+});
+
+/**
+ * P2-6 (G13). The consequence copy every destructive commerce action shows.
+ *
+ * Tested away from the DOM, because what can be wrong here is the SENTENCE: a
+ * dialog that opens and says the wrong thing passes any test that only asks
+ * whether a dialog opened.
+ */
+describe('membershipCancellationLines', () => {
+  it('names the date access actually ends', () => {
+    // The stated acceptance. Cancellation is scheduled, not immediate.
+    const lines = membershipCancellationLines({
+      current_period_end: '2026-09-14T00:00:00Z',
+      allowance_status: null,
+    }).join(' ');
+    expect(lines).toContain('14 September 2026');
+    expect(lines).toMatch(/stays active until/i);
+  });
+
+  it('still says something useful when there is no date to name', () => {
+    // `current_period_end` is nullable, and "stays active until null" is the
+    // shape of copy bug this module exists to prevent.
+    const lines = membershipCancellationLines({
+      current_period_end: null,
+      allowance_status: null,
+    }).join(' ');
+    expect(lines).not.toMatch(/null|undefined|Invalid/i);
+    expect(lines).toMatch(/end of the period you have paid for/i);
+  });
+
+  it('mentions the classes only when the membership includes some', () => {
+    const withAllowance = membershipCancellationLines({
+      current_period_end: '2026-09-14T00:00:00Z',
+      allowance_status: { kind: 'finite' },
+    }).join(' ');
+    const without = membershipCancellationLines({
+      current_period_end: '2026-09-14T00:00:00Z',
+      allowance_status: null,
+    }).join(' ');
+    expect(withAllowance).toMatch(/classes included/i);
+    expect(without).not.toMatch(/classes included/i);
+  });
+
+  it('promises the change of mind, which only became true with the undo route', () => {
+    const lines = membershipCancellationLines({
+      current_period_end: '2026-09-14T00:00:00Z',
+      allowance_status: null,
+    }).join(' ');
+    expect(lines).toMatch(/change your mind/i);
+  });
+});
+
+describe('courseCancellationEnrollmentLines', () => {
+  it('says a refund is due and names the window it depends on', () => {
+    const lines = courseCancellationEnrollmentLines({ cancel_by_date: '2026-09-24' }).join(' ');
+    expect(lines).toMatch(/refund is due/i);
+    expect(lines).toContain('24 September 2026');
+  });
+
+  it('does not promise an amount, which only the server can work out', () => {
+    // Prorated to the sessions not yet delivered, at cancel time. A figure
+    // here would be a guess printed next to the word refund.
+    const lines = courseCancellationEnrollmentLines({ cancel_by_date: '2026-09-24' }).join(' ');
+    expect(lines).not.toMatch(/£/);
+  });
+
+  it('says it cannot be undone, because it cannot', () => {
+    const lines = courseCancellationEnrollmentLines({ cancel_by_date: null }).join(' ');
+    expect(lines).toMatch(/cannot be undone/i);
+    expect(lines).not.toMatch(/null|undefined/i);
+  });
+});
+
+describe('recurringRuleDeletionLines', () => {
+  it('says the sessions already booked are NOT cancelled', () => {
+    // The half the old confirm box left out, and the one a customer worries
+    // about: reading "delete" as "cancel everything" means either turning up
+    // expecting a refund, or not turning up at all.
+    const lines = recurringRuleDeletionLines({ next_materialize_on: '2026-09-20' }).join(' ');
+    expect(lines).toMatch(/already booked are NOT cancelled/i);
+  });
+
+  it('names the booking that will now not happen', () => {
+    const lines = recurringRuleDeletionLines({ next_materialize_on: '2026-09-20' }).join(' ');
+    expect(lines).toContain('20 September 2026');
+  });
+
+  it('copes with a rule that has nothing scheduled', () => {
+    const lines = recurringRuleDeletionLines({ next_materialize_on: null }).join(' ');
+    expect(lines).not.toMatch(/null|undefined|Invalid/i);
+    expect(lines).toMatch(/nothing further/i);
+  });
+});
+
+describe('deviceRemovalLines', () => {
+  it('says what stops and that it is reversible', () => {
+    const lines = deviceRemovalLines().join(' ');
+    expect(lines).toMatch(/stops receiving notifications/i);
+    expect(lines).toMatch(/add it again/i);
+    // Removing a device must not read as being signed out of it.
+    expect(lines).toMatch(/stay signed in/i);
   });
 });

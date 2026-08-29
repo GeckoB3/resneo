@@ -134,6 +134,12 @@ describe('response envelope carve-out', () => {
  * which is closed: this one is for exemptions taken with a reason.
  */
 const C7A_EXEMPT: Record<string, string> = {
+  // P2-6's undo for an accidental membership cancellation. Memberships have no
+  // representation on /api/v1/me AT ALL, so aliasing this one verb would
+  // publish a fragment of a family that is not there. P5-1 is where the
+  // membership surface is added and aliased, driven by a real consumer rather
+  // than by a sweep, and this alias belongs in that batch.
+  'account/memberships/resume/route.ts': 'memberships reach v1 in P5-1, as a family',
   // P2-1's portal spelling of an action the versioned surface already has, as
   // `DELETE /api/v1/me/bookings/[id]`. Both are thin adapters over
   // `cancelBookingForGuest`, so they cannot diverge in behaviour, and adding
@@ -151,18 +157,20 @@ describe('v1 alias rule (C7a/C7b)', () => {
     // count is asserted so that adding a route without an alias, and without
     // consciously updating this list, fails here.
     //
-    // 31: P1-1 added account/home, aliased at v1/me/home, and P2-1 added four
+    // 32: P1-1 added account/home, aliased at v1/me/home, and P2-1 added four
     // booking action routes, three aliased under v1/me/bookings/[id]/ and
     // cancel C7A_EXEMPT because v1 already cancels with DELETE. P0-3's
     // account/bookings/[id]/manage-link was here as a C7a exemption and P2-5
-    // deleted it, which is why this went 32 to 31 rather than upward.
+    // deleted it, taking the count 32 to 31. P2-6 then added
+    // account/memberships/resume, C7A_EXEMPT because memberships are not on
+    // v1 at all, taking it back to 32.
     const accountRoutes = routeFiles('account').map(rel).sort();
     expect(
       accountRoutes.length,
       'An /api/account route was added or removed. If added: give it a v1 alias (C7a) ' +
         'or a C7A_EXEMPT entry, and bump this count. Do NOT add it to the pre-existing ' +
         'exclusion list, which is dated 2026-08-27 and closed.',
-    ).toBe(31);
+    ).toBe(32);
   });
 
   it('routes this plan created have their v1 alias', () => {

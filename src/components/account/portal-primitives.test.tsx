@@ -185,6 +185,12 @@ describe('mutation controls disable while in flight (G30)', () => {
    * guarded here. A tenth, `ManageBookingLink`, was guarded by P0-3 and then
    * deleted by P2-5 along with the route it called.
    *
+   * Since P2-6, `cancelMembership`, `cancelEnrollment` and `removeDevice` sit
+   * behind a `ConfirmDialog`, so a double tap cannot reach them at all: the
+   * dialog closes on confirm. Their in-flight guards stay, and the dialogs are
+   * covered by `portal-destructive-confirmations.test.tsx`. The rows below
+   * were never those three; they are the five that fire on one click.
+   *
    *   AccountPaymentMethodsSection  startSetup
    *   AccountCreditsSection         BuyPackPicker onBuy
    *   AccountMembershipsSection     startCheckout, cancelMembership

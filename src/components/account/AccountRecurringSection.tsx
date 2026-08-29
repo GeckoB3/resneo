@@ -6,8 +6,12 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
-import { Button, FormField, Input } from '@/components/ui/primitives';
-import { formatAccountDate, friendlyRecurringStatus } from '@/lib/account/account-commerce-copy';
+import { Button, ConfirmDialog, FormField, Input } from '@/components/ui/primitives';
+import {
+  formatAccountDate,
+  friendlyRecurringStatus,
+  recurringRuleDeletionLines,
+} from '@/lib/account/account-commerce-copy';
 
 interface RecRow {
   id: string;
@@ -81,6 +85,11 @@ export function AccountRecurringSection() {
   const [maxOccurrences, setMaxOccurrences] = useState('');
   const [intervalWeeks, setIntervalWeeks] = useState('1');
   const [busy, setBusy] = useState<string | null>(null);
+  /*
+    P2-6: the RULE awaiting confirmation, not a boolean, because the dialog
+    names that rule's own next booking date.
+  */
+  const [pendingDelete, setPendingDelete] = useState<RecRow | null>(null);
   const [error, setErrorState] = useState<string | null>(null);
   /** Load state machine (P0-5, G24): failed is not the same as empty. */
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
@@ -231,9 +240,6 @@ export function AccountRecurringSection() {
   async function deleteRule(id: string) {
     setError(null);
     setInfo(null);
-    if (!window.confirm('Delete this recurring rule? Future bookings will no longer be made automatically.')) {
-      return;
-    }
     setBusy(`delete:${id}`);
     try {
       const res = await fetch(`/api/account/class-recurring/${id}`, { method: 'DELETE' });
@@ -324,7 +330,7 @@ export function AccountRecurringSection() {
                         variant="secondary"
                         size="sm"
                         loading={busy === `delete:${r.id}`}
-                        onClick={() => void deleteRule(r.id)}
+                        onClick={() => setPendingDelete(r)}
                         className="rounded !border-red-300 px-2 py-1 text-xs !text-red-700 hover:!bg-red-50"
                       >
                         Delete
@@ -449,6 +455,39 @@ export function AccountRecurringSection() {
           </div>
         )}
       </SectionCard>
+
+      {/*
+        P2-6 (G13). This was a browser confirm box saying "Delete this recurring
+        rule? Future bookings will no longer be made automatically." Accurate
+        as far as it went, and silent on the half a customer actually worries
+        about: whether the sessions they are already booked on are about to
+        vanish. The list below says they are not.
+      */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDelete(null);
+        }}
+        title="Delete this repeat booking"
+        message="This stops the repeat. Here is what happens:"
+        body={
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700">
+            {recurringRuleDeletionLines(pendingDelete ?? { next_materialize_on: null }).map(
+              (line) => (
+                <li key={line}>{line}</li>
+              ),
+            )}
+          </ul>
+        }
+        confirmLabel="Yes, delete the repeat"
+        cancelLabel="Keep it running"
+        onConfirm={() => {
+          // Read before clearing: the dialog closes on confirm.
+          const target = pendingDelete;
+          setPendingDelete(null);
+          if (target) void deleteRule(target.id);
+        }}
+      />
     </div>
   );
 }

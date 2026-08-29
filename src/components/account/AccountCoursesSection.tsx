@@ -9,8 +9,11 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
-import { Button, FormField } from '@/components/ui/primitives';
-import { friendlyCourseStatus } from '@/lib/account/account-commerce-copy';
+import { Button, ConfirmDialog, FormField } from '@/components/ui/primitives';
+import {
+  courseCancellationEnrollmentLines,
+  friendlyCourseStatus,
+} from '@/lib/account/account-commerce-copy';
 
 interface EnrollmentRow {
   id: string;
@@ -138,6 +141,13 @@ export function AccountCoursesSection() {
   const [enrolling, setEnrolling] = useState(false);
   const [startingPaid, setStartingPaid] = useState(false);
   const [cancellingEnrollment, setCancellingEnrollment] = useState<string | null>(null);
+  /*
+    P2-6: the enrollment awaiting confirmation, not a boolean. The ROW is held
+    because the dialog states that enrollment's own cancellation window, and a
+    boolean would have made the copy read from whichever row happened to be
+    last.
+  */
+  const [pendingCancelEnrollment, setPendingCancelEnrollment] = useState<EnrollmentRow | null>(null);
   const [msg, setMsgState] = useState<string | null>(null);
   const setMsg = useCallback(
     (m: string | null) => {
@@ -266,9 +276,6 @@ export function AccountCoursesSection() {
     if (cancellingEnrollment) return;
     setError(null);
     setMsg(null);
-    if (!window.confirm('Cancel this enrollment? If within the refund window your payment will be refunded.')) {
-      return;
-    }
     setCancellingEnrollment(id);
     try {
       const res = await fetch('/api/account/courses/cancel', {
@@ -419,7 +426,7 @@ export function AccountCoursesSection() {
                       variant="secondary"
                       size="sm"
                       loading={cancellingEnrollment === e.id}
-                      onClick={() => void cancelEnrollment(e.id)}
+                      onClick={() => setPendingCancelEnrollment(e)}
                       className="!border-amber-300 px-2 py-1 text-xs !text-amber-800 hover:!bg-amber-50"
                     >
                       Cancel enrollment
@@ -552,6 +559,42 @@ export function AccountCoursesSection() {
           </SectionCard>
         </>
       )}
+
+      {/*
+        P2-6 (G13). This was a browser confirm box reading "Cancel this
+        enrollment? If within the refund window your payment will be
+        refunded." Two problems with that sentence, beyond it being a browser
+        dialog: it made the refund conditional on something the customer could
+        not check, and this button only renders when they ARE inside the
+        window, so the condition was theatre. The list below states the
+        outcome for this enrollment instead.
+      */}
+      <ConfirmDialog
+        open={pendingCancelEnrollment !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingCancelEnrollment(null);
+        }}
+        title="Cancel this course enrollment"
+        message="This gives up your place on the course. Here is what happens:"
+        body={
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700">
+            {courseCancellationEnrollmentLines(
+              pendingCancelEnrollment ?? { cancel_by_date: null },
+            ).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        }
+        confirmLabel="Yes, cancel my place"
+        cancelLabel="Keep my place"
+        onConfirm={() => {
+          // Read before clearing: `ConfirmDialog` closes on confirm, and the
+          // id would otherwise be gone by the time the request was built.
+          const target = pendingCancelEnrollment;
+          setPendingCancelEnrollment(null);
+          if (target) void cancelEnrollment(target.id);
+        }}
+      />
     </div>
   );
 }

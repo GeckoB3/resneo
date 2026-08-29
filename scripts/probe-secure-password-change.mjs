@@ -1,45 +1,49 @@
 /**
  * Does `secure_password_change` actually close the hole AD7 needs closed?
  *
- * RUN THIS BEFORE COMMITTING TO OPTION A. The plan makes the project-level
- * setting a prerequisite for P3-4b's limited sessions, on the assumption that
- * turning it on stops a limited session changing the account's password. That
- * assumption has never been tested. `supabase/config.toml:218` documents the
- * setting as "users need to reauthenticate **or have logged in recently**",
- * and a limited session is by construction a FRESH login: P3-4c mints it with
- * `generateLink` + `verifyOtp` at the moment the customer clicks. If the
- * recency exemption applies, the setting does not defend the one case it was
- * chosen for.
+ * **ANSWERED, staging, 2026-08-29: NO.** Recorded here because the result is
+ * the point of the script and someone reading it later should not have to
+ * re-run it to learn the answer.
  *
- * It answers three questions, and each changes a different decision:
+ *   0. AGED SESSION (backdated 72h) ..... REFUSED, `reauthentication_needed`
+ *   1. RECENT password sign-in .......... ACCEPTED
+ *   2. FRESH session via verifyOtp ...... ACCEPTED   <-- a limited session
+ *   3. RECOVERY session ................. ACCEPTED
  *
- *   1. ORDINARY SESSION. Does the setting bite at all on a normal password
- *      change? If not, it is not switched on for this project.
- *   2. FRESH SESSION (AD7's case). Can a session minted seconds ago change the
- *      password with no nonce? **If YES, option A does not buy what AD7 needs**
- *      and the limited-session boundary cannot be closed this way.
- *   3. RECOVERY SESSION. Can a `type=recovery` session set a password with no
- *      nonce? **If NO, turning the setting on BREAKS FORGOT-PASSWORD** for
- *      staff and customers, which is the flow used by the people least able to
- *      cope with it: `login-form.tsx:140` sends the reset, `/auth/confirm`
- *      routes it to `/auth/set-password`, and that posts to
- *      `/api/account/password`, which is the very endpoint this setting guards.
+ * So the setting works, and it exempts recent logins exactly as
+ * `supabase/config.toml:218` says it does. **A limited session under AD7 is by
+ * construction a recent login**: P3-4c mints it with `generateLink` +
+ * `verifyOtp` at the instant the customer clicks. Case 2 is that session, and
+ * it changed the password with no nonce. Turning this setting on therefore
+ * does NOT stop a forwarded confirmation email being turned into account
+ * takeover, which is the single thing AD7 made it a prerequisite for.
  *
- * WRITES NOTHING you care about: it creates one throwaway user, acts as that
- * user, and deletes it at the end, including on failure. It changes no project
- * settings; flipping the toggle is a human decision and stays one.
+ * The one piece of good news is case 3: forgot-password survives the toggle,
+ * so enabling it would not break `/auth/set-password` for people who cannot
+ * sign in. That was the other risk and it is clear.
  *
- * Run it TWICE, once with the setting off and once with it on, and compare.
- * The off run is the control: if case 1 does not change between the two runs,
- * the toggle did not take effect and nothing else in the output means anything.
+ * WHY CASE 0 EXISTS. Without it this script cannot tell an enabled setting
+ * from a disabled one: every other case holds a session seconds old, and the
+ * first version of this probe reported "ACCEPTED" three times with the setting
+ * ON and OFF alike, which reads as a finding and is not one. Case 0 is the
+ * only control that moves, and the interpretation of 1 to 3 is withheld until
+ * it refuses.
  *
- *   node scripts/probe-secure-password-change.mjs
+ * Re-run it if GoTrue is upgraded, or if the recency window becomes
+ * configurable. It creates one throwaway user and deletes it, changes no
+ * project settings, and prints no secrets.
+ *
+ *   npm run probe:secure-password-change
  *
  * Needs NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY and one of
- * NEXT_PUBLIC_SUPABASE_ANON_KEY / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.
- * Point them at STAGING. It prints no secrets.
+ * NEXT_PUBLIC_SUPABASE_ANON_KEY / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+ * pointed at STAGING, and the `supabase` CLI linked (case 0 shells out to it).
  */
 import { createClient } from '@supabase/supabase-js';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const secret = process.env.SUPABASE_SECRET_KEY?.trim();
@@ -126,6 +130,39 @@ async function passwordSession(password) {
 }
 
 /**
+ * Backdate this probe user's sessions so they are no longer "recent".
+ *
+ * WHY THIS EXISTS, and it is the whole point of the probe. GoTrue's own config
+ * comment says the setting demands a nonce unless the user has "logged in
+ * recently", so every case above uses a session seconds old and CANNOT tell an
+ * enabled setting from a disabled one. Ageing a session is the only way to
+ * observe the setting at all without waiting a day.
+ *
+ * IT WRITES TO `auth.sessions`, which is Supabase's own schema and which the
+ * plan rightly forbids production code from touching. It is confined to the
+ * throwaway user this script created and deletes, on staging, in a diagnostic
+ * that ships nothing. If that trade is not wanted, delete this case: the other
+ * three still run, and they will simply never distinguish on from off.
+ */
+function ageSessionsOfProbeUser(hours) {
+  const sql = `UPDATE auth.sessions
+     SET created_at = now() - interval '${hours} hours',
+         updated_at = now() - interval '${hours} hours',
+         refreshed_at = (now() - interval '${hours} hours')::timestamp
+   WHERE user_id = '${userId}';`;
+  const file = path.join(os.tmpdir(), `spc-age-${Date.now()}.sql`);
+  fs.writeFileSync(file, sql, 'utf8');
+  try {
+    execFileSync('npx', ['supabase', 'db', 'query', '--linked', '-f', file], {
+      stdio: 'pipe',
+      shell: process.platform === 'win32',
+    });
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+}
+
+/**
  * Case 1 is the CONTROL, and cases 2 and 3 mean nothing until it refuses.
  *
  * With the setting off everything is accepted, which is not evidence about
@@ -168,19 +205,38 @@ try {
   userId = created.user.id;
   console.log(`probe user created (deleted at the end)\nproject: ${url}`);
 
-  // ── 1. Ordinary session. The control. ──────────────────────────────────
+  /*
+    ── 0. AGED SESSION. The real control. ────────────────────────────────
+    Sign in, backdate the session past any plausible recency window, then try
+    to change the password. This is the ONLY case that can distinguish the
+    setting being on from being off, because every other case here holds a
+    session seconds old and the setting exempts recent logins by design.
+  */
+  const agedToken = await passwordSession(FIRST_PASSWORD);
+  ageSessionsOfProbeUser(72);
+  const aged = await changePasswordWithNoNonce(agedToken, `${FIRST_PASSWORD}-zero`);
+  report(
+    '0. AGED SESSION (signed in, then backdated 72 hours)',
+    aged,
+    (accepted) =>
+      accepted
+        ? 'the setting is OFF, or does not apply. Nothing below is evidence about it.'
+        : 'the setting is ON and biting. Now the cases below mean something.',
+    { isControl: true },
+  );
+
+  // ── 1. Ordinary session, seconds old. ──────────────────────────────────
   const ordinary = await changePasswordWithNoNonce(
     await passwordSession(FIRST_PASSWORD),
     `${FIRST_PASSWORD}-one`,
   );
   report(
-    '1. ORDINARY SESSION (signed in with a password)',
+    '1. RECENT SESSION (signed in with a password moments ago)',
     ordinary,
     (accepted) =>
       accepted
-        ? 'the setting is OFF, or does not bite here. If you flipped it, it has not taken effect and nothing below is evidence.'
-        : 'the setting is ON and biting. Every password-change surface needs a nonce step before this can ship.',
-    { isControl: true },
+        ? 'a RECENT login is exempt. This is the case AD7 depends on being blocked, and it is not.'
+        : 'even a recent login needs a nonce, so the exemption does not apply on this project.',
   );
 
   // ── 2. Fresh session. AD7's actual case. ───────────────────────────────

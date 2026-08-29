@@ -79,6 +79,17 @@ export interface AccountBookingRow {
   booking_model: BookingModel;
   deposit_status?: string | null;
   deposit_amount_pence?: number | null;
+  /**
+   * What the booking's money looks like, from the ledger cache (P1-2).
+   *
+   * `payment_state` is the enum `unpaid | deposit_paid | partially_paid | paid
+   * | refunded`; the balance is `booking_total_price_pence` less
+   * `amount_paid_pence`. Both halves are needed: a free booking is `unpaid`
+   * with nothing owed, and the state alone would put it on an outstanding list.
+   */
+  payment_state?: string | null;
+  booking_total_price_pence?: number | null;
+  amount_paid_pence?: number | null;
   /** Last instant the guest can cancel free of charge (deposit refund / card-hold release). */
   cancellation_deadline?: string | null;
   special_requests?: string | null;
@@ -148,7 +159,7 @@ const CANCELLED_STATUS_SQL_LIST = ['Cancelled', 'Canceled', 'No-Show', 'NoShow',
   .join(',');
 
 const ACCOUNT_BOOKING_COLUMNS =
-  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, cancellation_deadline, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id';
+  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, cancellation_deadline, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id, payment_state, booking_total_price_pence, amount_paid_pence';
 
 type RawBookingRow = {
   id: string;
@@ -162,6 +173,9 @@ type RawBookingRow = {
   booking_model?: BookingModel | null;
   deposit_status?: string | null;
   deposit_amount_pence?: number | null;
+  payment_state?: string | null;
+  booking_total_price_pence?: number | null;
+  amount_paid_pence?: number | null;
   cancellation_deadline?: string | null;
   special_requests?: string | null;
   dietary_notes?: string | null;
@@ -705,6 +719,9 @@ function hydrateAccountBookingRow(
     booking_model: (b.booking_model as BookingModel | null) ?? 'table_reservation',
     deposit_status: b.deposit_status ?? null,
     deposit_amount_pence: b.deposit_amount_pence ?? null,
+    payment_state: b.payment_state ?? null,
+    booking_total_price_pence: b.booking_total_price_pence ?? null,
+    amount_paid_pence: b.amount_paid_pence ?? null,
     cancellation_deadline: b.cancellation_deadline ?? null,
     special_requests: b.special_requests ?? null,
     dietary_notes: b.dietary_notes ?? null,

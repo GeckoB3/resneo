@@ -1,4 +1,7 @@
 import type { AccountBookingRow } from '@/lib/account/account-bookings';
+// The platform's one money formatter. This module had grown its own, which is
+// how two renderings of the same amount start to disagree.
+import { formatPence } from '@/lib/booking/payment-display';
 
 /**
  * What cancelling a whole course will do, stated before the customer confirms
@@ -81,11 +84,6 @@ export function summariseCourseCancellation(
   return summary;
 }
 
-/** "£12.50", the one place this course copy formats money. */
-export function formatPence(pence: number): string {
-  return `£${(pence / 100).toFixed(2)}`;
-}
-
 /**
  * The consequence lines the dialog shows, in the order a customer needs them:
  * what stops, what comes back, what does not.
@@ -105,7 +103,7 @@ export function courseCancellationLines(summary: CourseCancellationSummary): str
 
   if (summary.refundablePence > 0) {
     lines.push(
-      `${formatPence(summary.refundablePence)} of deposits should come back, across ${sessions(summary.beforeDeadline)} still inside the free-cancellation window.`,
+      `${formatPence(summary.refundablePence) ?? ''} of deposits should come back, across ${sessions(summary.beforeDeadline)} still inside the free-cancellation window.`,
     );
   } else if (summary.beforeDeadline > 0) {
     lines.push(`${sessions(summary.beforeDeadline)} are still inside the free-cancellation window.`);
@@ -113,7 +111,7 @@ export function courseCancellationLines(summary: CourseCancellationSummary): str
 
   if (summary.atRiskPence > 0) {
     lines.push(
-      `${formatPence(summary.atRiskPence)} of deposits will NOT come back, on ${sessions(summary.afterDeadline)} past the cancellation deadline.`,
+      `${formatPence(summary.atRiskPence) ?? ''} of deposits will NOT come back, on ${sessions(summary.afterDeadline)} past the cancellation deadline.`,
     );
   } else if (summary.afterDeadline > 0) {
     lines.push(`${sessions(summary.afterDeadline)} are past the cancellation deadline.`);

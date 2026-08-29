@@ -6,6 +6,27 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { NextBookingCard } from '@/components/account/NextBookingCard';
 import { loadAccountHome } from '@/lib/account/account-home';
+import {
+  accountBookingTimeZone,
+  formatAccountBookingDateTime,
+  type AccountBookingRow,
+} from '@/lib/account/account-bookings';
+import { formatPence } from '@/lib/booking/payment-display';
+
+/** "Thursday 10 September, 14:00", in the venue's zone, not the reader's. */
+function whenLine(row: AccountBookingRow, profileTz: string | null): string {
+  const { date, time } = formatAccountBookingDateTime(
+    row.booking_date,
+    row.booking_time,
+    accountBookingTimeZone(row, profileTz),
+  );
+  return time ? `${date}, ${time}` : date;
+}
+
+/** What is still owed on a booking, in pence. */
+function balancePence(row: AccountBookingRow): number {
+  return (row.booking_total_price_pence ?? 0) - (row.amount_paid_pence ?? 0);
+}
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -177,17 +198,100 @@ export default async function AccountHomePage() {
         />
       )}
 
-      {home.upcoming_count > 1 ? (
-        <p className="text-sm text-slate-600">
-          You have{' '}
-          <Link
-            href="/account/bookings?filter=upcoming"
-            className="inline-flex min-h-6 items-center font-semibold text-brand-700 underline underline-offset-2"
-          >
-            {home.upcoming_count} upcoming bookings
-          </Link>{' '}
-          across {home.venues.length} {home.venues.length === 1 ? 'venue' : 'venues'}.
-        </p>
+{/*
+        P1-2's outstanding actions, the half that was never built.
+
+        Forms to complete live on the card above, scoped to the booking they
+        belong to. Money does not: a balance can sit on any upcoming booking,
+        so it needs its own block. Worded as information rather than as a call
+        to action, because the portal has no way to PAY one: it is settled with
+        the venue, and a button that did not exist would be worse than a line
+        that tells the truth.
+      */}
+      {home.outstanding_payments.length > 0 ? (
+        <section
+          aria-labelledby="account-outstanding-heading"
+          className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4"
+        >
+          <h2 id="account-outstanding-heading" className="text-sm font-semibold text-amber-900">
+            {home.outstanding_payments.length === 1
+              ? 'One booking still has something to pay'
+              : `${home.outstanding_payments.length} bookings still have something to pay`}
+          </h2>
+          <ul className="mt-2 space-y-1.5 text-sm text-amber-900">
+            {home.outstanding_payments.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span>
+                  {row.venue?.name ? `${row.venue.name} · ` : ''}
+                  {whenLine(row, profileTz)}
+                </span>
+                <span className="flex items-baseline gap-3">
+                  <span className="font-semibold tabular-nums">
+                    {formatPence(balancePence(row))} to pay
+                  </span>
+                  <Link
+                    href={`/account/bookings/${row.id}`}
+                    className="inline-flex min-h-6 items-center font-medium text-amber-900 underline underline-offset-2"
+                  >
+                    Details
+                  </Link>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-amber-800">
+            You pay the venue directly for these, when you go.
+          </p>
+        </section>
+      ) : null}
+
+      {/*
+        P1-2's compact Upcoming list. This was one line of prose saying how
+        many there were, linking to the bookings page, so a customer with four
+        appointments this week learned only that there were four. The rows are
+        already loaded, so the list costs nothing to show.
+      */}
+      {home.upcoming_after_next.length > 0 ? (
+        <section aria-labelledby="account-upcoming-heading">
+          <h2 id="account-upcoming-heading" className="text-sm font-semibold text-slate-900">
+            Also coming up
+          </h2>
+          <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
+            {home.upcoming_after_next.map((row) => (
+              <li
+                key={row.id}
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm"
+              >
+                <span className="min-w-0">
+                  <span className="font-medium text-slate-900">{whenLine(row, profileTz)}</span>
+                  {row.venue?.name ? (
+                    <span className="text-slate-600"> · {row.venue.name}</span>
+                  ) : null}
+                </span>
+                <Link
+                  href={`/account/bookings/${row.id}`}
+                  className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+                >
+                  Details
+                </Link>
+              </li>
+            ))}
+          </ul>
+          {/*
+            The count still speaks for ALL of them: the list is bounded at four
+            and a customer with forty needs to know the rest are somewhere.
+          */}
+          {home.upcoming_count > home.upcoming_after_next.length + 1 ? (
+            <p className="mt-2 text-sm text-slate-600">
+              <Link
+                href="/account/bookings?filter=upcoming"
+                className="inline-flex min-h-6 items-center font-semibold text-brand-700 underline underline-offset-2"
+              >
+                See all {home.upcoming_count} upcoming bookings
+              </Link>
+            </p>
+          ) : null}
+        </section>
       ) : null}
 
       <section aria-labelledby="account-shortcuts-heading">

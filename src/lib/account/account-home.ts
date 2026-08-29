@@ -70,6 +70,26 @@ export interface AccountHomeData {
   next_booking_appointment: AccountHomeAppointmentLabel;
   /** How many bookings are still to come, including `next_booking`. */
   upcoming_count: number;
+  /**
+   * The bookings after `next_booking`, so the hub can LIST them (P1-2).
+   *
+   * It used to carry the count alone, which the hub rendered as one line of
+   * prose linking to the bookings page, so a customer with four appointments
+   * this week learned only that there were four. Bounded, because the card
+   * plus a short list is the shape; the full history has its own page.
+   *
+   * Free, in query terms: `loadAccountBookings` already returned these rows
+   * and the count was computed from the same array.
+   */
+  upcoming_after_next: AccountBookingRow[];
+  /**
+   * Upcoming bookings that still owe money (P1-2's outstanding actions).
+   *
+   * Deliberately upcoming-only. A past booking with a balance is settled with
+   * the venue, and the portal has no way to pay one, so listing it would be an
+   * anxiety line with nothing a customer could do about it.
+   */
+  outstanding_payments: AccountBookingRow[];
   /** Every venue the customer has booked with, by name. */
   venues: AccountVenueRow[];
   credits: AccountHomeCreditSummary;
@@ -92,6 +112,8 @@ export function emptyAccountHome(): AccountHomeData {
     next_booking_form_links: [],
     next_booking_appointment: { service: null, practitioner: null },
     upcoming_count: 0,
+    upcoming_after_next: [],
+    outstanding_payments: [],
     venues: [],
     credits: { total_remaining: 0, venue_count: 0, next_expiry: null },
     memberships: { active_count: 0, cancelling_count: 0 },
@@ -140,10 +162,33 @@ export async function loadAccountHome(
     next_booking_form_links: formLinks,
     next_booking_appointment: appointment,
     upcoming_count: upcoming.length,
+    upcoming_after_next: upcoming.slice(1, 1 + UPCOMING_LIST_LIMIT),
+    outstanding_payments: upcoming.filter(hasOutstandingBalance),
     venues: [...venueById.values()].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
     credits,
     memberships,
   };
+}
+
+/** How many bookings the hub lists under the card before deferring to the page. */
+const UPCOMING_LIST_LIMIT = 4;
+
+/** Payment states that can still owe money; `paid` and `refunded` cannot. */
+const OWING_STATES = new Set(['unpaid', 'deposit_paid', 'partially_paid']);
+
+/**
+ * Does this booking still owe the venue money?
+ *
+ * BOTH halves are required, and that is the point. `payment_state` alone would
+ * list every free booking, because the column defaults to `unpaid` and a
+ * booking with no price never leaves it. A balance alone would list a booking
+ * whose ledger says `refunded` while the cached total has not caught up.
+ */
+function hasOutstandingBalance(booking: AccountBookingRow): boolean {
+  if (!OWING_STATES.has(booking.payment_state ?? '')) return false;
+  const total = booking.booking_total_price_pence ?? 0;
+  const paid = booking.amount_paid_pence ?? 0;
+  return total - paid > 0;
 }
 
 /**

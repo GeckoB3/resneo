@@ -963,46 +963,75 @@ export async function rescheduleBookingForGuest(
     // different fee), but the hold row and its fee_pence are untouched
     // (card_hold deposits §10.1): the row is updated in place, never
     // deleted and reinserted, so the hold carries over unchanged.
-    const { data: apptUpdated, error: apptUpdErr } = await supabase
-      .from("bookings")
-      .update({
-        booking_date: newDate,
-        booking_time: newTime,
-        party_size: newPartySize,
-        ...(currentBookingModel === "unified_scheduling"
-          ? {
-              calendar_id: bodyPractitionerId,
-              service_item_id: bodyAppointmentServiceId,
-              practitioner_id: null,
-              appointment_service_id: null,
-            }
-          : {
-              practitioner_id: bodyPractitionerId,
-              appointment_service_id: bodyAppointmentServiceId,
-              calendar_id: null,
-              service_item_id: null,
-            }),
-        estimated_end_time: estimatedEndTime,
-        ...(rescheduleBookingEndTime
-          ? { booking_end_time: rescheduleBookingEndTime }
-          : {}),
-        service_variant_id: nextVariantId,
-        ...rescheduleNameSnapshot,
-        ...(rescheduleProcessingBlocks
-          ? { processing_time_blocks: rescheduleProcessingBlocks }
-          : {}),
-        cancellation_deadline,
-        // Skipped when the deadline was preserved: the row's existing
-        // snapshot is the one that matches it.
-        ...(deadlinePreserved ? {} : { cancellation_policy_snapshot }),
-        updated_at: nowIso,
-      })
-      .eq("id", bookingId)
-      .eq("updated_at", prevUpdatedAt)
-      .select("id")
-      .maybeSingle();
+    const isUnified = currentBookingModel === "unified_scheduling";
+
+    /*
+      P2-3a. Everything below the routing columns is a PATCH, not a full row:
+      a key that is ABSENT means "leave this column alone" and a key that is
+      present-and-null means "set it to null". That is the same distinction the
+      conditional spreads made when this was a PostgREST `.update()`, and
+      `claim_appointment_slot` preserves it with `p_patch ? 'key'` presence
+      tests rather than COALESCE, which cannot express it.
+    */
+    const claimPatch: Record<string, unknown> = {
+      party_size: newPartySize,
+      ...(isUnified
+        ? {
+            service_item_id: bodyAppointmentServiceId,
+            appointment_service_id: null,
+          }
+        : {
+            appointment_service_id: bodyAppointmentServiceId,
+            service_item_id: null,
+          }),
+      estimated_end_time: estimatedEndTime,
+      ...(rescheduleBookingEndTime
+        ? { booking_end_time: rescheduleBookingEndTime }
+        : {}),
+      service_variant_id: nextVariantId,
+      ...rescheduleNameSnapshot,
+      ...(rescheduleProcessingBlocks
+        ? { processing_time_blocks: rescheduleProcessingBlocks }
+        : {}),
+      cancellation_deadline,
+      // Skipped when the deadline was preserved: the row's existing
+      // snapshot is the one that matches it.
+      ...(deadlinePreserved ? {} : { cancellation_policy_snapshot }),
+      updated_at: nowIso,
+    };
+
+    /*
+      WHY THIS IS AN RPC AND NOT AN UPDATE. `enforce_cde_capacity` guards
+      class, event and resource bookings and explicitly excludes appointments,
+      so the recheck above narrows this race without closing it: two guests can
+      both pass it and both write the same slot. Closing it needs the lock, the
+      capacity count and the write inside ONE transaction, and PostgREST gives
+      one transaction per request. So they moved into the function together.
+
+      The optimistic-concurrency check moved with them, from `.eq("updated_at")`
+      into `p_expected_updated_at`, for the same reason: split out, it would be
+      a second round trip outside the lock.
+    */
+    const { data: claimRows, error: apptUpdErr } = await supabase.rpc(
+      "claim_appointment_slot",
+      {
+        p_booking_id: bookingId,
+        p_calendar_id: isUnified ? bodyPractitionerId : null,
+        p_practitioner_id: isUnified ? null : bodyPractitionerId,
+        p_booking_date: newDate,
+        p_booking_time: newTime,
+        p_expected_updated_at: prevUpdatedAt,
+        p_patch: claimPatch,
+      },
+    );
+    const apptUpdated = Array.isArray(claimRows) ? claimRows[0] : claimRows;
 
     if (apptUpdErr) {
+      // The guard raises the same SQLSTATE `enforce_cde_capacity` raises, so
+      // one mapping covers whichever guard refused the slot.
+      if (apptUpdErr.code === "23P01") {
+        return finish(SLOT_TAKEN_RESPONSE, { status: 409, code: "SLOT_TAKEN" });
+      }
       console.error(
         "confirm modify (appointment) update failed:",
         apptUpdErr,

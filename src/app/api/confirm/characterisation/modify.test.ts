@@ -18,9 +18,11 @@ import {
   makeCallLog,
   makeRequest,
   expectFrozen,
+  type Frozen,
   type RunOptions,
 } from './harness';
-import { makeRecordingDb } from '@/lib/testing/recording-supabase';
+import { makeRecordingDb, PG_ERRORS } from '@/lib/testing/recording-supabase';
+import { SLOT_TAKEN_RESPONSE } from '@/lib/booking/revalidate-appointment-slot';
 
 const hoisted = vi.hoisted(() => ({
   db: null as ReturnType<typeof import('@/lib/testing/recording-supabase').makeRecordingDb> | null,
@@ -194,6 +196,22 @@ async function run(opts: Omit<RunOptions, 'action'>) {
     if (call.table === 'bookings' && call.op === 'update') {
       return hoisted.updateMatches ? { data: { id: IDS.booking } } : { data: null };
     }
+    /*
+      P2-3a moved the APPOINTMENT branch's guarded UPDATE into
+      `claim_appointment_slot`, so that the advisory lock, the capacity count
+      and the write share one transaction. The optimistic lock moved with it,
+      from `.eq('updated_at', prev)` into `p_expected_updated_at`, so
+      `updateMatches` still means the same thing: did the guarded write find
+      its row. The CDE branches above still use `.update()` and are unchanged.
+
+      A SETOF function returns an ARRAY, where maybeSingle() returned an
+      object. Returning an object here would let the route's Array.isArray
+      unwrapping be wrong and this suite still pass.
+    */
+    if (call.table === 'rpc:claim_appointment_slot') {
+      if (hoisted.updateError) return { data: null, error: hoisted.updateError };
+      return hoisted.updateMatches ? { data: [{ id: IDS.booking }] } : { data: [] };
+    }
     if (call.op !== 'select') return { data: null, error: null };
     const row = tables[call.table];
     return row === undefined ? undefined : { data: row };
@@ -206,6 +224,27 @@ async function run(opts: Omit<RunOptions, 'action'>) {
   return freeze(res, hoisted.db, hoisted.log);
 }
 
+/**
+ * The appointment branch's write, expressed as COLUMNS.
+ *
+ * P2-3a moved that write from a PostgREST `.update()` into
+ * `claim_appointment_slot`, so the columns are now split across the function's
+ * routing arguments and its `p_patch`. The rows below assert WHICH COLUMNS GET
+ * WHICH VALUES, which is behaviour and unchanged; reading the raw payload
+ * would couple them to the transport, which is the reviewed change.
+ */
+function apptWrite(frozen: Frozen): Record<string, unknown> {
+  const claim = frozen.dbWrites.find((w) => w.table === 'rpc:claim_appointment_slot');
+  const args = (claim?.payload ?? {}) as Record<string, unknown>;
+  return {
+    booking_date: args.p_booking_date,
+    booking_time: args.p_booking_time,
+    calendar_id: args.p_calendar_id,
+    practitioner_id: args.p_practitioner_id,
+    ...((args.p_patch ?? {}) as Record<string, unknown>),
+  };
+}
+
 /** The body a valid appointment reschedule sends. */
 const APPT_BODY = {
   booking_date: '2026-06-12',
@@ -215,21 +254,28 @@ const APPT_BODY = {
   party_size: 1,
 };
 
+/**
+ * Every flag back to the happy path, and the clock pinned. Shared so the P2-3a
+ * describe at the foot of this file starts from the same known state: a row
+ * that inherited a leftover flag would pass or fail for the wrong reason.
+ */
+function resetToHappyPath() {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(FIXED_NOW));
+  hoisted.rescheduleEnabled = true;
+  hoisted.availabilityEngine = 'service';
+  hoisted.apptSlotAvailable = true;
+  hoisted.updateMatches = true;
+  hoisted.updateError = null;
+  hoisted.compliance = { blocked: false, body: {} };
+  hoisted.classValidation = { ok: true, reason: '' };
+  hoisted.largeParty = false;
+  hoisted.tableSlotFound = true;
+  hoisted.afterPromises = [];
+}
+
 describe('POST /api/confirm - action=modify + cross-cutting (P0-9, 21 rows)', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    hoisted.rescheduleEnabled = true;
-    hoisted.availabilityEngine = 'service';
-    hoisted.apptSlotAvailable = true;
-    hoisted.updateMatches = true;
-    hoisted.updateError = null;
-    hoisted.compliance = { blocked: false, body: {} };
-    hoisted.classValidation = { ok: true, reason: '' };
-    hoisted.largeParty = false;
-    hoisted.tableSlotFound = true;
-    hoisted.afterPromises = [];
-  });
+  beforeEach(resetToHappyPath);
   afterEach(() => vi.useRealTimers());
 
   // ── Guards shared by every model ────────────────────────────────────────
@@ -269,7 +315,7 @@ describe('POST /api/confirm - action=modify + cross-cutting (P0-9, 21 rows)', ()
   it('row 4: unified appointment writes calendar/service_item and NULLS the legacy pair', async () => {
     const frozen = await run({ booking: baseBooking(), body: APPT_BODY });
     expectFrozen(frozen, { status: 200 });
-    const p = frozen.dbWrites.find((w) => w.op === 'update')?.payload as Record<string, unknown>;
+    const p = apptWrite(frozen);
     expect(p).toMatchObject({
       calendar_id: 'cal-new',
       service_item_id: 'svc-new',
@@ -290,7 +336,7 @@ describe('POST /api/confirm - action=modify + cross-cutting (P0-9, 21 rows)', ()
       body: APPT_BODY,
     });
     expectFrozen(frozen, { status: 200 });
-    const p = frozen.dbWrites.find((w) => w.op === 'update')?.payload as Record<string, unknown>;
+    const p = apptWrite(frozen);
     expect(p).toMatchObject({
       practitioner_id: 'cal-new',
       appointment_service_id: 'svc-new',
@@ -330,21 +376,22 @@ describe('POST /api/confirm - action=modify + cross-cutting (P0-9, 21 rows)', ()
   it('row 9: the guarded UPDATE carries the updated_at predicate', async () => {
     const frozen = await run({ booking: baseBooking(), body: APPT_BODY });
     expectFrozen(frozen, { status: 200 });
-    const update = frozen.dbWrites.find((w) => w.op === 'update');
-    // Both filters, in order: the id AND the optimistic lock.
-    expect(update?.filters).toEqual(
-      expect.arrayContaining([
-        ['eq', 'id', IDS.booking],
-        ['eq', 'updated_at', '2026-05-30T10:00:00+00:00'],
-      ]),
-    );
+    // P2-3a: still both halves, the id AND the optimistic lock, but they are
+    // now arguments to `claim_appointment_slot` rather than PostgREST filters.
+    // The behaviour this row exists to pin is that the lock TRAVELS; where it
+    // travels is the reviewed change.
+    const claim = frozen.dbWrites.find((w) => w.table === 'rpc:claim_appointment_slot');
+    expect(claim?.payload).toMatchObject({
+      p_booking_id: IDS.booking,
+      p_expected_updated_at: '2026-05-30T10:00:00+00:00',
+    });
     expect(frozen).toMatchSnapshot();
   });
 
   it('row 10: a changed date recomputes the cancellation deadline', async () => {
     const frozen = await run({ booking: baseBooking(), body: APPT_BODY });
     expectFrozen(frozen, { status: 200 });
-    const p = frozen.dbWrites.find((w) => w.op === 'update')?.payload as Record<string, unknown>;
+    const p = apptWrite(frozen);
     expect(p).toHaveProperty('cancellation_deadline');
     expect(frozen).toMatchSnapshot();
   });
@@ -368,7 +415,7 @@ describe('POST /api/confirm - action=modify + cross-cutting (P0-9, 21 rows)', ()
     // from the portal, and reschedule-cancellation-deadline.ts:14 records why.
     const frozen = await run({ booking: baseBooking(), body: APPT_BODY });
     expectFrozen(frozen, { status: 200 });
-    const p = frozen.dbWrites.find((w) => w.op === 'update')?.payload as Record<string, unknown>;
+    const p = apptWrite(frozen);
     expect(p).not.toHaveProperty('confirm_token_used_at');
     expect(frozen).toMatchSnapshot();
   });
@@ -478,5 +525,60 @@ describe('POST /api/confirm - action=modify + cross-cutting (P0-9, 21 rows)', ()
     expectFrozen(frozen, { status: 404 });
     expect(frozen.dbWrites).toEqual([]);
     expect(frozen).toMatchSnapshot();
+  });
+});
+
+/**
+ * P2-3a. NOT characterisation: this describes behaviour that did not exist
+ * before, so it lives outside the 21-row matrix rather than renumbering it.
+ *
+ * `enforce_cde_capacity` guards class, event and resource bookings and
+ * explicitly excludes appointments, so until now two guests could both pass
+ * the availability recheck and both write the same slot. `claim_appointment_slot`
+ * closes that by holding an advisory lock across the count and the write, and
+ * raises 23P01 when the slot is full. These rows prove the route TRANSLATES
+ * that refusal, which is the half that lives in TypeScript and can be wrong.
+ */
+describe('POST /api/confirm - action=modify, appointment slot guard (P2-3a)', () => {
+  beforeEach(resetToHappyPath);
+  afterEach(() => vi.useRealTimers());
+
+  it('a 23P01 from the slot guard is INDISTINGUISHABLE from the existing 409', async () => {
+    // Asserted against the SHARED CONSTANT the pre-guard recheck already
+    // returns, not against a literal. Losing a slot to the advisory lock and
+    // losing it to the recheck milliseconds earlier are the same event to the
+    // guest, and a copied string here would let the two drift apart with
+    // nothing to notice. A 500 would tell a guest whose only mistake was being
+    // second that the site is broken.
+    hoisted.updateError = PG_ERRORS.exclusionViolation;
+    const frozen = await run({ booking: baseBooking(), body: APPT_BODY });
+    expectFrozen(frozen, { status: 409 });
+    expect(frozen.body).toEqual(SLOT_TAKEN_RESPONSE);
+  });
+
+  it('any OTHER Postgres error is still a 500, so the mapping stays narrow', async () => {
+    // The vacuity guard on the row above. If the route mapped every RPC error
+    // to 409, that test would pass while the route silently swallowed real
+    // failures and told the guest to pick another time.
+    hoisted.updateError = PG_ERRORS.uniqueViolation;
+    const frozen = await run({ booking: baseBooking(), body: APPT_BODY });
+    expectFrozen(frozen, { status: 500 });
+  });
+
+  it('the claim carries the calendar, the slot and the optimistic lock', async () => {
+    // The guard can only count the right rows if it is told which slot to lock.
+    // A claim missing its calendar would fall back to the practitioner branch
+    // and silently guard nothing on a unified venue, which is every venue.
+    const frozen = await run({ booking: baseBooking(), body: APPT_BODY });
+    expectFrozen(frozen, { status: 200 });
+    const claim = frozen.dbWrites.find((w) => w.table === 'rpc:claim_appointment_slot');
+    expect(claim?.payload).toMatchObject({
+      p_booking_id: IDS.booking,
+      p_calendar_id: 'cal-new',
+      p_practitioner_id: null,
+      p_booking_date: '2026-06-12',
+      p_booking_time: '11:00:00',
+      p_expected_updated_at: '2026-05-30T10:00:00+00:00',
+    });
   });
 });

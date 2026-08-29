@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 import { AccountSignOutButton } from '@/app/account/AccountSignOutButton';
 import { AccountNav } from '@/app/account/AccountNav';
 import { ToastProvider } from '@/components/ui/Toast';
+import { PortalPasswordPrompt } from '@/components/account/PortalPasswordPrompt';
 
 export default async function AccountLayout({ children }: { children: ReactNode }) {
   const supabase = await createClient();
@@ -19,6 +20,19 @@ export default async function AccountLayout({ children }: { children: ReactNode 
 
   const admin = getSupabaseAdminClient();
   const showVenueDashboard = await authenticatedUserHasStaffMembership(admin, user.id, user.email);
+
+  /*
+    P3-4h. Offered to a customer who has no password and has not already said
+    no. Both facts live in `user_metadata`, which `getUser()` above has already
+    returned, so this costs NO extra query on any portal page view.
+
+    In the LAYOUT rather than on the hub because a first-entry customer lands
+    on their booking, not the hub: a hub-only prompt would be seen by almost
+    nobody it is meant for.
+  */
+  const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+  const offerPasswordSetup =
+    meta.has_set_password !== true && !meta.portal_password_prompt_dismissed_at;
 
   const email = user.email?.trim() ?? '';
   const initial = email ? email.charAt(0).toUpperCase() : '?';
@@ -107,6 +121,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
         tabIndex={-1}
         className="mx-auto max-w-5xl px-4 pb-16 pt-8 outline-none sm:px-6 sm:pt-10"
       >
+        {offerPasswordSetup && <PortalPasswordPrompt />}
         {children}
       </main>
       </ToastProvider>

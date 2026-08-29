@@ -136,6 +136,30 @@ function busyIntervals(row) {
   return busy.filter((b) => b.end > b.start);
 }
 
+/**
+ * True when a processing gap falls inside the booking's window.
+ *
+ * "Has a gap inside its window", not "produces more than one busy interval".
+ * The narrower reading was the first version of this and it UNDER-COUNTED: a
+ * gap running to the END of the span leaves one busy interval, so it was not
+ * counted, even though the engine can still book into that gap and a
+ * span-based guard is still stricter than the engine for it. The SQL sibling
+ * caught the disagreement, at 9 against 7 on the same database, which is the
+ * argument for having written both.
+ */
+function hasGapInWindow(row) {
+  const start = toMinutes(row.booking_time);
+  const end = toMinutes(row.booking_end_time);
+  if (start == null || end == null || end <= start) return false;
+  const blocks = Array.isArray(row.processing_time_blocks) ? row.processing_time_blocks : [];
+  return blocks.some((b) => {
+    const from = Number(b?.start_minute);
+    const length = Number(b?.duration_minutes);
+    if (!Number.isFinite(from) || !Number.isFinite(length) || length <= 0) return false;
+    return start + from > start && start + from < end;
+  });
+}
+
 /** Peak simultaneous bookings in a group, by sweeping interval endpoints. */
 function peakConcurrency(rows) {
   const events = [];
@@ -205,10 +229,25 @@ async function main() {
   }
 
   // ── M2: how many bookings have a split busy span? ────────────────────────
-  const split = bookings.filter((b) => busyIntervals(b).length > 1);
+  /*
+    The denominator is bookings with a USABLE window: one with no end time
+    cannot be span-checked at all, so it is not part of the population a span
+    guard would misjudge. The total is reported beside it, because 122 of 315
+    active appointment bookings on staging carry no end time, which is worth
+    knowing on its own.
+  */
+  const withWindow = bookings.filter((b) => {
+    const start = toMinutes(b.booking_time);
+    const end = toMinutes(b.booking_end_time);
+    return start != null && end != null && end > start;
+  });
+  const split = withWindow.filter((b) => hasGapInWindow(b));
   const splitVenues = new Set(split.map((b) => b.venue_id));
   console.log('\nM2  Active bookings whose busy time is NOT one contiguous span');
-  console.log(`    ${split.length} of ${bookings.length} bookings, across ${splitVenues.size} venue(s).`);
+  console.log(
+    `    ${split.length} of ${withWindow.length} bookings with a usable window` +
+      ` (of ${bookings.length} active), across ${splitVenues.size} venue(s).`,
+  );
   console.log(
     split.length > 0
       ? '    => A guard reading booking_time..booking_end_time is STRICTER than the engine for these.'

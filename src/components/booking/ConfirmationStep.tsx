@@ -15,6 +15,21 @@ import {
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+/** Minutes between two `HH:MM` wall-clock times, or null when unusable. */
+function minutesBetweenHm(start: string, end?: string | null): number | null {
+  if (!end) return null;
+  const parse = (t: string): number | null => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(t.trim());
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const a = parse(start);
+  const b = parse(end);
+  if (a == null || b == null) return null;
+  // An end before the start is a booking crossing midnight.
+  const diff = b >= a ? b - a : b + 24 * 60 - a;
+  return diff > 0 ? diff : null;
+}
+
 function formatDateLong(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00');
   return `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]}`;
@@ -23,7 +38,12 @@ function formatDateLong(dateStr: string): string {
 interface ConfirmationStepProps {
   venue: VenuePublic;
   date: string;
-  slot: { label: string; start_time: string };
+  /**
+   * `end_time` and `estimated_duration` are on the `AvailableSlot` the caller
+   * already holds; this prop used to narrow them away, which is why the
+   * calendar file guessed at ninety minutes.
+   */
+  slot: { label: string; start_time: string; end_time?: string; estimated_duration?: number };
   partySize: number;
   guest: GuestDetails;
   bookingId: string | undefined;
@@ -44,12 +64,25 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
   }, []);
 
   const handleAddToCalendar = useCallback(() => {
+    /*
+      `timeZone` is the fix for a defect that shipped for a long time: without
+      it the venue's wall-clock time was read as UTC, so a 14:00 London booking
+      went into the guest's calendar at 15:00 for the whole of British Summer
+      Time. The Google link on the booking detail page always got this right,
+      so the two disagreed about the same booking.
+
+      The duration comes from the slot, which had it all along; the prop type
+      simply did not carry it through.
+    */
     const ics = buildIcsContent({
       venueName: venue.name,
       venueAddress: venue.address ?? undefined,
       bookingDate: date,
       bookingTime: slot.start_time,
       partySize,
+      timeZone: venue.timezone,
+      durationMinutes: minutesBetweenHm(slot.start_time, slot.end_time) ?? slot.estimated_duration,
+      bookingModel: venue.booking_model,
     });
     const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -58,7 +91,17 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
     a.download = `reservation-${venue.name.replace(/\s+/g, '-')}-${date}.ics`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [venue.name, venue.address, date, slot.start_time, partySize]);
+  }, [
+    venue.name,
+    venue.address,
+    venue.timezone,
+    venue.booking_model,
+    date,
+    slot.start_time,
+    slot.end_time,
+    slot.estimated_duration,
+    partySize,
+  ]);
 
   if (paymentOutcome === 'cancelled') {
     return (

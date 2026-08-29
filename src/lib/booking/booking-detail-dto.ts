@@ -490,6 +490,9 @@ export async function buildBookingDetailDto(
           partySize: booking.party_size,
           timeZone: venueTimezone,
           durationMinutes,
+          // So the fallback matches the Google link's when the duration is
+          // unknown: an event is three hours, an appointment is one.
+          bookingModel: inferredModel,
         })
       : null,
   };

@@ -355,13 +355,10 @@ describe('exactly one detail endpoint exists (P2-1 acceptance)', () => {
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
       .sort();
-    // `manage-link` is P0-3's and is deleted by P2-5.
-    expect(subroutes).toEqual([
-      'cancel',
-      'confirm',
-      'manage-link',
-      'reschedule',
-      'reschedule-options',
-    ]);
+    // P0-3's `manage-link` was a fifth until P2-5 deleted it: once the portal
+    // cancels and reschedules in place, nothing called it, and an
+    // authenticated route minting a cancel-without-login token with no
+    // consumer is a liability.
+    expect(subroutes).toEqual(['cancel', 'confirm', 'reschedule', 'reschedule-options']);
   });
 });

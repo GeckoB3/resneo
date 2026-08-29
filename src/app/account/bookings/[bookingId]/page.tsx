@@ -4,7 +4,6 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getBookingDetailForGuest } from '@/lib/booking/guest-actions/booking-detail';
 import { GuestBookingDetailView } from '@/components/booking/GuestBookingDetailView';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
-import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -61,20 +60,6 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
         initialDetail={result.data}
         chrome="embedded"
       />
-      {/*
-        The manage link stays until P2-2 and P2-3 give the session actor its own
-        cancel and reschedule handlers. P2-4 is scoped as a pure extraction, so
-        the shared view renders no buttons for a session actor yet, and removing
-        this before those land would leave a customer on a detail page with no
-        way to act. P2-5 removes it once they have.
-      */}
-      <div className="text-sm">
-        <ManageBookingLink
-          bookingId={bookingId}
-          label="Manage booking"
-          className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-medium text-brand-700 shadow-sm disabled:opacity-60"
-        />
-      </div>
     </div>
   );
 }

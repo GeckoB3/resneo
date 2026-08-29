@@ -134,13 +134,6 @@ describe('response envelope carve-out', () => {
  * which is closed: this one is for exemptions taken with a reason.
  */
 const C7A_EXEMPT: Record<string, string> = {
-  // P0-3 added it so the portal could mint a manage link on intent rather than
-  // on every list render. P2-5 performs cancel and reschedule in the portal and
-  // deletes it, so aliasing it would publish a route on the versioned surface
-  // only to remove it two phases later. Leaving an authenticated route that
-  // mints a cancel-without-login token with no consumer is a liability, which
-  // is why P2-5 removes it rather than keeping it around.
-  'account/bookings/[id]/manage-link/route.ts': 'removed by P2-5',
   // P2-1's portal spelling of an action the versioned surface already has, as
   // `DELETE /api/v1/me/bookings/[id]`. Both are thin adapters over
   // `cancelBookingForGuest`, so they cannot diverge in behaviour, and adding
@@ -158,17 +151,18 @@ describe('v1 alias rule (C7a/C7b)', () => {
     // count is asserted so that adding a route without an alias, and without
     // consciously updating this list, fails here.
     //
-    // 32: P0-3 added account/bookings/[id]/manage-link, which is C7A_EXEMPT;
-    // P1-1 added account/home, aliased at v1/me/home; and P2-1 added four
+    // 31: P1-1 added account/home, aliased at v1/me/home, and P2-1 added four
     // booking action routes, three aliased under v1/me/bookings/[id]/ and
-    // cancel C7A_EXEMPT because v1 already cancels with DELETE.
+    // cancel C7A_EXEMPT because v1 already cancels with DELETE. P0-3's
+    // account/bookings/[id]/manage-link was here as a C7a exemption and P2-5
+    // deleted it, which is why this went 32 to 31 rather than upward.
     const accountRoutes = routeFiles('account').map(rel).sort();
     expect(
       accountRoutes.length,
       'An /api/account route was added or removed. If added: give it a v1 alias (C7a) ' +
         'or a C7A_EXEMPT entry, and bump this count. Do NOT add it to the pre-existing ' +
         'exclusion list, which is dated 2026-08-27 and closed.',
-    ).toBe(32);
+    ).toBe(31);
   });
 
   it('routes this plan created have their v1 alias', () => {
@@ -194,9 +188,9 @@ describe('v1 alias rule (C7a/C7b)', () => {
   });
 
   it('every C7a exemption still exists, so the reason cannot outlive the route', () => {
-    // When P2-5 deletes the manage-link route, this fails until the entry goes
-    // too. An exemption list that quietly describes nothing is how the next
-    // route gets waved through without one.
+    // This is what made P2-5 delete the exemption alongside the route: it
+    // failed the moment the file went. An exemption list that quietly
+    // describes nothing is how the next route gets waved through without one.
     for (const [file, reason] of Object.entries(C7A_EXEMPT)) {
       expect(fs.existsSync(path.join(API, file)), `${file} is C7a-exempt (${reason}) but does not exist`).toBe(
         true,

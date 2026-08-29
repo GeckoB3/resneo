@@ -91,7 +91,19 @@ export interface BookingDetailDto {
   refund_notice_hours: number;
   guest_attendance_confirmed_at: string | null;
   venue_public: VenuePublic | null;
-  manage_booking_url: string;
+  /**
+   * The `/b/{code}` manage link, or null when the caller has no use for one.
+   *
+   * NULL FOR A SIGNED-IN CUSTOMER, and that is the point (P2-5). This field is
+   * a CREDENTIAL: a short link that grants cancel-without-login to whoever
+   * holds it. The token surfaces are built on one and `ConfirmCancelView`
+   * renders it, but the portal has its own authenticated actions and never
+   * showed it, so building one there minted a `booking_short_links` row on
+   * every page view and shipped a bearer token into the browser of somebody
+   * who was already signed in. That is the same liability P2-5 removes with
+   * the `manage-link` route, arriving by a different door.
+   */
+  manage_booking_url: string | null;
   compliance_forms: Array<{ name: string; url: string }>;
   feature_flags: { resolved: ReturnType<typeof resolveAppointmentsFeatureFlags> };
 
@@ -225,6 +237,13 @@ export interface BookingDetailSourceRow {
 export async function buildBookingDetailDto(
   supabase: SupabaseClient,
   booking: BookingDetailSourceRow,
+  /**
+   * Required, with no default, so that a new caller has to DECIDE rather than
+   * inherit a token it did not ask for. That is how the portal came to mint
+   * one: it reused a builder written for the token surface, and the field was
+   * simply always there.
+   */
+  opts: { includeManageUrl: boolean },
 ): Promise<BookingDetailDto> {
   const { data: venue } = await supabase
     .from('venues')
@@ -585,11 +604,16 @@ export async function buildBookingDetailDto(
     refund_notice_hours: refundNoticeHours,
     guest_attendance_confirmed_at: booking.guest_attendance_confirmed_at ?? null,
     venue_public: isAppointment ? await buildVenuePublicForBookingById(booking.venue_id) : null,
-    manage_booking_url: await createOrGetBookingShortLink({
-      venueId: booking.venue_id,
-      bookingId: booking.id,
-      purpose: 'manage',
-    }),
+    // Minting is a WRITE, so it is skipped rather than computed and dropped:
+    // a GET that writes on every render is the defect P0-3 removed from the
+    // bookings list, and the detail page had quietly reintroduced it.
+    manage_booking_url: opts.includeManageUrl
+      ? await createOrGetBookingShortLink({
+          venueId: booking.venue_id,
+          bookingId: booking.id,
+          purpose: 'manage',
+        })
+      : null,
     compliance_forms: await loadOutstandingBookingFormLinks(supabase, booking.venue_id, booking.id),
     feature_flags: { resolved: featureFlagsResolved },
     location: { type: locationType, address: locationAddress, map_url: mapUrl },

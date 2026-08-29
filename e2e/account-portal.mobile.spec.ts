@@ -83,25 +83,36 @@ test.describe('portal at 375px', () => {
 
     // Nothing has scrolled, and the card's primary action is on screen.
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
-    const action = page.getByRole('link', { name: 'View details' });
+    // P2-5 merged this card's two links into one: "View details" and
+    // "Reschedule or cancel" both led here, and the surviving label carries
+    // what the second one was for. It is a LONGER label on a 375px row, which
+    // is exactly the kind of change the measurement below exists to catch.
+    const action = page.getByRole('link', { name: 'View, reschedule or cancel' });
     const box = await action.boundingBox();
-    expect(box, 'the card has no View details link').not.toBeNull();
+    expect(box, 'the card has no link to the booking').not.toBeNull();
     expect(
       box!.y + box!.height,
       'the next booking card is below the fold at 375px',
     ).toBeLessThanOrEqual(812);
   });
 
-  test('the detail page and its manage button fit the viewport', async ({ page }) => {
+  test('the detail page action buttons fit the viewport', async ({ page }) => {
+    /*
+      This measured the "Manage booking" button, which P2-5 deleted: the portal
+      now cancels and reschedules in place rather than sending a customer to a
+      token page. The PROPERTY is unchanged and is what mattered, so it moved
+      to the controls that replaced it: an action a customer cannot reach with
+      a thumb at 375px is not an action.
+    */
     await page.goto('/account/bookings');
     await page.getByRole('link', { name: 'Details' }).first().click();
     await expect(page).toHaveURL(/\/account\/bookings\/[0-9a-f-]{36}/);
 
-    const manage = page.getByRole('button', { name: 'Manage booking' });
-    await expect(manage).toBeVisible();
+    const action = page.getByRole('button', { name: /^(cancel|change|modify)/i }).first();
+    await expect(action, 'the detail page offers no action at all').toBeVisible();
 
-    const box = await manage.boundingBox();
-    expect(box, 'the manage button has no layout box').not.toBeNull();
+    const box = await action.boundingBox();
+    expect(box, 'the action button has no layout box').not.toBeNull();
     // Inside the viewport horizontally, and tall enough to hit with a thumb.
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(375);

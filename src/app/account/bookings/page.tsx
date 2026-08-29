@@ -21,7 +21,6 @@ import {
   type AccountBookingModelFilter,
 } from '@/lib/account/account-booking-filters';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
-import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -234,11 +233,6 @@ export default async function AccountBookingsPage({
                               <Link href={`/account/bookings/${b.id}`} className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
                                 Details
                               </Link>
-                              <ManageBookingLink
-                                bookingId={b.id}
-                                label="Cancel this session"
-                                className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2 disabled:opacity-60"
-                              />
                             </span>
                           </li>
                         );
@@ -247,8 +241,8 @@ export default async function AccountBookingsPage({
                   </div>
                 </div>
                 <p className="text-[11px] leading-relaxed text-slate-500">
-                  Each link cancels only that one session. To cancel the whole course, cancel every session here or
-                  contact the venue.
+                  Each session is changed or cancelled on its own. To cancel the whole course, do
+                  that for every session here, or contact the venue.
                 </p>
               </li>
             ) : (
@@ -269,11 +263,6 @@ export default async function AccountBookingsPage({
                   <Link href={`/account/bookings/${item.row.id}`} className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
                     Details
                   </Link>
-                  <ManageBookingLink
-                    bookingId={item.row.id}
-                    label="Manage"
-                    className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2 disabled:opacity-60"
-                  />
                 </div>
               </li>
             ),

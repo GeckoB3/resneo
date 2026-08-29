@@ -76,41 +76,42 @@ test.describe('P0-1 portal smoke: view bookings, open detail', () => {
     await expect(heading.first()).toBeVisible();
   });
 
-  test('mints the manage link on intent, not on render (P0-3)', async ({ page }) => {
-    // The list used to mint a short link for every row while rendering, so a
-    // GET wrote a row per booking. It is now minted by POST when a customer
-    // asks, which means the button has to actually work: an anchor with a
-    // pre-baked href could not silently break, and a button can.
-    // Intercepted rather than observed, because the successful case navigates
-    // away and the response body is gone by the time an assertion could read
-    // it: the first version of this test failed on exactly that.
+  test('never mints a manage link, and the route is gone (P0-3, P2-5)', async ({ page }) => {
+    /*
+      P0-3 stopped the list minting a short link for every row on render, and
+      moved it to a POST on intent. P2-5 removed the intent too: the portal
+      cancels and reschedules in place, so no customer surface needs a link
+      that grants cancel-WITHOUT-login to whoever holds it.
+
+      This replaced a test that clicked the button and followed it to
+      `/manage/...`. Kept as a live check rather than deleted, because the
+      unit guard reads source text and cannot see a mint that happens
+      SERVER-side: the detail page minted one on every render for exactly that
+      reason, invisible to both.
+    */
     const mintCalls: string[] = [];
-    let mintedUrl: string | null = null;
     await page.route('**/manage-link', async (route) => {
       mintCalls.push(route.request().method());
-      const response = await route.fetch();
-      const body = (await response.json()) as { url?: string };
-      mintedUrl = body.url ?? null;
-      await route.fulfill({ response });
+      await route.continue();
     });
 
     // Registered BEFORE the navigation, so a mint during render would be seen.
     await page.goto('/account/bookings');
     await expect(page.getByRole('heading', { name: 'Your bookings' })).toBeVisible();
-    expect(mintCalls, 'the bookings list minted a manage link on render').toEqual([]);
-
     await page.getByRole('link', { name: 'Details' }).first().click();
     await expect(page).toHaveURL(/\/account\/bookings\/[0-9a-f-]{36}/);
-    expect(mintCalls, 'the booking detail page minted a manage link on render').toEqual([]);
+    expect(mintCalls, 'a portal page asked for a manage link').toEqual([]);
 
-    await page.getByRole('button', { name: 'Manage booking' }).click();
+    // And nothing sends a customer out to a token page any more.
+    await expect(page.getByRole('button', { name: 'Manage booking' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Manage$/ })).toHaveCount(0);
 
-    // It resolves to the guest manage page, signed with its HMAC.
-    await expect(page).toHaveURL(/\/manage\/[0-9a-f-]{36}\?hmac=/);
-
-    // One POST, and a real /b/{code} short link.
-    expect(mintCalls).toEqual(['POST']);
-    expect(mintedUrl).toMatch(/\/b\/[0-9A-Za-z]{6}$/);
+    // The route itself is deleted, not merely uncalled. Asserted through the
+    // browser's own session: a 404 from Next, rather than the 401 an existing
+    // route would give an anonymous caller, is what says it is gone.
+    const bookingId = new URL(page.url()).pathname.split('/').pop()!;
+    const res = await page.request.post(`/api/account/bookings/${bookingId}/manage-link`);
+    expect(res.status(), 'POST .../manage-link still resolves to a handler').toBe(404);
   });
 
   test('every account surface renders, with the timezone now a picker (P0-2)', async ({ page }) => {

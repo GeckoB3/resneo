@@ -173,10 +173,8 @@ describe('P1-4: the portal speaks to customers, not about its plumbing', () => {
     const offenders: string[] = [];
     for (const file of UI_DIRS.flatMap(tsxFiles)) {
       const src = strippedSource(fs.readFileSync(file, 'utf8'));
-      // `(?<!\$)` keeps this to JSX. `` `HTTP ${res.status}` `` in
-      // ManageBookingLink is an HTTP response code going into an Error, not a
-      // database enum going onto the page, and it is code for the same reason
-      // every other `${...}` is.
+      // `(?<!\$)` keeps this to JSX, so a `` `HTTP ${res.status}` `` going
+      // into an Error is not read as a database enum going onto the page.
       for (const m of src.matchAll(/(?<!\$)\{\s*[a-z]\w*\.(status|reason|state)\s*\}/gi)) {
         offenders.push(`${rel(file)}: ${m[0]}`);
       }

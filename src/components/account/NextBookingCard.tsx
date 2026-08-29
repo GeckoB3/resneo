@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
-import { ManageBookingLink } from '@/components/account/ManageBookingLink';
 import {
   accountBookingTimeZone,
   formatAccountBookingDateTime,
@@ -106,17 +105,20 @@ export function NextBookingCard({
       ) : null}
 
       <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-medium">
+{/*
+          ONE link where there were two (P2-5). "View details" and "Reschedule
+          or cancel" now lead to the same page, and two controls with one
+          destination is a duplicate to tab through rather than a choice. The
+          surviving label keeps what the second one was for, which is telling a
+          customer the actions EXIST: dropping it would have left the hub
+          silent about whether a booking can be changed at all.
+        */}
         <Link
           href={`/account/bookings/${booking.id}`}
           className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2"
         >
-          View details
+          View, reschedule or cancel
         </Link>
-        <ManageBookingLink
-          bookingId={booking.id}
-          label="Reschedule or cancel"
-          className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2 disabled:opacity-60"
-        />
         {address ? (
           <a
             // Maps rather than a bespoke directions integration: it works on

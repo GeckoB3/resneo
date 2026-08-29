@@ -209,9 +209,10 @@ describe('GET /api/account/bookings', () => {
   });
 
   it('drops manage_booking_link from the row', async () => {
-    // The one sanctioned C13 exception, taken before the rule binds: the link
-    // is minted on intent by POST /api/account/bookings/[id]/manage-link. Safe
-    // because the shipped app never calls GET /api/v1/me/bookings.
+    // The one sanctioned C13 exception, taken before the rule binds. P0-3
+    // moved the link to being minted on intent by a route of its own; P2-5
+    // deleted that route too, because the portal now cancels and reschedules
+    // in place and no customer surface needs the link at all.
     const { body } = await listBookings();
     expect(body.bookings!.every((b) => !('manage_booking_link' in b))).toBe(true);
   });

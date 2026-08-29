@@ -180,10 +180,10 @@ describe('accessible names survive the primitive migration', () => {
 
 describe('mutation controls disable while in flight (G30)', () => {
   /**
-   * The nine handlers, by file. The plan said eight; the tenth control
-   * (`ManageBookingLink`) already had a guard from P0-3 and
-   * `AccountRecurringSection`'s three had one from the start, which is why they
-   * are not listed as newly guarded here.
+   * The nine handlers, by file. The plan said eight; `AccountRecurringSection`'s
+   * three had a guard from the start, which is why they are not listed as newly
+   * guarded here. A tenth, `ManageBookingLink`, was guarded by P0-3 and then
+   * deleted by P2-5 along with the route it called.
    *
    *   AccountPaymentMethodsSection  startSetup
    *   AccountCreditsSection         BuyPackPicker onBuy

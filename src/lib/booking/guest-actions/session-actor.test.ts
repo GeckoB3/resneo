@@ -22,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
   ownsBooking: true,
   hmacValid: true,
   tokenValid: true,
+  mintShortLink: vi.fn(async () => 'https://resneo.test/b/abc123'),
 }));
 
 vi.mock('@/lib/confirm-token', () => ({ verifyConfirmToken: () => hoisted.tokenValid }));
@@ -37,6 +38,14 @@ vi.mock('@/lib/booking/offer-appointment-waitlist-on-cancel', () => ({
   offerAppointmentWaitlistOnCancel: async () => ({ offered: false }),
 }));
 vi.mock('@/lib/observability/booking-ops-log', () => ({ logBookingOp: vi.fn() }));
+/*
+  P2-5. Minting a short link is a WRITE through its own admin client, so it is
+  mocked both to keep this suite off the database and so that "was one minted"
+  becomes something a test can ask.
+*/
+vi.mock('@/lib/booking-short-links', () => ({
+  createOrGetBookingShortLink: hoisted.mintShortLink,
+}));
 vi.mock('@/lib/communications/send-templated', () => ({
   sendCancellationNotification: vi.fn(async () => undefined),
 }));
@@ -272,5 +281,62 @@ describe('token and HMAC semantics are unchanged', () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe(404);
+  });
+});
+
+
+describe('a signed-in customer is not handed a manage link (P2-5)', () => {
+  /*
+    A `/b/{code}` manage link is a BEARER CREDENTIAL: whoever holds it can
+    cancel the booking without logging in. The portal's detail page reuses the
+    DTO built for the token surface, so until P2-5 every page view minted one,
+    wrote a `booking_short_links` row, and serialised the link into the browser
+    of a customer who already had a session and a Cancel button that did not
+    need it.
+
+    Asserted on the MINT rather than on the field being null, because the field
+    could be nulled after the fact and the write would still happen: it is the
+    write, and the credential existing at all, that this is about.
+  */
+  beforeEach(() => {
+    hoisted.mintShortLink.mockClear();
+  });
+
+  it('mints nothing when a session actor loads a booking', async () => {
+    const clients = setup(baseBooking({ calendar_id: null, service_item_id: null }));
+    const { getBookingDetailForGuest } = await import('./booking-detail');
+    const result = await getBookingDetailForGuest(clients, {
+      bookingId: BOOKING_ID,
+      actor: sessionActor,
+    });
+
+    expect(result.ok, 'the fixture did not reach the builder, so this asserts nothing').toBe(true);
+    expect(hoisted.mintShortLink, 'the portal minted a manage link').not.toHaveBeenCalled();
+  });
+
+  it('and carries no manage link in the payload it returns', async () => {
+    const clients = setup(baseBooking({ calendar_id: null, service_item_id: null }));
+    const { getBookingDetailForGuest } = await import('./booking-detail');
+    const result = await getBookingDetailForGuest(clients, {
+      bookingId: BOOKING_ID,
+      actor: sessionActor,
+    });
+
+    expect(result.ok && result.data.manage_booking_url).toBeNull();
+  });
+
+  it('but the builder still mints one when its caller asks, so the token surface works', async () => {
+    // The vacuity guard. Without it, a build that deleted the minting entirely
+    // would pass both rows above while breaking every emailed manage link.
+    const clients = setup(baseBooking({ calendar_id: null, service_item_id: null }));
+    const { buildBookingDetailDto } = await import('@/lib/booking/booking-detail-dto');
+    const dto = await buildBookingDetailDto(
+      clients.admin,
+      baseBooking({ calendar_id: null, service_item_id: null }) as never,
+      { includeManageUrl: true },
+    );
+
+    expect(hoisted.mintShortLink).toHaveBeenCalledTimes(1);
+    expect(dto.manage_booking_url).toBe('https://resneo.test/b/abc123');
   });
 });

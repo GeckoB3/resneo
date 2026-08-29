@@ -23,5 +23,14 @@ export async function getBookingDetailForGuest(
 ): Promise<GuestActionResult<BookingDetailDto>> {
   const loaded = await loadAndAuthoriseGuestBooking(clients, params.bookingId, params.actor);
   if (!loaded.ok) return loaded;
-  return actionSuccess(await buildBookingDetailDto(clients.admin, loaded.data));
+  /*
+   * `includeManageUrl: false`: everything reaching here is a signed-in
+   * customer, on the portal or on `/api/v1/me`, and both have authenticated
+   * actions of their own. Minting a cancel-without-login short link for them
+   * would write a row per page view and hand a credential to a browser that
+   * already holds a session (P2-5).
+   */
+  return actionSuccess(
+    await buildBookingDetailDto(clients.admin, loaded.data, { includeManageUrl: false }),
+  );
 }

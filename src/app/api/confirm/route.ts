@@ -65,7 +65,11 @@ export async function GET(request: NextRequest) {
      * pinned by `characterisation/detail.test.ts` and are not the builder's
      * business.
      */
-    return NextResponse.json(await buildBookingDetailDto(supabase, booking));
+    // The token surface IS a manage link, and `ConfirmCancelView` renders
+    // one to move between the two token pages, so this caller wants it.
+    return NextResponse.json(
+      await buildBookingDetailDto(supabase, booking, { includeManageUrl: true }),
+    );
   } catch (err) {
     console.error("GET /api/confirm failed:", err);
     return NextResponse.json(

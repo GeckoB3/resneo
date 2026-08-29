@@ -10,6 +10,7 @@
     "lint:modals": "node scripts/lint-no-raw-modals.mjs",
     "check:function-grants": "node scripts/check-client-executable-functions.mjs",
     "check:table-grants": "node scripts/check-table-grants.mjs",
+    "measure:appointment-concurrency": "node scripts/measure-appointment-concurrency.mjs",
     "db:start": "supabase start",
     "db:stop": "supabase stop --no-backup",
     "test:rls": "supabase test db",

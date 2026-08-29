@@ -26,8 +26,21 @@ import {
 
 const TABLE = 'account_portal_tokens';
 
-/** AD7: 30 days. Long enough that a link in a month-old email still works. */
-export const PORTAL_TOKEN_TTL_DAYS = 30;
+/**
+ * TWENTY-FOUR HOURS, matching `otp_expiry` and therefore every other sign-in
+ * link on this platform.
+ *
+ * P3-4a shipped this as 30 days, which was AD7's figure for a token that only
+ * established a LIMITED session. P3-4c makes it establish a FULL one, so the
+ * window is the whole of what bounds it: within the window, whoever holds the
+ * confirmation email holds the account. A booking confirmation is forwarded,
+ * printed and kept for years in a way a requested sign-in link is not, and 30
+ * days of that is a different proposition from 24 hours.
+ *
+ * Named in HOURS deliberately. As `PORTAL_TOKEN_TTL_DAYS` a later reader could
+ * restore 30 believing it a tuning knob; the unit now says it is not.
+ */
+export const PORTAL_TOKEN_TTL_HOURS = 24;
 
 export interface PortalTokenVerification {
   ok: boolean;
@@ -46,7 +59,7 @@ export async function issuePortalToken(
 ): Promise<string | null> {
   const token = generateConfirmToken();
   const now = params.now ?? new Date();
-  const expiresAt = new Date(now.getTime() + PORTAL_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(now.getTime() + PORTAL_TOKEN_TTL_HOURS * 60 * 60 * 1000);
 
   const { error } = await admin.from(TABLE).insert({
     token_hash: hashConfirmToken(token),

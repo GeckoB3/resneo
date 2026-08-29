@@ -22,7 +22,7 @@ import {
   issuePortalToken,
   revokePortalTokensForBooking,
   verifyPortalToken,
-  PORTAL_TOKEN_TTL_DAYS,
+  PORTAL_TOKEN_TTL_HOURS,
 } from './portal-token';
 
 const NOW = new Date('2026-09-01T12:00:00.000Z');
@@ -72,13 +72,20 @@ describe('issuePortalToken', () => {
     expect(JSON.stringify(payload)).not.toContain(token);
   });
 
-  it('sets the 30-day window AD7 specifies', async () => {
+  it('sets a window measured in HOURS, matching a magic link', async () => {
+    /*
+      P3-4c cut this from 30 days. The token now establishes a FULL session, so
+      the window is the whole of what bounds it, and a booking confirmation is
+      forwarded and kept in a way a requested sign-in link is not. Asserted as
+      a literal 24 as well as against the constant, so raising the constant
+      fails here rather than passing by tautology.
+    */
     const admin = setup(null);
     await issuePortalToken(admin, { userId: USER, now: NOW });
     const payload = db.calls.find((c) => c.op === 'insert')?.payload as Record<string, string>;
-    const days = (Date.parse(payload.expires_at) - NOW.getTime()) / 86_400_000;
-    expect(days).toBe(PORTAL_TOKEN_TTL_DAYS);
-    expect(days).toBe(30);
+    const hours = (Date.parse(payload.expires_at) - NOW.getTime()) / 3_600_000;
+    expect(hours).toBe(PORTAL_TOKEN_TTL_HOURS);
+    expect(hours).toBe(24);
   });
 
   it('records the booking it was issued for, so it can be revoked later', async () => {

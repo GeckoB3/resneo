@@ -25,59 +25,57 @@ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SELECT plan(7);
 
 -- ── Fixture ────────────────────────────────────────────────────────────────
--- One venue, two calendars (cap 1 and cap 2), one guest, and bookings placed
--- so that every assertion below has something real to collide with.
-CREATE TEMP TABLE fx (k text PRIMARY KEY, v uuid);
+-- Its OWN venue, guest and calendars, at fixed ids.
+--
+-- It first borrowed whatever `SELECT id FROM public.venues LIMIT 1` returned,
+-- which passed against staging and FAILED IN CI, where the database is built
+-- from migrations and holds no venues at all: the select matched nothing, so
+-- every booking below was inserted with a null venue_id and the suite died on
+-- a not-null violation before running a single test. A fixture that depends on
+-- ambient data is not a fixture. Same shape as `account_safe_views_test.sql`,
+-- which is why that one has always passed in CI.
+INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
+VALUES ('00000000-0000-0000-0000-0000000a51f1', 'Slot Guard Venue', 'slot-guard-venue',
+        'venue@slotguard.test', 'appointments', 'active', 'unified_scheduling');
 
-INSERT INTO fx SELECT 'venue', id FROM public.venues LIMIT 1;
+INSERT INTO public.guests (id, venue_id, first_name, last_name, email)
+VALUES ('00000000-0000-0000-0000-0000000a51a1', '00000000-0000-0000-0000-0000000a51f1',
+        'PgTap', 'Guard', 'pgtap-guard@slotguard.test');
 
--- Data-modifying CTEs: an INSERT ... RETURNING cannot sit in a FROM subquery.
-WITH c1 AS (
-  INSERT INTO public.unified_calendars (venue_id, name, parallel_clients, capacity)
-  SELECT v, 'pgtap cap1', 1, 1 FROM fx WHERE k = 'venue'
-  RETURNING id
-)
-INSERT INTO fx SELECT 'cal1', id FROM c1;
+-- Two calendars: one that takes a single client at a time, one that takes two.
+-- The pair is what proves the guard READS `parallel_clients` rather than
+-- assuming it, which is the assertion that stops it disagreeing with the
+-- availability engine.
+INSERT INTO public.unified_calendars (id, venue_id, name, parallel_clients, capacity)
+VALUES
+  ('00000000-0000-0000-0000-0000000a51c1', '00000000-0000-0000-0000-0000000a51f1',
+   'pgtap cap1', 1, 1),
+  ('00000000-0000-0000-0000-0000000a51c2', '00000000-0000-0000-0000-0000000a51f1',
+   'pgtap cap2', 2, 2);
 
-WITH c2 AS (
-  INSERT INTO public.unified_calendars (venue_id, name, parallel_clients, capacity)
-  SELECT v, 'pgtap cap2', 2, 2 FROM fx WHERE k = 'venue'
-  RETURNING id
-)
-INSERT INTO fx SELECT 'cal2', id FROM c2;
-
-WITH g AS (
-  INSERT INTO public.guests (venue_id, first_name, last_name, email)
-  SELECT v, 'PgTap', 'Guard', 'pgtap-guard@example.invalid' FROM fx WHERE k = 'venue'
-  RETURNING id
-)
-INSERT INTO fx SELECT 'guest', id FROM g;
-
+/* A booking on one of those calendars, returned by id. */
 CREATE OR REPLACE FUNCTION pg_temp.mk(
-  p_cal_key text, p_time time, p_status text DEFAULT 'Booked'
+  p_cal uuid, p_time time, p_status text DEFAULT 'Booked'
 ) RETURNS uuid LANGUAGE sql AS $$
   INSERT INTO public.bookings
     (venue_id, guest_id, calendar_id, booking_date, booking_time, booking_end_time,
      party_size, status, source, booking_model)
-  SELECT
-    (SELECT v FROM fx WHERE k = 'venue'),
-    (SELECT v FROM fx WHERE k = 'guest'),
-    (SELECT v FROM fx WHERE k = p_cal_key),
-    DATE '2030-03-03', p_time, (p_time + INTERVAL '1 hour')::time, 1,
-    p_status::booking_status, 'online'::booking_source, 'unified_scheduling'::booking_model
+  VALUES
+    ('00000000-0000-0000-0000-0000000a51f1', '00000000-0000-0000-0000-0000000a51a1',
+     p_cal, DATE '2030-03-03', p_time, (p_time + INTERVAL '1 hour')::time, 1,
+     p_status::booking_status, 'online'::booking_source, 'unified_scheduling'::booking_model)
   RETURNING id;
 $$;
 
 /* Does a claim succeed? Returns the row count, or the SQLSTATE it raised. */
 CREATE OR REPLACE FUNCTION pg_temp.try_claim(
-  p_booking uuid, p_cal_key text, p_time time, p_updated timestamptz DEFAULT NULL
+  p_booking uuid, p_cal uuid, p_time time, p_updated timestamptz DEFAULT NULL
 ) RETURNS text LANGUAGE plpgsql AS $$
 DECLARE n int; u timestamptz;
 BEGIN
   u := COALESCE(p_updated, (SELECT updated_at FROM public.bookings WHERE id = p_booking));
   SELECT count(*) INTO n FROM public.claim_appointment_slot(
-    p_booking, (SELECT v FROM fx WHERE k = p_cal_key), NULL,
-    DATE '2030-03-03', p_time, u, '{}'::jsonb);
+    p_booking, p_cal, NULL, DATE '2030-03-03', p_time, u, '{}'::jsonb);
   RETURN 'rows:' || n;
 EXCEPTION WHEN others THEN
   RETURN SQLSTATE;
@@ -86,15 +84,15 @@ $$;
 
 -- ── 1. A free slot is claimable ────────────────────────────────────────────
 SELECT is(
-  pg_temp.try_claim(pg_temp.mk('cal1', TIME '09:00'), 'cal1', TIME '09:30'),
+  pg_temp.try_claim(pg_temp.mk('00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '09:00'), '00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '09:30'),
   'rows:1',
   'a claim on an empty slot succeeds'
 );
 
 -- ── 2. A full slot is refused, and with the shared SQLSTATE ────────────────
-SELECT pg_temp.mk('cal1', TIME '10:00');
+SELECT pg_temp.mk('00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '10:00');
 SELECT is(
-  pg_temp.try_claim(pg_temp.mk('cal1', TIME '11:00'), 'cal1', TIME '10:00'),
+  pg_temp.try_claim(pg_temp.mk('00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '11:00'), '00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '10:00'),
   '23P01',
   'a claim on a slot already at capacity raises 23P01, as enforce_cde_capacity does'
 );
@@ -103,16 +101,16 @@ SELECT is(
 -- The same collision on a parallel_clients=2 calendar is legitimate. This is
 -- the assertion that stops the guard disagreeing with the availability engine,
 -- which reads the same column.
-SELECT pg_temp.mk('cal2', TIME '10:00');
+SELECT pg_temp.mk('00000000-0000-0000-0000-0000000a51c2'::uuid, TIME '10:00');
 SELECT is(
-  pg_temp.try_claim(pg_temp.mk('cal2', TIME '11:00'), 'cal2', TIME '10:00'),
+  pg_temp.try_claim(pg_temp.mk('00000000-0000-0000-0000-0000000a51c2'::uuid, TIME '11:00'), '00000000-0000-0000-0000-0000000a51c2'::uuid, TIME '10:00'),
   'rows:1',
   'a second client at one time is allowed when parallel_clients is 2'
 );
 
 -- ── 4. ...but only up to the cap ───────────────────────────────────────────
 SELECT is(
-  pg_temp.try_claim(pg_temp.mk('cal2', TIME '13:00'), 'cal2', TIME '10:00'),
+  pg_temp.try_claim(pg_temp.mk('00000000-0000-0000-0000-0000000a51c2'::uuid, TIME '13:00'), '00000000-0000-0000-0000-0000000a51c2'::uuid, TIME '10:00'),
   '23P01',
   'a third client at one time is refused when parallel_clients is 2'
 );
@@ -124,17 +122,17 @@ SELECT is(
 -- from a WHERE clause it fires per row scanned, quietly manufacturing the very
 -- collision the test is meant to rule out. Bound in a subquery it runs once.
 SELECT is(
-  pg_temp.try_claim(b.id, 'cal1', TIME '14:00'),
+  pg_temp.try_claim(b.id, '00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '14:00'),
   'rows:1',
   'rescheduling a booking onto its own slot is not a conflict'
-) FROM (SELECT pg_temp.mk('cal1', TIME '14:00') AS id) b;
+) FROM (SELECT pg_temp.mk('00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '14:00') AS id) b;
 
 -- ── 6. A cancelled booking frees its slot ──────────────────────────────────
 -- The status list matches enforce_cde_capacity's: only capacity-consuming
 -- statuses occupy a slot.
-SELECT pg_temp.mk('cal1', TIME '15:00', 'Cancelled');
+SELECT pg_temp.mk('00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '15:00', 'Cancelled');
 SELECT is(
-  pg_temp.try_claim(pg_temp.mk('cal1', TIME '16:00'), 'cal1', TIME '15:00'),
+  pg_temp.try_claim(pg_temp.mk('00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '16:00'), '00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '15:00'),
   'rows:1',
   'a cancelled booking does not hold its slot against a new claim'
 );
@@ -144,7 +142,7 @@ SELECT is(
 -- the same atomic step. A stale value must still claim nothing.
 SELECT is(
   pg_temp.try_claim(
-    pg_temp.mk('cal1', TIME '17:00'), 'cal1', TIME '17:30',
+    pg_temp.mk('00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '17:00'), '00000000-0000-0000-0000-0000000a51c1'::uuid, TIME '17:30',
     TIMESTAMPTZ '2020-01-01 00:00:00+00'
   ),
   'rows:0',

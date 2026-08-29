@@ -44,6 +44,12 @@ export const PORTAL_TOKEN_TTL_HOURS = 24;
 
 export interface PortalTokenVerification {
   ok: boolean;
+  /**
+   * The address this token signs in, and the ONLY identity the caller may act
+   * on. Present for every valid token.
+   */
+  email: string | null;
+  /** Set only when the token was issued to somebody who already had an account. */
   userId: string | null;
   /** Why it was refused, for logging. Never shown to the person holding it. */
   reason: 'valid' | 'unknown' | 'expired' | 'revoked' | 'error';
@@ -52,18 +58,32 @@ export interface PortalTokenVerification {
 /**
  * Mint a token and store its hash. Returns the PLAINTEXT, which exists only in
  * the returned value and in the email that carries it; nothing persists it.
+ *
+ * **Keyed on the EMAIL, not on an account** (P3-4d). Most of the people these
+ * links are for have no `auth.users` row: 1,078 distinct guest emails on
+ * production had none, because nothing in the public booking flow creates one.
+ * The account is created when somebody actually clicks, by `/auth/portal`.
+ * `userId` is optional and recorded only when there already is one, so that
+ * every token belonging to an account can still be revoked together.
  */
 export async function issuePortalToken(
   admin: SupabaseClient,
-  params: { userId: string; bookingId?: string | null; now?: Date },
+  params: { email: string; userId?: string | null; bookingId?: string | null; now?: Date },
 ): Promise<string | null> {
   const token = generateConfirmToken();
   const now = params.now ?? new Date();
   const expiresAt = new Date(now.getTime() + PORTAL_TOKEN_TTL_HOURS * 60 * 60 * 1000);
 
+  const email = params.email.trim().toLowerCase();
+  if (!email) {
+    console.error('[portal-token] refused to issue a token for an empty address');
+    return null;
+  }
+
   const { error } = await admin.from(TABLE).insert({
     token_hash: hashConfirmToken(token),
-    user_id: params.userId,
+    email,
+    user_id: params.userId ?? null,
     scope: 'limited',
     issued_for_booking_id: params.bookingId ?? null,
     expires_at: expiresAt.toISOString(),
@@ -98,6 +118,7 @@ export async function verifyPortalToken(
 ): Promise<PortalTokenVerification> {
   const refused = (reason: PortalTokenVerification['reason']): PortalTokenVerification => ({
     ok: false,
+    email: null,
     userId: null,
     reason,
   });
@@ -106,7 +127,7 @@ export async function verifyPortalToken(
 
   const { data, error } = await admin
     .from(TABLE)
-    .select('token_hash, user_id, expires_at, revoked_at')
+    .select('token_hash, email, user_id, expires_at, revoked_at')
     .eq('token_hash', hashConfirmToken(token))
     .maybeSingle();
 
@@ -117,7 +138,8 @@ export async function verifyPortalToken(
 
   const row = data as {
     token_hash: string;
-    user_id: string;
+    email: string | null;
+    user_id: string | null;
     expires_at: string;
     revoked_at: string | null;
   } | null;
@@ -137,7 +159,13 @@ export async function verifyPortalToken(
   const expiresAt = Date.parse(row.expires_at);
   if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) return refused('expired');
 
-  return { ok: true, userId: row.user_id, reason: 'valid' };
+  const email = row.email?.trim().toLowerCase() ?? null;
+  // A row identifying nobody cannot sign anybody in. The table's CHECK makes
+  // this unreachable; it is here so that a future column change cannot turn it
+  // into a session for whoever asks.
+  if (!email && !row.user_id) return refused('unknown');
+
+  return { ok: true, email, userId: row.user_id, reason: 'valid' };
 }
 
 /**

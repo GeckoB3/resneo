@@ -39,13 +39,17 @@ async function fixtureUserId(): Promise<string> {
 }
 
 test.describe('P3-4c one-click entry', () => {
-  test.use({ storageState: EMPTY_STORAGE_STATE });
+  // Spread, because the constant is `as const` and Playwright wants mutable
+  // arrays. `portal-booking-actions.spec.ts` does the same.
+  test.use({
+    storageState: { cookies: [...EMPTY_STORAGE_STATE.cookies], origins: [...EMPTY_STORAGE_STATE.origins] },
+  });
   test.skip(!e2e.isConfigured || !portalCustomerConfigured(), 'not configured');
 
   test('a signed-out browser lands signed in', async ({ page }) => {
     const db = admin();
     const userId = await fixtureUserId();
-    const token = await issuePortalToken(db, { userId });
+    const token = await issuePortalToken(db, { email: getPortalCustomerEmail(), userId });
     expect(token, 'token was not issued').toBeTruthy();
 
     try {

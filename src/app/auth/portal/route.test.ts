@@ -18,15 +18,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const hoisted = vi.hoisted(() => ({
-  /** What `verifyPortalToken` says about the token in the URL. */
-  verification: { ok: true, userId: 'user-1', reason: 'valid' } as {
+  /**
+   * What `verifyPortalToken` says about the token in the URL. Its `email` is
+   * the only address the route may act on: P3-4d made the token email-scoped,
+   * because most of the people these links are for have no account yet.
+   */
+  verification: { ok: true, email: 'real@owner.test', userId: null, reason: 'valid' } as {
     ok: boolean;
+    email: string | null;
     userId: string | null;
     reason: string;
   },
-  /** The user the TOKEN resolves to, which is the only trustworthy source. */
-  userById: { user: { email: 'real@owner.test' } } as { user: { email: string } | null } | null,
-  userByIdError: null as { message: string } | null,
   generateLinkError: null as { message: string } | null,
   verifyOtpError: null as { message: string } | null,
   claimError: null as { message: string } | null,
@@ -44,10 +46,6 @@ vi.mock('@/lib/supabase', () => ({
   getSupabaseAdminClient: () => ({
     auth: {
       admin: {
-        getUserById: async () => ({
-          data: hoisted.userById,
-          error: hoisted.userByIdError,
-        }),
         generateLink: async ({ email }: { email: string }) => {
           hoisted.mintedFor.push(email);
           return hoisted.generateLinkError
@@ -84,9 +82,7 @@ async function get(query: string) {
 
 beforeEach(() => {
   process.env.NEXT_PUBLIC_BASE_URL = BASE;
-  hoisted.verification = { ok: true, userId: 'user-1', reason: 'valid' };
-  hoisted.userById = { user: { email: 'real@owner.test' } };
-  hoisted.userByIdError = null;
+  hoisted.verification = { ok: true, email: 'real@owner.test', userId: null, reason: 'valid' };
   hoisted.generateLinkError = null;
   hoisted.verifyOtpError = null;
   hoisted.claimError = null;
@@ -151,10 +147,10 @@ describe('a valid token', () => {
 
 describe('a token that does not work', () => {
   const REFUSALS = [
-    ['expired', { ok: false, userId: null, reason: 'expired' }],
-    ['revoked', { ok: false, userId: null, reason: 'revoked' }],
-    ['unknown', { ok: false, userId: null, reason: 'unknown' }],
-    ['a lookup error', { ok: false, userId: null, reason: 'error' }],
+    ['expired', { ok: false, email: null, userId: null, reason: 'expired' }],
+    ['revoked', { ok: false, email: null, userId: null, reason: 'revoked' }],
+    ['unknown', { ok: false, email: null, userId: null, reason: 'unknown' }],
+    ['a lookup error', { ok: false, email: null, userId: null, reason: 'error' }],
   ] as const;
 
   for (const [label, verification] of REFUSALS) {
@@ -174,26 +170,26 @@ describe('a token that does not work', () => {
       should not have to work out which door is theirs. `/login` offers the
       password, the magic link and forgot-password together.
     */
-    hoisted.verification = { ok: false, userId: null, reason: 'expired' };
+    hoisted.verification = { ok: false, email: null, userId: null, reason: 'expired' };
     const { location } = await get('?t=tok');
     expect(location.pathname).toBe('/login');
     expect(location.pathname).not.toBe('/auth/magic');
   });
 
   it('carries the booking through, so signing in still finishes the journey', async () => {
-    hoisted.verification = { ok: false, userId: null, reason: 'expired' };
+    hoisted.verification = { ok: false, email: null, userId: null, reason: 'expired' };
     const { location } = await get('?t=tok&next=%2Faccount%2Fbookings%2Fbk-1');
     expect(location.searchParams.get('redirectTo')).toBe('/account/bookings/bk-1');
   });
 
   it('prefills the address, so the customer does not retype it', async () => {
-    hoisted.verification = { ok: false, userId: null, reason: 'expired' };
+    hoisted.verification = { ok: false, email: null, userId: null, reason: 'expired' };
     const { location } = await get('?t=tok&email=Guest%40Example.test');
     expect(location.searchParams.get('email')).toBe('guest@example.test');
   });
 
   it('says WHY, or the form reads as the link being broken', async () => {
-    hoisted.verification = { ok: false, userId: null, reason: 'expired' };
+    hoisted.verification = { ok: false, email: null, userId: null, reason: 'expired' };
     const { location } = await get('?t=tok');
     expect(location.searchParams.get('reason')).toBe('portal_expired');
   });
@@ -206,21 +202,21 @@ describe('a token that does not work', () => {
       asserted the headers only on success, and a mutation stripping them from
       the fallback passed.
     */
-    hoisted.verification = { ok: false, userId: null, reason: 'expired' };
+    hoisted.verification = { ok: false, email: null, userId: null, reason: 'expired' };
     const { res } = await get('?t=tok');
     expect(res.headers.get('Cache-Control')).toMatch(/no-store/);
     expect(res.headers.get('Referrer-Policy')).toBe('no-referrer');
   });
 
   it('sends a missing token to the same place, not to an error page', async () => {
-    hoisted.verification = { ok: false, userId: null, reason: 'unknown' };
+    hoisted.verification = { ok: false, email: null, userId: null, reason: 'unknown' };
     const { res, location } = await get('');
     expect(res.status).toBe(307);
     expect(location.pathname).toBe('/login');
   });
 
   it('does not carry an attacker’s redirect into the fallback either', async () => {
-    hoisted.verification = { ok: false, userId: null, reason: 'expired' };
+    hoisted.verification = { ok: false, email: null, userId: null, reason: 'expired' };
     const { location } = await get('?t=tok&next=https%3A%2F%2Fevil.test');
     expect(location.origin).toBe(BASE);
     expect(location.searchParams.get('redirectTo')).not.toContain('evil.test');
@@ -228,8 +224,10 @@ describe('a token that does not work', () => {
 });
 
 describe('the session could not be established', () => {
-  it('falls back rather than 500ing when the user cannot be read', async () => {
-    hoisted.userById = { user: null };
+  it('falls back when the token names no address', async () => {
+    // The table's CHECK makes this unreachable, but a row that identifies
+    // nobody must not become a session for whoever asked.
+    hoisted.verification = { ok: true, email: null, userId: 'user-1', reason: 'valid' };
     const { location } = await get('?t=tok');
     expect(location.pathname).toBe('/login');
     expect(hoisted.mintedFor).toEqual([]);

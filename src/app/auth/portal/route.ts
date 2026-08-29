@@ -86,14 +86,14 @@ export async function GET(request: Request) {
 
   const admin = getSupabaseAdminClient();
   const verified = await verifyPortalToken(admin, token);
-  if (!verified.ok || !verified.userId) {
+  if (!verified.ok || !verified.email) {
     // Expired, revoked, unknown, malformed, absent, or a database error: all
     // one destination. The reason is carried for the copy, not for a branch.
     return signInFallback(base, next, emailForFallback, `portal_${verified.reason}`);
   }
 
   /*
-    THE EMAIL COMES FROM THE TOKEN, NEVER FROM THE QUERY STRING.
+    THE EMAIL COMES FROM THE TOKEN ROW, NEVER FROM THE QUERY STRING.
 
     This is the one place this route could be catastrophically wrong. The
     session is minted for whatever address is handed to `generateLink`, so
@@ -102,12 +102,7 @@ export async function GET(request: Request) {
     only to prefill the sign-in form on the failure path above, where no session
     is minted at all.
   */
-  const { data: userRow, error: userErr } = await admin.auth.admin.getUserById(verified.userId);
-  const email = userRow?.user?.email?.trim();
-  if (userErr || !email) {
-    console.error('[auth/portal] token resolved to no usable user:', userErr?.message);
-    return signInFallback(base, next, emailForFallback, 'portal_error');
-  }
+  const email = verified.email;
 
   /*
     The same mechanism as `/auth/confirm` and `POST /api/auth/send-magic-link`:
@@ -115,6 +110,13 @@ export async function GET(request: Request) {
     session cookies are set on this response. Do not reach for any other way of
     establishing a session: `verifyOtp` is what sets `email_confirmed_at`, and
     `claim_user_account()` will not link guest rows without it.
+
+    **This also CREATES the account when the address has none**, which is the
+    common case and is the point: production has 1,078 guest emails with no
+    `auth.users` row, because nothing in the public booking flow makes one.
+    Verified on staging that `generateLink` creates the user rather than
+    erroring. So an account appears when somebody actually clicks their link,
+    and never speculatively for the thousand who do not.
   */
   const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
     type: 'magiclink',

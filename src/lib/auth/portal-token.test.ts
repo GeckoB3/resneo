@@ -28,11 +28,13 @@ import {
 const NOW = new Date('2026-09-01T12:00:00.000Z');
 const USER = '11111111-1111-4111-8111-111111111111';
 const BOOKING = '22222222-2222-4222-8222-222222222222';
+const EMAIL = 'guest@example.test';
 
 /** The row the table returns for `token`, unless a test says otherwise. */
 function storedRow(token: string, overrides: Record<string, unknown> = {}) {
   return {
     token_hash: hashConfirmToken(token),
+    email: EMAIL,
     user_id: USER,
     expires_at: '2026-09-30T12:00:00.000Z',
     revoked_at: null,
@@ -63,7 +65,7 @@ describe('issuePortalToken', () => {
     // A dump of the table must grant nothing. The plaintext exists in the
     // return value and in the email; nowhere else.
     const admin = setup(null);
-    const token = await issuePortalToken(admin, { userId: USER, bookingId: BOOKING, now: NOW });
+    const token = await issuePortalToken(admin, { email: EMAIL, userId: USER, bookingId: BOOKING, now: NOW });
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     const insert = db.calls.find((c) => c.op === 'insert');
@@ -81,7 +83,7 @@ describe('issuePortalToken', () => {
       fails here rather than passing by tautology.
     */
     const admin = setup(null);
-    await issuePortalToken(admin, { userId: USER, now: NOW });
+    await issuePortalToken(admin, { email: EMAIL, userId: USER, now: NOW });
     const payload = db.calls.find((c) => c.op === 'insert')?.payload as Record<string, string>;
     const hours = (Date.parse(payload.expires_at) - NOW.getTime()) / 3_600_000;
     expect(hours).toBe(PORTAL_TOKEN_TTL_HOURS);
@@ -90,7 +92,7 @@ describe('issuePortalToken', () => {
 
   it('records the booking it was issued for, so it can be revoked later', async () => {
     const admin = setup(null);
-    await issuePortalToken(admin, { userId: USER, bookingId: BOOKING, now: NOW });
+    await issuePortalToken(admin, { email: EMAIL, userId: USER, bookingId: BOOKING, now: NOW });
     const payload = db.calls.find((c) => c.op === 'insert')?.payload as Record<string, unknown>;
     expect(payload.issued_for_booking_id).toBe(BOOKING);
     expect(payload.scope).toBe('limited');
@@ -98,7 +100,7 @@ describe('issuePortalToken', () => {
 
   it('allows a token with no booking, which the column is nullable for', async () => {
     const admin = setup(null);
-    await issuePortalToken(admin, { userId: USER, now: NOW });
+    await issuePortalToken(admin, { email: EMAIL, userId: USER, now: NOW });
     const payload = db.calls.find((c) => c.op === 'insert')?.payload as Record<string, unknown>;
     expect(payload.issued_for_booking_id).toBeNull();
   });
@@ -109,7 +111,7 @@ describe('issuePortalToken', () => {
     // out because a token could not be minted.
     const admin = setup(null);
     db.inject((c) => c.op === 'insert', PG_ERRORS.uniqueViolation);
-    await expect(issuePortalToken(admin, { userId: USER, now: NOW })).resolves.toBeNull();
+    await expect(issuePortalToken(admin, { email: EMAIL, userId: USER, now: NOW })).resolves.toBeNull();
   });
 });
 
@@ -117,7 +119,7 @@ describe('verifyPortalToken', () => {
   it('accepts a live token and names its user', async () => {
     const token = 'tok-live';
     const result = await verifyPortalToken(setup(storedRow(token)), token, NOW);
-    expect(result).toEqual({ ok: true, userId: USER, reason: 'valid' });
+    expect(result).toEqual({ ok: true, email: EMAIL, userId: USER, reason: 'valid' });
   });
 
   it('STILL WORKS ON THE TWENTIETH CALL, and writes nothing on any of them', async () => {

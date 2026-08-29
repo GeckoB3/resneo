@@ -142,7 +142,7 @@ exact_slot AS (
 )
 
 SELECT * FROM (
-  SELECT 1 AS sort, 'M1  calendars taking more than one client at once' AS measure,
+  SELECT 1::numeric AS sort, 'M1  calendars taking more than one client at once' AS measure,
          (SELECT COUNT(*) FROM cal WHERE parallel_clients > 1 OR capacity > 1)::text
            || ' of ' || (SELECT COUNT(*) FROM cal)::text || ' calendars' AS value,
          COALESCE((
@@ -179,7 +179,7 @@ SELECT * FROM (
          END
 
   UNION ALL
-  SELECT 5, 'M3  calendar-days an EXACT-SLOT guard would refuse',
+  SELECT 5, 'M3  SLOTS an EXACT-SLOT guard would refuse',
          (SELECT COUNT(*) FROM exact_slot e JOIN cal c ON c.id = e.calendar_id
           WHERE e.n > c.cap)::text,
          COALESCE((
@@ -189,6 +189,29 @@ SELECT * FROM (
                  FROM exact_slot e JOIN cal c ON c.id = e.calendar_id
                  WHERE e.n > c.cap LIMIT 10) x
          ), 'none: an exact-slot guard refuses no existing row')
+
+  /* M3 counts (calendar, date, start time) groups and M4 counts (calendar,
+     date) groups, so the two numbers are in DIFFERENT UNITS and comparing them
+     directly is meaningless. The b/c rows put both on calendar-days, and split
+     out the future, which is the real blast radius: a past booking is unlikely
+     to be rescheduled, and only a reschedule would meet the trigger. */
+  UNION ALL
+  SELECT 5.1, 'M3b calendar-days affected by M3',
+         (SELECT COUNT(*) FROM (
+            SELECT DISTINCT e.calendar_id, e.booking_date
+            FROM exact_slot e JOIN cal c ON c.id = e.calendar_id WHERE e.n > c.cap
+          ) d)::text,
+         'of which in the future: ' || (SELECT COUNT(*) FROM (
+            SELECT DISTINCT e.calendar_id, e.booking_date
+            FROM exact_slot e JOIN cal c ON c.id = e.calendar_id
+            WHERE e.n > c.cap AND e.booking_date >= CURRENT_DATE
+          ) d)::text
+
+  UNION ALL
+  SELECT 5.2, 'M3c distinct calendars affected by M3',
+         (SELECT COUNT(DISTINCT e.calendar_id)
+          FROM exact_slot e JOIN cal c ON c.id = e.calendar_id WHERE e.n > c.cap)::text,
+         'concentration matters: one misconfigured calendar is a different problem from many'
 
   UNION ALL
   SELECT 6, 'M4  calendar-days a CONCURRENCY guard would refuse',
@@ -201,6 +224,12 @@ SELECT * FROM (
                  FROM peak_by_day p JOIN cal c ON c.id = p.calendar_id
                  WHERE p.peak > c.cap LIMIT 10) x
          ), 'none')
+
+  UNION ALL
+  SELECT 6.1, 'M4b of those, in the future',
+         (SELECT COUNT(*) FROM peak_by_day p JOIN cal c ON c.id = p.calendar_id
+          WHERE p.peak > c.cap AND p.booking_date >= CURRENT_DATE)::text,
+         'past rows are unlikely to be rescheduled, so these are the ones that would break'
 
   UNION ALL
   SELECT 7, 'M5  active LEGACY appointments (no calendar_id)',

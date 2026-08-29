@@ -73,6 +73,16 @@ function baseDetail(overrides: Partial<BookingDetailDto> = {}): BookingDetailDto
         staff_first_booking_flow: false,
       },
     },
+    location: { type: 'venue', address: '1 Frozen Street', map_url: 'https://maps.test/1' },
+    notes: [],
+    ticket_lines: [],
+    duration_minutes: 30,
+    pre_appointment_instructions: null,
+    venue_email: 'hello@frozen.test',
+    deposit_status: null,
+    cancelled_by: null,
+    timeline: [],
+    calendar: { google_url: 'https://calendar.test/add', ics: 'BEGIN:VCALENDAR' },
     ...overrides,
   } as BookingDetailDto;
 }
@@ -216,6 +226,99 @@ describe('the shared view under a session actor', () => {
       />,
     );
     expect(screen.getByAltText('ResNeo')).toBeInTheDocument();
+  });
+});
+
+describe('the sections P2-4 completes', () => {
+  it('shows what the venue asked the guest to do beforehand (G8a)', () => {
+    // The gap: `service_items.pre_appointment_instructions` was written by
+    // venues and read by NOTHING in the codebase. A venue typing "please
+    // arrive with clean hair" had it stored and shown to nobody.
+    const text = renderSession(
+      baseDetail({ pre_appointment_instructions: 'Please arrive with clean, dry hair.' }),
+    );
+    expect(text).toContain('Before your visit');
+    expect(text).toContain('Please arrive with clean, dry hair.');
+  });
+
+  it('says nothing about preparation when the venue wrote none', () => {
+    expect(renderSession(baseDetail())).not.toContain('Before your visit');
+  });
+
+  it('tells a venue cancellation apart from the guest’s own (Q-22)', () => {
+    // Not cosmetic: the two carry different refund outcomes, and a guest
+    // looking at a cancelled booking is living with one of them.
+    expect(renderSession(baseDetail({ status: 'Cancelled', cancelled_by: 'venue' }))).toContain(
+      'cancelled by the venue',
+    );
+    cleanup();
+    expect(renderSession(baseDetail({ status: 'Cancelled', cancelled_by: 'customer' }))).toContain(
+      'You cancelled this booking',
+    );
+  });
+
+  it('sends a mobile appointment to the customer address, not the venue', () => {
+    // The failure this prevents: a page that always printed the venue's
+    // address would send a mobile practitioner's client to the wrong place.
+    const text = renderSession(
+      baseDetail({
+        location: {
+          type: 'client_address',
+          address: '9 Elm Row, Belfast, BT1 1AA',
+          map_url: 'https://maps.test/elm',
+        },
+      }),
+    );
+    expect(text).toContain('Where (your address)');
+    expect(text).toContain('9 Elm Row, Belfast, BT1 1AA');
+  });
+
+  it('says an online booking is online rather than printing an address', () => {
+    const text = renderSession(
+      baseDetail({ location: { type: 'online', address: null, map_url: null } }),
+    );
+    expect(text).toContain('Online');
+    expect(text).not.toContain('Get directions');
+  });
+
+  it('does not print the venue address twice', () => {
+    // It is already in the card header; a "Where" block repeating it is the
+    // same line twice. The directions link is what is actually new.
+    const text = renderSession(baseDetail());
+    expect(text.match(/1 Frozen Street/g) ?? []).toHaveLength(1);
+    expect(text).toContain('Get directions');
+  });
+
+  it('breaks down what was bought, and what the guest asked for', () => {
+    const text = renderSession(
+      baseDetail({
+        ticket_lines: [
+          { label: 'Adult', quantity: 2, unit_price_pence: 1500 },
+          { label: 'Child', quantity: 1, unit_price_pence: 500 },
+        ],
+        notes: [{ label: 'Special requests', value: 'Window table please' }],
+      }),
+    );
+    expect(text).toContain('2 x Adult');
+    expect(text).toContain('30.00');
+    expect(text).toContain('Window table please');
+  });
+
+  it('offers both calendar formats, built with the venue timezone', () => {
+    const text = renderSession(baseDetail());
+    expect(text).toContain('Add to Google Calendar');
+    expect(text).toContain('Download for other calendars');
+  });
+
+  it('offers no calendar entry for a booking that was cancelled', () => {
+    const text = renderSession(baseDetail({ status: 'Cancelled', cancelled_by: 'customer' }));
+    expect(text).not.toContain('Add to Google Calendar');
+  });
+
+  it('gives the guest a way to reach the venue', () => {
+    const text = renderSession(baseDetail());
+    expect(text).toContain('Contact the venue');
+    expect(text).toContain('hello@frozen.test');
   });
 });
 

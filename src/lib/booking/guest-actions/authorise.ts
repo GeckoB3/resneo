@@ -35,7 +35,7 @@ import {
 
 /** The columns `/api/confirm` selects. Kept verbatim so the actions see the same row. */
 export const GUEST_ACTION_BOOKING_COLUMNS =
-  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, addons_total_duration_minutes, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at';
+  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, addons_total_duration_minutes, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode, special_requests, dietary_notes, occasion, cancellation_actor_type, created_at';
 
 /**
  * Load the booking and authorise the actor against it, in that order.

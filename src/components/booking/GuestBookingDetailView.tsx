@@ -33,6 +33,24 @@ import {
  */
 type BookingDetails = BookingDetailDto;
 
+/**
+ * Hand the guest the .ics the server built.
+ *
+ * A blob rather than a `data:` URL, matching `ConfirmationStep.tsx:54`, which
+ * is the pattern already in this codebase for the same job.
+ */
+function downloadIcs(ics: string, bookingDate: string): void {
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `booking-${bookingDate}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function isCdeModel(m: BookingModel): boolean {
   return m === 'event_ticket' || m === 'class_session' || m === 'resource_booking';
 }
@@ -372,6 +390,19 @@ export function GuestBookingDetailView({
     rendered "undefined may still charge you" with nothing to say so.
   */
   const venueNameForCopy = details.venue_name ?? 'the venue';
+  /*
+    The sections added when P2-4 was completed, read defensively.
+
+    This page fetches its payload at runtime on the token surface, so a client
+    left open across a deploy can hold JS newer than the body it received. The
+    cost of being wrong is a blank page for a guest trying to find out where
+    their appointment is, and the cost of the guards is four lines.
+  */
+  const location = details.location ?? { type: 'venue' as const, address: null, map_url: null };
+  const calendar = details.calendar ?? { google_url: null, ics: null };
+  const notes = details.notes ?? [];
+  const ticketLines = details.ticket_lines ?? [];
+  const timeline = details.timeline ?? [];
   const isTableBooking = bookingModel === 'table_reservation';
   const isResourceBooking = bookingModel === 'resource_booking';
   const isClassBooking = bookingModel === 'class_session';
@@ -490,6 +521,113 @@ export function GuestBookingDetailView({
               <DetailTile label="Time" value={details.booking_time.slice(0, 5)} />
               <DetailTile label="Guests" value={`${details.party_size}`} />
               <DetailTile label="Status" value={details.status} />
+            </div>
+          )}
+
+          {/*
+            Who cancelled (Q-22). A guest opening a cancelled booking is living
+            with a refund outcome, and "you cancelled this" and "the venue
+            cancelled this" are not the same news.
+          */}
+          {details.cancelled_by && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+              <p className="font-medium text-slate-800">
+                {details.cancelled_by === 'venue'
+                  ? 'This booking was cancelled by the venue.'
+                  : 'You cancelled this booking.'}
+              </p>
+              {details.cancelled_by === 'venue' && (
+                <p className="mt-1 text-slate-600">
+                  Contact the venue if you were expecting this to go ahead.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Where. Not always the venue: an appointment can be at the
+              customer's address or online, which is what `location_type` and
+              the four client-address columns exist to say. */}
+          {/*
+            For a booking at the venue the address is already in the header, so
+            only the directions link is new; repeating the address under a
+            "Where" label would be the same line twice on one card. The other
+            two types genuinely say something else, and get the full block.
+          */}
+          {location.type === 'venue'
+            ? location.map_url && (
+                <a
+                  href={location.map_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-6 items-center text-sm font-medium text-brand-700 underline underline-offset-2"
+                >
+                  Get directions
+                </a>
+              )
+            : (
+                <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm">
+                  <p className="text-xs font-medium text-slate-500">
+                    {location.type === 'client_address' ? 'Where (your address)' : 'Where'}
+                  </p>
+                  <p className="mt-1 font-medium text-slate-800">
+                    {location.type === 'online'
+                      ? 'Online. The venue will send you a link.'
+                      : (location.address ?? 'The venue will confirm the address with you.')}
+                  </p>
+                  {location.map_url && (
+                    <a
+                      href={location.map_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1.5 inline-flex min-h-6 items-center text-sm font-medium text-brand-700 underline underline-offset-2"
+                    >
+                      Get directions
+                    </a>
+                  )}
+                </div>
+              )}
+
+          {/* G8a: written by venues and, until this shipped, read by nothing. */}
+          {details.pre_appointment_instructions && (
+            <div className="rounded-xl border border-brand-200 bg-brand-50/50 px-4 py-3 text-sm">
+              <p className="font-semibold text-brand-900">Before your visit</p>
+              <p className="mt-1 whitespace-pre-wrap leading-relaxed text-slate-700">
+                {details.pre_appointment_instructions}
+              </p>
+            </div>
+          )}
+
+          {ticketLines.length > 0 && (
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm">
+              <p className="text-xs font-medium text-slate-500">Tickets</p>
+              <ul className="mt-1.5 space-y-1">
+                {ticketLines.map((line, i) => (
+                  <li key={`${line.label}-${i}`} className="flex justify-between gap-3">
+                    <span className="text-slate-800">
+                      {line.quantity} x {line.label}
+                    </span>
+                    {line.unit_price_pence > 0 && (
+                      <span className="text-slate-600">
+                        &pound;{((line.unit_price_pence * line.quantity) / 100).toFixed(2)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {notes.length > 0 && (
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm">
+              <p className="text-xs font-medium text-slate-500">What you told the venue</p>
+              <dl className="mt-1.5 space-y-1.5">
+                {notes.map((note) => (
+                  <div key={note.label}>
+                    <dt className="text-xs text-slate-500">{note.label}</dt>
+                    <dd className="whitespace-pre-wrap text-slate-800">{note.value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           )}
 
@@ -703,6 +841,83 @@ export function GuestBookingDetailView({
                   {keepButtonLabel}
                 </button>
               </div>
+            </div>
+          )}
+          {/*
+            Add to calendar. Both links are built server-side, because getting
+            them right needs the venue's timezone and the browser does not have
+            it: a booking's time is the venue's wall clock, so 14:00 in London
+            belongs in the guest's calendar at 13:00 UTC during BST.
+          */}
+          {/*
+            `bookingIsLive` as well as `!cancelled`: the latter is only set
+            after a cancel performed in THIS session, so a booking that was
+            already cancelled when the page loaded still offered to put itself
+            in the guest's calendar.
+          */}
+          {(calendar.google_url || calendar.ics) && bookingIsLive && !cancelled && (
+            <div className="flex flex-wrap gap-3 border-t border-slate-100 pt-4 text-sm">
+              {calendar.google_url && (
+                <a
+                  href={calendar.google_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Add to Google Calendar
+                </a>
+              )}
+              {calendar.ics && (
+                <button
+                  type="button"
+                  onClick={() => downloadIcs(calendar.ics!, details.booking_date)}
+                  className="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Download for other calendars
+                </button>
+              )}
+            </div>
+          )}
+
+          {(details.venue_phone || details.venue_email) && (
+            <div className="border-t border-slate-100 pt-4 text-sm">
+              <p className="text-xs font-medium text-slate-500">Contact the venue</p>
+              <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                {details.venue_phone && (
+                  <a
+                    href={`tel:${details.venue_phone}`}
+                    className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+                  >
+                    {details.venue_phone}
+                  </a>
+                )}
+                {details.venue_email && (
+                  <a
+                    href={`mailto:${details.venue_email}`}
+                    className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+                  >
+                    {details.venue_email}
+                  </a>
+                )}
+              </p>
+            </div>
+          )}
+
+          {timeline.length > 0 && (
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-xs font-medium text-slate-500">History</p>
+              <ul className="mt-1.5 space-y-1 text-sm text-slate-600">
+                {timeline.map((entry) => (
+                  <li key={`${entry.label}-${entry.at}`}>
+                    {entry.label} ·{' '}
+                    {new Date(entry.at).toLocaleDateString('en-GB', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

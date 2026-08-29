@@ -79,6 +79,16 @@ function baseDetail(overrides: Record<string, unknown> = {}) {
     manage_booking_url: 'https://rsn.test/b/ABC123',
     compliance_forms: [],
     feature_flags: { resolved: { guest_self_reschedule: true } },
+    location: { type: 'venue', address: '1 Frozen Street', map_url: 'https://maps.test/1' },
+    notes: [],
+    ticket_lines: [],
+    duration_minutes: 30,
+    pre_appointment_instructions: null,
+    venue_email: 'hello@frozen.test',
+    deposit_status: null,
+    cancelled_by: null,
+    timeline: [],
+    calendar: { google_url: 'https://calendar.test/add', ics: 'BEGIN:VCALENDAR' },
     ...overrides,
   };
 }

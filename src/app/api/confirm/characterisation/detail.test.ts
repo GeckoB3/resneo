@@ -93,8 +93,10 @@ const VENUE = {
   phone: '+44 20 7946 0000',
   booking_model: 'unified_scheduling',
   booking_rules: { cancellation_notice_hours: 24 },
-  email: 'venue@frozen.test',
-  reply_to_email: null,
+  // Deliberately different, so the precedence is pinned rather than assumed:
+  // `email` is the legacy column and may be the venue's own account address.
+  email: 'account@frozen.test',
+  reply_to_email: 'hello@frozen.test',
   feature_flags: {},
 };
 
@@ -377,9 +379,13 @@ describe('GET /api/confirm - the booking detail payload (P2-4 gate)', () => {
       'hashed-confirm-token', // confirm_token_hash
       'pm_secret', // the hold's payment method
       IDS.guest, // guest_id: the payload is for one guest, and names nobody
-      'venue@frozen.test', // the venue's internal contact address
+      'account@frozen.test', // the legacy `venues.email`, which may be an account login
     ]) {
       expect(serialised, `the payload leaked ${secret}`).not.toContain(secret);
     }
+
+    // And the address a guest IS meant to have: the business inbox the
+    // platform already puts in the Reply-To of every email it sends them.
+    expect(serialised).toContain('hello@frozen.test');
   });
 });

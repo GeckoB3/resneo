@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the shared view under a session actor > renders a class session 1`] = `"Frozen Venue1 Frozen StreetClass bookingReformer Pilates · 2026-06-10 18:30DateWednesday 10 JuneTime14:00Guests1StatusBooked"`;
+
+exports[`the shared view under a session actor > renders a resource booking 1`] = `"Frozen Venue1 Frozen StreetResource bookingCourt 1 · until 14:30DateWednesday 10 JuneTime14:00Guests1StatusBooked"`;
+
+exports[`the shared view under a session actor > renders a table reservation 1`] = `"Frozen Venue1 Frozen StreetDateWednesday 10 JuneTime14:00Guests4StatusBooked"`;
+
+exports[`the shared view under a session actor > renders an appointment 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBooked"`;
+
+exports[`the shared view under a session actor > renders an event ticket 1`] = `"Frozen Venue1 Frozen StreetEvent bookingWine TastingDateWednesday 10 JuneTime14:00Guests1StatusBooked"`;

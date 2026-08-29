@@ -81,6 +81,12 @@ test.describe('portal screenshots', () => {
     await page.getByRole('link', { name: 'Details' }).first().click();
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.screenshot({ path: `${DIR}/booking-detail.png`, fullPage: true });
+
+    // The same booking on the token surface, so the two renderings of one
+    // policy can be compared side by side (P2-4, AD9).
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.screenshot({ path: `${DIR}/booking-detail-375.png`, fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 720 });
     console.log(`[e2e] wrote ${SCREENS.length + NARROW_SCREENS.length + 1} screenshots to ${DIR}`);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { makeRecordingDb } from '@/lib/testing/recording-supabase';
 
@@ -101,6 +101,24 @@ function makeRequest(method: string): NextRequest {
   });
   return req;
 }
+
+/**
+ * Load every route module once before the assertions start.
+ *
+ * The cost being paid here is module loading, not the check. P2-1's cancel
+ * route pulls in the whole cancel service graph (Stripe, card holds, waitlist
+ * offers, comms, table lifecycle), and the first test to import it spent more
+ * than the 5s default timeout doing so and failed on a route that answers 401
+ * correctly. `src/app/api/confirm/characterisation/cancel.test.ts:166` carries
+ * the same `beforeAll` for the same reason.
+ *
+ * Warming every module rather than the heavy one keeps this from having to be
+ * revisited each time a route grows a dependency, and it means no single test
+ * is charged for an import the whole file shares.
+ */
+beforeAll(async () => {
+  await Promise.all(Object.values(ROUTE_MODULES).map((load) => load()));
+}, 120_000);
 
 describe('P0-1c: every /api/account route refuses an anonymous caller', () => {
   beforeEach(() => {

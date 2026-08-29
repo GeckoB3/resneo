@@ -141,6 +141,14 @@ const C7A_EXEMPT: Record<string, string> = {
   // mints a cancel-without-login token with no consumer is a liability, which
   // is why P2-5 removes it rather than keeping it around.
   'account/bookings/[id]/manage-link/route.ts': 'removed by P2-5',
+  // P2-1's portal spelling of an action the versioned surface already has, as
+  // `DELETE /api/v1/me/bookings/[id]`. Both are thin adapters over
+  // `cancelBookingForGuest`, so they cannot diverge in behaviour, and adding
+  // `POST /api/v1/me/bookings/[id]/cancel` would publish a second spelling of
+  // one operation on the surface the app reads. That is the duplication P2-1's
+  // own acceptance rules out for the detail endpoint, applied to cancel. The
+  // other three P2-1 routes are new capabilities on v1 and ARE aliased.
+  'account/bookings/[id]/cancel/route.ts': 'cancel is on v1 as DELETE /api/v1/me/bookings/[id]',
 };
 
 describe('v1 alias rule (C7a/C7b)', () => {
@@ -150,21 +158,34 @@ describe('v1 alias rule (C7a/C7b)', () => {
     // count is asserted so that adding a route without an alias, and without
     // consciously updating this list, fails here.
     //
-    // 28: P0-3 added account/bookings/[id]/manage-link, which is C7A_EXEMPT,
-    // and P1-1 added account/home, which has its v1 alias at v1/me/home.
+    // 32: P0-3 added account/bookings/[id]/manage-link, which is C7A_EXEMPT;
+    // P1-1 added account/home, aliased at v1/me/home; and P2-1 added four
+    // booking action routes, three aliased under v1/me/bookings/[id]/ and
+    // cancel C7A_EXEMPT because v1 already cancels with DELETE.
     const accountRoutes = routeFiles('account').map(rel).sort();
     expect(
       accountRoutes.length,
       'An /api/account route was added or removed. If added: give it a v1 alias (C7a) ' +
         'or a C7A_EXEMPT entry, and bump this count. Do NOT add it to the pre-existing ' +
         'exclusion list, which is dated 2026-08-27 and closed.',
-    ).toBe(28);
+    ).toBe(32);
   });
 
   it('routes this plan created have their v1 alias', () => {
     // C7a. The count above notices a new route; this notices a new route that
     // was added without the alias, which is the failure C7a actually names.
-    for (const [account, alias] of [['account/home/route.ts', 'v1/me/home/route.ts']]) {
+    for (const [account, alias] of [
+      ['account/home/route.ts', 'v1/me/home/route.ts'],
+      [
+        'account/bookings/[id]/reschedule/route.ts',
+        'v1/me/bookings/[id]/reschedule/route.ts',
+      ],
+      [
+        'account/bookings/[id]/reschedule-options/route.ts',
+        'v1/me/bookings/[id]/reschedule-options/route.ts',
+      ],
+      ['account/bookings/[id]/confirm/route.ts', 'v1/me/bookings/[id]/confirm/route.ts'],
+    ]) {
       expect(fs.existsSync(path.join(API, account)), `${account} should exist`).toBe(true);
       expect(fs.existsSync(path.join(API, alias)), `${account} needs its v1 alias at ${alias}`).toBe(
         true,

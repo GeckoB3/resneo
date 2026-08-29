@@ -16,6 +16,11 @@ export {
 } from './reschedule';
 export { confirmAttendanceForGuest, type ConfirmAttendanceData } from './confirm-attendance';
 export { loadGuestBookingDetail } from './load-detail';
+export {
+  getRescheduleOptionsForGuest,
+  type RescheduleOptionsData,
+  type RescheduleBlockedReason,
+} from './reschedule-options';
 export { loadAndAuthoriseGuestBooking, GUEST_ACTION_BOOKING_COLUMNS } from './authorise';
 export {
   actionFailure,

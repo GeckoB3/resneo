@@ -56,6 +56,22 @@ import {
  * may act on the same booking twice from the portal.
  */
 
+/**
+ * The statuses a booking can be moved from.
+ *
+ * Exported because `reschedule-options.ts` has to answer "can this be moved"
+ * without attempting the move, and a second copy of this list is a promise the
+ * two surfaces would eventually break in opposite directions: the options
+ * endpoint offering a reschedule the POST refuses, or hiding one it would have
+ * allowed. There is no per-booking modify window in the platform; this list and
+ * the `guest_self_reschedule` venue flag are the whole gate.
+ */
+export const RESCHEDULE_MODIFIABLE_STATUSES: readonly string[] = [
+  "Booked",
+  "Confirmed",
+  "Pending",
+];
+
 /** Whatever the caller wants changed. Names follow the route's request body. */
 export interface RescheduleRequest {
   booking_date?: string;
@@ -126,8 +142,7 @@ export async function rescheduleBookingForGuest(
     return scheduleNotification ? { ...result, scheduleNotification } : result;
   };
 
-  const modifiableStatuses = ["Booked", "Confirmed", "Pending"];
-  if (!modifiableStatuses.includes(booking.status as string)) {
+  if (!RESCHEDULE_MODIFIABLE_STATUSES.includes(booking.status as string)) {
     return finish(
       { error: "This booking cannot be modified." },
       { status: 400 },

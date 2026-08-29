@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { issuePortalToken } from '../src/lib/auth/portal-token';
-import { getPortalCustomerEmail } from './helpers/account-session';
+import { getPortalCustomerEmail, portalCustomerConfigured } from './helpers/account-session';
+import { getE2eConfig } from './helpers/env';
 
 /**
  * P3-4i acceptance: a client holding ONLY a Bearer token can complete the whole
@@ -20,6 +21,11 @@ import { getPortalCustomerEmail } from './helpers/account-session';
  * No cookies are used anywhere here, deliberately: `request` is Playwright's
  * bare HTTP client, not the browser context.
  */
+test.skip(
+  !getE2eConfig().isConfigured || !portalCustomerConfigured(),
+  'Set E2E_VENUE_SLUG and E2E_PORTAL_CUSTOMER_EMAIL (see Docs/E2E_SMOKE.md)',
+);
+
 test('a client with only a Bearer token can enter, read and sign out', async ({ request }) => {
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -53,8 +59,20 @@ test('a client with only a Bearer token can enter, read and sign out', async ({ 
     console.log('--- BOOKINGS:', list.status());
     expect(list.status()).toBe(200);
 
-    // 4. SIGN OUT for real, then prove the token is dead.
-    const out = await request.post('/api/v1/auth/logout', { headers: bearer, data: { scope: 'global' } });
+    /*
+      4. SIGN OUT for real, then prove the token is dead.
+
+      `local`, NOT `global`, and this cost a CI run to learn. `global` revokes
+      every session the fixture customer has, including the one `auth.setup.ts`
+      minted and saved for the nine other portal specs, so this spec passed and
+      then broke every `portal-*` spec that ran after it. Alphabetically this
+      one runs first, so the damage was total and invisible locally, where it
+      had only ever been run on its own.
+
+      `local` revokes the caller's own session, which is exactly what is being
+      proved here: that THIS token dies.
+    */
+    const out = await request.post('/api/v1/auth/logout', { headers: bearer, data: { scope: 'local' } });
     console.log('--- LOGOUT:', out.status());
     expect(out.status()).toBe(200);
 

@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from("bookings")
       .select(
-        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode, special_requests, dietary_notes, occasion, cancellation_actor_type, created_at",
+        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode, special_requests, dietary_notes, occasion, cancellation_actor_type, created_at, group_booking_id",
       )
       .eq("id", bookingId)
       .single();

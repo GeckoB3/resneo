@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { GUEST_ACTION_BOOKING_COLUMNS } from '@/lib/booking/guest-actions/authorise';
 import {
   FIXED_NOW,
   IDS,
@@ -310,6 +311,44 @@ describe('GET /api/confirm - the booking detail payload (P2-4 gate)', () => {
     };
     expect(flags.resolved.guest_self_reschedule).toBe(false);
     expect(frozen).toMatchSnapshot();
+  });
+
+  it('row 10a: a course session is marked as one (P2-3)', async () => {
+    /*
+      NOT characterisation: `part_of_course` is new, and every other row in
+      this file renders it `false`, so a build that computed it as a constant
+      false would have left all fourteen snapshots green. The portal shows a
+      warning off the back of this that a guest reads before moving a session
+      they may not have meant to move.
+    */
+    const frozen = await run({
+      booking: baseBooking({ group_booking_id: '77777777-7777-4777-8777-777777777777' }),
+      tables: {
+        unified_calendars: { name: 'Alex Practitioner' },
+        service_items: { name: 'Consultation' },
+      },
+    });
+    expectFrozen(frozen, { status: 200 });
+    expect((frozen.body as Record<string, unknown>).part_of_course).toBe(true);
+
+    /*
+      And the column is actually ASKED FOR, on both paths that build this DTO.
+
+      The fixture hands back the whole booking row whatever the projection
+      says, so the assertion above passes just as happily against a SELECT that
+      never fetched `group_booking_id`: the field would be undefined in
+      production and `false` for every real course. This is the same trap the
+      bookings list route has, where a new column needs the projection edited
+      as well as the mapper.
+    */
+    const read = hoisted.db!.calls.find((c) => c.table === 'bookings' && c.op === 'select');
+    expect(read?.columns, 'the confirm route stopped selecting the column').toContain(
+      'group_booking_id',
+    );
+    expect(
+      GUEST_ACTION_BOOKING_COLUMNS,
+      'the portal path stopped selecting the column',
+    ).toContain('group_booking_id');
   });
 
   it('row 11: an HMAC link is accepted and does not check the token', async () => {

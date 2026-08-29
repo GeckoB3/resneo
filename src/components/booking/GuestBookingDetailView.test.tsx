@@ -1,9 +1,10 @@
 /** @vitest-environment happy-dom */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { BookingDetailDto } from '@/lib/booking/booking-detail-dto';
 
 /**
@@ -195,17 +196,93 @@ describe('the shared view under a session actor', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('offers cancel but not yet reschedule', () => {
+  it('offers both cancel and reschedule', () => {
     /*
       P2-4 left the session actor with no buttons at all, because both posted to
       `/api/confirm` with a token the portal does not hold. P2-2 gave cancel its
-      own route, so it is offered now. Reschedule is still not: P2-3 wires that,
-      and the test changing here is the deliberate edit its predecessor asked
-      for rather than something nobody noticed.
+      own route and P2-3 gave reschedule one, so both are offered now. This
+      assertion has been edited twice, each time as the deliberate change the
+      previous task asked for rather than something nobody noticed.
     */
     renderSession(baseDetail());
     expect(screen.getByRole('button', { name: /^cancel/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /change/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /change appointment/i })).toBeInTheDocument();
+  });
+
+  it('offers no reschedule when the venue has turned self-reschedule off', () => {
+    // The vacuity guard on the row above, and a real product setting: a venue
+    // that switched self-reschedule off must have it off in the portal exactly
+    // as it is off on the emailed link.
+    renderSession(
+      baseDetail({
+        feature_flags: { resolved: { guest_self_reschedule: false } },
+      } as Partial<BookingDetailDto>),
+    );
+    expect(screen.queryByRole('button', { name: /change appointment/i })).not.toBeInTheDocument();
+  });
+
+  it('says WHY there is no change button when the venue turned it off', () => {
+    // Hiding the control on its own leaves a customer hunting for it, deciding
+    // the page is broken, and ringing the venue anyway. The point of the flag
+    // is that the venue takes the call, not that the page goes quiet.
+    const text = renderSession(
+      baseDetail({
+        feature_flags: { resolved: { guest_self_reschedule: false } },
+      } as Partial<BookingDetailDto>),
+    );
+    expect(text).toMatch(/does not offer changes online/i);
+    expect(text).toMatch(/still cancel/i);
+  });
+
+  it('warns that changing a course session moves only that session', async () => {
+    // A guest who reads "change appointment" as "move my course" and then
+    // finds five sessions still in the old slot has been misled by the button.
+    renderSession(baseDetail({ part_of_course: true }));
+    await userEvent.click(screen.getByRole('button', { name: /change appointment/i }));
+    expect(document.body.textContent).toMatch(/only this session/i);
+  });
+
+  it('says nothing about courses for a single booking', async () => {
+    // The vacuity guard: a warning shown to everyone teaches guests to ignore it.
+    renderSession(baseDetail({ part_of_course: false }));
+    await userEvent.click(screen.getByRole('button', { name: /change appointment/i }));
+    expect(document.body.textContent).not.toMatch(/only this session/i);
+  });
+
+  it('attaches every label on the modify form to its control (Register Q-04)', async () => {
+    /*
+      Three controls had labels that LOOKED right and were not attached, so a
+      screen reader announced "edit text, blank" three times. Asserted with
+      getByLabelText, which resolves the label the same way assistive tech
+      does: a visual check, or querying by placeholder or role, would pass on
+      the broken markup.
+    */
+    renderSession(
+      baseDetail({
+        booking_model: 'table_reservation',
+        is_appointment: false,
+        practitioner_id: null,
+        appointment_service_id: null,
+        party_size: 4,
+      }),
+    );
+    // The time control is a `select` only once slots arrive, so the slots are
+    // supplied. Asserting on the label alone would have passed against a `for`
+    // pointing at nothing, which is the same silence for a screen reader.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ slots: [{ start_time: '19:00:00', available_covers: 4 }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /modify booking/i }));
+    for (const label of ['Date', 'Party size']) {
+      expect(screen.getByLabelText(label), `"${label}" is not attached to a control`).toBeInTheDocument();
+    }
+    await waitFor(() => expect(screen.getByLabelText('Time')).toBeInTheDocument());
   });
 
   it('drops the standalone chrome when embedded in the portal', () => {

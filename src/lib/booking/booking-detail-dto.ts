@@ -76,6 +76,15 @@ export interface BookingDetailDto {
   resource_id: string | null;
   class_instance_id: string | null;
   class_type_id: string | null;
+  /**
+   * Whether this booking is one session of a course bought together (P2-3).
+   *
+   * The portal needs it to say what a reschedule DOES: a course is many
+   * booking rows sharing a `group_booking_id`, and moving one moves that one.
+   * A guest who reads "change booking" as "move my course" and then finds
+   * five sessions still in the old slot has been misled by the button.
+   */
+  part_of_course: boolean;
   resource_name: string | null;
   booking_end_time: string | null;
   cancellation_deadline: string | null;
@@ -194,6 +203,7 @@ export interface BookingDetailSourceRow {
   service_variant_id?: string | null;
   experience_event_id?: string | null;
   class_instance_id?: string | null;
+  group_booking_id?: string | null;
   resource_id?: string | null;
   event_session_id?: string | null;
   guest_attendance_confirmed_at?: string | null;
@@ -565,6 +575,10 @@ export async function buildBookingDetailDto(
     class_instance_id:
       inferredModel === 'class_session' ? bookingRow.class_instance_id ?? null : null,
     class_type_id: inferredModel === 'class_session' ? class_type_id : null,
+    // A course is several booking rows sharing one group id. Not scoped to a
+    // model on purpose: courses are class sessions today, and a guard that
+    // encoded that would go quietly wrong the day they are not.
+    part_of_course: Boolean(bookingRow.group_booking_id),
     resource_name,
     booking_end_time: booking_end_label,
     cancellation_deadline: bookingRow.cancellation_deadline ?? null,

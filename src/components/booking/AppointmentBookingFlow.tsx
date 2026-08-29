@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
+import { buildGuestModifyRequest } from '@/lib/booking/guest-modify-request';
+import type { GuestBookingDetailActor } from '@/lib/booking/guest-booking-actor';
 import type { VenuePublic, GuestDetails } from './types';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
@@ -576,7 +578,13 @@ interface AppointmentBookingFlowProps {
     guest_last_name?: string;
     guest_email?: string;
     guest_phone?: string;
-    publicAuth?: { token?: string; hmac?: string };
+    /**
+     * WHO is saving, and therefore WHERE the save goes (P2-3). Absent means
+     * staff, which is why this cannot be inferred from whether a credential
+     * is present: a signed-in customer holds no credential either, and under
+     * the old `publicAuth` shape would silently have PATCHed the venue route.
+     */
+    guestActor?: GuestBookingDetailActor;
   };
   /** Built from sessionStorage when staff uses “Rebook” from guest history (same venue). */
   staffRebookBootstrap?: StaffRebookBootstrapPayloadV1 | null;
@@ -2706,16 +2714,17 @@ export function AppointmentBookingFlow({
         practitioner_id: selectedPractitionerId,
         appointment_service_id: selectedServiceId,
       };
-      const res = editBooking.publicAuth
-        ? await fetch('/api/confirm', {
+      // Staff keep the venue PATCH, with its manual-overlap allowance: a
+      // receptionist double-booking a chair on purpose is a supported thing
+      // to do and a guest rescheduling themselves is not.
+      const guestRequest = editBooking.guestActor
+        ? buildGuestModifyRequest(editBooking.guestActor, editBooking.id, body)
+        : null;
+      const res = guestRequest
+        ? await fetch(guestRequest.url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              booking_id: editBooking.id,
-              ...editBooking.publicAuth,
-              action: 'modify',
-              ...body,
-            }),
+            body: JSON.stringify(guestRequest.body),
           })
         : await fetch(`/api/venue/bookings/${editBooking.id}`, {
             method: 'PATCH',

@@ -1,10 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModel } from '@/types/booking-models';
 import type { BookingDetailDto } from '@/lib/booking/booking-detail-dto';
+import type { GuestBookingDetailActor } from '@/lib/booking/guest-booking-actor';
+import {
+  buildGuestModifyRequest,
+  readGuestModifyError,
+  type GuestModifyChanges,
+} from '@/lib/booking/guest-modify-request';
 import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { BrandSpinner, ConfirmDialog } from '@/components/ui/primitives';
@@ -129,16 +135,11 @@ interface Slot {
 }
 
 /**
- * Who is looking, and what proof they hold (P2-4, AD9).
- *
- * The token and HMAC actors are the emailed manage link and the `/m/` short
- * link, unchanged. The session actor is the portal, which has already proved
- * ownership server-side and therefore carries no proof in the browser at all.
+ * Re-exported so every existing importer is untouched. The declaration moved
+ * to `@/lib/booking/guest-booking-actor` in P2-3 because `AppointmentBookingFlow`
+ * needs it too, and this file imports that flow.
  */
-export type GuestBookingDetailActor =
-  | { kind: 'token'; token: string }
-  | { kind: 'hmac'; hmac: string }
-  | { kind: 'session' };
+export type { GuestBookingDetailActor };
 
 /**
  * One booking, as its guest sees it, on both surfaces that show it (AD9).
@@ -180,11 +181,6 @@ export function GuestBookingDetailView({
   const standalone = (chromeProp ?? 'standalone') === 'standalone';
   const token = actor.kind === 'token' ? actor.token : undefined;
   const hmac = actor.kind === 'hmac' ? actor.hmac : undefined;
-  /**
-   * Whether this reader may act from here. See the note above: a session actor
-   * gets the read-only surface until P2-2 and P2-3 supply its handlers.
-   */
-  const canAct = actor.kind !== 'session';
   const [details, setDetails] = useState<BookingDetails | null>(initialDetail ?? null);
   const [loading, setLoading] = useState(!initialDetail);
   const [error, setError] = useState<string | null>(null);
@@ -378,23 +374,19 @@ export function GuestBookingDetailView({
 
   const dateStr = new Date(details.booking_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   /*
-    Both gates carry `canAct`, which is the whole of P2-4's actor difference.
+    Every actor can now act, which closes P2-4's deliberate gap.
 
-    A session actor gets the booking and not the buttons, because the buttons
-    post to `/api/confirm` with a token it does not have. The plan scopes P2-4
-    as a pure extraction and has P2-2 and P2-3 supply the session handlers; an
-    affordance that cannot work is worse than one not offered yet. Everything
-    below this line is identical for all three actors, which is the point.
+    P2-4 extracted this view and left a session actor reading the booking and
+    not the buttons, because the buttons posted to `/api/confirm` with a token
+    the portal does not hold. P2-2 supplied the cancel route and P2-3 the
+    reschedule one, and `buildGuestModifyRequest` now sends each actor to the
+    route that will answer it. So the gate is the BOOKING's state, not the
+    reader's, and the `canAct` flag that expressed the difference is gone
+    rather than left behind reading `true` everywhere.
   */
   const bookingIsLive =
     details.status === 'Confirmed' || details.status === 'Booked' || details.status === 'Pending';
-  const canModify = canAct && bookingIsLive;
-  /*
-    Cancel is available to a session actor as of P2-2, because the portal now
-    has a route that performs it. Reschedule is not: P2-3 wires that, and until
-    it does the modify flows post to `/api/confirm` with a token the portal
-    does not hold.
-  */
+  const canModify = bookingIsLive;
   const canCancel = bookingIsLive;
   const isAppointment = Boolean(details.is_appointment);
   const bookingModel: BookingModel = details.booking_model ?? 'table_reservation';
@@ -454,6 +446,16 @@ export function GuestBookingDetailView({
       (isAppointment && guestSelfRescheduleEnabled) ||
       canGuestModifyResource ||
       canGuestModifyClass);
+  /*
+    The venue has switched self-reschedule off AND this booking is a model that
+    would otherwise offer one. Table reservations are excluded because their
+    modify has never been behind this flag, and events because they are
+    cancel-and-rebook by nature and already explain themselves below.
+  */
+  const rescheduleTurnedOff =
+    canModify &&
+    !guestSelfRescheduleEnabled &&
+    (isAppointment || isResourceBooking || isClassBooking);
   const modifyButtonLabel = isAppointment
     ? 'Change appointment'
     : isClassBooking
@@ -765,6 +767,32 @@ export function GuestBookingDetailView({
             </div>
           )}
 
+          {/*
+            P2-3: when a venue turns self-reschedule off, say so.
+
+            Hiding the button on its own leaves a customer looking for a
+            control that is not there, deciding the page is broken, and ringing
+            the venue anyway. This is the same product setting the emailed link
+            obeys, not a rollout gate.
+          */}
+          {rescheduleTurnedOff && !showCancelConfirm && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-1.5">
+              <p className="text-sm font-medium text-slate-800">Need a different time?</p>
+              <p className="text-xs text-slate-600">
+                {venueNameForCopy} does not offer changes online. Please contact them
+                {details.venue_phone ? (
+                  <>
+                    {' '}on{' '}
+                    <a href={`tel:${details.venue_phone}`} className="font-semibold text-brand-700 underline">
+                      {details.venue_phone}
+                    </a>
+                  </>
+                ) : null}
+                {' '}to move this booking. You can still cancel it below.
+              </p>
+            </div>
+          )}
+
           {showGuestModify && !showModify && !showCancelConfirm && (
             <button
               type="button"
@@ -773,6 +801,19 @@ export function GuestBookingDetailView({
             >
               {modifyButtonLabel}
             </button>
+          )}
+
+          {/*
+            P2-3: a course is several booking rows sharing a group id, and this
+            page changes one of them. Placed ABOVE the picker rather than in a
+            confirmation afterwards, because by then the guest has already
+            moved the session they did not mean to move.
+          */}
+          {showGuestModify && showModify && details.part_of_course && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+              This is one session of a course. Changing it here moves only this session;
+              the rest keep their current times. To move the whole course, contact the venue.
+            </div>
           )}
 
           {showGuestModify && showModify && isAppointment && details.practitioner_id && details.appointment_service_id && (
@@ -793,7 +834,7 @@ export function GuestBookingDetailView({
                     party_size: details.party_size,
                     practitioner_id: details.practitioner_id,
                     service_id: details.appointment_service_id,
-                    publicAuth: hmac ? { hmac } : { token },
+                    guestActor: actor,
                   }}
                 />
                 <button
@@ -819,7 +860,7 @@ export function GuestBookingDetailView({
               currentDate={details.booking_date}
               currentTime={details.booking_time}
               currentPartySize={details.party_size}
-              authPayload={hmac ? { hmac } : { token }}
+              actor={actor}
               onSaved={handleModifySaved}
               onCancel={() => setShowModify(false)}
             />
@@ -833,7 +874,7 @@ export function GuestBookingDetailView({
               currentDate={details.booking_date}
               currentTime={details.booking_time}
               currentEndTime={details.booking_end_time ?? null}
-              authPayload={hmac ? { hmac } : { token }}
+              actor={actor}
               onSaved={handleModifySaved}
               onCancel={() => setShowModify(false)}
             />
@@ -850,7 +891,7 @@ export function GuestBookingDetailView({
                 classTypeId={details.class_type_id}
                 currentInstanceId={details.class_instance_id}
                 className={details.class_type_name ?? null}
-                authPayload={hmac ? { hmac } : { token }}
+                actor={actor}
                 onSaved={handleModifySaved}
                 onCancel={() => setShowModify(false)}
               />
@@ -1013,7 +1054,7 @@ function ModifyTableBookingSection({
   currentDate,
   currentTime,
   currentPartySize,
-  authPayload,
+  actor,
   onSaved,
   onCancel,
 }: {
@@ -1023,10 +1064,18 @@ function ModifyTableBookingSection({
   currentDate: string;
   currentTime: string;
   currentPartySize: number;
-  authPayload: { hmac?: string; token?: string };
+  actor: GuestBookingDetailActor;
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  /*
+    Register Q-04: these three controls had visible labels that were not
+    ATTACHED to them, so a screen reader announced "edit text, blank" three
+    times over. `useId` rather than fixed ids because this section is a
+    component, and two of it on one page would produce duplicate ids, which is
+    the same bug wearing a different hat.
+  */
+  const fieldId = useId();
   const [date, setDate] = useState(currentDate);
   const [partySize, setPartySize] = useState(currentPartySize);
   const [selectedTime, setSelectedTime] = useState(currentTime.slice(0, 5));
@@ -1118,27 +1167,29 @@ function ModifyTableBookingSection({
     setSaving(true);
     setError(null);
     try {
+      const changes: GuestModifyChanges = {
+        booking_date: date,
+        booking_time: selectedTime,
+        party_size: partySize,
+      };
+      // Where this goes depends on who is asking: the emailed link posts to
+      // `/api/confirm` with its token, a signed-in customer to their own
+      // account route. `buildGuestModifyRequest` owns that decision for all
+      // four modify surfaces so they cannot drift apart.
+      const request = buildGuestModifyRequest(actor, bookingId, changes);
+      if (!request) {
+        setError('This booking cannot be changed from here.');
+        return;
+      }
       const base = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await fetch(`${base}/api/confirm`, {
+      const res = await fetch(`${base}${request.url}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_id: bookingId,
-          ...authPayload,
-          action: 'modify',
-          booking_date: date,
-          booking_time: selectedTime,
-          party_size: partySize,
-        }),
+        body: JSON.stringify(request.body),
       });
 
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        const msg =
-          res.status === 412
-            ? 'This booking was updated elsewhere. Refresh the page and try again.'
-            : ((j as { error?: string }).error ?? 'Failed to update booking.');
-        setError(msg);
+        setError(await readGuestModifyError(res));
         return;
       }
 
@@ -1148,7 +1199,7 @@ function ModifyTableBookingSection({
     } finally {
       setSaving(false);
     }
-  }, [bookingId, authPayload, date, selectedTime, partySize, hasChanges, onCancel, onSaved]);
+  }, [bookingId, actor, date, selectedTime, partySize, hasChanges, onCancel, onSaved]);
 
   return (
     <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 space-y-3">
@@ -1156,8 +1207,9 @@ function ModifyTableBookingSection({
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Date</label>
+          <label htmlFor={`${fieldId}-date`} className="mb-1 block text-xs font-medium text-slate-500">Date</label>
           <input
+            id={`${fieldId}-date`}
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
@@ -1165,8 +1217,9 @@ function ModifyTableBookingSection({
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">Party size</label>
+          <label htmlFor={`${fieldId}-party`} className="mb-1 block text-xs font-medium text-slate-500">Party size</label>
           <NumericInput
+            id={`${fieldId}-party`}
             min={1}
             max={50}
             value={partySize}
@@ -1177,7 +1230,7 @@ function ModifyTableBookingSection({
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-500">Time</label>
+        <label htmlFor={`${fieldId}-time`} className="mb-1 block text-xs font-medium text-slate-500">Time</label>
         {loadingSlots ? (
           <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
@@ -1201,6 +1254,7 @@ function ModifyTableBookingSection({
           </div>
         ) : (
           <select
+            id={`${fieldId}-time`}
             value={selectedTime}
             onChange={(e) => setSelectedTime(e.target.value)}
             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
@@ -1258,7 +1312,7 @@ function ModifyResourceBookingSection({
   currentDate,
   currentTime,
   currentEndTime,
-  authPayload,
+  actor,
   onSaved,
   onCancel,
 }: {
@@ -1268,7 +1322,7 @@ function ModifyResourceBookingSection({
   currentDate: string;
   currentTime: string;
   currentEndTime: string | null;
-  authPayload: { hmac?: string; token?: string };
+  actor: GuestBookingDetailActor;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -1292,26 +1346,28 @@ function ModifyResourceBookingSection({
     setSaving(true);
     setError(null);
     try {
+      const changes: GuestModifyChanges = {
+        booking_date: date,
+        booking_time: time,
+        duration_minutes: duration,
+      };
+      // Where this goes depends on who is asking: the emailed link posts to
+      // `/api/confirm` with its token, a signed-in customer to their own
+      // account route. `buildGuestModifyRequest` owns that decision for all
+      // four modify surfaces so they cannot drift apart.
+      const request = buildGuestModifyRequest(actor, bookingId, changes);
+      if (!request) {
+        setError('This booking cannot be changed from here.');
+        return;
+      }
       const base = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await fetch(`${base}/api/confirm`, {
+      const res = await fetch(`${base}${request.url}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_id: bookingId,
-          ...authPayload,
-          action: 'modify',
-          booking_date: date,
-          booking_time: time,
-          duration_minutes: duration,
-        }),
+        body: JSON.stringify(request.body),
       });
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        const msg =
-          res.status === 412
-            ? 'This booking was updated elsewhere. Refresh the page and try again.'
-            : ((j as { error?: string }).error ?? 'Failed to update booking.');
-        setError(msg);
+        setError(await readGuestModifyError(res));
         return;
       }
       onSaved();
@@ -1320,7 +1376,7 @@ function ModifyResourceBookingSection({
     } finally {
       setSaving(false);
     }
-  }, [bookingId, authPayload, date, time, duration, hasChanges, onCancel, onSaved]);
+  }, [bookingId, actor, date, time, duration, hasChanges, onCancel, onSaved]);
 
   return (
     <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 space-y-3">
@@ -1374,7 +1430,7 @@ function ModifyClassBookingSection({
   classTypeId,
   currentInstanceId,
   className,
-  authPayload,
+  actor,
   onSaved,
   onCancel,
 }: {
@@ -1383,7 +1439,7 @@ function ModifyClassBookingSection({
   classTypeId: string;
   currentInstanceId: string;
   className: string | null;
-  authPayload: { hmac?: string; token?: string };
+  actor: GuestBookingDetailActor;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -1396,24 +1452,26 @@ function ModifyClassBookingSection({
     setSaving(true);
     setError(null);
     try {
+      const changes: GuestModifyChanges = {
+        target_class_instance_id: selected.instance_id,
+      };
+      // Where this goes depends on who is asking: the emailed link posts to
+      // `/api/confirm` with its token, a signed-in customer to their own
+      // account route. `buildGuestModifyRequest` owns that decision for all
+      // four modify surfaces so they cannot drift apart.
+      const request = buildGuestModifyRequest(actor, bookingId, changes);
+      if (!request) {
+        setError('This booking cannot be changed from here.');
+        return;
+      }
       const base = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await fetch(`${base}/api/confirm`, {
+      const res = await fetch(`${base}${request.url}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_id: bookingId,
-          ...authPayload,
-          action: 'modify',
-          target_class_instance_id: selected.instance_id,
-        }),
+        body: JSON.stringify(request.body),
       });
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        const msg =
-          res.status === 412
-            ? 'This booking was updated elsewhere. Refresh the page and try again.'
-            : ((j as { error?: string }).error ?? 'Failed to update booking.');
-        setError(msg);
+        setError(await readGuestModifyError(res));
         return;
       }
       onSaved();
@@ -1422,7 +1480,7 @@ function ModifyClassBookingSection({
     } finally {
       setSaving(false);
     }
-  }, [bookingId, authPayload, selected, onSaved]);
+  }, [bookingId, actor, selected, onSaved]);
 
   return (
     <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 space-y-3">

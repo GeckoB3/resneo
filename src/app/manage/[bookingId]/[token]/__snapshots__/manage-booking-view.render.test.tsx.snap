@@ -16,7 +16,7 @@ exports[`ManageBookingView renders (P2-4 gate) > a table reservation shows guest
 
 exports[`ManageBookingView renders (P2-4 gate) > a used link explains itself and offers a new one 1`] = `"Link already usedThis booking link has already been used and is no longer active.Check your inbox for a more recent email, or contact the venue to resend your booking link.Go home"`;
 
-exports[`ManageBookingView renders (P2-4 gate) > a venue with self-reschedule off does not offer the change 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsCancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+exports[`ManageBookingView renders (P2-4 gate) > a venue with self-reschedule off does not offer the change 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsNeed a different time?Frozen Venue does not offer changes online. Please contact them on +44 20 7946 0000 to move this booking. You can still cancel it below.Cancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
 
 exports[`ManageBookingView renders (P2-4 gate) > an appointment shows its service, staff, and the policy copy 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsChange appointmentCancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
 

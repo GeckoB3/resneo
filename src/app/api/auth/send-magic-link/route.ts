@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { renderMagicLinkEmail } from '@/lib/emails/templates/magic-link-email';
+// One definition of the lifetime, shared with the 'check your inbox' screen
+// (P3-4g). It was stated in two files, which is how two strings disagree.
+import { MAGIC_LINK_EXPIRY_HOURS } from '@/lib/auth/magic-link-lifetime';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
 import { buildMagicLinkConfirmNextQuery } from '@/lib/safe-auth-redirect';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
@@ -21,17 +24,6 @@ import { z } from 'zod';
 const RATE_WINDOW_MS = 15 * 60_000;
 const RATE_LIMIT_PER_IP = 10;
 const RATE_LIMIT_PER_EMAIL = 3;
-
-/**
- * What the email TELLS the customer the link lasts, and it must equal the
- * project's `otp_expiry` (86400 seconds, `supabase/config.toml:230`).
- *
- * Named here rather than written into the copy, because that setting is
- * dashboard-configured per project and the plan records that changing it must
- * also update every string stating the lifetime. One constant is one place to
- * change, and `magic-link-email.ts` renders whatever it is given.
- */
-const MAGIC_LINK_EXPIRY_HOURS = 24;
 
 function tooManyRequests(retryAfterSec: number): NextResponse {
   return NextResponse.json(

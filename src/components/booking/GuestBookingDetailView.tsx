@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModel } from '@/types/booking-models';
@@ -11,7 +12,6 @@ import {
   readGuestModifyError,
   type GuestModifyChanges,
 } from '@/lib/booking/guest-modify-request';
-import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { BrandSpinner, ConfirmDialog } from '@/components/ui/primitives';
 import { GuestResourceModifySlotPicker } from '@/components/booking/GuestResourceModifySlotPicker';
@@ -22,6 +22,36 @@ import {
 import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { guestCardHoldHeldLine } from '@/lib/booking/guest-card-hold-summary';
+
+/*
+  P2-5a (Register Q-01). LAZY, because this view is what an emailed cancel
+  link opens.
+
+  A statically imported `AppointmentBookingFlow` is 5,903 lines and reaches
+  `PaymentStep`, which reaches both Stripe packages, so a guest opening a link
+  to CANCEL a booking downloaded the whole booking flow and a payment SDK
+  before the page could paint. Measured before the change: this page's initial
+  bundle was 1,331 KB and contained both, while the public booking page, which
+  mounts the same component through `BookingFlowRouter`'s `dynamic()`, was
+  364 KB and contained neither.
+
+  It renders only after the guest presses "Change appointment", so nothing is
+  waiting on it at first paint. Same shape as `BookingFlowRouter`, spinner
+  included, so the two cannot drift.
+*/
+const AppointmentBookingFlow = dynamic(
+  () =>
+    import('@/components/booking/AppointmentBookingFlow').then((m) => ({
+      default: m.AppointmentBookingFlow,
+    })),
+  {
+    loading: () => (
+      <div className="flex justify-center py-12" role="status" aria-label="Loading booking">
+        <BrandSpinner />
+      </div>
+    ),
+  },
+);
 
 /**
  * The payload this view reads, defined in exactly one place (P2-4 acceptance).

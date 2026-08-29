@@ -21,6 +21,32 @@ import {
   type AccountBookingModelFilter,
 } from '@/lib/account/account-booking-filters';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { CancelCourseButton } from '@/components/account/CancelCourseButton';
+import {
+  courseCancellationLines,
+  summariseCourseCancellation,
+} from '@/lib/account/course-cancellation-summary';
+
+/**
+ * What "cancel the whole course" would do, or null when there is nothing left
+ * to cancel (P2-2a).
+ *
+ * The anchor is the FIRST remaining session, not the first row: the service
+ * walks the group from whichever booking it is given, and handing it one that
+ * is already cancelled would be asking it to act on a booking the customer can
+ * no longer act on.
+ */
+function courseCancel(
+  rows: AccountBookingRow[],
+  nowIso: string,
+): { anchorBookingId: string; lines: string[] } | null {
+  const summary = summariseCourseCancellation(rows, nowIso);
+  if (summary.remaining === 0) return null;
+  const anchor = rows.find((r) => ['Pending', 'Booked', 'Confirmed'].includes(r.status));
+  if (!anchor) return null;
+  return { anchorBookingId: anchor.id, lines: courseCancellationLines(summary) };
+}
+
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -119,6 +145,12 @@ export default async function AccountBookingsPage({
     model,
   );
   const displayItems = buildAccountBookingDisplayList(filtered);
+  /*
+    ONE clock for every course on the page. Each session's refundability is a
+    comparison against this, and reading the clock per course would let two
+    courses on one screen disagree about whether the same instant had passed.
+  */
+  const nowIso = new Date().toISOString();
 
   const tabs: Array<{ id: AccountBookingFilter; label: string }> = [
     { id: 'all', label: 'All' },
@@ -208,8 +240,16 @@ export default async function AccountBookingsPage({
         </p>
       ) : (
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
-          {displayItems.map((item) =>
-            item.kind === 'group' ? (
+          {displayItems.map((item) => {
+            /*
+              Computed once per course, here on the server (P2-2a). The rows
+              already carry every session's status, deadline and deposit, so
+              the dialog can state the outcome without the browser asking for
+              it again. Null when nothing is left to cancel.
+            */
+            const course =
+              item.kind === 'group' ? courseCancel(item.rows, nowIso) : null;
+            return item.kind === 'group' ? (
               <li key={item.group_booking_id} className="flex flex-col gap-2 px-4 py-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
@@ -240,10 +280,33 @@ export default async function AccountBookingsPage({
                     </ul>
                   </div>
                 </div>
-                <p className="text-[11px] leading-relaxed text-slate-500">
-                  Each session is changed or cancelled on its own. To cancel the whole course, do
-                  that for every session here, or contact the venue.
-                </p>
+                {/*
+                  P2-2a closes Register Q-21. This footnote used to say "to
+                  cancel the whole course, do that for every session here",
+                  which was the portal handing a customer a chore because the
+                  control below did not exist. What remains of it is the part
+                  that is still true and still worth saying: one session at a
+                  time is also allowed.
+
+                  The consequences are worked out HERE, on the server, where
+                  every session's deadline and deposit already are.
+                */}
+                {course ? (
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                    <p className="text-[11px] leading-relaxed text-slate-500">
+                      Or open any session above to change or cancel just that one.
+                    </p>
+                    <CancelCourseButton
+                      anchorBookingId={course.anchorBookingId}
+                      courseName={item.rows[0]?.cde_context?.title ?? null}
+                      lines={course.lines}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-[11px] leading-relaxed text-slate-500">
+                    Every session on this course is cancelled or finished.
+                  </p>
+                )}
               </li>
             ) : (
               <li key={item.row.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -265,8 +328,8 @@ export default async function AccountBookingsPage({
                   </Link>
                 </div>
               </li>
-            ),
-          )}
+            );
+          })}
         </ul>
       )}
       <p className="text-xs text-slate-500">

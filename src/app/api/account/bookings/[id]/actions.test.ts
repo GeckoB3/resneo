@@ -331,6 +331,89 @@ describe('reschedule-options answers what a move would need', () => {
   });
 });
 
+/**
+ * P2-2a: `{ scope: 'course' }` on the cancel route (Register Q-21).
+ *
+ * The service itself is unit tested; what these rows cover is the ROUTING,
+ * which is the part a unit test cannot see. Sending the course scope and
+ * getting a single-booking cancel would leave a customer believing a course of
+ * six was gone when five sessions were still live, and it would look like a
+ * success from every angle except the list.
+ */
+describe('cancel takes a course scope', () => {
+  const SIBLINGS = [
+    { id: BOOKING_ID, status: 'Booked' },
+    { id: 'bk-session-2', status: 'Confirmed' },
+    { id: 'bk-session-3', status: 'Cancelled' },
+  ];
+
+  /** Ids the route actually wrote a cancellation to, in order. */
+  function cancelledIds(): string[] {
+    return hoisted
+      .admin!.calls.filter((c) => c.table === 'bookings' && c.op === 'update')
+      .flatMap((c) => c.filters.filter((f) => f[0] === 'eq' && f[1] === 'id').map((f) => String(f[2])));
+  }
+
+  beforeEach(() => {
+    setup(baseBooking({ group_booking_id: 'grp-1', booking_model: 'class_session' }));
+    const previous = hoisted.admin!;
+    hoisted.admin = makeRecordingDb((call: RecordedCall) => {
+      // The GROUP read is a list; every other bookings read is the single row.
+      // Told apart by the filter, because both are `bookings` selects and a
+      // responder that answered them the same way would hand an object to
+      // code that filters an array.
+      if (
+        call.table === 'bookings' &&
+        call.op === 'select' &&
+        call.filters.some((f) => f[1] === 'group_booking_id')
+      ) {
+        return { data: SIBLINGS };
+      }
+      if (call.table === 'bookings' && call.op === 'select') {
+        return { data: baseBooking({ group_booking_id: 'grp-1', booking_model: 'class_session' }) };
+      }
+      if (call.table === 'venues' && call.op === 'select') return { data: VENUE_ROW };
+      if (call.table === 'guests' && call.op === 'select') return { data: GUEST_ROW };
+      return undefined;
+    });
+    void previous;
+  });
+
+  it('cancels every remaining session of the course', async () => {
+    const { res, json } = await callRoute('cancel', { scope: 'course' });
+    expect(res.status, JSON.stringify(json)).toBe(200);
+    expect(cancelledIds()).toEqual([BOOKING_ID, 'bk-session-2']);
+    expect(json.cancelled_count).toBe(2);
+  });
+
+  it('leaves the already-cancelled session alone', async () => {
+    await callRoute('cancel', { scope: 'course' });
+    expect(cancelledIds()).not.toContain('bk-session-3');
+  });
+
+  it('cancels ONLY the named booking without the scope', async () => {
+    const { res } = await callRoute('cancel');
+    expect(res.status).toBe(200);
+    expect(cancelledIds()).toEqual([BOOKING_ID]);
+  });
+
+  it('treats a scope it has not heard of as the narrower action', async () => {
+    // A client sending `scope: "everything"` gets one booking cancelled, not
+    // a course. Widening on an unrecognised value is the wrong way to be wrong.
+    const { res } = await callRoute('cancel', { scope: 'everything' });
+    expect(res.status).toBe(200);
+    expect(cancelledIds()).toEqual([BOOKING_ID]);
+  });
+
+  it('refuses the course scope on a booking that is not part of one', async () => {
+    setup(baseBooking());
+    const { res, json } = await callRoute('cancel', { scope: 'course' });
+    expect(res.status).toBe(400);
+    expect(String(json.error)).toMatch(/not part of a course/i);
+    expect(cancelledIds()).toEqual([]);
+  });
+});
+
 describe('exactly one detail endpoint exists (P2-1 acceptance)', () => {
   it('no second booking detail route was added under /api/account', () => {
     // The plan called for `GET /api/account/bookings/[id]` before noticing that

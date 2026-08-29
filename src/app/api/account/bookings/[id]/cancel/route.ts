@@ -1,5 +1,13 @@
-import { runSessionBookingAction } from '@/lib/api/session-booking-action';
-import { cancelBookingForGuest } from '@/lib/booking/guest-actions/cancel';
+import { readJsonBody, runSessionBookingAction } from '@/lib/api/session-booking-action';
+import {
+  cancelBookingForGuest,
+  type CancelBookingData,
+} from '@/lib/booking/guest-actions/cancel';
+import {
+  cancelCourseForGuest,
+  type CancelCourseData,
+} from '@/lib/booking/guest-actions/cancel-course';
+import type { GuestActionResult } from '@/lib/booking/guest-actions/types';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,10 +24,31 @@ type Params = { params: Promise<{ id: string }> };
  *
  * A session actor does NOT consume the booking's confirm token. The emailed
  * link stays usable, because a portal cancel is not that link being followed.
+ *
+ * **`{ scope: 'course' }` cancels every remaining session of the course this
+ * booking belongs to** (P2-2a, Register Q-21). A body parameter rather than a
+ * route of its own: the thing being cancelled is still one of the caller's
+ * bookings, reached at its own id and authorised the same way, and a second
+ * route would need its own v1 alias under C7a to publish a second spelling of
+ * cancel on the versioned surface. Anything other than 'course' is the single
+ * booking, so a client that sends nothing, or sends a scope this route has not
+ * heard of, gets the narrower action rather than a wider one.
+ *
+ * The body is read INSIDE the callback, after the 401, which
+ * `account-routes-auth.test.ts` asserts for every route under /api/account.
  */
 export async function POST(request: Request, { params }: Params) {
   const { id } = await params;
-  return runSessionBookingAction(request, ({ clients, actor }) =>
-    cancelBookingForGuest(clients, { bookingId: id, actor }),
+  // Annotated, because the two branches return different data types and the
+  // inferred union of two `GuestActionResult<T>`s is not a
+  // `GuestActionResult<A | B>`. The response body is the union either way.
+  return runSessionBookingAction<CancelBookingData | CancelCourseData>(
+    request,
+    async ({ clients, actor }): Promise<GuestActionResult<CancelBookingData | CancelCourseData>> => {
+      const body = await readJsonBody(request);
+      return body.scope === 'course'
+        ? cancelCourseForGuest(clients, { bookingId: id, actor })
+        : cancelBookingForGuest(clients, { bookingId: id, actor });
+    },
   );
 }

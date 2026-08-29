@@ -150,6 +150,20 @@ export interface BookingDetailDto {
   timeline: Array<{ label: string; at: string }>;
 
   /**
+   * Whether a class credit or membership allowance paid for this booking.
+   *
+   * Read so the cancel dialog can say what happens to it. `cancelBookingForGuest`
+   * restores credits only when the booking is a class session AND the
+   * cancellation deadline has not passed, so a guest deciding whether to cancel
+   * needs to know both, and "your credit will be returned" is a different
+   * decision from "your credit will not be returned".
+   *
+   * Always false for anything that is not a class session, since nothing else
+   * can be paid that way.
+   */
+  paid_with_credit: boolean;
+
+  /**
    * Add to calendar, built here rather than in the browser.
    *
    * Both need the venue's timezone to be right, and the client does not have
@@ -451,6 +465,31 @@ export async function buildBookingDetailDto(
     });
   }
 
+  /*
+    Only asked for a class session: nothing else can be credit-paid, and this
+    is a second table read on a page that already makes several.
+  */
+  let paidWithCredit = false;
+  if (inferredModel === 'class_session') {
+    const [{ data: creditRow }, { data: allowanceRow }] = await Promise.all([
+      supabase
+        .from('class_credit_ledger')
+        .select('id')
+        .eq('booking_id', booking.id)
+        .eq('reason', 'redeem')
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('class_membership_allowance_ledger')
+        .select('id')
+        .eq('booking_id', booking.id)
+        .eq('reason', 'redeem')
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    paidWithCredit = Boolean(creditRow || allowanceRow);
+  }
+
   const venueTimezone =
     typeof (venue as { timezone?: string | null } | null)?.timezone === 'string' &&
     String((venue as { timezone?: string | null }).timezone).trim() !== ''
@@ -552,6 +591,7 @@ export async function buildBookingDetailDto(
     cancelled_by: cancelledBy,
     timeline,
     calendar,
+    paid_with_credit: paidWithCredit,
   };
 }
 

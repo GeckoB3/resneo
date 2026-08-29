@@ -6,9 +6,8 @@ import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModel } from '@/types/booking-models';
 import type { BookingDetailDto } from '@/lib/booking/booking-detail-dto';
 import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
-import type { VenuePublic } from '@/components/booking/types';
 import { NumericInput } from '@/components/ui/NumericInput';
-import { BrandSpinner } from '@/components/ui/primitives';
+import { BrandSpinner, ConfirmDialog } from '@/components/ui/primitives';
 import { GuestResourceModifySlotPicker } from '@/components/booking/GuestResourceModifySlotPicker';
 import {
   GuestClassModifyInstancePicker,
@@ -16,10 +15,7 @@ import {
 } from '@/components/booking/GuestClassModifyInstancePicker';
 import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
-import {
-  guestCardHoldHeldLine,
-  guestCardHoldLateCancelWarning,
-} from '@/lib/booking/guest-card-hold-summary';
+import { guestCardHoldHeldLine } from '@/lib/booking/guest-card-hold-summary';
 
 /**
  * The payload this view reads, defined in exactly one place (P2-4 acceptance).
@@ -240,12 +236,28 @@ export function GuestBookingDetailView({
     setCancelling(true);
     const base = typeof window !== 'undefined' ? window.location.origin : '';
     try {
-      const authPayload = hmac ? { hmac } : { token };
-      const res = await fetch(`${base}/api/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking_id: bookingId, ...authPayload, action: 'cancel' }),
-      });
+      /*
+        Two transports, one outcome (P2-2). The token surface posts its proof to
+        `/api/confirm`; the portal posts to its own route, which proves the
+        session and calls the SAME `cancelBookingForGuest`. Both come back with
+        the same body, which is what lets everything below this line be shared.
+      */
+      const res =
+        actor.kind === 'session'
+          ? await fetch(`${base}/api/account/bookings/${encodeURIComponent(bookingId)}/cancel`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({}),
+            })
+          : await fetch(`${base}/api/confirm`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                booking_id: bookingId,
+                ...(hmac ? { hmac } : { token }),
+                action: 'cancel',
+              }),
+            });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed');
       setCancelled(true);
@@ -257,7 +269,7 @@ export function GuestBookingDetailView({
     } finally {
       setCancelling(false);
     }
-  }, [bookingId, token, hmac]);
+  }, [bookingId, token, hmac, actor.kind]);
 
   /**
    * A modify succeeded, but the guest is still reading the flow's own confirmation.
@@ -377,7 +389,13 @@ export function GuestBookingDetailView({
   const bookingIsLive =
     details.status === 'Confirmed' || details.status === 'Booked' || details.status === 'Pending';
   const canModify = canAct && bookingIsLive;
-  const canCancel = canAct && bookingIsLive;
+  /*
+    Cancel is available to a session actor as of P2-2, because the portal now
+    has a route that performs it. Reschedule is not: P2-3 wires that, and until
+    it does the modify flows post to `/api/confirm` with a token the portal
+    does not hold.
+  */
+  const canCancel = bookingIsLive;
   const isAppointment = Boolean(details.is_appointment);
   const bookingModel: BookingModel = details.booking_model ?? 'table_reservation';
   const isCde = isCdeModel(bookingModel);
@@ -448,24 +466,75 @@ export function GuestBookingDetailView({
 
   // Model-aware noun + policy-aware refund copy (use "booking" for CDE, not "reservation").
   const bookingNoun = isCde ? 'booking' : isAppointment ? 'appointment' : 'reservation';
-  const rawRefundHours = details.refund_notice_hours;
-  const refundPolicyCopy =
-    rawRefundHours == null || rawRefundHours <= 0
-      ? `This ${bookingNoun} is non-refundable.`
-      : `Full refund if cancelled ${rawRefundHours}+ hours before your ${bookingNoun}. No refund within ${rawRefundHours} hours or for no-shows.`;
+  /*
+    `refundPolicyCopy` and `cardHoldLateCancelWarning` used to be derived here
+    and shown inside the cancel panel. Both are gone: the first stated the
+    venue's rule ("full refund if cancelled 24+ hours before") and left the
+    guest to work out which side of it they were on, and the second said the
+    deadline had passed, which the consequence list below now says once rather
+    than twice. What replaced them states the outcome for this booking.
+  */
 
-  // Card-hold late-cancellation warning (§9.3 amended): once the deadline has
-  // passed and a saved hold is open, cancelling no longer avoids the fee, so
-  // say so before the guest confirms.
-  const holdDeadlineMs = details.cancellation_deadline
+  /*
+    What cancelling actually does to THIS booking (P2-2, closes part of G13).
+
+    The panel this replaced stated the venue's refund POLICY: "full refund if
+    cancelled 24+ hours before". That is the rule, not the answer. A guest
+    deciding whether to cancel needs to know which side of the deadline they
+    are on right now, because the four outcomes below differ on exactly that,
+    and two of them are about money they will not get back.
+
+    Each line is included only when it applies, so a booking with no deposit,
+    no card hold and no credit gets one sentence rather than four hedged ones.
+  */
+  const deadlineMs = details.cancellation_deadline
     ? Date.parse(details.cancellation_deadline)
     : Number.NaN;
-  const cardHoldLateCancelWarning =
-    details.card_hold?.state === 'held' &&
-    Number.isFinite(holdDeadlineMs) &&
-    Date.now() > holdDeadlineMs
-      ? guestCardHoldLateCancelWarning(venueNameForCopy, details.card_hold.fee_pence)
-      : null;
+  const pastDeadline = Number.isFinite(deadlineMs) && Date.now() > deadlineMs;
+  const deadlineLabel = Number.isFinite(deadlineMs)
+    ? new Date(deadlineMs).toLocaleString('en-GB', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
+
+  const cancelConsequences: string[] = [];
+  if (deadlineLabel) {
+    cancelConsequences.push(
+      pastDeadline
+        ? `The free cancellation deadline passed on ${deadlineLabel}.`
+        : `You can cancel free of charge until ${deadlineLabel}.`,
+    );
+  }
+  if (details.deposit_paid && details.deposit_amount_pence != null) {
+    const amount = `£${(details.deposit_amount_pence / 100).toFixed(2)}`;
+    cancelConsequences.push(
+      pastDeadline
+        ? `Your ${amount} deposit will not be refunded.`
+        : `Your ${amount} deposit will be refunded.`,
+    );
+  }
+  if (details.card_hold?.state === 'held') {
+    const fee = formatCardHoldFeePence(details.card_hold.fee_pence);
+    cancelConsequences.push(
+      pastDeadline
+        ? `${venueNameForCopy} may charge a no-show fee of up to ${fee}.`
+        : `No no-show fee will be charged, and the hold on your card is released.`,
+    );
+  }
+  if (isClassBooking && details.paid_with_credit) {
+    cancelConsequences.push(
+      pastDeadline
+        ? 'Your class credit will not be returned.'
+        : 'Your class credit will be returned to your account.',
+    );
+  }
+  if (cancelConsequences.length === 0) {
+    cancelConsequences.push(`Your ${bookingNoun} will be cancelled. This cannot be undone.`);
+  }
 
   return (
     /*
@@ -819,30 +888,35 @@ export function GuestBookingDetailView({
             </button>
           )}
 
-          {canCancel && showCancelConfirm && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
-              <p className="text-sm font-medium text-red-800">Are you sure?</p>
-              {details.deposit_paid && details.deposit_amount_pence ? (
-                <p className="text-xs text-red-700">{refundPolicyCopy}</p>
-              ) : (
-                <p className="text-xs text-red-700">
-                  {`Are you sure you want to cancel this ${bookingNoun}?`}
-                </p>
-              )}
-              {cardHoldLateCancelWarning && (
-                <p className="text-xs font-medium text-red-700">{cardHoldLateCancelWarning}</p>
-              )}
-              {error && <p className="text-xs text-red-600">{error}</p>}
-              <div className="flex gap-2">
-                <button type="button" onClick={handleCancel} disabled={cancelling} className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50">
-                  {cancelling ? 'Cancelling...' : 'Yes, cancel'}
-                </button>
-                <button type="button" onClick={() => { setShowCancelConfirm(false); setError(null); }} className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
-                  {keepButtonLabel}
-                </button>
+          {/*
+            `ConfirmDialog` with its `body` slot (P0-16 added it for this), not
+            the hand-rolled red panel this replaced. That panel stated the
+            venue's refund POLICY and left the guest to work out which side of
+            the deadline they were on; the list below states the OUTCOME for
+            this booking, which is what they are actually deciding about.
+          */}
+          <ConfirmDialog
+            open={canCancel && showCancelConfirm}
+            onOpenChange={(next) => {
+              setShowCancelConfirm(next);
+              if (!next) setError(null);
+            }}
+            title={cancelButtonLabel}
+            message={`This cannot be undone. Here is what happens to your ${bookingNoun}:`}
+            body={
+              <div className="space-y-2 text-sm">
+                <ul className="list-disc space-y-1.5 pl-5 text-slate-700">
+                  {cancelConsequences.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                {error && <p className="text-sm font-medium text-red-700">{error}</p>}
               </div>
-            </div>
-          )}
+            }
+            confirmLabel={cancelling ? 'Cancelling…' : 'Yes, cancel'}
+            cancelLabel={keepButtonLabel}
+            onConfirm={() => void handleCancel()}
+          />
           {/*
             Add to calendar. Both links are built server-side, because getting
             them right needs the venue's timezone and the browser does not have

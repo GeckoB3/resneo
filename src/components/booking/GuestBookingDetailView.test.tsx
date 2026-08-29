@@ -83,6 +83,7 @@ function baseDetail(overrides: Partial<BookingDetailDto> = {}): BookingDetailDto
     cancelled_by: null,
     timeline: [],
     calendar: { google_url: 'https://calendar.test/add', ics: 'BEGIN:VCALENDAR' },
+    paid_with_credit: false,
     ...overrides,
   } as BookingDetailDto;
 }
@@ -194,18 +195,16 @@ describe('the shared view under a session actor', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('offers no action it cannot perform yet', () => {
+  it('offers cancel but not yet reschedule', () => {
     /*
-      P2-4 is a pure extraction: the plan has P2-2 and P2-3 supply the session
-      handlers. Until they do, the buttons would post to `/api/confirm` with a
-      token a portal reader does not have, so they are not rendered. An
-      affordance that cannot work is worse than one not offered yet.
-
-      This test is expected to CHANGE when P2-2 and P2-3 land. It is here to
-      make that a deliberate edit rather than something nobody notices.
+      P2-4 left the session actor with no buttons at all, because both posted to
+      `/api/confirm` with a token the portal does not hold. P2-2 gave cancel its
+      own route, so it is offered now. Reschedule is still not: P2-3 wires that,
+      and the test changing here is the deliberate edit its predecessor asked
+      for rather than something nobody noticed.
     */
     renderSession(baseDetail());
-    expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^cancel/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /change/i })).not.toBeInTheDocument();
   });
 
@@ -319,6 +318,115 @@ describe('the sections P2-4 completes', () => {
     const text = renderSession(baseDetail());
     expect(text).toContain('Contact the venue');
     expect(text).toContain('hello@frozen.test');
+  });
+});
+
+describe('cancelling from the portal (P2-2)', () => {
+  /** Inside the free-cancellation window: the deadline is in the future. */
+  const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  /** Past it: the deadline has gone. */
+  const past = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+  /** Opens the dialog and waits for it, since the state update is not sync. */
+  async function openCancelDialog(detail: BookingDetailDto) {
+    renderSession(detail);
+    screen.getByRole('button', { name: /^cancel/i }).click();
+    await screen.findByRole('button', { name: 'Yes, cancel' });
+    return (document.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  it('offers the action at all, which it did not before P2-2', () => {
+    renderSession(baseDetail());
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
+  });
+
+  it('states the deadline, and which side of it the guest is on', async () => {
+    expect(await openCancelDialog(baseDetail({ cancellation_deadline: future }))).toContain(
+      'cancel free of charge until',
+    );
+    cleanup();
+    expect(await openCancelDialog(baseDetail({ cancellation_deadline: past }))).toContain(
+      'free cancellation deadline passed',
+    );
+  });
+
+  it('says whether the deposit comes back, not what the policy is', async () => {
+    // The panel this replaced said "full refund if cancelled 24+ hours before"
+    // and left the guest to work out whether that was them.
+    const inWindow = await openCancelDialog(
+      baseDetail({ cancellation_deadline: future, deposit_paid: true, deposit_amount_pence: 2500 }),
+    );
+    expect(inWindow).toContain('£25.00 deposit will be refunded');
+    cleanup();
+
+    const late = await openCancelDialog(
+      baseDetail({ cancellation_deadline: past, deposit_paid: true, deposit_amount_pence: 2500 }),
+    );
+    expect(late).toContain('£25.00 deposit will not be refunded');
+  });
+
+  it('states the card-hold fee through the shared formatter', async () => {
+    const held = { fee_pence: 1500, state: 'held', charged_pence: null, charged_at: null };
+    const late = await openCancelDialog(
+      baseDetail({ cancellation_deadline: past, card_hold: held as never }),
+    );
+    expect(late).toContain('no-show fee of up to £15.00');
+    cleanup();
+
+    const inWindow = await openCancelDialog(
+      baseDetail({ cancellation_deadline: future, card_hold: held as never }),
+    );
+    expect(inWindow).toContain('No no-show fee will be charged');
+  });
+
+  it('says what happens to a class credit', async () => {
+    const asClass = {
+      booking_model: 'class_session' as const,
+      is_appointment: false,
+      paid_with_credit: true,
+    };
+    expect(await openCancelDialog(baseDetail({ ...asClass, cancellation_deadline: future }))).toContain(
+      'class credit will be returned',
+    );
+    cleanup();
+    expect(await openCancelDialog(baseDetail({ ...asClass, cancellation_deadline: past }))).toContain(
+      'class credit will not be returned',
+    );
+  });
+
+  it('says nothing about a credit for a booking no credit paid for', async () => {
+    const text = await openCancelDialog(baseDetail({ cancellation_deadline: future }));
+    expect(text).not.toContain('class credit');
+  });
+
+  it('still says something for a booking with nothing at stake', async () => {
+    // No deadline, no deposit, no hold, no credit: the dialog must not be an
+    // empty box with a destructive button in it.
+    const text = await openCancelDialog(
+      baseDetail({ cancellation_deadline: null, deposit_paid: false, card_hold: null }),
+    );
+    expect(text).toContain('cannot be undone');
+  });
+
+  it('posts to the portal route, not to the token surface', async () => {
+    // The session actor holds no token, so a post to /api/confirm would be
+    // rejected. This is the wiring that makes the shared button work for both.
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        calls.push(typeof input === 'string' ? input : String(input));
+        return { ok: true, status: 200, json: async () => ({ success: true }) } as unknown as Response;
+      }),
+    );
+    renderSession(baseDetail());
+    screen.getByRole('button', { name: /^cancel/i }).click();
+    // Awaited: opening the dialog is a state update, not a synchronous render.
+    (await screen.findByRole('button', { name: 'Yes, cancel' })).click();
+
+    await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls[0]).toContain(`/api/account/bookings/${BOOKING_ID}/cancel`);
+    expect(calls[0]).not.toContain('/api/confirm');
   });
 });
 

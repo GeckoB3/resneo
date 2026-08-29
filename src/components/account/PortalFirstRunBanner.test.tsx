@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
-import { PortalPasswordPrompt } from './PortalPasswordPrompt';
+import { PortalFirstRunBanner } from './PortalFirstRunBanner';
 
 const refresh = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
@@ -53,14 +53,29 @@ describe('it is a prompt, not a gate', () => {
       found that, not this one.
     */
     stubFetch();
-    render(<PortalPasswordPrompt />);
+    render(<PortalFirstRunBanner />);
     expect(screen.getByRole('region', { name: /set a password/i })).toBeInTheDocument();
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
   });
 
+  it('explains what the account IS, which is P3-5’s first-run explainer', () => {
+    /*
+      Folded in here rather than shipped as a second banner: two dismissible
+      boxes above the booking a customer came to read is worse than either
+      alone, and they would appear together. What it says is the one thing the
+      page in front of them cannot: that this is ONE account across every
+      ResNeo venue, not a login for the venue they just booked.
+    */
+    stubFetch();
+    render(<PortalFirstRunBanner />);
+    const text = document.body.textContent ?? '';
+    expect(text).toMatch(/every booking you make with any venue/i);
+    expect(text).toMatch(/change or cancel them yourself/i);
+  });
+
   it('asks without demanding anything', async () => {
     stubFetch();
-    render(<PortalPasswordPrompt />);
+    render(<PortalFirstRunBanner />);
     expect(screen.getByText(/set a password to get straight back in/i)).toBeInTheDocument();
     // The way out is present before the way in is even expanded.
     expect(screen.getByRole('button', { name: /not now/i })).toBeInTheDocument();
@@ -68,7 +83,7 @@ describe('it is a prompt, not a gate', () => {
 
   it('disappears entirely on "not now"', async () => {
     stubFetch();
-    render(<PortalPasswordPrompt />);
+    render(<PortalFirstRunBanner />);
     await userEvent.click(screen.getByRole('button', { name: /not now/i }));
     expect(screen.queryByText(/set a password to get straight back in/i)).not.toBeInTheDocument();
   });
@@ -77,7 +92,7 @@ describe('it is a prompt, not a gate', () => {
     // A form sitting open above the booking they came to read is a gate with
     // extra steps.
     stubFetch();
-    render(<PortalPasswordPrompt />);
+    render(<PortalFirstRunBanner />);
     expect(screen.queryByLabelText(/new password/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /set a password/i }));
     expect(screen.getByLabelText(/new password/i)).toBeInTheDocument();
@@ -93,7 +108,7 @@ describe('"not now" is remembered on the account', () => {
       the other half of this decision, already uses.
     */
     stubFetch();
-    render(<PortalPasswordPrompt />);
+    render(<PortalFirstRunBanner />);
     await userEvent.click(screen.getByRole('button', { name: /not now/i }));
     await waitFor(() => expect(updateUser).toHaveBeenCalledTimes(1));
     expect(updateUser.mock.calls[0]?.[0]?.data).toHaveProperty(
@@ -106,7 +121,7 @@ describe('"not now" is remembered on the account', () => {
     // a far better failure than a button that appears not to work.
     updateUser.mockRejectedValueOnce(new Error('offline'));
     stubFetch();
-    render(<PortalPasswordPrompt />);
+    render(<PortalFirstRunBanner />);
     await userEvent.click(screen.getByRole('button', { name: /not now/i }));
     expect(screen.queryByText(/set a password to get straight back in/i)).not.toBeInTheDocument();
   });
@@ -114,7 +129,7 @@ describe('"not now" is remembered on the account', () => {
 
 describe('setting a password', () => {
   async function openAndFill(pw: string, confirm = pw) {
-    render(<PortalPasswordPrompt />);
+    render(<PortalFirstRunBanner />);
     await userEvent.click(screen.getByRole('button', { name: /set a password/i }));
     await userEvent.type(screen.getByLabelText(/new password/i), pw);
     await userEvent.type(screen.getByLabelText(/confirm password/i), confirm);

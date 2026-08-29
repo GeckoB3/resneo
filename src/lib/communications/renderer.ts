@@ -485,6 +485,10 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       };
     }
     case 'confirm_or_cancel_prompt': {
+      // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
+      // already had it, so a customer's discovery of the portal depended on which
+      // email they happened to receive.
+      const acctConfirm = accountBookingsLinkParts(opts.booking);
       const hasPaidDeposit =
         opts.booking.deposit_status === 'Paid' && Boolean(opts.booking.deposit_amount_pence);
       const policyText = hasPaidDeposit ? (opts.cancellationPolicy ?? null) : null;
@@ -522,9 +526,15 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ctaUrl: opts.confirmLink ?? null,
         secondaryCtaLabel: appointment ? 'Cancel My Appointment' : 'Cancel My Booking',
         secondaryCtaUrl: opts.cancelLink ?? null,
+        postCtaHtml: acctConfirm.html || null,
+        postCtaTextLine: acctConfirm.textLine,
       };
     }
-    case 'deposit_payment_reminder':
+    case 'deposit_payment_reminder': {
+      // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
+      // already had it, so a customer's discovery of the portal depended on which
+      // email they happened to receive.
+      const acctDepRem = accountBookingsLinkParts(opts.booking);
       return {
         subject: `Reminder: Complete your deposit for ${opts.venue.name}`,
         heading: 'Deposit reminder',
@@ -555,9 +565,16 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ],
         ctaLabel: 'Pay Deposit Now',
         ctaUrl: opts.paymentLink ?? null,
+        postCtaHtml: acctDepRem.html || null,
+        postCtaTextLine: acctDepRem.textLine,
       };
+    }
     case 'card_hold_request':
     case 'card_hold_payment_reminder': {
+      // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
+      // already had it, so a customer's discovery of the portal depended on which
+      // email they happened to receive.
+      const acctHold = accountBookingsLinkParts(opts.booking);
       // Card-hold deposits (§10.3): no payment is taken and there is no refund
       // deadline copy (holds have none; the consent rule is stated in the body).
       const isReminder = opts.messageKey === 'card_hold_payment_reminder';
@@ -585,6 +602,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ],
         ctaLabel: 'Add card details',
         ctaUrl: opts.paymentLink ?? null,
+        postCtaHtml: acctHold.html || null,
+        postCtaTextLine: acctHold.textLine,
       };
     }
     case 'pre_visit_reminder': {
@@ -659,7 +678,11 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         postCtaTextLine: acctMod.textLine,
       };
     }
-    case 'cancellation_confirmation':
+    case 'cancellation_confirmation': {
+      // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
+      // already had it, so a customer's discovery of the portal depended on which
+      // email they happened to receive.
+      const acctCancel = accountBookingsLinkParts(opts.booking);
       return {
         subject: appointment
           ? `Your appointment at ${opts.venue.name} has been cancelled`
@@ -687,7 +710,10 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ],
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
+        postCtaHtml: acctCancel.html || null,
+        postCtaTextLine: acctCancel.textLine,
       };
+    }
     case 'auto_cancel_notification': {
       // Card-hold variant (§12.1): "the deposit wasn't paid in time" is false
       // for a card hold, where only card details were requested.
@@ -763,6 +789,10 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ],
       };
     case 'post_visit_thankyou': {
+      // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
+      // already had it, so a customer's discovery of the portal depended on which
+      // email they happened to receive.
+      const acctThanks = accountBookingsLinkParts(opts.booking);
       // Opt-in per venue, and silently absent when unset, so the email is unchanged for anyone who
       // has not asked for it. Named after the practitioner where we know who delivered the service,
       // because a review that names someone is both likelier and more use to the venue.
@@ -791,10 +821,16 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ],
         ctaLabel: 'Book Again',
         ctaUrl: opts.rebookLink ?? opts.venue.booking_page_url ?? null,
+        postCtaHtml: acctThanks.html || null,
+        postCtaTextLine: acctThanks.textLine,
       };
     }
     case 'compliance_form_request':
     case 'compliance_form_reminder': {
+      // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
+      // already had it, so a customer's discovery of the portal depended on which
+      // email they happened to receive.
+      const acctForm = accountBookingsLinkParts(opts.booking);
       const formName = opts.complianceFormName ?? 'form';
       const formLink = opts.complianceFormLink?.trim() ?? '';
       const expiryDays = opts.complianceExpiryDays ?? 14;
@@ -822,6 +858,8 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
         ],
         ctaLabel: 'Complete the form',
         ctaUrl: formLink || null,
+        postCtaHtml: acctForm.html || null,
+        postCtaTextLine: acctForm.textLine,
       };
     }
     case 'compliance_record_expiring': {

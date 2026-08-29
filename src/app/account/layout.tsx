@@ -7,7 +7,7 @@ import { redirect } from 'next/navigation';
 import { AccountSignOutButton } from '@/app/account/AccountSignOutButton';
 import { AccountNav } from '@/app/account/AccountNav';
 import { ToastProvider } from '@/components/ui/Toast';
-import { PortalPasswordPrompt } from '@/components/account/PortalPasswordPrompt';
+import { PortalFirstRunBanner } from '@/components/account/PortalFirstRunBanner';
 
 export default async function AccountLayout({ children }: { children: ReactNode }) {
   const supabase = await createClient();
@@ -121,7 +121,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
         tabIndex={-1}
         className="mx-auto max-w-5xl px-4 pb-16 pt-8 outline-none sm:px-6 sm:pt-10"
       >
-        {offerPasswordSetup && <PortalPasswordPrompt />}
+        {offerPasswordSetup && <PortalFirstRunBanner />}
         {children}
       </main>
       </ToastProvider>

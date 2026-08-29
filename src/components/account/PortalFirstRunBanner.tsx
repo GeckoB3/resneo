@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/browser';
 import { Button, FormField, Input } from '@/components/ui/primitives';
 
 /**
- * "Set a password so you can get straight back in" (P3-4h).
+ * The one thing the portal says to a customer on their first visit
+ * (P3-4h and P3-5's explainer).
  *
  * **This is the answer to G11, not the one-click link.** The link removes the
  * wall once; a password removes it for every visit after that, with no email at
@@ -29,8 +30,20 @@ import { Button, FormField, Input } from '@/components/ui/primitives';
  *
  * **Not passkeys.** There is no WebAuthn anywhere in this repository and the
  * Supabase config has it off; adding an authenticator is its own project.
+ *
+ * **P3-5's first-run explainer is HERE rather than a second banner**, and that
+ * is the whole design decision. Two dismissible boxes stacked above the booking
+ * a customer came to read is worse than either alone, and they would appear
+ * together: this one is in the layout, and a hub-only explainer would be missed
+ * by everybody who arrives on their booking, which is everybody who follows a
+ * link. One first-run moment, one box, one action.
+ *
+ * The explainer says the one thing a customer cannot infer from the page in
+ * front of them: that this is ONE account across every ResNeo venue, not a
+ * login for the venue they just booked. The shortcuts on the hub already say
+ * what each section holds, so repeating that would be noise.
  */
-export function PortalPasswordPrompt() {
+export function PortalFirstRunBanner() {
   const router = useRouter();
   const [dismissed, setDismissed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -125,8 +138,12 @@ export function PortalPasswordPrompt() {
             Set a password to get straight back in
           </p>
           <p className="mt-1 text-sm text-brand-900/80">
-            You are signed in from your booking email. Add a password and next time you can sign in
-            without waiting for an email.
+            You are signed in from your booking email. This is your ResNeo account: every booking you
+            make with any venue that uses ResNeo appears here, and you can change or cancel them
+            yourself.
+          </p>
+          <p className="mt-1 text-sm text-brand-900/80">
+            Add a password and next time you can sign in without waiting for an email.
           </p>
         </div>
         {!open && (

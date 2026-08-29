@@ -37,6 +37,19 @@ export interface MagicLinkEmailParams {
    * lifetime.
    */
   expiryHours: number;
+  /**
+   * The six-digit code Supabase issues alongside the link (P3-4i).
+   *
+   * Included so a NATIVE client can sign in without following a browser link:
+   * a phone app cannot open a web page, get a cookie and come back holding a
+   * session, but it can take this code straight to
+   * `supabase.auth.verifyOtp({ email, token, type: 'email' })`. It is also the
+   * fallback for anybody whose mail client mangles links.
+   *
+   * Optional, because it is absent whenever `generateLink` does not return one,
+   * and a missing code must not cost the recipient the link itself.
+   */
+  emailOtp?: string | null;
 }
 
 export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
@@ -46,9 +59,20 @@ export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
   const hours = Math.max(1, Math.round(params.expiryHours));
   const lifetime = hours === 1 ? '1 hour' : `${hours} hours`;
 
+  const code = params.emailOtp?.trim();
+
   const mainContent = [
     '<p style="margin:0 0 16px">Use the button below to sign in to your ResNeo account. You do not need a password.</p>',
     buildCtaButton('Sign in to ResNeo', params.confirmUrl),
+    /*
+      The code, for the ResNeo app and for anybody whose mail client breaks
+      links. Below the button rather than above it, because the button is what
+      almost everybody needs and a six-digit code offered first reads as extra
+      work.
+    */
+    code
+      ? `<p style="margin:16px 0 0;font-size:14px;color:#334155">Using the ResNeo app? Enter this code instead: <strong style="font-size:18px;letter-spacing:2px">${escapeHtml(code)}</strong></p>`
+      : '',
     `<p style="margin:16px 0 0;font-size:13px;color:#64748b">This link works once and expires in ${escapeHtml(lifetime)}.</p>`,
     /*
       The line that makes this not look like phishing. Somebody who did not ask
@@ -73,6 +97,7 @@ export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
     params.confirmUrl,
     '',
     `This link works once and expires in ${lifetime}.`,
+    ...(code ? ['', `Using the ResNeo app? Enter this code instead: ${code}`] : []),
     '',
     'If you did not ask to sign in, you can ignore this email. Nothing will happen and no one can use this link but you.',
   ].join('\n');

@@ -85,6 +85,43 @@ describe('the sign-in email', () => {
   });
 });
 
+describe('the app code (P3-4i)', () => {
+  it('carries the six-digit code when there is one', () => {
+    /*
+      A native client cannot follow a browser link, get a cookie and come back
+      holding a session. It CAN take this code straight to
+      `verifyOtp({ email, token, type: 'email' })`, which means the app needs
+      no ResNeo route to sign in. The route used to discard the field.
+    */
+    const { html, text } = renderMagicLinkEmail({
+      confirmUrl: URL_,
+      expiryHours: 24,
+      emailOtp: '123456',
+    });
+    expect(html).toContain('123456');
+    expect(text).toContain('123456');
+  });
+
+  it('says nothing about a code when there is not one', () => {
+    // `generateLink` does not always return one, and a missing code must not
+    // leave a dangling sentence in an email whose link works perfectly.
+    const { html, text } = renderMagicLinkEmail({ confirmUrl: URL_, expiryHours: 24 });
+    expect(html).not.toMatch(/enter this code/i);
+    expect(text).not.toMatch(/enter this code/i);
+  });
+
+  it('puts the code AFTER the button, not before it', () => {
+    // Almost everybody needs the button. A code offered first reads as extra
+    // work for the majority to serve the minority.
+    const { html } = renderMagicLinkEmail({
+      confirmUrl: URL_,
+      expiryHours: 24,
+      emailOtp: '123456',
+    });
+    expect(html.indexOf('123456')).toBeGreaterThan(html.indexOf('Sign in to ResNeo'));
+  });
+});
+
 describe('P3-4e acceptance: it appears in the template gallery', () => {
   it('is one of the gallery items', () => {
     // Being in the gallery is the only way anybody LOOKS at this email. Built

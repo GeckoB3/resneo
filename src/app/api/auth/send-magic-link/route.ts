@@ -101,8 +101,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ fallback: true });
     }
 
-    const hashedToken =
-      (genData as { properties?: { hashed_token?: string } }).properties?.hashed_token ?? '';
+    const props = (genData as {
+      properties?: { hashed_token?: string; email_otp?: string };
+    }).properties;
+    const hashedToken = props?.hashed_token ?? '';
+    /*
+      P3-4i. `generateLink` returns a six-digit OTP alongside the hash and this
+      route used to discard it. A native client cannot follow a browser link
+      and come back holding a session, but it CAN call
+      `supabase.auth.verifyOtp({ email, token, type: 'email' })` directly
+      against Supabase with this code, which means the app needs no ResNeo
+      route to sign in at all. Putting it in the email is what makes that
+      possible; the SDK documents the field for exactly this.
+    */
+    const emailOtp = props?.email_otp?.trim() || null;
 
     if (!hashedToken) {
       console.error('[send-magic-link] generateLink returned no hashed_token');
@@ -124,6 +136,7 @@ export async function POST(request: NextRequest) {
     const { html, text } = renderMagicLinkEmail({
       confirmUrl,
       expiryHours: MAGIC_LINK_EXPIRY_HOURS,
+      emailOtp,
     });
 
     try {

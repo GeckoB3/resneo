@@ -432,6 +432,18 @@ If the user wants to do anything beyond what the token allows (see other booking
 
 **Optional future:** scoped JWT query tokens (e.g. `?token=`) remain a valid alternative if product needs ever outgrow the HMAC format. Do not ship JWT and HMAC as *parallel primary* schemes without a documented migration; the MVP standard is v2 HMAC as above.
 
+**The one documented exception to that rule: portal entry tokens** (added 2026-08-29 by P3-4a; the reasoning is AD7 in `Docs/Resneo_Customer_Portal_World_Class_Plan.md`).
+
+`src/lib/auth/portal-token.ts` and the `account_portal_tokens` table implement a **stored, hashed** token rather than the stateless HMAC above. It is a genuinely different thing from a manage link, which is why it is an exception rather than a violation:
+
+- **What it grants.** A manage link is a scoped capability over one booking and is explicitly *not* an authentication. A portal token establishes a real Supabase **session**, so the holder is logged in. That is a larger grant and needs to be revocable, which a stateless token with the expiry packed into its payload cannot be.
+- **What it is keyed to.** Manage links are booking-scoped; a portal token is **user**-scoped, so `booking_short_links` could not be reused either: its `purpose` CHECK is `manage | confirm | payment`, its `booking_id` is `NOT NULL`, and `/b/{code}` mutates `access_count` on every read.
+- **Reusable, never single-use, and NO WRITE ON VERIFY.** Corporate link scanners (Outlook Safe Links, Proofpoint, Mimecast) fetch every URL in inbound mail before the recipient sees it. A single-use token is consumed by the scanner and the customer is handed a dead link by their own IT department. The table has no use-count column, so no future reader can add one by habit.
+- **The primitives are NOT parallel.** It reuses `generateConfirmToken` and `hashConfirmToken` from `src/lib/confirm-token.ts`, which is already the house hashed-token pattern. The exception is about STORAGE, not about a second way of making or hashing tokens.
+- 30-day window, hash only and never plaintext, revoked when the related booking is more than 30 days past. Service role only: RLS is enabled with no policies and `anon` and `authenticated` hold nothing, asserted against the live database by `npm run check:table-grants`.
+
+Anything beyond a limited session's scope still requires a full sign-in; P3-4b defines that boundary and enforces it per route.
+
 **Stable API alias:** `POST /api/v1/manage-booking/verify` accepts the raw path segment (the part after `/m/`) as `token` and returns `{ booking_id }` for mobile/clients that prefer JSON over redirects — see Section 11.5.
 
 ### 5.3 The "Manage all your bookings on Resneo" link

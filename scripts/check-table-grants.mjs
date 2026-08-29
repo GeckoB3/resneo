@@ -143,6 +143,22 @@ async function main() {
     );
   }
 
+  // -- account_portal_tokens (P3-4a) -----------------------------------------
+  // Service role only, for the same reason as portal_events and with a sharper
+  // consequence: a client that could read this table would hold every live
+  // one-click ENTRY TOKEN for every customer, which is a session each. Grants
+  // are checked BEFORE RLS, and hosted defaults grant client roles on new
+  // tables, which is exactly how bookings_account_safe became writable
+  // (20270119120000). The migration's REVOKEs cannot be the only control.
+  for (const role of ['anon', 'authenticated']) {
+    const row = grant('account_portal_tokens', role);
+    check(
+      `account_portal_tokens: ${role} holds nothing`,
+      row === null,
+      `live: ${fmt(row)}. These are portal entry tokens; a client reading them holds every customer's session key.`,
+    );
+  }
+
   // -- user_devices (P0-13) --------------------------------------------------
   // The audience column is added by migration 20270121120000, and the client
   // writes it through the session client under RLS. A relation-wide grant

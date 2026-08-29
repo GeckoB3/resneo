@@ -138,6 +138,24 @@ export function makeRequest(opts: RunOptions): NextRequest {
 }
 
 /**
+ * The GET request the payload builder parses.
+ *
+ * Added by P2-4, which lifts that builder out of the route. P0-9 characterised
+ * the POST only, so the ~270 lines that assemble the token surface's booking
+ * payload had no gate at all: they could have been moved with nothing able to
+ * say whether the body changed. This is that gate.
+ */
+export function makeGetRequest(opts: RunOptions): NextRequest {
+  const auth = opts.auth ?? { token: 'raw-confirm-token' };
+  const params = new URLSearchParams({ booking_id: IDS.booking });
+  if (auth.token) params.set('token', auth.token);
+  if (auth.hmac) params.set('hmac', auth.hmac);
+  return new NextRequest(`http://localhost:3000/api/confirm?${params.toString()}`, {
+    method: 'GET',
+  });
+}
+
+/**
  * The recording admin client, wired to answer the route's reads. `bookings`
  * SELECTs return `opts.booking`; a null booking yields PGRST116, which is how
  * the route reaches its 404.

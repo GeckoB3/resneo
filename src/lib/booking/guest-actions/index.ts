@@ -16,6 +16,7 @@ export {
 } from './reschedule';
 export { confirmAttendanceForGuest, type ConfirmAttendanceData } from './confirm-attendance';
 export { loadGuestBookingDetail } from './load-detail';
+export { getBookingDetailForGuest } from './booking-detail';
 export {
   getRescheduleOptionsForGuest,
   type RescheduleOptionsData,

@@ -4,7 +4,7 @@
 
 | Phase | State | Where |
 | --- | --- | --- |
-| **0A Pre-flight** | Complete except **F7** (mobile deep-link credentials: the Apple Team ID and the Play SHA-256, which this plan does not have) | production |
+| **0A Pre-flight** | Complete except **F7**, which is Phase 5 work rather than outstanding: nothing customer-facing waits on it, because the shipped app has no customer surface | production |
 | **0 Foundations** | Complete | production |
 | **1 The hub** | Complete | production |
 | **2 In-portal booking management** | Complete | production |
@@ -81,7 +81,19 @@ The Register lists **33 open findings gated on "Promoting the customer portal"**
 
 None of the following is a phase task, and each one blocks or invalidates work that is scheduled. They are small. Do them first.
 
-**Status at 2026-08-30: F1 to F6 and F8 are done; F9 is partly done; F7 is STILL not started, and it is now the only thing blocking a shipped feature.** P3-4i built everything on the ResNeo side of native entry, but `/.well-known/apple-app-site-association` and `assetlinks.json` cannot be written without the Apple Team ID and the Play app-signing SHA-256. They were deliberately NOT written with placeholders: a failed Android verification stops the app being offered as a handler at all, which is why universal links were removed on 2026-08-09 in the first place. Until F7 lands, an emailed sign-in link tapped on a phone opens a browser, which is today's behaviour and not a regression.
+**Status at 2026-08-30: F1 to F6 and F8 are done; F9 is partly done; F7 is not started, and it belongs to Phase 5 rather than to this plan's outstanding work.**
+
+**A correction to an earlier note here, which said F7 was the only thing blocking a shipped feature. It is not, and the reason matters.** Checked against `C:/Resneo-app` on 2026-08-30: the shipped app is the VENUE app. Its tabs are bookings, clients and settings, plus availability, classes, events and venue management. **There is no customer surface in it at all**, which `user_devices.audience` already implies by anticipating a `'customer'` value that nothing yet sends to. So a customer's confirmation email has nothing to open into, and its links are web-only by nature rather than by omission. Nobody is waiting on F7.
+
+P3-4i's ResNeo-side work is shipped and working: the token exchange, the OTP in the branded email, and the client contract in `Docs/MOBILE_API.md`. What F7 unblocks is deep-linking into an app, and that is Phase 5's job.
+
+**Three things are needed then, not two.** The credentials are not in the app repo and never were: an exhaustive search of the working tree and the full git history finds only the placeholder `ABCDE12345.com.resneo.app`. They are account credentials, from Apple Developer and Google Play.
+
+1. The **Apple Team ID** (App Store Connect > Membership, or `eas credentials`).
+2. The Play **app-signing** SHA-256. **Not the upload key**: the app repo's own draft warns that with Play App Signing enabled, which is the default, the upload key produces a verification that FAILS, and on Android 12+ a failed verification is worse than no file, because the app stops being offered as a handler at all. That is why universal links were removed on 2026-08-09, and why these files must not be written with placeholders.
+3. **The domain settled.** The drafts still target `reserve-ni.vercel.app`, the old staging host, and so did `app.json` before the config was removed. Whichever host is declared has to match exactly and serve a direct 200 on BOTH apex and www, because Android does not follow redirects when verifying and the apex currently 307s to www.
+
+**Status at 2026-08-27: F1 to F6 and F8 are done; F9 is partly done; F7 is not started.**
 
 **Status at 2026-08-27: F1 to F6 and F8 are done; F9 is partly done; F7 is not started.** **Pre-flight is effectively complete**: the only open items are F7 (mobile deep-link credentials, not needed until the app work) and the remainder of F9. F8 turned out to be four defects rather than one, all fixed and deployed: magic-link and password-reset sign-in work on web and in the shipped app. F4's three decisions were taken (see the decisions block above); **two of them are code-complete but still need applying by hand in both Supabase dashboards**, because `config.toml` does not configure hosted projects. **F5 is closed: CI is green and blocking**, so the safety net Phase 0 leans on now exists. F7 still needs credentials this plan does not have.
 

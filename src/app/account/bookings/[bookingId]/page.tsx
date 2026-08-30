@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccountPayments } from '@/lib/account/account-payments';
 import { getBookingDetailForGuest } from '@/lib/booking/guest-actions/booking-detail';
 import { GuestBookingDetailView } from '@/components/booking/GuestBookingDetailView';

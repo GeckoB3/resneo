@@ -62,7 +62,15 @@ describe('C1: portal pages go through shared loaders', () => {
     const offenders = pages
       .filter((f) => {
         const src = fs.readFileSync(f, 'utf8');
-        return src.includes('getSupabaseAdminClient(') || src.includes('supabase.from(');
+        /*
+          `getSupabaseAdminClient` WITHOUT the paren, so a page that merely
+          imports the service role is caught too. Three pages were carrying
+          exactly that after their queries moved into loaders: dead, harmless,
+          and one keystroke from being a live call that this check would then
+          be the last thing standing between. An import is the whole of the
+          mistake worth catching, because nobody adds the call first.
+        */
+        return src.includes('getSupabaseAdminClient') || src.includes('supabase.from(');
       })
       .map(rel)
       .filter((f) => !ALLOWLIST.includes(f));

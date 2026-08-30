@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
   accountBookingTimeZone,
   buildAccountBookingDisplayList,

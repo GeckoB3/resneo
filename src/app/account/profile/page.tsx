@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccountSafeGuests } from '@/lib/account/account-bookings';
 import { ProfileClient } from './ProfileClient';
 import { AccountPaymentMethodsSection } from '@/components/account/AccountPaymentMethodsSection';

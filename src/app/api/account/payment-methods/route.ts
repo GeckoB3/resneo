@@ -51,7 +51,7 @@ export async function GET(request: Request) {
 
     const customerId = (row as { stripe_customer_id?: string } | null)?.stripe_customer_id;
     if (!customerId) {
-      return NextResponse.json({ payment_methods: [], stripe_customer_id: null });
+      return NextResponse.json({ payment_methods: [] });
     }
 
     const list = await stripe.paymentMethods.list(
@@ -59,6 +59,14 @@ export async function GET(request: Request) {
       { stripeAccount: acct },
     );
 
+    /*
+      NO Stripe identifiers (G29, §6). This route used to hand the customer
+      `stripe_customer_id` and `stripe_connected_account_id`, which are the
+      venue's payment plumbing and name its Connect account: nothing a customer
+      can do with them is something they should be doing, and they end up in
+      browser history, screenshots and support tickets. P4-6 removes them from
+      the exact route it was already modifying.
+    */
     return NextResponse.json({
       payment_methods: list.data.map((pm) => ({
         id: pm.id,
@@ -67,8 +75,6 @@ export async function GET(request: Request) {
         exp_month: pm.card?.exp_month ?? null,
         exp_year: pm.card?.exp_year ?? null,
       })),
-      stripe_customer_id: customerId,
-      stripe_connected_account_id: acct,
     });
   } catch (e) {
     console.error('[account/payment-methods] GET', e);

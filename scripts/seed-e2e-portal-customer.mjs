@@ -202,7 +202,51 @@ async function resetBookings(admin, { venueId, guestId, calendarId, serviceItemI
     if (payErr) throw new Error(`booking_payments insert: ${payErr.message}`);
     console.log('[portal-seed] Payment: 4500 on', completed.id);
   }
+
+  /*
+    Waitlist places, for P4-4.
+
+    Two rows, and the SECOND one is the point: it belongs to a stranger at the
+    same venue, so the cross-user cancel test has a real row to be refused
+    against. A 404 for an id that never existed would prove nothing about
+    ownership.
+
+    Wiped and re-inserted like the bookings above, because these do not cascade
+    on anything and would otherwise accumulate a place per run.
+  */
+  const waitlistEmails = [CUSTOMER_EMAIL.toLowerCase(), WAITLIST_STRANGER_EMAIL];
+  const { error: wlWipeErr } = await admin
+    .from('waitlist_entries')
+    .delete()
+    .eq('venue_id', venueId)
+    .in('guest_email', waitlistEmails);
+  if (wlWipeErr) throw new Error(`waitlist wipe: ${wlWipeErr.message}`);
+
+  const waitlistBase = {
+    venue_id: venueId,
+    waitlist_kind: 'appointment',
+    party_size: 1,
+    status: 'waiting',
+    guest_first_name: CUSTOMER_FIRST_NAME,
+    guest_last_name: CUSTOMER_LAST_NAME,
+    guest_phone: CUSTOMER_PHONE,
+  };
+  const { error: wlErr } = await admin.from('waitlist_entries').insert([
+    { ...waitlistBase, desired_date: ymd(upcoming), guest_email: CUSTOMER_EMAIL.toLowerCase() },
+    {
+      ...waitlistBase,
+      desired_date: ymd(upcoming),
+      guest_email: WAITLIST_STRANGER_EMAIL,
+      guest_first_name: 'Someone',
+      guest_last_name: 'Else',
+    },
+  ]);
+  if (wlErr) throw new Error(`waitlist insert: ${wlErr.message}`);
+  console.log('[portal-seed] Waitlist: 1 for the customer, 1 for a stranger');
 }
+
+/** The other customer whose waitlist place must stay untouchable (P4-4). */
+const WAITLIST_STRANGER_EMAIL = 'someone-else@resneo-e2e.invalid';
 
 async function main() {
   const admin = makeAdmin();

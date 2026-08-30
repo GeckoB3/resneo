@@ -23,6 +23,8 @@ import {
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { CancelCourseButton } from '@/components/account/CancelCourseButton';
 import { rebookUrl } from '@/lib/account/rebook-url';
+import { AccountWaitlistSection } from '@/components/account/AccountWaitlistSection';
+import { loadAccountWaitlist } from '@/lib/account/account-waitlist';
 import { isPastBooking } from '@/lib/account/account-booking-filters';
 
 /**
@@ -169,6 +171,22 @@ export default async function AccountBookingsPage({
 
   const bookings = await loadAccountBookings(supabase, getSupabaseAdminClient(), 100);
 
+  /*
+    Waitlist places (P4-4), scoped by the account's own verified address
+    because `waitlist_entries` has no guest id. Failure is carried rather than
+    swallowed: an empty list would tell the customer they are waiting for
+    nothing, which is a claim (P4-1's rule).
+  */
+  const waitlist = await loadAccountWaitlist(getSupabaseAdminClient(), user?.email)
+    .then((entries) => ({ entries, failed: false }))
+    .catch((e) => {
+      console.error('[account/bookings] waitlist:', e instanceof Error ? e.message : e);
+      return { entries: [], failed: true };
+    });
+  const waitlistVenueNames = Object.fromEntries(
+    bookings.flatMap((b) => (b.venue ? [[b.venue.id, b.venue.name] as const] : [])),
+  );
+
   // The customer's own timezone is only a fallback: each booking is classified
   // in its VENUE's zone, which is the zone its stored times are in (P0-2).
   const filtered = filterAccountBookingsByModel(
@@ -212,6 +230,18 @@ export default async function AccountBookingsPage({
         title="Your bookings"
         subtitle="Reservations and visits linked to your account. Open a booking for details or use the venue manage link where available."
       />
+      {/*
+        Above the filters on purpose: a waitlist place is the thing a customer
+        is most likely to have come to check on, and it is not affected by the
+        date and type filters below, so putting it under them would look like
+        a list that the filters had emptied.
+      */}
+      <AccountWaitlistSection
+        entries={waitlist.entries}
+        venueNames={waitlistVenueNames}
+        failed={waitlist.failed}
+      />
+
       {/*
         Both pill rows are named groups. There are two of them since P1-3, and
         without names a screen reader announces two undifferentiated runs of

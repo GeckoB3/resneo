@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
+import { isValidIanaTimeZone } from '@/lib/time/iana-time-zone';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { normalizeWebsiteUrlForStorage } from '@/lib/urls/website-url';
 import {
@@ -49,7 +50,16 @@ const venueProfileSchema = z.object({
   owner_booking_notification_enabled: z.boolean().optional(),
   /** Alert recipient override; empty clears (falls back to the venue profile email). */
   owner_booking_notification_email: z.string().email().max(255).optional().or(z.literal('')),
-  timezone: z.string().max(50).optional(),
+  // Real IANA zones only (G23). A venue's timezone is the source of truth for
+  // every booking instant it stores, so an unusable value here is worse than an
+  // unusable one on a customer profile.
+  timezone: z
+    .string()
+    .max(50)
+    .refine((v) => v === '' || isValidIanaTimeZone(v), {
+      message: 'Choose a timezone from the list, for example Europe/London.',
+    })
+    .optional(),
   /** Public booking page link; empty clears. Stored as https URL or null. */
   website_url: z.string().max(2000).optional(),
   /** Pasted Google review link or Place ID; normalised (and validated) before it is stored. */

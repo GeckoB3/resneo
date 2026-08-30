@@ -187,15 +187,20 @@ jobs:
           NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
 
       - name: Seed E2E fixture venue
-        run: node scripts/seed-e2e-smoke-venue.mjs
+        # The portal customer seeder REQUIRES the venue seeder to have run first: it
+        # books the customer into the venues that script creates.
+        run: |
+          node scripts/seed-e2e-smoke-venue.mjs
+          node scripts/seed-e2e-portal-customer.mjs
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          E2E_VENUE_SLUG: ${{ secrets.E2E_VENUE_SLUG }}
-          E2E_VENUE_NAME: ${{ secrets.E2E_VENUE_NAME }}
-          E2E_SERVICE_NAME: ${{ secrets.E2E_SERVICE_NAME }}
-          E2E_OPTIONS_SERVICE_NAME: ${{ secrets.E2E_OPTIONS_SERVICE_NAME }}
+          E2E_VENUE_SLUG: ${{ vars.E2E_VENUE_SLUG }}
+          E2E_VENUE_NAME: ${{ vars.E2E_VENUE_NAME }}
+          E2E_SERVICE_NAME: ${{ vars.E2E_SERVICE_NAME }}
+          E2E_OPTIONS_SERVICE_NAME: ${{ vars.E2E_OPTIONS_SERVICE_NAME }}
           E2E_STRIPE_CONNECTED_ACCOUNT_ID: ${{ secrets.E2E_STRIPE_CONNECTED_ACCOUNT_ID }}
+          E2E_PORTAL_CUSTOMER_EMAIL: ${{ vars.E2E_PORTAL_CUSTOMER_EMAIL }}
           NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
 
       - name: Run Playwright smoke
@@ -203,19 +208,31 @@ jobs:
         env:
           CI: true
           E2E_BASE_URL: http://127.0.0.1:3000
-          E2E_VENUE_SLUG: ${{ secrets.E2E_VENUE_SLUG }}
-          E2E_VENUE_NAME: ${{ secrets.E2E_VENUE_NAME }}
-          E2E_SERVICE_NAME: ${{ secrets.E2E_SERVICE_NAME }}
-          E2E_OPTIONS_SERVICE_NAME: ${{ secrets.E2E_OPTIONS_SERVICE_NAME }}
+          E2E_VENUE_SLUG: ${{ vars.E2E_VENUE_SLUG }}
+          E2E_VENUE_NAME: ${{ vars.E2E_VENUE_NAME }}
+          E2E_SERVICE_NAME: ${{ vars.E2E_SERVICE_NAME }}
+          E2E_OPTIONS_SERVICE_NAME: ${{ vars.E2E_OPTIONS_SERVICE_NAME }}
+          # These fixture names are variables, not secrets. Nothing about them is
+          # sensitive, and as secrets GitHub masked them everywhere they appeared:
+          # "[e2e] Smoke fixture venue slug: ***" and "/book/***" in the run log,
+          # which is exactly the information needed to diagnose a failing run.
           # Fixed slug printed by the seed script; set it as a repo variable so
           # the staff-first specs run rather than skip.
           E2E_STAFF_FIRST_VENUE_SLUG: ${{ vars.E2E_STAFF_FIRST_VENUE_SLUG }}
+          E2E_PORTAL_CUSTOMER_EMAIL: ${{ vars.E2E_PORTAL_CUSTOMER_EMAIL }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
           PAYMENT_TOKEN_SECRET: ${{ secrets.PAYMENT_TOKEN_SECRET }}
+          # The web server Playwright starts inherits this step's env, so anything the app
+          # needs at runtime has to be listed here as well as in the build and seed steps.
+          # Their absence showed up as "STRIPE_WEBHOOK_SECRET is not set" and
+          # "E2E_STRIPE_CONNECTED_ACCOUNT_ID is not set" in the run log.
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          E2E_STRIPE_CONNECTED_ACCOUNT_ID: ${{ secrets.E2E_STRIPE_CONNECTED_ACCOUNT_ID }}
+          NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
 
       - name: Upload Playwright report
         if: failure()

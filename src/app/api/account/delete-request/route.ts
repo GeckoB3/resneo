@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
+import {
+  deleteUserDevices,
+  getCallerAccessToken,
+  signOutCaller,
+} from '@/lib/auth/caller-auth';
 import { sendEmail } from '@/lib/emails/send-email';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 
@@ -10,7 +15,7 @@ export async function POST(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const { data, error } = await supabase.rpc('request_account_deletion');
     if (error) {
@@ -59,10 +64,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { error: signOutErr } = await supabase.auth.signOut({ scope: 'global' });
-    if (signOutErr) {
-      console.error('[account/delete-request] signOut global:', signOutErr.message);
+    // Server-side revocation: the request-client signOut was a silent no-op for
+    // a Bearer caller, so a freshly deleted account kept a working refresh token
+    // AND a live push registration (P0-12, G27). Failures are logged, not
+    // fatal: the deletion itself is already scheduled.
+    const accessToken = await getCallerAccessToken(request, supabase);
+    if (accessToken) {
+      const { error: signOutErr } = await signOutCaller(accessToken, 'global');
+      if (signOutErr) {
+        console.error('[account/delete-request] signOut global:', signOutErr.message);
+      }
     }
+    await deleteUserDevices(user.id);
     return NextResponse.json({ deletion_scheduled_at: data });
   } catch (e) {
     console.error('[account/delete-request]', e);

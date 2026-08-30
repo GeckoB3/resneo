@@ -1,0 +1,1404 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 1: a unified-scheduling appointment 1`] = `
+{
+  "body": {
+    "appointment_service_id": "55555555-5555-4555-8555-555555555555",
+    "appointment_service_name": "Consultation",
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "unified_scheduling",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Consultation
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": true,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": "44444444-4444-4444-8444-444444444444",
+    "practitioner_name": "Alex Practitioner",
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Frozen Venue",
+      "slug": "frozen-venue",
+    },
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      "fn": "buildVenuePublicForBookingById",
+      "module": "build-venue-public",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 2: a legacy practitioner appointment 1`] = `
+{
+  "body": {
+    "appointment_service_id": "77777777-7777-4777-8777-777777777777",
+    "appointment_service_name": "Legacy Service",
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "practitioner_appointment",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Legacy Service
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": true,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": "66666666-6666-4666-8666-666666666666",
+    "practitioner_name": "Legacy Practitioner",
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Frozen Venue",
+      "slug": "frozen-venue",
+    },
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      "fn": "buildVenuePublicForBookingById",
+      "module": "build-venue-public",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 3: a service variant is appended to the service name 1`] = `
+{
+  "body": {
+    "appointment_service_id": "55555555-5555-4555-8555-555555555555",
+    "appointment_service_name": "Consultation - Long",
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "unified_scheduling",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Consultation - Long
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": true,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": "44444444-4444-4444-8444-444444444444",
+    "practitioner_name": "Alex Practitioner",
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Frozen Venue",
+      "slug": "frozen-venue",
+    },
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      "fn": "buildVenuePublicForBookingById",
+      "module": "build-venue-public",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 4: a table reservation carries no appointment fields 1`] = `
+{
+  "body": {
+    "appointment_service_id": null,
+    "appointment_service_name": null,
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "table_reservation",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Frozen Venue
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": false,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": null,
+    "practitioner_name": null,
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": null,
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 5: a class session carries its summary and type id 1`] = `
+{
+  "body": {
+    "appointment_service_id": null,
+    "appointment_service_name": null,
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "class_session",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Reformer Pilates
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": "99999999-9999-4999-8999-999999999999",
+    "class_summary": "Reformer Pilates · 2026-06-10 18:30",
+    "class_type_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "class_type_name": "Reformer Pilates",
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": false,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": null,
+    "practitioner_name": null,
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": null,
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 6: an event ticket carries the event name 1`] = `
+{
+  "body": {
+    "appointment_service_id": null,
+    "appointment_service_name": null,
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "event_ticket",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Wine Tasting
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": "Wine Tasting",
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": false,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": null,
+    "practitioner_name": null,
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": null,
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 7: a resource booking carries its name and identity 1`] = `
+{
+  "body": {
+    "appointment_service_id": null,
+    "appointment_service_name": null,
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "resource_booking",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Court 1
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": false,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": null,
+    "practitioner_name": null,
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "resource_name": "Court 1",
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": null,
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 8: a held card hold reaches the guest as fee and state only 1`] = `
+{
+  "body": {
+    "appointment_service_id": "55555555-5555-4555-8555-555555555555",
+    "appointment_service_name": "Consultation",
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "unified_scheduling",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Consultation
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": {
+      "charged_at": null,
+      "charged_pence": null,
+      "fee_pence": 1500,
+      "state": "held",
+    },
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": "Card Held",
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": true,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": "44444444-4444-4444-8444-444444444444",
+    "practitioner_name": "Alex Practitioner",
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Frozen Venue",
+      "slug": "frozen-venue",
+    },
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      "fn": "buildVenuePublicForBookingById",
+      "module": "build-venue-public",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 9: a hold awaiting a card carries a payment link 1`] = `
+{
+  "body": {
+    "appointment_service_id": "55555555-5555-4555-8555-555555555555",
+    "appointment_service_name": "Consultation",
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "unified_scheduling",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Consultation
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": {
+      "charged_at": null,
+      "charged_pence": null,
+      "fee_pence": 1500,
+      "payment_link": "https://rsn.test/p/PAY123",
+      "state": "awaiting_card",
+    },
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": "Pending",
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": true,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": "44444444-4444-4444-8444-444444444444",
+    "practitioner_name": "Alex Practitioner",
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Frozen Venue",
+      "slug": "frozen-venue",
+    },
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "createOrGetPaymentShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      "fn": "buildVenuePublicForBookingById",
+      "module": "build-venue-public",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 10: a venue with self-reschedule off says so in the flags 1`] = `
+{
+  "body": {
+    "appointment_service_id": "55555555-5555-4555-8555-555555555555",
+    "appointment_service_name": "Consultation",
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "unified_scheduling",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Consultation
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": false,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": true,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": "44444444-4444-4444-8444-444444444444",
+    "practitioner_name": "Alex Practitioner",
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Frozen Venue",
+      "slug": "frozen-venue",
+    },
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      "fn": "buildVenuePublicForBookingById",
+      "module": "build-venue-public",
+    },
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 11: an HMAC link is accepted and does not check the token 1`] = `
+{
+  "body": {
+    "appointment_service_id": "55555555-5555-4555-8555-555555555555",
+    "appointment_service_name": "Consultation",
+    "booking_date": "2026-06-10",
+    "booking_end_time": "14:30",
+    "booking_id": "11111111-1111-4111-8111-111111111111",
+    "booking_model": "unified_scheduling",
+    "booking_time": "14:00",
+    "calendar": {
+      "google_url": "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Frozen+Venue+%E2%80%93+Table+reservation&dates=20260610T130000Z%2F20260610T143000Z&details=Booking+at+Frozen+Venue%0AParty+size%3A+1&location=1+Frozen+Street",
+      "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ResNeo//Booking//EN
+BEGIN:VEVENT
+DTSTART:20260610T130000Z
+DTEND:20260610T133000Z
+SUMMARY:Reservation at Consultation
+LOCATION:1 Frozen Street
+DESCRIPTION:Party of 1. Booked via ResNeo.
+END:VEVENT
+END:VCALENDAR",
+    },
+    "cancellation_deadline": "2026-06-08T13:00:00+00:00",
+    "cancelled_by": null,
+    "card_hold": null,
+    "class_instance_id": null,
+    "class_summary": null,
+    "class_type_id": null,
+    "class_type_name": null,
+    "compliance_forms": [
+      {
+        "name": "Consultation form",
+        "url": "https://forms.test/1",
+      },
+    ],
+    "deposit_amount_pence": null,
+    "deposit_paid": false,
+    "deposit_status": null,
+    "duration_minutes": 30,
+    "event_name": null,
+    "feature_flags": {
+      "resolved": {
+        "any_available_practitioner": false,
+        "card_hold_deposits": false,
+        "class_commerce_enabled": false,
+        "compliance_records_enabled": false,
+        "guest_self_reschedule": true,
+        "staff_first_booking_flow": false,
+        "waitlist_v2": false,
+      },
+    },
+    "guest_attendance_confirmed_at": null,
+    "is_appointment": true,
+    "location": {
+      "address": "1 Frozen Street",
+      "map_url": "https://www.google.com/maps/search/?api=1&query=1%20Frozen%20Street",
+      "type": "venue",
+    },
+    "manage_booking_url": "https://rsn.test/b/ABC123",
+    "notes": [],
+    "paid_with_credit": false,
+    "part_of_course": false,
+    "party_size": 1,
+    "practitioner_id": "44444444-4444-4444-8444-444444444444",
+    "practitioner_name": "Alex Practitioner",
+    "pre_appointment_instructions": null,
+    "refund_notice_hours": 24,
+    "resource_id": null,
+    "resource_name": null,
+    "status": "Booked",
+    "ticket_lines": [],
+    "timeline": [],
+    "venue_address": "1 Frozen Street",
+    "venue_email": "hello@frozen.test",
+    "venue_id": "22222222-2222-4222-8222-222222222222",
+    "venue_name": "Frozen Venue",
+    "venue_phone": "+44 20 7946 0000",
+    "venue_public": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Frozen Venue",
+      "slug": "frozen-venue",
+    },
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "purpose": "manage",
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "createOrGetBookingShortLink",
+      "module": "booking-short-links",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      "fn": "buildVenuePublicForBookingById",
+      "module": "build-venue-public",
+    },
+    {
+      "args": [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+      "fn": "loadOutstandingBookingFormLinks",
+      "module": "form-links-service",
+    },
+    {
+      "args": [
+        "11111111-1111-4111-8111-111111111111",
+        "valid-hmac",
+      ],
+      "fn": "verifyBookingHmac",
+      "module": "short-manage-link",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 12: a used token is 410, and says so before checking the signature 1`] = `
+{
+  "body": {
+    "error": "This link has already been used",
+  },
+  "dbWrites": [],
+  "externalCalls": [],
+  "status": 410,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 13: an invalid token is 400 1`] = `
+{
+  "body": {
+    "error": "Invalid link",
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+  ],
+  "status": 400,
+}
+`;
+
+exports[`GET /api/confirm - the booking detail payload (P2-4 gate) > row 14: a missing booking is 404, decided before any proof is checked 1`] = `
+{
+  "body": {
+    "error": "Booking not found",
+  },
+  "dbWrites": [],
+  "externalCalls": [],
+  "status": 404,
+}
+`;

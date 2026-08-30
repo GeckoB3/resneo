@@ -63,6 +63,28 @@ describe('GET /auth/confirm', () => {
     stub.destination = '/dashboard';
   });
 
+  it('passes a null rawNext to destination resolution when the link carries none', async () => {
+    // Regression: the failure-redirect default (/dashboard) used to be passed as the
+    // caller's next, which the resolver honours unconditionally, so a no-next magic
+    // link sent a venue-less customer to /dashboard and from there into the signup
+    // funnel. The resolver's role-based fall-throughs must decide instead.
+    stub.verifyError = null;
+    const { resolvePostLoginDestination } = await import('@/lib/post-login-destination');
+    await GET(get('?token_hash=abcdef123456&type=magiclink'));
+    expect(vi.mocked(resolvePostLoginDestination)).toHaveBeenCalledWith(
+      expect.objectContaining({ rawNext: null }),
+    );
+  });
+
+  it('still passes an explicit next through to destination resolution', async () => {
+    stub.verifyError = null;
+    const { resolvePostLoginDestination } = await import('@/lib/post-login-destination');
+    await GET(get('?token_hash=abcdef123456&type=magiclink&next=%2Faccount'));
+    expect(vi.mocked(resolvePostLoginDestination)).toHaveBeenCalledWith(
+      expect.objectContaining({ rawNext: '/account' }),
+    );
+  });
+
   it('sends a verified recovery link to set-password, not to the dashboard', async () => {
     // A reset link that signs the user in and drops them on their dashboard has silently
     // skipped the password change they asked for. Neither resolvePostLoginDestination (which

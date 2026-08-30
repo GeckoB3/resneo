@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { Dialog } from './Dialog';
 import { Button } from './Button';
 
@@ -7,7 +8,20 @@ export interface ConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
+  /**
+   * The one-line consequence, read out as the dialog's accessible description.
+   * Stays a plain string on purpose: it is what a screen reader announces with
+   * the title, so it must not become arbitrary markup.
+   */
   message: string;
+  /**
+   * Optional structured content rendered beneath `message`, for consequences a
+   * sentence cannot carry: a cancellation deadline, deposit refundability, a
+   * card-hold fee, what stops and when (P0-16, blocks P2-2 and P2-6).
+   * `message` remains required, so a caller adding a body cannot accidentally
+   * leave the dialog without an accessible description.
+   */
+  body?: ReactNode;
   confirmLabel: string;
   onConfirm: () => void;
   cancelLabel?: string;
@@ -20,6 +34,7 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   message,
+  body,
   confirmLabel,
   onConfirm,
   cancelLabel = 'Cancel',
@@ -53,7 +68,7 @@ export function ConfirmDialog({
         </div>
       }
     >
-      {null}
+      {body ?? null}
     </Dialog>
   );
 }

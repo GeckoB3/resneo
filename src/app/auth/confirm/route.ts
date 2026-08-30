@@ -54,12 +54,20 @@ export async function GET(request: Request) {
   }
 
   const rawNext = searchParams.get('next') ?? nextFromRedirect;
+  /**
+   * The caller's next, or null when the link carried none. Kept separate from
+   * `fallbackNext` below, which exists for failure redirects and therefore has a
+   * default. Passing that default into `resolvePostLoginDestination` as `rawNext`
+   * laundered it into a caller-provided choice: its explicit-/dashboard branch
+   * honoured it unconditionally, so a magic link with no `next` sent a pure customer
+   * to /dashboard, whose venue guards then funnelled them into /signup/business-type.
+   * With null, the resolver's own role-based fall-throughs decide (a guest-only
+   * account lands on /account, a dual-role account gets the chooser).
+   */
+  const callerNext = rawNext != null && rawNext !== '' ? resolveAuthNextPath(rawNext) : null;
   const fallbackNext =
-    rawNext != null && rawNext !== ''
-      ? resolveAuthNextPath(rawNext)
-      : type === 'invite' || type === 'recovery'
-        ? SET_PASSWORD_PATH
-        : sanitizeAuthNextPath(null);
+    callerNext ??
+    (type === 'invite' || type === 'recovery' ? SET_PASSWORD_PATH : sanitizeAuthNextPath(null));
   const base = getBaseUrl(request.url);
 
   // Hand off to the mobile app before verifying anything: the token is single-use, and the
@@ -113,7 +121,7 @@ export async function GET(request: Request) {
         admin,
         userId: user.id,
         userEmail: user.email ?? '',
-        rawNext: fallbackNext,
+        rawNext: callerNext,
         isPlatformSuperuser: isSuper,
         needsSetPassword,
         pendingSignup: readSignupPendingFromMetadata(meta),

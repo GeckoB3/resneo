@@ -26,8 +26,31 @@ async function shouldSkipMarketingComms(request: CommunicationRequest): Promise<
   }
   if (!guestId) return false;
 
-  const { data: guest } = await supabase.from('guests').select('marketing_opt_out').eq('id', guestId).maybeSingle();
-  return Boolean(guest?.marketing_opt_out);
+  const { data: guest } = await supabase
+    .from('guests')
+    .select('marketing_opt_out, user_id')
+    .eq('id', guestId)
+    .maybeSingle();
+  const row = guest as { marketing_opt_out?: boolean | null; user_id?: string | null } | null;
+
+  // Per-venue opt-out, unchanged.
+  if (row?.marketing_opt_out) return true;
+
+  // Account-level preference (P0-14, G21). Until now the profile toggle saved
+  // and nothing read it, so a customer could switch marketing off, watch it
+  // persist, and keep receiving it. The two checks are deliberately
+  // independent: the guest row is per venue, this is per account, and a
+  // customer who has said no in either place has said no.
+  //
+  // Only consulted for a LINKED guest. A guest with no account has no
+  // account-level preference to honour, and the per-venue flag above is the
+  // whole answer for them.
+  if (row?.user_id) {
+    const { accountAllowsMarketingEmail } = await import('@/lib/notifications/customer-email-consent');
+    if (!(await accountAllowsMarketingEmail(supabase, row.user_id))) return true;
+  }
+
+  return false;
 }
 
 export async function sendCommunication(request: CommunicationRequest): Promise<void> {

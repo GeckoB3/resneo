@@ -1,0 +1,240 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`POST /api/confirm - action=confirm (P0-9, 7 rows) > row 1: Pending is refused, deposit must be paid first 1`] = `
+{
+  "body": {
+    "error": "This booking is awaiting deposit payment. Please complete the deposit before confirming your attendance.",
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+  ],
+  "status": 400,
+}
+`;
+
+exports[`POST /api/confirm - action=confirm (P0-9, 7 rows) > row 2: already Confirmed WITH a timestamp is idempotent and writes nothing 1`] = `
+{
+  "body": {
+    "guest_attendance_confirmed_at": "2026-05-31T08:00:00+00:00",
+    "message": "Thanks. We already have your confirmation on file for this booking.",
+    "success": true,
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=confirm (P0-9, 7 rows) > row 3: Confirmed WITHOUT a timestamp records attendance only 1`] = `
+{
+  "body": {
+    "guest_attendance_confirmed_at": "2026-06-01T09:00:00.000Z",
+    "message": "Thanks! Your appointment is already confirmed. We look forward to seeing you.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "guest_attendance_confirmed_at": "2026-06-01T09:00:00.000Z",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=confirm (P0-9, 7 rows) > row 4: Booked confirms, stamps the token, and fires lifecycle effects 1`] = `
+{
+  "body": {
+    "message": "Thanks! Your appointment is confirmed. We look forward to seeing you.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "guest_attendance_confirmed_at": "2026-06-01T09:00:00.000Z",
+        "status": "Confirmed",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Confirmed",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        "Booked",
+        "Confirmed",
+      ],
+      "fn": "validateBookingStatusTransition",
+      "module": "lifecycle",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=confirm (P0-9, 7 rows) > row 5: an invalid transition is refused 1`] = `
+{
+  "body": {
+    "error": "Cannot change status from Cancelled to Confirmed",
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        "raw-confirm-token",
+        "hashed-confirm-token",
+      ],
+      "fn": "verifyConfirmToken",
+      "module": "confirm-token",
+    },
+    {
+      "args": [
+        "Cancelled",
+        "Confirmed",
+      ],
+      "fn": "validateBookingStatusTransition",
+      "module": "lifecycle",
+    },
+  ],
+  "status": 400,
+}
+`;
+
+exports[`POST /api/confirm - action=confirm (P0-9, 7 rows) > row 6: a used token is 410 before any status check 1`] = `
+{
+  "body": {
+    "error": "This link has already been used",
+  },
+  "dbWrites": [],
+  "externalCalls": [],
+  "status": 410,
+}
+`;
+
+exports[`POST /api/confirm - action=confirm (P0-9, 7 rows) > row 7: HMAC on the same fixture confirms AND consumes the token (contradicts the plan) 1`] = `
+{
+  "body": {
+    "message": "Thanks! Your appointment is confirmed. We look forward to seeing you.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "guest_attendance_confirmed_at": "2026-06-01T09:00:00.000Z",
+        "status": "Confirmed",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Confirmed",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        "Booked",
+        "Confirmed",
+      ],
+      "fn": "validateBookingStatusTransition",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        "11111111-1111-4111-8111-111111111111",
+        "9999999999.signature",
+      ],
+      "fn": "verifyBookingHmac",
+      "module": "short-manage-link",
+    },
+  ],
+  "status": 200,
+}
+`;

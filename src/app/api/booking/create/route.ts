@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
@@ -97,7 +97,6 @@ import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-em
 import { DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES } from '@/lib/booking/resource-booking-defaults';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
-import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
 import { userCourseCoversClassInstance } from '@/lib/class-commerce/course-instance-coverage';
@@ -288,7 +287,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
-    const authClient = await createClient();
+    // Bearer-capable, not cookie-only: with createClient() a mobile Bearer
+    // caller resolved as signed OUT here, so no app could book at any venue
+    // with require_account_login_for_bookings on. The same file already
+    // resolves the user with createRouteHandlerClient further down; one
+    // request must not answer under two auth models (P0-12).
+    const authClient = await createRouteHandlerClient(request);
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
       requireAccountLogin: Boolean(
         (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,

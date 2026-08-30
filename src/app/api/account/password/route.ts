@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
+import { getCallerAccessToken, updateAuthUserAsCaller } from '@/lib/auth/caller-auth';
 import { z } from 'zod';
 
 const schema = z.object({
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
     }
 
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
@@ -26,18 +27,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 400 });
     }
 
-    const existingMeta =
-      typeof user.user_metadata === 'object' && user.user_metadata !== null
-        ? (user.user_metadata as Record<string, unknown>)
-        : {};
-
-    const { error } = await supabase.auth.updateUser({
+    // As the caller, not via supabase.auth.updateUser: that call reads the
+    // session from storage, so it silently did nothing for a Bearer (mobile)
+    // request. GoTrue shallow-merges `data` into user_metadata, same as the
+    // SDK call it replaces (P0-12).
+    const accessToken = await getCallerAccessToken(request, supabase);
+    if (!accessToken) {
+      return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
+    }
+    const { error } = await updateAuthUserAsCaller(accessToken, {
       password: parsed.data.password,
-      data: { ...existingMeta, has_set_password: true },
+      data: { has_set_password: true },
     });
 
     if (error) {
-      if (error.message?.includes('same_password')) {
+      if (error.code === 'same_password' || error.message?.includes('same_password')) {
         return NextResponse.json(
           { error: 'New password must be different from the current one.' },
           { status: 400 },

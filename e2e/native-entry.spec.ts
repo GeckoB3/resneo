@@ -1,0 +1,85 @@
+import { test, expect } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
+import { issuePortalToken } from '../src/lib/auth/portal-token';
+import { getPortalCustomerEmail, portalCustomerConfigured } from './helpers/account-session';
+import { getE2eConfig } from './helpers/env';
+
+/**
+ * P3-4i acceptance: a client holding ONLY a Bearer token can complete the whole
+ * journey (AD7, §5D).
+ *
+ * Written as one test rather than four because the point is the CHAIN. Each
+ * step's unit tests mock the step before it, so nothing else proves that a
+ * session minted by the exchange is one PostgREST will accept, that the token
+ * it returns is the same one `/api/v1/me` authenticates, or that logging out
+ * actually revokes it.
+ *
+ * The last assertion is the one worth keeping. Until P0-12, `signOut` on a
+ * Bearer request revoked nothing and returned ok; a 401 after logout is the
+ * only way to tell a real revocation from that silence.
+ *
+ * No cookies are used anywhere here, deliberately: `request` is Playwright's
+ * bare HTTP client, not the browser context.
+ */
+test.skip(
+  !getE2eConfig().isConfigured || !portalCustomerConfigured(),
+  'Set E2E_VENUE_SLUG and E2E_PORTAL_CUSTOMER_EMAIL (see Docs/E2E_SMOKE.md)',
+);
+
+test('a client with only a Bearer token can enter, read and sign out', async ({ request }) => {
+  const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const email = getPortalCustomerEmail();
+  const token = (await issuePortalToken(admin, { email }))!;
+  expect(token).toBeTruthy();
+
+  try {
+    // 1. EXCHANGE: token in, session out. No cookies anywhere.
+    const ex = await request.post('/api/v1/auth/portal-token/exchange', { data: { token } });
+    expect(ex.status(), await ex.text()).toBe(200);
+    const session = await ex.json();
+    expect(session.access_token).toBeTruthy();
+    expect(session.refresh_token, 'setSession rejects a session with no refresh token').toBeTruthy();
+    console.log('--- EXCHANGE OK, expires_at', session.expires_at);
+
+    const bearer = { Authorization: `Bearer ${session.access_token}` };
+
+    // 2. LINK guest rows, the way the app does: PostgREST directly.
+    const asUser = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: bearer },
+    });
+    const { error: claimErr } = await asUser.rpc('claim_user_account');
+    console.log('--- CLAIM:', claimErr ? `FAILED ${claimErr.message}` : 'OK');
+    expect(claimErr).toBeNull();
+
+    // 3. READ its bookings over Bearer.
+    const list = await request.get('/api/v1/me/bookings', { headers: bearer });
+    console.log('--- BOOKINGS:', list.status());
+    expect(list.status()).toBe(200);
+
+    /*
+      4. SIGN OUT for real, then prove the token is dead.
+
+      `local`, NOT `global`, and this cost a CI run to learn. `global` revokes
+      every session the fixture customer has, including the one `auth.setup.ts`
+      minted and saved for the nine other portal specs, so this spec passed and
+      then broke every `portal-*` spec that ran after it. Alphabetically this
+      one runs first, so the damage was total and invisible locally, where it
+      had only ever been run on its own.
+
+      `local` revokes the caller's own session, which is exactly what is being
+      proved here: that THIS token dies.
+    */
+    const out = await request.post('/api/v1/auth/logout', { headers: bearer, data: { scope: 'local' } });
+    console.log('--- LOGOUT:', out.status());
+    expect(out.status()).toBe(200);
+
+    const after = await request.get('/api/v1/me/bookings', { headers: bearer });
+    console.log('--- AFTER LOGOUT:', after.status(), '(401 means revocation was real)');
+    expect(after.status()).toBe(401);
+  } finally {
+    await admin.from('account_portal_tokens').delete().eq('email', email.toLowerCase());
+  }
+});

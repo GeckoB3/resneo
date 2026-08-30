@@ -12,6 +12,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { sendOwnerBookingNotification } from './owner-booking-notification';
 import { sendStaffPush } from './staff-push-notification';
 import { sendPolicyMessage } from './outbound';
+import { resolveAccountEntryLink } from '@/lib/emails/account-entry-link';
 import { deliverEmailMessage } from './delivery';
 import { inferCommunicationLaneFromBookingModel } from './policies';
 
@@ -98,13 +99,41 @@ async function attachCardHoldFee(
   }
 }
 
+/**
+ * The "your bookings" link, resolved once and written onto the email data
+ * (P3-4d).
+ *
+ * **Here rather than in the templates**, because minting a token is an async
+ * database write and every template that renders this link is a synchronous
+ * function. `account_bookings_link` is the override those templates already
+ * check first, declared since before this task and until now never set by
+ * anything, so all four read sites are served by writing it once:
+ * `renderer.ts`, both branches of `booking-confirmation.ts`, and
+ * `deposit-confirmation.ts`.
+ *
+ * Leaves the field alone when it is already set, so a caller that has resolved
+ * its own link keeps it.
+ */
+async function attachAccountEntryLink(
+  admin: SupabaseClient,
+  booking: BookingEmailData,
+): Promise<BookingEmailData> {
+  if ((booking.account_bookings_link ?? '').trim()) return booking;
+  const link = await resolveAccountEntryLink(admin, {
+    email: booking.guest_email,
+    bookingId: booking.id ?? null,
+  });
+  return link ? { ...booking, account_bookings_link: link } : booking;
+}
+
 async function enrichBookingForConfirmation(booking: BookingEmailData): Promise<BookingEmailData> {
   if (!booking.id?.trim()) return booking;
   const admin = getSupabaseAdminClient();
   try {
     const enriched = await enrichBookingEmailForComms(admin, booking.id, booking);
     const withHold = await attachCardHoldFee(admin, enriched);
-    return await attachComplianceForms(admin, withHold);
+    const withForms = await attachComplianceForms(admin, withHold);
+    return await attachAccountEntryLink(admin, withForms);
   } catch (err) {
     console.error('[send-templated] enrichBookingForConfirmation failed', {
       bookingId: booking.id,

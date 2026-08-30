@@ -61,18 +61,38 @@ export function addDaysToYmd(ymd: string, delta: number): string {
  * a future caller to pick by accident.
  */
 
+/**
+ * `Intl.DateTimeFormat` construction is the expensive part of this file, not
+ * `formatToParts`, and `venueLocalWallTimeToUtcMs` builds two per call. Rendering
+ * a page of bookings resolves several instants per row, so an uncached
+ * formatter meant hundreds of constructions per request and put back a
+ * meaningful part of the time P0-3 had just taken out. Keyed by zone, which is
+ * what the constructor actually depends on; the instant is an argument to
+ * `formatToParts`. Bounded by the number of zones a process ever sees.
+ */
+const offsetFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function offsetFormatter(timeZone: string): Intl.DateTimeFormat {
+  let fmt = offsetFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    offsetFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
 /** Offset of `timeZone` from UTC at `utcMs` (positive east of UTC), read via Intl. */
-function timeZoneOffsetMs(utcMs: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(new Date(utcMs));
+export function timeZoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = offsetFormatter(timeZone).formatToParts(new Date(utcMs));
   const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
   const wallAsUtc = Date.UTC(
     get('year'),
@@ -107,6 +127,30 @@ export function venueLocalWallTimeToUtcMs(dateYmd: string, timeHHmm: string, tim
   const guess = Date.UTC(y!, mo! - 1, d!, h!, min!, 0);
   const first = guess - timeZoneOffsetMs(guess, timeZone);
   return guess - timeZoneOffsetMs(first, timeZone);
+}
+
+/**
+ * An instant as an ISO 8601 string carrying the venue's offset, e.g.
+ * `2026-09-01T18:00:00+01:00` (P0-2, C10).
+ *
+ * Why not `toISOString()`: that renders the same instant in UTC, and a customer
+ * in Sydney reading `2026-09-01T08:00:00Z` has to know the venue's zone and
+ * apply it themselves to learn their appointment is at 18:00 local. The offset
+ * form is unambiguous to every client without any of them reimplementing the
+ * rule, which is what `booking_date` plus `booking_time` forces today.
+ *
+ * The offset is read at the instant itself, so a booking either side of a DST
+ * transition gets the offset actually in force on that day.
+ */
+export function toIsoWithOffset(utcMs: number, timeZone: string): string {
+  const offsetMs = timeZoneOffsetMs(utcMs, timeZone);
+  const local = new Date(utcMs + offsetMs).toISOString().slice(0, 19);
+  if (offsetMs === 0) return `${local}Z`;
+  const sign = offsetMs > 0 ? '+' : '-';
+  const total = Math.abs(Math.round(offsetMs / 60_000));
+  const hh = String(Math.floor(total / 60)).padStart(2, '0');
+  const mm = String(total % 60).padStart(2, '0');
+  return `${local}${sign}${hh}:${mm}`;
 }
 
 /**

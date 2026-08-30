@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ManageBookingView renders (P2-4 gate) > a booking that does not exist says so 1`] = `"Booking not foundWe couldn't find a booking for this link. It may have been removed.Go home"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a card awaiting details offers the payment link 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsAdd your card details to secure this booking. No payment is taken.Add card detailsChange appointmentCancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a class session shows its summary 1`] = `"Frozen Venue1 Frozen StreetClass bookingReformer Pilates · 2026-06-10 18:30DateWednesday 10 JuneTime14:00Guests1StatusBookedGet directionsChange sessionCancel bookingAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a held card states the fee and what would charge it 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsYour card is securely on file. Frozen Venue may charge a no-show fee of up to £15.00 if you miss this booking or cancel late. Cancel before Mon, 8 Jun 2026, 14:00 to avoid any charge.Change appointmentCancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a paid deposit is stated with its amount 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsDeposit paid: £25.00Change appointmentCancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a resource booking shows the resource 1`] = `"Frozen Venue1 Frozen StreetResource bookingCourt 1 · until 14:30DateWednesday 10 JuneTime14:00Guests1StatusBookedGet directionsChange slotCancel bookingAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a table reservation shows guests rather than a service 1`] = `"Frozen Venue1 Frozen StreetDateWednesday 10 JuneTime14:00Guests4StatusBookedGet directionsModify bookingCancel reservationAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a used link explains itself and offers a new one 1`] = `"Link already usedThis booking link has already been used and is no longer active.Check your inbox for a more recent email, or contact the venue to resend your booking link.Go home"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > a venue with self-reschedule off does not offer the change 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsNeed a different time?Frozen Venue does not offer changes online. Please contact them on +44 20 7946 0000 to move this booking. You can still cancel it below.Cancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > an appointment shows its service, staff, and the policy copy 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsChange appointmentCancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > an event ticket shows the event name 1`] = `"Frozen Venue1 Frozen StreetEvent bookingWine TastingDateWednesday 10 JuneTime14:00Guests1StatusBookedGet directionsNeed to change this event booking?Event tickets can’t be moved to another date online. To change your booking, cancel it below (if the cancellation policy allows a refund) and book the new date, or contact the venue at +44 20 7946 0000.Cancel bookingAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > an expired link explains itself 1`] = `"Link expiredThis booking link has expired for your security.Check your inbox for a more recent email, or contact the venue to resend your booking link.Go home"`;
+
+exports[`ManageBookingView renders (P2-4 gate) > outstanding forms are named, with a link each 1`] = `"Frozen Venue1 Frozen StreetServiceConsultationStaffAlex PractitionerDateWednesday 10 JuneTime14:00StatusBookedGet directionsForms to complete before your visitConsultation form →Change appointmentCancel appointmentAdd to Google CalendarDownload for other calendarsContact the venue+44 20 7946 0000hello@frozen.testPowered by ResNeo"`;

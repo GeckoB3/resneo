@@ -221,11 +221,17 @@ export async function sendStaffPush(
     });
     if (allowed.length === 0) return { sent: false, reason: 'no_recipients' };
 
-    // 5. Their device push tokens.
+    // 5. Their STAFF device push tokens.
+    //
+    // The audience filter is the point of P0-13's column. Without it this
+    // selects every device a user has registered, so once the customer app
+    // writes rows, a dual-role person, which linked accounts actively create,
+    // gets staff booking alerts on their personal phone in the customer app.
     const { data: devices } = await admin
       .from('user_devices')
       .select('push_token')
       .in('user_id', allowed)
+      .eq('audience', 'staff')
       .not('push_token', 'is', null);
     const tokens = Array.from(
       new Set(
@@ -247,7 +253,19 @@ export async function sendStaffPush(
       priority: 'high',
     });
     if (invalidTokens.length > 0) {
-      await admin.from('user_devices').delete().in('push_token', invalidTokens);
+      // Scoped to the users this send addressed. Unscoped, this was a GLOBAL
+      // delete by token value: any other user who happened to hold the same
+      // token string lost their registration too, and once a customer app also
+      // writes to this table, a dead staff token would silently deregister the
+      // customer device sharing it (P0-12).
+      await admin
+        .from('user_devices')
+        .delete()
+        .in('push_token', invalidTokens)
+        .in('user_id', allowed)
+        // And scoped to the audience this send addressed, so a dead staff token
+        // cannot deregister the customer device that happens to share it.
+        .eq('audience', 'staff');
     }
 
     return { sent: sent > 0, reason: sent > 0 ? undefined : 'not_sent' };

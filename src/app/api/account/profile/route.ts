@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
+import { getCallerAccessToken, updateAuthUserAsCaller } from '@/lib/auth/caller-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
+import { isValidIanaTimeZone } from '@/lib/time/iana-time-zone';
+import {
+  mergeIncomingPreferences,
+  withStaffMirror,
+} from '@/lib/notifications/notification-preferences';
 
 const patchSchema = z.object({
   display_name: z.union([z.string(), z.null()]).optional(),
@@ -10,7 +16,17 @@ const patchSchema = z.object({
   phone: z.union([z.string(), z.null()]).optional(),
   email: z.string().email().optional(),
   locale: z.string().min(2).max(20).optional(),
-  timezone: z.string().min(2).max(64).optional(),
+  // Constrained to real IANA zones (G23). Free text here meant a customer could
+  // save 'GMT+1' and then be unable to load the very page that would let them
+  // fix it, because every toLocaleDateString({ timeZone }) call threw.
+  timezone: z
+    .string()
+    .min(2)
+    .max(64)
+    .refine(isValidIanaTimeZone, {
+      message: 'Choose a timezone from the list, for example Europe/London.',
+    })
+    .optional(),
   default_login_destination: z.enum(['account', 'dashboard', 'ask']).nullable().optional(),
   notification_preferences: z.record(z.string(), z.unknown()).optional(),
 });
@@ -32,14 +48,27 @@ export async function GET(request: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const { data, error } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
     if (error) {
       console.error('[account/profile GET]', error.message);
       return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 });
     }
-    return NextResponse.json({ profile: data, user: { id: user.id, email: user.email } });
+
+    // Build 1.0.7 reads notification_preferences.new_booking and its siblings
+    // directly off this response, and it is in the stores. Once P0-13's R3
+    // migration moves those keys into `staff`, the shipped app would read a
+    // default for every one, show the user toggles that do not match reality,
+    // and write those defaults back on their next save. The mirror costs a
+    // dozen duplicated keys and removes that entirely (§5D.0 B7). It is a
+    // no-op before R3, because the column is still flat. Retire it only when
+    // telemetry shows 1.0.7 is gone.
+    const profile = data
+      ? { ...data, notification_preferences: withStaffMirror(data.notification_preferences) }
+      : data;
+
+    return NextResponse.json({ profile, user: { id: user.id, email: user.email } });
   } catch (e) {
     console.error('[account/profile GET]', e);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
@@ -52,7 +81,7 @@ export async function PATCH(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const body = await request.json().catch(() => ({}));
     const parsed = patchSchema.safeParse(body);
@@ -109,7 +138,30 @@ export async function PATCH(request: NextRequest) {
     if (d.locale !== undefined) profileUpdate.locale = d.locale;
     if (d.timezone !== undefined) profileUpdate.timezone = d.timezone;
     if (d.default_login_destination !== undefined) profileUpdate.default_login_destination = d.default_login_destination;
-    if (d.notification_preferences !== undefined) profileUpdate.notification_preferences = d.notification_preferences;
+    if (d.notification_preferences !== undefined) {
+      // MERGED, never assigned. This route is re-exported as
+      // /api/v1/me/profile, so both the customer portal and the shipped staff
+      // app PATCH through it, into the same free-form jsonb column. Assigning
+      // the incoming object meant a customer client that sent only its own two
+      // keys erased every staff push preference on the row, and linked
+      // accounts actively create users who have both.
+      //
+      // The merge also routes keys to their namespace by name, which is what
+      // lets 1.0.7 keep PATCHing flat staff keys after R3 without an app
+      // release. Re-reading the row first is a read-modify-write and so races
+      // a concurrent save of the OTHER namespace; that is a fair trade against
+      // today's guaranteed clobber, and P0-13's R4 half narrows this route to
+      // the customer namespace so the race stops mattering.
+      const { data: current } = await supabase
+        .from('user_profiles')
+        .select('notification_preferences')
+        .eq('id', user.id)
+        .maybeSingle();
+      profileUpdate.notification_preferences = mergeIncomingPreferences(
+        (current as { notification_preferences?: unknown } | null)?.notification_preferences,
+        d.notification_preferences,
+      );
+    }
 
     const { data, error } = await supabase
       .from('user_profiles')
@@ -126,7 +178,12 @@ export async function PATCH(request: NextRequest) {
     let emailNotice: string | null = null;
     let email_error: string | null = null;
     if (wantsEmailChange && nextEmail) {
-      const { error: authErr } = await supabase.auth.updateUser({ email: nextEmail });
+      // As the caller: keeps the double-confirm flow, and actually works for a
+      // Bearer request, where supabase.auth.updateUser silently no-ops (P0-12).
+      const accessToken = await getCallerAccessToken(request, supabase);
+      const { error: authErr } = accessToken
+        ? await updateAuthUserAsCaller(accessToken, { email: nextEmail })
+        : { error: { message: 'Unauthorised', status: 401 } };
       if (authErr) {
         console.error('[account/profile PATCH] updateUser email:', authErr.message);
         email_error = authErr.message;

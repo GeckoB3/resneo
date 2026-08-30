@@ -402,7 +402,12 @@ export async function POST(request: NextRequest) {
       workingHours,
     );
     if (!displayCheck.ok) {
-      return NextResponse.json({ error: displayCheck.message }, { status: 409 });
+      // Coded (P0-11): matched by English prose alone until now, so it broke the
+      // moment anyone edited the copy.
+      return NextResponse.json(
+        { error: displayCheck.message, code: 'CONFLICT' },
+        { status: 409 },
+      );
     }
 
     const insertPayload: Record<string, unknown> = {
@@ -631,7 +636,12 @@ export async function PATCH(request: NextRequest) {
         id as string,
       );
       if (!displayCheck.ok) {
-        return NextResponse.json({ error: displayCheck.message }, { status: 409 });
+        // Coded (P0-11): matched by English prose alone until now, so it broke the
+      // moment anyone edited the copy.
+      return NextResponse.json(
+        { error: displayCheck.message, code: 'CONFLICT' },
+        { status: 409 },
+      );
       }
     }
     if (parsed.data.display_on_calendar_id !== undefined) {

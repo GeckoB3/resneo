@@ -46,11 +46,28 @@ try {
   console.warn('lint-no-raw-modals: no allowlist file; all violations fail. Run: node scripts/generate-modal-allowlist.mjs');
 }
 
+/**
+ * Comments are not markup, so they are stripped before the scan.
+ *
+ * This rule is two substring tests over a whole file, which means a file that
+ * merely DESCRIBES the rule matches it. That is not hypothetical: a test added
+ * for P0-7 quoted the rule in its header to explain why it was not citing it
+ * as evidence, and CI failed on the explanation. Commented-out markup cannot
+ * render either, so removing comments only narrows this to code that could
+ * actually put a modal on screen.
+ *
+ * Block comments first, then line comments. `//` inside a string, a URL most
+ * often, is left alone by requiring a line start or whitespace before it.
+ */
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/[^\n]*/g, '$1');
+}
+
 const violations = [];
 
 for (const file of walk(SRC)) {
   if (isAllowed(file)) continue;
-  const content = readFileSync(file, 'utf8');
+  const content = stripComments(readFileSync(file, 'utf8'));
   const hasDialogRole = /role\s*=\s*["']dialog["']/.test(content);
   const hasFixedInset = /fixed\s+inset-0|fixed\s+inset-x-0/.test(content);
   if (hasDialogRole && hasFixedInset) {

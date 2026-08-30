@@ -1607,6 +1607,97 @@ describe('staff-first: surfaces that keep the old order', () => {
     expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
   });
 
+  describe('?start=time: a rebook link passes through the service step (P3-1)', () => {
+    /*
+      "Book again" is only worth the name if it saves taps. `start=service`
+      alone lands the guest back on the service list with the service merely
+      selected in state, so they still have to pick the thing they already
+      picked.
+
+      Every case below is really one question: can the link skip THIS step
+      without the booking becoming wrong? It may skip choosing the service,
+      because the link names it. It may never skip a variant or an addon
+      group, because nothing names those, and a booking made without them is
+      at the wrong duration and the wrong price.
+    */
+    it('goes to the times for a service with nothing left to choose', async () => {
+      installFetch(venueCatalog());
+      renderFlow({ preselectedServiceId: PLAIN, initialStep: 'time' });
+      await waitForStep(STEP.practitioner);
+    });
+
+    it('reaches the TIMES when the link also locks the practitioner', async () => {
+      /*
+        The shape a "Book again" link actually has:
+        `/book/<venue>/<practitioner>?service_id=…&start=time`. Who and what
+        are both settled by the link, so the only thing left to choose is
+        when, and that is the tap the customer came to make.
+      */
+      installFetch(venueCatalog());
+      renderFlow({ preselectedServiceId: PLAIN, initialStep: 'time', lockedPractitioner: LOCKED });
+      await waitForStep(STEP.slot);
+    });
+
+    it('STOPS at the variant step, which is a required choice', async () => {
+      installFetch(venueCatalog());
+      renderFlow({ preselectedServiceId: VARIANTS, initialStep: 'time' });
+      await waitForStep(STEP.variant);
+    });
+
+    it('STOPS at the addons step for the same reason', async () => {
+      installFetch(venueCatalog());
+      renderFlow({ preselectedServiceId: ADDONS, initialStep: 'time' });
+      await waitForStep(STEP.addons);
+    });
+
+    it('takes the first of the two when a service has both', async () => {
+      installFetch(venueCatalog());
+      renderFlow({ preselectedServiceId: BOTH, initialStep: 'time' });
+      await waitForStep(STEP.variant);
+    });
+
+    it('stays on the service step when the service no longer exists', async () => {
+      // Same degradation the stale `service_id` already has: the link's shape
+      // settles the order, not whether it resolves. A retired service must
+      // leave the guest somewhere they can choose, not somewhere blank.
+      installFetch(venueCatalog());
+      renderFlow({ preselectedServiceId: 'svc-retired-in-may', initialStep: 'time' });
+      await waitForStep(STEP.service);
+      expect(screen.getByRole('button', { name: /Plain Service/i })).toBeInTheDocument();
+    });
+
+    it('composes with staff-first, which a named service already reorders', async () => {
+      /*
+        Worth pinning because two rules meet here and the result is not
+        obvious. A staff-first venue asks who before what, but a link naming
+        the service already collapses that to service-first: the guest has
+        committed to the what, so there is nothing to ask first. `start=time`
+        then passes through the service step as everywhere else, and the
+        guest arrives at who, which is now the only thing left.
+      */
+      installFetch(venueCatalog());
+      renderFlow({
+        venue: staffFirstVenue(),
+        preselectedServiceId: PLAIN,
+        initialStep: 'time',
+      });
+      expect(screen.queryByTestId(STAFF_PICK)).not.toBeInTheDocument();
+      await waitForStep(STEP.practitioner);
+    });
+
+    it('does NOTHING without the param, so existing links are untouched', async () => {
+      /*
+        The guard that matters for anything already in the wild. Waitlist
+        offers carry `service_id` and must keep landing on the service step:
+        this behaviour is opt-in through the link, not a new meaning for an
+        existing parameter.
+      */
+      installFetch(venueCatalog());
+      renderFlow({ preselectedServiceId: PLAIN, initialStep: 'service' });
+      await waitForStep(STEP.service);
+    });
+  });
+
   it('does the same for a link naming a service that no longer exists', async () => {
     // The order is settled from the link's shape, not from whether the service
     // resolves, so a stale link degrades to the old flow rather than breaking.

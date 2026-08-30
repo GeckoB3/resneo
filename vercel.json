@@ -45,6 +45,10 @@
       "schedule": "0 5 * * *"
     },
     {
+      "path": "/api/cron/portal-events-prune",
+      "schedule": "30 5 * * *"
+    },
+    {
       "path": "/api/cron/venue-hard-delete",
       "schedule": "15 5 * * *"
     },

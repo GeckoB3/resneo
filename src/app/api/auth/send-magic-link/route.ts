@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
+import { renderMagicLinkEmail } from '@/lib/emails/templates/magic-link-email';
+// One definition of the lifetime, shared with the 'check your inbox' screen
+// (P3-4g). It was stated in two files, which is how two strings disagree.
+import { MAGIC_LINK_EXPIRY_HOURS } from '@/lib/auth/magic-link-lifetime';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
 import { buildMagicLinkConfirmNextQuery } from '@/lib/safe-auth-redirect';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
@@ -97,8 +101,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ fallback: true });
     }
 
-    const hashedToken =
-      (genData as { properties?: { hashed_token?: string } }).properties?.hashed_token ?? '';
+    const props = (genData as {
+      properties?: { hashed_token?: string; email_otp?: string };
+    }).properties;
+    const hashedToken = props?.hashed_token ?? '';
+    /*
+      P3-4i. `generateLink` returns a six-digit OTP alongside the hash and this
+      route used to discard it. A native client cannot follow a browser link
+      and come back holding a session, but it CAN call
+      `supabase.auth.verifyOtp({ email, token, type: 'email' })` directly
+      against Supabase with this code, which means the app needs no ResNeo
+      route to sign in at all. Putting it in the email is what makes that
+      possible; the SDK documents the field for exactly this.
+    */
+    const emailOtp = props?.email_otp?.trim() || null;
 
     if (!hashedToken) {
       console.error('[send-magic-link] generateLink returned no hashed_token');
@@ -111,20 +127,17 @@ export async function POST(request: NextRequest) {
       `&type=magiclink` +
       `&next=${encodeURIComponent(nextPath)}`;
 
-    const text = [
-      'Here is your sign-in link for ResNeo.',
-      '',
-      'Open this link to sign in:',
+    /*
+      P3-4e. This was three bare `<p>` tags and a naked anchor, built inline
+      here: no ResNeo header, no footer, and invisible to the template gallery
+      because it was not a template. It is the FIRST thing a customer sees when
+      they try to get into their account, and it looked like phishing.
+    */
+    const { html, text } = renderMagicLinkEmail({
       confirmUrl,
-      '',
-      'This link expires in 1 hour. If you did not request this, you can ignore it.',
-    ].join('\n');
-
-    const html = `
-      <p>Here is your sign-in link for <strong>ResNeo</strong>.</p>
-      <p><a href="${confirmUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">Sign in to ResNeo</a></p>
-      <p style="font-size:12px;color:#64748b;">This link expires in 1 hour. If you did not request this, you can ignore it.</p>
-    `;
+      expiryHours: MAGIC_LINK_EXPIRY_HOURS,
+      emailOtp,
+    });
 
     try {
       await sendEmail({

@@ -138,7 +138,13 @@ function PaymentForm({
       <PaymentElement options={{ layout: 'tabs' }} />
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div
+          role="alert"
+          data-testid="payment-error"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {error}
+        </div>
       )}
 
       {consentText && (

@@ -74,3 +74,6 @@ Docs/supabase-*-logs-*.csv*
 
 # generated marketing assets (video renders, thumbnails), not source
 /marketing/
+
+# Playwright saved sessions: a live staging session cookie, never commit.
+/e2e/.auth/

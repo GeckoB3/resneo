@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
     const bookings = await loadAccountBookings(supabase, getSupabaseAdminClient(), 100);
     return NextResponse.json({ bookings });

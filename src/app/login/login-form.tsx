@@ -12,15 +12,22 @@ export type LoginFormVariant = 'default' | 'booking';
 
 export function LoginForm({
   redirectTo,
+  initialEmail,
   variant = 'default',
 }: {
   redirectTo?: string;
+  /**
+   * Prefilled address (P3-4c), for a customer arriving from a portal link that
+   * has expired. It is only a starting value: they can still change it, which
+   * matters if the link reached them by forward rather than by inbox.
+   */
+  initialEmail?: string;
   variant?: LoginFormVariant;
 }) {
   const isBookingFlow = variant === 'booking';
   const [mode, setMode] = useState<'password' | 'magic'>(isBookingFlow ? 'magic' : 'password');
   const [forgotPassword, setForgotPassword] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail?.trim().toLowerCase() ?? '');
   const [password, setPassword] = useState('');
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);

@@ -81,7 +81,7 @@ scheduling audit.
 
 | Document | Status |
 |---|---|
-| `Resneo_Customer_Portal_World_Class_Plan.md` | Re-verified 2026-08-26, not implemented. Read its §0 first: it names its own authorities |
+| `Resneo_Customer_Portal_World_Class_Plan.md` | Re-verified 2026-08-26, no portal phase implemented. Its pre-flight (§0A) is partly done and **§5D.4 records the email-link and mobile auth constraints proven by the 2026-08-26 outage repair**, which is the section to read before touching any auth or transactional email. Read its §0 first: it names its own authorities |
 | `Resneo_Scheduling_Resolver_Plan_August_2026.md` | Partly implemented; the document tracks stage by stage |
 | `staff-first-booking-flow-plan.md` | Not implemented. Flag `staff_first_booking_flow` |
 | `deposit-payment-robustness-plan.md` | Implemented on staging |

@@ -5,6 +5,12 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { useToast } from '@/components/ui/Toast';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
+import { Button, FormField } from '@/components/ui/primitives';
+import { formatAccountDate, friendlyCreditReason } from '@/lib/account/account-commerce-copy';
 
 interface BalanceRow {
   id: string;
@@ -76,13 +82,9 @@ function CreditPurchaseForm({
     <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
       <PaymentElement options={{ layout: 'tabs' }} />
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={!stripe} loading={loading}>
         {loading ? 'Processing…' : 'Pay'}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -120,7 +122,19 @@ export function AccountCreditsSection() {
     venues: Array<{ id: string; name: string }>;
     products: CatalogProduct[];
   }>({ venues: [], products: [] });
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  /** Load state machine (P0-5, G24): failed is not the same as empty. */
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+
+  /** Announcing wrapper (P0-8); see the note in ProfileClient. */
+  const { addToast } = useToast();
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
   const [purchase, setPurchase] = useState<{
     venue_id: string;
     product_id: string;
@@ -133,10 +147,21 @@ export function AccountCreditsSection() {
     await Promise.resolve();
     setError(null);
     const qs = deepLinkVenueId ? `?venue=${encodeURIComponent(deepLinkVenueId)}` : '';
-    const res = await fetch(`/api/account/credits${qs}`);
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not load credits');
+    let data: Record<string, unknown>;
+    try {
+      const res = await fetch(`/api/account/credits${qs}`);
+      // Checked BEFORE parsing: an error page is rarely JSON, and parsing it
+      // first threw past every branch below and left the empty state showing.
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not load credits');
+        setStatus('failed');
+        return;
+      }
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+      setStatus('failed');
       return;
     }
     setBalances((data.balances ?? []) as BalanceRow[]);
@@ -148,7 +173,8 @@ export function AccountCreditsSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       products: (pc?.products ?? []) as CatalogProduct[],
     });
-  }, [deepLinkVenueId]);
+    setStatus('ready');
+  }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -158,13 +184,6 @@ export function AccountCreditsSection() {
 
   const venueName = (id: string) => venues.find((v) => v.id === id)?.name ?? id.slice(0, 8);
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Pack';
-
-  const formatExpiry = (iso: string | null): string | null => {
-    if (!iso) return null;
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
 
   const startPurchase = useCallback(
     async (venue_id: string, product_id: string) => {
@@ -186,7 +205,7 @@ export function AccountCreditsSection() {
         stripe_account_id: data.stripe_account_id,
       });
     },
-    [],
+    [setError],
   );
 
   function afterPaid() {
@@ -221,18 +240,27 @@ export function AccountCreditsSection() {
       <PageHeader
         eyebrow="Account"
         title="Class credits"
-        subtitle="Balances are per venue. Buy packs from a venue that sells them; redeem when booking paid classes (where enabled)."
+        subtitle="Credits are held with each venue separately. Buy a pack from a venue that sells them, then use your credits when you book a class there."
       />
+      {status === 'failed' ? (
+        <PortalLoadFailed
+          message={error}
+          onRetry={() => {
+            setStatus('loading');
+            void load();
+          }}
+        />
+      ) : null}
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Balances</h2>
         {balances.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">No credit batches yet.</p>
+          <p className="mt-2 text-sm text-slate-500">You have no credits yet.</p>
         ) : (
           <ul className="mt-3 space-y-2 text-sm">
             {balances.map((b) => {
-              const expiry = formatExpiry(b.expires_at);
+              const expiry = formatAccountDate(b.expires_at);
               return (
                 <li key={b.id} className="flex items-start justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
                   <span className="min-w-0">
@@ -249,21 +277,21 @@ export function AccountCreditsSection() {
             })}
           </ul>
         )}
-      </div>
+      </SectionCard>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Buy a pack</h2>
-        <p className="mt-1 text-xs text-slate-500">Choose a venue, then a published credit pack.</p>
+        <p className="mt-1 text-xs text-slate-500">Choose a venue, then the pack you want.</p>
         <BuyPackPicker
           catalog={purchaseCatalog}
           preselectVenueId={deepLinkVenueId}
           preselectProductId={deepLinkProductId}
           onBuy={(v, p) => void startPurchase(v, p)}
         />
-      </div>
+      </SectionCard>
 
       {purchase ? (
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+        <SectionCard className="p-5 sm:p-6">
           <h2 className="text-sm font-semibold text-slate-900">Complete payment</h2>
           <Elements
             stripe={stripeForAccount(purchase.stripe_account_id)}
@@ -275,24 +303,25 @@ export function AccountCreditsSection() {
               onDone={() => void afterPaid()}
             />
           </Elements>
-        </div>
+        </SectionCard>
       ) : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
-        <h2 className="text-sm font-semibold text-slate-900">Recent ledger</h2>
+      <SectionCard className="p-5 sm:p-6">
+        <h2 className="text-sm font-semibold text-slate-900">Recent activity</h2>
         {ledger.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">No activity yet.</p>
         ) : (
           <ul className="mt-3 max-h-64 space-y-1 overflow-auto text-xs text-slate-700">
             {ledger.map((l) => (
               <li key={l.id}>
-                {l.created_at.slice(0, 10)} · {l.reason} · {l.delta_credits > 0 ? '+' : ''}
+                {formatAccountDate(l.created_at)} · {friendlyCreditReason(l.reason)} ·{' '}
+                {l.delta_credits > 0 ? '+' : ''}
                 {l.delta_credits} · {venueName(l.venue_id)}
               </li>
             ))}
           </ul>
         )}
-      </div>
+      </SectionCard>
     </div>
   );
 }
@@ -314,6 +343,13 @@ function BuyPackPicker({
       : null) ?? catalog.venues[0]?.id ?? '';
   const [venueId, setVenueId] = useState(initialVenueId);
   const [productId, setProductId] = useState(preselectProductId ?? '');
+  /**
+   * In-flight guard (G30). `onBuy` issues a PaymentIntent on the venue's
+   * connected account, so two taps meant two intents. It stays true until this
+   * panel unmounts, which is what happens on success: the parent swaps it for
+   * the Payment Element.
+   */
+  const [buying, setBuying] = useState(false);
   // Track venue prop changes (catalog loads async).
   useEffect(() => {
     if (preselectVenueId && catalog.venues.some((v) => v.id === preselectVenueId)) {
@@ -335,13 +371,18 @@ function BuyPackPicker({
     productId && productChoices.some((p) => p.id === productId) ? productId : firstProductId;
 
   if (catalog.venues.length === 0 || catalog.products.length === 0) {
-    return <p className="mt-3 text-sm text-slate-500">No published credit packs are available yet.</p>;
+    return (
+      <EmptyState
+        size="compact"
+        title="No credit packs on sale yet"
+        description="When a venue puts a credit pack on sale, it will show up here."
+      />
+    );
   }
 
   return (
     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-      <label className="min-w-0 flex-1 text-xs text-slate-600">
-        Venue
+      <FormField label="Venue" className="min-w-0 flex-1">
         <select
           value={venueId}
           onChange={(e) => {
@@ -356,9 +397,8 @@ function BuyPackPicker({
             </option>
           ))}
         </select>
-      </label>
-      <label className="min-w-0 flex-1 text-xs text-slate-600">
-        Pack
+      </FormField>
+      <FormField label="Pack" className="min-w-0 flex-1">
         <select
           value={effectiveProductId}
           onChange={(e) => setProductId(e.target.value)}
@@ -370,15 +410,19 @@ function BuyPackPicker({
             </option>
           ))}
         </select>
-      </label>
-      <button
+      </FormField>
+      <Button
         type="button"
         disabled={!venueId || !effectiveProductId}
-        onClick={() => onBuy(venueId, effectiveProductId)}
-        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        loading={buying}
+        onClick={() => {
+          setBuying(true);
+          onBuy(venueId, effectiveProductId);
+        }}
+        className="!bg-slate-900 hover:!bg-slate-800 disabled:!bg-slate-400"
       >
         Pay
-      </button>
+      </Button>
     </div>
   );
 }

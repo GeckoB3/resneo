@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import {
   applyStatusToAllGroupVisitRows,
   formatGroupVisitSegmentDurationLabel,
@@ -269,14 +269,44 @@ describe('group-visit-bookings cache', () => {
     expect(next.map((r) => r.status)).toEqual(['Seated', 'Seated']);
   });
 
+  /*
+    Runs on a FROZEN clock, against literal dates.
+
+    It used to build "today" with `new Date().toISOString().slice(0, 10)`,
+    which is the UTC date, and compare it against a helper that works in LOCAL
+    dates (`new Date(`${iso}T12:00:00`)` and `toDateString()`). Those are the
+    same string for most of the day and different either side of midnight
+    wherever local time is not UTC. It duly failed at 00:01 BST on 2026-08-30:
+    UTC was still the 29th, so the test asked for 'on Sat 29 Aug' and demanded
+    'today'.
+
+    So this was a real timezone defect in the test, not merely a rollover
+    race, and the fix has to remove BOTH. Freezing the clock at each side of
+    midnight does that: local dates are stated outright, and the assertion no
+    longer depends on when or where the suite is run.
+  */
   it('multiServiceVisitDatePhrase omits "on" for today and tomorrow', () => {
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowIso = tomorrow.toISOString().slice(0, 10);
-    expect(multiServiceVisitDatePhrase(todayIso)).toBe('today');
-    expect(multiServiceVisitDatePhrase(tomorrowIso)).toBe('tomorrow');
-    expect(multiServiceVisitDatePhrase('2020-06-15')).toMatch(/^on /);
+    // Local-time constructor on purpose: `new Date(y, m, d)` is local, and
+    // local is what the helper compares against.
+    const justBeforeMidnight = new Date(2026, 7, 29, 23, 59, 59, 900);
+    const justAfterMidnight = new Date(2026, 7, 30, 0, 0, 0, 100);
+
+    for (const [now, today, tomorrow] of [
+      [justBeforeMidnight, '2026-08-29', '2026-08-30'],
+      [justAfterMidnight, '2026-08-30', '2026-08-31'],
+    ] as const) {
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      try {
+        expect(multiServiceVisitDatePhrase(today), `today at ${now.toISOString()}`).toBe('today');
+        expect(multiServiceVisitDatePhrase(tomorrow), `tomorrow at ${now.toISOString()}`).toBe(
+          'tomorrow',
+        );
+        expect(multiServiceVisitDatePhrase('2020-06-15')).toMatch(/^on /);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
   });
 });
 

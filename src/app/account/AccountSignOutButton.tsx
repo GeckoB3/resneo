@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { signOutCleanly } from '@/lib/auth/sign-out-cleanly';
+import { Button } from '@/components/ui/primitives';
 
 export function AccountSignOutButton() {
   const [busy, setBusy] = useState(false);
@@ -13,18 +14,18 @@ export function AccountSignOutButton() {
   }
 
   return (
-    <button
+    // `loading` renders the primitive's own spinner and sets `disabled`, so the
+    // hand-rolled spinner and the `disabled={busy}` prop both go. The icon is
+    // hidden while loading for the same reason it was before: two spinners
+    // would be worse than one.
+    <Button
       type="button"
-      disabled={busy}
+      variant="secondary"
+      loading={busy}
       onClick={() => void signOut()}
-      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm shadow-slate-900/5 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+      className="min-h-10 gap-2 rounded-xl shadow-sm shadow-slate-900/5"
     >
-      {busy ? (
-        <span
-          className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600"
-          aria-hidden
-        />
-      ) : (
+      {busy ? null : (
         <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" aria-hidden>
           <path
             strokeLinecap="round"
@@ -34,6 +35,6 @@ export function AccountSignOutButton() {
         </svg>
       )}
       Sign out
-    </button>
+    </Button>
   );
 }

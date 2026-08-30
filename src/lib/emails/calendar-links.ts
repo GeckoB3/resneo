@@ -18,16 +18,40 @@ function formatGoogleUtcEpochMs(utcMs: number): string {
   return `${y}${m}${day}T${h}${min}${s}Z`;
 }
 
-function defaultDurationMinutes(booking: BookingEmailData): number {
-  if (typeof booking.calendar_duration_minutes === 'number' && booking.calendar_duration_minutes > 0) {
-    return Math.min(24 * 60, booking.calendar_duration_minutes);
+/**
+ * How long a calendar entry for this booking should be.
+ *
+ * Exported because there are TWO "add to calendar" affordances, this Google
+ * link and the `.ics` file from `src/lib/ics.ts`, and they must not disagree
+ * about the same booking. They disagreed on the start instant until P2-4 (the
+ * `.ics` treated the venue's wall clock as UTC) and they disagreed on the
+ * length until this was shared: the `.ics` used a flat 90 minutes, so an
+ * appointment was an hour in one calendar and ninety minutes in the other.
+ *
+ * A known duration wins, capped at a day so a bad row cannot produce a
+ * week-long event. Otherwise the per-model default, which is the best guess
+ * available: an event runs longer than an appointment.
+ */
+export function calendarEventDurationMinutes(opts: {
+  durationMinutes?: number | null;
+  bookingModel?: string | null;
+}): number {
+  if (typeof opts.durationMinutes === 'number' && opts.durationMinutes > 0) {
+    return Math.min(24 * 60, opts.durationMinutes);
   }
-  const m = booking.booking_model;
+  const m = opts.bookingModel;
   if (m === 'event_ticket') return 180;
   if (m === 'class_session') return 90;
   if (m === 'resource_booking') return 90;
   if (m === 'unified_scheduling' || m === 'practitioner_appointment') return 60;
   return 90;
+}
+
+function defaultDurationMinutes(booking: BookingEmailData): number {
+  return calendarEventDurationMinutes({
+    durationMinutes: booking.calendar_duration_minutes,
+    bookingModel: booking.booking_model,
+  });
 }
 
 function confirmationEventTitle(booking: BookingEmailData, venueName: string): string {

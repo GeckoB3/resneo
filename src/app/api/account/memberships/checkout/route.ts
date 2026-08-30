@@ -5,7 +5,6 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { ensureVenueStripeCustomerForUser } from '@/lib/class-commerce/venue-stripe-customer';
 import { RESERVE_NI_SUBSCRIPTION_PURPOSE } from '@/types/class-commerce';
-import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 
 const bodySchema = z.object({
   venue_id: z.string().uuid(),
@@ -13,7 +12,33 @@ const bodySchema = z.object({
 });
 
 /**
- * POST /api/account/memberships/checkout — Stripe Checkout (subscription) on the venue connected account.
+ * POST /api/account/memberships/checkout (P0-17, implements C9)
+ *
+ * WHAT THIS REPLACED. It created a hosted Stripe Checkout session and returned
+ * `{ url }` for the browser to navigate to, with a `success_url` of
+ * `/account/memberships?checkout=success`. In an app webview with no cookie
+ * that URL hits middleware, resolves no user, and redirects to `/login`, so a
+ * customer who had just been charged for a subscription was shown a sign-in
+ * page. It was the only money route in the app not returning a `client_secret`;
+ * `credits/purchase`, `courses/checkout` and `payment-methods/setup-intent` all
+ * already did.
+ *
+ * WHAT IT DOES NOW. Creates a SetupIntent on the venue's connected account and
+ * returns its `client_secret`, exactly like the other three. The client
+ * confirms the card in a Payment Element it already renders, and the
+ * subscription is created SERVER SIDE from the `setup_intent.succeeded`
+ * webhook.
+ *
+ * Why the webhook rather than a second call from the client: the card is
+ * already saved by then, so a client that closes its tab between confirming and
+ * calling back would leave a customer with a saved card and no membership, and
+ * nothing to reconcile it from. The webhook is the only participant guaranteed
+ * to run.
+ *
+ * Nothing downstream changed. `syncClassMembershipFromStripeSubscription` reads
+ * `customer.subscription.created` and keys off the subscription's metadata, not
+ * off `checkout.session.completed`, so the recording path is untouched by this
+ * rework. The metadata below is what carries the purchase across the gap.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -22,7 +47,7 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user?.email) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
     }
 
     const json = await request.json().catch(() => ({}));
@@ -69,6 +94,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Refuse a second subscription to the same plan rather than letting the
+    // webhook create one. A customer who double-taps would otherwise be billed
+    // twice on the venue's account, and the only cure is a manual refund.
+    const { data: existing } = await admin
+      .from('class_memberships')
+      .select('id, status')
+      .eq('user_id', user.id)
+      .eq('venue_id', venue_id)
+      .eq('product_id', product_id)
+      .in('status', ['active', 'trialing', 'past_due'])
+      .maybeSingle();
+    if (existing) {
+      return NextResponse.json(
+        { error: 'You already have this membership.', code: 'ALREADY_ENROLLED' },
+        { status: 409 },
+      );
+    }
+
     const { stripeCustomerId } = await ensureVenueStripeCustomerForUser(admin, {
       userId: user.id,
       venueId: venue_id,
@@ -76,41 +119,33 @@ export async function POST(request: NextRequest) {
       email: user.email,
     });
 
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL?.trim() !== ''
-        ? normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL!)
-        : new URL(request.url).origin;
-
-    const session = await stripe.checkout.sessions.create(
+    const setupIntent = await stripe.setupIntents.create(
       {
-        mode: 'subscription',
         customer: stripeCustomerId,
-        line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${base}/account/memberships?checkout=success`,
-        cancel_url: `${base}/account/memberships?checkout=cancel`,
+        payment_method_types: ['card'],
+        // The subscription charges this card on a schedule with nobody present.
+        usage: 'off_session',
         metadata: {
           reserve_ni_purpose: RESERVE_NI_SUBSCRIPTION_PURPOSE.CLASS_MEMBERSHIP,
           user_id: user.id,
           venue_id,
           product_id,
         },
-        subscription_data: {
-          metadata: {
-            reserve_ni_purpose: RESERVE_NI_SUBSCRIPTION_PURPOSE.CLASS_MEMBERSHIP,
-            user_id: user.id,
-            venue_id,
-            product_id,
-          },
-        },
       },
       { stripeAccount: acct },
     );
 
-    if (!session.url) {
+    if (!setupIntent.client_secret) {
       return NextResponse.json({ error: 'Could not start checkout' }, { status: 500 });
     }
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({
+      client_secret: setupIntent.client_secret,
+      stripe_account_id: acct,
+      setup_intent_id: setupIntent.id,
+      venue_id,
+      product_id,
+    });
   } catch (e) {
     console.error('[account/memberships/checkout]', e);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

@@ -16,7 +16,7 @@ function cookieAdapter(cookieStore: Awaited<ReturnType<typeof cookies>>) {
   };
 }
 
-function getSupabaseServerEnv() {
+export function getSupabaseServerEnv() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabasePublishableKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??

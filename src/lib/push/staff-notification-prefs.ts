@@ -5,6 +5,8 @@
  * keys to decide whether to push an event to a staff member.
  */
 
+import { readPreferenceNamespace } from '@/lib/notifications/notification-preferences';
+
 export type BookingNotificationScope = 'all' | 'mine';
 
 /** Per-event preference keys (booleans) the sender checks. */
@@ -79,9 +81,18 @@ function timeOr(value: unknown, fallback: string): string {
   return typeof value === 'string' && TIME_RE.test(value) ? value : fallback;
 }
 
-/** Validate a raw jsonb bag onto the defaults. Never throws. */
+/**
+ * Validate a raw jsonb bag onto the defaults. Never throws.
+ *
+ * Callers hand this the WHOLE `notification_preferences` column, so it has to
+ * cope with both shapes across P0-13's R3 migration: the flat blob it has
+ * always been given, and the `{ staff, customer }` namespacing that replaces it.
+ * Reading the wrong one is not a partial failure, it is total: every key falls
+ * to its default, the user is shown toggles that do not match reality, and the
+ * next save writes those defaults back as if they had chosen them.
+ */
 export function parseStaffNotificationPrefs(raw: unknown): StaffNotificationPrefs {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const r = readPreferenceNamespace(raw, 'staff');
   const d = DEFAULT_STAFF_NOTIFICATION_PREFS;
   return {
     push_enabled: boolOr(r.push_enabled, d.push_enabled),

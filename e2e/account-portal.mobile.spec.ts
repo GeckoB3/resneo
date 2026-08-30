@@ -1,0 +1,148 @@
+import { test, expect } from '@playwright/test';
+import { getE2eConfig } from './helpers/env';
+import { portalCustomerConfigured } from './helpers/account-session';
+import { PORTAL_CUSTOMER_STATE } from './helpers/auth-state';
+
+/**
+ * The portal at 375px (P0-1d).
+ *
+ * This spec exists so the mobile project is not an empty box that reports
+ * green. P1-2 and P1-3 write their acceptance criteria against this width and
+ * P0-8's axe pass runs here too; a project that has never executed a test
+ * proves nothing about whether it works, and "the project exists" is exactly
+ * the kind of claim that turns out to be false the first time someone relies
+ * on it.
+ *
+ * What it asserts is deliberately narrow and structural rather than visual: no
+ * screenshot baselines, no pixel assertions. Those are P0-7 and P0-8's
+ * business, and a baseline committed now would need rewriting by both.
+ */
+
+const e2e = getE2eConfig();
+
+test.describe('portal at 375px', () => {
+  test.use({ storageState: PORTAL_CUSTOMER_STATE });
+  test.skip(
+    !e2e.isConfigured || !portalCustomerConfigured(),
+    'Set E2E_VENUE_SLUG and E2E_PORTAL_CUSTOMER_EMAIL (see Docs/E2E_SMOKE.md)',
+  );
+
+  test('runs at the width the acceptance criteria are written against', async ({ page }) => {
+    // If the project's viewport drifts, every criterion written against 375px
+    // silently starts being checked at some other width.
+    await page.goto('/account/bookings');
+    expect(page.viewportSize()?.width).toBe(375);
+  });
+
+  test('the bookings list does not scroll sideways', async ({ page }) => {
+    // The classic small-screen defect, and one a desktop project cannot see: a
+    // fixed-width table or an unwrapped row pushes the page wider than the
+    // viewport and the customer has to pan to reach anything on the right.
+    await page.goto('/account/bookings');
+    await expect(page.getByRole('heading', { name: 'Your bookings' })).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, 'the page is wider than the viewport at 375px').toBeLessThanOrEqual(1);
+  });
+
+  test('the filter tabs and a booking are reachable and tappable', async ({ page }) => {
+    await page.goto('/account/bookings');
+
+    // Reachable: a control that renders off-screen or under another element is
+    // not usable, and toBeVisible alone would not catch either.
+    const past = page.getByRole('link', { name: 'Past' });
+    await expect(past).toBeVisible();
+    await past.click();
+    await expect(page).toHaveURL(/filter=past/);
+
+    const details = page.getByRole('link', { name: 'Details' }).first();
+    await expect(details).toBeVisible();
+    await details.click();
+    await expect(page).toHaveURL(/\/account\/bookings\/[0-9a-f-]{36}/);
+  });
+
+  test('the next booking is visible without scrolling (P1-2)', async ({ page }) => {
+    /*
+      P1-2's stated acceptance, which until now was measured once by hand and
+      never guarded. It is guarded here because P1-3's nav can change the
+      answer: the four items fit one row under some font metrics and wrap to
+      two under others, and the second row costs 38px of the fold.
+
+      Measured at the time of writing: one row puts the card top at y=366, two
+      rows at y=404, both of 812. So the wrap is affordable, and this is the
+      test that says so if it ever stops being.
+    */
+    await page.goto('/account');
+    const card = page.locator('main').filter({ hasText: 'Next up' }).first();
+    await expect(card, 'the fixture customer should have an upcoming booking').toBeVisible();
+
+    const label = page.getByText('Next up', { exact: true });
+    await expect(label).toBeVisible();
+
+    // Nothing has scrolled, and the card's primary action is on screen.
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    // P2-5 merged this card's two links into one: "View details" and
+    // "Reschedule or cancel" both led here, and the surviving label carries
+    // what the second one was for. It is a LONGER label on a 375px row, which
+    // is exactly the kind of change the measurement below exists to catch.
+    const action = page.getByRole('link', { name: 'View, reschedule or cancel' });
+    const box = await action.boundingBox();
+    expect(box, 'the card has no link to the booking').not.toBeNull();
+    expect(
+      box!.y + box!.height,
+      'the next booking card is below the fold at 375px',
+    ).toBeLessThanOrEqual(812);
+  });
+
+  test('the first-run banner stays within its height budget (P3-5)', async ({ page }) => {
+    /*
+      Measured directly, because the P1-2 test above only says SOMETHING pushed
+      the next booking off the screen, and this banner is the thing most likely
+      to have done it: it sits above the card and its height is whatever the
+      copy happens to wrap to.
+
+      It has broken P1-2 twice. The second time only in CI, because Linux and
+      Windows wrap the same sentence into different numbers of lines, so
+      trimming words until it fits locally proves nothing. Hence a budget with
+      real headroom rather than a limit set at the last passing measurement.
+
+      If this fails, shorten the banner or make it denser. Do not raise the
+      number to whatever it currently is.
+    */
+    await page.goto('/account');
+    const banner = page.locator('section[aria-label]').first();
+    if (!(await banner.isVisible().catch(() => false))) {
+      test.skip(true, 'fixture customer has dismissed the banner or set a password');
+    }
+    const box = await banner.boundingBox();
+    expect(
+      Math.round(box!.height),
+      'the first-run banner grew; it pushes the next booking below the fold before it looks wrong',
+    ).toBeLessThanOrEqual(140);
+  });
+
+  test('the detail page action buttons fit the viewport', async ({ page }) => {
+    /*
+      This measured the "Manage booking" button, which P2-5 deleted: the portal
+      now cancels and reschedules in place rather than sending a customer to a
+      token page. The PROPERTY is unchanged and is what mattered, so it moved
+      to the controls that replaced it: an action a customer cannot reach with
+      a thumb at 375px is not an action.
+    */
+    await page.goto('/account/bookings');
+    await page.getByRole('link', { name: 'Details' }).first().click();
+    await expect(page).toHaveURL(/\/account\/bookings\/[0-9a-f-]{36}/);
+
+    const action = page.getByRole('button', { name: /^(cancel|change|modify)/i }).first();
+    await expect(action, 'the detail page offers no action at all').toBeVisible();
+
+    const box = await action.boundingBox();
+    expect(box, 'the action button has no layout box').not.toBeNull();
+    // Inside the viewport horizontally, and tall enough to hit with a thumb.
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+    expect(box!.height).toBeGreaterThanOrEqual(40);
+  });
+});

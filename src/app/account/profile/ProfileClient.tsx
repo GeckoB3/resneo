@@ -1,6 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { supportedTimeZones } from '@/lib/time/iana-time-zone';
+import { Button, ConfirmDialog, FormField, Input } from '@/components/ui/primitives';
+import { deviceRemovalLines } from '@/lib/account/account-commerce-copy';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { useToast } from '@/components/ui/Toast';
+import {
+  mergePreferenceNamespace,
+  readPreferenceNamespace,
+} from '@/lib/notifications/notification-preferences';
 import { useRouter } from 'next/navigation';
 
 type Profile = {
@@ -8,6 +17,13 @@ type Profile = {
   first_name: string | null;
   last_name: string | null;
   phone: string | null;
+  /**
+   * Still round-tripped, deliberately (P1-4). This form stopped offering a
+   * Locale control because nothing reads the column (G22), but `saveProfile`
+   * spreads the whole profile, so the stored value is preserved rather than
+   * cleared. Removing it from the type would make the web form silently blank
+   * a field another client may be setting.
+   */
   locale: string;
   timezone: string;
   default_login_destination: 'account' | 'dashboard' | 'ask' | null;
@@ -31,7 +47,7 @@ type Device = {
 };
 
 const inputClass =
-  'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/80';
+  'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/80';
 
 const sectionClass =
   'rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-900/5 sm:p-7';
@@ -48,16 +64,49 @@ export function ProfileClient({
   devices: Device[];
 }) {
   const router = useRouter();
+  // Built once: the list is ~420 entries and the component re-renders on every
+  // keystroke in the fields above it.
+  const timeZoneOptions = useMemo(() => supportedTimeZones(), []);
   const [profile, setProfile] = useState(initialProfile);
   const [email, setEmail] = useState(initialEmail);
   const [marketing, setMarketing] = useState(marketingRelationships);
   const [knownDevices, setKnownDevices] = useState(devices);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessageState] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+
+  /**
+   * Announcing wrappers (P0-8). Named for the setters they replace so
+   * every existing call site announces without being edited.
+   */
+  const { addToast } = useToast();
+  const setMessage = useCallback(
+    (m: string | null) => {
+      setMessageState(m);
+      if (m) addToast(m, 'success');
+    },
+    [addToast],
+  );
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
   const [saving, setSaving] = useState(false);
+  /** In-flight guards (G30) for the two device handlers, which had none. */
+  const [registeringDevice, setRegisteringDevice] = useState(false);
+  const [removingDevice, setRemovingDevice] = useState<string | null>(null);
+  /** The device awaiting confirmation; the row, so the dialog can name it. */
+  const [pendingDeviceRemoval, setPendingDeviceRemoval] = useState<
+    (typeof devices)[number] | null
+  >(null);
 
   const prefs = useMemo(() => {
-    const p = profile.notification_preferences ?? {};
+    // Reads whichever shape the column is in, across P0-13's R3 migration. A
+    // flat read against a namespaced blob would silently show both of these as
+    // their defaults and then write those defaults back on the next save.
+    const p = readPreferenceNamespace(profile.notification_preferences, 'customer');
     return {
       operational_email: p.operational_email !== false,
       marketing_email: p.marketing_email === true,
@@ -129,46 +178,69 @@ export function ProfileClient({
     }
   }
 
+  /*
+    P2-6: the device awaiting confirmation. Not in the task's stated inventory,
+    but "Remove" deletes something of the customer's, which is the rule that
+    inventory is drawn from, and it was a single unguarded click on a red
+    button in a list.
+  */
   async function removeDevice(deviceId: string) {
-    const res = await fetch(`/api/account/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
-    if (res.ok) {
-      setKnownDevices((rows) => rows.filter((d) => d.id !== deviceId));
-    } else {
-      setError('Could not remove device.');
+    if (removingDevice) return;
+    setRemovingDevice(deviceId);
+    try {
+      const res = await fetch(`/api/account/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setKnownDevices((rows) => rows.filter((d) => d.id !== deviceId));
+      } else {
+        setError('Could not remove device.');
+      }
+    } finally {
+      setRemovingDevice(null);
     }
   }
 
   async function registerThisDevice() {
+    if (registeringDevice) return;
+    setRegisteringDevice(true);
     setError(null);
-    const res = await fetch('/api/account/devices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        platform: 'web',
-        device_name: typeof navigator === 'undefined' ? 'Web browser' : navigator.userAgent.slice(0, 120),
-      }),
-    });
-    const body = (await res.json().catch(() => ({}))) as { device?: Device; error?: string };
-    if (res.ok && body.device) {
-      // Re-registering an existing device returns the refreshed row, so replace it
-      // in place rather than adding a second entry for the same device.
-      setKnownDevices((rows) => [
-        body.device!,
-        ...rows.filter((d) => d.id !== body.device!.id),
-      ]);
-      setMessage('This browser has been registered.');
-      return;
+    try {
+      const res = await fetch('/api/account/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform: 'web',
+          // Declared explicitly (P0-13): this is the customer portal, and a
+          // device left at the default would receive staff booking alerts for
+          // anyone who is both a customer and a staff member.
+          audience: 'customer',
+          device_name:
+            typeof navigator === 'undefined' ? 'Web browser' : navigator.userAgent.slice(0, 120),
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { device?: Device; error?: string };
+      if (res.ok && body.device) {
+        // Re-registering an existing device returns the refreshed row, so replace
+        // it in place rather than adding a second entry for the same device.
+        setKnownDevices((rows) => [body.device!, ...rows.filter((d) => d.id !== body.device!.id)]);
+        setMessage('This browser has been registered.');
+        return;
+      }
+      setError(body.error ?? 'Could not register this browser.');
+    } finally {
+      setRegisteringDevice(false);
     }
-    setError(body.error ?? 'Could not register this browser.');
   }
 
   function updateNotificationPreference(key: 'operational_email' | 'marketing_email', value: boolean) {
     setProfile((p) => ({
       ...p,
-      notification_preferences: {
-        ...(p.notification_preferences ?? {}),
-        [key]: value,
-      },
+      // Merged into the customer namespace rather than spread over the whole
+      // column, so a dual-role user's staff push settings survive this save.
+      notification_preferences: mergePreferenceNamespace(
+        p.notification_preferences,
+        'customer',
+        { [key]: value },
+      ),
     }));
   }
 
@@ -181,9 +253,8 @@ export function ProfileClient({
           sign-in address; changing it may require confirmation from your new inbox.
         </p>
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-first-name">
-            First name
-            <input
+          <FormField label="First name" htmlFor="profile-first-name">
+            <Input
               id="profile-first-name"
               name="first_name"
               autoComplete="given-name"
@@ -191,10 +262,9 @@ export function ProfileClient({
               onChange={(e) => setProfile((p) => ({ ...p, first_name: e.target.value }))}
               className={inputClass}
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-last-name">
-            Surname
-            <input
+          </FormField>
+          <FormField label="Surname" htmlFor="profile-last-name">
+            <Input
               id="profile-last-name"
               name="last_name"
               autoComplete="family-name"
@@ -202,10 +272,14 @@ export function ProfileClient({
               onChange={(e) => setProfile((p) => ({ ...p, last_name: e.target.value }))}
               className={inputClass}
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-email">
-            Email
-            <input
+          </FormField>
+          <FormField
+            label="Email"
+            htmlFor="profile-email"
+            className="sm:col-span-2"
+            description="This updates your login email in our authentication system. If you change it, check both inboxes until you confirm."
+          >
+            <Input
               id="profile-email"
               name="email"
               type="email"
@@ -214,14 +288,9 @@ export function ProfileClient({
               onChange={(e) => setEmail(e.target.value)}
               className={inputClass}
             />
-            <span className="mt-1.5 block text-xs text-slate-500">
-              This updates your login email in our authentication system. If you change it, check both inboxes until you
-              confirm.
-            </span>
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-phone">
-            Phone number
-            <input
+          </FormField>
+          <FormField label="Phone number" htmlFor="profile-phone" className="sm:col-span-2">
+            <Input
               id="profile-phone"
               name="phone"
               type="tel"
@@ -231,11 +300,13 @@ export function ProfileClient({
               className={inputClass}
               placeholder="e.g. 07700 900000"
             />
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-display-name">
-            Preferred display name{' '}
-            <span className="font-normal text-slate-500">(optional)</span>
-            <input
+          </FormField>
+          <FormField
+            label="Preferred display name (optional)"
+            htmlFor="profile-display-name"
+            className="sm:col-span-2"
+          >
+            <Input
               id="profile-display-name"
               name="display_name"
               autoComplete="nickname"
@@ -244,37 +315,67 @@ export function ProfileClient({
               className={inputClass}
               placeholder="How we greet you in the app"
             />
-          </label>
+          </FormField>
         </div>
       </section>
 
       <section className={sectionClass}>
-        <h2 className="text-lg font-semibold text-slate-900">Regional &amp; login</h2>
-        <p className="mt-1 text-sm text-slate-600">Locale and timezone affect how dates and times are shown to you.</p>
+        <h2 className="text-lg font-semibold text-slate-900">Dates and sign-in</h2>
+        {/*
+          The Locale field is gone (P1-4, closes G22).
+
+          `user_profiles.locale` was written by this form and read nowhere in
+          the entire codebase, while the heading above it said "Locale and
+          timezone affect how dates and times are shown to you". Half of that
+          sentence was false, and a setting that visibly does nothing when you
+          change it costs more trust than the setting was ever worth. Making it
+          work is a multi-language project, named in the plan's out-of-scope
+          list.
+
+          The column and `PATCH /api/account/profile` are untouched on purpose:
+          the API is frozen by P0-11 and the mobile app is a separate consumer,
+          so removing a field it may send is a contract change rather than a
+          copy change. This form simply stops offering it.
+        */}
+        <p className="mt-1 text-sm text-slate-600">
+          Your timezone decides how dates and times are shown to you across ResNeo.
+        </p>
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-locale">
-            Locale
-            <input
-              id="profile-locale"
-              name="locale"
-              value={profile.locale}
-              onChange={(e) => setProfile((p) => ({ ...p, locale: e.target.value }))}
-              className={inputClass}
-            />
-          </label>
-          <label className="block text-sm font-medium text-slate-800" htmlFor="profile-timezone">
-            Timezone
-            <input
+          {/*
+            No Select primitive exists, so the control stays a native select
+            and keeps `inputClass` so it still matches the Inputs beside it.
+            FormField takes over the label and the htmlFor wiring.
+          */}
+          <FormField label="Timezone" htmlFor="profile-timezone">
+            <select
               id="profile-timezone"
               name="timezone"
               value={profile.timezone}
               onChange={(e) => setProfile((p) => ({ ...p, timezone: e.target.value }))}
               className={inputClass}
-              placeholder="Europe/London"
-            />
-          </label>
-          <label className="block text-sm font-medium text-slate-800 sm:col-span-2" htmlFor="profile-login-dest">
-            Default destination after login
+            >
+              {/*
+                A select rather than free text (G23): the server now rejects
+                anything that is not a real IANA zone, so an input could only
+                produce a 400 the customer has to guess their way out of.
+                A value already stored that is not in the list is kept as its
+                own option, so opening this page cannot silently change it.
+              */}
+              {!timeZoneOptions.includes(profile.timezone) && profile.timezone !== '' ? (
+                <option value={profile.timezone}>{profile.timezone} (not recognised)</option>
+              ) : null}
+              {timeZoneOptions.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField
+            label="Default destination after login"
+            htmlFor="profile-login-dest"
+            className="sm:col-span-2"
+          >
             <select
               id="profile-login-dest"
               name="default_login_destination"
@@ -291,17 +392,18 @@ export function ProfileClient({
               <option value="account">Account</option>
               <option value="dashboard">Venue dashboard</option>
             </select>
-          </label>
+          </FormField>
         </div>
       </section>
 
       <section className={sectionClass}>
         <h2 className="text-lg font-semibold text-slate-900">Notification preferences</h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          These apply to your <span className="font-medium text-slate-800">ResNeo account</span> (booking confirmations
-          from the platform, security notices, optional product updates). Use{' '}
-          <span className="font-medium text-slate-800">Venue marketing</span> below for promotional email per venue you
-          have booked with.
+          These apply to email sent by{' '}
+          <span className="font-medium text-slate-800">ResNeo</span> about your account. Emails from a
+          venue about a specific booking, such as your confirmation and reminders, always come to you
+          and are set per venue under{' '}
+          <span className="font-medium text-slate-800">Venue marketing</span> below.
         </p>
         <div className="mt-5 space-y-4 text-sm text-slate-700">
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
@@ -312,8 +414,10 @@ export function ProfileClient({
               className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
             <span>
-              Operational emails: booking confirmations and reminders sent by ResNeo, plus security notices for your
-              account.
+              Account emails from ResNeo, such as service notices and changes to your account.{' '}
+              <span className="text-slate-500">
+                Security emails, like sign-in links and password changes, are always sent.
+              </span>
             </span>
           </label>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
@@ -367,16 +471,18 @@ export function ProfileClient({
             <h2 className="text-lg font-semibold text-slate-900">Devices</h2>
             <p className="mt-1 text-sm text-slate-600">Browsers you have registered for account security.</p>
           </div>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            loading={registeringDevice}
             onClick={() => void registerThisDevice()}
-            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50"
+            className="min-h-10 shrink-0 rounded-xl px-4 py-2.5 shadow-sm"
           >
             Register this browser
-          </button>
+          </Button>
         </div>
         {knownDevices.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-600">No devices registered yet.</p>
+          <EmptyState size="compact" title="No devices registered yet" description="Register a browser to help us spot unfamiliar sign-ins." />
         ) : (
           <ul className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-100">
             {knownDevices.map((device) => (
@@ -387,13 +493,15 @@ export function ProfileClient({
                     Last seen {device.last_seen_at ? device.last_seen_at.slice(0, 10) : device.created_at.slice(0, 10)}
                   </p>
                 </div>
-                <button
+                <Button
                   type="button"
-                  onClick={() => void removeDevice(device.id)}
-                  className="text-sm font-semibold text-red-700 transition-colors hover:text-red-800"
+                  variant="link"
+                  loading={removingDevice === device.id}
+                  onClick={() => setPendingDeviceRemoval(device)}
+                  className="text-sm font-semibold !text-red-700 transition-colors hover:!text-red-800"
                 >
                   Remove
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -413,15 +521,43 @@ export function ProfileClient({
             </p>
           ) : null}
         </div>
-        <button
+        <Button
           type="button"
-          disabled={saving}
+          loading={saving}
           onClick={() => void saveProfile()}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+          className="min-h-11 shrink-0 rounded-xl px-6 py-2.5 shadow-sm"
         >
           {saving ? 'Saving…' : 'Save changes'}
-        </button>
+        </Button>
       </div>
+
+      <ConfirmDialog
+        open={pendingDeviceRemoval !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDeviceRemoval(null);
+        }}
+        title={
+          pendingDeviceRemoval
+            ? `Remove ${pendingDeviceRemoval.device_name || pendingDeviceRemoval.platform}`
+            : 'Remove this device'
+        }
+        message="Here is what happens:"
+        body={
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700">
+            {deviceRemovalLines().map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        }
+        confirmLabel="Yes, remove it"
+        cancelLabel="Keep it"
+        onConfirm={() => {
+          // Read before clearing: the dialog closes on confirm.
+          const target = pendingDeviceRemoval;
+          setPendingDeviceRemoval(null);
+          if (target) void removeDevice(target.id);
+        }}
+      />
     </div>
   );
 }

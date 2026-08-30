@@ -4,6 +4,7 @@ import { getPreviewBookingSample } from '@/lib/communications/preview-samples';
 import { renderCommunicationEmail } from '@/lib/communications/renderer';
 import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confirmation';
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
+import { renderMagicLinkEmail } from '@/lib/emails/templates/magic-link-email';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
 import { renderAppointmentWaitlistOfferEmail } from '@/lib/emails/templates/appointment-waitlist-offer-email';
@@ -195,6 +196,23 @@ export function getEmailTemplateGalleryItems(): EmailGalleryItem[] {
     subtitle: 'Dashboard credentials',
     subject: 'Your ResNeo dashboard login details',
     html: staff.html,
+  });
+
+  /*
+    P3-4e's acceptance. Being in this gallery is not decoration: it is the only
+    way anybody LOOKS at this email, and it was built inline in a route handler
+    where nobody ever had.
+  */
+  const magicLink = renderMagicLinkEmail({
+    confirmUrl: 'https://www.resneo.com/auth/confirm?token_hash=demo&type=magiclink',
+    expiryHours: 24,
+  });
+  items.push({
+    id: 'magic-link',
+    title: 'Sign-in link',
+    subtitle: 'Customer and staff sign-in',
+    subject: 'Sign in to ResNeo',
+    html: magicLink.html,
   });
 
   const r56 = renderReminder56h(

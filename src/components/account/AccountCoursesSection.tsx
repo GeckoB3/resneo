@@ -5,6 +5,15 @@ import { useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { useToast } from '@/components/ui/Toast';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
+import { Button, ConfirmDialog, FormField } from '@/components/ui/primitives';
+import {
+  courseCancellationEnrollmentLines,
+  friendlyCourseStatus,
+} from '@/lib/account/account-commerce-copy';
 
 interface EnrollmentRow {
   id: string;
@@ -78,13 +87,9 @@ function CoursePurchaseForm({
     <form onSubmit={(ev) => void onSubmit(ev)} className="mt-3 space-y-3">
       <PaymentElement options={{ layout: 'tabs' }} />
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={!stripe} loading={loading}>
         {loading ? 'Processing…' : 'Pay and enroll'}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -116,8 +121,41 @@ export function AccountCoursesSection() {
   const [venueId, setVenueId] = useState('');
   const [productIdFree, setProductIdFree] = useState('');
   const [productIdPaid, setProductIdPaid] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  /** Load state machine (P0-5, G24): failed is not the same as empty. */
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+
+  /** Announcing wrappers (P0-8); see the note in ProfileClient. */
+  const { addToast } = useToast();
+  const setError = useCallback(
+    (m: string | null) => {
+      setErrorState(m);
+      if (m) addToast(m, 'error');
+    },
+    [addToast],
+  );
+  /**
+   * In-flight guards (G30). All three call routes that create enrollments,
+   * PaymentIntents or refunds, so a double tap was a double side effect.
+   */
+  const [enrolling, setEnrolling] = useState(false);
+  const [startingPaid, setStartingPaid] = useState(false);
+  const [cancellingEnrollment, setCancellingEnrollment] = useState<string | null>(null);
+  /*
+    P2-6: the enrollment awaiting confirmation, not a boolean. The ROW is held
+    because the dialog states that enrollment's own cancellation window, and a
+    boolean would have made the copy read from whichever row happened to be
+    last.
+  */
+  const [pendingCancelEnrollment, setPendingCancelEnrollment] = useState<EnrollmentRow | null>(null);
+  const [msg, setMsgState] = useState<string | null>(null);
+  const setMsg = useCallback(
+    (m: string | null) => {
+      setMsgState(m);
+      if (m) addToast(m, 'success');
+    },
+    [addToast],
+  );
   const [paidCheckout, setPaidCheckout] = useState<{
     venue_id: string;
     product_id: string;
@@ -130,10 +168,21 @@ export function AccountCoursesSection() {
     await Promise.resolve();
     setError(null);
     const qs = deepLinkVenueId ? `?venue=${encodeURIComponent(deepLinkVenueId)}` : '';
-    const res = await fetch(`/api/account/courses${qs}`);
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Could not load');
+    let data: Record<string, unknown>;
+    try {
+      const res = await fetch(`/api/account/courses${qs}`);
+      // Checked BEFORE parsing: an error page is rarely JSON, and parsing it
+      // first threw past every branch below and left the empty state showing.
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Could not load');
+        setStatus('failed');
+        return;
+      }
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      setError('We could not reach the server. Check your connection and try again.');
+      setStatus('failed');
       return;
     }
     setEnrollments((data.enrollments ?? []) as EnrollmentRow[]);
@@ -144,7 +193,8 @@ export function AccountCoursesSection() {
       venues: (pc?.venues ?? []) as Array<{ id: string; name: string }>,
       courses: (pc?.courses ?? []) as CatalogCourse[],
     });
-  }, [deepLinkVenueId]);
+    setStatus('ready');
+  }, [deepLinkVenueId, setError]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -188,51 +238,76 @@ export function AccountCoursesSection() {
   const effectiveProductIdPaid =
     productIdPaid && courseChoicesPaid.some((c) => c.id === productIdPaid) ? productIdPaid : firstPaidId;
 
-  async function enrollFree() {
+  /**
+   * Enroll in an explicit venue and free course, defaulting to whatever the
+   * form is showing. See the comment on the autostart effect for why the
+   * arguments exist (P0-15, G25).
+   */
+  async function enrollFree(venueIdArg?: string, productIdArg?: string) {
+    if (enrolling) return;
     setError(null);
     setMsg(null);
-    if (!resolvedVenueId || !effectiveProductIdFree) {
+    const venue_id = venueIdArg || resolvedVenueId;
+    const product_id = productIdArg || effectiveProductIdFree;
+    if (!venue_id || !product_id) {
       setError('Choose a venue and a free (£0) course package.');
       return;
     }
-    const res = await fetch('/api/account/courses/enroll', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id: resolvedVenueId, product_id: effectiveProductIdFree }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Enroll failed');
-      return;
+    setEnrolling(true);
+    try {
+      const res = await fetch('/api/account/courses/enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue_id, product_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Enroll failed');
+        return;
+      }
+      setMsg('Enrolled.');
+      void load();
+    } finally {
+      setEnrolling(false);
     }
-    setMsg('Enrolled.');
-    void load();
   }
 
   async function cancelEnrollment(id: string) {
+    if (cancellingEnrollment) return;
     setError(null);
     setMsg(null);
-    if (!window.confirm('Cancel this enrollment? If within the refund window your payment will be refunded.')) {
-      return;
+    setCancellingEnrollment(id);
+    try {
+      const res = await fetch('/api/account/courses/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enrollment_id: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Cancel failed');
+        return;
+      }
+      const refunded = (data as { refund_amount_pence?: number }).refund_amount_pence ?? 0;
+      setMsg(
+        refunded > 0
+          ? `Cancelled. Refund of £${(refunded / 100).toFixed(2)} is being processed.`
+          : 'Cancelled.',
+      );
+      void load();
+    } finally {
+      setCancellingEnrollment(null);
     }
-    const res = await fetch('/api/account/courses/cancel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enrollment_id: id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Cancel failed');
-      return;
-    }
-    const refunded = (data as { refund_amount_pence?: number }).refund_amount_pence ?? 0;
-    setMsg(refunded > 0 ? `Cancelled. Refund of £${(refunded / 100).toFixed(2)} is being processed.` : 'Cancelled.');
-    void load();
   }
 
-  // Auto-start when arriving with ?venue=&course=&autostart=1 — deferred out of
-  // the effect body so the setState cascade inside enrollFree/startPaidCheckout
-  // runs after this render commits.
+  // Auto-start when arriving with ?venue=&course=&autostart=1.
+  //
+  // The venue and course are passed EXPLICITLY (P0-15, G25). They used not to
+  // be: enrollFree() and startPaidCheckout() took no arguments and read the
+  // state that the preselect effects above set in this same commit, so the
+  // deferred call ran with the render's stale values and both fell through to
+  // their fallbacks. A customer following a link to one venue's course was
+  // charged for a different venue's, on that venue's Stripe Connect account.
   useEffect(() => {
     if (autoStartedRef.current) return;
     if (!autostart || !deepLinkVenueId || !deepLinkCourseId) return;
@@ -243,43 +318,61 @@ export function AccountCoursesSection() {
     autoStartedRef.current = true;
     queueMicrotask(() => {
       if (course.price_pence === 0) {
-        void enrollFree();
+        void enrollFree(deepLinkVenueId, deepLinkCourseId);
       } else {
-        void startPaidCheckout();
+        void startPaidCheckout(deepLinkVenueId, deepLinkCourseId);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autostart, deepLinkVenueId, deepLinkCourseId, purchaseCatalog.courses]);
 
-  async function startPaidCheckout() {
+  /**
+   * Start payment for an explicit venue and paid course, defaulting to whatever
+   * the form is showing.
+   */
+  async function startPaidCheckout(venueIdArg?: string, productIdArg?: string) {
+    if (startingPaid) return;
     setError(null);
     setMsg(null);
     setPaidCheckout(null);
-    if (!resolvedVenueId || !effectiveProductIdPaid) {
+    const venue_id = venueIdArg || resolvedVenueId;
+    const product_id = productIdArg || effectiveProductIdPaid;
+    if (!venue_id || !product_id) {
       setError('Choose a venue and a paid course.');
       return;
     }
-    const res = await fetch('/api/account/courses/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue_id: resolvedVenueId, product_id: effectiveProductIdPaid }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? 'Checkout failed');
+    // A course that is not at this venue would be charged on the wrong Stripe
+    // Connect account, which is the whole failure this guard exists for.
+    if (!purchaseCatalog.courses.some((c) => c.id === product_id && c.venue_id === venue_id)) {
+      setError('That course is not available at this venue.');
       return;
     }
-    if (!data.client_secret || !data.stripe_account_id) {
-      setError('Could not start payment');
-      return;
+    setStartingPaid(true);
+    try {
+      const res = await fetch('/api/account/courses/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venue_id, product_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Checkout failed');
+        return;
+      }
+      if (!data.client_secret || !data.stripe_account_id) {
+        setError('Could not start payment');
+        return;
+      }
+      setPaidCheckout({
+      venue_id,
+      product_id,
+        client_secret: data.client_secret,
+        stripe_account_id: data.stripe_account_id,
+        amount_pence: data.amount_pence ?? 0,
+      });
+    } finally {
+      setStartingPaid(false);
     }
-    setPaidCheckout({
-      venue_id: resolvedVenueId,
-      product_id: effectiveProductIdPaid,
-      client_secret: data.client_secret,
-      stripe_account_id: data.stripe_account_id,
-      amount_pence: data.amount_pence ?? 0,
-    });
   }
 
   return (
@@ -287,15 +380,24 @@ export function AccountCoursesSection() {
       <PageHeader
         eyebrow="Account"
         title="Courses"
-        subtitle="Enroll in free course packages instantly, or pay for paid courses with your card (processed on the venue’s Stripe account)."
+        subtitle="Join a course that runs over several sessions. Free courses are confirmed straight away; for paid courses the venue takes the payment from your card."
       />
+      {status === 'failed' ? (
+        <PortalLoadFailed
+          message={error}
+          onRetry={() => {
+            setStatus('loading');
+            void load();
+          }}
+        />
+      ) : null}
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
       {msg ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</div> : null}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+      <SectionCard className="p-5 sm:p-6">
         <h2 className="text-sm font-semibold text-slate-900">Enrollments</h2>
-        {enrollments.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">None yet.</p>
+        {status !== 'ready' ? null : enrollments.length === 0 ? (
+          <EmptyState size="compact" title="No enrollments yet" description="Courses you enroll in will appear here." />
         ) : (
           <ul className="mt-2 space-y-2 text-sm">
             {enrollments.map((e) => {
@@ -305,7 +407,7 @@ export function AccountCoursesSection() {
                   <div className="min-w-0">
                     <div className="font-medium text-slate-900">{productName(e.course_product_id)}</div>
                     <div className="text-xs text-slate-600">
-                      {venueName(e.venue_id)} · {e.status}
+                      {venueName(e.venue_id)} · {friendlyCourseStatus(e.status)}
                       {e.first_session_date ? ` · starts ${e.first_session_date}` : ''}
                     </div>
                     {active ? (
@@ -319,28 +421,37 @@ export function AccountCoursesSection() {
                     ) : null}
                   </div>
                   {active && e.can_cancel_now ? (
-                    <button
+                    <Button
                       type="button"
-                      onClick={() => void cancelEnrollment(e.id)}
-                      className="rounded border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50"
+                      variant="secondary"
+                      size="sm"
+                      loading={cancellingEnrollment === e.id}
+                      onClick={() => setPendingCancelEnrollment(e)}
+                      className="!border-amber-300 px-2 py-1 text-xs !text-amber-800 hover:!bg-amber-50"
                     >
                       Cancel enrollment
-                    </button>
+                    </Button>
                   ) : null}
                 </li>
               );
             })}
           </ul>
         )}
-      </div>
+      </SectionCard>
 
-      {purchaseCatalog.venues.length === 0 ? (
-        <p className="text-sm text-slate-500">No published course packages yet.</p>
+      {status !== 'ready' ? null : purchaseCatalog.venues.length === 0 ? (
+        <EmptyState size="compact" title="No courses on sale yet" description="When a venue opens a course for booking, it will show up here." />
       ) : (
         <>
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
-            <h2 className="text-sm font-semibold text-slate-900">Venue</h2>
-            <label className="mt-3 block text-xs text-slate-600">
+          <SectionCard className="p-5 sm:p-6">
+            {/*
+              This was an EMPTY <label> wrapping the select, with the word
+              "Venue" living in an <h2> above it, so the field had no
+              accessible name at all: nothing to migrate, because it was never
+              a label. FormField supplies a real one, which makes the heading
+              redundant rather than duplicated.
+            */}
+            <FormField label="Venue" className="mt-1">
               <select
                 value={resolvedVenueId}
                 onChange={(e) => {
@@ -356,14 +467,13 @@ export function AccountCoursesSection() {
                   </option>
                 ))}
               </select>
-            </label>
-          </div>
+            </FormField>
+          </SectionCard>
 
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+          <SectionCard className="p-5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Free course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-              <label className="min-w-0 flex-1 text-xs text-slate-600">
-                Package
+              <FormField label="Package" className="min-w-0 flex-1">
                 <select
                   value={effectiveProductIdFree}
                   onChange={(e) => setProductIdFree(e.target.value)}
@@ -379,23 +489,22 @@ export function AccountCoursesSection() {
                     ))
                   )}
                 </select>
-              </label>
-              <button
+              </FormField>
+              <Button
                 type="button"
                 disabled={!effectiveProductIdFree}
+                loading={enrolling}
                 onClick={() => void enrollFree()}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Enroll free
-              </button>
+              </Button>
             </div>
-          </div>
+          </SectionCard>
 
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-900/5 sm:p-6">
+          <SectionCard className="p-5 sm:p-6">
             <h2 className="text-sm font-semibold text-slate-900">Paid course</h2>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-              <label className="min-w-0 flex-1 text-xs text-slate-600">
-                Package
+              <FormField label="Package" className="min-w-0 flex-1">
                 <select
                   value={effectiveProductIdPaid}
                   onChange={(e) => setProductIdPaid(e.target.value)}
@@ -411,15 +520,16 @@ export function AccountCoursesSection() {
                     ))
                   )}
                 </select>
-              </label>
-              <button
+              </FormField>
+              <Button
                 type="button"
                 disabled={!effectiveProductIdPaid}
+                loading={startingPaid}
                 onClick={() => void startPaidCheckout()}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className="!bg-slate-900 hover:!bg-slate-800 disabled:!bg-slate-400"
               >
                 Pay with card
-              </button>
+              </Button>
             </div>
 
             {paidCheckout ? (
@@ -446,9 +556,45 @@ export function AccountCoursesSection() {
                 </Elements>
               </div>
             ) : null}
-          </div>
+          </SectionCard>
         </>
       )}
+
+      {/*
+        P2-6 (G13). This was a browser confirm box reading "Cancel this
+        enrollment? If within the refund window your payment will be
+        refunded." Two problems with that sentence, beyond it being a browser
+        dialog: it made the refund conditional on something the customer could
+        not check, and this button only renders when they ARE inside the
+        window, so the condition was theatre. The list below states the
+        outcome for this enrollment instead.
+      */}
+      <ConfirmDialog
+        open={pendingCancelEnrollment !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingCancelEnrollment(null);
+        }}
+        title="Cancel this course enrollment"
+        message="This gives up your place on the course. Here is what happens:"
+        body={
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700">
+            {courseCancellationEnrollmentLines(
+              pendingCancelEnrollment ?? { cancel_by_date: null },
+            ).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        }
+        confirmLabel="Yes, cancel my place"
+        cancelLabel="Keep my place"
+        onConfirm={() => {
+          // Read before clearing: `ConfirmDialog` closes on confirm, and the
+          // id would otherwise be gone by the time the request was built.
+          const target = pendingCancelEnrollment;
+          setPendingCancelEnrollment(null);
+          if (target) void cancelEnrollment(target.id);
+        }}
+      />
     </div>
   );
 }

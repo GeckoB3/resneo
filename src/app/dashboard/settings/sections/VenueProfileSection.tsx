@@ -3,7 +3,8 @@
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { isValidIanaTimeZone, supportedTimeZones } from '@/lib/time/iana-time-zone';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { VenueSettings } from '../types';
 import { useNumericField } from '@/hooks/useNumericField';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
@@ -40,7 +41,13 @@ const profileSchema = z.object({
   price_band: z.string().max(50).optional(),
   no_show_grace_minutes: z.number().int().min(10).max(60).optional(),
   kitchen_email: z.string().email().optional().or(z.literal('')),
-  timezone: z.string().max(50).optional(),
+  timezone: z
+    .string()
+    .max(50)
+    .refine((v) => !v || isValidIanaTimeZone(v), {
+      message: 'Choose a timezone from the list.',
+    })
+    .optional(),
 });
 
 type ProfileForm = z.infer<typeof profileSchema>;
@@ -334,6 +341,10 @@ export function VenueProfileSection({
     return () => window.clearTimeout(timer);
   }, [watched, isAdmin, trySave]);
 
+  // Built once: ~420 entries, and this card re-renders on every keystroke.
+  const timeZoneOptions = useMemo(() => supportedTimeZones(), []);
+  const storedTimezone = venue.timezone?.trim() ?? '';
+
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50';
 
@@ -496,7 +507,26 @@ export function VenueProfileSection({
             <label htmlFor="timezone" className="mb-1 block text-sm font-medium text-slate-700">
               Timezone
             </label>
-            <input id="timezone" {...register('timezone')} disabled={!isAdmin} className={inputClass} />
+            <select id="timezone" {...register('timezone')} disabled={!isAdmin} className={inputClass}>
+              {/*
+                A select rather than free text (G23). A venue's timezone is the
+                source of truth for every booking instant it stores, so a value
+                Intl cannot use breaks far more than one page.
+
+                A stored value absent from the list keeps its own option. The
+                card AUTOSAVES, so without this the select would render blank
+                and the first change to any other field would silently write
+                that blank over the venue's timezone.
+              */}
+              {storedTimezone && !timeZoneOptions.includes(storedTimezone) ? (
+                <option value={storedTimezone}>{storedTimezone} (not recognised)</option>
+              ) : null}
+              {timeZoneOptions.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
           </div>
         </form>
       </SectionCard.Body>

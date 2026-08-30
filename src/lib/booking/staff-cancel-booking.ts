@@ -25,6 +25,22 @@ import {
 } from '@/lib/class-commerce/booking-was-credit-paid';
 import { sendClassCommerceComm } from '@/lib/communications/send-class-commerce';
 
+/**
+ * CROSS-REFERENCE (AD1, P0-4). The guest equivalent of this file is
+ * `src/lib/booking/guest-actions/cancel.ts`. If you are changing refund,
+ * card-hold or credit-restore behaviour here, check whether the same change is
+ * owed there.
+ *
+ * They are NOT merged, and that is a decision rather than an oversight. The
+ * guest path restores class credits ONLY when the cancellation policy was met,
+ * stamps `cancellation_actor_type: 'customer'`, keeps a saved card hold
+ * chargeable after the deadline, and consumes the confirm token for token and
+ * HMAC actors. This path does none of those, takes an `actorId`, cascades
+ * across visit groups, and can be told to forfeit credits outright. Folding
+ * them together would mean threading four booleans through one function to
+ * recover two behaviours, and the first caller to pass the wrong one would
+ * refund a guest who was not owed a refund.
+ */
 const CANCELLABLE = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
 export interface StaffCancelBookingNotifyOptions {

@@ -1,0 +1,1515 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 1: plain appointment cancels with no deposit and no refund call 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": null,
+    "message": "Booking cancelled.",
+    "refund_eligible": false,
+    "refund_message": "",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": null,
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        null,
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 2: paid deposit before the deadline refunds with the planned amount and key 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": "£25.00",
+    "message": "Booking cancelled. Your deposit will be refunded.",
+    "refund_eligible": true,
+    "refund_message": "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": "Refunded",
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "settlingBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+        },
+      ],
+      "fn": "planSharedDepositRefund",
+      "module": "shared-deposit-refund",
+    },
+    {
+      "args": [
+        {
+          "amount": 1500,
+          "payment_intent": "pi_char",
+        },
+        {
+          "idempotencyKey": "idem-partial",
+          "stripeAccount": "acct_char",
+        },
+      ],
+      "fn": "refunds.create",
+      "module": "stripe",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 3: a retryable refund failure returns 502 and the booking is NOT cancelled 1`] = `
+{
+  "body": {
+    "code": "REFUND_FAILED",
+    "error": "We could not process your refund right now. Your booking has not been cancelled. Please try again or contact the venue.",
+  },
+  "dbWrites": [],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "error": "card_declined",
+          "operation": "refund_failed",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "stripeAccountId": "acct_char",
+        },
+      ],
+      "fn": "classifyDepositRefundFailure",
+      "module": "deposit-refund-convergence",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "settlingBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+        },
+      ],
+      "fn": "planSharedDepositRefund",
+      "module": "shared-deposit-refund",
+    },
+    {
+      "args": [
+        {
+          "payment_intent": "pi_char",
+        },
+        {
+          "idempotencyKey": "idem-key-1",
+          "stripeAccount": "acct_char",
+        },
+      ],
+      "fn": "refunds.create",
+      "module": "stripe",
+    },
+  ],
+  "status": 502,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 4: nothing-to-refund converges to 200 with variant copy and deposit_status preserved 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": "£25.00",
+    "message": "Booking cancelled.",
+    "refund_eligible": false,
+    "refund_message": "We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of £25.00.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": "Paid",
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "stripeAccountId": "acct_char",
+        },
+      ],
+      "fn": "classifyDepositRefundFailure",
+      "module": "deposit-refund-convergence",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        "We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of £25.00.",
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "settlingBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+        },
+      ],
+      "fn": "planSharedDepositRefund",
+      "module": "shared-deposit-refund",
+    },
+    {
+      "args": [
+        {
+          "payment_intent": "pi_char",
+        },
+        {
+          "idempotencyKey": "idem-key-1",
+          "stripeAccount": "acct_char",
+        },
+      ],
+      "fn": "refunds.create",
+      "module": "stripe",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 5: an already-refunded intent converges to a successful refund 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": "£25.00",
+    "message": "Booking cancelled. Your deposit will be refunded.",
+    "refund_eligible": true,
+    "refund_message": "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": "Refunded",
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "stripeAccountId": "acct_char",
+        },
+      ],
+      "fn": "classifyDepositRefundFailure",
+      "module": "deposit-refund-convergence",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "settlingBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+        },
+      ],
+      "fn": "planSharedDepositRefund",
+      "module": "shared-deposit-refund",
+    },
+    {
+      "args": [
+        {
+          "payment_intent": "pi_char",
+        },
+        {
+          "idempotencyKey": "idem-key-1",
+          "stripeAccount": "acct_char",
+        },
+      ],
+      "fn": "refunds.create",
+      "module": "stripe",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 6: a shared deposit refunds only this row share 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": "£25.00",
+    "message": "Booking cancelled. Your deposit will be refunded.",
+    "refund_eligible": true,
+    "refund_message": "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": "Refunded",
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "settlingBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+        },
+      ],
+      "fn": "planSharedDepositRefund",
+      "module": "shared-deposit-refund",
+    },
+    {
+      "args": [
+        {
+          "amount": 800,
+          "payment_intent": "pi_char",
+        },
+        {
+          "idempotencyKey": "idem-shared",
+          "stripeAccount": "acct_char",
+        },
+      ],
+      "fn": "refunds.create",
+      "module": "stripe",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 7: a card hold before the deadline is released and the copy says so 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": "Your booking is cancelled. Your card will not be charged and the card hold has been released.",
+    "card_hold_released": true,
+    "deposit_amount_str": null,
+    "message": "Your booking is cancelled. Your card will not be charged and the card hold has been released.",
+    "refund_eligible": false,
+    "refund_message": "",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": "Card Held",
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        [
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "fn": "settleCardHoldsOnCancellation",
+      "module": "card-hold-cancellation",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        null,
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 8: a card hold after the deadline is kept, with the fee copy 1`] = `
+{
+  "body": {
+    "card_hold_kept": true,
+    "card_hold_message": "Your booking is cancelled. Because the booking was cancelled after the cancellation deadline, Char Venue may charge a no-show fee of up to £15.00.",
+    "card_hold_released": false,
+    "deposit_amount_str": null,
+    "message": "Your booking is cancelled. Because the booking was cancelled after the cancellation deadline, Char Venue may charge a no-show fee of up to £15.00.",
+    "refund_eligible": false,
+    "refund_message": "",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": "Card Held",
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        [
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "fn": "settleCardHoldsOnCancellation",
+      "module": "card-hold-cancellation",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        "Because the booking was cancelled after the cancellation deadline, Char Venue may charge a no-show fee of up to £15.00.",
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 9: a class paid by credit restores credits and writes class_credit_restored 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": null,
+    "message": "Booking cancelled.",
+    "refund_eligible": false,
+    "refund_message": "",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": null,
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+    {
+      "filters": [],
+      "op": "insert",
+      "payload": {
+        "booking_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "class_credit_restored",
+        "payload": {
+          "restored_credits": 2,
+          "source": "guest_self_cancel",
+        },
+        "venue_id": "22222222-2222-4222-8222-222222222222",
+      },
+      "table": "events",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "class_session",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": null,
+          "class_instance_id": "ci-char",
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": null,
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        {
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "idempotencyPrefix": "guest_self_cancel:11111111-1111-4111-8111-111111111111",
+        },
+      ],
+      "fn": "restoreClassCreditsForBooking",
+      "module": "restore-class-credits",
+    },
+    {
+      "args": [
+        null,
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 10: a class paid by membership restores the allowance 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": null,
+    "message": "Booking cancelled.",
+    "refund_eligible": false,
+    "refund_message": "",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": null,
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+    {
+      "filters": [],
+      "op": "insert",
+      "payload": {
+        "booking_id": "11111111-1111-4111-8111-111111111111",
+        "event_type": "class_membership_allowance_restored",
+        "payload": {
+          "restored_sessions": 1,
+          "source": "guest_self_cancel",
+        },
+        "venue_id": "22222222-2222-4222-8222-222222222222",
+      },
+      "table": "events",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "class_session",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": null,
+          "class_instance_id": "ci-char",
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": null,
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        {
+          "admin": {
+            "from": [Function],
+            "rpc": [Function],
+          },
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "idempotencyPrefix": "guest_self_cancel:11111111-1111-4111-8111-111111111111",
+        },
+      ],
+      "fn": "restoreMembershipAllowanceForBooking",
+      "module": "restore-membership-allowance",
+    },
+    {
+      "args": [
+        null,
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 11: a class cancelled after the deadline restores nothing 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": null,
+    "message": "Booking cancelled.",
+    "refund_eligible": false,
+    "refund_message": "",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": null,
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "class_session",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": null,
+          "class_instance_id": "ci-char",
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": null,
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        null,
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 12: an event ticket carries experience_event_id into the waitlist payload 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": null,
+    "message": "Booking cancelled.",
+    "refund_eligible": false,
+    "refund_message": "",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": null,
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "event_ticket",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": null,
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": "ev-char",
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": null,
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        null,
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+  ],
+  "status": 200,
+}
+`;
+
+exports[`POST /api/confirm - action=cancel (P0-9, 13 rows) > row 13: the open deposit intent is cancelled with the booking 1`] = `
+{
+  "body": {
+    "card_hold_kept": false,
+    "card_hold_message": null,
+    "card_hold_released": false,
+    "deposit_amount_str": "£25.00",
+    "message": "Booking cancelled. Your deposit will be refunded.",
+    "refund_eligible": true,
+    "refund_message": "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+    "success": true,
+  },
+  "dbWrites": [
+    {
+      "filters": [
+        [
+          "eq",
+          "id",
+          "11111111-1111-4111-8111-111111111111",
+        ],
+      ],
+      "op": "update",
+      "payload": {
+        "cancellation_actor_type": "customer",
+        "cancelled_by_staff_id": null,
+        "confirm_token_used_at": "2026-06-01T09:00:00.000Z",
+        "deposit_status": "Refunded",
+        "status": "Cancelled",
+        "updated_at": "2026-06-01T09:00:00.000Z",
+      },
+      "table": "bookings",
+    },
+  ],
+  "externalCalls": [
+    {
+      "args": [
+        {
+          "booking_id": "11111111-1111-4111-8111-111111111111",
+          "booking_model": "unified_scheduling",
+          "operation": "cancel",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "logBookingOp",
+      "module": "booking-ops-log",
+    },
+    {
+      "args": [
+        {
+          "settledBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+          "venueId": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "cancelOpenDepositIntentForBookings",
+      "module": "cancel-open-deposit-intent",
+    },
+    {
+      "args": [
+        {
+          "actorId": null,
+          "bookingId": "11111111-1111-4111-8111-111111111111",
+          "guestId": "33333333-3333-4333-8333-333333333333",
+          "nextStatus": "Cancelled",
+          "previousStatus": "Booked",
+        },
+      ],
+      "fn": "applyBookingLifecycleStatusEffects",
+      "module": "lifecycle",
+    },
+    {
+      "args": [
+        {
+          "appointment_service_id": null,
+          "booking_date": "2026-06-10",
+          "booking_time": "14:00:00",
+          "calendar_id": "44444444-4444-4444-8444-444444444444",
+          "class_instance_id": null,
+          "event_session_id": null,
+          "experience_event_id": null,
+          "id": "11111111-1111-4111-8111-111111111111",
+          "practitioner_id": null,
+          "resource_id": null,
+          "service_item_id": "55555555-5555-4555-8555-555555555555",
+          "venue_id": "22222222-2222-4222-8222-222222222222",
+        },
+      ],
+      "fn": "offerAppointmentWaitlistOnCancel",
+      "module": "offer-appointment-waitlist-on-cancel",
+    },
+    {
+      "args": [
+        "Your deposit of £25.00 will be refunded to your original payment method within 5-10 business days.",
+      ],
+      "fn": "sendCancellationNotification",
+      "module": "send-templated",
+    },
+    {
+      "args": [
+        {
+          "paymentIntentId": "pi_char",
+          "settlingBookingIds": [
+            "11111111-1111-4111-8111-111111111111",
+          ],
+        },
+      ],
+      "fn": "planSharedDepositRefund",
+      "module": "shared-deposit-refund",
+    },
+    {
+      "args": [
+        {
+          "payment_intent": "pi_char",
+        },
+        {
+          "idempotencyKey": "idem-key-1",
+          "stripeAccount": "acct_char",
+        },
+      ],
+      "fn": "refunds.create",
+      "module": "stripe",
+    },
+  ],
+  "status": 200,
+}
+`;

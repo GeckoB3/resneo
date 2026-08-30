@@ -164,6 +164,7 @@ returns 404 rather than 403, so a stranger learns nothing from a guessed id.
 | GET | `/api/v1/me/home` | The hub aggregate: next booking, outstanding payments, upcoming list, venue history |
 | GET | `/api/v1/me/bookings` | The caller's bookings |
 | GET | `/api/v1/me/bookings/by-model?model=event_ticket\|resource_booking` | The events and resources hubs. `limit` optional, capped at 100 |
+| GET | `/api/v1/me/bookings/[id]` | One booking in full. The body **is** the shared booking DTO, the same object the web's own detail page renders, so a client shows what the web shows without a second interpretation of a booking |
 | DELETE | `/api/v1/me/bookings/[id]` | Cancel |
 | GET | `/api/v1/me/bookings/[id]/reschedule-options` | Whether this booking can be moved and what a move would need. Returns **no slots**: the availability call is separate |
 | POST | `/api/v1/me/bookings/[id]/reschedule` | Move it. Body keys are read by name, not forwarded wholesale; ask `reschedule-options` first rather than guessing and getting a 400 |

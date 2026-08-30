@@ -75,8 +75,17 @@ export function BookPublicBookingFlow({
   );
 
   const tabParam = searchParams.get('tab');
-  /** `?start=service`: appointment flows open on "Select a service", skipping the single/group chooser. */
-  const initialStep = searchParams.get('start') === 'service' ? ('service' as const) : undefined;
+  /*
+    `?start=`: where the link asks the appointment flow to open.
+
+    `service` skips the single-or-group chooser. `time` does that AND passes
+    through the service step, for a "Book again" link that already names the
+    service (P3-1). An unrecognised value is ignored rather than guessed at,
+    so a typo degrades to the ordinary flow instead of a broken one.
+  */
+  const startParam = searchParams.get('start');
+  const initialStep =
+    startParam === 'service' || startParam === 'time' ? (startParam as 'service' | 'time') : undefined;
   const waitlistOfferEntryId = searchParams.get('waitlist_offer') ?? undefined;
   const waitlistPrefillDate = searchParams.get('date') ?? undefined;
   const waitlistPrefillTime = searchParams.get('time') ?? undefined;

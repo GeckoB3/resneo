@@ -10,6 +10,24 @@ import { createClient } from '@/lib/supabase/server';
  * browser. Cookies are not cleared by the header; `signOut()` handles those
  * (and runs again here server-side in case the client-side call failed).
  *
+ * **The scope is GLOBAL, and that is a decision, not an oversight** (owner,
+ * 2026-08-30). `supabase.auth.signOut()` takes no scope argument here and the
+ * SDK defaults to `global`, so signing out in one place signs the customer out
+ * everywhere, the ResNeo app included. Recorded because it reads like a bug
+ * from three directions and was raised as one: the sentence above says "in
+ * case the client-side call failed", which sounds like it means this session;
+ * `POST /api/v1/auth/logout` defaults to `local`; and
+ * `/api/account/sign-out-everywhere` exists separately. Do NOT "fix" this by
+ * passing `{ scope: 'local' }`.
+ *
+ * Two consequences worth knowing. `sign-out-everywhere` is now a way to revoke
+ * sessions WITHOUT ending this one, rather than the only way to reach every
+ * device. And a global sign-out leaves every other device holding cookies
+ * whose access token has not expired: those land on `/login`, which only works
+ * because middleware confirms the session against the auth server on that path
+ * (`confirmAuthIdentity`). Before that existed they looped between `/account`
+ * and `/login` until the token aged out.
+ *
  * Why an HTML interstitial instead of a 302 redirect: a 3xx response that ALSO
  * carries `Clear-Site-Data: "cache"` is mishandled by several mobile browsers
  * (iOS WebKit and some Android in-app WebViews) — they clear the cache and then

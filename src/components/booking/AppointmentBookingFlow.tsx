@@ -564,7 +564,16 @@ interface AppointmentBookingFlowProps {
   preselectedServiceId?: string;
   waitlistOfferEntryId?: string;
   /** Public flow: open on "Select a service", skipping the single/group mode chooser (`?start=service`). */
-  initialStep?: 'service';
+  /**
+   * Which step the LINK asked to open on.
+   *
+   * `'service'` skips the single-or-group chooser. `'time'` additionally says
+   * the link already names the service, so the service step should be passed
+   * through once the catalogue confirms it: that is what makes "Book again"
+   * one tap rather than three (P3-1). Neither value can skip a REQUIRED
+   * choice; see `advanceForRebook`.
+   */
+  initialStep?: 'service' | 'time';
   /** Staff walk-ins: optional guest contact (defaults name to Walk In). */
   staffBookingSource?: 'phone' | 'walk-in';
   editBooking?: {
@@ -801,15 +810,11 @@ export function AppointmentBookingFlow({
       // A combined page has no single-or-group chooser, staff never see one
       // either (group bookings are reached only from `mode_choice`), and
       // `?start=service` means "skip the chooser". All three land on the picker.
-      return venue.is_collective || isStaff || initialStep === 'service'
+      return venue.is_collective || isStaff || initialStep
         ? 'staff_pick'
         : 'mode_choice';
     }
-    return editBooking ||
-      isLockedPractitionerFlow ||
-      isStaff ||
-      venue.is_collective ||
-      initialStep === 'service'
+    return editBooking || isLockedPractitionerFlow || isStaff || venue.is_collective || initialStep
       ? 'service'
       : 'mode_choice';
   });
@@ -1893,6 +1898,128 @@ export function AppointmentBookingFlow({
    * these lookups are practitioner-scoped (empty until a calendar is picked).
    */
   const isCombined = Boolean(venue.is_collective);
+
+  /**
+   * Choose a service and move to whatever comes next.
+   *
+   * Lifted out of the service row so the row and the rebook auto-advance
+   * (P3-1) run the SAME path. What must not be duplicated is precisely the
+   * part that is easy to get wrong: `afterService` routes a service with
+   * variants to the variant step and one with addon groups to the addons
+   * step. A shortcut that jumped a rebook link straight to the times would
+   * produce bookings with no variant chosen, at the wrong duration and the
+   * wrong price.
+   */
+  const chooseServiceAndAdvance = useCallback(
+    (serviceId: string) => {
+      const serviceHasVariants =
+        (isStaffFirst
+          ? catalogVariantsForServiceFromStaff(catalogStaff, serviceId, selectedPractitionerId)
+          : catalogVariantsForServiceId(catalogStaff, serviceId)
+        ).length > 0;
+      const staffDurationOverrideForService = staffDurationOverrides[serviceId] ?? null;
+
+      setDurationPopoverOpenForKey(null);
+      setDurationPopoverServiceId(null);
+      queuePrefetchForServicePractitioners(serviceId, staffDurationOverrideForService);
+      setSelectedServiceId(serviceId);
+      setSelectedVariantId(null);
+      setSelectedAddonIds([]);
+      setCarriedServiceId(null);
+      // Pooled on a combined page: an offering that differs by
+      // calendar cannot be booked without naming one, so this is
+      // where the guest is handed back to the calendar list.
+      if (
+        isCombined &&
+        isAnyAvailablePractitionerId(selectedPractitionerId) &&
+        !offeringIsUniform(catalogStaff, serviceId)
+      ) {
+        setAnyRouteActive(true);
+        setSelectedPractitionerId(null);
+        setStep('practitioner');
+        return;
+      }
+      const hasAddonGroups = isStaffFirst
+        ? addonGroupsForServiceFromStaff(catalogStaff, serviceId, selectedPractitionerId).length > 0
+        : catalogAddonGroupsForServiceId(catalogStaff, serviceId).length > 0;
+      // Editing keeps the booking's own person, so it can skip ahead to the
+      // times once there is nothing left to choose. This sits after the
+      // options checks, exactly as it always has.
+      if (isEdit && !serviceHasVariants && !hasAddonGroups) {
+        const existingOrFirst =
+          catalogStaff.find((p) => p.id === selectedPractitionerId && p.services.some((s) => s.id === serviceId)) ??
+          catalogStaff.find((p) => p.services.some((s) => s.id === serviceId));
+        setSelectedPractitionerId(existingOrFirst?.id ?? null);
+        if (existingOrFirst?.id) {
+          primeSelectedAppointmentCalendar(existingOrFirst.id, serviceId, staffDurationOverrideForService);
+          setStep('slot');
+        } else {
+          setStep('practitioner');
+        }
+        return;
+      }
+      const next = afterService(flowShape, {
+        hasVariants: serviceHasVariants,
+        hasAddons: hasAddonGroups,
+      });
+      if (next === 'slot' && selectedPractitionerId) {
+        primeSelectedAppointmentCalendar(selectedPractitionerId, serviceId, staffDurationOverrideForService);
+      }
+      setStep(next);
+    },
+    [
+      catalogStaff,
+      flowShape,
+      isCombined,
+      isEdit,
+      isStaffFirst,
+      primeSelectedAppointmentCalendar,
+      queuePrefetchForServicePractitioners,
+      selectedPractitionerId,
+      staffDurationOverrides,
+    ],
+  );
+
+  /**
+   * `?start=time`: pass THROUGH the service step for a rebook link (P3-1).
+   *
+   * Runs once, and only once the catalogue has arrived, because until then
+   * there is no way to tell a service that still exists from one the venue
+   * retired. A link naming a service that no longer resolves simply stays on
+   * the service step, which is the same way a stale `service_id` already
+   * degrades: the link's shape settles the order, not whether it resolves.
+   *
+   * **It advances by running the ordinary selection**, not by jumping to the
+   * times. `chooseServiceAndAdvance` consults `afterService`, so a service
+   * with variants stops at the variant step and one with addon groups stops
+   * at addons. Those are REQUIRED choices; skipping them would produce a
+   * booking at the wrong duration and the wrong price.
+   */
+  const rebookAdvanceDone = useRef(false);
+  useEffect(() => {
+    if (rebookAdvanceDone.current) return;
+    if (initialStep !== 'time' || editBooking || !preselectedServiceId) return;
+    // The `step` half is DEFENSIVE and no test pins it: a named service already
+    // suppresses the staff-first picker, so the two conditions coincide today.
+    // Kept because it states the intent precisely, and it can only narrow.
+    if (catalogStaff.length === 0 || step !== 'service') return;
+    const resolves = catalogStaff.some((p) => p.services.some((s) => s.id === preselectedServiceId));
+    if (!resolves) {
+      // Nothing more to try: the catalogue is loaded and the service is gone.
+      rebookAdvanceDone.current = true;
+      return;
+    }
+    rebookAdvanceDone.current = true;
+    chooseServiceAndAdvance(preselectedServiceId);
+  }, [
+    catalogStaff,
+    chooseServiceAndAdvance,
+    editBooking,
+    initialStep,
+    preselectedServiceId,
+    step,
+  ]);
+
   /** Variants the customer can pick from for the currently selected service (active only). */
   const variantsForSelectedService = useMemo<CatalogVariant[]>(() => {
     if (!selectedServiceId) return [];
@@ -3284,7 +3411,7 @@ export function AppointmentBookingFlow({
         <div data-testid="staff-pick-step">
           {/* Staff never pass through the single-or-group chooser, so the picker
               is their first step and there is nothing behind it. */}
-          {backFromStaffPick(flowShape) && initialStep !== 'service' && !isStaff && (
+          {backFromStaffPick(flowShape) && !initialStep && !isStaff && (
             <AppointmentBackLink onClick={() => setStep('mode_choice')} />
           )}
           <AppointmentStepHeader
@@ -3378,7 +3505,7 @@ export function AppointmentBookingFlow({
                 setStep('mode_choice');
               }}
             />
-          ) : !isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && initialStep !== 'service' ? (
+          ) : !isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && !initialStep ? (
             isPublicGuest ? (
               <AppointmentBackLink onClick={() => setStep('mode_choice')} />
             ) : (
@@ -3430,56 +3557,9 @@ export function AppointmentBookingFlow({
                 const isCarriedService = isStaffFirst && svc.id === carriedServiceId;
                 const displayedDuration = staffDurationOverrides[svc.id] ?? svc.duration_minutes;
                 const durationIsCustom = displayedDuration !== svc.duration_minutes;
-                const staffDurationOverrideForService = staffDurationOverrides[svc.id] ?? null;
 
                 function navigateFromServiceRow() {
-                  setDurationPopoverOpenForKey(null);
-                  setDurationPopoverServiceId(null);
-                  queuePrefetchForServicePractitioners(svc.id, staffDurationOverrideForService);
-                  setSelectedServiceId(svc.id);
-                  setSelectedVariantId(null);
-                  setSelectedAddonIds([]);
-                  setCarriedServiceId(null);
-                  // Pooled on a combined page: an offering that differs by
-                  // calendar cannot be booked without naming one, so this is
-                  // where the guest is handed back to the calendar list.
-                  if (
-                    isCombined &&
-                    isAnyAvailablePractitionerId(selectedPractitionerId) &&
-                    !offeringIsUniform(catalogStaff, svc.id)
-                  ) {
-                    setAnyRouteActive(true);
-                    setSelectedPractitionerId(null);
-                    setStep('practitioner');
-                    return;
-                  }
-                  const hasAddonGroups = isStaffFirst
-                    ? addonGroupsForServiceFromStaff(catalogStaff, svc.id, selectedPractitionerId).length > 0
-                    : catalogAddonGroupsForServiceId(catalogStaff, svc.id).length > 0;
-                  // Editing keeps the booking's own person, so it can skip ahead to the
-                  // times once there is nothing left to choose. This sits after the
-                  // options checks, exactly as it always has.
-                  if (isEdit && !serviceHasVariants && !hasAddonGroups) {
-                    const existingOrFirst =
-                      catalogStaff.find((p) => p.id === selectedPractitionerId && p.services.some((s) => s.id === svc.id)) ??
-                      catalogStaff.find((p) => p.services.some((s) => s.id === svc.id));
-                    setSelectedPractitionerId(existingOrFirst?.id ?? null);
-                    if (existingOrFirst?.id) {
-                      primeSelectedAppointmentCalendar(existingOrFirst.id, svc.id, staffDurationOverrideForService);
-                      setStep('slot');
-                    } else {
-                      setStep('practitioner');
-                    }
-                    return;
-                  }
-                  const next = afterService(flowShape, {
-                    hasVariants: serviceHasVariants,
-                    hasAddons: hasAddonGroups,
-                  });
-                  if (next === 'slot' && selectedPractitionerId) {
-                    primeSelectedAppointmentCalendar(selectedPractitionerId, svc.id, staffDurationOverrideForService);
-                  }
-                  setStep(next);
+                  chooseServiceAndAdvance(svc.id);
                 }
 
                 if (!isStaff) {

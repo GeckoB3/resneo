@@ -66,7 +66,8 @@ interface Props {
   initialDate?: string;
   initialTime?: string;
   /** Appointment flows: open on "Select a service", skipping the single/group mode chooser. */
-  initialStep?: 'service';
+  /** Where the link asks the flow to open; `'time'` also passes through the service step (P3-1). */
+  initialStep?: 'service' | 'time';
 }
 
 /**

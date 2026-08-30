@@ -69,7 +69,7 @@ describe('it is a prompt, not a gate', () => {
     stubFetch();
     render(<PortalFirstRunBanner />);
     const text = document.body.textContent ?? '';
-    expect(text).toMatch(/every booking you make with any ResNeo venue/i);
+    expect(text).toMatch(/every booking with any ResNeo venue appears here/i);
     /*
       Kept to ONE short paragraph. Written longer it pushed the next booking
       card below the fold at 375px, which P1-2 forbids: the explainer sits

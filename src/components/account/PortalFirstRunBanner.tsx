@@ -130,31 +130,40 @@ export function PortalFirstRunBanner() {
     */
     <section
       aria-label="Set a password for faster sign-in"
-      className="mb-6 rounded-2xl border border-brand-200 bg-brand-50/50 p-4"
+      className="mb-4 rounded-2xl border border-brand-200 bg-brand-50/50 p-3 sm:mb-6 sm:p-4"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2 sm:gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-brand-900">
             Set a password to get straight back in
           </p>
           {/*
-            ONE paragraph, and short, because this banner sits above the thing
-            the customer came for. Written as two, it pushed the next booking
-            card to 857px on a 375x812 screen and off the bottom of the phone,
-            which P1-2's acceptance forbids and its e2e test caught. The
-            explainer earns its place only while it stays this size.
+            KEPT SMALL ON PURPOSE, and measured rather than guessed.
+
+            This sits above the thing the customer came for. At 190px tall it
+            pushed the next booking card off the bottom of a 375x812 phone,
+            which P1-2's acceptance forbids; its e2e test caught that twice,
+            the second time only in CI, because Linux and Windows wrap the
+            same sentence into different numbers of lines. Trimming words to
+            squeeze under the limit is therefore not a fix, it is a coin
+            toss on the next font change.
+
+            So the size is structural: tighter padding and margin below `sm`,
+            smaller text, and one sentence that says the only thing a customer
+            cannot infer from the page in front of them. Keep it under about
+            130px on a 375px screen and there is real headroom.
           */}
-          <p className="mt-1 text-sm text-brand-900/80">
-            You are signed in from your booking email. Every booking you make with any ResNeo venue
-            appears here. Add a password to sign in without waiting for one next time.
+          <p className="mt-1 text-xs text-brand-900/80 sm:text-sm">
+            Every booking with any ResNeo venue appears here. Add a password to skip the email next
+            time.
           </p>
         </div>
         {!open && (
           <div className="flex shrink-0 gap-2">
-            <Button type="button" onClick={() => setOpen(true)} className="min-h-10">
+            <Button type="button" onClick={() => setOpen(true)} className="min-h-9 sm:min-h-10">
               Set a password
             </Button>
-            <Button type="button" variant="secondary" onClick={() => void dismiss()} className="min-h-10">
+            <Button type="button" variant="secondary" onClick={() => void dismiss()} className="min-h-9 sm:min-h-10">
               Not now
             </Button>
           </div>

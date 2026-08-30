@@ -96,6 +96,33 @@ test.describe('portal at 375px', () => {
     ).toBeLessThanOrEqual(812);
   });
 
+  test('the first-run banner stays within its height budget (P3-5)', async ({ page }) => {
+    /*
+      Measured directly, because the P1-2 test above only says SOMETHING pushed
+      the next booking off the screen, and this banner is the thing most likely
+      to have done it: it sits above the card and its height is whatever the
+      copy happens to wrap to.
+
+      It has broken P1-2 twice. The second time only in CI, because Linux and
+      Windows wrap the same sentence into different numbers of lines, so
+      trimming words until it fits locally proves nothing. Hence a budget with
+      real headroom rather than a limit set at the last passing measurement.
+
+      If this fails, shorten the banner or make it denser. Do not raise the
+      number to whatever it currently is.
+    */
+    await page.goto('/account');
+    const banner = page.locator('section[aria-label]').first();
+    if (!(await banner.isVisible().catch(() => false))) {
+      test.skip(true, 'fixture customer has dismissed the banner or set a password');
+    }
+    const box = await banner.boundingBox();
+    expect(
+      Math.round(box!.height),
+      'the first-run banner grew; it pushes the next booking below the fold before it looks wrong',
+    ).toBeLessThanOrEqual(140);
+  });
+
   test('the detail page action buttons fit the viewport', async ({ page }) => {
     /*
       This measured the "Manage booking" button, which P2-5 deleted: the portal

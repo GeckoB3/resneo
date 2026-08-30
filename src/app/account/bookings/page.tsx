@@ -22,6 +22,37 @@ import {
 } from '@/lib/account/account-booking-filters';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { CancelCourseButton } from '@/components/account/CancelCourseButton';
+import { rebookUrl } from '@/lib/account/rebook-url';
+import { isPastBooking } from '@/lib/account/account-booking-filters';
+
+/**
+ * "Book again" (P3-1), rendered only when the link can honour the name.
+ *
+ * `rebookUrl` returns null when it cannot carry over enough for the phrase to
+ * be true, and this renders nothing rather than a control that starts the
+ * customer from scratch under a label promising otherwise.
+ */
+function RebookLink({ row }: { row: AccountBookingRow }) {
+  const href = rebookUrl({
+    venueSlug: row.venue?.slug,
+    serviceItemId: row.service_item_id,
+    practitionerSlug: row.practitioner_slug,
+  });
+  if (!href) return null;
+  return (
+    <Link
+      href={href}
+      className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2"
+    >
+      Book again
+    </Link>
+  );
+}
+
+/** Uses the SAME predicate the Past filter does, so the button and the tab agree. */
+function isPastRow(row: AccountBookingRow): boolean {
+  return isPastBooking(row, Date.now());
+}
 import {
   courseCancellationLines,
   summariseCourseCancellation,
@@ -323,6 +354,17 @@ export default async function AccountBookingsPage({
                   ) : null}
                 </div>
                 <div className="flex gap-3 text-sm font-medium">
+                  {/*
+                    "Book again" on a visit that has been and gone (P3-1). Only
+                    on past bookings: offering it beside an appointment that has
+                    not happened yet invites a customer to book a second one
+                    when what they meant was to change the first.
+
+                    Absent, not disabled, when the link cannot carry the service
+                    and the practitioner over. A button that quietly starts them
+                    from scratch is not booking again.
+                  */}
+                  {isPastRow(item.row) ? <RebookLink row={item.row} /> : null}
                   <Link href={`/account/bookings/${item.row.id}`} className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2">
                     Details
                   </Link>

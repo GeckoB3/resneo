@@ -108,6 +108,14 @@ export interface AccountBookingRow {
    */
   calendar_id?: string | null;
   service_item_id?: string | null;
+  /**
+   * The practitioner's public booking slug, when the appointment has one.
+   *
+   * Carried so the portal can offer "Book again" without a second round trip:
+   * the public booking page names a practitioner by path segment, not by id
+   * (P3-1). Null for non-appointment rows and for calendars with no slug.
+   */
+  practitioner_slug?: string | null;
   venue: AccountVenueRow | null;
   /** CDE name + extras (event/class/resource). Null for table/appointment rows. */
   cde_context?: AccountCdeContext | null;
@@ -158,8 +166,25 @@ const CANCELLED_STATUS_SQL_LIST = ['Cancelled', 'Canceled', 'No-Show', 'NoShow',
   .map((s) => `"${s}"`)
   .join(',');
 
+/**
+ * What is read from the view.
+ *
+ * **Every column the row builder reads must be listed here**, and that is not
+ * automatic in either direction: PostgREST returns exactly what is asked for,
+ * and a field the builder maps but this string omits is silently `undefined`,
+ * which `?? null` then turns into a plausible-looking null.
+ *
+ * That is not hypothetical. `calendar_id` and `service_item_id` were added to
+ * the view by P0-6, declared on the DTO, and mapped by the builder, but never
+ * added HERE, so every appointment in the portal reported no service and no
+ * practitioner for months. Nothing failed: the unit tests stub the database
+ * and return whatever they are told, so they were green throughout.
+ * `account-bookings-columns.test.ts` is the guard.
+ */
 const ACCOUNT_BOOKING_COLUMNS =
-  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, cancellation_deadline, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id, payment_state, booking_total_price_pence, amount_paid_pence';
+  'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, booking_model, deposit_status, deposit_amount_pence, cancellation_deadline, special_requests, dietary_notes, occasion, group_booking_id, class_instance_id, experience_event_id, resource_id, calendar_id, service_item_id, payment_state, booking_total_price_pence, amount_paid_pence';
+
+export const ACCOUNT_BOOKING_COLUMNS_FOR_TEST = ACCOUNT_BOOKING_COLUMNS;
 
 type RawBookingRow = {
   id: string;
@@ -311,6 +336,15 @@ interface AccountCdeMaps {
   classTypes: Map<string, ClassTypeRow>;
   resources: Map<string, ResourceLabels>;
   classSpots: Map<string, ClassSpots>;
+  /**
+   * `unified_calendars.id` to its public booking slug, for appointment rows.
+   *
+   * The portal already knows WHICH practitioner an appointment was with
+   * (`calendar_id`), but a "Book again" link needs the slug, because the
+   * public booking page names a practitioner by path segment
+   * (`/book/<venue>/<practitioner>`) and not by id (P3-1).
+   */
+  practitionerSlugs: Map<string, string>;
 }
 
 function emptyCdeMaps(): AccountCdeMaps {
@@ -321,6 +355,7 @@ function emptyCdeMaps(): AccountCdeMaps {
     classTypes: new Map(),
     resources: new Map(),
     classSpots: new Map(),
+    practitionerSlugs: new Map(),
   };
 }
 
@@ -437,8 +472,19 @@ async function loadAccountCdeMaps(
   const eventBookingIds = uniqueIds(eventRows.map((r) => r.id));
   const instanceIds = uniqueIds(classRows.map((r) => r.class_instance_id));
   const resourceIds = uniqueIds(resourceRows.map((r) => r.resource_id));
+  /*
+    Appointment practitioners, for rebook links. A separate list from
+    `resourceIds` on purpose: both are `unified_calendars` rows, but a resource
+    is read for its NAME on a resource booking, and this is read for the SLUG
+    on an appointment. Rows with neither are not fetched at all.
+  */
+  const practitionerIds = uniqueIds(
+    rows
+      .filter((r) => !r.experience_event_id && !r.class_instance_id && !r.resource_id)
+      .map((r) => r.calendar_id),
+  );
 
-  const [events, lines, instances, resources] = await Promise.all([
+  const [events, lines, instances, resources, practitioners] = await Promise.all([
     eventIds.length
       ? batchRead('experience_events', () =>
           admin.from('experience_events').select('id, name, end_time').in('id', eventIds),
@@ -468,7 +514,20 @@ async function loadAccountCdeMaps(
             .in('id', resourceIds),
         )
       : NO_ROWS(),
+    practitionerIds.length
+      ? batchRead('unified_calendars', () =>
+          admin.from('unified_calendars').select('id, slug').in('id', practitionerIds),
+        )
+      : NO_ROWS(),
   ]);
+
+  for (const r of practitioners) {
+    const id = asText(r.id);
+    const slug = asText(r.slug);
+    // No slug means no path segment to point at, so the rebook link falls back
+    // to the venue rather than guessing one from the name.
+    if (id && slug) maps.practitionerSlugs.set(id, slug);
+  }
 
   for (const r of events) {
     const id = asText(r.id);
@@ -732,6 +791,7 @@ function hydrateAccountBookingRow(
     resource_id: b.resource_id ?? null,
     calendar_id: b.calendar_id ?? null,
     service_item_id: b.service_item_id ?? null,
+    practitioner_slug: b.calendar_id ? (maps.practitionerSlugs.get(b.calendar_id) ?? null) : null,
     venue,
     cde_context: buildAccountCdeContext(b, maps, opts),
     starts_at: toIsoWithOffset(accountBookingStartMs(instantRow), time_zone),

@@ -137,13 +137,16 @@ export function PortalFirstRunBanner() {
           <p className="text-sm font-semibold text-brand-900">
             Set a password to get straight back in
           </p>
+          {/*
+            ONE paragraph, and short, because this banner sits above the thing
+            the customer came for. Written as two, it pushed the next booking
+            card to 857px on a 375x812 screen and off the bottom of the phone,
+            which P1-2's acceptance forbids and its e2e test caught. The
+            explainer earns its place only while it stays this size.
+          */}
           <p className="mt-1 text-sm text-brand-900/80">
-            You are signed in from your booking email. This is your ResNeo account: every booking you
-            make with any venue that uses ResNeo appears here, and you can change or cancel them
-            yourself.
-          </p>
-          <p className="mt-1 text-sm text-brand-900/80">
-            Add a password and next time you can sign in without waiting for an email.
+            You are signed in from your booking email. Every booking you make with any ResNeo venue
+            appears here. Add a password to sign in without waiting for one next time.
           </p>
         </div>
         {!open && (

@@ -69,8 +69,15 @@ describe('it is a prompt, not a gate', () => {
     stubFetch();
     render(<PortalFirstRunBanner />);
     const text = document.body.textContent ?? '';
-    expect(text).toMatch(/every booking you make with any venue/i);
-    expect(text).toMatch(/change or cancel them yourself/i);
+    expect(text).toMatch(/every booking you make with any ResNeo venue/i);
+    /*
+      Kept to ONE short paragraph. Written longer it pushed the next booking
+      card below the fold at 375px, which P1-2 forbids: the explainer sits
+      above the thing the customer actually came for, so its length is part of
+      its correctness, not a matter of taste.
+    */
+    const paragraphs = document.querySelectorAll('section p');
+    expect(paragraphs.length, 'the banner grew a paragraph; check P1-2 still passes').toBeLessThanOrEqual(2);
   });
 
   it('asks without demanding anything', async () => {

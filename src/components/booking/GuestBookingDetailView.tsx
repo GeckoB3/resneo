@@ -7,6 +7,12 @@ import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModel } from '@/types/booking-models';
 import type { BookingDetailDto } from '@/lib/booking/booking-detail-dto';
 import type { GuestBookingDetailActor } from '@/lib/booking/guest-booking-actor';
+import type { AccountPaymentRow } from '@/lib/account/account-payments';
+import { formatPence } from '@/lib/booking/payment-display';
+import {
+  paymentMethodLabel,
+  paymentStatusLabel,
+} from '@/components/account/AccountPaymentHistorySection';
 import {
   buildGuestModifyRequest,
   readGuestModifyError,
@@ -190,11 +196,26 @@ export type { GuestBookingDetailActor };
 export function GuestBookingDetailView({
   bookingId,
   actor,
+  payments,
+  paymentsFailed,
   initialDetail,
   chrome: chromeProp,
 }: {
   bookingId: string;
   actor: GuestBookingDetailActor;
+  /**
+   * The booking's payments, when the CALLER has already established that this
+   * person may see them (P4-2).
+   *
+   * Passed in rather than fetched here, and absent on the guest manage-link
+   * page on purpose: that URL is forwardable, and a payment history is more
+   * sensitive than the booking it belongs to. The page that cannot see them
+   * simply never receives them, which is a boundary a later edit cannot
+   * quietly move.
+   */
+  payments?: AccountPaymentRow[];
+  /** True when the payments lookup failed, so an empty list means nothing. */
+  paymentsFailed?: boolean;
   /** The portal already has the DTO server-side; passing it skips a fetch. */
   initialDetail?: BookingDetails | null;
   /**
@@ -731,6 +752,42 @@ export function GuestBookingDetailView({
               </dl>
             </div>
           )}
+
+          {/*
+            What this booking has been paid (P4-2).
+
+            Rendered only when the page supplied it, which the guest
+            manage-link page never does. Placed with the booking rather than
+            behind a link, because "what did I pay for this?" is a question
+            about THIS booking and the answer is three lines long.
+          */}
+          {payments && payments.length > 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+              <p className="font-semibold text-slate-900">Payments for this booking</p>
+              <ul className="mt-2 space-y-1.5">
+                {payments.map((p) => (
+                  <li key={p.id} className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <span className="text-slate-700">
+                      {paymentMethodLabel(p.method)}
+                      {p.status !== 'succeeded' ? ` · ${paymentStatusLabel(p.status)}` : ''}
+                    </span>
+                    <span className="font-medium text-slate-900">
+                      {formatPence(p.amount_pence)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {paymentsFailed && (!payments || payments.length === 0) ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" role="alert">
+              <p className="font-semibold text-slate-900">We could not load your payments</p>
+              <p className="mt-1 text-slate-600">
+                Please refresh, or contact the venue if you need a record of what you paid.
+              </p>
+            </div>
+          ) : null}
 
           {/*
             A failed lookup is said out loud rather than shown as silence

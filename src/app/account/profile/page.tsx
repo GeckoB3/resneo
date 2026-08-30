@@ -4,6 +4,8 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccountSafeGuests } from '@/lib/account/account-bookings';
 import { ProfileClient } from './ProfileClient';
 import { AccountPaymentMethodsSection } from '@/components/account/AccountPaymentMethodsSection';
+import { AccountPaymentHistorySection } from '@/components/account/AccountPaymentHistorySection';
+import { loadAccountPayments } from '@/lib/account/account-payments';
 import { AccountSecuritySection } from '@/components/account/AccountSecuritySection';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 
@@ -29,6 +31,7 @@ export const metadata = {
  * a redirect, which `retired-routes.test.ts` asserts against this list.
  */
 export const PROFILE_SECTION_ANCHORS = [
+  { id: 'payments', label: 'Payment history' },
   { id: 'payment-methods', label: 'Saved payment methods' },
   { id: 'password', label: 'Password and account' },
 ] as const;
@@ -80,6 +83,21 @@ export default async function AccountProfilePage() {
       ? await getSupabaseAdminClient().from('venues').select('id, name').in('id', venueIds)
       : { data: [] as Array<{ id: string; name: string }> };
   const venueMap = new Map((venues ?? []).map((v) => [v.id, v.name]));
+  const venueRowById = new Map(
+    (venues ?? []).map((v) => [v.id, { id: v.id, name: v.name, slug: null }]),
+  );
+
+  /*
+    Payment history (P4-2). Failure is CARRIED, not swallowed: an empty list
+    would otherwise tell the customer they have paid nothing, which is a claim,
+    and about money (P4-1's rule applied a second time).
+  */
+  const paymentsResult = await loadAccountPayments(supabase, getSupabaseAdminClient())
+    .then((r) => ({ payments: r.payments, failed: false }))
+    .catch((e) => {
+      console.error('[account/profile] payments:', e instanceof Error ? e.message : e);
+      return { payments: [], failed: true };
+    });
 
   return (
     <div className="space-y-8">
@@ -131,6 +149,11 @@ export default async function AccountProfilePage() {
         ids and because a customer who bookmarked "my saved cards" should still
         recognise what they land on.
       */}
+      <AccountPaymentHistorySection
+        payments={paymentsResult.payments}
+        venues={venueRowById}
+        failed={paymentsResult.failed}
+      />
       <AccountPaymentMethodsSection />
       <AccountSecuritySection />
 

@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { loadAccountPayments } from '@/lib/account/account-payments';
 import { getBookingDetailForGuest } from '@/lib/booking/guest-actions/booking-detail';
 import { GuestBookingDetailView } from '@/components/booking/GuestBookingDetailView';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
@@ -47,6 +48,26 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
   );
   if (!result.ok) notFound();
 
+  /*
+    The booking's payments (P4-2), loaded HERE rather than inside the shared
+    view, and passed down as a prop.
+
+    `GuestBookingDetailView` is also the manage page for a guest holding a
+    forwardable URL (AD9). Payments are more sensitive than the booking itself,
+    so the boundary is that the guest page never loads them: it cannot leak
+    what it does not have. An actor check inside the view would put the same
+    rule somewhere it can be got wrong by a later edit.
+
+    Failure is carried, not swallowed, for the same reason as P4-1: an empty
+    list would tell the customer they have paid nothing.
+  */
+  const payments = await loadAccountPayments(supabase, getSupabaseAdminClient(), { bookingId })
+    .then((r) => ({ rows: r.payments, failed: false }))
+    .catch((e) => {
+      console.error('[account/bookings/[id]] payments:', e instanceof Error ? e.message : e);
+      return { rows: [], failed: true };
+    });
+
   return (
     <div className="space-y-6">
       <PageHeader eyebrow="Account" title="Booking details" />
@@ -59,6 +80,8 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
         actor={{ kind: 'session' }}
         initialDetail={result.data}
         chrome="embedded"
+        payments={payments.rows}
+        paymentsFailed={payments.failed}
       />
     </div>
   );

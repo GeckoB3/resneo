@@ -91,7 +91,11 @@ P3-4i's ResNeo-side work is shipped and working: the token exchange, the OTP in 
 
 1. The **Apple Team ID** (App Store Connect > Membership, or `eas credentials`).
 2. The Play **app-signing** SHA-256. **Not the upload key**: the app repo's own draft warns that with Play App Signing enabled, which is the default, the upload key produces a verification that FAILS, and on Android 12+ a failed verification is worse than no file, because the app stops being offered as a handler at all. That is why universal links were removed on 2026-08-09, and why these files must not be written with placeholders.
-3. **The domain settled.** The drafts still target `reserve-ni.vercel.app`, the old staging host, and so did `app.json` before the config was removed. Whichever host is declared has to match exactly and serve a direct 200 on BOTH apex and www, because Android does not follow redirects when verifying and the apex currently 307s to www.
+3. **The domain chosen.** *(Refined 2026-08-30 with facts from the app repo, which correct two things said here earlier.)* **`app.json` declares no host at all**: no `ios.associatedDomains`, no `https` intent filter, only the `resneo://` scheme. So there is nothing to "match", and the order is: choose the domain, serve the files, THEN declare it in `app.json`. The older builds had claimed `reserve-ni.vercel.app`, a staging host a production app should not claim, and removing it was right.
+
+   **`www.resneo.com` is the answer**, and three things agree: it is what `NEXT_PUBLIC_BASE_URL` resolves to in production and therefore what every email link already uses, it is what the app repo's own docs name as intended, and the bundle id `com.resneo.app` is its reverse-DNS form.
+
+   **Only the DECLARED host is fetched**, which corrects an over-cautious note here: both apex and www do not need to serve the file. Declaring `applinks:www.resneo.com` and serving it at www is sufficient, because the links in email are www. The apex 307 matters only if the apex is declared, or if some link is ever built from it.
 
 **Status at 2026-08-27: F1 to F6 and F8 are done; F9 is partly done; F7 is not started.**
 
@@ -1328,7 +1332,7 @@ Earlier drafts scoped this as documentation and asserted that "all routes needed
 **P5-3. Deep link contract**
 - Document the **`resneo://`** route map for customer surfaces. The scheme is registered (`app.json:8` and the Android intent filter), and `resneo://callback` is handled for magic-link and password-reset sign-in, but everything else resolves only through Expo Router's implicit file-route mapping: no route map, no parser, and **no not-installed fallback anywhere**.
 - Cover at minimum: `/account`, `/account/bookings`, `/account/bookings/[id]`, `/manage/[bookingId]/[token]`, `/m/v3...`, `/b/{code}`, `/auth/confirm?token_hash=`, the AD7 portal-token URL, and the Stripe Checkout return, each with a not-installed fallback.
-- The universal and app link files move to P3-4i, because they are served from this repo and are needed the moment AD7's emails go out.
+- The universal and app link files move to P3-4i, because they are served from this repo and are needed the moment AD7's emails go out. *(**Split 2026-08-30.** The `resneo://` route map above is UNBLOCKED and useful now: the scheme is registered and is the only deep-link entry point the app has, and `resneo://callback` already carries magic-link and password-reset sign-in. The association files are the deferred half, waiting on F7's credentials and the domain choice. Doing the route map first is also the honest order, because a universal link cannot be verified until there is an app screen for it to land on.)*
 
 **Explicit note:** the app repo needs its own customer UI. Nothing in Phases 0 to 4 appears in the app automatically.
 

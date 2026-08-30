@@ -7,7 +7,11 @@ import {
 } from '@/lib/account/account-bookings';
 import { buildVenueHistory, type AccountVenueHistory } from './venue-history';
 import { isUpcomingBooking, accountBookingStartMs } from '@/lib/account/account-booking-filters';
-import { loadOutstandingBookingFormsChecked } from '@/lib/compliance/form-links-service';
+import {
+  loadOutstandingBookingFormsChecked,
+  bookingsNeedingFormsIn,
+} from '@/lib/compliance/form-links-service';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 /**
  * Everything the account hub renders, in one loader (P1-1, AD5).
@@ -68,6 +72,16 @@ export interface AccountHomeData {
   next_booking: AccountBookingRow | null;
   /** Forms still to complete for that booking. Empty when there is none. */
   next_booking_form_links: Array<{ name: string; url: string }>;
+  /**
+   * How many of the OTHER bookings the hub lists still need a form.
+   *
+   * The hub checked the next booking alone, so a waiver on the second of four
+   * upcoming appointments was invisible until the first one passed, which is
+   * exactly when it is too late to sign it comfortably. Bounded to the
+   * bookings already on the page, so this is a handful of extra reads and
+   * never the N+1 this loader exists to avoid.
+   */
+  later_bookings_needing_forms: number;
   /**
    * FALSE when the forms lookup failed, so an empty list means nothing (P4-1).
    *
@@ -131,6 +145,7 @@ export function emptyAccountHome(): AccountHomeData {
     next_booking: null,
     next_booking_form_links: [],
     next_booking_forms_checked: true,
+    later_bookings_needing_forms: 0,
     next_booking_appointment: { service: null, practitioner: null },
     upcoming_count: 0,
     upcoming_after_next: [],
@@ -145,7 +160,7 @@ export function emptyAccountHome(): AccountHomeData {
 
 export async function loadAccountHome(
   supabase: SupabaseClient,
-  admin: SupabaseClient,
+  admin: SupabaseClient = getSupabaseAdminClient(),
   nowMs: number = Date.now(),
 ): Promise<AccountHomeData> {
   // Bookings come through `bookings_account_safe` on the SESSION client, and
@@ -187,11 +202,34 @@ export async function loadAccountHome(
     if (b.venue && !venueById.has(b.venue.id)) venueById.set(b.venue.id, b.venue);
   }
 
+  /*
+    Outstanding forms on the OTHER bookings the hub lists (P4-1's leftover).
+
+    Bounded to what is already on the page, so this is at most
+    `UPCOMING_LIST_LIMIT` extra reads rather than one per booking the customer
+    has ever made. Only the COUNT is carried: the hub says that something else
+    needs attention and links to the booking, rather than repeating a list of
+    form names it has no room for.
+
+    A failed lookup counts as nothing rather than as something, which is the
+    opposite of P4-1's rule and is right here: the next booking's card already
+    says out loud when a check failed, and a second, vaguer warning about
+    bookings further out would be noise on top of it.
+  */
+  const laterShown = upcoming.slice(1, 1 + UPCOMING_LIST_LIMIT);
+  const laterNeedingForms = (
+    await bookingsNeedingFormsIn(
+      admin,
+      laterShown.map((b) => b.id),
+    )
+  ).size;
+
   const allVenueHistory = buildVenueHistory(guests, [...venueById.values()], bookings, nowMs);
 
   return {
     next_booking: nextBooking,
     next_booking_form_links: formsLookup.forms,
+    later_bookings_needing_forms: laterNeedingForms,
     next_booking_forms_checked: formsLookup.ok,
     next_booking_appointment: appointment,
     upcoming_count: upcoming.length,

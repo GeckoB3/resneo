@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import { authenticatedUserHasStaffMembership } from '@/lib/venue-auth';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
@@ -13,6 +12,7 @@ import {
 } from '@/lib/account/account-bookings';
 import { formatPence } from '@/lib/booking/payment-display';
 import { redirect } from 'next/navigation';
+import { loadAccountProfile } from '@/lib/account/account-profile';
 
 /** "Thursday 10 September, 14:00", in the venue's zone, not the reader's. */
 function whenLine(row: AccountBookingRow, profileTz: string | null): string {
@@ -99,7 +99,12 @@ export default async function AccountHomePage() {
   */
   if (!user) redirect('/login?redirectTo=/account');
 
-  const { data: profile } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
+  // Through the shared loader, not a query of this page's own (C1): the same
+  // row is served by `GET /api/account/profile`, so a native client and this
+  // page cannot answer differently.
+  // Degrades rather than throwing: a hub that renders without a display name
+  // is better than an error page, and nothing here states an absence as fact.
+  const profile = await loadAccountProfile(supabase, user.id).catch(() => null);
 
   const display =
     (profile as { display_name?: string | null } | null)?.display_name?.trim() ||
@@ -115,11 +120,10 @@ export default async function AccountHomePage() {
   const firstName = hasName ? (display.split(/\s+/)[0] ?? display) : null;
   const greeting = firstName ? `Welcome back, ${firstName}` : 'Welcome back';
 
-  const admin = getSupabaseAdminClient();
   // The customer's own timezone is a DISPLAY fallback only: each booking is
   // rendered in its venue's zone, which is the zone its stored times are in.
   const profileTz = (profile?.timezone as string | null | undefined)?.trim() || null;
-  const showVenueDashboard = await authenticatedUserHasStaffMembership(admin, user.id, user.email);
+  const showVenueDashboard = await authenticatedUserHasStaffMembership(undefined, user.id, user.email);
 
   /*
     Three shortcuts, not eleven (P1-3, closes G18).
@@ -171,7 +175,7 @@ export default async function AccountHomePage() {
       : []),
   ];
 
-  const home = await loadAccountHome(supabase, admin);
+  const home = await loadAccountHome(supabase);
 
   return (
     <div className="space-y-10">
@@ -303,6 +307,28 @@ export default async function AccountHomePage() {
             </p>
           ) : null}
         </section>
+      ) : null}
+
+      {/*
+        Something further down the list needs a form (P4-1's leftover). Said
+        once, with a count, rather than repeated per booking: the point is to
+        send the customer to the list, not to reproduce it here.
+      */}
+      {home.later_bookings_needing_forms > 0 ? (
+        <p
+          role="alert"
+          className="rounded-xl border border-amber-200/90 bg-amber-50/60 px-4 py-3 text-sm text-amber-950"
+        >
+          {home.later_bookings_needing_forms === 1
+            ? 'One of your other bookings has a form to complete.'
+            : `${home.later_bookings_needing_forms} of your other bookings have forms to complete.`}{' '}
+          <Link
+            href="/account/bookings"
+            className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+          >
+            See your bookings
+          </Link>
+        </p>
       ) : null}
 
       {home.venue_history.length > 0 ? (

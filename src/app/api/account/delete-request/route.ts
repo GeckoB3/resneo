@@ -25,9 +25,17 @@ export async function POST(request: NextRequest) {
 
     const base = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL ?? '');
     const loginForCancel = `${base}/login?redirectTo=${encodeURIComponent('/account/security')}`;
+    /*
+      `context=customer` was dropped here (G11f). It was the only producer in
+      the codebase and nothing has ever read it, on this page or anywhere else,
+      so it promised a behaviour that does not exist and would have been
+      inherited by whoever copied this URL next. If a future flow needs to tell
+      the sign-in page who is arriving, it can be added WITH the code that
+      reads it.
+    */
     const magicCancel =
       user.email && base
-        ? `${base}/auth/magic?email=${encodeURIComponent(user.email)}&context=customer&redirect=${encodeURIComponent('/account/security')}`
+        ? `${base}/auth/magic?email=${encodeURIComponent(user.email)}&redirect=${encodeURIComponent('/account/security')}`
         : loginForCancel;
     const magicCancelHref = magicCancel.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 

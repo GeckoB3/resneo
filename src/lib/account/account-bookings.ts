@@ -13,6 +13,7 @@ import {
 } from '@/lib/account/account-booking-filters';
 import { CAPACITY_CONSUMING_STATUSES } from '@/lib/availability/capacity-status';
 import type { BookingModel } from '@/types/booking-models';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 export interface AccountGuestSafeRow {
   id: string;
@@ -823,7 +824,14 @@ async function hydrateAccountBookingRows(
 
 export async function loadAccountBookings(
   supabase: SupabaseClient,
-  admin: SupabaseClient,
+  /*
+    Defaulted so a PAGE never has to construct one (C1). Pages have no
+    legitimate need for admin privileges of their own: their job is to call a
+    loader a route also calls, and a page that reaches for the service role is
+    a page doing something no route can reuse. Still injectable, so tests keep
+    passing a fake.
+  */
+  admin: SupabaseClient = getSupabaseAdminClient(),
   limit = 100,
 ): Promise<AccountBookingRow[]> {
   const guests = await loadAccountSafeGuests(supabase);
@@ -861,7 +869,7 @@ export async function loadAccountBookings(
  */
 export async function loadAccountUpcomingBookingsByModel(
   supabase: SupabaseClient,
-  admin: SupabaseClient,
+  admin: SupabaseClient = getSupabaseAdminClient(),
   model: Extract<BookingModel, 'event_ticket' | 'resource_booking'>,
   nowMs: number = Date.now(),
   limit = 50,
@@ -907,7 +915,12 @@ export async function loadAccountUpcomingBookingsByModel(
   return hydrated.filter((b) => isUpcomingBooking(b, nowMs));
 }
 
-export async function loadAccountBookingById(
+/**
+ * Not exported: nothing outside this module calls it, and C1 asks that every
+ * exported loader be reachable through a route. An internal helper that looks
+ * like a surface is worse than one that does not.
+ */
+async function loadAccountBookingById(
   supabase: SupabaseClient,
   admin: SupabaseClient,
   bookingId: string,

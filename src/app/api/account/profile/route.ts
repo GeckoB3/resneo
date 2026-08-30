@@ -8,6 +8,7 @@ import {
   mergeIncomingPreferences,
   withStaffMirror,
 } from '@/lib/notifications/notification-preferences';
+import { loadAccountProfile } from '@/lib/account/account-profile';
 
 const patchSchema = z.object({
   display_name: z.union([z.string(), z.null()]).optional(),
@@ -50,11 +51,11 @@ export async function GET(request: Request) {
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorised', code: 'UNAUTHENTICATED' }, { status: 401 });
 
-    const { data, error } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
-    if (error) {
-      console.error('[account/profile GET]', error.message);
-      return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 });
-    }
+    // The same loader the portal pages call (C1), so the route and the page
+    // cannot answer differently.
+    // Throws on a read failure, caught below as a 500, so an empty response
+    // never gets mistaken for "this customer has no profile".
+    const data = await loadAccountProfile(supabase, user.id);
 
     // Build 1.0.7 reads notification_preferences.new_booking and its siblings
     // directly off this response, and it is in the stores. Once P0-13's R3

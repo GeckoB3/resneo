@@ -114,7 +114,7 @@ async function attachCardHoldFee(
  * Leaves the field alone when it is already set, so a caller that has resolved
  * its own link keeps it.
  */
-async function attachAccountEntryLink(
+export async function attachAccountEntryLink(
   admin: SupabaseClient,
   booking: BookingEmailData,
 ): Promise<BookingEmailData> {

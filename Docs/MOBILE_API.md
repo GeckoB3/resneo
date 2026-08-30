@@ -147,3 +147,83 @@ Android verification is worse than none: the app stops being offered as a
 handler at all. The order is: serve the files, confirm a 200 with the right
 content type and no redirect on both apex and www, then restore `app.json`,
 then ship a build.
+
+## The customer surface (P5-1)
+
+Everything above is the venue app. This section is the customer's own account,
+which had no documentation at all until now.
+
+**All of these need a Bearer token and answer only about the caller.** Ownership
+is resolved server-side from the session, never from a parameter: there is no
+`user_id` argument anywhere here, and supplying somebody else's booking id
+returns 404 rather than 403, so a stranger learns nothing from a guessed id.
+
+| Method | Path | Returns |
+|--------|------|---------|
+| GET | `/api/v1/me/profile` | `{ profile, user }`. PATCH the same path to update; preferences are MERGED, never assigned |
+| GET | `/api/v1/me/home` | The hub aggregate: next booking, outstanding payments, upcoming list, venue history |
+| GET | `/api/v1/me/bookings` | The caller's bookings |
+| GET | `/api/v1/me/bookings/by-model?model=event_ticket\|resource_booking` | The events and resources hubs. `limit` optional, capped at 100 |
+| DELETE | `/api/v1/me/bookings/[id]` | Cancel |
+| GET | `/api/v1/me/bookings/[id]/reschedule-options` | Whether this booking can be moved and what a move would need. Returns **no slots**: the availability call is separate |
+| POST | `/api/v1/me/bookings/[id]/reschedule` | Move it. Body keys are read by name, not forwarded wholesale; ask `reschedule-options` first rather than guessing and getting a 400 |
+| POST | `/api/v1/me/bookings/[id]/confirm` | Confirm attendance, the action the "please confirm you are coming" email asks for. Idempotent, so a double tap is not an error |
+| GET | `/api/v1/me/venues` | One row per venue the customer is known at: names, first and last booked, counts, marketing consent |
+| GET | `/api/v1/me/payments` | Settled payments. `?booking_id=` narrows to one |
+| GET | `/api/v1/me/waitlist` | Waitlist places |
+| DELETE | `/api/v1/me/waitlist/[id]` | Leave one. 409 when it is already gone |
+| GET | `/api/v1/me/export` | The whole account as one JSON document, as a download |
+| DELETE | `/api/v1/me/payment-methods/[venueId]/[paymentMethodId]` | Remove a card. 409 `requires_confirmation` when it pays for a membership; repeat with `?acknowledge=true` |
+| GET | `/api/v1/me/devices` | Registered devices. POST the same path to register, DELETE `/api/v1/me/devices/[id]` to remove one |
+| POST | `/api/v1/me/email/change` | Start an email change. 409 when another guest record already owns that address at any venue. The change applies only after the customer confirms from the new inbox |
+| GET | `/api/v1/me` | The same handler as `/profile`, kept because it is the conventional root for "who am I". PATCH works here too |
+
+**Two shapes worth knowing before writing a client.**
+
+`409 { requires_confirmation: true, message }` means "this will affect
+something, say you meant it". Show `message` verbatim, because it names what is
+affected, and repeat the call with the acknowledgement parameter. The venue
+availability routes use the same shape.
+
+Errors carry a `code` from a frozen union (`src/lib/api/error-codes.ts`). Branch
+on `code`, never on the human sentence in `error`, which is copy and will change.
+
+## Deep links: the `resneo://` route map (P5-3)
+
+**`resneo://` is the only deep-link entry point today.** There are no universal
+or app links: `ios.associatedDomains` and the Android `https` intent filter were
+removed on 2026-08-09 because the association files were never served, and a
+FAILED Android verification is worse than none, since the app stops being
+offered as a handler at all. Restoring them needs the Apple Team ID, the Play
+app-signing certificate SHA-256 and a settled domain (F7).
+
+**Every https link in an email therefore opens a browser.** That is the current
+behaviour, and for customers it is the only possible one, because the shipped
+app has no customer surface yet.
+
+| Link the customer receives | App route to open | If the app is not installed |
+|---|---|---|
+| `/auth/confirm?token_hash=…&type=…` | `resneo://callback?token_hash=…&type=…` | The web page completes it and lands on the portal |
+| `/auth/portal?t=…` (AD7 first entry) | `resneo://callback` after the exchange | The web route sets cookies and lands on the booking |
+| `/account` | `resneo://account` | The web portal hub |
+| `/account/bookings` | `resneo://account/bookings` | The web list |
+| `/account/bookings/{id}` | `resneo://account/bookings/{id}` | The web detail page |
+| `/manage/{bookingId}/{token}` | `resneo://manage/{bookingId}/{token}` | The web manage page, which needs no sign-in |
+| `/m/v3…` (short manage link) | Resolve on the web first, then route by its target | The web page it resolves to |
+| `/b/{code}` (short booking link) | Resolve on the web first, then route by its target | The web page it resolves to |
+| Stripe Checkout return | `resneo://account/bookings/{id}` | The web return page |
+
+**The two short links resolve on the WEB, deliberately.** `/m/v3…` and `/b/…`
+are opaque: only the server knows what they point at, and an app that guessed
+would have to reimplement the resolver and keep it in step. Follow the redirect,
+then route on where it lands.
+
+**Only `resneo://callback` is implemented today** (magic-link and
+password-reset sign-in). The rest of this table is the contract for the customer
+app to build against, not a description of what exists.
+
+**Every row needs a not-installed fallback and none may be a dead end.** A deep
+link that fails silently is worse than a web page: the customer taps a link in
+an email and nothing happens at all, with no way to tell whether the booking is
+still there.
+

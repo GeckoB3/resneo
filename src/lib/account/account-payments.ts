@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 /**
  * What a customer is shown of a payment.
@@ -87,7 +88,7 @@ export type AccountPaymentsResult = {
  */
 export async function loadAccountPayments(
   session: SupabaseClient,
-  admin: SupabaseClient,
+  admin: SupabaseClient = getSupabaseAdminClient(),
   opts: { bookingId?: string | null; limit?: number } = {},
 ): Promise<AccountPaymentsResult> {
   const ownership = session.from('bookings_account_safe').select('id');

@@ -5,6 +5,7 @@ import { loadAccountPayments } from '@/lib/account/account-payments';
 import { getBookingDetailForGuest } from '@/lib/booking/guest-actions/booking-detail';
 import { GuestBookingDetailView } from '@/components/booking/GuestBookingDetailView';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { sessionActionClients } from '@/lib/booking/guest-actions/types';
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -43,7 +44,7 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
   if (!user) notFound();
 
   const result = await getBookingDetailForGuest(
-    { admin: getSupabaseAdminClient(), session: supabase },
+    sessionActionClients(supabase),
     { bookingId, actor: { kind: 'session', userId: user.id } },
   );
   if (!result.ok) notFound();
@@ -61,7 +62,7 @@ export default async function AccountBookingDetailPage({ params }: PageProps) {
     Failure is carried, not swallowed, for the same reason as P4-1: an empty
     list would tell the customer they have paid nothing.
   */
-  const payments = await loadAccountPayments(supabase, getSupabaseAdminClient(), { bookingId })
+  const payments = await loadAccountPayments(supabase, undefined, { bookingId })
     .then((r) => ({ rows: r.payments, failed: false }))
     .catch((e) => {
       console.error('[account/bookings/[id]] payments:', e instanceof Error ? e.message : e);

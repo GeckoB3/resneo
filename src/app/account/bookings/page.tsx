@@ -26,6 +26,7 @@ import { rebookUrl } from '@/lib/account/rebook-url';
 import { AccountWaitlistSection } from '@/components/account/AccountWaitlistSection';
 import { loadAccountWaitlist } from '@/lib/account/account-waitlist';
 import { isPastBooking } from '@/lib/account/account-booking-filters';
+import { loadAccountProfile } from '@/lib/account/account-profile';
 
 /**
  * "Book again" (P3-1), rendered only when the link can honour the name.
@@ -164,12 +165,13 @@ export default async function AccountBookingsPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from('user_profiles').select('timezone').eq('id', user.id).maybeSingle()
-    : { data: null };
-  const profileTz = (profile?.timezone as string | null | undefined)?.trim() || null;
+  // Shared loader rather than a query only this page runs (C1).
+  // The timezone is a DISPLAY fallback, so losing it degrades gracefully.
+  const profileTz =
+    (user ? (await loadAccountProfile(supabase, user.id).catch(() => null))?.timezone : null)
+      ?.trim() || null;
 
-  const bookings = await loadAccountBookings(supabase, getSupabaseAdminClient(), 100);
+  const bookings = await loadAccountBookings(supabase, undefined, 100);
 
   /*
     Waitlist places (P4-4), scoped by the account's own verified address
@@ -177,7 +179,7 @@ export default async function AccountBookingsPage({
     swallowed: an empty list would tell the customer they are waiting for
     nothing, which is a claim (P4-1's rule).
   */
-  const waitlist = await loadAccountWaitlist(getSupabaseAdminClient(), user?.email)
+  const waitlist = await loadAccountWaitlist(undefined, user?.email)
     .then((entries) => ({ entries, failed: false }))
     .catch((e) => {
       console.error('[account/bookings] waitlist:', e instanceof Error ? e.message : e);

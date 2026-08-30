@@ -172,14 +172,16 @@ describe('v1 alias rule (C7a/C7b)', () => {
     // v1/me/waitlist, taking it to 35. P4-5 then added account/export,
     // aliased at v1/me/export, taking it to 36. P4-6 then added
     // account/payment-methods/[venueId]/[paymentMethodId], aliased under
-    // v1/me/payment-methods, taking it to 37.
+    // v1/me/payment-methods, taking it to 37. P5-1 then added
+    // account/bookings/by-model and account/venues, both aliased, taking it
+    // to 39.
     const accountRoutes = routeFiles('account').map(rel).sort();
     expect(
       accountRoutes.length,
       'An /api/account route was added or removed. If added: give it a v1 alias (C7a) ' +
         'or a C7A_EXEMPT entry, and bump this count. Do NOT add it to the pre-existing ' +
         'exclusion list, which is dated 2026-08-27 and closed.',
-    ).toBe(37);
+    ).toBe(39);
   });
 
   it('routes this plan created have their v1 alias', () => {

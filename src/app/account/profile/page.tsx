@@ -8,6 +8,8 @@ import { AccountPaymentHistorySection } from '@/components/account/AccountPaymen
 import { loadAccountPayments } from '@/lib/account/account-payments';
 import { AccountSecuritySection } from '@/components/account/AccountSecuritySection';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { loadAccountProfile } from '@/lib/account/account-profile';
+import { loadVenueNames } from '@/lib/account/account-venues';
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -56,7 +58,8 @@ export default async function AccountProfilePage() {
     redirect('/login?redirectTo=/account/profile');
   }
 
-  const { data: profileData } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
+  // Shared loader, so this page and `GET /api/account/profile` cannot drift (C1).
+  const profileData = await loadAccountProfile(supabase, user.id).catch(() => null);
   const profile = (profileData ?? {
     display_name: null,
     first_name: null,
@@ -78,13 +81,10 @@ export default async function AccountProfilePage() {
   ]);
 
   const venueIds = [...new Set(relationships.map((r) => r.venue_id))];
-  const { data: venues } =
-    venueIds.length > 0
-      ? await getSupabaseAdminClient().from('venues').select('id, name').in('id', venueIds)
-      : { data: [] as Array<{ id: string; name: string }> };
-  const venueMap = new Map((venues ?? []).map((v) => [v.id, v.name]));
+  // The same lookup `GET /api/account/venues` performs (C1).
+  const venueMap = await loadVenueNames(venueIds);
   const venueRowById = new Map(
-    (venues ?? []).map((v) => [v.id, { id: v.id, name: v.name, slug: null }]),
+    [...venueMap.entries()].map(([id, name]) => [id, { id, name, slug: null }]),
   );
 
   /*
@@ -92,7 +92,7 @@ export default async function AccountProfilePage() {
     would otherwise tell the customer they have paid nothing, which is a claim,
     and about money (P4-1's rule applied a second time).
   */
-  const paymentsResult = await loadAccountPayments(supabase, getSupabaseAdminClient())
+  const paymentsResult = await loadAccountPayments(supabase)
     .then((r) => ({ payments: r.payments, failed: false }))
     .catch((e) => {
       console.error('[account/profile] payments:', e instanceof Error ? e.message : e);

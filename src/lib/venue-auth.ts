@@ -357,7 +357,8 @@ export async function resolveStaffVenueIdForAuthenticatedUser(
 
 /** True when the signed-in user has at least one active staff row (any venue). */
 export async function authenticatedUserHasStaffMembership(
-  admin: SupabaseClient,
+  /* Defaulted so a page never constructs an admin client of its own (C1). */
+  admin: SupabaseClient = getSupabaseAdminClient(),
   userId: string,
   userEmail: string | null | undefined,
 ): Promise<boolean> {

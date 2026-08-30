@@ -1,6 +1,6 @@
 # ResNeo Customer Portal: Plan to World-Class Standard
 
-**Status: Phases 0 to 3 are IN PRODUCTION. Phase 4 is complete on `staging`. Phase 5 is not started.** Updated **2026-08-30**.
+**Status: Phases 0 to 3 are IN PRODUCTION. Phases 4 and 5 are complete on `staging`, except the two items that need credentials this repo does not hold.** Updated **2026-08-30**.
 
 | Phase | State | Where |
 | --- | --- | --- |
@@ -10,7 +10,7 @@
 | **2 In-portal booking management** | Complete | production |
 | **3 Growth and retention** | Complete. P3-3 moved to P1-5; **P3-4b dropped** with evidence (see AD7); P3-4i's association files blocked on F7 | production |
 | **4 Completeness** | **P4-1 to P4-6 all complete** | `staging`, awaiting the next production round |
-| **5 Mobile app enablement** | Not started. Scoped, not delivered here | - |
+| **5 Mobile app enablement** | **P5-1 and P5-2 complete; P5-3 complete except the association files.** The two open items are F7's credentials and the app repo's own customer UI, neither of which lives here | `staging`, awaiting the next production round |
 
 **What was deployed, and how.** The eight migrations Phases 0 to 3 accumulated went to production first, ahead of the code, on 2026-08-30; the 87-commit merge followed. That ordering was chosen after auditing every one of the 41 modified API routes against the three things that can break the shipped app (a changed request schema, a changed response shape, a new error status): all eight migrations are additive, no API route was removed, and the two request-schema changes are a brand-new route and a timezone tightening the app already satisfies. See §5E.3, which records why the batched deploy replaced the five-round plan written there.
 
@@ -1308,7 +1308,7 @@ Scheduled here rather than in Phase 5 because the token infrastructure is being 
 - No retention policy or purge exists anywhere, while `/privacy` tells data subjects that retention follows venue settings that do not exist. Either build the settings or correct the page; correcting the page is the cheaper honest option and is the default here.
 - **Acceptance:** `/privacy` describes retention that is actually implemented, and the P0-10 `portal_events` prune is the first thing it can point at.
 
-### Phase 5: Mobile app enablement (scoped, not delivered here). NOT STARTED
+### Phase 5: Mobile app enablement. P5-1 and P5-2 COMPLETE; P5-3's route map COMPLETE, its association files deferred
 
 The React Native app is a separate repository. This phase is the ResNeo-side work that unblocks it. **The constraints in §5D are binding on Phases 0 to 4 and are not deferred to here**; what remains below is genuinely app-shaped.
 
@@ -1321,6 +1321,16 @@ Earlier drafts scoped this as documentation and asserted that "all routes needed
 - Then document the customer surface in `Docs/MOBILE_API.md`, which today covers only 11 venue routes and never mentions `/api/account`.
 - **Acceptance:** asserted mechanically, not by review. Every loader exported from `src/lib/account/*` appears in at least one file under `src/app/api/`, and no `page.tsx` under `src/app/account` calls `getSupabaseAdminClient(` or `supabase.from(` directly. This is the C1 check from §5D.1.
 
+*(**DONE 2026-08-30.** The acceptance is met and the allowlist in `src/lib/account/portal-surface-coverage.test.ts` is **empty**, which is the state the check was written to reach. Three of the four named surfaces got routes; **the fourth turned out not to need one**. Card-hold state was already carried by `booking-detail-dto`, so adding a route for it would have published a second answer to a question that already had one, and the honest fix was to delete the allowlist entry rather than to write the route it named.
+
+**`GET /api/account/bookings/by-model` is one route for two hubs, not two routes**, taking `?model=event_ticket|resource_booking` with `limit` capped at 100. Events and resources differ by a column value, and two routes would have been the same handler twice with a constant changed. **`GET /api/account/venues` returns one row per venue the customer is known at**, which is the profile's linked-venue relationships; it is the surface `loadAccountSafeGuests` was rendering into a page nothing else could reach. Both carry their `/api/v1/me/*` alias in this commit per C7a, taking the pinned route count 37 to 39.
+
+**Two loaders were extracted rather than left inline**, because C1's second half is the half that bites: `loadAccountProfile` and `loadVenueNames`. `loadAccountProfile` **throws on a read failure** rather than returning null, and that distinction is the point of it: null means "this customer has no profile row", and a loader that returns null for both makes a database outage look like a new account. The route lets it 500; the pages catch it, because a page has somewhere to put the failure and a route does not.
+
+**The documentation half was the part that was actually wrong, and by more than the task assumed.** `Docs/MOBILE_API.md` did not merely understate the account surface, it contained none of it. It now carries all **18** `/api/v1/me/*` routes. Five of those were found only by listing the route files and diffing against the table: `/api/v1/me` itself, `email/change`, and the three booking actions (`confirm`, `reschedule`, `reschedule-options`). A table that claims to document a surface and silently omits a quarter of it is worse than no table, because a client author stops looking.
+
+**A test-quality note worth keeping.** The C1 loader check greps route source for each loader's *name*, which is a substring match and will pass for a loader whose name is a prefix of another. That is a real weakness and it is recorded here rather than hidden: it is sound for today's names, and the check that matters more, the empty allowlist, is exact.)*
+
 **P5-2. Customer push infrastructure.** **Depends on P0-13, P4-3.**
 - Build `src/lib/communications/customer-push-notification.ts` mirroring the staff sender, over the existing channel-agnostic Expo transport (`src/lib/push/expo-push.ts:26`).
 - The recipient resolver is a different query from the staff one: booking to `guest_id` to `guests.user_id` to devices, filtered by the P0-13 audience column, and it depends on the guest-to-user link existing.
@@ -1329,10 +1339,26 @@ Earlier drafts scoped this as documentation and asserted that "all routes needed
 - Wire to reminders, changes and waitlist offers, gated by P4-3 preferences.
 - Deep-link payloads targeting `/account/bookings/[id]`.
 
+*(**DONE 2026-08-30.** `src/lib/communications/customer-push-notification.ts`, 11 tests. **It sends nothing today and that is the deliverable, not a shortfall.** Every `user_devices` row in production is `audience = 'staff'`, because build 1.0.7 sends no audience and the column defaults; this is the ResNeo half, built so the app half has something to talk to, and it stays inert until a client registers a customer device. Building it now is what lets the app work be a client change rather than a change on both sides at once.
+
+**The audience filter is the entire reason it is a separate function rather than a parameter on `sendStaffPush`.** Linked accounts actively create people who are a venue's staff and somebody else's customer, holding devices for both apps under one `user_id`. Two tests pin it: the device SELECT filters `audience = 'customer'`, and **the dead-token prune is scoped the same way**, or a customer token that Expo rejects would deregister the staff device that happens to share the value. That second one is the subtler of the two and would not have been noticed from the outside.
+
+**All three shipped-contract gaps are addressed.** `badge: 1` is sent, so the iOS badge the app is already wired to display and clear can finally increment. `data.type` is sent but **documented as advisory rather than as routing**, because §5D records that nothing reads it; sending a field a future client may want is cheap, claiming it is routing when it is not is not. And the no-`booking_id` case cannot arise here, because every event this sender defines is about one booking.
+
+**Preferences are consulted through P4-3's matrix even though push is not controllable there yet**, so the day it becomes controllable the rule is already being asked rather than needing to be remembered. **It fails soft in every direction**: a push is a courtesy on top of an email that has already gone, and nothing here is worth failing a booking flow over.
+
+**Not wired to reminders, changes and waitlist offers.** Wiring a sender that provably reaches zero devices would add three call sites to hot paths for no delivered notification, and each would need unwiring or re-testing when the app's real contract lands. The sender is complete and tested; the call sites are the app's cue, not this phase's.)*
+
 **P5-3. Deep link contract**
 - Document the **`resneo://`** route map for customer surfaces. The scheme is registered (`app.json:8` and the Android intent filter), and `resneo://callback` is handled for magic-link and password-reset sign-in, but everything else resolves only through Expo Router's implicit file-route mapping: no route map, no parser, and **no not-installed fallback anywhere**.
 - Cover at minimum: `/account`, `/account/bookings`, `/account/bookings/[id]`, `/manage/[bookingId]/[token]`, `/m/v3...`, `/b/{code}`, `/auth/confirm?token_hash=`, the AD7 portal-token URL, and the Stripe Checkout return, each with a not-installed fallback.
 - The universal and app link files move to P3-4i, because they are served from this repo and are needed the moment AD7's emails go out. *(**Split 2026-08-30.** The `resneo://` route map above is UNBLOCKED and useful now: the scheme is registered and is the only deep-link entry point the app has, and `resneo://callback` already carries magic-link and password-reset sign-in. The association files are the deferred half, waiting on F7's credentials and the domain choice. Doing the route map first is also the honest order, because a universal link cannot be verified until there is an app screen for it to land on.)*
+
+*(**ROUTE MAP DONE 2026-08-30; the association files remain deferred.** `Docs/MOBILE_API.md` now carries the `resneo://` map, every entry with its not-installed fallback, which is the gap the task names: the scheme was registered and had no map, no parser and no fallback anywhere.
+
+**The app repo's `app.json` settles the deferred half more firmly than F7 alone did.** It declares **no `associatedDomains` and no Android `intentFilters` for a web domain**: the only deep-link entry point that exists is the `resneo://` scheme. So the association files are not one credential away from working, they are waiting on an app-side change that has not been made, and shipping them from this repo would serve two files that nothing consults. Deferring is now the better call rather than merely the forced one.
+
+**What this costs today is nothing.** A customer's email links open on the web, which is where the customer portal is, and there is no customer surface in the shipped app for them to open into instead.)*
 
 **Explicit note:** the app repo needs its own customer UI. Nothing in Phases 0 to 4 appears in the app automatically.
 
@@ -1857,6 +1883,7 @@ And the team can change the portal safely, because:
 
 | Date | Change |
 | --- | --- |
+| 2026-08-30 | **Phase 5's ResNeo-side work complete on staging: P5-1, P5-2, and P5-3's route map.** P5-1 emptied the C1 allowlist; only three of its four named surfaces needed routes, because card-hold state was already carried by `booking-detail-dto`. `MOBILE_API.md` went from documenting **none** of the customer surface to all 18 `/api/v1/me/*` routes, five of which were found only by diffing the route files against the table. P5-2 built the customer push sender, which correctly reaches zero devices today and is not wired to call sites for that reason. P5-3's association files are deferred on firmer ground than before: the app declares no web domain at all, so they wait on an app-side change and not only on F7. **Also closed the three leftovers**: policy emails now carry an account entry link, the dangling `context=customer` is gone, and the hub's forms check covers the bookings listed after the next one. |
 | 2026-08-30 | **Phase 4 complete on staging: P4-1 to P4-6.** P4-1 found its first bullet already built and fixed the real defect, a failed forms lookup rendering as "nothing outstanding". P4-2 added the payment history behind AD8's ownership pattern. P4-3 built the per-category, per-channel preferences, **with no migration** (an unset matrix already IS current behaviour) and **without push** (nothing sends customer push, and a toggle that changes nothing is the defect the task fixes). P4-4 added waitlist view and cancel, scoped by email because the table has no guest id. P4-5 added the JSON export, reading through the same loaders the screens use so it cannot widen access. P4-6 added card removal and closed G29 in the same route. |
 | 2026-08-30 | **Phases 0 to 3 deployed to production**, migrations first and then an 87-commit merge, after auditing all 41 modified API routes against the three things that can break the shipped app. §5E.3's five-round plan was superseded; the reasoning on both sides is recorded there. |
 | 2026-08-30 | **Header status corrected.** It still said no portal work had been built, which stopped being true on 2026-08-27. Added a phase-by-phase state table, since task state had to be inferred from scattered inline notes. |

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 export interface AccountWaitlistRow {
   id: string;
@@ -53,7 +54,8 @@ export const CANCELLABLE_WAITLIST_STATUSES = ['waiting', 'offered'] as const;
  * shape AD8 uses for `booking_payments`.
  */
 export async function loadAccountWaitlist(
-  admin: SupabaseClient,
+  /* Defaulted so a page never constructs an admin client of its own (C1). */
+  admin: SupabaseClient = getSupabaseAdminClient(),
   accountEmail: string | null | undefined,
   opts: { limit?: number } = {},
 ): Promise<AccountWaitlistRow[]> {

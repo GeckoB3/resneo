@@ -68,7 +68,17 @@ test.describe('P3-4c one-click entry', () => {
         hand the customer a dead link. Cookies are cleared first, or the second
         visit would succeed on the session rather than on the token.
       */
-      await page.goto('/auth/signed-out').catch(() => {});
+      /*
+        Cookies only. This used to visit `/auth/signed-out` first, and THAT is
+        what broke CI: the route calls `supabase.auth.signOut()`, whose scope
+        defaults to GLOBAL, so it revoked every session the fixture customer
+        had, including the one `auth.setup.ts` saves for the nine other portal
+        specs. This spec passed and every portal spec after it failed.
+
+        Clearing cookies is all the assertion below needs: it proves the second
+        visit succeeds on the TOKEN rather than on a surviving session, and it
+        touches nothing outside this browser context.
+      */
       await page.context().clearCookies();
       await page.goto(`/auth/portal?t=${encodeURIComponent(token!)}`);
       await expect(page).toHaveURL(/\/account\/bookings/, { timeout: 20_000 });

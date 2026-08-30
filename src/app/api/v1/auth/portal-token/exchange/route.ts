@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { mintEntryLink } from '@/lib/auth/entry-link';
 import { verifyPortalToken } from '@/lib/auth/portal-token';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { NO_STORE_HEADERS } from '@/lib/api/error-codes';
@@ -94,15 +95,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Creates the account when the address has none, which is the common case:
-  // nothing in the public booking flow makes one (P3-4d).
-  const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
-    type: 'magiclink',
-    email: verified.email,
-  });
-  const tokenHash = link?.properties?.hashed_token;
-  if (linkErr || !tokenHash) {
-    console.error('[v1/portal-token/exchange] generateLink failed:', linkErr?.message);
+  /*
+    Creates the account when the address has none, which is the common case:
+    nothing in the public booking flow makes one (P3-4d). `mintEntryLink`
+    reports the verification type GoTrue ISSUED, which for a new address is
+    `signup` rather than the `magiclink` that was asked for; assuming the
+    latter here broke entry for exactly the population it was built for.
+  */
+  const link = await mintEntryLink(admin, verified.email);
+  if (!link) {
     return NextResponse.json(
       { error: 'Could not sign you in. Please try again.', code: 'INTERNAL_ERROR' },
       { status: 500, headers: NO_STORE_HEADERS },
@@ -113,8 +114,8 @@ export async function POST(request: NextRequest) {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
   const { data: verifiedOtp, error: otpErr } = await stateless.auth.verifyOtp({
-    type: 'magiclink',
-    token_hash: tokenHash,
+    type: link.verificationType,
+    token_hash: link.tokenHash,
   });
   const session = verifiedOtp?.session;
   if (otpErr || !session?.access_token || !session?.refresh_token) {

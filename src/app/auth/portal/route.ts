@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { safeSameOriginPath } from '@/lib/safe-auth-redirect';
+import { mintEntryLink } from '@/lib/auth/entry-link';
 import { verifyPortalToken } from '@/lib/auth/portal-token';
 
 /**
@@ -114,24 +115,24 @@ export async function GET(request: Request) {
     **This also CREATES the account when the address has none**, which is the
     common case and is the point: production has 1,078 guest emails with no
     `auth.users` row, because nothing in the public booking flow makes one.
-    Verified on staging that `generateLink` creates the user rather than
-    erroring. So an account appears when somebody actually clicks their link,
-    and never speculatively for the thousand who do not.
+    So an account appears when somebody actually clicks their link, and never
+    speculatively for the thousand who do not.
+
+    **The type must come back from GoTrue, not be assumed**, and this file used
+    to assume it. For an address with no user, `generateLink({type:
+    'magiclink'})` issues a link whose verification type is `signup`, and
+    verifying it as a magiclink returns 403. Entry therefore worked for
+    everybody who already had an account and failed for everybody who did not,
+    which is exactly backwards, and no test saw it because the fixture customer
+    exists. `mintEntryLink` asks instead of assuming.
   */
-  const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
-    type: 'magiclink',
-    email,
-  });
-  const tokenHash = link?.properties?.hashed_token;
-  if (linkErr || !tokenHash) {
-    console.error('[auth/portal] generateLink failed:', linkErr?.message);
-    return signInFallback(base, next, email, 'portal_error');
-  }
+  const link = await mintEntryLink(admin, email);
+  if (!link) return signInFallback(base, next, email, 'portal_error');
 
   const supabase = await createClient();
   const { error: verifyErr } = await supabase.auth.verifyOtp({
-    type: 'magiclink',
-    token_hash: tokenHash,
+    type: link.verificationType,
+    token_hash: link.tokenHash,
   });
   if (verifyErr) {
     console.error('[auth/portal] verifyOtp failed:', verifyErr.message);

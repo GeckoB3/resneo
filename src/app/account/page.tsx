@@ -12,6 +12,7 @@ import {
   type AccountBookingRow,
 } from '@/lib/account/account-bookings';
 import { formatPence } from '@/lib/booking/payment-display';
+import { redirect } from 'next/navigation';
 
 /** "Thursday 10 September, 14:00", in the venue's zone, not the reader's. */
 function whenLine(row: AccountBookingRow, profileTz: string | null): string {
@@ -89,7 +90,16 @@ export default async function AccountHomePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase.from('user_profiles').select('*').eq('id', user!.id).maybeSingle();
+  /*
+    The layout redirects when there is no user, so this page used to assert one
+    with `user!`. Layouts and pages render in PARALLEL in the App Router, so
+    that assertion still ran, and a revoked session threw here rather than
+    redirecting: a 500 where the customer should have been shown a sign-in
+    form, and the noisy half of the redirect loop this task fixed.
+  */
+  if (!user) redirect('/login?redirectTo=/account');
+
+  const { data: profile } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
 
   const display =
     (profile as { display_name?: string | null } | null)?.display_name?.trim() ||
@@ -109,7 +119,7 @@ export default async function AccountHomePage() {
   // The customer's own timezone is a DISPLAY fallback only: each booking is
   // rendered in its venue's zone, which is the zone its stored times are in.
   const profileTz = (profile?.timezone as string | null | undefined)?.trim() || null;
-  const showVenueDashboard = await authenticatedUserHasStaffMembership(admin, user!.id, user?.email);
+  const showVenueDashboard = await authenticatedUserHasStaffMembership(admin, user.id, user.email);
 
   /*
     Three shortcuts, not eleven (P1-3, closes G18).

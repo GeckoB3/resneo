@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { resolveAuthIdentity, resolveAuthUserMetadata } from '@/lib/auth/resolve-auth-identity';
+import { resolveAuthIdentity, confirmAuthIdentity } from '@/lib/auth/resolve-auth-identity';
 import { isPlatformRoleInJwt } from '@/lib/platform-auth';
 import { isSalesAgentRoleInJwt } from '@/lib/sales/auth';
 import {
@@ -104,10 +104,32 @@ export async function middleware(request: NextRequest) {
 
   if (identity) {
     let userMetadata = identity.userMetadata;
+    /*
+      On `/login` this already went to the auth server for metadata, and threw
+      away the most important thing it learned: WHETHER THE SESSION IS STILL
+      REAL. `resolveAuthIdentity` prefers `getClaims()`, which verifies the JWT
+      locally and therefore cannot see revocation, so a session signed out
+      elsewhere kept looking valid here until its access token expired.
+
+      That produced a redirect loop rather than a bad page: `/account`'s layout
+      uses `getUser()`, was told there was no user and redirected to `/login`,
+      and this block bounced them straight back. The customer got
+      ERR_TOO_MANY_REDIRECTS where they should have got a sign-in form.
+
+      Checked only on the sign-in and signup paths, which is where the bounce
+      happens and where the server was already being asked. Every other route
+      keeps the cheap local check.
+    */
+    let confirmed = true;
     if (pathname === '/login' || isSignupPath(pathname)) {
-      userMetadata = await resolveAuthUserMetadata(supabase, identity, {
-        fetchFromServer: true,
-      });
+      const checked = await confirmAuthIdentity(supabase, identity);
+      userMetadata = checked.metadata;
+      confirmed = checked.confirmed;
+    }
+    if (!confirmed) {
+      // Let the sign-in form render. Falling through with a user would send
+      // them back to the page that just rejected them.
+      return response;
     }
     user = {
       id: identity.id,

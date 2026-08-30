@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { loadOutstandingBookingFormLinks } from '@/lib/compliance/form-links-service';
+import { loadOutstandingBookingFormsChecked } from '@/lib/compliance/form-links-service';
 import {
   getCancellationNoticeHoursForBooking,
   parseExtendedBookingRules,
@@ -105,6 +105,14 @@ export interface BookingDetailDto {
    */
   manage_booking_url: string | null;
   compliance_forms: Array<{ name: string; url: string }>;
+  /**
+   * False when the forms lookup FAILED, so an empty `compliance_forms` carries
+   * no information (P4-1).
+   *
+   * Optional so every existing consumer of this DTO keeps compiling and keeps
+   * its present behaviour; the surfaces that state the absence as fact read it.
+   */
+  compliance_forms_checked?: boolean;
   feature_flags: { resolved: ReturnType<typeof resolveAppointmentsFeatureFlags> };
 
   // ── Sections added by P2-4's completion ─────────────────────────────────
@@ -565,6 +573,14 @@ export async function buildBookingDetailDto(
       : null,
   };
 
+  // Bound before the object so the OUTCOME survives, not just the rows: an
+  // empty list from a failed query must not read as "nothing to complete".
+  const complianceForms = await loadOutstandingBookingFormsChecked(
+    supabase,
+    booking.venue_id,
+    booking.id,
+  );
+
   return {
     booking_id: booking.id,
     venue_id: booking.venue_id,
@@ -614,7 +630,8 @@ export async function buildBookingDetailDto(
           purpose: 'manage',
         })
       : null,
-    compliance_forms: await loadOutstandingBookingFormLinks(supabase, booking.venue_id, booking.id),
+    compliance_forms: complianceForms.forms,
+    compliance_forms_checked: complianceForms.ok,
     feature_flags: { resolved: featureFlagsResolved },
     location: { type: locationType, address: locationAddress, map_url: mapUrl },
     notes,

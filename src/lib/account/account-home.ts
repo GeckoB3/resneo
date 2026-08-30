@@ -7,7 +7,7 @@ import {
 } from '@/lib/account/account-bookings';
 import { buildVenueHistory, type AccountVenueHistory } from './venue-history';
 import { isUpcomingBooking, accountBookingStartMs } from '@/lib/account/account-booking-filters';
-import { loadOutstandingBookingFormLinks } from '@/lib/compliance/form-links-service';
+import { loadOutstandingBookingFormsChecked } from '@/lib/compliance/form-links-service';
 
 /**
  * Everything the account hub renders, in one loader (P1-1, AD5).
@@ -68,6 +68,14 @@ export interface AccountHomeData {
   next_booking: AccountBookingRow | null;
   /** Forms still to complete for that booking. Empty when there is none. */
   next_booking_form_links: Array<{ name: string; url: string }>;
+  /**
+   * FALSE when the forms lookup failed, so an empty list means nothing (P4-1).
+   *
+   * The portal must not turn a failed query into "you have nothing to do".
+   * A customer who is told that, and who actually has an unsigned waiver,
+   * finds out at the door.
+   */
+  next_booking_forms_checked: boolean;
   /** Service and practitioner for `next_booking`, when it is an appointment. */
   next_booking_appointment: AccountHomeAppointmentLabel;
   /** How many bookings are still to come, including `next_booking`. */
@@ -122,6 +130,7 @@ export function emptyAccountHome(): AccountHomeData {
   return {
     next_booking: null,
     next_booking_form_links: [],
+    next_booking_forms_checked: true,
     next_booking_appointment: { service: null, practitioner: null },
     upcoming_count: 0,
     upcoming_after_next: [],
@@ -161,12 +170,16 @@ export async function loadAccountHome(
 
   // Only for the one booking shown. Loading them for all 100 would be the N+1
   // this loader exists to avoid, and the hub shows one.
-  const [formLinks, appointment] = nextBooking
+  const [formsLookup, appointment] = nextBooking
     ? await Promise.all([
-        loadOutstandingBookingFormLinks(admin, nextBooking.venue_id, nextBooking.id),
+        loadOutstandingBookingFormsChecked(admin, nextBooking.venue_id, nextBooking.id),
         loadAppointmentLabel(admin, nextBooking),
       ])
-    : [[], { service: null, practitioner: null } as AccountHomeAppointmentLabel];
+    : [
+        // No booking means nothing to check, which is a genuine "checked".
+        { ok: true, forms: [] },
+        { service: null, practitioner: null } as AccountHomeAppointmentLabel,
+      ];
 
   // Venues the customer has actually booked with, deduplicated, name-sorted.
   const venueById = new Map<string, AccountVenueRow>();
@@ -178,7 +191,8 @@ export async function loadAccountHome(
 
   return {
     next_booking: nextBooking,
-    next_booking_form_links: formLinks,
+    next_booking_form_links: formsLookup.forms,
+    next_booking_forms_checked: formsLookup.ok,
     next_booking_appointment: appointment,
     upcoming_count: upcoming.length,
     upcoming_after_next: upcoming.slice(1, 1 + UPCOMING_LIST_LIMIT),

@@ -191,6 +191,7 @@ export default async function AccountHomePage() {
           booking={home.next_booking}
           appointment={home.next_booking_appointment}
           formLinks={home.next_booking_form_links}
+          formsChecked={home.next_booking_forms_checked}
           profileTz={profileTz}
         />
       ) : (

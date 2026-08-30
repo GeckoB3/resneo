@@ -732,6 +732,23 @@ export function GuestBookingDetailView({
             </div>
           )}
 
+          {/*
+            A failed lookup is said out loud rather than shown as silence
+            (P4-1). Rendering nothing tells the customer they have nothing to
+            sign, and if that is wrong they are turned away at the door.
+          */}
+          {details.compliance_forms_checked === false &&
+            (details.compliance_forms?.length ?? 0) === 0 && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" role="alert">
+                <p className="font-semibold text-slate-900">
+                  We could not check for forms to complete
+                </p>
+                <p className="mt-1 text-slate-600">
+                  Please refresh, or contact the venue if you were expecting one to sign.
+                </p>
+              </div>
+            )}
+
           {details.compliance_forms && details.compliance_forms.length > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
               <p className="font-semibold text-amber-900">Forms to complete before your visit</p>

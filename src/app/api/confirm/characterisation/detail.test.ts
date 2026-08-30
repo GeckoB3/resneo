@@ -85,6 +85,19 @@ vi.mock('@/lib/compliance/form-links-service', () => ({
     hoisted.log!.record('form-links-service', 'loadOutstandingBookingFormLinks')(args[1], args[2]);
     return Promise.resolve([{ name: 'Consultation form', url: 'https://forms.test/1' }]);
   },
+  /*
+    The DTO reads through the CHECKED variant now (P4-1), which reports whether
+    the lookup worked so an empty list cannot be shown as "nothing to
+    complete". Recorded under its own name: this log exists to notice that the
+    call changed, so quietly aliasing it to the old name would defeat the gate.
+  */
+  loadOutstandingBookingFormsChecked: (...args: unknown[]) => {
+    hoisted.log!.record('form-links-service', 'loadOutstandingBookingFormsChecked')(args[1], args[2]);
+    return Promise.resolve({
+      ok: true,
+      forms: [{ name: 'Consultation form', url: 'https://forms.test/1' }],
+    });
+  },
 }));
 
 /** The venue row the payload reads name, address, rules and flags from. */

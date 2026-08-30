@@ -304,6 +304,79 @@ export default async function AccountHomePage() {
         </section>
       ) : null}
 
+      {home.venue_history.length > 0 ? (
+        <section aria-labelledby="account-venues-heading">
+          <h2 id="account-venues-heading" className="text-sm font-semibold text-slate-900">
+            Your venues
+          </h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Everywhere you have booked, most recent first.
+          </p>
+          <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+            {home.venue_history.map((v) => (
+              <li
+                key={v.venue.id}
+                className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm shadow-slate-900/5"
+              >
+                <p className="font-semibold text-slate-900">{v.venue.name}</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {v.visits === 1 ? '1 booking' : `${v.visits} bookings`}
+                  {v.first_booked_at ? ` since ${formatVenueHistoryDate(v.first_booked_at)}` : ''}
+                </p>
+                {/*
+                  "Deposits paid", never "spent". `total_spent_minor` sums paid
+                  deposits only and excludes the whole payments ledger, so a
+                  customer who paid in full would see the deposit and conclude
+                  the portal had lost the rest. Shown only when there is one:
+                  a zero on every venue that takes no deposit is noise.
+                */}
+                {v.deposits_paid_minor > 0 ? (
+                  <p className="mt-0.5 text-sm text-slate-600">
+                    {formatPence(v.deposits_paid_minor)} in deposits paid
+                  </p>
+                ) : null}
+                <p className="mt-2 text-sm text-slate-700">
+                  {v.next_booking
+                    ? `Next: ${formatVenueHistoryDate(v.next_booking.starts_at)}`
+                    : 'Nothing booked at the moment'}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-3 text-sm font-medium">
+                  {v.next_booking ? (
+                    <Link
+                      href={`/account/bookings/${v.next_booking.id}`}
+                      className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2"
+                    >
+                      View booking
+                    </Link>
+                  ) : null}
+                  {v.rebook_href ? (
+                    <Link
+                      href={v.rebook_href}
+                      className="inline-flex min-h-6 items-center text-brand-700 underline underline-offset-2"
+                    >
+                      Book again
+                    </Link>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {home.venue_history_hidden > 0 ? (
+            <p className="mt-3 text-xs text-slate-500">
+              {home.venue_history_hidden === 1
+                ? 'One more venue is not shown here.'
+                : `${home.venue_history_hidden} more venues are not shown here.`}{' '}
+              <Link
+                href="/account/bookings"
+                className="inline-flex min-h-6 items-center font-medium text-brand-700 underline underline-offset-2"
+              >
+                See all bookings
+              </Link>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section aria-labelledby="account-shortcuts-heading">
         <h2 id="account-shortcuts-heading" className="sr-only">
           Account shortcuts
@@ -336,4 +409,15 @@ export default async function AccountHomePage() {
       </section>
     </div>
   );
+}
+
+/** Short, unambiguous, and the same shape in every venue card. */
+function formatVenueHistoryDate(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return 'a date we could not read';
+  return new Date(ms).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }

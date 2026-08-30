@@ -1,9 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   loadAccountBookings,
+  loadAccountSafeGuests,
   type AccountBookingRow,
   type AccountVenueRow,
 } from '@/lib/account/account-bookings';
+import { buildVenueHistory, type AccountVenueHistory } from './venue-history';
 import { isUpcomingBooking, accountBookingStartMs } from '@/lib/account/account-booking-filters';
 import { loadOutstandingBookingFormLinks } from '@/lib/compliance/form-links-service';
 
@@ -92,6 +94,16 @@ export interface AccountHomeData {
   outstanding_payments: AccountBookingRow[];
   /** Every venue the customer has booked with, by name. */
   venues: AccountVenueRow[];
+  /**
+   * One entry per venue relationship, most recently booked first (P3-2).
+   *
+   * Separate from `venues` because that is a name lookup and this is a
+   * history: visits, when it started, when it last happened, and what to do
+   * next. Bounded, like everything else on this hub.
+   */
+  venue_history: AccountVenueHistory[];
+  /** Relationships beyond the ones listed, so the count is never silently cut. */
+  venue_history_hidden: number;
   credits: AccountHomeCreditSummary;
   memberships: AccountHomeMembershipSummary;
 }
@@ -115,6 +127,8 @@ export function emptyAccountHome(): AccountHomeData {
     upcoming_after_next: [],
     outstanding_payments: [],
     venues: [],
+    venue_history: [],
+    venue_history_hidden: 0,
     credits: { total_remaining: 0, venue_count: 0, next_expiry: null },
     memberships: { active_count: 0, cancelling_count: 0 },
   };
@@ -127,10 +141,13 @@ export async function loadAccountHome(
 ): Promise<AccountHomeData> {
   // Bookings come through `bookings_account_safe` on the SESSION client, and
   // already arrive hydrated and bounded (P0-6, P0-3).
-  const [bookings, credits, memberships] = await Promise.all([
+  const [bookings, credits, memberships, guests] = await Promise.all([
     loadAccountBookings(supabase, admin, 100),
     loadCreditSummary(admin, supabase),
     loadMembershipSummary(admin, supabase),
+    // The venue history's counts come from here, not from `bookings`, which is
+    // capped at 100 (see `buildVenueHistory`).
+    loadAccountSafeGuests(supabase),
   ]);
 
   // "Next" is derived from a real instant, never from a date string (P0-2).
@@ -157,6 +174,8 @@ export async function loadAccountHome(
     if (b.venue && !venueById.has(b.venue.id)) venueById.set(b.venue.id, b.venue);
   }
 
+  const allVenueHistory = buildVenueHistory(guests, [...venueById.values()], bookings, nowMs);
+
   return {
     next_booking: nextBooking,
     next_booking_form_links: formLinks,
@@ -165,10 +184,22 @@ export async function loadAccountHome(
     upcoming_after_next: upcoming.slice(1, 1 + UPCOMING_LIST_LIMIT),
     outstanding_payments: upcoming.filter(hasOutstandingBalance),
     venues: [...venueById.values()].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    venue_history: allVenueHistory.slice(0, VENUE_HISTORY_LIMIT),
+    venue_history_hidden: Math.max(0, allVenueHistory.length - VENUE_HISTORY_LIMIT),
     credits,
     memberships,
   };
 }
+
+/**
+ * How many venue cards the hub shows.
+ *
+ * A customer who books everywhere would otherwise turn the hub into a
+ * directory of their own history. The remainder is COUNTED and said out loud
+ * rather than dropped, because a list that silently stops is one a customer
+ * cannot tell from a complete one.
+ */
+const VENUE_HISTORY_LIMIT = 6;
 
 /** How many bookings the hub lists under the card before deferring to the page. */
 const UPCOMING_LIST_LIMIT = 4;

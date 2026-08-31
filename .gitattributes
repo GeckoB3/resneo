@@ -1,0 +1,12 @@
+# Vitest writes snapshot files with LF. On Windows `core.autocrlf=true` checks
+# them out with CRLF, so the moment a test run rewrites one, the size the index
+# cached (one byte per line larger) stops matching the file on disk and
+# `git status` reports it modified forever after. The content is identical:
+# `git diff` shows nothing, and the hashes of the index, the worktree and HEAD
+# all agree, so the phantom cannot be committed. It just makes `git status`
+# lie, which cost two `git restore`s on 2026-08-31 before it was pinned down.
+#
+# Checking them out as LF is what vitest is going to write anyway, so the
+# cached stat stays valid and the flip-flop ends. The blobs are already LF, so
+# this renormalises nothing.
+*.snap text eol=lf

@@ -11,6 +11,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const hoisted = vi.hoisted(() => ({
   bookingGuestId: 'guest-1' as string | null,
   guestUserId: 'user-1' as string | null,
+  /** Rows the address lookup returns, as `guests` would for (venue, email). */
+  guestsByEmail: [] as Array<{ user_id: string | null }>,
+  /** Filters the guest lookup applied, so the venue scoping is assertable. */
+  guestFilters: {} as Record<string, unknown>,
   prefs: {} as Record<string, unknown>,
   devices: [{ push_token: 'ExponentPushToken[customer]' }] as Array<{ push_token: string | null }>,
   /** Filters the device SELECT applied, so the audience scoping is assertable. */
@@ -34,11 +38,24 @@ vi.mock('@/lib/supabase', () => ({
         };
       }
       if (table === 'guests') {
-        return {
-          select: () => ({
-            eq: () => ({ maybeSingle: async () => ({ data: { user_id: hoisted.guestUserId } }) }),
-          }),
+        /*
+          Two shapes, because the sender has two ways in. By booking it reads
+          one guest by id and takes `maybeSingle`. By address it filters
+          venue AND email and takes the rows, which is the query the venue
+          scoping lives in, so the mock records those filters rather than
+          ignoring them.
+        */
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: (col: string, val: unknown) => {
+            hoisted.guestFilters[col] = val;
+            return chain;
+          },
+          maybeSingle: async () => ({ data: { user_id: hoisted.guestUserId } }),
+          then: (resolve: (v: unknown) => unknown) =>
+            resolve({ data: hoisted.guestsByEmail, error: null }),
         };
+        return chain;
       }
       if (table === 'user_devices') {
         const chain: Record<string, unknown> = {
@@ -93,6 +110,8 @@ async function send(event: 'reminder' | 'booking_changed' | 'waitlist_offer' = '
 beforeEach(() => {
   hoisted.bookingGuestId = 'guest-1';
   hoisted.guestUserId = 'user-1';
+  hoisted.guestsByEmail = [{ user_id: 'user-1' }];
+  hoisted.guestFilters = {};
   hoisted.prefs = {};
   hoisted.devices = [{ push_token: 'ExponentPushToken[customer]' }];
   hoisted.deviceFilters = {};
@@ -150,6 +169,81 @@ describe('who gets nothing', () => {
   it('an account with no customer device registered', async () => {
     hoisted.devices = [];
     expect(await send()).toEqual({ sent: false, reason: 'no_tokens' });
+  });
+});
+
+describe('reaching a waitlist joiner, who has no booking', () => {
+  /**
+   * The address path exists because `waitlist_entries` stores no id for the
+   * person: an entry is made before there is a booking, often by somebody with
+   * no account. So the only key is the address they typed, and a typed address
+   * is not proof of anything, which is what the venue scoping is for.
+   */
+  async function sendWaitlist(email: string | null = 'cass@example.com') {
+    const { sendCustomerPush } = await import('./customer-push-notification');
+    return sendCustomerPush({
+      venueId: 'venue-1',
+      guestEmail: email,
+      bookingPageUrl: 'https://www.resneo.com/book/the-studio',
+      event: 'waitlist_offer',
+      body: 'A place has come up at The Studio.',
+    });
+  }
+
+  it('reaches a claimed account at that venue', async () => {
+    expect(await sendWaitlist()).toEqual({ sent: true, reason: undefined });
+  });
+
+  it('looks the address up AT THAT VENUE, never across ResNeo', async () => {
+    /*
+      The security property of this path. Without the venue filter, typing a
+      stranger's address into any venue's waitlist form would push to their
+      phone. With it, the reach of a typed address is bounded by a relationship
+      that venue already has, and is already emailing about this same offer.
+    */
+    await sendWaitlist();
+    expect(hoisted.guestFilters.venue_id).toBe('venue-1');
+    expect(hoisted.guestFilters.email).toBe('cass@example.com');
+  });
+
+  it('normalises the address the way the join routes store it', async () => {
+    await sendWaitlist('  Cass@Example.COM ');
+    expect(hoisted.guestFilters.email).toBe('cass@example.com');
+  });
+
+  it('says no_guest for an address this venue does not know', async () => {
+    hoisted.guestsByEmail = [];
+    expect(await sendWaitlist()).toEqual({ sent: false, reason: 'no_guest' });
+  });
+
+  it('says no_account for one it knows who has never signed in', async () => {
+    // A different silence from the one above, and the reason both are logged:
+    // this customer becomes reachable the day they make an account.
+    hoisted.guestsByEmail = [{ user_id: null }];
+    expect(await sendWaitlist()).toEqual({ sent: false, reason: 'no_account' });
+  });
+
+  it('takes the claimed row when the venue holds several for one address', async () => {
+    hoisted.guestsByEmail = [{ user_id: null }, { user_id: 'user-9' }];
+    expect(await sendWaitlist()).toEqual({ sent: true, reason: undefined });
+    expect(hoisted.deviceFilters.user_id).toBe('user-9');
+  });
+
+  it('sends nothing at all when the entry has no address', async () => {
+    expect(await sendWaitlist(null)).toEqual({ sent: false, reason: 'no_guest' });
+  });
+
+  it('carries no booking_id, since a tap has no booking to open', async () => {
+    // A fabricated id would route the tap to a 404. The venue and the booking
+    // page are what the offer email already points at.
+    await sendWaitlist();
+    const data = hoisted.sentMessage?.data as Record<string, unknown>;
+    expect(data.booking_id, 'absent, not null, so a client can test for it').toBeUndefined();
+    expect(data).toMatchObject({
+      type: 'waitlist_offer',
+      venue_id: 'venue-1',
+      url: 'https://www.resneo.com/book/the-studio',
+    });
   });
 });
 

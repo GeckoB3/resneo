@@ -27,6 +27,8 @@ import {
 import type { BookingModel } from '@/types/booking-models';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { sendCustomerPush } from '@/lib/communications/customer-push-notification';
+import { reminderPushBody } from '@/lib/communications/customer-push-body';
 import {
   CRON_COMMS_TOLERANCE_MS,
   bookingCivilDatesForPostVisitWindow,
@@ -433,6 +435,40 @@ async function sendPreVisitReminders(results: {
               mode: 'dedupe',
             });
             sentAny = sentAny || sms.sent;
+          }
+
+          /*
+            The customer's own push (P5-2), after the email and SMS.
+
+            NOT counted in `day_of_reminders`, and not gated on `sentAny`. The
+            counter is what the cron reports as work done, and a push is a
+            courtesy on top of the message that carries the obligation; letting
+            it inflate the count would make a run where every email failed look
+            like a run that worked. Nor is it gated on the email having gone:
+            `sendCustomerPush` consults the customer's own preference matrix,
+            which is a different question from the venue's channel policy above.
+          */
+          const push = await sendCustomerPush({
+            bookingId: bookingRow.id,
+            // `BOOKING_SELECT` already fetched it, and passing it saves the
+            // sender a booking read per reminder. The only optimisation here
+            // worth making, on the one call site that runs in a loop.
+            guestId: bookingRow.guest_id,
+            event: 'reminder',
+            body: reminderPushBody({
+              venueName: venueData.name,
+              bookingDate: booking.booking_date,
+              bookingTime: booking.booking_time,
+            }),
+          });
+          if (!push.sent) {
+            // Expected to be `no_tokens` everywhere until a customer build
+            // registers a device with `audience: 'customer'`. Logged so that
+            // state is distinguishable from suppressing these by mistake.
+            console.log('[customer-push] reminder not sent', {
+              bookingId: bookingRow.id,
+              reason: push.reason,
+            });
           }
 
           if (sentAny) results.day_of_reminders++;

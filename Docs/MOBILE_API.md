@@ -169,7 +169,8 @@ returns 404 rather than 403, so a stranger learns nothing from a guessed id.
 | GET | `/api/v1/me/bookings/[id]/reschedule-options` | Whether this booking can be moved and what a move would need. Returns **no slots**: the availability call is separate |
 | POST | `/api/v1/me/bookings/[id]/reschedule` | Move it. Body keys are read by name, not forwarded wholesale; ask `reschedule-options` first rather than guessing and getting a 400 |
 | POST | `/api/v1/me/bookings/[id]/confirm` | Confirm attendance, the action the "please confirm you are coming" email asks for. Idempotent, so a double tap is not an error |
-| GET | `/api/v1/me/venues` | One row per venue the customer is known at: names, first and last booked, counts, marketing consent |
+| GET | `/api/v1/me/venues` | One row per venue the customer is known at: `guest_id`, names, first and last booked, counts, marketing consent |
+| PATCH | `/api/account/marketing-preferences` | Turn one venue's offers on or off. Takes the `guest_id` from `/api/v1/me/venues`; unversioned because it predates this surface (C7b) |
 | GET | `/api/v1/me/payments` | Settled payments. `?booking_id=` narrows to one |
 | GET | `/api/v1/me/waitlist` | Waitlist places |
 | DELETE | `/api/v1/me/waitlist/[id]` | Leave one. 409 when it is already gone |
@@ -191,12 +192,24 @@ on `code`, never on the human sentence in `error`, which is copy and will change
 
 ## Deep links: the `resneo://` route map (P5-3)
 
-**`resneo://` is the only deep-link entry point today.** There are no universal
-or app links: `ios.associatedDomains` and the Android `https` intent filter were
-removed on 2026-08-09 because the association files were never served, and a
-FAILED Android verification is worse than none, since the app stops being
-offered as a handler at all. Restoring them needs the Apple Team ID, the Play
-app-signing certificate SHA-256 and a settled domain (F7).
+**`resneo://` is still the only deep-link entry point in the SHIPPED app, but
+the web half is now in place.** `ios.associatedDomains` and the Android `https`
+intent filter were removed on 2026-08-09 because the association files were
+never served, and a FAILED Android verification is worse than none, since the
+app stops being offered as a handler at all.
+
+Since 2026-08-31 this repo serves both, as route handlers under
+`src/app/.well-known/` (C12): `/.well-known/apple-app-site-association` and
+`/.well-known/assetlinks.json`, each 200, `application/json`, no redirect,
+middleware excluded. **On `www.resneo.com` only.** The apex 307s to www, and a
+verifier does not follow a redirect, so the app must declare www and only www;
+if the apex is ever added it has to serve these files directly.
+
+The AASA claims five portal paths and **excludes the rest of `/account`**,
+because the app has no screen for them. A portal route the app also gains has
+to be added to the AASA and to the app's `+native-intent.tsx` translation
+together. Restoring `app.json` and shipping a build is the app repo's step, and
+comes after verifying these files against the deployed site, not before.
 
 **Every https link in an email therefore opens a browser.** That is the current
 behaviour, and for customers it is the only possible one, because the shipped

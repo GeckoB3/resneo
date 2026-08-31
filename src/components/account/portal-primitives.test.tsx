@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { AccountCoursesSection } from './AccountCoursesSection';
 import { AccountCreditsSection } from './AccountCreditsSection';
@@ -29,6 +29,22 @@ import { AccountSecuritySection } from './AccountSecuritySection';
  * this guard all along, which is what made the gap a regression rather than a
  * feature.
  */
+
+/**
+ * Every section here paints in two steps: a GET resolves and the shell
+ * renders, then a choice or a second GET resolves and the controls appear.
+ * Testing Library gives an async assertion 1000ms by default, and on a loaded
+ * CI runner that ran out between those two steps: `payment methods` failed
+ * with a bare "Unable to find role=button", the DOM dump showing the venue
+ * `<select>` and nothing else, on a commit that touched none of this.
+ *
+ * `findBy*` is NOT the answer, though it reads like it: it wraps `waitFor`
+ * with this same budget, so it would have bought a better error message and
+ * the same flake. Every async utility in the file gets the longer budget
+ * instead. A passing run does not wait any longer for it; only a failing one
+ * takes 5s to say so.
+ */
+configure({ asyncUtilTimeout: 5000 });
 
 const searchParams = { current: new URLSearchParams() };
 vi.mock('next/navigation', () => ({
@@ -96,6 +112,16 @@ const CATALOG_VENUES = [{ id: 'v1', name: 'The Wharf' }];
  */
 async function selectPaymentVenue() {
   const select = await screen.findByRole('combobox');
+  /*
+    The OPTION has to exist before the change, not just the select. The venues
+    arrive with the first GET, and when that resolves a beat after the shell
+    paints, this fired at a select holding only "Select…": React drops a value
+    the select does not have, no venue is ever chosen, and the section waits
+    for a card list it will never ask for. Locally the two land in one commit
+    and it never showed; slow the GET down and it fails every time, past any
+    timeout, which is why the budget above is not on its own enough.
+  */
+  await screen.findByRole('option', { name: CATALOG_VENUES[0].name });
   fireEvent.change(select, { target: { value: 'v1' } });
 }
 

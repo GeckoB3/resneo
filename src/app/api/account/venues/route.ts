@@ -35,6 +35,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         venues: relationships.map((r) => ({
+          /*
+            The id of the RELATIONSHIP, which is what makes the marketing
+            consent below writable rather than only readable.
+
+            `PATCH /api/account/marketing-preferences` identifies a venue
+            relationship by `guest_id`, and this route was the only way a
+            native client could learn one. Without it the app could show a
+            customer which venues may email them and then had to send them to
+            the website to change it, which is a poor answer to "stop emailing
+            me". The web page never noticed because it reads the guest rows
+            server-side and already holds the ids.
+
+            Safe to publish: `guests_account_safe` is `WHERE user_id =
+            auth.uid()`, so these are the caller's own rows, and the PATCH
+            route re-checks ownership by `user_id` before it writes. This hands
+            out an id the caller could already act on, not a new capability.
+          */
+          guest_id: r.id,
           venue_id: r.venue_id,
           venue_name: names.get(r.venue_id) ?? null,
           first_booked_at: r.first_booked_at,

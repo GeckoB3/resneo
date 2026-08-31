@@ -9,6 +9,8 @@ import {
 } from '@/lib/communications/send-appointment-waitlist-offer';
 import { formatWaitlistTimeWindowLabel } from '@/lib/booking/waitlist-time-window';
 import { ensureWaitlistOfferCommunicationPolicyForVenue } from '@/lib/communications/policies';
+import { sendCustomerPush } from '@/lib/communications/customer-push-notification';
+import { waitlistOfferPushBody } from '@/lib/communications/customer-push-body';
 
 export interface AppointmentWaitlistOfferEntryNotifyRow {
   waitlistEntryId?: string;
@@ -79,9 +81,10 @@ export async function notifyAppointmentWaitlistOfferForEntry(
     ? `${bookingBase}/book/${encodeURIComponent(venueSlug)}`
     : null;
 
-  return sendAppointmentWaitlistOfferNotification({
+  const venueName = String(venueRow.name ?? 'Venue');
+  const notified = await sendAppointmentWaitlistOfferNotification({
     venueId,
-    venueName: String(venueRow.name ?? 'Venue'),
+    venueName,
     venueLogoUrl: typeof venueRow.logo_url === 'string' ? venueRow.logo_url : null,
     venueAddress: typeof venueRow.address === 'string' ? venueRow.address : null,
     venuePhone: typeof venueRow.phone === 'string' ? venueRow.phone : null,
@@ -94,4 +97,39 @@ export async function notifyAppointmentWaitlistOfferForEntry(
     desiredTimeHm,
     expiresAtIso,
   });
+
+  /*
+    The customer's own push (P5-2), after the email and SMS that carry the
+    offer, and never instead of them.
+
+    Identified by ADDRESS, because a waitlist entry has nothing else: it
+    predates any booking and `waitlist_entries` stores no id for the person.
+    `sendCustomerPush` will only match a claimed account whose address is this
+    one AT THIS VENUE, so the reach of a typed address is bounded by an existing
+    relationship with the venue that is already emailing them.
+
+    Deliberately not gated on the email having sent. A customer who has turned
+    the venue's offer emails off, or who has no address on the entry, may still
+    have a device and their own preference for push, which `sendCustomerPush`
+    consults itself.
+  */
+  const push = await sendCustomerPush({
+    venueId,
+    guestEmail: entry.guest_email,
+    bookingPageUrl,
+    event: 'waitlist_offer',
+    body: waitlistOfferPushBody({ venueName }),
+  });
+  if (!push.sent) {
+    // `no_guest` is the ordinary answer here, not a fault: most people on a
+    // waitlist have no account at that venue. Logged with the reason so it
+    // stays distinguishable from `suppressed`, which would be a bug.
+    console.log('[customer-push] waitlist_offer not sent', {
+      venueId,
+      waitlistEntryId: entry.waitlistEntryId,
+      reason: push.reason,
+    });
+  }
+
+  return notified;
 }

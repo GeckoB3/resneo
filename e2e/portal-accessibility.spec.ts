@@ -91,15 +91,53 @@ test.describe('portal accessibility', () => {
     });
   }
 
+  /**
+   * The URL is NOT the signal that this page is ready to audit.
+   *
+   * A client-side hop updates the address bar before the tree swaps, and the
+   * outgoing `<title>` is removed in a separate DOM operation from the one
+   * that inserts the new one. Throttled to 12KB/s, five runs in six caught
+   * that gap: `location.pathname` was already the detail page, the document
+   * had no `<title>` at all, and `main` still held the bookings list. That is
+   * the intermittent `document-title` failure this test used to produce on
+   * CI, on commits that passed when re-run.
+   *
+   * The half that mattered more is the half that looked green. A moment later
+   * the same assertion audits `loading.tsx`'s skeleton, on which axe reports
+   * nothing, so the passes were vacuous: this never once audited the real
+   * page. It does now, and the audit immediately found five AA contrast
+   * failures in `DetailTile` that had been sitting behind the skeleton.
+   *
+   * `portal-copy.spec.ts`'s "an `<h1>` and no `role=status`" is not enough on
+   * its own here, and the same throttled run proves it: the address bar can
+   * hold the detail URL while the DOM is still the bookings LIST, whose `<h1>`
+   * is present and whose skeleton is long gone, so those two waits pass and
+   * axe audits the page it navigated away from. Only something the detail view
+   * alone renders settles it, and `detail-time` is the tile the reschedule
+   * specs already use for exactly this.
+   */
   test('the booking detail page has no A or AA violations', async ({ page }) => {
     await page.goto('/account/bookings');
     await page.getByRole('link', { name: 'Details' }).first().click();
     await expect(page).toHaveURL(/\/account\/bookings\/[0-9a-f-]{36}/);
+    await expect(
+      page.getByTestId('detail-time'),
+      'the booking detail view never rendered; axe would audit the list or the skeleton',
+    ).toBeVisible();
+    await expect(page.locator('main [role="status"]')).toHaveCount(0);
+
+    // WCAG 2.4.2 for this page. The route test below covers only the four
+    // routes reachable without an id, so without this the detail page's own
+    // title is asserted nowhere.
+    await expect(page).toHaveTitle(/Booking details/);
 
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    expect(
+      results.violations.map((v) => `${v.id} (${v.nodes.length}): ${v.help}`),
+      'axe found WCAG A/AA violations on the booking detail page',
+    ).toEqual([]);
   });
 
   test('each surviving route has its own page title (WCAG 2.4.2)', async ({ page }) => {

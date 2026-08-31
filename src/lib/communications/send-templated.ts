@@ -11,6 +11,8 @@ import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { BookingModel } from '@/types/booking-models';
 import { sendOwnerBookingNotification } from './owner-booking-notification';
 import { sendStaffPush } from './staff-push-notification';
+import { sendCustomerPush } from './customer-push-notification';
+import { bookingChangedPushBody } from './customer-push-body';
 import { sendPolicyMessage } from './outbound';
 import { resolveAccountEntryLink } from '@/lib/emails/account-entry-link';
 import { deliverEmailMessage } from './delivery';
@@ -319,6 +321,41 @@ export async function sendDepositConfirmationEmail(
 }
 
 /**
+ * The customer's own push about their own booking (P5-2), sent AFTER the email
+ * and SMS above.
+ *
+ * Ordering is habit rather than necessity, since `sendCustomerPush` cannot
+ * throw, but it keeps the guarantee the right way round: the message a customer
+ * relies on is never at the mercy of a courtesy sent on top of it.
+ *
+ * No preference check here, and no try/catch. `sendCustomerPush` consults P4-3's
+ * matrix itself, and a second copy of that rule outside it is a copy that can
+ * drift. It fails soft in every direction and returns a reason instead of
+ * throwing.
+ *
+ * **Reaching nobody is the expected state today, not a fault.** Every
+ * `user_devices` row is `audience = 'staff'`, because the shipped build sends no
+ * audience and the column defaults, so this returns `no_tokens` until a customer
+ * installs a build that registers as one. The reason is logged precisely so that
+ * "nobody has a customer device yet" and "we are suppressing these by mistake"
+ * do not look identical from the outside.
+ */
+async function pushCustomer(
+  bookingId: string,
+  kind: 'modified' | 'cancelled',
+  venueName: string | null | undefined,
+): Promise<void> {
+  const result = await sendCustomerPush({
+    bookingId,
+    event: 'booking_changed',
+    body: bookingChangedPushBody({ venueName, kind }),
+  });
+  if (!result.sent) {
+    console.log('[customer-push] booking_changed not sent', { bookingId, kind, reason: result.reason });
+  }
+}
+
+/**
  * Send booking modification notification email and/or SMS based on venue settings.
  * No dedup - the same booking can be modified multiple times.
  */
@@ -346,6 +383,7 @@ export async function sendBookingModificationNotification(
     }),
   ]);
   await sendStaffPush(booking, venue, venueId, 'reschedule');
+  await pushCustomer(booking.id, 'modified', venue.name);
   return { email, sms };
 }
 
@@ -383,6 +421,7 @@ export async function sendCancellationNotification(
     }),
   ]);
   await sendStaffPush(booking, venue, venueId, 'cancellation');
+  await pushCustomer(booking.id, 'cancelled', venue.name);
   return { email, sms };
 }
 

@@ -39,7 +39,20 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: process.env.CI ? [['github'], ['list']] : [['list']],
+  /**
+   * `html` on CI is what makes the workflow's upload step mean anything.
+   *
+   * That step has always pointed at `playwright-report/`, and nothing wrote
+   * one: without this reporter the directory never exists, `upload-artifact`
+   * shrugs, and a failed run offers a stack trace and no way to see the page
+   * it failed on. The intermittent `document-title` failure was diagnosed by
+   * reproducing it locally, because its screenshot, video and trace had all
+   * been discarded at the end of the run that produced them.
+   *
+   * `open: 'never'` so a failing run does not try to launch a browser on the
+   * runner and hang the job.
+   */
+  reporter: process.env.CI ? [['github'], ['list'], ['html', { open: 'never' }]] : [['list']],
   timeout: 120_000,
   expect: { timeout: 20_000 },
   use: {

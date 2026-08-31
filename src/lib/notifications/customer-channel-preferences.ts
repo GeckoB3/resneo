@@ -1,6 +1,24 @@
 import type { CommunicationMessageKey } from '@/lib/communications/policies';
 import type { PreferenceBag } from './notification-preferences';
 
+/**
+ * STATUS: NO CUSTOMER-FACING SWITCH READS THIS TODAY.
+ *
+ * `/account/profile` briefly rendered five of these pairs. The section was
+ * withdrawn because only `communicationService.send` ever consulted the
+ * result, and the messages a customer would want to silence (the reminders,
+ * a change, a cancellation, the post-visit marketing email) all reach them
+ * through `sendPolicyMessage` directly and never passed through it. See the
+ * long note at the foot of `lib/communications/service.ts`.
+ *
+ * What a customer receives about a booking is therefore the venue's own
+ * communication settings. This module is kept because `sendCustomerPush`
+ * consults it, and because the DECISION it encodes (which messages may be
+ * silenced at all, and on which channel) is the part that was right and
+ * should not have to be rediscovered. Restoring the UI means moving the check
+ * into `sendPolicyMessage` FIRST, then rendering the switches.
+ */
+
 export type NotificationCategory = 'reminders' | 'changes' | 'marketing';
 export type NotificationChannel = 'email' | 'sms' | 'push';
 
@@ -58,7 +76,8 @@ export const MESSAGE_CATEGORY: Record<CommunicationMessageKey, NotificationCateg
 };
 
 /**
- * The pairs a customer is actually allowed to control.
+ * The pairs a customer would be allowed to control, and the ONLY ones any
+ * future switch may offer.
  *
  * **`changes` over email is deliberately absent**, and that is the floor this
  * whole feature rests on. A cancellation or a moved appointment must leave a
@@ -133,24 +152,4 @@ export function customerAllowsMessageOnChannel(
     return prefs.marketing_email === true;
   }
   return true;
-}
-
-/**
- * The matrix as the profile page should render it: every controllable pair
- * with its effective value, so the UI never has to repeat these defaults.
- */
-export function readChannelMatrix(
-  prefs: PreferenceBag,
-): Array<{ category: NotificationCategory; channel: NotificationChannel; enabled: boolean }> {
-  return CONTROLLABLE.map((pair) => {
-    const [category, channel] = pair.split(':') as [NotificationCategory, NotificationChannel];
-    const stored = prefs[preferenceKey(category, channel)];
-    const enabled =
-      typeof stored === 'boolean'
-        ? stored
-        : category === 'marketing'
-          ? prefs.marketing_email === true
-          : true;
-    return { category, channel, enabled };
-  });
 }

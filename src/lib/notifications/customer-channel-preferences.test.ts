@@ -11,7 +11,6 @@ import {
   customerAllowsMessageOnChannel,
   isControllable,
   preferenceKey,
-  readChannelMatrix,
 } from './customer-channel-preferences';
 
 describe('what may never be switched off', () => {
@@ -156,31 +155,7 @@ describe('marketing', () => {
   });
 });
 
-describe('the matrix the profile renders', () => {
-  it('offers exactly the controllable pairs, and not changes-by-email', () => {
-    const matrix = readChannelMatrix({});
-    const pairs = matrix.map((m) => `${m.category}:${m.channel}`);
-    expect(pairs).not.toContain('changes:email');
-    expect(pairs).toContain('reminders:sms');
-    expect(pairs).toContain('changes:sms');
-    expect(pairs).toContain('marketing:email');
-  });
-
-  it('shows transactional categories on and marketing off by default', () => {
-    const matrix = readChannelMatrix({});
-    for (const row of matrix) {
-      expect(row.enabled, `${row.category}:${row.channel}`).toBe(row.category !== 'marketing');
-    }
-  });
-
-  it('reflects what the customer actually stored', () => {
-    const matrix = readChannelMatrix({ reminders_sms: false, marketing_email: true });
-    const bySms = matrix.find((m) => m.category === 'reminders' && m.channel === 'sms');
-    const marketingEmail = matrix.find((m) => m.category === 'marketing' && m.channel === 'email');
-    expect(bySms?.enabled).toBe(false);
-    expect(marketingEmail?.enabled).toBe(true);
-  });
-
+describe('the key names the resolver reads', () => {
   it('names keys the way the resolver reads them', () => {
     // A mismatch here would save preferences nothing ever consults, which is
     // the bug G21 was: the toggle persisted and no send path read it.
@@ -192,5 +167,18 @@ describe('the matrix the profile renders', () => {
         'sms',
       ),
     ).toBe(false);
+  });
+
+  it('never lets a change be silenced by email', () => {
+    // The floor the whole module rests on, and the one rule that must survive
+    // the profile section being withdrawn: a crafted PATCH can still write
+    // `changes_email` into the jsonb column, and it must not be honoured.
+    expect(
+      customerAllowsMessageOnChannel(
+        { changes_email: false },
+        'cancellation_confirmation',
+        'email',
+      ),
+    ).toBe(true);
   });
 });

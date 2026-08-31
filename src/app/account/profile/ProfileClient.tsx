@@ -10,27 +10,6 @@ import {
   mergePreferenceNamespace,
   readPreferenceNamespace,
 } from '@/lib/notifications/notification-preferences';
-import {
-  readChannelMatrix,
-  preferenceKey,
-  type NotificationCategory,
-  type NotificationChannel,
-} from '@/lib/notifications/customer-channel-preferences';
-
-/**
- * One sentence per switch, in the customer's words.
- *
- * Written out rather than assembled from the category and channel names,
- * because "reminders sms" is not a sentence and a customer deciding whether to
- * silence something deserves to know what they will stop receiving.
- */
-const CHANNEL_LABELS: Record<string, string> = {
-  'reminders:email': 'Email reminders before your appointment, and when something needs doing.',
-  'reminders:sms': 'Text reminders before your appointment, and when something needs doing.',
-  'changes:sms': 'Text me when a booking is changed or cancelled. The email always comes.',
-  'marketing:email': 'Email offers and news from venues you have booked with.',
-  'marketing:sms': 'Text offers and news from venues you have booked with.',
-};
 import { useRouter } from 'next/navigation';
 
 type Profile = {
@@ -252,26 +231,6 @@ export function ProfileClient({
     }
   }
 
-  const channelMatrix = useMemo(
-    () => readChannelMatrix(readPreferenceNamespace(profile.notification_preferences, 'customer')),
-    [profile.notification_preferences],
-  );
-
-  function updateChannelPreference(
-    category: NotificationCategory,
-    channel: NotificationChannel,
-    value: boolean,
-  ) {
-    setProfile((p) => ({
-      ...p,
-      // Merged into the customer namespace, like every other preference here,
-      // so a dual-role user's staff push settings survive the save.
-      notification_preferences: mergePreferenceNamespace(p.notification_preferences, 'customer', {
-        [preferenceKey(category, channel)]: value,
-      }),
-    }));
-  }
-
   function updateNotificationPreference(key: 'operational_email' | 'marketing_email', value: boolean) {
     setProfile((p) => ({
       ...p,
@@ -360,33 +319,6 @@ export function ProfileClient({
         </div>
       </section>
 
-      <section className={sectionClass} aria-labelledby="booking-messages-heading">
-        <h2 id="booking-messages-heading" className="text-lg font-semibold text-slate-900">
-          Booking messages
-        </h2>
-        <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          How venues reach you about your bookings. Confirmations, payment requests and anything a
-          venue writes to you directly are always sent, and a cancellation or a change of time
-          always reaches you by email, so you keep a record of it.
-        </p>
-        <div className="mt-5 space-y-3 text-sm text-slate-700">
-          {channelMatrix.map((row) => (
-            <label
-              key={`${row.category}-${row.channel}`}
-              className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4"
-            >
-              <input
-                type="checkbox"
-                checked={row.enabled}
-                onChange={(e) => updateChannelPreference(row.category, row.channel, e.target.checked)}
-                className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-              />
-              <span>{CHANNEL_LABELS[`${row.category}:${row.channel}`]}</span>
-            </label>
-          ))}
-        </div>
-      </section>
-
       <section className={sectionClass}>
         <h2 className="text-lg font-semibold text-slate-900">Dates and sign-in</h2>
         {/*
@@ -468,10 +400,9 @@ export function ProfileClient({
         <h2 className="text-lg font-semibold text-slate-900">Notification preferences</h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
           These apply to email sent by{' '}
-          <span className="font-medium text-slate-800">ResNeo</span> about your account. Messages from
-          a venue about a specific booking are set under{' '}
-          <span className="font-medium text-slate-800">Booking messages</span> below, and promotions
-          from a particular venue under{' '}
+          <span className="font-medium text-slate-800">ResNeo</span> about your account. Messages
+          about a specific booking, such as confirmations, reminders and changes, are set by the
+          venue you booked with. Promotions from a particular venue are under{' '}
           <span className="font-medium text-slate-800">Venue marketing</span>.
         </p>
         <div className="mt-5 space-y-4 text-sm text-slate-700">

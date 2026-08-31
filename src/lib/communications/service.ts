@@ -6,6 +6,9 @@ import {
 } from '@/lib/emails/booking-email-enrichment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { sendPolicyMessage } from './outbound';
+import type { CommunicationMessageKey } from './policies';
+import { readCustomerPrefs } from '@/lib/notifications/customer-email-consent';
+import { customerAllowsMessageOnChannel } from '@/lib/notifications/customer-channel-preferences';
 import type { MessageType, Recipient, TemplateVariables } from './types';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
@@ -411,7 +414,25 @@ export class CommunicationService {
     if (recipient.email) channels.push('email');
     if (recipient.phone) channels.push('sms');
 
-    for (const channel of channels) {
+    /*
+      The customer's own per-category, per-channel preferences (P4-3).
+
+      Filtered HERE because this is the one place a channel is chosen, so a
+      preference honoured here is honoured for every message rather than for
+      the ones somebody remembered. The resolver decides what may be silenced
+      at all: confirmations, payment requests and anything a human wrote are
+      not suppressible, and a booking change always keeps its email.
+
+      Only for a LINKED guest, exactly as the marketing check above: a guest
+      with no account has no account-level preference to honour.
+    */
+    const allowedChannels = await filterChannelsForCustomer(
+      channels,
+      mapped.key,
+      ctx.guest_id ?? null,
+    );
+
+    for (const channel of allowedChannels) {
       await sendPolicyMessage({
         venueId: ctx.venue_id,
         booking: context.booking,
@@ -434,3 +455,55 @@ export class CommunicationService {
 }
 
 export const communicationService = new CommunicationService();
+
+/**
+ * Drop the channels this customer has switched off for this kind of message.
+ *
+ * Resolved per send rather than cached: preferences are changed rarely and
+ * read once per message, and a stale cache here means a customer who has just
+ * turned something off receives it anyway, which is the complaint the feature
+ * exists to answer.
+ *
+ * **Fails OPEN.** A read error returns the channels unchanged, matching
+ * `customer-email-consent`: silently stopping somebody's mail because a query
+ * failed is the one failure nobody reports.
+ */
+async function filterChannelsForCustomer(
+  channels: Array<'email' | 'sms'>,
+  messageKey: CommunicationMessageKey,
+  guestId: string | null,
+): Promise<Array<'email' | 'sms'>> {
+  if (!guestId || channels.length === 0) return channels;
+  try {
+    const admin = getSupabaseAdminClient();
+    const { data: guest } = await admin
+      .from('guests')
+      .select('user_id')
+      .eq('id', guestId)
+      .maybeSingle();
+    const userId = (guest as { user_id?: string | null } | null)?.user_id ?? null;
+    // No account means no account-level preference to honour.
+    if (!userId) return channels;
+
+    const prefs = await readCustomerPrefs(admin, userId);
+    return channels.filter((channel) =>
+      customerAllowsMessageOnChannel(prefs, messageKey, channel),
+    );
+  } catch (e) {
+    console.error(
+      '[filterChannelsForCustomer] preference read failed, sending anyway:',
+      e instanceof Error ? e.message : e,
+    );
+    return channels;
+  }
+}
+
+/**
+ * The channel filter, exposed for its own test.
+ *
+ * Named `ForTest` rather than exported plainly because it is an implementation
+ * detail of the channel loop above and nothing else should call it: a second
+ * caller would be a second place the rule runs, which is the shape of the bug
+ * this feature fixes.
+ */
+export const filterChannelsForCustomerForTest = filterChannelsForCustomer;

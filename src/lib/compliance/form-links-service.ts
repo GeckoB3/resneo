@@ -301,16 +301,35 @@ export async function consumePendingLinksForCapture(
   }
 }
 
+export type OutstandingFormsLookup = {
+  /**
+   * FALSE when the lookup itself failed, so the caller cannot conclude
+   * anything from `forms` being empty.
+   *
+   * `forms: []` answers two completely different questions with the same
+   * value: "this booking needs nothing" and "we could not find out". For the
+   * manage page that conflation is a deliberate, sensible trade, which is why
+   * `loadOutstandingBookingFormLinks` still makes it. For the portal it is
+   * not: showing a customer nothing is a CLAIM that they have nothing to do,
+   * and if that claim is wrong they arrive without a signed waiver and are
+   * turned away at the door (P4-1).
+   */
+  ok: boolean;
+  forms: Array<{ name: string; url: string }>;
+};
+
 /**
- * Outstanding (pending, unexpired) form links for a booking, as {name, url} — for
- * the guest-facing confirmation/manage surfaces (Phase 1, G2). Defensive: returns
- * [] on any error (e.g. feature/table absent) so it never breaks the manage page.
+ * The same query, with the outcome of the lookup preserved.
+ *
+ * Use this anywhere the ABSENCE of forms is shown to somebody as fact. Use
+ * `loadOutstandingBookingFormLinks` where a failure should quietly render
+ * nothing rather than break the page.
  */
-export async function loadOutstandingBookingFormLinks(
+export async function loadOutstandingBookingFormsChecked(
   admin: SupabaseClient,
   venueId: string,
   bookingId: string,
-): Promise<Array<{ name: string; url: string }>> {
+): Promise<OutstandingFormsLookup> {
   try {
     const { data, error } = await admin
       .from('compliance_form_links')
@@ -319,16 +338,94 @@ export async function loadOutstandingBookingFormLinks(
       .eq('booking_id', bookingId)
       .eq('status', 'pending')
       .gt('expires_at', new Date().toISOString());
-    if (error || !data) return [];
-    return data.map((row) => {
-      const r = row as { code: string; compliance_types: { name?: string } | { name?: string }[] | null };
-      const t = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
-      return { name: t?.name ?? 'Form', url: complianceFormPublicUrl(r.code) };
-    });
+    if (error || !data) {
+      console.error('[loadOutstandingBookingFormsChecked] query failed:', error?.message);
+      return { ok: false, forms: [] };
+    }
+    return {
+      ok: true,
+      forms: data.map((row) => {
+        const r = row as {
+          code: string;
+          compliance_types: { name?: string } | { name?: string }[] | null;
+        };
+        const t = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
+        return { name: t?.name ?? 'Form', url: complianceFormPublicUrl(r.code) };
+      }),
+    };
   } catch (err) {
-    console.error('[loadOutstandingBookingFormLinks] failed:', err instanceof Error ? err.message : err);
-    return [];
+    console.error(
+      '[loadOutstandingBookingFormsChecked] failed:',
+      err instanceof Error ? err.message : err,
+    );
+    return { ok: false, forms: [] };
   }
+}
+
+/**
+ * Which of these bookings still need a form, in ONE query.
+ *
+ * The hub lists several bookings and wants to say whether any of the others
+ * need attention. Asking per booking would make the hub's query count grow
+ * with what is on the page, which `account-home.test.ts` forbids and which is
+ * the N+1 that loader exists to avoid, so this asks once with `in`.
+ *
+ * Scoped by booking id alone: the ids come from rows the caller has already
+ * proved are the customer's, so adding a venue filter would narrow nothing and
+ * would break the moment a customer has bookings at two venues on one page.
+ *
+ * Returns the SET of booking ids that need something. A failed query returns
+ * an empty set, which reads as "nothing else needs attention": the next
+ * booking's own card already says out loud when a check failed, and a second,
+ * vaguer warning stacked on top of it would be noise rather than information.
+ */
+export async function bookingsNeedingFormsIn(
+  admin: SupabaseClient,
+  bookingIds: string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(bookingIds)].filter(Boolean);
+  if (ids.length === 0) return new Set();
+  try {
+    const { data, error } = await admin
+      .from('compliance_form_links')
+      .select('booking_id')
+      .in('booking_id', ids)
+      .eq('status', 'pending')
+      .gt('expires_at', new Date().toISOString());
+    if (error || !data) {
+      console.error('[bookingsNeedingFormsIn] query failed:', error?.message);
+      return new Set();
+    }
+    return new Set(
+      (data as Array<{ booking_id?: string | null }>)
+        .map((r) => r.booking_id)
+        .filter((id): id is string => typeof id === 'string'),
+    );
+  } catch (err) {
+    console.error(
+      '[bookingsNeedingFormsIn] failed:',
+      err instanceof Error ? err.message : err,
+    );
+    return new Set();
+  }
+}
+
+/**
+ * Outstanding (pending, unexpired) form links for a booking, as {name, url} — for
+ * the guest-facing confirmation/manage surfaces (Phase 1, G2). Defensive: returns
+ * [] on any error (e.g. feature/table absent) so it never breaks the manage page.
+ *
+ * **Deliberately discards whether the lookup worked.** Kept exactly as it was,
+ * because its callers chose that trade; anything that tells a customer they
+ * have nothing outstanding should call `loadOutstandingBookingFormsChecked`
+ * instead.
+ */
+export async function loadOutstandingBookingFormLinks(
+  admin: SupabaseClient,
+  venueId: string,
+  bookingId: string,
+): Promise<Array<{ name: string; url: string }>> {
+  return (await loadOutstandingBookingFormsChecked(admin, venueId, bookingId)).forms;
 }
 
 export async function listFormLinks(

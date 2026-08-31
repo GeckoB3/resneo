@@ -30,11 +30,14 @@ export function NextBookingCard({
   booking,
   appointment,
   formLinks,
+  formsChecked = true,
   profileTz,
 }: {
   booking: AccountBookingRow;
   appointment: AccountHomeAppointmentLabel;
   formLinks: Array<{ name: string; url: string }>;
+  /** False when the forms lookup failed; an empty list then means nothing. */
+  formsChecked?: boolean;
   profileTz: string | null;
 }) {
   const tz = accountBookingTimeZone(booking, profileTz);
@@ -78,6 +81,26 @@ export function NextBookingCard({
         {time ? <> at {time}</> : null}
       </p>
       <p className="mt-0.5 text-xs text-slate-500">Times shown in {tz.replace('_', ' ')}.</p>
+
+      {/*
+        The lookup failed, so silence would be a lie (P4-1). An empty list is
+        rendered as "nothing to do", and a customer who believes that and
+        actually has an unsigned waiver is turned away at the door. Saying we
+        could not check is worse-looking and better.
+      */}
+      {!formsChecked && formLinks.length === 0 ? (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3.5"
+        >
+          <p className="text-sm font-semibold text-slate-900">
+            We could not check for forms to complete
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            Please refresh, or contact the venue if you were expecting one to sign.
+          </p>
+        </div>
+      ) : null}
 
       {formLinks.length > 0 ? (
         <div

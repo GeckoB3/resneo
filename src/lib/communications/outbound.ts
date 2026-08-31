@@ -3,6 +3,7 @@ import type { CommunicationChannel, CommunicationMessageKey } from './policies';
 import { resolveCommPolicy } from './policy-resolver';
 import { renderCommunicationEmail, renderCommunicationSms } from './renderer';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { attachAccountEntryLink } from './send-templated';
 import {
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlag,
@@ -109,10 +110,30 @@ export async function sendPolicyMessage(
   };
 
   if (opts.channel === 'email') {
+    /*
+      The account link, resolved the same way the confirmation email resolves
+      it (P3-4d's leftover).
+
+      Every policy-driven email, which is the deposit request, the reminders,
+      the modification and the cancellation, was still carrying the OLD
+      `/auth/magic` link while the confirmation had moved to a one-click
+      portal token. So the first email a customer got worked in one tap and
+      every one after it asked them to request a second email, which is
+      exactly the friction AD7 exists to remove.
+
+      Fails soft inside `attachAccountEntryLink`: on any doubt it falls back to
+      the magic-link URL, which is what these emails carried anyway, so the
+      worst case here is the behaviour that shipped before.
+    */
+    const bookingForEmail = await attachAccountEntryLink(
+      getSupabaseAdminClient(),
+      opts.booking,
+    );
+
     const rendered = renderCommunicationEmail({
       lane: resolved.lane,
       messageKey: opts.messageKey,
-      booking: opts.booking,
+      booking: bookingForEmail,
       venue: opts.venue,
       emailCustomMessage: resolved.emailCustomMessage,
       smsCustomMessage: resolved.smsCustomMessage,

@@ -305,6 +305,76 @@ describe('the shared view under a session actor', () => {
   });
 });
 
+describe('payments on the booking (P4-2)', () => {
+  const PAYMENTS = [
+    {
+      id: 'pay-1',
+      booking_id: BOOKING_ID,
+      venue_id: 'v-1',
+      method: 'card_present',
+      status: 'succeeded',
+      amount_pence: 4500,
+      currency: 'gbp',
+      purpose: 'balance',
+      created_at: '2026-08-30T10:00:00Z',
+    },
+  ];
+
+  function renderWith(props: Record<string, unknown>) {
+    render(
+      <GuestBookingDetailView
+        bookingId={BOOKING_ID}
+        actor={{ kind: 'session' }}
+        initialDetail={baseDetail()}
+        chrome="embedded"
+        {...props}
+      />,
+    );
+    return (document.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  it('shows the payment in plain words and real money', () => {
+    const text = renderWith({ payments: PAYMENTS });
+    expect(text).toContain('Payments for this booking');
+    expect(text).toContain('Card in person');
+    expect(text).toContain('£45.00');
+    expect(text, 'the raw enum reached the customer').not.toContain('card_present');
+  });
+
+  it('SHOWS NOTHING when the page did not supply payments', () => {
+    /*
+      The security boundary, asserted from the view's side. The guest
+      manage-link page never passes this prop, because that URL is forwardable
+      and a payment history is more sensitive than the booking it belongs to.
+      A view that invented a fetch of its own would defeat that, so the absence
+      of the prop must render nothing at all.
+    */
+    const text = renderWith({});
+    expect(text).not.toContain('Payments for this booking');
+    expect(text).not.toContain('£45.00');
+  });
+
+  it('names a refund rather than showing it as money paid', () => {
+    // A refunded row rendered as a bare figure reads as money the customer
+    // handed over and did not get back.
+    const text = renderWith({
+      payments: [{ ...PAYMENTS[0], status: 'refunded' }],
+    });
+    expect(text).toContain('Refunded');
+  });
+
+  it('says so when the lookup failed, rather than implying nothing was paid', () => {
+    const text = renderWith({ payments: [], paymentsFailed: true });
+    expect(text).toContain('could not load your payments');
+  });
+
+  it('shows the payments rather than the warning when it has both', () => {
+    const text = renderWith({ payments: PAYMENTS, paymentsFailed: true });
+    expect(text).toContain('£45.00');
+    expect(text).not.toContain('could not load your payments');
+  });
+});
+
 describe('the sections P2-4 completes', () => {
   it('shows what the venue asked the guest to do beforehand (G8a)', () => {
     // The gap: `service_items.pre_appointment_instructions` was written by

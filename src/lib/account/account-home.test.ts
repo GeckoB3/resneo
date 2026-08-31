@@ -243,15 +243,37 @@ describe('the hub LISTS what is coming, not just a count (P1-2)', () => {
   });
 
   it('costs no extra queries, being a slice of rows already loaded', async () => {
-    // P1-2's own acceptance is that the hub issues ONE round of queries. The
-    // list is free because `loadAccountBookings` already returned these rows
-    // and the count was computed from the same array; a version that fetched
-    // them again would show up as a query count that grows with the bookings.
-    const one = setup({ bookings: upcomingRun(1) });
-    await loadAccountHome(one.session, one.admin, NOW);
+    /*
+      P1-2's own acceptance is that the hub issues ONE round of queries. The
+      list is free because `loadAccountBookings` already returned these rows
+      and the count was computed from the same array; a version that fetched
+      them again would show up as a query count that grows with the bookings.
+
+      **Compared five against forty, not one against forty**, and that changed
+      when the hub began checking whether the OTHER listed bookings need a
+      form (P4-1's leftover). That check is a single `in` query over the
+      bookings already on the page, so it costs one read when there are later
+      bookings and none when there are not. Comparing one against forty would
+      therefore be comparing "has later bookings at all" with "how many", which
+      is not the property this test is about. Both sides here have later
+      bookings, so what is measured is growth, and growth is what must be zero.
+    */
+    const five = setup({ bookings: upcomingRun(5) });
+    await loadAccountHome(five.session, five.admin, NOW);
     const many = setup({ bookings: upcomingRun(40) });
     await loadAccountHome(many.session, many.admin, NOW);
-    expect(many.db.calls.length).toBe(one.db.calls.length);
+    expect(many.db.calls.length).toBe(five.db.calls.length);
+  });
+
+  it('checks later bookings for forms in ONE query, not one per booking', async () => {
+    // The N+1 the batch exists to avoid: four listed bookings must cost one
+    // read between them, not four.
+    const many = setup({ bookings: upcomingRun(40) });
+    await loadAccountHome(many.session, many.admin, NOW);
+    const formQueries = many.db.calls.filter(
+      (c: { table?: string }) => c.table === 'compliance_form_links',
+    );
+    expect(formQueries.length, 'one for the next booking, one for the rest').toBeLessThanOrEqual(2);
   });
 });
 

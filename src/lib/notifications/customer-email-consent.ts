@@ -25,7 +25,15 @@ import { readPreferenceNamespace } from './notification-preferences';
 /** What a platform-originated email is for. Only `operational` is suppressible. */
 export type PlatformEmailKind = 'operational' | 'security';
 
-async function readCustomerPrefs(
+/**
+ * The customer namespace of `notification_preferences`, for one account.
+ *
+ * Exported so the per-channel filter in the comms service reads the column
+ * through the SAME function this module's consent checks use. Two readers of
+ * one free-form jsonb column is how a namespacing change gets applied to one
+ * of them, and the other keeps quietly reading defaults.
+ */
+export async function readCustomerPrefs(
   admin: Pick<SupabaseClient, 'from'>,
   userId: string,
 ): Promise<Record<string, unknown>> {

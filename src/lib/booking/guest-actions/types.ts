@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ApiErrorCode } from '@/lib/api/error-codes';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 /**
  * The guest booking action service layer (AD1, P0-4).
@@ -38,6 +39,18 @@ import type { ApiErrorCode } from '@/lib/api/error-codes';
 export interface GuestActionClients {
   admin: SupabaseClient;
   session: SupabaseClient | null;
+}
+
+/**
+ * The client bag for a signed-in caller.
+ *
+ * Exists so a PAGE never constructs an admin client of its own (C1): a page
+ * that reaches for the service role is doing something no route can reuse,
+ * and the mobile app then has no way to reach the same answer. Callers hand
+ * over the session client they already have and get the pair back.
+ */
+export function sessionActionClients(session: SupabaseClient): GuestActionClients {
+  return { admin: getSupabaseAdminClient(), session };
 }
 
 /**

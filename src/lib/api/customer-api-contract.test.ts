@@ -163,14 +163,25 @@ describe('v1 alias rule (C7a/C7b)', () => {
     // account/bookings/[id]/manage-link was here as a C7a exemption and P2-5
     // deleted it, taking the count 32 to 31. P2-6 then added
     // account/memberships/resume, C7A_EXEMPT because memberships are not on
-    // v1 at all, taking it back to 32.
+    // v1 at all, taking it back to 32. P4-2 then added account/payments,
+    // aliased at v1/me/payments, taking it to 33. It is ALIASED rather than
+    // exempt: the memberships exemption was about publishing one verb of a
+    // family that has no presence on v1, and a payment history is not a verb
+    // of anything, it is a complete capability on its own. P4-4 then added
+    // account/waitlist and account/waitlist/[id], both aliased under
+    // v1/me/waitlist, taking it to 35. P4-5 then added account/export,
+    // aliased at v1/me/export, taking it to 36. P4-6 then added
+    // account/payment-methods/[venueId]/[paymentMethodId], aliased under
+    // v1/me/payment-methods, taking it to 37. P5-1 then added
+    // account/bookings/by-model and account/venues, both aliased, taking it
+    // to 39.
     const accountRoutes = routeFiles('account').map(rel).sort();
     expect(
       accountRoutes.length,
       'An /api/account route was added or removed. If added: give it a v1 alias (C7a) ' +
         'or a C7A_EXEMPT entry, and bump this count. Do NOT add it to the pre-existing ' +
         'exclusion list, which is dated 2026-08-27 and closed.',
-    ).toBe(32);
+    ).toBe(39);
   });
 
   it('routes this plan created have their v1 alias', () => {

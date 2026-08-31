@@ -145,6 +145,28 @@ export function AccountSecuritySection() {
         </Button>
       </SectionCard>
 
+      {/*
+        Download beside delete, because they are the same question asked two
+        ways: "what do you hold about me, and will you stop holding it?" A
+        customer about to delete an account is exactly the customer who wants a
+        copy first, and finding that only after the deletion is too late.
+      */}
+      <SectionCard>
+        <h2 className="text-lg font-semibold text-slate-900">Download your data</h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Everything in your account, as one file: your profile, bookings, payments and waitlist
+          places. It downloads to this device rather than arriving by email, so no copy is left in
+          an inbox.
+        </p>
+        <a
+          href="/api/account/export"
+          download
+          className="mt-4 inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-brand-700 shadow-sm hover:bg-slate-50"
+        >
+          Download my data
+        </a>
+      </SectionCard>
+
       <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/90 to-amber-50/40 p-6 shadow-sm shadow-amber-900/5 sm:p-7">
         <h2 className="text-lg font-semibold text-amber-950">Delete account</h2>
         <p className="mt-2 text-sm text-slate-700">

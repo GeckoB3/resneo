@@ -5,6 +5,7 @@ import {
   complianceFormPublicUrl,
   issueOrReuseFormLink,
   revokeFormLink,
+  bookingsNeedingFormsIn,
 } from '@/lib/compliance/form-links-service';
 import { generateComplianceFormCode } from '@/lib/compliance/short-code';
 import { DEFAULT_COMPLIANCE_CONFIG } from '@/lib/compliance/config';
@@ -117,5 +118,101 @@ describe('revokeFormLink', () => {
     const res = await revokeFormLink(fake.asClient(), { venueId: VENUE, staffId: STAFF, linkId: 'l1' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.status).toBe(409);
+  });
+});
+
+describe('bookingsNeedingFormsIn', () => {
+  /*
+    The account hub asks this ONE question about the several bookings it is
+    listing, instead of one question per booking. Every filter it drops is a
+    wrong answer that still looks plausible on screen, so each one is pinned
+    here on its own.
+  */
+  const FUTURE = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  const PAST = new Date(Date.now() - 86_400_000).toISOString();
+
+  function seed(rows: Array<Record<string, unknown>>) {
+    return new FakeSupabase({ compliance_form_links: rows }).asClient();
+  }
+
+  const pending = (booking_id: string, extra: Record<string, unknown> = {}) => ({
+    id: `link-${booking_id}`,
+    booking_id,
+    status: 'pending',
+    expires_at: FUTURE,
+    ...extra,
+  });
+
+  it('returns only the bookings that actually have one outstanding', async () => {
+    const db = seed([pending('bk-1'), pending('bk-3')]);
+    const needing = await bookingsNeedingFormsIn(db, ['bk-1', 'bk-2', 'bk-3']);
+    expect([...needing].sort()).toEqual(['bk-1', 'bk-3']);
+  });
+
+  it('does NOT answer for bookings it was not asked about', async () => {
+    /*
+      The filter whose absence is worst: without `in`, the hub counts every
+      pending form on the platform and tells this customer that some number of
+      strangers' bookings need their attention.
+    */
+    const db = seed([pending('bk-1'), pending('someone-elses-booking')]);
+    const needing = await bookingsNeedingFormsIn(db, ['bk-1']);
+    expect(needing.has('someone-elses-booking')).toBe(false);
+    expect(needing.size).toBe(1);
+  });
+
+  it('ignores a form the customer has already completed', async () => {
+    // Otherwise the hub nags about work that is done, which teaches people to
+    // ignore it.
+    const db = seed([pending('bk-1', { status: 'completed' })]);
+    expect(await bookingsNeedingFormsIn(db, ['bk-1'])).toEqual(new Set());
+  });
+
+  it('ignores a link that has expired', async () => {
+    // An expired link cannot be filled in, so pointing at it is worse than
+    // saying nothing: there is no action the customer can take.
+    const db = seed([pending('bk-1', { expires_at: PAST })]);
+    expect(await bookingsNeedingFormsIn(db, ['bk-1'])).toEqual(new Set());
+  });
+
+  it('asks nothing at all when given no bookings', async () => {
+    /*
+      The second assertion is the point. Removing the early return still gives
+      the right answer, because `in ()` matches nothing, so without this the
+      guard reads as redundant and gets deleted. Its actual job is that a hub
+      with a single booking and nothing listed after it does not pay for a
+      round trip whose answer is known before it is asked.
+    */
+    let asked = false;
+    const db = {
+      from: () => {
+        asked = true;
+        return {
+          select: () => ({
+            in: () => ({ eq: () => ({ gt: async () => ({ data: [], error: null }) }) }),
+          }),
+        };
+      },
+    } as unknown as Parameters<typeof bookingsNeedingFormsIn>[0];
+    expect(await bookingsNeedingFormsIn(db, [])).toEqual(new Set());
+    expect(asked, 'queried the database for an empty list of bookings').toBe(false);
+  });
+
+  it('says "nothing outstanding" when the query fails, rather than throwing', async () => {
+    /*
+      Fails soft on purpose. This is a secondary hint underneath a booking card
+      that already reports its own failure out loud; a hub that 500s because a
+      hint could not be computed is the worse outcome.
+    */
+    const broken = {
+      from: () => ({
+        select: () => ({
+          in: () => ({
+            eq: () => ({ gt: async () => ({ data: null, error: { message: 'boom' } }) }),
+          }),
+        }),
+      }),
+    } as unknown as Parameters<typeof bookingsNeedingFormsIn>[0];
+    expect(await bookingsNeedingFormsIn(broken, ['bk-1'])).toEqual(new Set());
   });
 });

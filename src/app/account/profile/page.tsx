@@ -1,11 +1,14 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccountSafeGuests } from '@/lib/account/account-bookings';
 import { ProfileClient } from './ProfileClient';
 import { AccountPaymentMethodsSection } from '@/components/account/AccountPaymentMethodsSection';
+import { AccountPaymentHistorySection } from '@/components/account/AccountPaymentHistorySection';
+import { loadAccountPayments } from '@/lib/account/account-payments';
 import { AccountSecuritySection } from '@/components/account/AccountSecuritySection';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { loadAccountProfile } from '@/lib/account/account-profile';
+import { loadVenueNames } from '@/lib/account/account-venues';
 
 /**
  * WCAG 2.4.2 (Level A): every page needs a title that describes it. Next
@@ -29,6 +32,7 @@ export const metadata = {
  * a redirect, which `retired-routes.test.ts` asserts against this list.
  */
 export const PROFILE_SECTION_ANCHORS = [
+  { id: 'payments', label: 'Payment history' },
   { id: 'payment-methods', label: 'Saved payment methods' },
   { id: 'password', label: 'Password and account' },
 ] as const;
@@ -53,7 +57,8 @@ export default async function AccountProfilePage() {
     redirect('/login?redirectTo=/account/profile');
   }
 
-  const { data: profileData } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
+  // Shared loader, so this page and `GET /api/account/profile` cannot drift (C1).
+  const profileData = await loadAccountProfile(supabase, user.id).catch(() => null);
   const profile = (profileData ?? {
     display_name: null,
     first_name: null,
@@ -75,11 +80,23 @@ export default async function AccountProfilePage() {
   ]);
 
   const venueIds = [...new Set(relationships.map((r) => r.venue_id))];
-  const { data: venues } =
-    venueIds.length > 0
-      ? await getSupabaseAdminClient().from('venues').select('id, name').in('id', venueIds)
-      : { data: [] as Array<{ id: string; name: string }> };
-  const venueMap = new Map((venues ?? []).map((v) => [v.id, v.name]));
+  // The same lookup `GET /api/account/venues` performs (C1).
+  const venueMap = await loadVenueNames(venueIds);
+  const venueRowById = new Map(
+    [...venueMap.entries()].map(([id, name]) => [id, { id, name, slug: null }]),
+  );
+
+  /*
+    Payment history (P4-2). Failure is CARRIED, not swallowed: an empty list
+    would otherwise tell the customer they have paid nothing, which is a claim,
+    and about money (P4-1's rule applied a second time).
+  */
+  const paymentsResult = await loadAccountPayments(supabase)
+    .then((r) => ({ payments: r.payments, failed: false }))
+    .catch((e) => {
+      console.error('[account/profile] payments:', e instanceof Error ? e.message : e);
+      return { payments: [], failed: true };
+    });
 
   return (
     <div className="space-y-8">
@@ -131,6 +148,11 @@ export default async function AccountProfilePage() {
         ids and because a customer who bookmarked "my saved cards" should still
         recognise what they land on.
       */}
+      <AccountPaymentHistorySection
+        payments={paymentsResult.payments}
+        venues={venueRowById}
+        failed={paymentsResult.failed}
+      />
       <AccountPaymentMethodsSection />
       <AccountSecuritySection />
 

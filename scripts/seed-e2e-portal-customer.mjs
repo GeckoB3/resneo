@@ -171,7 +171,82 @@ async function resetBookings(admin, { venueId, guestId, calendarId, serviceItemI
   const { data, error } = await admin.from('bookings').insert(rows).select('id, booking_date, status');
   if (error) throw new Error(`bookings insert: ${error.message}`);
   for (const b of data) console.log('[portal-seed] Booking:', b.id, b.booking_date, b.status);
+
+  /*
+    A settled payment on the past booking, for P4-2.
+
+    Seeded rather than left to a manual insert because `booking_payments`
+    cascades on `bookings`, and this script wipes and re-inserts the bookings
+    above: any hand-made row disappears on the next seed, and the payment specs
+    would then fail in CI for a reason that has nothing to do with the code.
+
+    It deliberately carries the fields a customer must NEVER see, so the leak
+    assertions in `e2e/portal-payments.spec.ts` have something real to catch. A
+    projection test against a row with no secrets in it proves nothing.
+  */
+  const completed = data.find((b) => b.status === 'Completed');
+  if (completed) {
+    const { error: payErr } = await admin.from('booking_payments').insert({
+      booking_id: completed.id,
+      venue_id: venueId,
+      method: 'card_present',
+      status: 'succeeded',
+      amount_pence: 4500,
+      currency: 'gbp',
+      purpose: 'balance',
+      stripe_payment_intent_id: `pi_e2e_${completed.id.slice(0, 8)}`,
+      stripe_connected_account_id: 'acct_e2e_must_not_leak',
+      note: 'INTERNAL staff note that must never be shown to the customer',
+      metadata: { seeded_by: 'seed-e2e-portal-customer', secret: 'do-not-leak' },
+    });
+    if (payErr) throw new Error(`booking_payments insert: ${payErr.message}`);
+    console.log('[portal-seed] Payment: 4500 on', completed.id);
+  }
+
+  /*
+    Waitlist places, for P4-4.
+
+    Two rows, and the SECOND one is the point: it belongs to a stranger at the
+    same venue, so the cross-user cancel test has a real row to be refused
+    against. A 404 for an id that never existed would prove nothing about
+    ownership.
+
+    Wiped and re-inserted like the bookings above, because these do not cascade
+    on anything and would otherwise accumulate a place per run.
+  */
+  const waitlistEmails = [CUSTOMER_EMAIL.toLowerCase(), WAITLIST_STRANGER_EMAIL];
+  const { error: wlWipeErr } = await admin
+    .from('waitlist_entries')
+    .delete()
+    .eq('venue_id', venueId)
+    .in('guest_email', waitlistEmails);
+  if (wlWipeErr) throw new Error(`waitlist wipe: ${wlWipeErr.message}`);
+
+  const waitlistBase = {
+    venue_id: venueId,
+    waitlist_kind: 'appointment',
+    party_size: 1,
+    status: 'waiting',
+    guest_first_name: CUSTOMER_FIRST_NAME,
+    guest_last_name: CUSTOMER_LAST_NAME,
+    guest_phone: CUSTOMER_PHONE,
+  };
+  const { error: wlErr } = await admin.from('waitlist_entries').insert([
+    { ...waitlistBase, desired_date: ymd(upcoming), guest_email: CUSTOMER_EMAIL.toLowerCase() },
+    {
+      ...waitlistBase,
+      desired_date: ymd(upcoming),
+      guest_email: WAITLIST_STRANGER_EMAIL,
+      guest_first_name: 'Someone',
+      guest_last_name: 'Else',
+    },
+  ]);
+  if (wlErr) throw new Error(`waitlist insert: ${wlErr.message}`);
+  console.log('[portal-seed] Waitlist: 1 for the customer, 1 for a stranger');
 }
+
+/** The other customer whose waitlist place must stay untouchable (P4-4). */
+const WAITLIST_STRANGER_EMAIL = 'someone-else@resneo-e2e.invalid';
 
 async function main() {
   const admin = makeAdmin();

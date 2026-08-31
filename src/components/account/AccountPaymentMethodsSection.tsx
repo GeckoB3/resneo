@@ -7,7 +7,7 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useToast } from '@/components/ui/Toast';
 import { PortalLoadFailed } from '@/components/account/PortalLoadFailed';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
-import { Button, FormField } from '@/components/ui/primitives';
+import { Button, ConfirmDialog, FormField } from '@/components/ui/primitives';
 
 function SetupForm({ clientSecret, stripeAccountId: _stripeAccountId, onComplete }: { clientSecret: string; stripeAccountId: string; onComplete: () => void }) {
   const stripe = useStripe();
@@ -66,6 +66,12 @@ export function AccountPaymentMethodsSection() {
   const [venues, setVenues] = useState<Array<{ id: string; name: string }>>([]);
   const [venueId, setVenueId] = useState('');
   const [methods, setMethods] = useState<Array<{ id: string; brand: string | null; last4: string | null }>>([]);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  /** Set when the server says this card is paying for a membership (P2-6). */
+  const [confirmRemoval, setConfirmRemoval] = useState<
+    { method: { id: string; brand: string | null; last4: string | null }; message: string } | null
+  >(null);
   const [setup, setSetup] = useState<{ client_secret: string; stripe_account_id: string } | null>(null);
   /** In-flight guard (G30): two taps used to mint two SetupIntents. */
   const [startingSetup, setStartingSetup] = useState(false);
@@ -124,6 +130,49 @@ export function AccountPaymentMethodsSection() {
       void loadVenues();
     });
   }, [loadVenues]);
+
+  /**
+   * Remove a card, asking again only when the server says it is paying for
+   * something (P2-6).
+   *
+   * The first call carries no acknowledgement; a 409 comes back naming the
+   * membership, and the dialog repeats that sentence rather than a generic
+   * "are you sure". The second call carries `acknowledge=true`.
+   */
+  async function removeCard(
+    method: { id: string; brand: string | null; last4: string | null },
+    acknowledge = false,
+  ) {
+    const vid = venueId.trim();
+    if (!vid) return;
+    setRemovingId(method.id);
+    setRemoveError(null);
+    try {
+      const res = await fetch(
+        `/api/account/payment-methods/${encodeURIComponent(vid)}/${encodeURIComponent(method.id)}` +
+          (acknowledge ? '?acknowledge=true' : ''),
+        { method: 'DELETE' },
+      );
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string };
+        setConfirmRemoval({
+          method,
+          message: body.message ?? 'This card may be paying for something.',
+        });
+        return;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setRemoveError(body.error ?? 'We could not remove that card. Please try again.');
+        return;
+      }
+      setMethods((list) => list.filter((m) => m.id !== method.id));
+    } catch {
+      setRemoveError('We could not remove that card. Please try again.');
+    } finally {
+      setRemovingId(null);
+    }
+  }
 
   async function startSetup() {
     if (startingSetup) return;
@@ -212,13 +261,31 @@ export function AccountPaymentMethodsSection() {
       {venueId ? (
         <SectionCard className="p-5 sm:p-6">
           <h3 className="text-sm font-semibold text-slate-900">Saved cards</h3>
+          {removeError ? (
+            // On the section, not in the dialog: the dialog closes on confirm,
+            // so an error shown inside it can never be read (P2-6).
+            <p role="alert" className="mt-2 text-sm font-medium text-red-700">
+              {removeError}
+            </p>
+          ) : null}
           {methods.length === 0 ? (
             <EmptyState size="compact" title="No saved cards for this venue" description="Add a card to pay faster next time." />
           ) : (
             <ul className="mt-2 space-y-1 text-sm">
               {methods.map((m) => (
-                <li key={m.id}>
-                  {m.brand ?? 'Card'} ·••• {m.last4}
+                <li key={m.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                  <span>
+                    {m.brand ?? 'Card'} ·••• {m.last4}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-9"
+                    loading={removingId === m.id}
+                    onClick={() => void removeCard(m)}
+                  >
+                    Remove
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -250,6 +317,29 @@ export function AccountPaymentMethodsSection() {
           </Elements>
         </SectionCard>
       ) : null}
+
+      {/*
+        Only shown when the server said this card is paying for something. An
+        "are you sure?" on every removal is a step people learn to click
+        through; this one repeats the server's own sentence, naming the
+        membership, so it carries information rather than friction (P2-6).
+      */}
+      <ConfirmDialog
+        open={confirmRemoval !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmRemoval(null);
+        }}
+        title="Remove this card?"
+        message={confirmRemoval?.message ?? ''}
+        confirmLabel="Yes, remove the card"
+        cancelLabel="Keep the card"
+        onConfirm={() => {
+          // Read before clearing: the dialog closes on confirm.
+          const target = confirmRemoval;
+          setConfirmRemoval(null);
+          if (target) void removeCard(target.method, true);
+        }}
+      />
     </div>
   );
 }

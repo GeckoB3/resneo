@@ -86,7 +86,7 @@ describe('the sign-in email', () => {
 });
 
 describe('the app code (P3-4i)', () => {
-  it('carries the six-digit code when there is one', () => {
+  it('carries the code when there is one', () => {
     /*
       A native client cannot follow a browser link, get a cookie and come back
       holding a session. It CAN take this code straight to
@@ -101,6 +101,31 @@ describe('the app code (P3-4i)', () => {
     expect(html).toContain('123456');
     expect(text).toContain('123456');
   });
+
+  it.each(['123456', '12345678', '1234567890'])(
+    'prints a %s-length code verbatim, because the length is not ours to assume',
+    (code) => {
+      /*
+        This test used to be named for a six-digit code, and the name was read
+        as a promise. `otp_length` is a per-project HOSTED setting that
+        `supabase/config.toml` does not configure; staging issues eight. A
+        client that trusted the config file's six shipped an input that
+        truncated the code the email had just sent, and the box silently
+        refused to hold it.
+
+        The template's contract is that it prints what it is handed, whole. It
+        is asserted over several lengths so the next reader cannot mistake one
+        example for a specification.
+      */
+      const { html, text } = renderMagicLinkEmail({
+        confirmUrl: URL_,
+        expiryHours: 24,
+        emailOtp: code,
+      });
+      expect(html).toContain(code);
+      expect(text).toContain(code);
+    },
+  );
 
   it('says nothing about a code when there is not one', () => {
     // `generateLink` does not always return one, and a missing code must not

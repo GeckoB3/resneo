@@ -106,13 +106,24 @@ export async function POST(request: NextRequest) {
     }).properties;
     const hashedToken = props?.hashed_token ?? '';
     /*
-      P3-4i. `generateLink` returns a six-digit OTP alongside the hash and this
+      P3-4i. `generateLink` returns a numeric OTP alongside the hash and this
       route used to discard it. A native client cannot follow a browser link
       and come back holding a session, but it CAN call
       `supabase.auth.verifyOtp({ email, token, type: 'email' })` directly
       against Supabase with this code, which means the app needs no ResNeo
       route to sign in at all. Putting it in the email is what makes that
       possible; the SDK documents the field for exactly this.
+
+      DO NOT hardcode a length against this code. `otp_length` is a per-project
+      setting and `supabase/config.toml` does NOT configure hosted projects: it
+      configures a local `supabase start` only. Staging and production are
+      separate hosted projects, each carrying its own dashboard value, and they
+      may differ from the config file and from each other. Staging issues eight
+      at the time of writing. A client that fixed the length at the config
+      file's six shipped an input that silently truncated the code the email
+      had just issued. Treat this string as opaque and length-agnostic, here
+      and in anything that renders or accepts it. (`otp_expiry` carries the
+      same hazard; see the note beside it in config.toml.)
     */
     const emailOtp = props?.email_otp?.trim() || null;
 

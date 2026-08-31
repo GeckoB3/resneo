@@ -23,11 +23,19 @@ export default async function ChooseDestinationPage() {
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .is('revoked_at', null),
+    /*
+      Must stay in step with the email fallback in `resolveStaffIdentityUncached`,
+      including `.is('user_id', null)`. This count only decides whether to OFFER
+      the dashboard; `getVenueStaff` decides whether the door opens. Counting a
+      row that resolution would refuse offers a door that cannot open, and a
+      dead end is worse than no option at all.
+    */
     emailNorm
       ? admin
           .from('staff')
           .select('id', { count: 'exact', head: true })
           .ilike('email', escapeLikePattern(emailNorm))
+          .is('user_id', null)
           .is('revoked_at', null)
       : Promise.resolve({ count: 0 }),
     admin.from('guests').select('id', { count: 'exact', head: true }).eq('user_id', user.id),

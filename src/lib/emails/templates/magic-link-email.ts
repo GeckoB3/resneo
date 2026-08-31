@@ -38,7 +38,12 @@ export interface MagicLinkEmailParams {
    */
   expiryHours: number;
   /**
-   * The six-digit code Supabase issues alongside the link (P3-4i).
+   * The numeric code Supabase issues alongside the link (P3-4i).
+   *
+   * Length is NOT fixed. `otp_length` is a per-project hosted setting that
+   * `supabase/config.toml` does not govern, so it varies by environment. This
+   * template prints whatever it is handed and must stay length-agnostic; the
+   * app that assumed six truncated an eight-digit staging code.
    *
    * Included so a NATIVE client can sign in without following a browser link:
    * a phone app cannot open a web page, get a cookie and come back holding a
@@ -67,8 +72,8 @@ export function renderMagicLinkEmail(params: MagicLinkEmailParams): {
     /*
       The code, for the ResNeo app and for anybody whose mail client breaks
       links. Below the button rather than above it, because the button is what
-      almost everybody needs and a six-digit code offered first reads as extra
-      work.
+      almost everybody needs and a short numeric code offered first reads as
+      extra work.
     */
     code
       ? `<p style="margin:16px 0 0;font-size:14px;color:#334155">Using the ResNeo app? Enter this code instead: <strong style="font-size:18px;letter-spacing:2px">${escapeHtml(code)}</strong></p>`

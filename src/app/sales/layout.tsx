@@ -43,6 +43,8 @@ export default async function SalesLayout({ children }: { children: React.ReactN
             .from('staff')
             .select('id', { count: 'exact', head: true })
             .ilike('email', escapeLikePattern(emailNorm))
+            // Unclaimed rows only, matching resolveStaffIdentityUncached.
+            .is('user_id', null)
             .is('revoked_at', null)
         : Promise.resolve({ count: 0 }),
       emailNorm

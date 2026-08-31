@@ -219,6 +219,13 @@ secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 max_frequency = "1s"
 # Number of characters used in the email OTP.
+# HOSTED PROJECTS DO NOT READ THIS. Like otp_expiry below, this line configures
+# a local `supabase start` only; staging and production each carry their own
+# dashboard value and can differ from this file and from each other. Staging
+# issues eight. Nothing that renders, accepts or stores an email OTP may assume
+# a length from this line: an app that trusted the six here shipped an input
+# that truncated the code the email had just sent. See the note in
+# src/app/api/auth/send-magic-link/route.ts.
 otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 # 24 hours, decided 2026-08-27. This governs magic links, password recovery AND staff

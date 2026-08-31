@@ -131,3 +131,110 @@ describe('POST /api/auth/send-magic-link rate limiting', () => {
     expect(blocked.status).toBe(429);
   });
 });
+
+/**
+ * The contract the ResNeo mobile app now signs in against.
+ *
+ * As of 2026-08-31 the app calls this route instead of Supabase directly, and
+ * it branches on the RESPONSE SHAPE. These are not implementation details any
+ * more; each one has a specific way of failing silently in the app.
+ */
+describe('POST /api/auth/send-magic-link: the mobile sign-in contract', () => {
+  function adminReturning(properties: Record<string, unknown> | null) {
+    mockAdmin.mockReturnValue({
+      auth: {
+        admin: {
+          generateLink: vi.fn().mockResolvedValue({
+            data: properties ? { properties } : null,
+            error: properties ? null : { message: 'nope' },
+          }),
+        },
+      },
+    } as unknown as ReturnType<typeof getSupabaseAdminClient>);
+  }
+
+  const sentEmail = () => mockSendEmail.mock.calls[0][0] as { html: string; text: string };
+
+  it.each(['123456', '12345678'])(
+    'puts the %s code Supabase issued into the email, whatever its length',
+    async (otp) => {
+      /*
+        The code, not the link, is how the app actually signs in. Supabase's
+        link redirects into resneo://callback, which needs the scheme
+        allowlisted AND the mail client and browser both willing to hand a
+        custom scheme off from an HTTP 302. Plenty will not (Gmail on Android
+        especially) and it fails by silently landing on the website. A typed
+        code has none of that in its path.
+
+        Both lengths are asserted because otp_length is a per-project HOSTED
+        setting that supabase/config.toml does not govern. The config file says
+        six; staging issues eight. Nothing in this path may assume either.
+      */
+      adminReturning({ hashed_token: 'hashed-token-value', email_otp: otp });
+
+      const res = await POST(post(uniqueEmail(), uniqueIp()));
+
+      expect(await res.json()).toEqual({ ok: true });
+      expect(sentEmail().text).toContain(otp);
+      expect(sentEmail().html).toContain(otp);
+    },
+  );
+
+  it('answers a sent email with ok, never with fallback', async () => {
+    // The app reads fallback as "not sent" and sends its own via Supabase. If a
+    // success ever carried it, the user would get two emails; if a failure ever
+    // dropped it, they would be told to check an inbox nothing was sent to.
+    adminReturning({ hashed_token: 'hashed-token-value', email_otp: '12345678' });
+
+    const body = await (await POST(post(uniqueEmail(), uniqueIp()))).json();
+
+    expect(body).toEqual({ ok: true });
+    expect(body).not.toHaveProperty('fallback');
+  });
+
+  it.each([
+    ['SendGrid is not configured', () => { delete process.env.SENDGRID_API_KEY; }],
+    ['generateLink fails', () => adminReturning(null)],
+    ['generateLink returns no hashed_token', () => adminReturning({ email_otp: '12345678' })],
+    ['the send itself throws', () => { mockSendEmail.mockRejectedValue(new Error('smtp down')); }],
+  ])('says fallback, not ok, when %s', async (_label, arrange) => {
+    // Every path where no ResNeo email went out has to be distinguishable from
+    // one where it did. A bare { ok: true } here shows "check your email" for a
+    // message nobody sent, and the user waits for it forever.
+    arrange();
+
+    const body = await (await POST(post(uniqueEmail(), uniqueIp()))).json();
+
+    expect(body).toEqual({ fallback: true });
+    expect(body).not.toHaveProperty('ok');
+  });
+
+  it('gives a throttled caller a readable error and no reason to retry elsewhere', async () => {
+    /*
+      Two things at once, both load-bearing.
+
+      The error string is shown to the user VERBATIM by the app, so it has to
+      read as an explanation rather than a code.
+
+      And the 429 must not carry `fallback`. The app deliberately does not fall
+      back on this status: falling through would send, via Supabase, the exact
+      email this route just declined to send. The rate limit would throttle
+      nothing at all.
+    */
+    adminReturning({ hashed_token: 'hashed-token-value', email_otp: '12345678' });
+
+    const email = uniqueEmail();
+    for (let i = 0; i < 3; i += 1) {
+      expect((await POST(post(email, uniqueIp()))).status).toBe(200);
+    }
+
+    const blocked = await POST(post(email, uniqueIp()));
+    const body = await blocked.json();
+
+    expect(blocked.status).toBe(429);
+    expect(typeof body.error).toBe('string');
+    expect(body.error.length).toBeGreaterThan(10);
+    expect(body).not.toHaveProperty('fallback');
+    expect(blocked.headers.get('Retry-After')).toBeTruthy();
+  });
+});

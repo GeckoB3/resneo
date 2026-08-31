@@ -340,6 +340,15 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|api/webhooks|api/cron|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    /*
+      `.well-known` is excluded because Apple and Android fetch the association
+      files from an unauthenticated crawler and neither follows a redirect while
+      verifying. Auth resolution has no business running on those two constants:
+      at best it is a Supabase round trip per fetch, and at worst a future
+      redirect added here breaks universal links silently, in a way that shows
+      up as "the app does not open links" rather than as anything to do with
+      middleware. (C12.)
+    */
+    '/((?!_next/static|_next/image|favicon.ico|\\.well-known|api/webhooks|api/cron|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

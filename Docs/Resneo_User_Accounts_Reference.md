@@ -213,6 +213,33 @@ All tables must have RLS enabled. Here are the core policies — adapt as needed
 - `revoked_at IS NULL` is required for active dashboard access.
 - During migration, email-based staff policies may continue for compatibility, but new account-aware checks should prefer `staff.user_id = auth.uid()` when available.
 
+**As built, verified 31 August 2026 (`resolveStaffIdentityUncached`, `src/lib/venue-auth.ts`).** The migration above is settled, and the rule is now:
+
+1. Resolve by `user_id` first. This is the durable link and it wins whenever it exists.
+2. Fall back to a case-insensitive email match **only against rows where `user_id IS NULL`**, then lazily claim the matched row by writing `user_id` to it.
+3. Refuse to choose when the matched rows span more than one venue, rather than picking implicitly.
+
+**The email fallback cannot be removed.** `POST /api/venue/staff/invite` inserts a staff row with no `user_id`, because the invited person has no auth user yet, and the lazy claim in step 2 is the only writer of `user_id` for those rows. It is therefore the bootstrap for every invited member's first sign-in; deleting it makes every outstanding invite unacceptable. The four owner-creating paths (signup complete, create-checkout, the Stripe subscription webhook, and `staff/create`) all set `user_id` at insert, which is why only invites depend on it.
+
+**The `user_id IS NULL` bound was added on 31 August 2026.** Without it, a row already claimed by another user could still be matched by email, because `staff.email` is not kept in step when an auth email changes elsewhere. A later signup on the stale address inherited the original owner's staff id, venue and role. Reaching the fallback means the `user_id` lookup found nothing for this caller, so a matched row carrying a `user_id` necessarily belongs to somebody else.
+
+**Every site that decides staff-ness applies the identical rule**, including the `user_id IS NULL` bound. There are six, and they must be changed together, because the ones that only decide whether to OFFER the dashboard have to agree with `getVenueStaff`, which decides whether the door opens. Counting a row that resolution would refuse offers a door that cannot open.
+
+| Site | Decides |
+| --- | --- |
+| `resolveStaffIdentityUncached` (`src/lib/venue-auth.ts`) | The canonical answer: which staff row the caller is |
+| `resolveStaffVenueIdForAuthenticatedUser` (same file) | The venue used by `src/middleware.ts` routing |
+| `authenticatedUserHasStaffMembership` (same file) | Whether `/account` shows a "Venue dashboard" link |
+| `resolvePostLoginDestination` (`src/lib/post-login-destination.ts`, twice) | Where a user lands after login, and the sales dual-role chooser |
+| `/auth/choose-destination` | Which options the chooser offers |
+| `src/app/sales/layout.tsx` | Whether the sales layout offers a dashboard switch |
+
+Note they are still not fully aligned on one point: the count-based sites do not apply step 3's multi-venue refusal, so a user with unclaimed rows at two venues is still offered a dashboard they will then be refused.
+
+**Not in this list, deliberately:** the duplicate-email conflict checks in `staff/create`, `staff/invite` and `staff/me`, and the "does this address already belong to a venue" existence checks in `provision-venue`, `signup/complete`, `signup-existing-venue` and the Stripe subscription webhook. Those must keep seeing claimed rows, because their question is whether ANY row exists for an address, not who the caller is. Adding the bound there would let a second venue be provisioned onto an address that already has one.
+
+Behaviour is locked by `src/lib/venue-auth.staff-identity.test.ts`.
+
 `**auth.users`**
 
 - Managed by Supabase. Don't write custom RLS here.

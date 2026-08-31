@@ -34,6 +34,19 @@ curl -sS \
 
 Expect `200` with a JSON body containing the staff object, e.g. `{ "staff": { "id", "email", "name", "phone", "role", ... } }`.
 
+### This route's 401 is BARE, and must stay that way
+
+A caller who is not staff gets `401 { "error": "Unauthorised" }` with **no
+`code`**. That is deliberate and the app depends on it: `useRole` probes this
+route on launch and reads a bare 401 as "this person is a customer".
+
+Everywhere else, a 401 carrying `code: "UNAUTHENTICATED"` means "this session is
+dead" and the app signs the user out. So the two shapes are load-bearing in
+opposite directions. If this route ever gained the code, every customer would be
+signed out on launch, having done nothing wrong. Do not make the 401s across the
+API "consistent": the asymmetry is the contract, and
+`src/app/api/mobile-401-contract.test.ts` fails if either half moves.
+
 ## Adding new venue routes
 
 Any new `/api/venue/*` route handler that needs staff authentication should use:
@@ -58,7 +71,11 @@ Add the mobile deep link to **Authentication → URL Configuration → Redirect 
 resneo://callback
 ```
 
-Required for magic-link sign-in from the mobile app.
+Keep this entry, but note what now depends on it: **staff invites, and nothing
+else.** Since 2026-08-31 the app signs in with the typed code above rather than
+by following the link, and it has dropped password reset entirely. Invite links
+still route through this scheme, so removing it would break them. It is no
+longer on the critical path for customer sign-in or recovery.
 
 **Add it to every project (staging and production) separately.** This list is per-project and is
 not carried over by a migration. If the URL is missing, GoTrue does not return an error: it
@@ -68,7 +85,8 @@ the user is never signed in.
 The value must match `Linking.createURL('callback')` exactly, which resolves to the `expo.scheme`
 in `app.json` (`resneo`) with two slashes. It was `reserveniapp://callback` before the
 ReserveNI-to-Resneo rebrand; that entry is dead and can be removed. The same URL serves
-password-reset and invite emails, so a missing entry breaks those too.
+invite emails, so a missing entry breaks those too. It served password-reset emails as
+well until the app dropped reset on 2026-08-31.
 
 ## Customer first entry (P3-4i)
 
@@ -78,13 +96,26 @@ consume a cookie**, so there are two transports for the same mechanism.
 
 ### Two ways in, and both are the same underneath
 
-**1. The six-digit code, with no ResNeo route at all.** The sign-in email now
+**1. The typed code, with no ResNeo route at all.** The sign-in email now
 carries the `email_otp` that `generateLink` returns alongside the link; the
 route used to discard it. A client can take it straight to Supabase:
 
 ```ts
 await supabase.auth.verifyOtp({ email, token: code, type: 'email' });
 ```
+
+**Do not hardcode the code's length.** This paragraph said "six-digit" until
+2026-08-31 and an app trusted it, shipping an input that truncated the code as
+the user typed, so the box silently refused to hold what the email had just
+issued. `otp_length` is a per-project HOSTED setting: `supabase/config.toml`
+says six but configures a local `supabase start` only, and staging currently
+issues eight. Treat the code as an opaque string of unknown length.
+
+**This is now the app's primary way in**, not a fallback. Supabase's link
+redirects into `resneo://callback`, which needs the scheme allowlisted and
+needs the mail client and browser both willing to hand a custom scheme off from
+an HTTP 302. Many will not, Gmail on Android especially, and it fails by
+silently landing on the website. The typed code has none of that in its path.
 
 **2. `POST /api/v1/auth/portal-token/exchange`**, for the token in a
 confirmation email's account link.
@@ -232,9 +263,10 @@ are opaque: only the server knows what they point at, and an app that guessed
 would have to reimplement the resolver and keep it in step. Follow the redirect,
 then route on where it lands.
 
-**Only `resneo://callback` is implemented today** (magic-link and
-password-reset sign-in). The rest of this table is the contract for the customer
-app to build against, not a description of what exists.
+**Only `resneo://callback` is implemented today**, and since 2026-08-31 staff
+invites are all that still arrive through it: the app signs in with the typed
+code and no longer does password reset. The rest of this table is the contract
+for the customer app to build against, not a description of what exists.
 
 **Every row needs a not-installed fallback and none may be a dead end.** A deep
 link that fails silently is worse than a web page: the customer taps a link in

@@ -118,6 +118,44 @@ async function resolveStaffIdentityUncached(
     };
   }
 
+  /*
+    The email fallback. It looks vestigial now that every row created by signup,
+    provisioning, the Stripe webhook and staff/create carries a user_id, and it
+    is not: `POST /api/venue/staff/invite` inserts a row with NO user_id,
+    because the invited person has no auth user yet at that moment. The lazy
+    backfill below is the ONLY writer of user_id for those rows, so this match
+    is the bootstrap for every invited team member's FIRST sign-in. Delete it
+    and every outstanding invite becomes unacceptable.
+
+    Its cost is real and worth stating: anyone who signs up with an address
+    matching an unrevoked staff row inherits that venue's dashboard. That is
+    exactly how an invite is meant to work, so the danger is not the mechanism
+    but a STALE row: one whose invite was never accepted, never revoked, and is
+    still sitting there when somebody else signs up on that address later. Look
+    there first when a pure customer is offered a venue dashboard.
+
+    `.is('user_id', null)` bounds that cost to UNCLAIMED rows, which is all an
+    invite bootstrap ever needs. Reaching this point means the query above found
+    no row for this user_id, so any row matched here that HAS a user_id belongs
+    to somebody else; matching it would hand this caller another person's staff
+    identity. That was reachable: `staff.email` goes stale when an auth email
+    changes elsewhere, and a later signup on the old address would have matched
+    the original owner's row.
+
+    Two consequences worth knowing.
+
+    It also removes a lockout. Other people's rows no longer count toward the
+    multi-venue ambiguity check below, so a stray claimed row at another venue
+    can no longer make a legitimate invitee's own match look ambiguous and get
+    refused.
+
+    And it makes the lookup above's error path fail CLOSED. If that query errors
+    we log and fall through to here, and a staff member whose row is already
+    claimed will no longer be rescued by an email match: they get null, which
+    reads as "not staff". That is the correct direction to fail in for auth, and
+    the error is logged, but it is why a transient staff-table error can bounce
+    a signed-in admin for up to STAFF_IDENTITY_TTL_MS.
+  */
   const normalised = email?.toLowerCase().trim() ?? '';
   if (!normalised) return null;
 
@@ -125,6 +163,7 @@ async function resolveStaffIdentityUncached(
     .from('staff')
     .select('id, venue_id, email, role, user_id')
     .ilike('email', escapeLikePattern(normalised))
+    .is('user_id', null)
     .is('revoked_at', null)
     .order('id', { ascending: true })
     .limit(10);
@@ -333,10 +372,14 @@ export async function resolveStaffVenueIdForAuthenticatedUser(
   const normalised = userEmail?.trim().toLowerCase() ?? '';
   if (!normalised) return null;
 
+  // Unclaimed rows only, matching resolveStaffIdentityUncached: reaching an
+  // email match means no row carries this user_id, so one that has a user_id
+  // belongs to somebody else.
   const { data: byEmail, error: emailErr } = await admin
     .from('staff')
     .select('venue_id')
     .ilike('email', escapeLikePattern(normalised))
+    .is('user_id', null)
     .is('revoked_at', null)
     .order('id', { ascending: true })
     .limit(10);
@@ -373,10 +416,14 @@ export async function authenticatedUserHasStaffMembership(
   const normalised = userEmail?.trim().toLowerCase() ?? '';
   if (!normalised) return false;
 
+  // Unclaimed rows only, matching resolveStaffIdentityUncached: reaching an
+  // email match means no row carries this user_id, so one that has a user_id
+  // belongs to somebody else.
   const { count: byEmail } = await admin
     .from('staff')
     .select('id', { count: 'exact', head: true })
     .ilike('email', escapeLikePattern(normalised))
+    .is('user_id', null)
     .is('revoked_at', null);
 
   return (byEmail ?? 0) > 0;

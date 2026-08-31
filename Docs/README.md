@@ -36,11 +36,11 @@ These are the documents to trust first in their area.
 | Document | Owns | Verified |
 |---|---|---|
 | `Resneo_Booking_Models_Reference.md` | The six `BookingModel` values, which public flow runs, signup cards | 2026-08-26 |
-| `Resneo_User_Accounts_Reference.md` | Accounts, auth flows, the live `/api/v1/*` customer API, manage-link token formats (`/m/v3`), when login is required | 2026-07-10 |
+| `Resneo_User_Accounts_Reference.md` | Accounts, auth flows, the live `/api/v1/*` customer API, manage-link token formats (`/m/v3`), when login is required | 2026-07-10; staff identity resolution 2026-08-31 (its `staff` RLS section carried migration-era language after the migration had settled; the as-built rule, why the email fallback cannot be deleted, and its new `user_id IS NULL` bound are now recorded there) |
 | `schema.sql` | Table and enum inventory. **Not** column-level detail | 2026-08-26 |
 | `DESIGN_SYSTEM.md` | Component conventions, the hand-rolled-modal migration rule | 2026-07-10 |
 | `FEATURE_FLAGS.md` | The closed 7-key venue flag list and defaults | 2026-08-09 |
-| `MOBILE_API.md` | The Bearer contract the React Native app depends on, venue routes and, since P5-1, the customer surface | 2026-07-10; deep-link section corrected 2026-08-26 (it named the pre-rebrand `reserveniapp://` scheme, and production had been configured from it); customer surface 2026-08-31 (this row still said that surface was undocumented after P5-1 wrote it) |
+| `MOBILE_API.md` | The Bearer contract the React Native app depends on, venue routes and, since P5-1, the customer surface | 2026-07-10; deep-link section corrected 2026-08-26 (it named the pre-rebrand `reserveniapp://` scheme, and production had been configured from it); customer surface 2026-08-31 (this row still said that surface was undocumented after P5-1 wrote it); auth contract 2026-08-31 (the app moved to the typed sign-in code and dropped password reset, so the OTP length, the `resneo://` dependency and the bare `staff/me` 401 were all restated) |
 | `BASELINE_METRICS.md` | Venue metric definitions and targets | 2026-05-31 |
 | `Embed_Public_Booking_URL_Contract.md` | Supported public booking page query parameters | 2026-08-09 |
 | `api-venue-permissions-matrix.md` | Admin vs calendar-scoped staff on venue mutation routes | 2026-08-26 |

@@ -84,6 +84,8 @@ export async function resolvePostLoginDestination(
             .from('staff')
             .select('id', { count: 'exact', head: true })
             .ilike('email', escapeLikePattern(emailNorm))
+            // Unclaimed rows only, matching resolveStaffIdentityUncached.
+            .is('user_id', null)
             .is('revoked_at', null)
         : Promise.resolve({ count: 0 }),
       admin.from('guests').select('id', { count: 'exact', head: true }).eq('user_id', userId),
@@ -129,6 +131,9 @@ export async function resolvePostLoginDestination(
       .from('staff')
       .select('id, venue_id')
       .ilike('email', escapeLikePattern(emailNorm))
+      // Unclaimed rows only. Routing someone to /dashboard on a row that
+      // getVenueStaff will refuse sends them to a door that cannot open.
+      .is('user_id', null)
       .is('revoked_at', null)
       .limit(5),
   ]);

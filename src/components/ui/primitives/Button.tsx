@@ -62,13 +62,31 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
       {...props}
     >
-      {loading ? (
-        <span
-          className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
-          aria-hidden
-        />
-      ) : null}
-      {children}
+      {/*
+        Under `asChild`, `children` is passed through ALONE.
+
+        `Slot` calls `React.Children.only`, and `{loading ? <span/> : null}`
+        followed by `{children}` is an array of two even when the first is
+        null. So every `asChild` call site threw
+        "expected to receive a single React element child" and took the page
+        down with it. The spinner is dropped rather than merged because
+        `asChild` renders a link, and a link has no pending state to show:
+        pair `asChild` with `loading` and the spinner is silently skipped,
+        which is the right trade for a prop combination that has no meaning.
+      */}
+      {asChild ? (
+        children
+      ) : (
+        <>
+          {loading ? (
+            <span
+              className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+              aria-hidden
+            />
+          ) : null}
+          {children}
+        </>
+      )}
     </Comp>
   );
 });

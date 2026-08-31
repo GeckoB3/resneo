@@ -151,20 +151,35 @@ export function AccountSecuritySection() {
         customer about to delete an account is exactly the customer who wants a
         copy first, and finding that only after the deletion is too late.
       */}
-      <SectionCard>
+      {/*
+        `p-6 sm:p-7` is not decoration. `SectionCard` is a SHELL with no padding
+        of its own, meant to be filled with `SectionCard.Body`, which brings
+        its own. Rendered with bare children and no className, the heading and
+        the button sat flush against the border, and `overflow-hidden` cropped
+        them to the rounded corners. Matches the Sessions card above.
+      */}
+      <SectionCard className="p-6 sm:p-7">
         <h2 className="text-lg font-semibold text-slate-900">Download your data</h2>
         <p className="mt-2 text-sm text-slate-600">
           Everything in your account, as one file: your profile, bookings, payments and waitlist
           places. It downloads to this device rather than arriving by email, so no copy is left in
           an inbox.
         </p>
-        <a
-          href="/api/account/export"
-          download
-          className="mt-4 inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-brand-700 shadow-sm hover:bg-slate-50"
+        {/*
+          `asChild` so the link is the real secondary Button rather than a
+          hand-copied one: it sat next to "Sign out everywhere" wearing a
+          different text colour and carrying no focus ring, which is the half
+          of a button a keyboard user needs most.
+        */}
+        <Button
+          asChild
+          variant="secondary"
+          className="mt-4 min-h-10 rounded-xl px-4 py-2.5 shadow-sm"
         >
-          Download my data
-        </a>
+          <a href="/api/account/export" download>
+            Download my data
+          </a>
+        </Button>
       </SectionCard>
 
       <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/90 to-amber-50/40 p-6 shadow-sm shadow-amber-900/5 sm:p-7">

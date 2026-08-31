@@ -6,9 +6,6 @@ import {
 } from '@/lib/emails/booking-email-enrichment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { sendPolicyMessage } from './outbound';
-import type { CommunicationMessageKey } from './policies';
-import { readCustomerPrefs } from '@/lib/notifications/customer-email-consent';
-import { customerAllowsMessageOnChannel } from '@/lib/notifications/customer-channel-preferences';
 import type { MessageType, Recipient, TemplateVariables } from './types';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
@@ -415,24 +412,18 @@ export class CommunicationService {
     if (recipient.phone) channels.push('sms');
 
     /*
-      The customer's own per-category, per-channel preferences (P4-3).
+      No account-level channel filter here, deliberately (see below).
 
-      Filtered HERE because this is the one place a channel is chosen, so a
-      preference honoured here is honoured for every message rather than for
-      the ones somebody remembered. The resolver decides what may be silenced
-      at all: confirmations, payment requests and anything a human wrote are
-      not suppressible, and a booking change always keeps its email.
-
-      Only for a LINKED guest, exactly as the marketing check above: a guest
-      with no account has no account-level preference to honour.
+      What a customer receives about a booking is the venue's communication
+      settings, and nothing else. The per-category preference matrix that used
+      to be consulted at this point was WITHDRAWN because it was honoured here
+      and nowhere else: this method handles six message keys, while the
+      reminders, the modification and the cancellation reach the customer
+      through `sendPolicyMessage` directly and never passed through it. Half a
+      rule is worse than none, because the half that works teaches a customer
+      to trust the half that does not.
     */
-    const allowedChannels = await filterChannelsForCustomer(
-      channels,
-      mapped.key,
-      ctx.guest_id ?? null,
-    );
-
-    for (const channel of allowedChannels) {
+    for (const channel of channels) {
       await sendPolicyMessage({
         venueId: ctx.venue_id,
         booking: context.booking,
@@ -456,54 +447,30 @@ export class CommunicationService {
 
 export const communicationService = new CommunicationService();
 
-/**
- * Drop the channels this customer has switched off for this kind of message.
- *
- * Resolved per send rather than cached: preferences are changed rarely and
- * read once per message, and a stale cache here means a customer who has just
- * turned something off receives it anyway, which is the complaint the feature
- * exists to answer.
- *
- * **Fails OPEN.** A read error returns the channels unchanged, matching
- * `customer-email-consent`: silently stopping somebody's mail because a query
- * failed is the one failure nobody reports.
- */
-async function filterChannelsForCustomer(
-  channels: Array<'email' | 'sms'>,
-  messageKey: CommunicationMessageKey,
-  guestId: string | null,
-): Promise<Array<'email' | 'sms'>> {
-  if (!guestId || channels.length === 0) return channels;
-  try {
-    const admin = getSupabaseAdminClient();
-    const { data: guest } = await admin
-      .from('guests')
-      .select('user_id')
-      .eq('id', guestId)
-      .maybeSingle();
-    const userId = (guest as { user_id?: string | null } | null)?.user_id ?? null;
-    // No account means no account-level preference to honour.
-    if (!userId) return channels;
+/*
+  WHERE THE CUSTOMER'S OWN CHANNEL PREFERENCES WENT.
 
-    const prefs = await readCustomerPrefs(admin, userId);
-    return channels.filter((channel) =>
-      customerAllowsMessageOnChannel(prefs, messageKey, channel),
-    );
-  } catch (e) {
-    console.error(
-      '[filterChannelsForCustomer] preference read failed, sending anyway:',
-      e instanceof Error ? e.message : e,
-    );
-    return channels;
-  }
-}
+  `/account/profile` briefly offered five switches (reminders by email and by
+  text, changes by text, marketing by email and by text) and this file held the
+  only code that read them. That was the whole defect: `send` below handles six
+  message keys, and the messages a customer would actually want to silence do
+  not go through it.
 
-/**
- * The channel filter, exposed for its own test.
- *
- * Named `ForTest` rather than exported plainly because it is an implementation
- * detail of the channel loop above and nothing else should call it: a second
- * caller would be a second place the rule runs, which is the shape of the bug
- * this feature fixes.
- */
-export const filterChannelsForCustomerForTest = filterChannelsForCustomer;
+  - Reminders (`pre_visit_reminder`, `confirm_or_cancel_prompt`) come from
+    `cron/send-communications`, which calls `sendPolicyMessage` directly.
+  - A change or a cancellation comes from `sendBookingModificationNotification`
+    and `sendCancellationNotification` in `send-templated`, likewise direct.
+  - The compliance reminders come from `lib/compliance/dispatch`, likewise.
+  - `post_visit_thankyou`, the only message in the marketing category, is sent
+    by the post-visit cron and `mapMessageType` returns null for it, so it
+    could not reach this method even if something routed it here.
+
+  So the switches worked for the no-show notice, the auto-cancel notice and the
+  deposit reminder, and silently did nothing for everything a customer would
+  reach for them to stop. Rather than leave that shipped, the UI was withdrawn
+  and this filter with it: a venue's communication settings are now the single
+  answer to what a customer receives about a booking.
+
+  To bring the matrix back, the check belongs in `sendPolicyMessage`, which is
+  the real point where a channel becomes a send, and not here.
+*/

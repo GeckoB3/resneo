@@ -40,7 +40,7 @@ These are the documents to trust first in their area.
 | `schema.sql` | Table and enum inventory. **Not** column-level detail | 2026-08-26 |
 | `DESIGN_SYSTEM.md` | Component conventions, the hand-rolled-modal migration rule | 2026-07-10 |
 | `FEATURE_FLAGS.md` | The closed 7-key venue flag list and defaults | 2026-08-09 |
-| `MOBILE_API.md` | The Bearer contract the React Native staff app depends on. **Venue routes only**; the customer surface is undocumented | 2026-07-10; deep-link section corrected 2026-08-26 (it named the pre-rebrand `reserveniapp://` scheme, and production had been configured from it) |
+| `MOBILE_API.md` | The Bearer contract the React Native app depends on, venue routes and, since P5-1, the customer surface | 2026-07-10; deep-link section corrected 2026-08-26 (it named the pre-rebrand `reserveniapp://` scheme, and production had been configured from it); customer surface 2026-08-31 (this row still said that surface was undocumented after P5-1 wrote it) |
 | `BASELINE_METRICS.md` | Venue metric definitions and targets | 2026-05-31 |
 | `Embed_Public_Booking_URL_Contract.md` | Supported public booking page query parameters | 2026-08-09 |
 | `api-venue-permissions-matrix.md` | Admin vs calendar-scoped staff on venue mutation routes | 2026-08-26 |

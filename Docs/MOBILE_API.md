@@ -169,7 +169,8 @@ returns 404 rather than 403, so a stranger learns nothing from a guessed id.
 | GET | `/api/v1/me/bookings/[id]/reschedule-options` | Whether this booking can be moved and what a move would need. Returns **no slots**: the availability call is separate |
 | POST | `/api/v1/me/bookings/[id]/reschedule` | Move it. Body keys are read by name, not forwarded wholesale; ask `reschedule-options` first rather than guessing and getting a 400 |
 | POST | `/api/v1/me/bookings/[id]/confirm` | Confirm attendance, the action the "please confirm you are coming" email asks for. Idempotent, so a double tap is not an error |
-| GET | `/api/v1/me/venues` | One row per venue the customer is known at: names, first and last booked, counts, marketing consent |
+| GET | `/api/v1/me/venues` | One row per venue the customer is known at: `guest_id`, names, first and last booked, counts, marketing consent |
+| PATCH | `/api/account/marketing-preferences` | Turn one venue's offers on or off. Takes the `guest_id` from `/api/v1/me/venues`; unversioned because it predates this surface (C7b) |
 | GET | `/api/v1/me/payments` | Settled payments. `?booking_id=` narrows to one |
 | GET | `/api/v1/me/waitlist` | Waitlist places |
 | DELETE | `/api/v1/me/waitlist/[id]` | Leave one. 409 when it is already gone |

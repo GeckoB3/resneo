@@ -361,7 +361,12 @@ export function ConfirmCancelView({
 function DetailTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2.5">
-      <p className="text-xs font-medium text-slate-400">{label}</p>
+      {/*
+        Same 2.56:1 label as the portal's copy of this tile: see the note in
+        `GuestBookingDetailView`. No axe test reaches this page, so the two
+        have to be kept in step by hand.
+      */}
+      <p className="text-xs font-medium text-slate-600">{label}</p>
       <p className="mt-0.5 text-sm font-semibold text-slate-800">{value}</p>
     </div>
   );

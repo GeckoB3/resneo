@@ -1630,7 +1630,14 @@ function ModifyClassBookingSection({
 function DetailTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2.5">
-      <p className="text-xs font-medium text-slate-400">{label}</p>
+      {/*
+        `text-slate-400` here was 2.56:1 against this tile (#90a1b9 on #fcfcfd)
+        where WCAG 1.4.3 AA asks for 4.5:1 at 12px, so the labels naming what
+        each value IS (Service, Staff, Date, Time, Status) were the least
+        legible text on the page. `slate-500` clears the bar only just; this is
+        about 7.7:1 and still reads as secondary beside the value below it.
+      */}
+      <p className="text-xs font-medium text-slate-600">{label}</p>
       <p
         data-testid={`detail-${label.toLowerCase().replace(/\s+/g, '-')}`}
         className="mt-0.5 text-sm font-semibold text-slate-800"

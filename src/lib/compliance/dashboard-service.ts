@@ -4,6 +4,7 @@ import {
   resolveRequirements,
   type ResolverRecord,
   type ResolverRequirement,
+  mergeRequirementsServiceWins,
 } from '@/lib/compliance/resolve-requirements';
 import { COMPLIANCE_EXPIRING_SOON_DAYS } from '@/lib/compliance/constants';
 import { formatYmdInTimezone, addDaysToYmd } from '@/lib/venue/venue-local-clock';
@@ -210,15 +211,25 @@ async function resolveMissingForBookings(
         .in('service_item_id', serviceItemIds),
     );
   }
+  // Venue-wide rows (plan §4) apply to every booking; a service row for the same type wins.
+  reqQueries.push(
+    admin
+      .from('service_compliance_requirements')
+      .select(
+        'id, compliance_type_id, enforcement, lock_period_hours, scope, compliance_types!inner(name, is_active, validity_period_days)',
+      )
+      .eq('venue_id', venueId)
+      .eq('scope', 'venue'),
+  );
   const reqResults = await Promise.all(reqQueries);
   const reqRows = reqResults.flatMap((r) => r.data ?? []) as Record<string, unknown>[];
   if (reqRows.length === 0) return [];
 
-  // Index requirements by service id (whichever column is set).
+  // Index requirements by service id (whichever column is set); venue-wide rows aside.
   const reqsByService = new Map<string, ResolverRequirement[]>();
+  const venueReqs: ResolverRequirement[] = [];
   const typeIds = new Set<string>();
   for (const row of reqRows) {
-    const svcId = (row.appointment_service_id ?? row.service_item_id) as string;
     type TypeJoin = { name?: string; is_active?: boolean; validity_period_days?: number | null };
     const typeJoin = row.compliance_types as TypeJoin | TypeJoin[] | null;
     const t = Array.isArray(typeJoin) ? typeJoin[0] : typeJoin;
@@ -230,11 +241,17 @@ async function resolveMissingForBookings(
       lock_period_hours: (row.lock_period_hours as number | null) ?? null,
       type_is_active: t?.is_active ?? true,
       validity_period_days: t?.validity_period_days ?? null,
+      scope: row.scope === 'venue' ? 'venue' : 'service',
     };
+    typeIds.add(req.compliance_type_id);
+    const svcId = (row.appointment_service_id ?? row.service_item_id) as string | null;
+    if (req.scope === 'venue' || !svcId) {
+      venueReqs.push(req);
+      continue;
+    }
     const list = reqsByService.get(svcId) ?? [];
     list.push(req);
     reqsByService.set(svcId, list);
-    typeIds.add(req.compliance_type_id);
   }
 
   // Batch-load the guests' records for the involved types.
@@ -272,8 +289,8 @@ async function resolveMissingForBookings(
   const out: MissingBookingRow[] = [];
   for (const b of bookings) {
     const svcId = (b.appointment_service_id ?? b.service_item_id) as string;
-    const reqs = reqsByService.get(svcId);
-    if (!reqs || reqs.length === 0) continue;
+    const reqs = mergeRequirementsServiceWins(reqsByService.get(svcId) ?? [], venueReqs);
+    if (reqs.length === 0) continue;
     const guestId = (b.guest_id as string | null) ?? null;
     const records = guestId ? recordsByGuest.get(guestId) ?? [] : [];
     const resolved = resolveRequirements(

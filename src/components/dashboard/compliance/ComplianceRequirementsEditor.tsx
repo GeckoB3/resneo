@@ -24,17 +24,28 @@ function typeSupportsClientOnline(captureMethods: string[] | undefined): boolean
 }
 
 /**
- * Inline service-compliance-requirements editor (spec §3.6 / §11.5). Shared by
- * the service editor and the Settings → Compliance per-service drill-in. Hidden
- * entirely when the compliance feature is off for the venue.
+ * Inline compliance-requirements editor (spec §3.6 / §11.5). Shared by the service
+ * editor, the Settings → Compliance per-service drill-in, and (with `scope="venue"`)
+ * the "All bookings" row that holds the requirements every appointment booking must
+ * meet (plan §4). Hidden entirely when the compliance feature is off for the venue.
  */
 export function ComplianceRequirementsEditor({
   appointmentServiceId,
+  scope = 'service',
+  venueWideTypeNames,
   complianceEnabled,
   embedded = false,
   onChanged,
 }: {
-  appointmentServiceId: string;
+  /** The service whose requirements are edited. Not used when `scope` is `venue`. */
+  appointmentServiceId?: string;
+  /** `venue` edits the requirements that apply to every appointment booking. */
+  scope?: 'service' | 'venue';
+  /**
+   * Names of the venue-wide types, shown read-only above a service's own list so nobody
+   * adds the same form twice. Only meaningful for `scope="service"`.
+   */
+  venueWideTypeNames?: string[];
   complianceEnabled: boolean;
   /**
    * Render without the SectionCard chrome. Used inside the Settings → Compliance
@@ -45,13 +56,16 @@ export function ComplianceRequirementsEditor({
   /** Called after a requirement is added or removed, so hosts can refresh counts. */
   onChanged?: () => void;
 }) {
-  const reqUrl = `/api/venue/compliance/requirements?appointment_service_id=${encodeURIComponent(appointmentServiceId)}`;
+  const isVenueScope = scope === 'venue';
+  const reqUrl = isVenueScope
+    ? '/api/venue/compliance/requirements?scope=venue'
+    : `/api/venue/compliance/requirements?appointment_service_id=${encodeURIComponent(appointmentServiceId ?? '')}`;
   const {
     data: reqData,
     mutate: mutateReqs,
     isLoading: reqLoading,
   } = useSWR<{ requirements: RequirementRowData[] }>(
-    complianceEnabled ? reqUrl : null,
+    complianceEnabled && (isVenueScope || appointmentServiceId) ? reqUrl : null,
     complianceJsonFetcher,
   );
   const { data: typesData } = useSWR<{ types: ComplianceTypeSummary[] }>(
@@ -146,8 +160,21 @@ export function ComplianceRequirementsEditor({
       </button>
     ) : undefined;
 
+  const venueWideNote =
+    !isVenueScope && venueWideTypeNames && venueWideTypeNames.length > 0 ? (
+      <p className="mb-3 rounded-lg border border-brand-100 bg-brand-50/50 px-3 py-2 text-xs text-slate-600">
+        Also required for all bookings: <span className="font-medium text-slate-800">{venueWideTypeNames.join(', ')}</span>.
+        Manage those under{' '}
+        <a href="/dashboard/settings?tab=compliance&sub=requirements" className="text-brand-600 underline">
+          Settings → Compliance → Requirements
+        </a>
+        .
+      </p>
+    ) : null;
+
   const body = (
     <>
+        {venueWideNote}
         {error && (
           <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
             {error}
@@ -164,7 +191,9 @@ export function ComplianceRequirementsEditor({
           </p>
         ) : requirements.length === 0 ? (
           <p className="text-sm text-slate-500">
-            This service has no compliance requirements. Add one to warn or block bookings without a valid record.
+            {isVenueScope
+              ? 'No form applies to all bookings yet. Add one to ask every client for it, such as a new client intake form.'
+              : 'This service has no compliance requirements of its own. Add one to warn or block bookings without a valid record.'}
           </p>
         ) : (
           <ul className="divide-y divide-slate-100">
@@ -288,7 +317,8 @@ export function ComplianceRequirementsEditor({
     <AddRequirementDialog
       open={adding}
       onOpenChange={setAdding}
-      serviceId={appointmentServiceId}
+      scope={scope}
+      serviceId={appointmentServiceId ?? null}
       availableTypes={availableTypes}
       onAdded={() => {
         void mutateReqs();
@@ -311,8 +341,12 @@ export function ComplianceRequirementsEditor({
     <SectionCard>
       <SectionCard.Header
         eyebrow="Compliance"
-        title="Compliance requirements"
-        description="Records this service requires before a booking. Missing or expired records warn or block at booking time."
+        title={isVenueScope ? 'Requirements for all bookings' : 'Compliance requirements'}
+        description={
+          isVenueScope
+            ? 'Records every appointment booking requires. Missing or expired records warn or block at booking time.'
+            : 'Records this service requires before a booking. Missing or expired records warn or block at booking time.'
+        }
         right={addButton}
       />
       <SectionCard.Body>{body}</SectionCard.Body>
@@ -324,13 +358,15 @@ export function ComplianceRequirementsEditor({
 function AddRequirementDialog({
   open,
   onOpenChange,
+  scope,
   serviceId,
   availableTypes,
   onAdded,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  serviceId: string;
+  scope: 'service' | 'venue';
+  serviceId: string | null;
   availableTypes: ComplianceTypeSummary[];
   onAdded: () => void;
 }) {
@@ -356,7 +392,8 @@ function AddRequirementDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          service_id: serviceId,
+          scope,
+          ...(scope === 'service' ? { service_id: serviceId } : {}),
           compliance_type_id: typeId,
           enforcement,
           online_collection: supportsOnline ? onlineCollection : 'none',
@@ -385,7 +422,11 @@ function AddRequirementDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Add compliance requirement"
-      description="Require a compliance record for this service."
+      description={
+        scope === 'venue'
+          ? 'Require a compliance record for every appointment booking.'
+          : 'Require a compliance record for this service.'
+      }
       footer={
         <div className="flex justify-end gap-2">
           <button

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FakeSupabase } from '@/lib/compliance/test-utils/fake-supabase';
 import {
   loadPublicFormByCode,
-  publicServiceRequirements,
+  publicBookingRequirements,
   stripStaffOnlyFields,
   submitPublicForm,
 } from '@/lib/compliance/public-forms-service';
@@ -219,19 +219,215 @@ describe('submitPublicForm storage-path safety (§13.3)', () => {
   });
 });
 
-describe('publicServiceRequirements', () => {
-  it('lists active-type requirements for a service', async () => {
-    const fake = new FakeSupabase({
-      venues: [{ id: VENUE, booking_model: 'unified_scheduling', enabled_models: null }],
-      service_compliance_requirements: [
-        { id: 'r1', venue_id: VENUE, service_item_id: 'svc-1', compliance_type_id: 't1', enforcement: 'warn_client', lock_period_hours: null },
+describe('publicBookingRequirements (booking page, plan §3)', () => {
+  const NOW = new Date('2026-09-01T10:00:00Z');
+  const inTwoDays = { bookingDate: '2026-09-03', bookingTime: '10:00' };
+
+  function seedBooking(opts: {
+    requirements?: Array<Record<string, unknown>>;
+    records?: Array<Record<string, unknown>>;
+    enabled?: boolean;
+    inline?: boolean;
+    lockHours?: number | null;
+  } = {}) {
+    const inline = opts.inline ?? true;
+    return new FakeSupabase({
+      venues: [
+        {
+          id: VENUE,
+          booking_model: 'unified_scheduling',
+          enabled_models: null,
+          pricing_tier: opts.enabled === false ? null : 'appointments',
+          feature_flags: { compliance_records_enabled: opts.enabled !== false },
+        },
+      ],
+      service_compliance_requirements: opts.requirements ?? [
+        {
+          id: 'r1',
+          venue_id: VENUE,
+          service_item_id: 'svc-1',
+          compliance_type_id: 't1',
+          enforcement: 'block_online',
+          lock_period_hours: opts.lockHours ?? null,
+          online_collection: inline ? 'inline' : 'confirmation_link',
+        },
+      ],
+      compliance_types: [
+        {
+          id: 't1',
+          venue_id: VENUE,
+          name: 'Consent',
+          is_active: true,
+          capture_methods: ['client_online', 'staff_in_venue'],
+          online_unmet_message: null,
+          current_version_id: 'v1',
+          validity_period_days: null,
+          result_type: 'completed',
+        },
+      ],
+      compliance_type_versions: [{ id: 'v1', venue_id: VENUE, compliance_type_id: 't1', form_schema: SCHEMA }],
+      guests: [{ id: GUEST, venue_id: VENUE, email: 'jane@x.com' }],
+      compliance_records: opts.records ?? [],
+    });
+  }
+
+  const validRecord = (captured: string) => ({
+    id: 'rec-1',
+    venue_id: VENUE,
+    guest_id: GUEST,
+    compliance_type_id: 't1',
+    status: 'completed',
+    expires_at: null,
+    voided_at: null,
+    captured_at: captured,
+    result: null,
+    captured_by_staff_id: null,
+  });
+
+  it('with no email: lists the requirement with no state and no form', async () => {
+    const res = await publicBookingRequirements(seedBooking().asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res.identity_known).toBe(false);
+    expect(res.requirements).toHaveLength(1);
+    expect(res.requirements[0]).toMatchObject({ compliance_type_id: 't1', state: null, form: null, client_online: true });
+  });
+
+  it('a returning customer with a valid record is SATISFIED and gets no form', async () => {
+    const res = await publicBookingRequirements(seedBooking({ records: [validRecord('2026-08-01T10:00:00Z')] }).asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: '  Jane@X.com ',
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res.identity_known).toBe(true);
+    expect(res.requirements[0]).toMatchObject({ state: 'SATISFIED', form: null });
+  });
+
+  it('a new customer is MISSING and gets the inline form with staff_only fields stripped', async () => {
+    const res = await publicBookingRequirements(seedBooking().asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: 'someone-new@x.com',
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res.identity_known).toBe(true);
+    const req = res.requirements[0]!;
+    expect(req.state).toBe('MISSING');
+    expect(req.form?.version_id).toBe('v1');
+    expect(req.form?.form_schema.fields.map((f) => f.id)).toEqual(['f_name']);
+  });
+
+  it('a phone-only or differently-addressed returning customer reads as MISSING (mirrors booking creation)', async () => {
+    const res = await publicBookingRequirements(seedBooking({ records: [validRecord('2026-08-01T10:00:00Z')] }).asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: 'jane.other@x.com',
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res.requirements[0]!.state).toBe('MISSING');
+    expect(res.requirements[0]!.form).not.toBeNull();
+  });
+
+  it('does not offer a form when the type is collected by link rather than inline', async () => {
+    const res = await publicBookingRequirements(seedBooking({ inline: false }).asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: 'someone-new@x.com',
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res.requirements[0]).toMatchObject({ state: 'MISSING', online_collection: 'confirmation_link', form: null });
+  });
+
+  it('judges the lock period against the chosen slot: too close to book means LOCK_PASSED and no form', async () => {
+    const res = await publicBookingRequirements(seedBooking({ lockHours: 72 }).asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: 'someone-new@x.com',
+      now: NOW,
+      ...inTwoDays, // 48h away, inside a 72h lock
+    });
+    expect(res.requirements[0]).toMatchObject({ state: 'LOCK_PASSED', form: null });
+
+    const later = await publicBookingRequirements(seedBooking({ lockHours: 24 }).asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: 'someone-new@x.com',
+      now: NOW,
+      ...inTwoDays, // 48h away, outside a 24h lock
+    });
+    expect(later.requirements[0]).toMatchObject({ state: 'MISSING' });
+    expect(later.requirements[0]!.form).not.toBeNull();
+  });
+
+  it('merges a type required by two services: strictest enforcement, worst state, asked once', async () => {
+    const fake = seedBooking({
+      requirements: [
+        { id: 'r1', venue_id: VENUE, service_item_id: 'svc-1', compliance_type_id: 't1', enforcement: 'warn_client', lock_period_hours: null, online_collection: 'inline' },
+        { id: 'r2', venue_id: VENUE, service_item_id: 'svc-2', compliance_type_id: 't1', enforcement: 'block_online', lock_period_hours: null, online_collection: 'confirmation_link' },
       ],
     });
-    // The !inner join to compliance_types is not resolved by the fake, so the
-    // type defaults to active — assert the requirement is surfaced.
-    const reqs = await publicServiceRequirements(fake.asClient(), VENUE, 'svc-1');
-    expect(reqs).toHaveLength(1);
-    expect(reqs[0]!.enforcement).toBe('warn_client');
+    const res = await publicBookingRequirements(fake.asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1', 'svc-2'],
+      email: 'someone-new@x.com',
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res.requirements).toHaveLength(1);
+    expect(res.requirements[0]).toMatchObject({ enforcement: 'block_online', online_collection: 'inline', state: 'MISSING' });
+    expect(res.requirements[0]!.form).not.toBeNull();
+  });
+
+  it('applies a venue-wide (all bookings) requirement to any service, and lets a service row win (plan §4)', async () => {
+    const venueWideOnly = seedBooking({
+      requirements: [
+        { id: 'v1', venue_id: VENUE, scope: 'venue', compliance_type_id: 't1', enforcement: 'block_online', lock_period_hours: null, online_collection: 'inline' },
+      ],
+    });
+    const res = await publicBookingRequirements(venueWideOnly.asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-any'],
+      email: 'someone-new@x.com',
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res.requirements).toHaveLength(1);
+    expect(res.requirements[0]).toMatchObject({ scope: 'venue', enforcement: 'block_online', state: 'MISSING' });
+    expect(res.requirements[0]!.form).not.toBeNull();
+
+    const both = seedBooking({
+      requirements: [
+        { id: 'v1', venue_id: VENUE, scope: 'venue', compliance_type_id: 't1', enforcement: 'block_all', lock_period_hours: null, online_collection: 'inline' },
+        { id: 's1', venue_id: VENUE, service_item_id: 'svc-1', compliance_type_id: 't1', enforcement: 'warn_client', lock_period_hours: null, online_collection: 'inline' },
+      ],
+    });
+    const res2 = await publicBookingRequirements(both.asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: 'someone-new@x.com',
+      now: NOW,
+      ...inTwoDays,
+    });
+    expect(res2.requirements).toHaveLength(1);
+    expect(res2.requirements[0]).toMatchObject({ scope: 'service', enforcement: 'warn_client' });
+  });
+
+  it('returns nothing when compliance is not enabled for the venue', async () => {
+    const res = await publicBookingRequirements(seedBooking({ enabled: false }).asClient(), {
+      venueId: VENUE,
+      serviceIds: ['svc-1'],
+      email: 'someone-new@x.com',
+      now: NOW,
+    });
+    expect(res.requirements).toEqual([]);
   });
 });
 

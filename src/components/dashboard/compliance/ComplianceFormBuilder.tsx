@@ -654,6 +654,10 @@ function ValidityEditor({ meta, setMeta }: { meta: BuilderMeta; setMeta: (m: Bui
         <option value="per_visit">Per visit (single-use)</option>
         <option value="days">Expires after N days</option>
       </select>
+      <p className="mt-1 text-xs text-slate-500">
+        No expiry: the client completes this once. Per visit: every booking. A number of days: again after that
+        long.
+      </p>
       {mode === 'days' && (
         <input
           type="number"

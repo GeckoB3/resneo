@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ComplianceFormRenderer } from '@/components/dashboard/compliance/ComplianceFormRenderer';
 import type { ComplianceFormSchema } from '@/lib/compliance/form-schema';
 import {
@@ -11,14 +11,17 @@ import {
 } from '@/lib/compliance/form-draft';
 
 /**
- * Inline compliance forms for the public booking flow (spec §9.3, Phase 2c). Fetches the
- * service's client-completable, `inline` requirements and renders each form so the guest
- * completes it before booking. Each form validates + reports its responses on submit
+ * Inline compliance forms for the public booking flow (spec §9.3; plan §3). Renders the
+ * forms the parent block has already resolved as needed for THIS guest, so the guest
+ * completes them before booking. Each form validates + reports its responses on submit
  * (ComplianceFormRenderer owns its own submit + validation); we collect them by type and
  * report up whether every MANDATORY (block_*) form is done so the parent can gate Confirm.
+ *
+ * Presentational: it no longer fetches anything. `BookingComplianceBlock` decides which
+ * forms are shown, from the guest's resolved requirements.
  */
 
-interface InlineForm {
+export interface BookingInlineForm {
   compliance_type_id: string;
   compliance_type_name: string;
   enforcement: string;
@@ -27,14 +30,14 @@ interface InlineForm {
   form_schema: ComplianceFormSchema;
 }
 
-export interface BookingComplianceState {
+export interface BookingComplianceFormsState {
   /** Completed submissions to send with the booking-create request. */
-  submissions: Array<{ compliance_type_id: string; responses: Record<string, unknown> }>;
+  submissions: Array<{ compliance_type_id: string; version_id: string; responses: Record<string, unknown> }>;
   /** Draft id used for any pre-booking file uploads (also sent with the booking). */
   draftId: string;
   /** True when every mandatory (block_*) inline form has been completed. */
   mandatoryComplete: boolean;
-  /** All type ids handled inline — so the pre-check notice can suppress them. */
+  /** All type ids handled inline. */
   inlineTypeIds: string[];
 }
 
@@ -74,28 +77,15 @@ export function clearBookingComplianceDrafts(venueId: string): void {
 
 interface Props {
   venueId: string;
-  /** Catalog service id(s) for the booking (one per chosen service / multi-service segment). */
-  serviceIds: string[];
+  /** The forms this guest still needs to complete, as resolved by the parent block. */
+  forms: BookingInlineForm[];
   /** Disable the forms while the parent is submitting the booking. */
   submittingBooking?: boolean;
-  onChange: (state: BookingComplianceState) => void;
-  /** Drop the standalone card chrome so the host can group this inside one section. */
-  embedded?: boolean;
-  /** Reports whether any inline form is currently shown (for the host's shared wrapper). */
-  onActiveChange?: (active: boolean) => void;
+  onChange: (state: BookingComplianceFormsState) => void;
   className?: string;
 }
 
-export default function BookingComplianceForms({
-  venueId,
-  serviceIds,
-  submittingBooking,
-  onChange,
-  embedded,
-  onActiveChange,
-  className,
-}: Props) {
-  const [forms, setForms] = useState<InlineForm[] | null>(null);
+export default function BookingComplianceForms({ venueId, forms, submittingBooking, onChange, className }: Props) {
   const [responsesByType, setResponsesByType] = useState<Record<string, Record<string, unknown>>>({});
   const [editingType, setEditingType] = useState<string | null>(null);
   // One stable draft id per booking session, used as the file-upload prefix. Persisted
@@ -126,98 +116,39 @@ export default function BookingComplianceForms({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responsesByType, restored]);
 
-  const serviceKey = useMemo(() => [...new Set(serviceIds.filter(Boolean))].sort().join(','), [serviceIds]);
-  const uniqueServiceIds = useMemo(() => serviceKey.split(',').filter(Boolean), [serviceKey]);
-
-  // Fetch the inline forms for the chosen service(s); dedup by type (worst case a type
-  // is required by two segments — one form satisfies both). Fail-quiet.
-  useEffect(() => {
-    const controller = new AbortController();
-    let cancelled = false;
-    (async () => {
-      if (!venueId || uniqueServiceIds.length === 0) {
-        if (!cancelled) setForms(null);
-        return;
-      }
-      try {
-        const lists = await Promise.all(
-          uniqueServiceIds.map(async (serviceId) => {
-            const res = await fetch(
-              `/api/public/compliance/inline-forms?venue_id=${encodeURIComponent(venueId)}&service_id=${encodeURIComponent(serviceId)}`,
-              { signal: controller.signal },
-            );
-            if (!res.ok) return [] as InlineForm[];
-            const data = (await res.json()) as { forms?: InlineForm[] };
-            return data.forms ?? [];
-          }),
-        );
-        if (cancelled) return;
-        const byType = new Map<string, InlineForm>();
-        for (const f of lists.flat()) if (!byType.has(f.compliance_type_id)) byType.set(f.compliance_type_id, f);
-        setForms([...byType.values()]);
-      } catch {
-        if (!cancelled) setForms(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [venueId, serviceKey, uniqueServiceIds]);
-
   // Report collected state up whenever the forms or captured responses change.
   useEffect(() => {
-    const formList = forms ?? [];
-    // Only submit responses for forms required by the CURRENT service set. A persisted draft
-    // from a previously-abandoned booking (different services, same venue/device) is kept for
-    // resume but must not be captured against this booking (review #3).
-    const currentTypeIds = new Set(formList.map((f) => f.compliance_type_id));
+    // Only submit responses for forms required by the CURRENT guest + service set. A
+    // persisted draft from a previously-abandoned booking (different services, same
+    // venue/device) is kept for resume but must not be captured against this booking
+    // (review #3). The same filter drops a form the guest filled in before the check
+    // found it was already on file.
+    const byType = new Map(forms.map((f) => [f.compliance_type_id, f] as const));
     const submissions = Object.entries(responsesByType)
-      .filter(([compliance_type_id]) => currentTypeIds.has(compliance_type_id))
+      .filter(([compliance_type_id]) => byType.has(compliance_type_id))
       .map(([compliance_type_id, responses]) => ({
         compliance_type_id,
+        version_id: byType.get(compliance_type_id)!.version_id,
         responses,
       }));
-    const mandatoryComplete = formList
+    const mandatoryComplete = forms
       .filter((f) => isMandatory(f.enforcement))
       .every((f) => responsesByType[f.compliance_type_id] !== undefined);
-    onChange({ submissions, draftId, mandatoryComplete, inlineTypeIds: formList.map((f) => f.compliance_type_id) });
+    onChange({ submissions, draftId, mandatoryComplete, inlineTypeIds: forms.map((f) => f.compliance_type_id) });
     // onChange is provided fresh each render by the parent; depending on it would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responsesByType, forms, draftId]);
 
-  // Report whether any inline form is shown, so the host can render a shared wrapper.
-  useEffect(() => {
-    onActiveChange?.(Boolean(forms && forms.length > 0 && draftId));
-  }, [forms, draftId, onActiveChange]);
-
-  if (!forms || forms.length === 0 || !draftId) return null;
+  if (forms.length === 0 || !draftId) return null;
 
   const fileUploadUrl = `/api/public/compliance/booking-upload?venue_id=${encodeURIComponent(venueId)}&draft_id=${encodeURIComponent(draftId)}`;
 
-  const instructions = (
-    <p className={embedded ? 'text-xs text-slate-500' : 'mt-0.5 text-xs text-slate-500'}>
-      Please complete the form{forms.length > 1 ? 's' : ''} below. Anything marked required must be done before you
-      can book.
-    </p>
-  );
-
   return (
-    <div
-      className={
-        embedded
-          ? `space-y-4 ${className ?? ''}`
-          : `mb-4 space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 ${className ?? ''}`
-      }
-    >
-      {embedded ? (
-        instructions
-      ) : (
-        <div>
-          <h4 className="text-sm font-semibold text-slate-900">Forms for this booking</h4>
-          {instructions}
-        </div>
-      )}
+    <div className={`space-y-4 ${className ?? ''}`}>
+      <p className="text-xs text-slate-500">
+        Please complete the form{forms.length > 1 ? 's' : ''} below. Anything marked required must be done before you
+        can book.
+      </p>
       {forms.map((f) => {
         const done = responsesByType[f.compliance_type_id] !== undefined;
         const editing = editingType === f.compliance_type_id;

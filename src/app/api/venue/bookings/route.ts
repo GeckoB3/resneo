@@ -137,7 +137,6 @@ const phoneBookingSchema = z.object({
     .max(50)
     .optional(),
   /** Admin acknowledgement to proceed past an unmet `block_all` compliance requirement (§5.2). */
-  override_compliance: z.boolean().optional(),
   /** Client-address services: where staff travel to for this appointment. */
   ...clientAddressRequestFields,
 });
@@ -1380,8 +1379,9 @@ export async function POST(request: NextRequest) {
         apptInsert.created_by_linked_venue_id = linkedCreate.actingVenueId;
       }
 
-      // Compliance requirements gate (§5.1). Staff context blocks only on `block_all`;
-      // an admin may acknowledge and proceed (§5.2). No-ops when the feature is off.
+      // Compliance requirements check (§5.1). Staff are never blocked (plan §5, 2026-09-01):
+      // every unmet requirement comes back as a warning for the confirmation screen. The
+      // 409 branch below is the helper's contract and is unreachable in the staff context.
       const apptCompliance = await checkBookingCompliance(admin, {
         venueId,
         guestId: guest.id,
@@ -1391,7 +1391,7 @@ export async function POST(request: NextRequest) {
         bookingTime: timeForDb,
         context: 'staff',
       });
-      if (apptCompliance.blocked && !(staff.role === 'admin' && parsed.data.override_compliance === true)) {
+      if (apptCompliance.blocked) {
         return NextResponse.json(
           {
             error: COMPLIANCE_REQUIREMENT_UNMET,

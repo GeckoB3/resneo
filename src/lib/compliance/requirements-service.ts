@@ -1,7 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { writeComplianceAuditEvent } from '@/lib/compliance/audit';
-import type { ComplianceEnforcement, ComplianceOnlineCollection } from '@/lib/compliance/constants';
+import type {
+  ComplianceEnforcement,
+  ComplianceOnlineCollection,
+  ComplianceRequirementScope,
+} from '@/lib/compliance/constants';
 import type { ServiceResult } from '@/lib/compliance/types-service';
 
 /**
@@ -40,6 +44,8 @@ async function serviceBelongsToVenue(
 
 export interface RequirementRow {
   id: string;
+  /** `venue` rows apply to every appointment booking and carry no service FK (plan §4). */
+  scope: ComplianceRequirementScope;
   compliance_type_id: string;
   enforcement: ComplianceEnforcement;
   lock_period_hours: number | null;
@@ -51,6 +57,9 @@ export interface RequirementRow {
   compliance_type_is_active: boolean;
 }
 
+const REQUIREMENT_SELECT =
+  'id, scope, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)';
+
 function mapRequirementRow(row: Record<string, unknown>): RequirementRow {
   const typeJoin = row.compliance_types as
     | { name?: string; category?: string; is_active?: boolean }
@@ -59,6 +68,7 @@ function mapRequirementRow(row: Record<string, unknown>): RequirementRow {
   const t = Array.isArray(typeJoin) ? typeJoin[0] : typeJoin;
   return {
     id: row.id as string,
+    scope: row.scope === 'venue' ? 'venue' : 'service',
     compliance_type_id: row.compliance_type_id as string,
     enforcement: row.enforcement as ComplianceEnforcement,
     lock_period_hours: (row.lock_period_hours as number | null) ?? null,
@@ -81,7 +91,7 @@ export async function listRequirementsForService(
   const { data, error } = await admin
     .from('service_compliance_requirements')
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+      REQUIREMENT_SELECT,
     )
     .eq('venue_id', venueId)
     .eq(column, serviceId);
@@ -92,11 +102,28 @@ export async function listRequirementsForService(
   return (data ?? []).map((r) => mapRequirementRow(r as Record<string, unknown>));
 }
 
+/** List the requirements that apply to every appointment booking at the venue (plan §4). */
+export async function listVenueWideRequirements(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<RequirementRow[]> {
+  const { data, error } = await admin
+    .from('service_compliance_requirements')
+    .select(REQUIREMENT_SELECT)
+    .eq('venue_id', venueId)
+    .eq('scope', 'venue');
+  if (error) {
+    console.error('[listVenueWideRequirements] failed:', error.message);
+    return [];
+  }
+  return (data ?? []).map((r) => mapRequirementRow(r as Record<string, unknown>));
+}
+
 /**
  * List every requirement for a venue in one query, used by the Settings →
- * Compliance service list to show per-service indicators without a request
- * per service. Rows carry both service FK columns so the caller can group by
- * whichever one the venue uses.
+ * Compliance requirements list to show per-row indicators without a request
+ * per service. Rows carry `scope` and both service FK columns so the caller can
+ * group by whichever one the venue uses, with venue-wide rows set apart.
  */
 export async function listRequirementsForVenue(
   admin: SupabaseClient,
@@ -105,7 +132,7 @@ export async function listRequirementsForVenue(
   const { data, error } = await admin
     .from('service_compliance_requirements')
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+      REQUIREMENT_SELECT,
     )
     .eq('venue_id', venueId);
   if (error) {
@@ -120,17 +147,24 @@ export async function addRequirement(
   params: {
     venueId: string;
     staffId: string;
-    serviceId: string;
+    /** Required for a `service` requirement; ignored for a `venue` one. */
+    serviceId?: string | null;
+    /** Defaults to `service`. `venue` makes the type required on every appointment booking. */
+    scope?: ComplianceRequirementScope;
     complianceTypeId: string;
     enforcement: ComplianceEnforcement;
     lockPeriodHours: number | null;
     onlineCollection?: ComplianceOnlineCollection;
   },
 ): Promise<ServiceResult<RequirementRow>> {
+  const scope: ComplianceRequirementScope = params.scope ?? 'service';
   const column = await resolveServiceFkColumn(admin, params.venueId);
 
-  if (!(await serviceBelongsToVenue(admin, params.venueId, column, params.serviceId))) {
-    return { ok: false, error: 'Service not found for this venue.', status: 404 };
+  if (scope === 'service') {
+    if (!params.serviceId) return { ok: false, error: 'A service is required.', status: 400 };
+    if (!(await serviceBelongsToVenue(admin, params.venueId, column, params.serviceId))) {
+      return { ok: false, error: 'Service not found for this venue.', status: 404 };
+    }
   }
 
   const { data: typeRow } = await admin
@@ -148,20 +182,28 @@ export async function addRequirement(
     .from('service_compliance_requirements')
     .insert({
       venue_id: params.venueId,
-      [column]: params.serviceId,
+      scope,
+      ...(scope === 'service' ? { [column]: params.serviceId } : {}),
       compliance_type_id: params.complianceTypeId,
       enforcement: params.enforcement,
       lock_period_hours: params.lockPeriodHours,
       ...(params.onlineCollection !== undefined ? { online_collection: params.onlineCollection } : {}),
     })
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+      REQUIREMENT_SELECT,
     )
     .single();
 
   if (error) {
     if (error.code === '23505') {
-      return { ok: false, error: 'This service already requires that compliance type.', status: 409 };
+      return {
+        ok: false,
+        error:
+          scope === 'venue'
+            ? 'All bookings already require that compliance type.'
+            : 'This service already requires that compliance type.',
+        status: 409,
+      };
     }
     console.error('[addRequirement] insert failed:', error.message);
     return { ok: false, error: 'Failed to add requirement.', status: 500 };
@@ -173,7 +215,7 @@ export async function addRequirement(
     actorType: 'staff',
     actorStaffId: params.staffId,
     complianceTypeId: params.complianceTypeId,
-    metadata: { service_id: params.serviceId, enforcement: params.enforcement },
+    metadata: { scope, service_id: scope === 'service' ? params.serviceId : null, enforcement: params.enforcement },
   });
 
   return { ok: true, value: mapRequirementRow(inserted as Record<string, unknown>) };
@@ -209,7 +251,7 @@ export async function updateRequirement(
     .eq('id', params.requirementId)
     .eq('venue_id', params.venueId)
     .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, appointment_service_id, service_item_id, compliance_types!inner(name, category, is_active)',
+      REQUIREMENT_SELECT,
     )
     .single();
   if (error) {

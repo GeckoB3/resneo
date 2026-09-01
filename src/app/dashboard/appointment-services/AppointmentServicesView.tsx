@@ -224,6 +224,7 @@ export function AppointmentServicesView({
   // at-a-glance indicator. Refreshed when requirements change in the editor.
   const { data: complianceSummary, mutate: mutateComplianceSummary } = useSWR<{
     requirements: Array<{
+      scope?: string;
       appointment_service_id: string | null;
       service_item_id: string | null;
       compliance_type_name: string;
@@ -232,12 +233,21 @@ export function AppointmentServicesView({
   const complianceTypeNamesByService = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const r of complianceSummary?.requirements ?? []) {
+      if (r.scope === 'venue') continue;
       const serviceId = r.appointment_service_id ?? r.service_item_id;
       if (!serviceId) continue;
       m.set(serviceId, [...(m.get(serviceId) ?? []), r.compliance_type_name]);
     }
     return m;
   }, [complianceSummary]);
+  // Types every booking already requires (plan §4), shown read-only in the service editor.
+  const venueWideComplianceTypeNames = useMemo(
+    () =>
+      (complianceSummary?.requirements ?? [])
+        .filter((r) => r.scope === 'venue' || (!r.appointment_service_id && !r.service_item_id))
+        .map((r) => r.compliance_type_name),
+    [complianceSummary],
+  );
 
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
   // `?tab=addons` so deep-links and the back button work as expected.
@@ -1330,6 +1340,7 @@ export function AppointmentServicesView({
                 <ComplianceRequirementsEditor
                   appointmentServiceId={editingId}
                   complianceEnabled={complianceEnabled}
+                  venueWideTypeNames={venueWideComplianceTypeNames}
                   onChanged={() => void mutateComplianceSummary()}
                 />
               </div>

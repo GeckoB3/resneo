@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getComplianceTypeWithVersion } from '@/lib/compliance/types-service';
 import { parseFormSchema, type ComplianceFormSchema, type ComplianceResultType } from '@/lib/compliance/form-schema';
 import { captureComplianceRecord } from '@/lib/compliance/records-service';
+import { resolveServiceFkColumn } from '@/lib/compliance/requirements-service';
 
 /**
  * Capture of compliance forms a guest completes inline DURING online booking
@@ -10,13 +11,16 @@ import { captureComplianceRecord } from '@/lib/compliance/records-service';
  * insert via {@link linkBookingComplianceRecords}.
  *
  * Each submission is validated against its type's current version in PUBLIC mode (so
- * staff_only fields are stripped, exactly like the public form link), the type must be
- * client-completable, and any `file` response must live under this draft's upload prefix
- * so a submitter cannot point a record at an arbitrary stored object.
+ * staff_only fields are stripped, exactly like the public form link), the type must be an
+ * `inline` requirement of a booked service and client-completable, the version the guest
+ * saw must still be current, and any `file` response must live under this draft's upload
+ * prefix so a submitter cannot point a record at an arbitrary stored object.
  */
 
 export interface BookingComplianceSubmission {
   compliance_type_id: string;
+  /** The form version the guest was shown; rejected if the venue has published a newer one since. */
+  version_id?: string;
   responses: Record<string, unknown>;
 }
 
@@ -57,6 +61,8 @@ export async function captureBookingComplianceSubmissions(
     guestId: string;
     /** Client draft id used for any pre-booking file uploads; null when no files were uploaded. */
     draftId: string | null;
+    /** Catalog service id(s) being booked: only their `inline` requirements may be captured. */
+    serviceIds: string[];
     submissions: BookingComplianceSubmission[];
     /**
      * Per-visit types only (validity 0): the appointment date these forms are being
@@ -73,11 +79,57 @@ export async function captureBookingComplianceSubmissions(
   const allowedFilePrefix = params.draftId
     ? `venues/${params.venueId}/uploads/booking-draft/${params.draftId}/`
     : null;
+  if (params.submissions.length === 0) return { ok: true, recordIds };
+
+  // Only a type the booked service(s) collect inline may be captured this way (plan §3.5):
+  // otherwise a crafted request could create records of any client-completable type.
+  const allowedTypeIds = new Set<string>();
+  const serviceIds = [...new Set(params.serviceIds.filter(Boolean))];
+  if (serviceIds.length > 0) {
+    const column = await resolveServiceFkColumn(admin, params.venueId);
+    // Service rows plus the venue-wide rows that apply to every booking (plan §4).
+    const [{ data: serviceReqRows }, { data: venueReqRows }] = await Promise.all([
+      admin
+        .from('service_compliance_requirements')
+        .select('compliance_type_id, online_collection')
+        .eq('venue_id', params.venueId)
+        .in(column, serviceIds),
+      admin
+        .from('service_compliance_requirements')
+        .select('compliance_type_id, online_collection')
+        .eq('venue_id', params.venueId)
+        .eq('scope', 'venue'),
+    ]);
+    type ReqRow = { compliance_type_id: string; online_collection?: string | null };
+    for (const r of [...((serviceReqRows ?? []) as ReqRow[]), ...((venueReqRows ?? []) as ReqRow[])]) {
+      if ((r.online_collection ?? 'confirmation_link') === 'inline') allowedTypeIds.add(r.compliance_type_id);
+    }
+  }
 
   for (const sub of params.submissions) {
+    if (!allowedTypeIds.has(sub.compliance_type_id)) {
+      return {
+        ok: false,
+        recordIds,
+        error: 'This form is not part of this booking.',
+        status: 400,
+        typeId: sub.compliance_type_id,
+      };
+    }
     const typeRes = await getComplianceTypeWithVersion(admin, params.venueId, sub.compliance_type_id);
     if (!typeRes.ok || !typeRes.value.version) {
       return { ok: false, recordIds, error: 'Compliance form not found.', status: 400, typeId: sub.compliance_type_id };
+    }
+    // The guest answered the version they were shown; if the venue published a newer one
+    // meanwhile, validating their answers against it could fail on a field they never saw.
+    if (sub.version_id && sub.version_id !== typeRes.value.version.id) {
+      return {
+        ok: false,
+        recordIds,
+        error: 'This form was updated while you were booking. Please review and complete it again.',
+        status: 409,
+        typeId: sub.compliance_type_id,
+      };
     }
     const type = typeRes.value.type as unknown as {
       result_type: ComplianceResultType;

@@ -1748,6 +1748,7 @@ async function handleNonTableBooking(
       guestId: guest.id,
       draftId: data.compliance_draft_id ?? null,
       submissions: data.compliance_submissions,
+      serviceIds: data.appointment_service_id ? [data.appointment_service_id] : [],
       // Per-visit forms (validity 0) expire at the end of the appointment's day, not the
       // day they were filled in, so an advance completion still satisfies the gate below.
       visitDate: booking_date,

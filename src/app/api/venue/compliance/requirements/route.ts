@@ -7,12 +7,14 @@ import {
   addRequirement,
   listRequirementsForService,
   listRequirementsForVenue,
+  listVenueWideRequirements,
 } from '@/lib/compliance/requirements-service';
 
 /**
  * GET /api/venue/compliance/requirements?service_id= (or appointment_service_id /
- * service_item_id). Without a service filter it returns every requirement for the
- * venue, which the settings service list uses for per-service indicators.
+ * service_item_id), or ?scope=venue for the rows that apply to every booking (plan §4).
+ * Without a filter it returns every requirement for the venue, which the settings
+ * requirements list uses for per-row indicators.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -28,7 +30,9 @@ export async function GET(request: NextRequest) {
 
     const requirements = serviceId
       ? await listRequirementsForService(staff.db, staff.venue_id, serviceId)
-      : await listRequirementsForVenue(staff.db, staff.venue_id);
+      : sp.get('scope') === 'venue'
+        ? await listVenueWideRequirements(staff.db, staff.venue_id)
+        : await listRequirementsForVenue(staff.db, staff.venue_id);
     return NextResponse.json({ requirements });
   } catch (err) {
     console.error('GET /api/venue/compliance/requirements failed:', err);
@@ -36,7 +40,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** POST /api/venue/compliance/requirements — add a requirement to a service (admin). */
+/** POST /api/venue/compliance/requirements — add a requirement to a service, or to all bookings (admin). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
@@ -55,7 +59,8 @@ export async function POST(request: NextRequest) {
     const result = await addRequirement(staff.db, {
       venueId: staff.venue_id,
       staffId: staff.id,
-      serviceId: parsed.data.service_id,
+      scope: parsed.data.scope,
+      serviceId: parsed.data.service_id ?? null,
       complianceTypeId: parsed.data.compliance_type_id,
       enforcement: parsed.data.enforcement,
       lockPeriodHours: parsed.data.lock_period_hours ?? null,

@@ -90,6 +90,71 @@ describe('addRequirement', () => {
   });
 });
 
+describe('addRequirement with scope venue (all bookings, plan §4)', () => {
+  it('writes a venue-scoped row with no service FK and audits it', async () => {
+    const fake = new FakeSupabase({
+      venues: [{ id: VENUE, booking_model: 'unified_scheduling', enabled_models: null }],
+      compliance_types: [{ id: 'type-1', venue_id: VENUE, is_active: true }],
+    });
+    const res = await addRequirement(fake.asClient(), {
+      venueId: VENUE,
+      staffId: STAFF,
+      scope: 'venue',
+      complianceTypeId: 'type-1',
+      enforcement: 'block_online',
+      lockPeriodHours: null,
+      onlineCollection: 'inline',
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value.scope).toBe('venue');
+    const row = (fake.tables.service_compliance_requirements ?? [])[0]!;
+    expect(row.scope).toBe('venue');
+    expect(row.service_item_id).toBeUndefined();
+    expect(row.appointment_service_id).toBeUndefined();
+    const audit = (fake.tables.compliance_audit_events ?? []).find((a) => a.event_type === 'requirement.added');
+    expect((audit?.metadata as { scope?: string } | undefined)?.scope).toBe('venue');
+  });
+
+  it('400s a service-scoped add with no service', async () => {
+    const fake = new FakeSupabase({
+      venues: [{ id: VENUE, booking_model: 'unified_scheduling', enabled_models: null }],
+      compliance_types: [{ id: 'type-1', venue_id: VENUE, is_active: true }],
+    });
+    const res = await addRequirement(fake.asClient(), {
+      venueId: VENUE,
+      staffId: STAFF,
+      complianceTypeId: 'type-1',
+      enforcement: 'warn_staff',
+      lockPeriodHours: null,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.status).toBe(400);
+  });
+
+  it('409s with an "all bookings" message on a duplicate venue-wide type', async () => {
+    const fake = new FakeSupabase(
+      {
+        venues: [{ id: VENUE, booking_model: 'unified_scheduling', enabled_models: null }],
+        compliance_types: [{ id: 'type-1', venue_id: VENUE, is_active: true }],
+      },
+      { failNextInsert: { service_compliance_requirements: { code: '23505', message: 'dup' } } },
+    );
+    const res = await addRequirement(fake.asClient(), {
+      venueId: VENUE,
+      staffId: STAFF,
+      scope: 'venue',
+      complianceTypeId: 'type-1',
+      enforcement: 'warn_staff',
+      lockPeriodHours: null,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.status).toBe(409);
+      expect(res.error).toMatch(/all bookings/i);
+    }
+  });
+});
+
 describe('removeRequirement', () => {
   it('removes an existing requirement and audits it', async () => {
     const fake = new FakeSupabase({

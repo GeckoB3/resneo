@@ -61,6 +61,7 @@ import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import {
   enforceBookingCompliance,
+  type ComplianceDetailBrief,
   complianceUnmetMessage,
   COMPLIANCE_REQUIREMENT_UNMET,
 } from '@/lib/compliance/enforce-booking';
@@ -633,6 +634,7 @@ export async function POST(request: NextRequest) {
         guestId: guest.id,
         draftId: parsed.data.compliance_draft_id ?? null,
         submissions: parsed.data.compliance_submissions,
+        serviceIds: validated.map((seg) => seg.appointment_service_id),
         // Per-visit forms (validity 0) expire at the end of the appointment's day. One
         // record has to satisfy every segment, so anchor it to the LAST segment date
         // (booking_date is YYYY-MM-DD, so the string max is the latest date).
@@ -671,6 +673,9 @@ export async function POST(request: NextRequest) {
       enforcement: string;
       state: string;
     }> = [];
+    // Staff are never blocked (plan §5); their unmet requirements are merged by type and
+    // returned as `compliance_warnings` so the confirmation screen can prompt for capture.
+    const msComplianceWarnings = new Map<string, ComplianceDetailBrief>();
     for (const seg of validated) {
       const segCheck = await enforceBookingCompliance(supabase, {
         venueId: venue_id,
@@ -686,6 +691,9 @@ export async function POST(request: NextRequest) {
           msBlockedDetails.push({ service_id: seg.appointment_service_id, ...d });
           msBlockedUnmet.push(d);
         }
+      }
+      for (const w of segCheck.warnings) {
+        if (!msComplianceWarnings.has(w.compliance_type_id)) msComplianceWarnings.set(w.compliance_type_id, w);
       }
     }
     if (msBlockedUnmet.length > 0) {
@@ -1043,6 +1051,9 @@ export async function POST(request: NextRequest) {
         group_booking_id: groupBookingId,
         booking_ids: bookingIds,
         primary_booking_id: bookingIds[0],
+        ...(msComplianceContext === 'staff' && msComplianceWarnings.size > 0
+          ? { compliance_warnings: [...msComplianceWarnings.values()] }
+          : {}),
         // requires_deposit is true whenever a payment step must render (spec §18):
         // setup mode carries the SetupIntent secret in the existing client_secret field.
         requires_deposit: hasPaymentStep,

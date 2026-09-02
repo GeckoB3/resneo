@@ -72,6 +72,10 @@ COMMENT ON COLUMN public.venue_collectives.categories_seeded_at IS
 -- current_staff_venue_ids reads staff. Read-only and parameterised on the
 -- caller's own identity, so it belongs on the client-executable allowlist
 -- (scripts/check-client-executable-functions.mjs) beside the other RLS helpers.
+--
+-- Membership of ANY status counts, exactly as the older policies' subqueries
+-- counted it, so 20270202140000 can rewrite those policies through this helper
+-- without changing who can read what.
 CREATE OR REPLACE FUNCTION public.current_staff_collective_ids()
 RETURNS SETOF uuid
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
@@ -79,8 +83,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   WHERE c.host_venue_id IN (SELECT public.current_staff_venue_ids())
   UNION
   SELECT m.collective_id FROM public.venue_collective_members m
-  WHERE m.status = 'active'
-    AND m.venue_id IN (SELECT public.current_staff_venue_ids());
+  WHERE m.venue_id IN (SELECT public.current_staff_venue_ids());
 $$;
 
 -- Whether a combined page is live and public (active, unified_catalog). Same

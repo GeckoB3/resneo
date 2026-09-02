@@ -134,9 +134,14 @@ role, so any policy evaluation that reads either table as `anon` or `authenticat
 `collective_service_providers` carry policies with exactly those subqueries and are therefore
 unreadable through PostgREST for those roles; nothing noticed because every collective read in
 the app goes through the service role. The new categories table avoids the chain with two
-SECURITY DEFINER helpers (`current_staff_collective_ids`, `collective_is_public_catalog`), both
-allowlisted in `scripts/check-client-executable-functions.mjs`. The older policies are left as
-they are: fixing them is a separate, security-reviewed change, and the helpers are ready for it.
+SECURITY DEFINER helpers (`current_staff_collective_ids`, `collective_is_public_catalog`).
+Migration `20270202140000_collective_policies_no_recursion.sql` then rewrites all six older
+collective policies through the helpers plus a third, `current_staff_hosted_collective_ids`,
+with no change to who can read what (each rewrite documents the predicate it replaces). All three
+are allowlisted in `scripts/check-client-executable-functions.mjs`, and
+`supabase/tests/collective_policies_test.sql` asserts every role's reads, which is also the
+regression test for the recursion: any policy that subqueries the two collective tables again
+aborts that file before its first assertion.
 
 ## Out of scope, by decision
 

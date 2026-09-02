@@ -65,12 +65,14 @@ const ALLOWLIST = new Set([
   'caller_staff_admin_venue_ids',
   'caller_staff_venue_ids',
   'current_staff_venue_ids',
-  // 20270202130000: the collectives the caller hosts or is a member of, and
-  // whether a combined page is live and public. Both exist because the
-  // venue_collectives / venue_collective_members staff policies recurse into
-  // each other, so a policy on another table cannot subquery them directly.
-  // Read-only, parameterised on the caller's identity or on public state.
+  // 20270202130000 and 20270202140000: the collectives the caller hosts or is a
+  // member of, the ones it hosts, and whether a combined page is live and
+  // public. They exist because the venue_collectives / venue_collective_members
+  // staff policies used to recurse into each other; every collective policy now
+  // reads membership through these instead. Read-only, parameterised on the
+  // caller's identity or on public state.
   'current_staff_collective_ids',
+  'current_staff_hosted_collective_ids',
   'collective_is_public_catalog',
   'get_linked_booking_source',
   'link_action_grant',

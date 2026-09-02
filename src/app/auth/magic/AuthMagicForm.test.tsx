@@ -177,6 +177,9 @@ describe('changing address', () => {
     stubSend();
     const user = await sendFrom();
     await user.click(screen.getByRole('button', { name: /use a different email/i }));
-    expect(screen.getByRole('button', { name: /email me a sign-in link/i })).toBeEnabled();
+    // The form comes back on a state update after the click; under fake timers on a
+    // slow CI runner that commit can land a tick later, so wait for it rather than
+    // asserting synchronously (this assertion flaked on CI on 2026-09-02).
+    expect(await screen.findByRole('button', { name: /email me a sign-in link/i })).toBeEnabled();
   });
 });

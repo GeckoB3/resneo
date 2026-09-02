@@ -211,6 +211,8 @@ export async function bookAppointmentWithDeposit(
   }
 
   await page.getByRole('button', { name: opts.serviceName }).click();
+  // The picker ticks the service; the bar's Continue moves on.
+  await page.getByRole('button', { name: /^continue$/i }).click();
 
   if (await page.getByRole('heading', { name: /who would you like to see/i }).isVisible().catch(() => false)) {
     const prac =

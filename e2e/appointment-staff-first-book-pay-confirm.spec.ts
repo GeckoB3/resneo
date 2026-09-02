@@ -73,6 +73,7 @@ test.describe('Staff-first smoke: choose a person, then their services', () => {
     await page.getByRole('button', { name: staffFirst.calendarA }).click();
     await expect(page.getByRole('heading', { name: /select a service/i })).toBeVisible();
     await page.getByRole('button', { name: staffFirst.optionsServiceName }).click();
+    await page.getByRole('button', { name: /^continue$/i }).click();
 
     // Options then extras, in that order, and no calendar step in between.
     await expect(page.getByRole('heading', { name: /choose your option/i })).toBeVisible();

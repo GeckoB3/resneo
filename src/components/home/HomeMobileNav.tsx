@@ -26,6 +26,7 @@ const ITEMS: { href: string; label: string; internal?: boolean }[] = [
   { href: '/help', label: 'Help', internal: true },
   { href: '#faq', label: 'FAQ' },
   { href: '/about', label: 'About', internal: true },
+  { href: '#contact', label: 'Contact' },
 ];
 
 export function HomeMobileNav() {
@@ -135,7 +136,7 @@ export function HomeMobileNav() {
   }, [open]);
 
   const linkClass =
-    'flex min-h-12 items-center rounded-xl px-4 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
+    'flex min-h-12 items-center rounded-full px-4 text-base font-bold text-slate-700 transition-colors hover:bg-white hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600';
 
   return (
     <div ref={rootRef} className="md:hidden">
@@ -146,7 +147,7 @@ export function HomeMobileNav() {
         aria-controls={panelId}
         aria-label={open ? 'Close menu' : 'Open menu'}
         onClick={() => setOpen((v) => !v)}
-        className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+        className="grid h-11 w-11 place-items-center rounded-full border border-[#E8E4DC] bg-white text-slate-700 transition-colors hover:bg-brand-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
       >
         <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
           {open ? (
@@ -176,7 +177,7 @@ export function HomeMobileNav() {
         ref={panelRef}
         id={panelId}
         hidden={!open}
-        className="absolute left-0 right-0 top-full max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain border-b border-slate-200 bg-white shadow-lg shadow-slate-900/5"
+        className="absolute left-0 right-0 top-full max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain border-b border-[#EEE9E0] bg-[#FDFBF7] shadow-lg shadow-slate-900/5"
       >
         <nav aria-label="Primary" className="mx-auto max-w-6xl px-4 py-3">
           <ul className="flex flex-col gap-0.5">
@@ -193,7 +194,7 @@ export function HomeMobileNav() {
                 )}
               </li>
             ))}
-            <li className="mt-2 border-t border-slate-100 pt-2">
+            <li className="mt-2 border-t border-[#EEE9E0] pt-2">
               <Link href="/login" className={linkClass} onClick={() => setOpen(false)}>
                 Log in
               </Link>

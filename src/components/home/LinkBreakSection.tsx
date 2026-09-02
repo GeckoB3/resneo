@@ -55,34 +55,23 @@ export function LinkBreakSection() {
   return (
     <section
       id="link-break"
-      className="relative scroll-mt-16 overflow-hidden border-y border-slate-200/70 py-20 sm:py-28"
+      className="relative scroll-mt-16 overflow-hidden bg-[#FDFBF7] py-20 sm:py-28"
     >
-      {/* Tinted wash so the section reads as its own chapter */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-50 via-white to-accent-50/50" aria-hidden />
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.035]"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)',
-          backgroundSize: '44px 44px',
-        }}
-        aria-hidden
-      />
-      <div className="pointer-events-none absolute -left-24 top-24 h-80 w-80 rounded-full bg-accent/10 blur-3xl" aria-hidden />
-      <div className="pointer-events-none absolute -right-24 bottom-10 h-80 w-80 rounded-full bg-brand-200/25 blur-3xl" aria-hidden />
-
+      {/* Soft shapes on the cream ground, so the section reads as its own chapter. */}
+      <div className="pointer-events-none absolute -left-32 top-16 h-96 w-96 rounded-[48%_52%_41%_59%/55%_40%_60%_45%] bg-accent-100/60" aria-hidden />
+      <div className="pointer-events-none absolute -right-40 bottom-0 h-[26rem] w-[26rem] rounded-[58%_42%_55%_45%/48%_60%_40%_52%] bg-brand-50" aria-hidden />
       <div className="relative mx-auto max-w-6xl px-6">
         {/* ── Header ────────────────────────────────────────── */}
         <HomeReveal className="mx-auto max-w-3xl text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200/70 bg-white/85 px-3.5 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-brand-700 shadow-sm backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-[0.18em] text-accent-700 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(0,194,199,0.8)]" />
             Link &amp; break
           </span>
-          <h2 className="mt-6 text-balance text-3xl font-bold leading-[1.1] tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-6 text-balance text-3xl font-black leading-[1.1] tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             Link up. Break away.{' '}
             {/* Ends on accent-700, not accent-600: the lighter teal lands under
                 3:1 on white at the tail of the gradient. */}
-            <span className="bg-gradient-to-r from-brand-600 to-accent-700 bg-clip-text text-transparent">
+            <span className="text-accent-700">
               Nothing ever moves.
             </span>
           </h2>
@@ -104,8 +93,8 @@ export function LinkBreakSection() {
         <div className="mt-16 grid gap-4 md:grid-cols-3">
           {PILLARS.map((p, i) => (
             <HomeReveal key={p.title} delay={i * 80}>
-              <div className="flex h-full flex-col rounded-2xl border border-slate-200/80 bg-white/85 p-6 shadow-sm backdrop-blur transition-colors hover:border-brand-200">
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100">
+              <div className="flex h-full flex-col rounded-[28px] border border-[#EEE9E0] bg-white p-6 shadow-[0_18px_40px_-24px_rgba(0,59,111,0.2)] transition-all hover:-translate-y-0.5">
+                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent-100 text-accent-800">
                   <span className="block h-5 w-5 [&>svg]:h-5 [&>svg]:w-5">{p.icon}</span>
                 </span>
                 <h3 className="mt-4 text-base font-bold tracking-tight text-slate-900">{p.title}</h3>
@@ -117,12 +106,12 @@ export function LinkBreakSection() {
 
         {/* ── Separate books callout + conversion path ──────── */}
         <HomeReveal delay={60}>
-          <div className="mt-8 overflow-hidden rounded-3xl border border-brand-100 bg-white shadow-sm">
-            <div className="h-1.5 w-full bg-gradient-to-r from-brand-500 via-brand-400 to-accent-400" aria-hidden />
+          <div className="mt-8 overflow-hidden rounded-[32px] border border-[#EEE9E0] bg-white shadow-[0_18px_40px_-24px_rgba(0,59,111,0.2)]">
+            <div className="h-1.5 w-full bg-accent-400" aria-hidden />
             <div className="grid gap-8 p-7 sm:p-9 lg:grid-cols-[1.6fr_1fr] lg:items-center lg:gap-12">
               <div>
                 <div className="flex items-center gap-3">
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
                     <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11.99 3 4.5 6v5.4c0 4.2 3.2 8.1 7.49 9.1 4.3-1 7.51-4.9 7.51-9.1V6L11.99 3Z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="m9.4 12.2 1.9 1.9 3.6-3.9" />
@@ -155,13 +144,13 @@ export function LinkBreakSection() {
               <div className="flex flex-col gap-3">
                 <a
                   href="#pricing"
-                  className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-6 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
+                  className="inline-flex h-12 items-center justify-center rounded-full bg-brand-600 px-6 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
                 >
                   Start your free trial
                 </a>
                 <Link
                   href="/salon-booking-software#linked-accounts"
-                  className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-center text-base font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  className="inline-flex h-12 items-center justify-center rounded-full border-2 border-brand-50 bg-white px-6 text-center text-base font-extrabold text-brand-600 transition-colors hover:border-brand-100 hover:bg-brand-50/40"
                 >
                   See how linking works
                 </Link>

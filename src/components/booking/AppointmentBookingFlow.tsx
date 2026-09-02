@@ -2122,6 +2122,44 @@ export function AppointmentBookingFlow({
   }, [catalogStaff, selectedServiceId, isCombined, selectedPractitionerId]);
   const serviceHasAddons = addonGroupsForSelectedService.length > 0;
   /**
+   * The add-ons chosen for the primary service, priced from the same groups the
+   * add-on step offered (practitioner-scoped on a combined page, like the groups
+   * above). Every price shown after the add-on step has to include this: the
+   * practitioner cards, the banner over them and the single-booking summary were
+   * all quoting the service alone, so a guest who had just added a paid
+   * treatment was told the visit cost less than it did.
+   */
+  const selectedAddonSummary = useMemo<ReturnType<typeof addonSelectionDetails>>(
+    () =>
+      selectedServiceId
+        ? addonSelectionDetails(
+            catalogStaff,
+            selectedServiceId,
+            selectedAddonIds,
+            isCombined ? selectedPractitionerId : undefined,
+          )
+        : { filteredIds: [], totalPence: 0, totalMinutes: 0, lines: [] },
+    [catalogStaff, selectedServiceId, selectedAddonIds, isCombined, selectedPractitionerId],
+  );
+  const groupSelectedAddonSummary = useMemo<ReturnType<typeof addonSelectionDetails>>(
+    () =>
+      groupServiceId
+        ? addonSelectionDetails(catalogStaff, groupServiceId, groupSelectedAddonIds)
+        : { filteredIds: [], totalPence: 0, totalMinutes: 0, lines: [] },
+    [catalogStaff, groupServiceId, groupSelectedAddonIds],
+  );
+  /**
+   * A service price with the chosen add-ons on top. An unset service price still
+   * reads as unset (which formats as Free) unless paid add-ons were chosen, in
+   * which case the add-ons are the price.
+   */
+  const priceWithAddons = (pence: number | null | undefined, addonPence: number): number | null =>
+    addonPence > 0 ? (pence ?? 0) + addonPence : pence ?? null;
+  const priceWithSelectedAddons = (pence: number | null | undefined) =>
+    priceWithAddons(pence, selectedAddonSummary.totalPence);
+  const addonCountSuffix = (count: number) =>
+    count > 0 ? ` incl. ${count} add-on${count === 1 ? '' : 's'}` : '';
+  /**
    * Combined page: "any available" is only safe when an offering's calendars share the
    * same options (the merged catalog marks this per offering). Otherwise the customer
    * must pick a specific calendar to reach its variants/add-ons.
@@ -4361,7 +4399,7 @@ export function AppointmentBookingFlow({
           {selectedService && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
               <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {serviceSelectionDurationMinutes ?? selectedService.duration_minutes} min &middot; {selectedVariant ? formatPrice(selectedVariant.price_pence) : formatFromPrice(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence)}</span></div>
+              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {(serviceSelectionDurationMinutes ?? selectedService.duration_minutes) + selectedAddonSummary.totalMinutes} min &middot; {selectedVariant ? formatPrice(priceWithSelectedAddons(selectedVariant.price_pence)) : formatFromPrice(priceWithSelectedAddons(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence))}{addonCountSuffix(selectedAddonSummary.lines.length)}</span></div>
             </div>
           )}
           {anyRouteActive ? (
@@ -4373,7 +4411,7 @@ export function AppointmentBookingFlow({
           <p className="mb-4 text-sm text-slate-500">
             {isEdit
               ? `Choose the ${terms.staff.toLowerCase()} for your changed appointment.`
-              : `Choose your preferred ${terms.staff.toLowerCase()}. Prices shown are what they charge for this service.`}
+              : `Choose your preferred ${terms.staff.toLowerCase()}. Prices shown are what they charge for this service${selectedAddonSummary.lines.length > 0 ? ', including your add-ons' : ''}.`}
           </p>
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />)}</div>
@@ -4458,7 +4496,7 @@ export function AppointmentBookingFlow({
                         <div className="font-medium text-slate-900">{prac.name}</div>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-2">
-                        <span className={APPOINTMENT_PUBLIC_PRICE}>{formatPrice(offer?.price_pence ?? null)}</span>
+                        <span className={APPOINTMENT_PUBLIC_PRICE}>{formatPrice(priceWithSelectedAddons(offer?.price_pence))}</span>
                         <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                       </div>
                     </div>
@@ -4936,13 +4974,33 @@ export function AppointmentBookingFlow({
                 {effectiveOfferForBooking?.duration_minutes != null && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Duration</span>
-                    <span className="font-medium text-slate-900">{effectiveOfferForBooking.duration_minutes} min</span>
+                    <span className="font-medium text-slate-900">{effectiveOfferForBooking.duration_minutes + selectedAddonSummary.totalMinutes} min</span>
                   </div>
                 )}
                 {effectiveOfferForBooking?.price_pence != null && (
                   <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
-                    <span className="font-medium text-slate-700">Price</span>
+                    <span className="font-medium text-slate-700">{selectedAddonSummary.lines.length > 0 ? 'Service' : 'Price'}</span>
                     <span className="font-semibold text-brand-600">{formatPrice(effectiveOfferForBooking.price_pence)}</span>
+                  </div>
+                )}
+                {/* The chosen add-ons, each priced, then the total they make with the service. */}
+                {selectedAddonSummary.lines.map((line) => (
+                  <div key={line.id} className="flex justify-between pl-3 text-xs">
+                    <span className="min-w-0 truncate text-slate-500">
+                      + {line.name}
+                      {line.durationMinutes > 0 ? ` (+${line.durationMinutes} min)` : ''}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-slate-700">
+                      {line.pricePence > 0 ? `+${sym}${(line.pricePence / 100).toFixed(2)}` : 'Free'}
+                    </span>
+                  </div>
+                ))}
+                {selectedAddonSummary.lines.length > 0 && (
+                  <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
+                    <span className="font-medium text-slate-700">Total</span>
+                    <span className="font-semibold text-brand-600">
+                      {formatPrice(priceWithSelectedAddons(effectiveOfferForBooking?.price_pence))}
+                    </span>
                   </div>
                 )}
                 {(() => {
@@ -4959,12 +5017,16 @@ export function AppointmentBookingFlow({
                       </p>
                     );
                   }
+                  // Full payment charges the add-ons too; a deposit does not. The same
+                  // rule the segment builder applies when the booking is created.
+                  const amountPence =
+                    o.amountPence + (o.chargeLabel === 'full_payment' ? selectedAddonSummary.totalPence : 0);
                   return (
                     <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
                       <span className="font-medium text-slate-700">
                         {o.chargeLabel === 'full_payment' ? 'Pay now' : 'Deposit'}
                       </span>
-                      <span className="font-semibold text-amber-700">{formatPrice(o.amountPence)}</span>
+                      <span className="font-semibold text-amber-700">{formatPrice(amountPence)}</span>
                     </div>
                   );
                 })()}
@@ -5832,7 +5894,7 @@ export function AppointmentBookingFlow({
                         <div className="font-medium text-slate-900">{prac.name}</div>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold text-brand-600">{formatPrice(offer?.price_pence ?? null)}</span>
+                        <span className="text-sm font-semibold text-brand-600">{formatPrice(priceWithAddons(offer?.price_pence, groupSelectedAddonSummary.totalPence))}</span>
                         <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                       </div>
                     </div>

@@ -5,10 +5,9 @@ import {
   APPOINTMENTS_LIGHT_PRICE,
   APPOINTMENTS_PLUS_PRICE,
   APPOINTMENTS_PRO_PRICE,
-  RESTAURANT_PRICE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
-import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from '@/lib/billing/sms-allowance';
 import { RESNEO_MARKETING_PAYMENTS_AND_NO_HOLD } from '@/lib/booking-funds-copy';
 import { STANDARD_PAYMENT_PROVIDER_FEES_NOTICE } from '@/lib/payment-provider-fees-notice';
 import { SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE } from '@/lib/subscription-cancellation-copy';
@@ -33,7 +32,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'How long does it take to get set up?',
           answer:
-            'Most businesses are up and running within 15 minutes. Our setup wizard walks you through adding your services, setting your availability, and publishing your booking page. If you are a restaurant, allow a little longer to configure your floor plan and table layout. Either way, you can start accepting bookings on your first day.',
+            'Most businesses are up and running within 15 minutes. Our setup wizard walks you through adding your services, setting your availability, and publishing your booking page. You can start accepting bookings on your first day.',
         },
         {
           question: 'Do I need any technical knowledge to use ResNeo?',
@@ -47,11 +46,11 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
       items: [
         {
           question: 'What does ResNeo cost?',
-          answer: `New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan (card required at checkout; first subscription charge after 14 days). ${signupTrialSmsDuringTrialNotice()} Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS includes ${SMS_INCLUDED_LIGHT} messages per month, then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and ${SMS_INCLUDED_RESTAURANT} SMS per month included. There are no setup fees, no contracts, and no per-booking commissions. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
+          answer: `New customers get a ${SIGNUP_TRIAL_SHORT_LABEL.toLowerCase()} on any paid plan (card required at checkout; first subscription charge after 14 days). ${signupTrialSmsDuringTrialNotice()} Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS includes ${SMS_INCLUDED_LIGHT} messages per month, then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Every plan includes every feature: the plans differ only in the number of calendars, team logins and included SMS. There are no setup fees, no contracts, and no per-booking commissions. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} ${SUBSCRIPTION_CANCELLATION_PUBLIC_NOTICE}`,
         },
         {
           question: 'Are there any hidden fees or commissions?',
-          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} Appointments Light, Plus, Pro, and Restaurant each include a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
+          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE} Every plan includes a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard. There are no add-on charges for features: marketing messages, online payments, reminders, forms and reports are all part of every plan.`,
         },
         {
           question: 'How does ResNeo compare to competitors on price?',
@@ -66,7 +65,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'What types of business can use ResNeo?',
           answer:
-            'Any business that takes bookings. Barbers, hairdressers, beauty salons, physiotherapists, personal trainers, yoga studios, escape rooms, sports facilities, tutors, dog groomers, restaurants, and many more. ResNeo supports appointments, classes, events, and resource bookings, and you can offer any combination of these from a single account.',
+            'Any business that takes bookings. Barbers, hairdressers, beauty salons, physiotherapists, personal trainers, yoga studios, escape rooms, sports facilities, tutors, dog groomers, and many more. ResNeo supports appointments, classes, events, and resource bookings, and you can offer any combination of these from a single account.',
         },
         {
           question: 'Can my customers book online without calling me?',
@@ -76,7 +75,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'Does ResNeo send booking reminders to my clients?',
           answer:
-            'Yes. Automated email reminders are included on every plan. Appointments Light, Plus, Pro, and Restaurant also include SMS reminders within your monthly allowance (overage priced per message). Reminders include a one-tap confirm or cancel link, which can help reduce no-shows by making it easier for clients to confirm or cancel.',
+            'Yes. Automated email reminders are included on every plan. Every plan also includes SMS reminders within your monthly allowance (overage priced per message). Reminders include a one-tap confirm or cancel link, which can help reduce no-shows by making it easier for clients to confirm or cancel.',
         },
         {
           question: 'Can I collect deposits to protect against no-shows?',
@@ -87,10 +86,6 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
           question: 'Can my staff each have their own calendar and booking link?',
           answer:
             'On Appointments Plus and Pro, yes (within your plan limits). Each team member can have their own calendar with individual working hours, breaks, and services, plus a personal booking link to share with clients. Appointments Light is built for sole traders: one bookable calendar and one venue login. Upgrade to Plus or Pro when you need multiple staff with separate calendars.',
-        },
-        {
-          question: 'I run a restaurant. How does ResNeo compare to other options?',
-          answer: `ResNeo is built for restaurants with the tools most venues use every day: a visual timeline grid, an interactive floor plan editor, covers-based availability, deposit collection, SMS confirm-or-cancel, and automated reminders. Compared with many booking platforms, ResNeo keeps pricing to a simple monthly subscription with no commission on bookings from any source, and your floor plan can be laid out visually instead of through long, fiddly configuration forms. ${STANDARD_PAYMENT_PROVIDER_FEES_NOTICE}`,
         },
       ],
     },
@@ -109,7 +104,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'What support do you offer if I get stuck?',
           answer:
-            'Appointments Light includes email support. Appointments Plus, Pro, and Restaurant include email and phone support, and Restaurant customers get priority response times. We are a small, founder-led team who understand independent businesses, so when you contact us you will reach someone who knows the product inside out, not a chatbot or an overseas call centre.',
+            'Appointments Light includes email support. Appointments Plus and Pro include email and phone support. We are a small, founder-led team who understand independent businesses, so when you contact us you will reach someone who knows the product inside out, not a chatbot or an overseas call centre.',
         },
         {
           question: 'Can I try ResNeo before committing?',
@@ -125,10 +120,10 @@ const FAQ_SECTIONS = buildFaqSections();
 function FaqToggleIcon({ open }: { open: boolean }) {
   return (
     <span
-      className={`relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border transition-all duration-300 ease-out ${
+      className={`relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border transition-all duration-300 ease-out ${
         open
           ? 'border-brand-300/80 bg-brand-600 text-white shadow-md shadow-brand-900/15'
-          : 'border-slate-200/90 bg-white text-slate-500 shadow-sm group-hover:border-brand-200 group-hover:bg-brand-50/80 group-hover:text-brand-700'
+          : 'border-[#EEE9E0] bg-[#FDFBF7] text-slate-500 shadow-sm group-hover:border-accent-200 group-hover:bg-accent-50 group-hover:text-brand-700'
       }`}
       aria-hidden
     >
@@ -170,41 +165,22 @@ export default function HomeFaq() {
     <section
       id="faq"
       aria-labelledby="faq-heading"
-      className="relative scroll-mt-16 overflow-hidden border-t border-slate-200/60 py-20 sm:py-28"
+      className="relative scroll-mt-16 overflow-hidden bg-[#FDFBF7] py-20 sm:py-28"
     >
-      {/* Ambient background */}
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_100%_60%_at_50%_-10%,rgba(0,59,111,0.09),transparent_55%)]"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-50/90 via-white to-slate-50/50"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute -left-40 top-1/3 h-72 w-72 rounded-full bg-brand-200/20 blur-3xl"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute -right-32 bottom-20 h-64 w-64 rounded-full bg-emerald-100/30 blur-3xl"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent"
-        aria-hidden
-      />
-
+      {/* Soft shapes on the cream ground. */}
+      <div className="pointer-events-none absolute -left-40 top-1/3 h-80 w-80 rounded-[58%_42%_55%_45%/48%_60%_40%_52%] bg-brand-50" aria-hidden />
+      <div className="pointer-events-none absolute -right-32 bottom-20 h-72 w-72 rounded-[48%_52%_41%_59%/55%_40%_60%_45%] bg-accent-100/60" aria-hidden />
       <div className="relative mx-auto max-w-4xl px-6">
         <div className="text-center">
-          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-brand-200/60 bg-white/90 px-4 py-1.5 shadow-sm shadow-slate-200/40 backdrop-blur-sm">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand-500 shadow-sm shadow-brand-600/40" />
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">
+          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-4 py-1.5 shadow-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent-500" />
+            <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-accent-700">
               Questions
             </p>
           </div>
           <h2
             id="faq-heading"
-            className="mt-5 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl sm:tracking-tight"
+            className="mt-5 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl"
           >
             Frequently asked questions
           </h2>
@@ -218,7 +194,7 @@ export default function HomeFaq() {
             <div key={section.heading}>
               <div className="mb-5 flex items-start gap-4 sm:mb-6 sm:items-center">
                 <span
-                  className="mt-1 hidden h-10 w-1 shrink-0 rounded-full bg-gradient-to-b from-brand-500 via-brand-400 to-brand-600/70 shadow-sm shadow-brand-700/20 sm:mt-0 sm:block sm:h-12"
+                  className="mt-1 hidden h-10 w-1.5 shrink-0 rounded-full bg-accent-400 sm:mt-0 sm:block sm:h-12"
                   aria-hidden
                 />
                 <div className="min-w-0 flex-1 text-left sm:flex sm:items-baseline sm:gap-3">
@@ -241,15 +217,15 @@ export default function HomeFaq() {
                   return (
                     <li key={key}>
                       <div
-                        className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 ease-out ${
+                        className={`group relative overflow-hidden rounded-[22px] border transition-all duration-300 ease-out ${
                           isOpen
-                            ? 'border-brand-200/70 bg-white shadow-xl shadow-brand-900/[0.06] ring-1 ring-brand-100/80'
-                            : 'border-slate-200/70 bg-white/70 shadow-sm shadow-slate-200/30 backdrop-blur-[2px] hover:border-slate-300/80 hover:bg-white hover:shadow-md hover:shadow-slate-200/40'
+                            ? 'border-accent-200 bg-white shadow-xl shadow-brand-900/[0.08]'
+                            : 'border-[#EEE9E0] bg-white hover:border-accent-200 hover:shadow-md hover:shadow-brand-900/5'
                         }`}
                       >
                         {isOpen ? (
                           <div
-                            className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-brand-500 via-brand-500 to-brand-600"
+                            className="absolute inset-y-0 left-0 w-1.5 bg-accent-500"
                             aria-hidden
                           />
                         ) : null}

@@ -137,7 +137,11 @@ the app goes through the service role. The new categories table avoids the chain
 SECURITY DEFINER helpers (`current_staff_collective_ids`, `collective_is_public_catalog`).
 Migration `20270202140000_collective_policies_no_recursion.sql` then rewrites all six older
 collective policies through the helpers plus a third, `current_staff_hosted_collective_ids`,
-with no change to who can read what (each rewrite documents the predicate it replaces). All three
+with no change to who can read what (each rewrite documents the predicate it replaces). It is
+self-contained: it defines all three helpers itself and restates the two categories policies,
+because staging had already applied `20270202130000` in its first form (recursive subqueries,
+no helpers) before the helpers were added to that file, and an applied migration must never be
+edited in place; the CLI tracks versions, so the edit never ran there. All three
 are allowlisted in `scripts/check-client-executable-functions.mjs`, and
 `supabase/tests/collective_policies_test.sql` asserts every role's reads, which is also the
 regression test for the recursion: any policy that subqueries the two collective tables again

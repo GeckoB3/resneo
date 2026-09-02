@@ -1,7 +1,9 @@
 'use client';
 
+import { ServiceCategoryList } from '@/components/booking/ServiceCategoryList';
+import { resolveServicesLayout } from '@/lib/booking/booking-page-theme';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
+import { compareByCategoryThenServiceOrder, type ServiceCategoryRef } from '@/lib/booking/service-categories';
 import { buildGuestModifyRequest } from '@/lib/booking/guest-modify-request';
 import type { GuestBookingDetailActor } from '@/lib/booking/guest-booking-actor';
 import type { VenuePublic, GuestDetails } from './types';
@@ -457,6 +459,8 @@ interface CatalogPractitioner {
     payment_requirement?: ClassPaymentRequirement;
     /** Venue-chosen display order (lower first); the service picker sorts by this, then name. */
     sort_order?: number;
+    /** Category heading the venue lists this service under; null or absent when uncategorised. */
+    category?: ServiceCategoryRef | null;
     /** From service_items / appointment_services; used for deposit refund copy before booking completes. */
     cancellation_notice_hours?: number;
     /** Optional sub-options. When present, the customer must pick one before slot selection. */
@@ -1757,6 +1761,9 @@ export function AppointmentBookingFlow({
         duration_minutes: number;
         minPricePence: number | null;
         sortOrder: number;
+        /** Same value as `sortOrder`, under the name the category grouping reads. */
+        sort_order: number;
+        category: ServiceCategoryRef | null;
         location_type?: import('@/types/booking-models').ServiceLocationType;
       }
     >();
@@ -1772,6 +1779,8 @@ export function AppointmentBookingFlow({
             duration_minutes: s.duration_minutes,
             minPricePence: price,
             sortOrder: s.sort_order ?? 0,
+            sort_order: s.sort_order ?? 0,
+            category: s.category ?? null,
             location_type: s.location_type,
           });
         } else {
@@ -1787,9 +1796,9 @@ export function AppointmentBookingFlow({
     // Venue-chosen order first (Dashboard → Services drag order); name breaks ties so
     // venues that never reordered keep the old alphabetical listing.
     return Array.from(map.values()).sort((a, b) =>
-      compareByVenueServiceOrder(
-        { sort_order: a.sortOrder, name: a.name },
-        { sort_order: b.sortOrder, name: b.name },
+      compareByCategoryThenServiceOrder(
+        { sort_order: a.sortOrder, name: a.name, category: a.category },
+        { sort_order: b.sortOrder, name: b.name, category: b.category },
       ),
     );
   }, [catalogStaff]);
@@ -1870,13 +1879,15 @@ export function AppointmentBookingFlow({
           // venue-wide list does; otherwise it is simply this person's price.
           minPricePence: variantPrices.length > 0 ? Math.min(...variantPrices) : s.price_pence,
           sortOrder: s.sort_order ?? 0,
+          sort_order: s.sort_order ?? 0,
+          category: s.category ?? null,
           location_type: s.location_type,
         };
       })
       .sort((a, b) =>
-        compareByVenueServiceOrder(
-          { sort_order: a.sortOrder, name: a.name },
-          { sort_order: b.sortOrder, name: b.name },
+        compareByCategoryThenServiceOrder(
+          { sort_order: a.sortOrder, name: a.name, category: a.category },
+          { sort_order: b.sortOrder, name: b.name, category: b.category },
         ),
       );
   }, [isStaffFirst, selectedPractitionerId, catalogStaff]);
@@ -1898,13 +1909,15 @@ export function AppointmentBookingFlow({
           duration_minutes: s.duration_minutes,
           minPricePence: variantPrices.length > 0 ? Math.min(...variantPrices) : s.price_pence,
           sortOrder: s.sort_order ?? 0,
+          sort_order: s.sort_order ?? 0,
+          category: s.category ?? null,
           location_type: s.location_type,
         };
       })
       .sort((a, b) =>
-        compareByVenueServiceOrder(
-          { sort_order: a.sortOrder, name: a.name },
-          { sort_order: b.sortOrder, name: b.name },
+        compareByCategoryThenServiceOrder(
+          { sort_order: a.sortOrder, name: a.name, category: a.category },
+          { sort_order: b.sortOrder, name: b.name, category: b.category },
         ),
       );
   }, [isStaffFirst, groupPractitionerId, catalogStaff]);
@@ -1927,6 +1940,8 @@ export function AppointmentBookingFlow({
   }, [catalogStaff, groupServiceId]);
 
   const sym = currencySymbolFromCode(venue.currency);
+  /** Sections with a category menu, or collapsible categories (Settings, Booking Page). */
+  const servicesLayout = resolveServicesLayout(venue.booking_page_config);
 
   function onlineChargeFromCatalogOffer(offer: {
     price_pence: number | null;
@@ -3702,7 +3717,13 @@ export function AppointmentBookingFlow({
                   they do.
                 </p>
               ) : null}
-              {serviceListForStep.map((svc) => {
+              <ServiceCategoryList
+                services={serviceListForStep}
+                layout={servicesLayout}
+                embed={embed}
+                idPrefix="ap-service"
+                revealServiceId={carriedServiceId ?? preselectedServiceId ?? null}
+                renderService={(svc) => {
                 const serviceVariants = isStaffFirst
                   ? catalogVariantsForServiceFromStaff(catalogStaff, svc.id, selectedPractitionerId)
                   : catalogVariantsForServiceId(catalogStaff, svc.id);
@@ -3862,7 +3883,8 @@ export function AppointmentBookingFlow({
                     ) : null}
                   </div>
                 );
-              })}
+                }}
+              />
             </div>
           )}
         </div>
@@ -4776,8 +4798,14 @@ export function AppointmentBookingFlow({
                 {addingExtraService && visitPractitioner && (
                   <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                     <p className="mb-2 text-xs font-medium text-slate-500">Choose a service - next start time is calculated automatically.</p>
-                    <div className="flex flex-wrap gap-2">
-                      {visitPractitioner.services.map((svc) => {
+                    <ServiceCategoryList
+                      services={visitPractitioner.services}
+                      layout="sections"
+                      embed
+                      searchable={false}
+                      idPrefix="ap-visit-add"
+                      listClassName="flex flex-wrap gap-2"
+                      renderService={(svc) => {
                         const appending = appendingServiceId === svc.id;
                         return (
                         <button
@@ -4817,8 +4845,8 @@ export function AppointmentBookingFlow({
                           <span className="ml-2 text-xs text-slate-500">{svc.duration_minutes} min</span>
                         </button>
                         );
-                      })}
-                    </div>
+                      }}
+                    />
                   </div>
                 )}
               </>
@@ -5548,7 +5576,12 @@ export function AppointmentBookingFlow({
             </div>
           ) : (
             <div className="space-y-2">
-              {(groupStaffFirstServices ?? servicesWithFromPrice).map((svc) => (
+              <ServiceCategoryList
+                services={groupStaffFirstServices ?? servicesWithFromPrice}
+                layout={servicesLayout}
+                embed={embed}
+                idPrefix="ap-group-service"
+                renderService={(svc) => (
                 <div key={svc.id} className={choiceCardShellClass}>
                 <button
                   type="button"
@@ -5594,7 +5627,8 @@ export function AppointmentBookingFlow({
                 </button>
                 <ServiceCatalogDescription description={svc.description} idSuffix={svc.id} />
                 </div>
-              ))}
+                )}
+              />
             </div>
           )}
         </div>

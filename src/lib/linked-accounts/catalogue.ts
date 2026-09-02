@@ -8,6 +8,8 @@
  * ever mutated — so a broken link splits the catalogue cleanly (plan D5/§8).
  */
 
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { compareCombinedCatalogueItems, fetchCollectiveCategoryRefs } from './collective-categories';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   hasFullMutualWriteLinks,
@@ -42,6 +44,8 @@ export interface VenueCatalogueData {
       description: string | null;
       /** The owning venue's chosen display order (Dashboard → Services drag order). */
       sortOrder: number;
+      /** The owning venue's category heading for this service, or null. */
+      category: ServiceCategoryRef | null;
     }
   >;
   /** calendarId → name. */
@@ -55,6 +59,7 @@ export interface VenueCatalogueData {
     durationMinutes: number | null;
     pricePence: number | null;
     description: string | null;
+    category: ServiceCategoryRef | null;
   }[];
   /** ordered list of calendars for the builder. */
   calendarList: { id: string; name: string }[];
@@ -84,6 +89,7 @@ export async function loadVenueCatalogueData(
       pricePence: number | null;
       description: string | null;
       sortOrder: number;
+      category: ServiceCategoryRef | null;
     }
   >();
   const calendars = new Map<string, { name: string }>();
@@ -103,6 +109,7 @@ export async function loadVenueCatalogueData(
           pricePence: s.price_pence ?? null,
           description: s.description?.trim() ? s.description.trim() : null,
           sortOrder: s.sort_order ?? 0,
+          category: s.category ?? null,
         });
         serviceOrder.push(s.id);
       }
@@ -218,7 +225,10 @@ export interface CatalogueItemView {
   id: string;
   name: string;
   description: string | null;
+  /** Legacy free-text label; nothing reads it. */
   category: string | null;
+  /** Heading on the combined page; one of CatalogueManagementView.categories, or null. */
+  categoryId: string | null;
   imageUrl: string | null;
   displayOrder: number;
   defaultDurationMinutes: number | null;
@@ -242,6 +252,8 @@ export interface CatalogueManagementView {
   pageMode: PageMode;
   items: CatalogueItemView[];
   memberSources: CatalogueMemberSource[];
+  /** The page's headings in display order (host-curated, inherited from member venues by default). */
+  categories: ServiceCategoryRef[];
 }
 
 interface SourceServiceRecord {
@@ -400,7 +412,7 @@ export async function loadCatalogueForManagement(
   const { data: itemRows } = await admin
     .from('collective_service_items')
     .select(
-      'id, name, description, category, image_url, display_order, default_duration_minutes, default_price_pence, pricing_display, allow_any_available, status',
+      'id, name, description, category, category_id, image_url, display_order, default_duration_minutes, default_price_pence, pricing_display, allow_any_available, status',
     )
     .eq('collective_id', collectiveId)
     .order('display_order', { ascending: true });
@@ -447,6 +459,8 @@ export async function loadCatalogueForManagement(
     }
   }
 
+  const categories = await fetchCollectiveCategoryRefs(admin, collectiveId);
+
   const itemViews: CatalogueItemView[] = items.map((i) => ({
     id: i.id as string,
     name: (i.name as string) ?? 'Service',
@@ -459,6 +473,7 @@ export async function loadCatalogueForManagement(
         collective.host_venue_id as string | null,
       ),
     category: (i.category as string | null) ?? null,
+    categoryId: (i.category_id as string | null | undefined) ?? null,
     imageUrl: (i.image_url as string | null) ?? null,
     displayOrder: (i.display_order as number) ?? 0,
     defaultDurationMinutes: (i.default_duration_minutes as number | null) ?? null,
@@ -474,6 +489,7 @@ export async function loadCatalogueForManagement(
     pageMode: (collective.page_mode as PageMode) ?? 'directory',
     items: itemViews,
     memberSources,
+    categories,
   };
 }
 
@@ -575,7 +591,8 @@ export interface PublicCatalogueItem {
   id: string;
   name: string;
   description: string | null;
-  category: string | null;
+  /** Heading on the combined page; null when uncategorised. */
+  category: ServiceCategoryRef | null;
   imageUrl: string | null;
   pricingDisplay: PricingDisplay;
   allowAnyAvailable: boolean;
@@ -587,6 +604,8 @@ export interface PublicCatalogueItem {
 export interface PublicCombinedCatalogue {
   serviceGrouping: ServiceGrouping;
   items: PublicCatalogueItem[];
+  /** Every heading on the page in display order, including empty ones. */
+  categories: ServiceCategoryRef[];
 }
 
 /**
@@ -637,7 +656,7 @@ export async function loadPublicCombinedCatalogue(
     .eq('collective_id', collectiveId)
     .eq('status', 'active');
   const memberVenueIds = (memberRows ?? []).map((m) => m.venue_id as string);
-  if (memberVenueIds.length === 0) return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [] };
+  if (memberVenueIds.length === 0) return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [], categories: [] };
 
   // Eligible venues (Appointments-family, active plan) + name/slug.
   const { data: venues } = await admin
@@ -663,7 +682,7 @@ export async function loadPublicCombinedCatalogue(
   }
   const eligibleVenueIds = memberVenueIds.filter((id) => venueInfo[id]?.eligible);
   if (eligibleVenueIds.length === 0) {
-    return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [] };
+    return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [], categories: [] };
   }
 
   // Source services + calendars per eligible venue (model-agnostic).
@@ -696,13 +715,16 @@ export async function loadPublicCombinedCatalogue(
   const { data: itemRows } = await admin
     .from('collective_service_items')
     .select(
-      'id, name, description, category, image_url, display_order, default_duration_minutes, default_price_pence, pricing_display, allow_any_available',
+      'id, name, description, category, category_id, image_url, display_order, default_duration_minutes, default_price_pence, pricing_display, allow_any_available',
     )
     .eq('collective_id', collectiveId)
     .eq('status', 'active')
     .order('display_order', { ascending: true });
   const items = (itemRows ?? []) as Array<Record<string, unknown>>;
   const itemIds = items.map((i) => i.id as string);
+
+  const categories = await fetchCollectiveCategoryRefs(admin, collectiveId);
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
 
   const providersByItem = new Map<string, PublicCatalogueProvider[]>();
   // itemId → lowest source-service sort_order across bookable providers. Lets the
@@ -757,14 +779,19 @@ export async function loadPublicCombinedCatalogue(
   }
 
   const publicItems: PublicCatalogueItem[] = [];
-  const sortKeyByItem = new Map<string, { displayOrder: number; sourceOrder: number }>();
+  const sortKeyByItem = new Map<
+    string,
+    { displayOrder: number; sourceOrder: number; category: ServiceCategoryRef | null }
+  >();
   for (const i of items) {
     const providers = providersByItem.get(i.id as string) ?? [];
     if (providers.length === 0) continue; // nothing bookable → hide the offering
     const prices = providers.map((p) => p.pricePence).filter((p): p is number => p != null);
+    const itemCategory = categoryById.get((i.category_id as string | null | undefined) ?? '') ?? null;
     sortKeyByItem.set(i.id as string, {
       displayOrder: (i.display_order as number) ?? 0,
       sourceOrder: minSourceSortByItem.get(i.id as string) ?? 0,
+      category: itemCategory,
     });
     publicItems.push({
       id: i.id as string,
@@ -772,7 +799,7 @@ export async function loadPublicCombinedCatalogue(
       description:
         ((i.description as string | null)?.trim() || null) ??
         sourceDescriptionForProviders(providers, serviceIndex, collective.host_venue_id as string | null),
-      category: (i.category as string | null) ?? null,
+      category: itemCategory,
       imageUrl: (i.image_url as string | null) ?? null,
       pricingDisplay: (i.pricing_display as PricingDisplay) ?? 'from',
       allowAnyAvailable: (i.allow_any_available as boolean) ?? true,
@@ -781,17 +808,16 @@ export async function loadPublicCombinedCatalogue(
     });
   }
 
-  // Order: host-curated display_order first, then the member venues' own service
-  // order (lowest across providers), then name so untouched catalogues stay stable.
-  publicItems.sort((a, b) => {
-    const ka = sortKeyByItem.get(a.id) ?? { displayOrder: 0, sourceOrder: 0 };
-    const kb = sortKeyByItem.get(b.id) ?? { displayOrder: 0, sourceOrder: 0 };
-    return (
-      ka.displayOrder - kb.displayOrder ||
-      ka.sourceOrder - kb.sourceOrder ||
-      a.name.localeCompare(b.name, 'en')
-    );
-  });
+  // Order: heading first (uncategorised last), then host-curated display_order, then
+  // the member venues' own service order (lowest across providers), then name so
+  // untouched catalogues stay stable.
+  const fallbackKey = { displayOrder: 0, sourceOrder: 0, category: null };
+  publicItems.sort((a, b) =>
+    compareCombinedCatalogueItems(
+      { name: a.name, ...(sortKeyByItem.get(a.id) ?? fallbackKey) },
+      { name: b.name, ...(sortKeyByItem.get(b.id) ?? fallbackKey) },
+    ),
+  );
 
-  return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: publicItems };
+  return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: publicItems, categories };
 }

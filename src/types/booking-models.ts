@@ -178,6 +178,8 @@ export interface AppointmentService {
   colour: string;
   is_active: boolean;
   sort_order: number;
+  /** Category heading on the booking pages; null or absent when uncategorised. */
+  category_id?: string | null;
   created_at: string;
   /** Admin: which fields individual staff may override for their own calendar. */
   staff_may_customize_name?: boolean;

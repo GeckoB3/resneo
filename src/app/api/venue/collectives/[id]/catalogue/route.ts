@@ -13,6 +13,13 @@ import { ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-acc
 import { loadVenueLookup } from '@/lib/linked-accounts/queries';
 import { notifyCombinedProviderProposed } from '@/lib/linked-accounts/notifications';
 import { groupServicesForBulkAdd } from '@/lib/linked-accounts/group-services-for-bulk-add';
+import { resolveCollectiveCategoryId } from '@/lib/linked-accounts/collective-categories';
+import {
+  applyCollectiveCategoryAction,
+  inheritCategoryForOffering,
+  isCollectiveCategoryAction,
+  seedCollectiveCategoriesOnce,
+} from '@/lib/linked-accounts/collective-category-inheritance';
 
 /** Best-effort: notification failures must never fail a catalogue action. */
 async function safeNotify(p: Promise<unknown>): Promise<void> {
@@ -60,6 +67,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     }
     // Self-heal legacy venue-wide providers so the per-calendar checkboxes are accurate.
     if (access.isHost) await backfillPerCalendarProviders(ctx.admin, id);
+    // First host visit after the headings migration: inherit headings from the member
+    // venues' own categories, once. Later changes are the host's alone.
+    if (access.isHost) await seedCollectiveCategoriesOnce(ctx.admin, id);
     const catalogue = await loadCatalogueForManagement(ctx.admin, id);
     // Host-only: each active member's saved booking-page settings, so the host can
     // prefill the combined page from a member venue ("import from", plan §22 / P4).
@@ -382,6 +392,8 @@ async function createOfferingSeeded(
     );
     if (res.ok && res.added > 0 && src.venueId !== actingVenueId) seededMemberVenues.add(src.venueId);
   }
+  // File the offering under the heading its source services carry at their own venues.
+  await inheritCategoryForOffering(admin, collectiveId, item.id as string, sources);
   return { ok: true, seededMemberVenues };
 }
 
@@ -392,16 +404,28 @@ async function applyCatalogueAction(
   userId: string | null,
   input: CatalogueActionInput,
 ): Promise<ActionResult> {
+  if (isCollectiveCategoryAction(input.action)) {
+    return applyCollectiveCategoryAction(admin, collectiveId, {
+      action: input.action,
+      categoryId: input.categoryId,
+      categoryName: input.categoryName,
+      categoryIds: input.categoryIds,
+      itemIds: input.itemIds,
+    });
+  }
+
   switch (input.action) {
     case 'create_item': {
       if (!input.name) return { ok: false, error: 'A service name is required.', status: 400 };
+      const categoryCheck = await resolveCollectiveCategoryId(admin, collectiveId, input.categoryId);
+      if (!categoryCheck.ok) return { ok: false, error: categoryCheck.error, status: 400 };
       const { data: item, error } = await admin
         .from('collective_service_items')
         .insert({
           collective_id: collectiveId,
           name: input.name.trim(),
           description: input.description ?? null,
-          category: input.category ?? null,
+          category_id: categoryCheck.categoryId,
           display_order: input.displayOrder ?? 0,
           default_duration_minutes: input.defaultDurationMinutes ?? null,
           default_price_pence: input.defaultPricePence ?? null,
@@ -427,6 +451,10 @@ async function applyCatalogueAction(
           userId,
         );
         if (res.ok && res.added > 0 && src.venueId !== actingVenueId) seededMemberVenues.add(src.venueId);
+      }
+      // No heading chosen: file it under the one its source services carry at home.
+      if (!categoryCheck.categoryId) {
+        await inheritCategoryForOffering(admin, collectiveId, item.id as string, input.sourceServiceIds ?? []);
       }
       // Ask each seeded member to approve the terms for its calendars (plan D6).
       if (seededMemberVenues.size > 0) {
@@ -517,7 +545,11 @@ async function applyCatalogueAction(
       const updates: Record<string, unknown> = {};
       if (input.name !== undefined) updates.name = input.name.trim();
       if (input.description !== undefined) updates.description = input.description;
-      if (input.category !== undefined) updates.category = input.category;
+      if (input.categoryId !== undefined) {
+        const categoryCheck = await resolveCollectiveCategoryId(admin, collectiveId, input.categoryId);
+        if (!categoryCheck.ok) return { ok: false, error: categoryCheck.error, status: 400 };
+        updates.category_id = categoryCheck.categoryId;
+      }
       if (input.displayOrder !== undefined) updates.display_order = input.displayOrder;
       if (input.defaultDurationMinutes !== undefined)
         updates.default_duration_minutes = input.defaultDurationMinutes;

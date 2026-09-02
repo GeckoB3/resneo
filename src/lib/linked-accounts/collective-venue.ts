@@ -12,6 +12,7 @@
  * row into the correct owning venue with the override applied.
  */
 
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
@@ -161,6 +162,8 @@ export interface CollectiveCatalogService {
    * member venues' own service order); the booking flow picker sorts by this.
    */
   sort_order: number;
+  /** Heading on the combined page; null when uncategorised. */
+  category?: ServiceCategoryRef | null;
   /** The source service's own deposit-refund notice window (owning venue's setting). */
   cancellation_notice_hours: number;
   /** This calendar's OWN source-service variants/add-ons (each venue keeps its own). */
@@ -202,9 +205,11 @@ const DEFAULT_CANCELLATION_NOTICE_HOURS = 24;
 export async function loadCollectiveAppointmentCatalog(
   admin: SupabaseClient,
   collectiveId: string,
-): Promise<{ practitioners: CollectiveCatalogPractitioner[] }> {
+): Promise<{ practitioners: CollectiveCatalogPractitioner[]; categories: ServiceCategoryRef[] }> {
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
-  if (!catalogue || catalogue.items.length === 0) return { practitioners: [] };
+  if (!catalogue || catalogue.items.length === 0) {
+    return { practitioners: [], categories: catalogue?.categories ?? [] };
+  }
 
   // Per-venue calendar names + which calendars offer each source service.
   const venueIds = [
@@ -362,6 +367,7 @@ export async function loadCollectiveAppointmentCatalog(
           // `catalogue.items` is already sorted (host display_order → member venue
           // service order → name), so the index is the display position.
           sort_order: itemIndex,
+          category: item.category,
           cancellation_notice_hours:
             meta?.cancellationNoticeHours ?? DEFAULT_CANCELLATION_NOTICE_HOURS,
           variants: activeVariants(provider.venueId, provider.sourceServiceId).map(variantToCatalog),
@@ -407,7 +413,7 @@ export async function loadCollectiveAppointmentCatalog(
     (collectiveRow as { host_venue_id?: string } | null)?.host_venue_id ?? null,
   );
 
-  return { practitioners: result };
+  return { practitioners: result, categories: catalogue.categories };
 }
 
 /**
@@ -446,7 +452,7 @@ export async function loadCollectivePublicServices(
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
   if (!catalogue) return [];
   const crops = pageConfig?.service_photo_crops ?? {};
-  return catalogue.items.map((i) => {
+  return catalogue.items.map((i, index) => {
     const imageUrl = i.imageUrl ?? null;
     return {
       id: i.id,
@@ -457,6 +463,9 @@ export async function loadCollectivePublicServices(
       price_pence: i.fromPricePence,
       duration_minutes:
         i.providers.find((p) => p.durationMinutes != null)?.durationMinutes ?? 0,
+      category: i.category,
+      // `catalogue.items` is already in page order (heading, then host order).
+      sort_order: index,
     };
   });
 }

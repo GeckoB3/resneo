@@ -1,3 +1,4 @@
+import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
 import { NextRequest, NextResponse } from 'next/server';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
@@ -108,6 +109,8 @@ const serviceSchema = z
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().optional(),
+    /** Category heading on the booking pages; null clears it. Must belong to the venue. */
+    category_id: z.string().uuid().nullable().optional(),
     max_advance_booking_days: z.number().int().min(1).max(365).optional(),
     min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
@@ -191,6 +194,8 @@ const servicePatchSchema = z
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().optional(),
+    /** Category heading on the booking pages; null clears it. Must belong to the venue. */
+    category_id: z.string().uuid().nullable().optional(),
     max_advance_booking_days: z.number().int().min(1).max(365).optional(),
     min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
@@ -398,6 +403,7 @@ function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<str
   return {
     ...row,
     colour: row.colour ?? '#3B82F6',
+    category_id: (row.category_id as string | null | undefined) ?? null,
     location_type: (row.location_type as string | undefined) ?? 'business_venue',
     booking_interval_minutes: (row.booking_interval_minutes as number | undefined) ?? 15,
     booking_minute_marks: (row.booking_minute_marks as number[] | null | undefined) ?? null,
@@ -585,6 +591,29 @@ async function nextServiceSortOrder(
   return max > 0 ? max + 1 : 0;
 }
 
+/**
+ * A category id from the client must be one of this venue's; `null` (or omitted)
+ * means no category. Checked here rather than left to the foreign key so a stale
+ * id from a category deleted in another tab gets a message instead of a 500.
+ */
+async function resolveCategoryIdForVenue(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  raw: string | null | undefined,
+): Promise<{ ok: true; categoryId: string | null } | { ok: false; error: string }> {
+  if (raw == null) return { ok: true, categoryId: null };
+  const { data, error } = await admin
+    .from('service_categories')
+    .select('id')
+    .eq('id', raw)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  if (error || !data) {
+    return { ok: false, error: 'That category no longer exists. Refresh the page and try again.' };
+  }
+  return { ok: true, categoryId: data.id as string };
+}
+
 const OWNER_VENUE_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -611,7 +640,7 @@ export async function GET(request: NextRequest) {
     const useUnified = await venueUsesUnifiedServiceItems(admin, catalogVenueId);
 
     if (useUnified) {
-      const [servicesRes, calRes] = await Promise.all([
+      const [servicesRes, calRes, categories] = await Promise.all([
         admin
           .from('service_items')
           .select('*')
@@ -619,6 +648,7 @@ export async function GET(request: NextRequest) {
           .order('sort_order', { ascending: true })
           .order('name', { ascending: true }),
         admin.from('unified_calendars').select('id').eq('venue_id', catalogVenueId),
+        fetchServiceCategoryRefs(admin, catalogVenueId),
       ]);
 
       if (servicesRes.error) {
@@ -688,6 +718,7 @@ export async function GET(request: NextRequest) {
         {
           services: servicesWithVariants,
           practitioner_services,
+          categories,
         },
         { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } },
       );
@@ -879,6 +910,10 @@ export async function POST(request: NextRequest) {
         payment_requirement: parsed.data.payment_requirement,
         deposit_pence: parsed.data.deposit_pence,
       });
+      const categoryCheck = await resolveCategoryIdForVenue(admin, staff.venue_id, parsed.data.category_id);
+      if (!categoryCheck.ok) {
+        return NextResponse.json({ error: categoryCheck.error }, { status: 400 });
+      }
       const staffMayAllTrue = staff.role !== 'admin';
       const insertRow = {
         venue_id: staff.venue_id,
@@ -899,6 +934,7 @@ export async function POST(request: NextRequest) {
         sort_order:
           parsed.data.sort_order ??
           (await nextServiceSortOrder(admin, 'service_items', staff.venue_id)),
+        category_id: categoryCheck.categoryId,
         staff_may_customize_name: staffMayAllTrue ? true : (parsed.data.staff_may_customize_name ?? false),
         staff_may_customize_description: staffMayAllTrue ? true : (parsed.data.staff_may_customize_description ?? false),
         staff_may_customize_duration: staffMayAllTrue ? true : (parsed.data.staff_may_customize_duration ?? false),
@@ -1250,6 +1286,13 @@ export async function PATCH(request: NextRequest) {
       let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
       let requestedManagedCalendarIds = practitioner_ids;
       let updatePayload: Record<string, unknown> = { ...parsed.data };
+      if (parsed.data.category_id !== undefined) {
+        const categoryCheck = await resolveCategoryIdForVenue(admin, staff.venue_id, parsed.data.category_id);
+        if (!categoryCheck.ok) {
+          return NextResponse.json({ error: categoryCheck.error }, { status: 400 });
+        }
+        updatePayload.category_id = categoryCheck.categoryId;
+      }
 
       if (staff.role !== 'admin') {
         managedScope = await requireManagedCalendarIds(admin, staff.venue_id, staff);

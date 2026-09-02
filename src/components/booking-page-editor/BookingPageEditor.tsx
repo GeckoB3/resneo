@@ -53,9 +53,11 @@ import {
   BOOKING_THEME_PRESETS,
   normalizeHexColor,
   primaryNeedsDarkText,
+  resolveServicesLayout,
   type BookingFontPreset,
   type BookingPageConfig,
   type BookingTeamProfile,
+  type ServicesLayout,
 } from '@/lib/booking/booking-page-theme';
 import {
   DEFAULT_BOOKING_PAGE_LOGO_CROP,
@@ -182,6 +184,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   const [showServicesTab, setShowServicesTab] = useState(cfg0.show_services_tab === true);
   const [showTeamTab, setShowTeamTab] = useState(cfg0.show_team_tab === true);
   const [showAboutTab, setShowAboutTab] = useState(cfg0.show_about_tab === true);
+  const [servicesLayout, setServicesLayout] = useState<ServicesLayout>(() => resolveServicesLayout(cfg0));
   const [servicePhotoBusyId, setServicePhotoBusyId] = useState<string | null>(null);
   const [servicePhotoError, setServicePhotoError] = useState<string | null>(null);
   const [teamProfiles, setTeamProfiles] = useState<Record<string, BookingTeamProfile>>(cfg0.team_profiles ?? {});
@@ -265,6 +268,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     config.show_services_tab = showServicesTab;
     config.show_team_tab = showTeamTab;
     config.show_about_tab = showAboutTab;
+    config.services_layout = servicesLayout;
     // Team profiles: keep only members that still exist and carry content.
     const liveTeamIds = new Set(teamList.map((m) => m.id));
     const profiles: Record<string, BookingTeamProfile> = {};
@@ -316,6 +320,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     showServicesTab,
     showTeamTab,
     showAboutTab,
+    servicesLayout,
     teamProfiles,
     teamList,
   ]);
@@ -371,6 +376,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     [adapter, draftBookingPageConfig],
   );
 
+  const serviceHasCategories = useMemo(() => serviceList.some((s) => s.category != null), [serviceList]);
+
   const previewServices = useMemo((): BookingPagePublicService[] => {
     if (!showServicesTab) return [];
     return serviceList.map((s) => {
@@ -383,6 +390,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         image_crop: imageUrl ? servicePhotoCrops[s.id] ?? null : null,
         price_pence: typeof s.price_pence === 'number' ? s.price_pence : null,
         duration_minutes: typeof s.duration_minutes === 'number' && s.duration_minutes > 0 ? s.duration_minutes : 60,
+        category: s.category ?? null,
+        sort_order: s.sort_order ?? 0,
       };
     });
   }, [showServicesTab, serviceList, effectiveServicePhotos, servicePhotoCrops]);
@@ -407,6 +416,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setShowServicesTab(c.show_services_tab === true);
     setShowTeamTab(c.show_team_tab === true);
     setShowAboutTab(c.show_about_tab === true);
+    setServicesLayout(resolveServicesLayout(c));
     setTeamProfiles(c.team_profiles ?? {});
     setLogoCrop(resolveBookingPageLogoCrop(c.logo_crop));
     setCoverCropBox(resolveBookingPageCoverCropBox(c.cover_crop_box));
@@ -423,6 +433,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setShowServicesTab(c.show_services_tab === true);
     setShowTeamTab(c.show_team_tab === true);
     setShowAboutTab(c.show_about_tab === true);
+    setServicesLayout(resolveServicesLayout(c));
     setCoverFullWidth(c.cover_full_width === true);
     setCoverCropBox(resolveBookingPageCoverCropBox(c.cover_crop_box));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sync only when the saved config changes
@@ -772,6 +783,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         setShowServicesTab(c.show_services_tab === true);
         setShowTeamTab(c.show_team_tab === true);
         setShowAboutTab(c.show_about_tab === true);
+        setServicesLayout(resolveServicesLayout(c));
       }
     },
     [adapter],
@@ -1279,6 +1291,54 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               onChange: setShowServicesTab,
             }}
           >
+              <fieldset className="mb-5">
+                <legend className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>How services are listed</legend>
+                <p className="mb-2 text-xs text-slate-500">
+                  {serviceHasCategories
+                    ? 'Applies wherever customers pick a service: the booking form and the Services tab.'
+                    : 'Create categories on the Services page to group your services. Until then the list shows as it does now.'}
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(
+                    [
+                      {
+                        value: 'sections',
+                        label: 'Sections with a category menu',
+                        hint: 'Every category is shown with its services below. A menu at the top jumps between them.',
+                      },
+                      {
+                        value: 'accordion',
+                        label: 'Collapsible categories',
+                        hint: 'Customers open a category to see its services. Good for long menus.',
+                      },
+                    ] as const
+                  ).map((option) => {
+                    const selected = servicesLayout === option.value;
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 text-sm transition-colors ${
+                          selected ? 'border-brand-300 bg-brand-50/60' : 'border-slate-200 bg-white hover:border-slate-300'
+                        } ${!isAdmin ? 'cursor-not-allowed opacity-60' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="bp-services-layout"
+                          value={option.value}
+                          checked={selected}
+                          disabled={!isAdmin}
+                          onChange={() => setServicesLayout(option.value)}
+                          className="mt-0.5 text-brand-600 focus:ring-brand-500"
+                        />
+                        <span>
+                          <span className="block font-medium text-slate-800">{option.label}</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">{option.hint}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
               {serviceList.length > 0 ? (
               <div>
               <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Service photos</span>

@@ -1,3 +1,4 @@
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
 import type { ReactNode } from 'react';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { VenuePublic } from '@/components/booking/types';
@@ -27,6 +28,10 @@ export interface EditorServiceItem {
    * collective offerings carry it here (item image), so the editor seeds from this.
    */
   imageUrl?: string | null;
+  /** Category heading on the booking page, so the preview groups as the live page does. */
+  category?: ServiceCategoryRef | null;
+  /** Venue drag order, so the preview keeps it inside each category. */
+  sort_order?: number;
 }
 
 /** A bookable team member shown in the "Meet the team" group + the preview. */

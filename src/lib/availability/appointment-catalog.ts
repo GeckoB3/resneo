@@ -3,6 +3,8 @@
  * `unified_scheduling` uses unified_calendars + service_items + calendar_service_assignments.
  */
 
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { fetchServiceCategoryRefs, serviceCategoryLookup } from '@/lib/booking/service-categories-db';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   AppointmentService,
@@ -52,6 +54,8 @@ export interface AppointmentCatalogPractitioner {
     payment_requirement?: ClassPaymentRequirement;
     /** Venue-chosen display order (lower first); service pickers sort by this, then name. */
     sort_order?: number;
+    /** Category heading the venue lists this service under; null or absent when uncategorised. */
+    category?: ServiceCategoryRef | null;
     /** Hours before start for deposit refund; from service row. */
     cancellation_notice_hours: number;
     /** Active sub-options. When non-empty the booking flow must collect a variant choice. */
@@ -100,6 +104,16 @@ function resolveCatalogPaymentRequirement(params: {
   return 'none';
 }
 
+/** What the guest catalog returns: staff with their services, plus the venue's category headings. */
+export interface AppointmentCatalog {
+  practitioners: AppointmentCatalogPractitioner[];
+  /**
+   * Every category the venue has, in booking-page order, including empty ones.
+   * Absent on the legacy path; combined pages return their own headings the same way.
+   */
+  categories?: ServiceCategoryRef[];
+}
+
 export interface AppointmentCatalogOptions {
   practitionerSlug?: string;
   includeHiddenAddons?: boolean;
@@ -142,6 +156,7 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
     colour: (row.colour as string) ?? '#3B82F6',
     is_active: row.is_active !== false,
     sort_order: (row.sort_order as number) ?? 0,
+    category_id: (row.category_id as string | null | undefined) ?? null,
     created_at: (row.created_at as string) ?? new Date().toISOString(),
     max_advance_booking_days: entityBookingWindowFromRow(row).max_advance_booking_days,
     min_booking_notice_hours: entityBookingWindowFromRow(row).min_booking_notice_hours,
@@ -164,7 +179,7 @@ async function fetchUnifiedAppointmentCatalog(
   venueId: string,
   cardHoldDepositsEnabled: boolean,
   options?: AppointmentCatalogOptions,
-): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
+): Promise<AppointmentCatalog> {
   const calQuery = supabase
     .from('unified_calendars')
     .select('*')
@@ -188,7 +203,7 @@ async function fetchUnifiedAppointmentCatalog(
 
   const calendarIds = calendars.map((c) => c.id as string);
 
-  const [servicesRes, assignRes] = await Promise.all([
+  const [servicesRes, assignRes, categories] = await Promise.all([
     supabase
       .from('service_items')
       .select('*')
@@ -200,9 +215,11 @@ async function fetchUnifiedAppointmentCatalog(
       .from('calendar_service_assignments')
       .select('id, calendar_id, service_item_id, custom_duration_minutes, custom_price_pence')
       .in('calendar_id', calendarIds),
+    fetchServiceCategoryRefs(supabase, venueId),
   ]);
 
   const services = ((servicesRes.data ?? []) as Record<string, unknown>[]).map(serviceItemRowToAppointmentService);
+  const categoryFor = serviceCategoryLookup(categories);
   const practitionerServices: PractitionerService[] = (assignRes.data ?? []).map((a) => {
     const row = a as {
       id: string;
@@ -260,6 +277,7 @@ async function fetchUnifiedAppointmentCatalog(
           price_pence: svc.price_pence,
           deposit_pence: svc.deposit_pence,
           sort_order: svc.sort_order ?? 0,
+          category: categoryFor(svc.category_id),
           payment_requirement: resolveCatalogPaymentRequirement({
             service: svc,
             variants,
@@ -276,14 +294,14 @@ async function fetchUnifiedAppointmentCatalog(
     });
   }
 
-  return { practitioners: result };
+  return { practitioners: result, categories };
 }
 
 export async function fetchAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
   options?: AppointmentCatalogOptions,
-): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
+): Promise<AppointmentCatalog> {
   const { data: venueRow } = await supabase
     .from('venues')
     .select('booking_model, enabled_models, feature_flags')

@@ -887,6 +887,14 @@ button, a, input, select, textarea {
   --tw-ring-color: color-mix(in srgb, var(--ap-accent) 35%, transparent);
 }
 
+/* ── Service category menu (public flow, staff modal, Services tab) ─────────
+   Sticky inside whichever scrollport holds it; the fade hides cards sliding
+   underneath without a hard edge. Top offset comes from --ap-sticky-top, set by
+   the page when a sticky tab bar sits above the form. */
+.ap-cat-nav {
+  background: linear-gradient(to bottom, #ffffff 0%, #ffffff 82%, rgba(255, 255, 255, 0) 100%);
+}
+
 /* ── Expanded booking detail: Apple-style polish ──────────────────────────────
    Smooth accordion height animation via ::details-content + interpolate-size.
    The @supports guard means non-supporting browsers keep the native instant

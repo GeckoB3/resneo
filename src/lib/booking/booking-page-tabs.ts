@@ -1,3 +1,4 @@
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
 import type {
   BookingPageConfig,
   BookingPageImageFraming,
@@ -29,6 +30,10 @@ export interface BookingPagePublicService {
   image_crop?: BookingPageImageFraming | null;
   price_pence: number | null;
   duration_minutes: number;
+  /** Category heading on the booking page; null or absent when uncategorised. */
+  category?: ServiceCategoryRef | null;
+  /** Venue drag order, so grouping keeps it. */
+  sort_order?: number;
 }
 
 export interface BookingPageTeamMember {

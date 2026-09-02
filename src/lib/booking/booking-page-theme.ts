@@ -67,6 +67,23 @@ export const BOOKING_FONT_PRESET_LABELS: Record<BookingFontPreset, string> = {
   cinzel: 'Refined (Cinzel)',
 };
 
+/**
+ * How the booking page lists services once the venue has categories: every category
+ * as a headed section with a category menu to jump between them, or collapsible
+ * categories the customer opens. Ignored while the venue has no categories.
+ */
+export const SERVICES_LAYOUTS = ['sections', 'accordion'] as const;
+export type ServicesLayout = (typeof SERVICES_LAYOUTS)[number];
+export const DEFAULT_SERVICES_LAYOUT: ServicesLayout = 'sections';
+
+export function isServicesLayout(value: unknown): value is ServicesLayout {
+  return typeof value === 'string' && (SERVICES_LAYOUTS as readonly string[]).includes(value);
+}
+
+export function resolveServicesLayout(config: BookingPageConfig | null | undefined): ServicesLayout {
+  return config?.services_layout ?? DEFAULT_SERVICES_LAYOUT;
+}
+
 export interface BookingPageConfig {
   /**
    * Brand primary as `#rrggbb`; drives the booking-page colour ramp. This is the only colour the
@@ -113,6 +130,8 @@ export interface BookingPageConfig {
   show_services_tab?: boolean;
   /** When true, show a Meet the team tab on the public booking page. */
   show_team_tab?: boolean;
+  /** Sections with a category menu (default, stored as absent) or collapsible categories. */
+  services_layout?: ServicesLayout;
   /** When true, show the About tab on the public booking page (off by default for new venues). */
   show_about_tab?: boolean;
   /** "Meet the team" profiles keyed by practitioner / calendar id. */
@@ -390,6 +409,9 @@ export function sanitizeBookingPageConfig(raw: unknown): BookingPageConfig {
 
   if (src.show_services_tab === true) config.show_services_tab = true;
   if (src.show_team_tab === true) config.show_team_tab = true;
+  if (isServicesLayout(src.services_layout) && src.services_layout !== DEFAULT_SERVICES_LAYOUT) {
+    config.services_layout = src.services_layout;
+  }
   if (src.show_about_tab === false) config.show_about_tab = false;
   else if (src.show_about_tab === true) config.show_about_tab = true;
 
@@ -414,6 +436,13 @@ export function mergeBookingPageConfigPatch(
   }
   if ('cover_full_width' in incoming) {
     merged.cover_full_width = incoming.cover_full_width === true;
+  }
+  if ('services_layout' in incoming) {
+    if (isServicesLayout(incoming.services_layout) && incoming.services_layout !== DEFAULT_SERVICES_LAYOUT) {
+      merged.services_layout = incoming.services_layout;
+    } else {
+      delete merged.services_layout;
+    }
   }
   if ('brand_emails' in incoming) {
     if (incoming.brand_emails === true) {

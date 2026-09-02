@@ -16,6 +16,10 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
 import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-any-practitioner';
+import type { PhantomBooking } from '@/lib/availability/appointment-engine';
+import { computeChainStartsForPractitioner } from '@/lib/availability/appointment-chain';
+import { prepareChainSegments, type ChainSegmentRequest, type VenueClockRow } from '@/lib/availability/appointment-chain-server';
+import type { ServiceChainSegmentParam } from '@/lib/booking/service-chain';
 import {
   loadCollectiveAppointmentCatalog,
   type CollectiveCatalogPractitioner,
@@ -250,5 +254,143 @@ export async function loadCollectiveMonthAvailableDates(
     month,
     available_dates,
     any_available: params.anyAvailable || undefined,
+  };
+}
+
+/**
+ * Chain day availability for the combined page: starts at which SEVERAL
+ * offerings fit back to back on one calendar. Each offering resolves per
+ * calendar to its owning venue and source service, carrying the collective's
+ * own length, exactly as the single-offering path above does; the slots are
+ * labelled with the FIRST offering so the flow reads them unchanged.
+ */
+export async function loadCollectiveChainDayAvailability(
+  admin: SupabaseClient,
+  params: {
+    collectiveId: string;
+    chain: ServiceChainSegmentParam[];
+    calendarId: string | null;
+    anyAvailable: boolean;
+    date: string;
+    phantoms?: PhantomBooking[];
+  },
+): Promise<
+  | { ok: true; payload: { date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean } }
+  | { ok: false; error: string; details?: unknown }
+> {
+  const { collectiveId, chain, date } = params;
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId);
+  const firstOfferingId = chain[0]!.service_id;
+
+  type ChainTarget = {
+    calendarId: string;
+    name: string;
+    venueId: string;
+    firstPricePence: number | null;
+    segments: ChainSegmentRequest[];
+  };
+  const all: ChainTarget[] = [];
+  for (const p of practitioners) {
+    const segments: ChainSegmentRequest[] = [];
+    let firstPricePence: number | null = null;
+    let offersAll = true;
+    for (const c of chain) {
+      const svc = p.services.find((s) => s.id === c.service_id);
+      if (!svc) {
+        offersAll = false;
+        break;
+      }
+      if (c.service_id === firstOfferingId && segments.length === 0) firstPricePence = svc.price_pence;
+      segments.push({
+        serviceId: svc.source_service_id,
+        variantId: c.variant_id ?? null,
+        addonIds: c.addon_ids ?? [],
+        customDurationMinutes: c.duration_minutes ?? null,
+        durationOverrideMinutes: svc.duration_minutes,
+      });
+    }
+    if (!offersAll) continue;
+    all.push({ calendarId: p.id, name: p.name, venueId: p.owning_venue_id, firstPricePence, segments });
+  }
+  const targets =
+    params.anyAvailable || !params.calendarId ? all : all.filter((t) => t.calendarId === params.calendarId);
+
+  const venueIds = [...new Set(targets.map((t) => t.venueId))];
+  const clocks: Record<string, VenueClockRow> = {};
+  await Promise.all(
+    venueIds.map(async (venueId) => {
+      const { data } = await admin
+        .from('venues')
+        .select('id, timezone, booking_rules, opening_hours, venue_opening_exceptions')
+        .eq('id', venueId)
+        .maybeSingle();
+      if (data) clocks[venueId] = data as VenueClockRow;
+    }),
+  );
+
+  let invalid: { error: string; details?: unknown } | null = null;
+  const perCalendar = await Promise.all(
+    targets.map(async (t): Promise<DaySlot[]> => {
+      const clock = clocks[t.venueId];
+      if (!clock) return [];
+      try {
+        const prepared = await prepareChainSegments({
+          supabase: admin,
+          venueId: t.venueId,
+          date,
+          practitionerId: t.calendarId,
+          segments: t.segments,
+          clock,
+          bookingModel: null,
+          phantoms: params.phantoms,
+        });
+        if (!prepared.ok) {
+          if (prepared.kind === 'invalid') invalid = { error: prepared.error, details: prepared.details };
+          return [];
+        }
+        const { starts } = computeChainStartsForPractitioner(t.calendarId, prepared.segments);
+        return starts.map((s) => ({
+          start_time: s.start_time,
+          service_id: firstOfferingId,
+          duration_minutes: s.span_minutes,
+          price_pence: t.firstPricePence,
+          practitioner_id: t.calendarId,
+          practitioner_name: t.name,
+        }));
+      } catch {
+        return [];
+      }
+    }),
+  );
+  if (invalid) return { ok: false, ...(invalid as { error: string; details?: unknown }) };
+
+  if (params.anyAvailable) {
+    const byTime = new Map<string, DaySlot>();
+    for (const slot of perCalendar.flat()) {
+      if (!byTime.has(slot.start_time)) byTime.set(slot.start_time, slot);
+    }
+    const pooled = [...byTime.values()].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    return {
+      ok: true,
+      payload: {
+        date,
+        venue_id: collectiveId,
+        any_available: true,
+        practitioners: [{ id: ANY_AVAILABLE_PRACTITIONER_ID, name: 'Any available', slots: pooled }],
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      date,
+      venue_id: collectiveId,
+      practitioners: targets.map((t, i) => ({
+        id: t.calendarId,
+        name: t.name,
+        slots: (perCalendar[i] ?? []).sort((a, b) => a.start_time.localeCompare(b.start_time)),
+      })),
+    },
   };
 }

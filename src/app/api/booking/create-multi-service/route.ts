@@ -21,7 +21,11 @@ import {
   fetchAppointmentInput,
   validateExactAppointmentStart,
   type PhantomBooking,
+  MAX_APPOINTMENT_CORE_DURATION_MINUTES,
+  MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
+import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { MAX_SERVICES_PER_VISIT } from '@/lib/booking/service-chain';
 import {
   createAppointmentSlotRecheck,
   SLOT_TAKEN_RESPONSE,
@@ -87,6 +91,17 @@ const serviceEntrySchema = z.object({
   service_variant_id: z.string().uuid().optional(),
   /** Optional add-ons stacked on this segment's service. */
   addons: bookingAddonSelectionArraySchema.optional(),
+  /**
+   * Staff custom duration for this segment (the dashboard's per-service
+   * override), honoured only for the `phone` / `walk-in` sources like the
+   * single-booking staff route. Public callers cannot shorten a service.
+   */
+  duration_minutes: z
+    .number()
+    .int()
+    .min(MIN_APPOINTMENT_CORE_DURATION_MINUTES)
+    .max(MAX_APPOINTMENT_CORE_DURATION_MINUTES)
+    .optional(),
 });
 
 const createMultiServiceSchema = z.object({
@@ -104,7 +119,7 @@ const createMultiServiceSchema = z.object({
    */
   require_deposit: z.boolean().optional(),
   require_card_hold: z.boolean().optional(),
-  services: z.array(serviceEntrySchema).min(1).max(4),
+  services: z.array(serviceEntrySchema).min(1).max(MAX_SERVICES_PER_VISIT),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
   marketing_consent: z.boolean().optional(),
@@ -135,7 +150,7 @@ export async function POST(request: NextRequest) {
     }
 
     const {
-      venue_id,
+      venue_id: requestedVenueId,
       booking_date,
       first_name,
       last_name,
@@ -187,6 +202,55 @@ export async function POST(request: NextRequest) {
       isOnlineLikeSource && marketingConsentRaw !== undefined ? marketingConsentRaw : undefined;
 
     const supabase = getSupabaseAdminClient();
+
+    /**
+     * Combined booking page (plan §22): `venue_id` is the collective and every
+     * `service_id` is an OFFERING id. Each segment resolves, through its
+     * calendar, to the owning venue and that venue's source service, carrying
+     * the collective's own length. The single-booking `create` route and
+     * `validate-appointment-slot` already did this; this one did not, so a
+     * visit of two or more services on a combined page failed with
+     * "Venue not found" once the picker let guests choose several at once.
+     */
+    type SegmentEntry = (typeof rawServices)[number] & {
+      collective_service_item_id: string | null;
+      collective_duration_override: number | null;
+    };
+    let venue_id = requestedVenueId;
+    let services: SegmentEntry[] = rawServices.map((s) => ({
+      ...s,
+      collective_service_item_id: null,
+      collective_duration_override: null,
+    }));
+    let collectiveIdFromVenue: string | null = null;
+    if (await isCollectiveId(supabase, requestedVenueId)) {
+      const resolved: SegmentEntry[] = [];
+      let owningVenueId: string | null = null;
+      for (const s of rawServices) {
+        const target = await resolveCombinedBookingTarget(supabase, {
+          collectiveId: requestedVenueId,
+          offeringId: s.service_id,
+          calendarId: s.practitioner_id,
+        });
+        if (!target || (owningVenueId && target.venueId !== owningVenueId)) {
+          return NextResponse.json(
+            { error: 'This booking option is no longer available.' },
+            { status: 409 },
+          );
+        }
+        owningVenueId = target.venueId;
+        resolved.push({
+          ...s,
+          service_id: target.sourceServiceId,
+          collective_service_item_id: s.service_id,
+          collective_duration_override: target.durationMinutes,
+        });
+      }
+      services = resolved;
+      venue_id = owningVenueId!;
+      collectiveIdFromVenue = requestedVenueId;
+    }
+    const effectiveCollectiveId = collectiveIdFromVenue ?? collective_id ?? null;
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
@@ -245,12 +309,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Multi-service bookings are only for appointment businesses' }, { status: 400 });
     }
 
-    const practitionerId = rawServices[0]!.practitioner_id;
-    if (!rawServices.every((s) => s.practitioner_id === practitionerId)) {
+    const practitionerId = services[0]!.practitioner_id;
+    if (!services.every((s) => s.practitioner_id === practitionerId)) {
       return NextResponse.json({ error: 'All services must be with the same practitioner' }, { status: 400 });
     }
 
-    const sorted = [...rawServices].sort(
+    const sorted = [...services].sort(
       (a, b) => timeToMinutes(a.start_time.slice(0, 5)) - timeToMinutes(b.start_time.slice(0, 5)),
     );
 
@@ -273,6 +337,8 @@ export async function POST(request: NextRequest) {
       addon_snapshots: BookingAddonSnapshot[];
       addons_total_price_pence: number;
       addons_total_duration_minutes: number;
+      /** Combined page: the offering this row was booked through. */
+      collective_service_item_id: string | null;
     };
 
     const validated: ValidatedSeg[] = [];
@@ -294,6 +360,16 @@ export async function POST(request: NextRequest) {
         serviceId: seg.service_id,
       });
       input.phantomBookings = [...phantoms];
+
+      // The collective may sell the offering at its own length; reserve that,
+      // not the source service's. Applied before the variant and add-ons, so
+      // anything chosen on top still stacks.
+      if (seg.collective_duration_override != null) {
+        const ovIdx = input.services.findIndex((s) => s.id === seg.service_id);
+        if (ovIdx >= 0) {
+          input.services[ovIdx] = { ...input.services[ovIdx]!, duration_minutes: seg.collective_duration_override };
+        }
+      }
 
       let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
       if (seg.service_variant_id) {
@@ -368,13 +444,24 @@ export async function POST(request: NextRequest) {
       );
       const mergedSvc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
       const svc = mergedSvc ? resolveBookableServiceWithVariant(mergedSvc, chosenVariant) : undefined;
-      const resolvedBaseDuration = svc?.duration_minutes ?? 30;
+      const staffCustomDuration =
+        source === 'phone' || source === 'walk-in' ? seg.duration_minutes ?? null : null;
+      const resolvedBaseDuration = staffCustomDuration ?? svc?.duration_minutes ?? 30;
       const durationMins = resolvedBaseDuration + segAddonTotals.total_duration_minutes;
       const bufferMins = svc?.buffer_minutes ?? 0;
-      if (segAddonTotals.total_duration_minutes > 0) {
+      if (segAddonTotals.total_duration_minutes > 0 || staffCustomDuration != null) {
         const idx = input.services.findIndex((s) => s.id === seg.service_id);
         if (idx >= 0) {
           input.services[idx] = { ...input.services[idx]!, duration_minutes: durationMins };
+        }
+        if (staffCustomDuration != null) {
+          // The engine re-applies the practitioner's own duration when it
+          // merges the link; a staff override has to win over that too.
+          input.practitionerServices = input.practitionerServices.map((row) =>
+            row.practitioner_id === practitionerId && row.service_id === seg.service_id
+              ? { ...row, custom_duration_minutes: null }
+              : row,
+          );
         }
       }
 
@@ -529,6 +616,7 @@ export async function POST(request: NextRequest) {
         addon_snapshots: segAddonSnapshots,
         addons_total_price_pence: segAddonTotals.total_price_pence,
         addons_total_duration_minutes: segAddonTotals.total_duration_minutes,
+        collective_service_item_id: seg.collective_service_item_id,
       });
 
       phantoms.push({
@@ -729,18 +817,16 @@ export async function POST(request: NextRequest) {
     // §7.7: attribute to a venue collective only when this venue is genuinely
     // an active member, so a forged collective_id cannot be attached.
     let collectiveIdForInsert: string | null = null;
-    let collectiveServiceItemIdForInsert: string | null = null;
-    if (collective_id) {
+    if (effectiveCollectiveId) {
       const { data: membership } = await supabase
         .from('venue_collective_members')
         .select('id')
-        .eq('collective_id', collective_id)
+        .eq('collective_id', effectiveCollectiveId)
         .eq('venue_id', venue_id)
         .eq('status', 'active')
         .maybeSingle();
       if (membership) {
-        collectiveIdForInsert = collective_id;
-        collectiveServiceItemIdForInsert = collective_service_item_id ?? null;
+        collectiveIdForInsert = effectiveCollectiveId;
       }
     }
 
@@ -786,7 +872,9 @@ export async function POST(request: NextRequest) {
         group_booking_id: groupBookingId,
         person_label: null,
         collective_id: collectiveIdForInsert,
-        collective_service_item_id: collectiveServiceItemIdForInsert,
+        collective_service_item_id: collectiveIdForInsert
+          ? seg.collective_service_item_id ?? collective_service_item_id ?? null
+          : null,
         processing_time_blocks: seg.processing_time_blocks,
         addons_total_price_pence: seg.addons_total_price_pence,
         addons_total_duration_minutes: seg.addons_total_duration_minutes,

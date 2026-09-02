@@ -275,3 +275,8 @@ link that fails silently is worse than a web page: the customer taps a link in
 an email and nothing happens at all, with no way to tell whether the booking is
 still there.
 
+## Several services in one visit (2026-09-02)
+
+`GET /api/booking/availability` accepts an optional `services` query parameter: a JSON array of up to four `{ service_id, variant_id?, addon_ids?, duration_minutes? }` entries in visit order. When present, the day view returns the starts at which the WHOLE chain fits back to back with one person (or, with `any_available=1`, with anyone who offers every service). Slots are labelled with the first `service_id` and carry the visit's span as `duration_minutes`. The top-level `service_id`, `variant_id`, `addon_ids` and `duration_minutes` are ignored when `services` is sent. Works on combined (collective) pages, where each entry is an offering id.
+
+`POST /api/booking/create-multi-service` now accepts an optional per-entry `duration_minutes` (staff custom core duration, honoured for the `phone` and `walk-in` sources only) and resolves a collective id in `venue_id` with offering ids in `service_id`, as `create` already did. `POST /api/booking/create-group` accepts up to 40 rows (ten people, four services each).

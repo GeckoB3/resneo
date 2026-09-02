@@ -127,6 +127,7 @@ describe('service step with categories', () => {
     expect(rows.map((t) => t?.replace(/30 min.*$/, '').trim())).toEqual(['Cut', 'Colour', 'Manicure', 'Aftercare kit']);
 
     fireEvent.click(screen.getByRole('button', { name: /Manicure/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }));
     await screen.findByRole('heading', { name: 'Who would you like to see?' });
   });
 

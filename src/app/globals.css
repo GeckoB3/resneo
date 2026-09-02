@@ -572,6 +572,22 @@ button, a, input, select, textarea {
   transform: scale(0.995);
 }
 
+/* A service ticked on the multi-service picker. */
+.appointment-public .ap-choice-card-selected {
+  border-color: var(--ap-accent);
+  background: var(--ap-accent-soft);
+  box-shadow: 0 0 0 1px var(--ap-accent);
+}
+.appointment-public .ap-pick-check {
+  background-color: var(--ap-accent);
+}
+.appointment-public .ap-pick-box {
+  border-color: var(--ap-accent-border);
+}
+.appointment-public .ap-picker-bar {
+  border-color: var(--ap-accent-border);
+}
+
 /*
  * Choice cards that carry a description.
  *

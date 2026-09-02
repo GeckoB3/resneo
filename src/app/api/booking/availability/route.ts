@@ -51,8 +51,11 @@ import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-
 import { loadActiveWaitlistOfferForGuestAccess } from '@/lib/booking/validate-waitlist-offer-access';
 import {
   isCollectiveId,
+  loadCollectiveChainDayAvailability,
   loadCollectiveDayAvailability,
 } from '@/lib/linked-accounts/collective-booking-bridge';
+import { parseServiceChainParam } from '@/lib/booking/service-chain';
+import { computeChainAvailabilityForVenue } from '@/lib/availability/appointment-chain-server';
 import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
 import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
@@ -546,9 +549,46 @@ async function handleAppointmentAvailability(
   const anyAvailable =
     searchParams.get('any_available') === '1' || searchParams.get('any_available') === 'true';
 
+  /**
+   * Several services in one visit (`services`, a JSON list): the day view
+   * then reports starts where the WHOLE chain fits back to back with one
+   * person, rather than where the first service alone does. The top-level
+   * `service_id` / `variant_id` / `addon_ids` / `duration_minutes` are ignored
+   * in favour of the per-segment fields. See `Docs/multi-service-picker-plan.md`.
+   */
+  const chainParse = parseServiceChainParam(searchParams.get('services'));
+  if (!chainParse.ok) {
+    return NextResponse.json({ error: chainParse.error }, { status: 400 });
+  }
+  const serviceChain = chainParse.chain;
+
+  const phantomsParam = searchParams.get('phantoms');
+  let phantomBookings: PhantomBooking[] = [];
+  if (phantomsParam) {
+    try {
+      phantomBookings = JSON.parse(phantomsParam);
+    } catch (e) {
+      console.warn('[booking/availability] invalid phantoms JSON ignored', { length: phantomsParam.length, e });
+    }
+  }
+
   // Combined booking page (plan §22): the venue id is a collective — compute the
   // merged availability (resolving each offering+calendar to its owning venue).
   if (await isCollectiveId(supabase, venueId)) {
+    if (serviceChain) {
+      const chainResult = await loadCollectiveChainDayAvailability(supabase, {
+        collectiveId: venueId,
+        chain: serviceChain,
+        calendarId: practitionerId ?? null,
+        anyAvailable,
+        date,
+        phantoms: phantomBookings,
+      });
+      if (!chainResult.ok) {
+        return NextResponse.json({ error: chainResult.error, details: chainResult.details }, { status: 400 });
+      }
+      return NextResponse.json(chainResult.payload);
+    }
     if (!serviceId) {
       return NextResponse.json({ error: 'service_id is required' }, { status: 400 });
     }
@@ -567,7 +607,7 @@ async function handleAppointmentAvailability(
 
   let anyAvailableVenueFlags: ReturnType<typeof parseVenueFeatureFlags> | null = null;
   if (anyAvailable) {
-    if (!serviceId) {
+    if (!serviceId && !serviceChain) {
       return NextResponse.json(
         { error: 'service_id is required when any_available is set' },
         { status: 400 },
@@ -585,16 +625,6 @@ async function handleAppointmentAvailability(
       assertAppointmentsFeatureEnabled('any_available_practitioner', anyAvailableVenueFlags);
     } catch {
       return featureFlagDisabledResponse('any_available_practitioner');
-    }
-  }
-
-  const phantomsParam = searchParams.get('phantoms');
-  let phantomBookings: PhantomBooking[] = [];
-  if (phantomsParam) {
-    try {
-      phantomBookings = JSON.parse(phantomsParam);
-    } catch (e) {
-      console.warn('[booking/availability] invalid phantoms JSON ignored', { length: phantomsParam.length, e });
     }
   }
 
@@ -616,6 +646,65 @@ async function handleAppointmentAvailability(
     if (offer) {
       skipPastSlotFilter = true;
     }
+  }
+
+  if (serviceChain) {
+    const { data: chainClock } = await supabase
+      .from('venues')
+      .select('id, timezone, booking_rules, opening_hours, venue_opening_exceptions')
+      .eq('id', venueId)
+      .single();
+    const chainVenueMode = await resolveVenueMode(supabase, venueId);
+    let chainPractitionerIds: string[];
+    if (anyAvailable) {
+      // Only people who offer EVERY service in the visit can be pooled.
+      const perService = await Promise.all(
+        serviceChain.map((seg) => listPractitionerIdsForAppointmentService(supabase, venueId, seg.service_id)),
+      );
+      chainPractitionerIds = perService.reduce<string[]>(
+        (acc, ids, i) => (i === 0 ? ids : acc.filter((id) => ids.includes(id))),
+        [],
+      );
+    } else {
+      if (!practitionerId) {
+        return NextResponse.json({ error: 'practitioner_id is required' }, { status: 400 });
+      }
+      chainPractitionerIds = [practitionerId];
+    }
+    const chainResult = await computeChainAvailabilityForVenue({
+      supabase,
+      venueId,
+      date,
+      practitionerIds: chainPractitionerIds,
+      segments: serviceChain.map((seg) => ({
+        serviceId: seg.service_id,
+        variantId: seg.variant_id ?? null,
+        addonIds: seg.addon_ids ?? [],
+        customDurationMinutes: seg.duration_minutes ?? null,
+      })),
+      clock: chainClock ?? {},
+      bookingModel: chainVenueMode.bookingModel,
+      phantoms: phantomBookings,
+      excludeBookingId,
+      skipPastSlotFilter,
+    });
+    if (!chainResult.ok) {
+      return NextResponse.json({ error: chainResult.error, details: chainResult.details }, { status: 400 });
+    }
+    const firstServiceId = serviceChain[0]!.service_id;
+    let chainPayload: { practitioners: typeof chainResult.practitioners };
+    if (anyAvailable) {
+      const assignmentConfig = parseAnyAvailablePractitionerConfig(anyAvailableVenueFlags);
+      const calendarOrder = await listVenueCalendarSortOrder(supabase, venueId);
+      chainPayload = buildAnyAvailableAvailabilityPayload(
+        { practitioners: chainResult.practitioners },
+        firstServiceId,
+        { assignment: assignmentConfig, calendarOrder },
+      );
+    } else {
+      chainPayload = { practitioners: chainResult.practitioners };
+    }
+    return NextResponse.json({ date, venue_id: venueId, ...chainPayload, any_available: anyAvailable || undefined });
   }
 
   const customDurationMinutes = durationParam ? parseInt(durationParam, 10) : null;

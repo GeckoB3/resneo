@@ -159,7 +159,9 @@ export const AppointmentPublicShell = forwardRef<
       className={`${APPOINTMENT_PUBLIC_ROOT_CLASS} relative w-full ${className}`.trim()}
       style={accentStyle}
     >
-      <div className="ap-shell overflow-hidden rounded-2xl border bg-white shadow-[var(--ds-shadow-elevated)] ring-1 ring-slate-900/[0.03]">
+      {/* `overflow-clip`, not `overflow-hidden`: hidden makes this a scroll container and
+          silently defeats `position: sticky` for the service picker bar inside it. */}
+      <div className="ap-shell overflow-clip rounded-2xl border bg-white shadow-[var(--ds-shadow-elevated)] ring-1 ring-slate-900/[0.03]">
         <div className="ap-accent-bar h-1 w-full" />
         <div className="px-5 py-6 sm:px-6 sm:py-7">{children}</div>
       </div>

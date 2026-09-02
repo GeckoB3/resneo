@@ -3,9 +3,14 @@
 /**
  * The bar under the service list once services can be ticked rather than
  * tapped through: what is chosen so far, how long the visit runs, what it
- * starts from, and the one control that moves on. Rendered even when nothing
- * is ticked, so the list reads as "choose, then continue" rather than as a
- * list that stopped responding to taps.
+ * starts from, and the one control that moves on. It appears once something
+ * is ticked and sticks to the bottom of the screen (or of the modal's own
+ * scroller) while the list runs on below, so Continue is always in reach.
+ *
+ * Sticky needs every ancestor up to the scroller to keep `overflow: visible`
+ * (or `clip`); an `overflow-hidden` wrapper turns it back into an in-flow bar
+ * at the foot of the form. Inside an auto-height embed iframe there is no
+ * scroller to stick to, and it sits at the foot of the list.
  */
 
 export interface PickerServiceLine {
@@ -41,10 +46,11 @@ export function MultiServicePickerBar({
   const priced = services.filter((s) => s.minPricePence != null);
   const fromPence = priced.length > 0 ? priced.reduce((sum, s) => sum + (s.minPricePence ?? 0), 0) : null;
   const full = count >= max;
+  if (count === 0) return null;
 
   const shell = isPublic
-    ? 'ap-picker-bar sticky bottom-0 z-10 mt-4 rounded-2xl border bg-white p-3 shadow-lg'
-    : 'sticky bottom-0 z-10 mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg';
+    ? 'ap-picker-bar sticky bottom-2 z-20 mt-4 rounded-2xl border bg-white p-3 shadow-[0_-4px_24px_rgb(15_23_42/0.12),0_8px_24px_rgb(15_23_42/0.08)]'
+    : 'sticky bottom-2 z-20 mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_-4px_24px_rgb(15_23_42/0.12),0_8px_24px_rgb(15_23_42/0.08)]';
   const continueClass = isPublic
     ? 'ap-btn-primary min-h-[44px] rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-50'
     : 'min-h-[44px] rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300';
@@ -53,44 +59,33 @@ export function MultiServicePickerBar({
     <div className={shell} data-testid="service-picker-bar" aria-live="polite">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          {count === 0 ? (
-            <>
-              <p className="text-sm font-semibold text-slate-900">Choose one or more services</p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Tick everything you want in one visit, up to {max}. They will be booked back to back with the same {staffWord}.
-              </p>
-            </>
+          <p className="text-sm font-semibold text-slate-900">
+            {count} {count === 1 ? 'service' : 'services'}
+            <span className="font-normal text-slate-500">
+              {' '}&middot; {totalMinutes} min
+              {fromPence != null && fromPence > 0 ? <> &middot; from {formatPrice(fromPence)}</> : null}
+            </span>
+          </p>
+          <p className="mt-0.5 truncate text-xs text-slate-500" title={services.map((s) => s.name).join(', ')}>
+            {services.map((s) => s.name).join(' + ')}
+          </p>
+          {full ? (
+            <p className="mt-0.5 text-xs text-amber-700">That is the most you can book in one visit ({max}).</p>
           ) : (
-            <>
-              <p className="text-sm font-semibold text-slate-900">
-                {count} {count === 1 ? 'service' : 'services'}
-                <span className="font-normal text-slate-500">
-                  {' '}&middot; {totalMinutes} min
-                  {fromPence != null && fromPence > 0 ? <> &middot; from {formatPrice(fromPence)}</> : null}
-                </span>
-              </p>
-              <p className="mt-0.5 truncate text-xs text-slate-500" title={services.map((s) => s.name).join(', ')}>
-                {services.map((s) => s.name).join(' + ')}
-              </p>
-              {full ? (
-                <p className="mt-0.5 text-xs text-amber-700">
-                  That is the most you can book in one visit ({max}).
-                </p>
-              ) : null}
-            </>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Tick more to book them back to back with the same {staffWord}, up to {max}.
+            </p>
           )}
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
-          {count > 0 ? (
-            <button
-              type="button"
-              onClick={onClear}
-              className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-            >
-              Clear
-            </button>
-          ) : null}
-          <button type="button" onClick={onContinue} disabled={count === 0} className={continueClass}>
+          <button
+            type="button"
+            onClick={onClear}
+            className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          >
+            Clear
+          </button>
+          <button type="button" onClick={onContinue} className={continueClass}>
             Continue
           </button>
         </div>

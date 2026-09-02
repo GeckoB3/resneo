@@ -224,12 +224,13 @@ describe('the picker', () => {
     render(<AppointmentBookingFlow venue={venue()} />);
     await startSingleBooking();
 
-    const bar = screen.getByTestId('service-picker-bar');
-    expect(bar).toHaveTextContent('Choose one or more services');
-    expect(screen.getByRole('button', { name: /^Continue$/ })).toBeDisabled();
+    // Nothing ticked: no bar and no Continue, so there is nothing to press by mistake.
+    expect(screen.queryByTestId('service-picker-bar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Continue$/ })).not.toBeInTheDocument();
 
     tick('Haircut');
     tick('Waxing');
+    const bar = screen.getByTestId('service-picker-bar');
     expect(serviceCard('Haircut')).toHaveAttribute('aria-pressed', 'true');
     expect(bar).toHaveTextContent('2 services');
     expect(bar).toHaveTextContent('45 min');
@@ -237,10 +238,12 @@ describe('the picker', () => {
     // Still on the list: ticking does not navigate.
     expect(screen.getByRole('heading', { name: 'Select a service' })).toBeInTheDocument();
 
-    // Ticking again unticks.
+    // Ticking again unticks, and clearing the last one takes the bar away.
     tick('Waxing');
     expect(serviceCard('Waxing')).toHaveAttribute('aria-pressed', 'false');
     expect(bar).toHaveTextContent('1 service');
+    tick('Haircut');
+    expect(screen.queryByTestId('service-picker-bar')).not.toBeInTheDocument();
   });
 
   it('stops at four services', async () => {

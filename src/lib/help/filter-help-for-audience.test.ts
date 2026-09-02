@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { BookingModel } from '@/types/booking-models';
 import {
   buildHelpSearchDocsForAudience,
   filterHelpCategoriesForAudience,
@@ -35,35 +34,6 @@ describe('filterHelpCategoriesForAudience', () => {
     expect(slugs).toContain('getting-started');
   });
 
-  it('hides appointments for restaurant table-only (no schedule add-ons)', () => {
-    const ctx = venueCtx({
-      venueId: 'v1',
-      pricingTier: 'restaurant',
-      bookingModel: 'table_reservation',
-      enabledModels: [],
-      showRestaurantHelp: true,
-      showAppointmentsHelp: false,
-      hybridScheduleAddOns: false,
-    });
-    const slugs = filterHelpCategoriesForAudience(ctx).map((c) => c.slug);
-    expect(slugs).toContain('restaurant');
-    expect(slugs).not.toContain('appointments');
-  });
-
-  it('shows appointments for restaurant + event secondary', () => {
-    const ctx = venueCtx({
-      venueId: 'v1',
-      pricingTier: 'restaurant',
-      bookingModel: 'table_reservation',
-      enabledModels: ['event_ticket'] as BookingModel[],
-      showRestaurantHelp: true,
-      showAppointmentsHelp: true,
-      hybridScheduleAddOns: true,
-    });
-    const slugs = filterHelpCategoriesForAudience(ctx).map((c) => c.slug);
-    expect(slugs).toContain('restaurant');
-    expect(slugs).toContain('appointments');
-  });
 });
 
 describe('presentHelpCategoriesForNav', () => {

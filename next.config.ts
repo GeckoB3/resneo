@@ -30,11 +30,16 @@ const nextConfig: NextConfig = {
    * `permanent: false` (307) deliberately. See the note beside the table.
    */
   async redirects() {
-    return RETIRED_ACCOUNT_ROUTES.map(({ from, to }) => ({
-      source: from,
-      destination: to,
-      permanent: false,
-    }));
+    return [
+      ...RETIRED_ACCOUNT_ROUTES.map(({ from, to }) => ({
+        source: from,
+        destination: to,
+        permanent: false,
+      })),
+      // The Restaurant plan is no longer sold. Its marketing page is gone, so
+      // old links and search results land on the solutions hub instead of a 404.
+      { source: '/restaurant', destination: '/solutions', permanent: true },
+    ];
   },
   async headers() {
     const sharedSecurity: { key: string; value: string }[] = [

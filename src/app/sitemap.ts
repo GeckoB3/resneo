@@ -29,7 +29,6 @@ const ROUTES: { path: string; changeFrequency: ChangeFrequency; priority: number
   { path: "/wellness-booking-software", changeFrequency: "monthly", priority: 0.8 },
   { path: "/class-booking-software", changeFrequency: "monthly", priority: 0.8 },
   { path: "/facility-booking-software", changeFrequency: "monthly", priority: 0.8 },
-  { path: "/restaurant", changeFrequency: "monthly", priority: 0.8 },
   { path: "/appointments-plan", changeFrequency: "monthly", priority: 0.7 },
   { path: "/calculator", changeFrequency: "monthly", priority: 0.7 },
   { path: "/about", changeFrequency: "monthly", priority: 0.5 },

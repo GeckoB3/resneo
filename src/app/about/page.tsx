@@ -45,7 +45,6 @@ const businessTypes = [
   'Dog Groomers',
   'Photography Studios',
   'Tutors & Driving Instructors',
-  'Restaurants & Cafés',
 ];
 
 const fixes = [
@@ -101,7 +100,7 @@ const founders = [
 
 export default function AboutPage() {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       <MarketingNav currentHref="/about" />
 
       {/* Hero */}
@@ -115,15 +114,15 @@ export default function AboutPage() {
           }}
         />
         <div className="relative mx-auto max-w-4xl px-6 py-20 text-center sm:py-28 lg:py-32">
-          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-brand-200/60 bg-white/90 px-4 py-1.5 shadow-sm shadow-slate-200/40 backdrop-blur-sm">
+          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-4 py-1.5 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-500 shadow-sm shadow-brand-600/40" />
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               About ResNeo
             </p>
           </div>
-          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+          <h1 className="mt-6 text-4xl font-black tracking-tight text-brand-600 sm:text-5xl lg:text-6xl">
             Booking software, built for{' '}
-            <span className="bg-gradient-to-r from-brand-600 to-brand-800 bg-clip-text text-transparent">
+            <span className="text-accent-700">
               the businesses that rely on it
             </span>
           </h1>
@@ -135,7 +134,7 @@ export default function AboutPage() {
           <div className="mt-10 flex justify-center">
             <Link
               href="/#contact"
-              className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30"
+              className="inline-flex h-12 items-center rounded-full bg-brand-600 px-8 text-base font-extrabold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30"
             >
               Talk to a founder
             </Link>
@@ -163,20 +162,20 @@ export default function AboutPage() {
       </section>
 
       {/* Mission */}
-      <section className="relative overflow-hidden border-y border-slate-100 bg-slate-50 py-20 sm:py-28">
+      <section className="relative overflow-hidden border-y border-[#EEE9E0] bg-[#FDFBF7] py-20 sm:py-28">
         <div
-          className="pointer-events-none absolute -left-32 top-10 h-72 w-72 rounded-full bg-brand-200/30 blur-3xl"
+          className="pointer-events-none absolute -left-32 top-10 h-72 w-72 rounded-[48%_52%_41%_59%/55%_40%_60%_45%] bg-brand-50"
           aria-hidden
         />
         <div
-          className="pointer-events-none absolute -right-24 bottom-10 h-64 w-64 rounded-full bg-brand-100/40 blur-3xl"
+          className="pointer-events-none absolute -right-24 bottom-10 h-64 w-64 rounded-[48%_52%_41%_59%/55%_40%_60%_45%] bg-brand-50"
           aria-hidden
         />
         <div className="relative mx-auto max-w-4xl px-6 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
             Our mission
           </p>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
             Manage your diary with zero fuss. Eliminate no-shows. Keep 100% of what you earn.
           </h2>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">
@@ -201,7 +200,7 @@ export default function AboutPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               Why we built ResNeo
             </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               The problems we set out to fix
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -215,7 +214,7 @@ export default function AboutPage() {
             {fixes.map((fix) => (
               <div
                 key={fix.title}
-                className="group flex flex-col rounded-2xl border border-slate-100 bg-white p-7 transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
+                className="group flex flex-col rounded-[24px] border border-[#EEE9E0] bg-white p-7 transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
               >
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent-700">
                   {fix.eyebrow}
@@ -229,13 +228,13 @@ export default function AboutPage() {
       </section>
 
       {/* Local, Practical, Transparent */}
-      <section className="bg-slate-50 py-20 sm:py-28">
+      <section className="bg-[#FDFBF7] py-20 sm:py-28">
         <div className="mx-auto grid max-w-5xl gap-12 px-6 lg:grid-cols-5">
           <div className="lg:col-span-2">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               How we operate
             </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               Local, practical and transparent
             </h2>
           </div>
@@ -266,7 +265,7 @@ export default function AboutPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               Who it&rsquo;s for
             </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               Built for any business that takes bookings
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -279,7 +278,7 @@ export default function AboutPage() {
             {businessTypes.map((bt) => (
               <div
                 key={bt}
-                className="flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-5 py-4 text-sm font-medium text-slate-800 shadow-sm transition-all hover:border-brand-200 hover:shadow-md hover:shadow-brand-600/5"
+                className="flex items-center gap-3 rounded-xl border border-[#EEE9E0] bg-white px-5 py-4 text-sm font-medium text-slate-800 shadow-sm transition-all hover:border-brand-200 hover:shadow-md hover:shadow-brand-600/5"
               >
                 <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
                   <CheckIcon />
@@ -292,13 +291,13 @@ export default function AboutPage() {
       </section>
 
       {/* What we stand for */}
-      <section className="bg-slate-50 py-20 sm:py-28">
+      <section className="bg-[#FDFBF7] py-20 sm:py-28">
         <div className="mx-auto max-w-5xl px-6">
           <div className="text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               What we stand for
             </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               Four principles, kept simple
             </h2>
           </div>
@@ -307,9 +306,9 @@ export default function AboutPage() {
             {principles.map((p) => (
               <div
                 key={p.title}
-                className="group flex gap-5 rounded-2xl border border-slate-100 bg-white p-6 transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
+                className="group flex gap-5 rounded-[24px] border border-[#EEE9E0] bg-white p-6 transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
               >
-                <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
+                <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
                   <p.icon />
                 </span>
                 <div>
@@ -335,7 +334,7 @@ export default function AboutPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               Meet the founders
             </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               The team behind ResNeo
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -350,7 +349,7 @@ export default function AboutPage() {
             {founders.map((founder) => (
               <article
                 key={founder.name}
-                className="flex flex-col rounded-2xl border border-slate-100 bg-white p-7 shadow-sm transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
+                className="flex flex-col rounded-[24px] border border-[#EEE9E0] bg-white p-7 shadow-sm transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5"
               >
                 <div className="flex items-center gap-4">
                   <span
@@ -371,7 +370,7 @@ export default function AboutPage() {
             ))}
           </div>
 
-          <div className="mx-auto mt-14 max-w-3xl rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50 via-white to-brand-50/40 p-8 text-center shadow-sm">
+          <div className="mx-auto mt-14 max-w-3xl rounded-[24px] border border-brand-200/60 bg-gradient-to-br from-brand-50 via-white to-brand-50/40 p-8 text-center shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-700">
               Based in Holywood, Co Down
             </p>
@@ -385,7 +384,7 @@ export default function AboutPage() {
       </section>
 
       {/* CTA */}
-      <section className="border-t border-slate-100 bg-gradient-to-br from-brand-600 to-brand-700 py-20 sm:py-24">
+      <section className="border-t border-[#EEE9E0] bg-gradient-to-br from-brand-600 to-brand-700 py-20 sm:py-24">
         <div className="mx-auto max-w-3xl px-6 text-center">
           <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
             Ready to take back control of your bookings?
@@ -396,7 +395,7 @@ export default function AboutPage() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/#pricing"
-              className="inline-flex h-12 items-center rounded-xl bg-white px-8 text-base font-semibold text-brand-700 shadow-lg transition-all hover:bg-brand-50"
+              className="inline-flex h-12 items-center rounded-full bg-white px-8 text-base font-extrabold text-brand-700 shadow-lg transition-all hover:bg-brand-50"
             >
               See pricing
             </Link>

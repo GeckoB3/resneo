@@ -201,7 +201,7 @@ const jsonLd = {
 
 export default function StudioSoftwareTrueCostPage() {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -225,14 +225,6 @@ function Hero() {
   return (
     <section className="relative overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-accent-50/40" />
-      <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
       <div className="relative mx-auto max-w-3xl px-6 py-16 sm:py-20">
         <nav aria-label="Breadcrumb" className="text-sm text-slate-500">
           <ol className="flex flex-wrap items-center gap-x-2">
@@ -258,12 +250,12 @@ function Hero() {
           </ol>
         </nav>
 
-        <span className="mt-6 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
+        <span className="mt-6 inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-accent-700">
           <span className="h-1.5 w-1.5 rounded-full bg-accent" />
           Guide for studios, gyms and clinics
         </span>
 
-        <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl">
+        <h1 className="mt-5 text-4xl font-black leading-[1.1] tracking-tight text-brand-600 sm:text-5xl">
           What is a subscription plus commission booking platform actually costing you?
         </h1>
 
@@ -290,7 +282,7 @@ function QuickAnswer() {
   return (
     <section className="bg-white pb-4">
       <div className="mx-auto max-w-3xl px-6">
-        <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-6 sm:p-8">
+        <div className="rounded-[24px] border border-brand-100 bg-brand-50/60 p-6 sm:p-8">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             Short answer
           </h2>
@@ -328,7 +320,7 @@ function ArticleBody() {
           {LAYERS.map((layer) => (
             <div
               key={layer.label}
-              className={`rounded-2xl border p-6 ${
+              className={`rounded-[24px] border p-6 ${
                 layer.tone === "flat" ?
                   "border-slate-200 bg-slate-50/70"
                 : "border-amber-200/80 bg-amber-50/60"
@@ -336,7 +328,7 @@ function ArticleBody() {
             >
               <div className="flex items-center gap-3">
                 <span
-                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wider ${
                     layer.tone === "flat" ?
                       "bg-slate-200/80 text-slate-700"
                     : "bg-amber-200/70 text-amber-900"
@@ -366,12 +358,12 @@ function ArticleBody() {
           {TIER_BANDS.map((band) => (
             <div
               key={band.label}
-              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+              className="rounded-[24px] border border-[#EEE9E0] bg-white p-6 shadow-sm"
             >
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                 {band.label}
               </p>
-              <p className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900">
+              <p className="mt-2 text-3xl font-black tracking-tight text-brand-600">
                 {band.range}
               </p>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{band.note}</p>
@@ -413,7 +405,7 @@ function ArticleBody() {
           {CHECKS.map((c, i) => (
             <li
               key={c.question}
-              className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm transition-colors hover:border-brand-200"
+              className="rounded-[24px] border border-[#EEE9E0] bg-white p-6 shadow-sm transition-colors hover:border-brand-200"
             >
               <div className="flex items-start gap-4">
                 <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
@@ -450,9 +442,9 @@ function FlatFeeSection() {
           multi-session bookings are included as standard, not an upsell.
         </p>
 
-        <div className="mt-9 rounded-2xl border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-8">
+        <div className="mt-9 rounded-[24px] border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-8">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
+            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
               <ShieldPoundIcon className="h-6 w-6" />
             </span>
             <div>
@@ -482,14 +474,14 @@ function FlatFeeSection() {
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <Link
             href="/calculator"
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
+            className="inline-flex h-12 items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-accent-400"
           >
             Compare the cost with your numbers
             <ArrowRightIcon />
           </Link>
           <a
             href={SIGNUP}
-            className="inline-flex h-12 items-center justify-center rounded-xl border border-white/25 bg-transparent px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
+            className="inline-flex h-12 items-center justify-center rounded-full border border-white/25 bg-transparent px-6 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/10"
           >
             See ResNeo pricing
           </a>
@@ -503,7 +495,7 @@ function FlatFeeSection() {
 
 function FaqSection() {
   return (
-    <section id="faq" className="scroll-mt-16 bg-slate-50 py-16 sm:py-20">
+    <section id="faq" className="scroll-mt-16 bg-[#FDFBF7] py-16 sm:py-20">
       <div className="mx-auto max-w-3xl px-6">
         <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
           Common questions
@@ -516,7 +508,7 @@ function FaqSection() {
           {FAQS.map((f) => (
             <details
               key={f.q}
-              className="group rounded-2xl border border-slate-200 bg-white p-6 open:shadow-md"
+              className="group rounded-[24px] border border-[#EEE9E0] bg-white p-6 open:shadow-md"
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-base font-semibold text-slate-900">
                 {f.q}
@@ -539,7 +531,7 @@ function SourcesSection() {
   return (
     <section id="sources" className="scroll-mt-16 bg-white pt-16 sm:pt-20">
       <div className="mx-auto max-w-3xl px-6">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-6 sm:p-8">
+        <div className="rounded-[24px] border border-amber-200 bg-amber-50/80 p-6 sm:p-8">
           <h2 className="text-sm font-bold uppercase tracking-wide text-amber-900">Sources</h2>
           <p className="mt-3 text-sm leading-relaxed text-amber-900/90">
             Publicly reported 2026 pricing tiers and marketplace commission structures for
@@ -572,7 +564,7 @@ function ClosingCta() {
   return (
     <section className="bg-white py-16 sm:py-20">
       <div className="mx-auto max-w-3xl px-6 text-center">
-        <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+        <h2 className="text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
           Curious what you would actually save?
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-slate-600">
@@ -582,13 +574,13 @@ function ClosingCta() {
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Link
             href="/calculator"
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
+            className="inline-flex h-12 items-center justify-center rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
           >
             Try ResNeo&rsquo;s calculator
           </Link>
           <Link
             href="/#contact"
-            className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300"
+            className="inline-flex h-12 items-center justify-center rounded-full border border-[#EEE9E0] bg-white px-6 text-base font-extrabold text-brand-600 shadow-sm transition-colors hover:border-accent-200"
           >
             Get in touch
           </Link>

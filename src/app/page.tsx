@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { SocialLinks } from "@/components/marketing/SocialLinks";
 import Script from "next/script";
-import { Nunito, Nunito_Sans } from "next/font/google";
 import ContactForm from "@/components/ContactForm";
 import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from "@/lib/embed/widget-frame";
 import { normalizePublicBaseUrl } from "@/lib/public-base-url";
@@ -29,14 +28,6 @@ import {
 const demoPublicOrigin = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 const demoEmbedSrc = `${demoPublicOrigin}/embed/resneo-demo?start=service`;
 const demoResizeScriptSrc = `${demoPublicOrigin}/embed/resize.js`;
-
-/**
- * The homepage's own type: a rounded display face for headings and its
- * companion for body copy. Scoped to this page via the `home-warm` class
- * in globals.css, so the dashboard and booking pages keep their fonts.
- */
-const homeDisplay = Nunito({ subsets: ["latin"], weight: ["700", "800", "900"], variable: "--font-home-display", display: "swap" });
-const homeBody = Nunito_Sans({ subsets: ["latin"], weight: ["400", "600", "700"], variable: "--font-home-body", display: "swap" });
 
 
 
@@ -97,7 +88,7 @@ const promises = [
 
 export default function Home() {
   return (
-    <div className={`home-warm ${homeDisplay.variable} ${homeBody.variable} min-h-screen bg-[#FDFBF7] text-slate-900`}>
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       {/* ── Nav ─────────────────────────────────────────────── */}
       <nav className="sticky top-0 z-50 border-b border-[#EEE9E0] bg-[#FDFBF7]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">

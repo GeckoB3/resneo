@@ -20,7 +20,6 @@ const SOLUTION_LINKS = [
   { href: "/wellness-booking-software", label: "Health & wellbeing" },
   { href: "/class-booking-software", label: "Studios & classes" },
   { href: "/facility-booking-software", label: "Courts & venues" },
-  { href: "/restaurant", label: "Restaurants" },
 ];
 
 const PRODUCT_LINKS: { href: string; label: string; route?: boolean }[] = [
@@ -28,7 +27,6 @@ const PRODUCT_LINKS: { href: string; label: string; route?: boolean }[] = [
   { href: "/#link-break", label: "Link & break" },
   { href: "/#pricing", label: "Pricing" },
   { href: "/appointments-plan", label: "Appointments plan", route: true },
-  { href: "/restaurant", label: "Restaurant plan", route: true },
 ];
 
 const COMPANY_LINKS: { href: string; label: string; route?: boolean }[] = [
@@ -50,7 +48,7 @@ function FooterColumn({
 }) {
   return (
     <div>
-      <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-900">{title}</h2>
+      <h2 className="text-xs font-extrabold uppercase tracking-widest text-brand-600">{title}</h2>
       <ul className="mt-3 space-y-0.5">
         {links.map((l) => (
           <li key={`${title}-${l.href}`}>
@@ -72,7 +70,7 @@ function FooterColumn({
 
 export function MarketingFooter() {
   return (
-    <footer className="border-t border-slate-200 bg-slate-50">
+    <footer className="home-warm border-t border-[#EEE9E0] bg-[#FDFBF7]">
       <div className="mx-auto max-w-6xl px-6 py-14">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
@@ -83,7 +81,7 @@ export function MarketingFooter() {
               <img src="/Logo.png" alt="ResNeo" className="h-8 w-auto" />
             </Link>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-600">
-              One booking platform for appointments, classes, resources and tables. No booking
+              One booking platform for appointments, classes, events and resources. No booking
               commission, and your clients stay yours.
             </p>
             <SocialLinks className="mt-6" />
@@ -100,7 +98,7 @@ export function MarketingFooter() {
           <FooterColumn title="Company" links={COMPANY_LINKS} />
         </div>
 
-        <div className="mt-12 flex flex-col gap-4 border-t border-slate-200 pt-6 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-12 flex flex-col gap-4 border-t border-[#EEE9E0] pt-6 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
           <p className="max-w-xl leading-snug">
             &copy; 2026 ResNeo · JAR 26 LTD (NI740269) · 100a Main Street, Bangor, BT20 4AG, UK
           </p>

@@ -133,7 +133,7 @@ export default function ContactForm({ className }: ContactFormProps) {
           name="email"
           value={formData.email}
           onChange={handleChange}
-          placeholder="you@restaurant.com"
+          placeholder="you@yourbusiness.com"
           required
           className={inputClass}
           disabled={status === 'submitting'}
@@ -164,7 +164,7 @@ export default function ContactForm({ className }: ContactFormProps) {
           name="restaurantName"
           value={formData.restaurantName}
           onChange={handleChange}
-          placeholder="Your restaurant"
+          placeholder="Your business name"
           className={inputClass}
           disabled={status === 'submitting'}
         />
@@ -179,7 +179,7 @@ export default function ContactForm({ className }: ContactFormProps) {
           name="message"
           value={formData.message}
           onChange={handleChange}
-          placeholder="Tell us about your restaurant, or ask us anything..."
+          placeholder="Tell us about your business, or ask us anything..."
           rows={4}
           maxLength={2000}
           className={`${inputClass} resize-y`}

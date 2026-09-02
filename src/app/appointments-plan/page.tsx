@@ -248,7 +248,7 @@ const faqs = [
 
 export default function AppointmentsPlanPage() {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       <MarketingNav extraLink={{ href: "#how", label: "How it works" }} />
       <Hero />
       <BookingChannelsSection />
@@ -280,25 +280,17 @@ function Hero() {
             "radial-gradient(circle at 15% 20%, rgba(0,59,111,0.12) 0%, transparent 45%), radial-gradient(circle at 85% 80%, rgba(0,59,111,0.10) 0%, transparent 50%)",
         }}
       />
-      <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
 
       <div className="relative mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-5 lg:gap-10 lg:py-28">
         <div className="lg:col-span-3 lg:pt-6">
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-accent-700">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
             Booking software for every business
           </span>
-          <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+          <h1 className="mt-6 text-4xl font-black leading-[1.05] tracking-tight text-brand-600 sm:text-5xl lg:text-6xl">
             Stop losing bookings.
             <br />
-            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-brand-800 bg-clip-text text-transparent">
+            <span className="text-accent-700">
               Start growing your business.
             </span>
           </h1>
@@ -310,14 +302,14 @@ function Hero() {
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
             <Link
               href="/#pricing"
-              className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30"
+              className="inline-flex h-12 items-center justify-center rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30"
             >
               Get Started Now
               <ArrowRightIcon />
             </Link>
             <a
               href="#how"
-              className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
+              className="inline-flex h-12 items-center justify-center rounded-full border border-[#EEE9E0] bg-white px-6 text-base font-extrabold text-brand-600 shadow-sm transition-colors hover:border-accent-200 hover:bg-brand-50/40"
             >
               See how bookings work
             </a>
@@ -377,7 +369,7 @@ function HeroVisual() {
       <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-brand-300/50 blur-2xl" />
 
       {/* Phone mock */}
-      <div className="relative rounded-[2.25rem] border border-slate-200 bg-slate-900 p-2 shadow-2xl shadow-brand-900/20">
+      <div className="relative rounded-[2.25rem] border border-[#EEE9E0] bg-slate-900 p-2 shadow-2xl shadow-brand-900/20">
         <div className="relative overflow-hidden rounded-[1.85rem] bg-white">
           {/* Status bar */}
           <div className="flex items-center justify-between px-5 pt-3 text-[10px] font-semibold text-slate-600">
@@ -409,7 +401,7 @@ function HeroVisual() {
               <InfoTile label="Deposit" value="£5 paid" accent />
             </div>
 
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div className="mt-5 rounded-xl border border-[#EEE9E0] bg-[#FDFBF7] p-3">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 Reminder scheduled
               </p>
@@ -418,14 +410,14 @@ function HeroVisual() {
 
             <div className="mt-5 flex gap-2">
               <div className="h-9 flex-1 rounded-lg bg-brand-600" />
-              <div className="h-9 flex-1 rounded-lg border border-slate-200 bg-white" />
+              <div className="h-9 flex-1 rounded-lg border border-[#EEE9E0] bg-white" />
             </div>
           </div>
         </div>
       </div>
 
       {/* Floating receipt card, positioned above the phone so it doesn't obscure the booking details */}
-      <div className="absolute -top-6 -left-6 hidden rotate-[-6deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
+      <div className="absolute -top-6 -left-6 hidden rotate-[-6deg] rounded-xl border border-[#EEE9E0] bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
             <TickIcon />
@@ -438,7 +430,7 @@ function HeroVisual() {
       </div>
 
       {/* Floating reminder card, positioned below the phone so it doesn't obscure the booking details */}
-      <div className="absolute -bottom-6 -right-4 hidden rotate-[4deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
+      <div className="absolute -bottom-6 -right-4 hidden rotate-[4deg] rounded-xl border border-[#EEE9E0] bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
             <BellIcon />
@@ -476,7 +468,7 @@ function ProblemSection() {
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             If this sounds familiar
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             Your office is closed.
             <br className="hidden sm:block" />
             <span className="text-slate-500">Your customers aren&apos;t.</span>
@@ -493,9 +485,9 @@ function ProblemSection() {
           {problems.map((p) => (
             <div
               key={p.title}
-              className="group relative overflow-hidden rounded-2xl border border-slate-100 bg-slate-50/60 p-6 transition-all hover:border-slate-200 hover:bg-white hover:shadow-md"
+              className="group relative overflow-hidden rounded-[24px] border border-[#EEE9E0] bg-[#FDFBF7] p-6 transition-all hover:border-[#EEE9E0] hover:bg-white hover:shadow-md"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-brand-700 shadow-sm ring-1 ring-slate-100">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-brand-700 shadow-sm ring-1 ring-slate-100">
                 <p.icon />
               </div>
               <h3 className="mt-4 text-base font-semibold text-slate-900">{p.title}</h3>
@@ -519,7 +511,7 @@ function SolutionIntro() {
         }}
       />
       <div className="relative mx-auto max-w-4xl px-6 text-center">
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/80 backdrop-blur">
+        <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-white/80">
           Meet ResNeo
         </span>
         <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">
@@ -533,14 +525,14 @@ function SolutionIntro() {
         <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
           <Link
             href="/#pricing"
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
+            className="inline-flex h-12 items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-accent-400"
           >
             Get Started Now
             <ArrowRightIcon />
           </Link>
           <a
             href="#contact"
-            className="inline-flex h-12 items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
+            className="inline-flex h-12 items-center justify-center rounded-full border border-white/20 bg-white/5 px-6 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/10"
           >
             Book a 15-min demo
           </a>
@@ -558,7 +550,7 @@ function OwnerBenefitsSection() {
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             For the business owner
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             No-shows cost real money. ResNeo helps you keep it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -571,9 +563,9 @@ function OwnerBenefitsSection() {
           {ownerBenefits.map((b) => (
             <div
               key={b.title}
-              className="group relative rounded-2xl border border-slate-100 bg-gradient-to-br from-white to-slate-50 p-7 transition-all hover:-translate-y-1 hover:border-brand-200 hover:shadow-xl hover:shadow-brand-600/5"
+              className="group relative rounded-[24px] border border-[#EEE9E0] bg-gradient-to-br from-white to-slate-50 p-7 transition-all hover:-translate-y-1 hover:border-brand-200 hover:shadow-xl hover:shadow-brand-600/5"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 transition-colors group-hover:bg-brand-100">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 transition-colors group-hover:bg-brand-100">
                 <b.icon />
               </div>
               <h3 className="mt-5 text-lg font-semibold text-slate-900">{b.title}</h3>
@@ -588,13 +580,13 @@ function OwnerBenefitsSection() {
 
 function ProductPreview() {
   return (
-    <section className="relative overflow-hidden bg-slate-50 py-20 sm:py-28">
+    <section className="relative overflow-hidden bg-[#FDFBF7] py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             Your dashboard
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
             Your business, beautifully organised.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -605,7 +597,7 @@ function ProductPreview() {
 
         <div className="relative mt-16">
           {/* Decorative glow */}
-          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-brand-300/40 blur-3xl" />
+          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-200/40 via-white/0 to-brand-300/40" />
 
           <DashboardMock />
         </div>
@@ -627,9 +619,9 @@ function DashboardMock() {
   ];
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10">
+    <div className="relative overflow-hidden rounded-2xl border border-[#EEE9E0] bg-white shadow-2xl shadow-slate-900/10">
       {/* Window chrome */}
-      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
+      <div className="flex items-center gap-2 border-b border-[#EEE9E0] bg-[#FDFBF7] px-4 py-3">
         <span className="h-2.5 w-2.5 rounded-full bg-red-400/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-brand-400/80" />
@@ -640,7 +632,7 @@ function DashboardMock() {
 
       <div className="grid gap-0 lg:grid-cols-[220px_1fr_280px]">
         {/* Sidebar */}
-        <aside className="hidden border-r border-slate-100 bg-slate-50/60 p-4 lg:block">
+        <aside className="hidden border-r border-[#EEE9E0] bg-[#FDFBF7] p-4 lg:block">
           <div className="flex items-center gap-2 px-2 pb-4">
             <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800" />
             <span className="text-sm font-bold text-slate-900">Grove Street</span>
@@ -708,7 +700,7 @@ function DashboardMock() {
         </div>
 
         {/* Right panel */}
-        <aside className="border-t border-slate-100 bg-slate-50/50 p-5 lg:border-l lg:border-t-0 lg:p-6">
+        <aside className="border-t border-[#EEE9E0] bg-[#FDFBF7] p-5 lg:border-l lg:border-t-0 lg:p-6">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">This week</h4>
           <div className="mt-3 grid grid-cols-3 gap-3 lg:grid-cols-1">
             <StatCard label="Bookings" value="47" trend="+18%" />
@@ -755,7 +747,7 @@ function StatCard({
   good?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-slate-100 bg-white p-3">
+    <div className="rounded-xl border border-[#EEE9E0] bg-white p-3">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-extrabold text-slate-900">{value}</p>
       <p className={`text-[11px] font-semibold ${good ? "text-brand-600" : "text-brand-600"}`}>
@@ -767,7 +759,7 @@ function StatCard({
 
 function MessageRow({ type, text }: { type: string; text: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2">
+    <div className="flex items-center gap-2 rounded-lg border border-[#EEE9E0] bg-white px-3 py-2">
       <span className="rounded-md bg-brand-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-700">
         {type}
       </span>
@@ -785,7 +777,7 @@ function ClientBenefitsSection() {
             <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
               For your clients
             </span>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
               An experience that makes them come back.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600">
@@ -869,7 +861,7 @@ function MiniCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-[#EEE9E0] bg-white p-4 shadow-sm">
       <div className="flex items-center gap-2">
         <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[10px] font-bold text-brand-700">
           {step}
@@ -926,7 +918,7 @@ function HowItWorksSection() {
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             How it works
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             Up and running before your next coffee.
           </h2>
         </div>
@@ -953,20 +945,12 @@ function HowItWorksSection() {
 function BookingChannelsSection() {
   return (
     <section className="relative overflow-hidden bg-white py-16 sm:py-24">
-      <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-          backgroundSize: "48px 48px",
-        }}
-      />
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             Be easy to book, everywhere
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             One booking system your clients can reach from any channel.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -1016,11 +1000,11 @@ function ChannelCard({
 }) {
   return (
     <div
-      className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-gradient-to-br from-white to-slate-50 p-6 transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-brand-600/5 ${
+      className={`group relative flex flex-col overflow-hidden rounded-[24px] border bg-gradient-to-br from-white to-slate-50 p-6 transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-brand-600/5 ${
         featured ? "border-brand-200 ring-2 ring-brand-100/70" : "border-slate-100 hover:border-brand-200"
       }`}
     >
-      <div className="relative flex h-44 items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-white p-4">
+      <div className="relative flex h-44 items-center justify-center overflow-hidden rounded-xl border border-[#EEE9E0] bg-white p-4">
         {visual}
       </div>
       <div className="mt-6">
@@ -1037,7 +1021,7 @@ function ChannelCard({
 function YourSiteVisual() {
   return (
     <div className="relative flex w-full max-w-[200px] flex-col items-center">
-      <div className="flex h-4 w-full items-center gap-1 rounded-t-md border border-b-0 border-slate-200 bg-slate-50 px-1.5">
+      <div className="flex h-4 w-full items-center gap-1 rounded-t-md border border-b-0 border-[#EEE9E0] bg-[#FDFBF7] px-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
@@ -1045,7 +1029,7 @@ function YourSiteVisual() {
           resneo.com/book/you
         </div>
       </div>
-      <div className="w-full rounded-b-md border border-slate-200 bg-white p-2.5">
+      <div className="w-full rounded-b-md border border-[#EEE9E0] bg-white p-2.5">
         <div className="h-2 w-16 rounded bg-slate-200" />
         <div className="mt-1 h-1.5 w-24 rounded bg-slate-100" />
         <div className="mt-3 grid grid-cols-3 gap-1">
@@ -1070,8 +1054,8 @@ function YourSiteVisual() {
 
 function EmbedVisual() {
   return (
-    <div className="relative w-full max-w-[220px] rounded-md border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center gap-1 border-b border-slate-100 px-2 py-1.5">
+    <div className="relative w-full max-w-[220px] rounded-md border border-[#EEE9E0] bg-white shadow-sm">
+      <div className="flex items-center gap-1 border-b border-[#EEE9E0] px-2 py-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
@@ -1104,7 +1088,7 @@ function EmbedVisual() {
 function ShareLinkVisual() {
   return (
     <div className="flex w-full max-w-[220px] flex-col items-center gap-2">
-      <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 shadow-sm">
+      <div className="flex w-full items-center gap-2 rounded-lg border border-[#EEE9E0] bg-white px-2.5 py-2 shadow-sm">
         <svg
           className="h-3.5 w-3.5 flex-shrink-0 text-brand-600"
           fill="none"
@@ -1139,7 +1123,7 @@ function ShareLinkVisual() {
 
 function ChannelChip({ label, svg }: { label: string; svg?: React.ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-1 rounded-md border border-slate-100 bg-slate-50 px-1 py-1.5">
+    <div className="flex flex-col items-center gap-1 rounded-md border border-[#EEE9E0] bg-[#FDFBF7] px-1 py-1.5">
       {svg ?? <span className="h-3 w-3 rounded-sm bg-brand-200" />}
       <span className="text-[7px] font-semibold text-slate-600">{label}</span>
     </div>
@@ -1156,13 +1140,13 @@ function QrMiniIcon() {
 
 function UseCasesSection() {
   return (
-    <section className="bg-slate-50 py-20 sm:py-28">
+    <section className="bg-[#FDFBF7] py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             Built for
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             If it&apos;s bookable, we handle it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -1175,7 +1159,7 @@ function UseCasesSection() {
           {useCases.map((u) => (
             <div
               key={u.name}
-              className="group flex items-center gap-3 rounded-xl border border-slate-100 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
+              className="group flex items-center gap-3 rounded-xl border border-[#EEE9E0] bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
             >
               <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-lg">
                 {u.icon}
@@ -1200,7 +1184,7 @@ function FeaturesSection() {
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             What&apos;s inside
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             Everything you need. Nothing you don&apos;t.
           </h2>
         </div>
@@ -1225,13 +1209,13 @@ function FeaturesSection() {
 
 function FaqSection() {
   return (
-    <section className="bg-slate-50 py-20 sm:py-28">
+    <section className="bg-[#FDFBF7] py-20 sm:py-28">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             Questions?
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
             Everything you want to know.
           </h2>
         </div>
@@ -1240,7 +1224,7 @@ function FaqSection() {
           {faqs.map((f) => (
             <details
               key={f.q}
-              className="group rounded-2xl border border-slate-200 bg-white p-6 open:shadow-md"
+              className="group rounded-[24px] border border-[#EEE9E0] bg-white p-6 open:shadow-md"
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-base font-semibold text-slate-900">
                 {f.q}
@@ -1261,7 +1245,7 @@ function ClosingCta() {
   return (
     <section id="contact" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
+        <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
           <div
             className="absolute inset-0 opacity-30"
             style={{
@@ -1271,7 +1255,7 @@ function ClosingCta() {
           />
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
             <div className="min-w-0">
-              <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
+              <h2 className="text-3xl font-black tracking-tight text-white sm:text-4xl lg:text-5xl">
                 Ready to take your diary back?
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
@@ -1310,14 +1294,14 @@ function ClosingCta() {
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                 <Link
                   href="/#pricing"
-                  className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
+                  className="inline-flex h-12 items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-accent-400"
                 >
                   Get Started Now
                   <ArrowRightIcon />
                 </Link>
                 <a
                   href="mailto:hello@resneo.com"
-                  className="inline-flex h-12 items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
+                  className="inline-flex h-12 items-center justify-center rounded-full border border-white/20 bg-white/5 px-6 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/10"
                 >
                   hello@resneo.com
                 </a>
@@ -1336,7 +1320,7 @@ function ClosingCta() {
               </div>
             </div>
 
-            <div className="min-w-0 w-full max-w-full rounded-2xl bg-white p-5 text-slate-900 shadow-xl sm:p-8">
+            <div className="min-w-0 w-full max-w-full rounded-[24px] bg-white p-5 text-slate-900 shadow-xl sm:p-8">
               <h3 className="text-lg font-bold">Or, tell us about your business.</h3>
               <p className="mt-1 text-sm text-slate-500">
                 We&apos;ll get back to you within one working day.

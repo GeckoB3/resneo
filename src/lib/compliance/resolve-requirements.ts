@@ -3,6 +3,7 @@ import {
   COMPLIANCE_EXPIRING_SOON_DAYS,
   type ComplianceEnforcement,
   type ComplianceOnlineCollection,
+  type ComplianceRequirementScope,
   type ComplianceRequirementState,
 } from '@/lib/compliance/constants';
 import type { ComplianceResultType } from '@/lib/compliance/form-schema';
@@ -50,6 +51,21 @@ export interface ResolverRequirement {
   validity_period_days?: number | null;
   /** Where a client-online form is offered online (spec §9.3). Optional: only loaded by the DB loader. */
   online_collection?: ComplianceOnlineCollection;
+  /** `venue` rows apply to every booking; a `service` row for the same type overrides one (plan §4.2). */
+  scope?: ComplianceRequirementScope;
+}
+
+/**
+ * Combine a service's own requirements with the venue-wide ones (plan §4.2). When both
+ * name the same type the service row wins: it is the more specific setting, so a venue can
+ * give one service a longer lead time or a stricter enforcement than the general rule.
+ */
+export function mergeRequirementsServiceWins(
+  serviceRequirements: ResolverRequirement[],
+  venueRequirements: ResolverRequirement[],
+): ResolverRequirement[] {
+  const covered = new Set(serviceRequirements.map((r) => r.compliance_type_id));
+  return [...serviceRequirements, ...venueRequirements.filter((r) => !covered.has(r.compliance_type_id))];
 }
 
 export interface ResolvedRequirement {
@@ -166,19 +182,25 @@ export function resolveRequirements(
 
 export type EnforcementContext = 'online' | 'staff';
 
-/** Whether an unmet requirement blocks creation in the given context (spec §5.1 step 4). */
+/**
+ * Whether an unmet requirement blocks creation in the given context (spec §5.1 step 4).
+ *
+ * Staff are never blocked (decision 2026-09-01, `Docs/compliance-booking-flow-plan.md` §5).
+ * A `block_*` requirement stops the public booking page; for staff it comes back from
+ * {@link summariseBlocking} as a warning (`required` severity for `block_all`) instead of a 409.
+ */
 export function isBlocking(
   state: ComplianceRequirementState,
   enforcement: ComplianceEnforcement,
   context: EnforcementContext,
 ): boolean {
+  if (context === 'staff') return false;
   // Only EXPIRED / MISSING can block. satisfied / expiring_soon / not_applicable never block.
   if (state !== 'expired' && state !== 'missing') return false;
   switch (enforcement) {
     case 'block_all':
-      return true;
     case 'block_online':
-      return context === 'online';
+      return true;
     case 'warn_staff':
     case 'warn_client':
       return false;
@@ -187,18 +209,33 @@ export function isBlocking(
   }
 }
 
+/**
+ * How loudly an unmet, non-blocking requirement should be shown to staff. `required` is a
+ * `block_all` rule (the venue requires the record for everyone, staff included, and is only
+ * not blocked because staff never are); `advisory` is everything else.
+ */
+export type ComplianceWarningSeverity = 'required' | 'advisory';
+
 export interface ComplianceRequirementBrief {
   compliance_type_id: string;
   compliance_type_name: string;
   enforcement: ComplianceEnforcement;
   state: ComplianceRequirementState;
+  severity: ComplianceWarningSeverity;
 }
 
 export interface BlockingSummary {
   blocked: boolean;
   unmet: ComplianceRequirementBrief[];
-  /** Unmet warn_staff / warn_client requirements: do not block, but worth flagging to staff (audit M2). */
+  /**
+   * Unmet requirements that do not block in this context, `required` first. Online that is
+   * the warn_* rules; for staff it is every unmet requirement (audit M2, plan §5).
+   */
   warnings: ComplianceRequirementBrief[];
+}
+
+function warningSeverity(enforcement: ComplianceEnforcement): ComplianceWarningSeverity {
+  return enforcement === 'block_all' ? 'required' : 'advisory';
 }
 
 /** Summarise which resolved requirements block creation, and which only warn, in the given context. */
@@ -211,15 +248,14 @@ export function summariseBlocking(
     compliance_type_name: r.requirement.compliance_type_name,
     enforcement: r.requirement.enforcement,
     state: r.state,
+    severity: warningSeverity(r.requirement.enforcement),
   });
+  const isUnmet = (r: ResolvedRequirement) => r.state === 'missing' || r.state === 'expired';
   const unmet = resolved.filter((r) => isBlocking(r.state, r.requirement.enforcement, context)).map(brief);
   const warnings = resolved
-    .filter(
-      (r) =>
-        (r.state === 'missing' || r.state === 'expired') &&
-        (r.requirement.enforcement === 'warn_staff' || r.requirement.enforcement === 'warn_client'),
-    )
-    .map(brief);
+    .filter((r) => isUnmet(r) && !isBlocking(r.state, r.requirement.enforcement, context))
+    .map(brief)
+    .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'required' ? -1 : 1));
   return { blocked: unmet.length > 0, unmet, warnings };
 }
 
@@ -269,29 +305,41 @@ export async function loadAndResolveServiceRequirements(
     return { applicable: false, resolved: [] };
   }
 
-  let query = admin
+  const REQ_SELECT =
+    'id, compliance_type_id, enforcement, lock_period_hours, online_collection, scope, compliance_types!inner(id, name, is_active, validity_period_days)';
+  let serviceQuery = admin.from('service_compliance_requirements').select(REQ_SELECT).eq('venue_id', venueId);
+  serviceQuery = appointmentServiceId
+    ? serviceQuery.eq('appointment_service_id', appointmentServiceId)
+    : serviceQuery.eq('service_item_id', serviceItemId as string);
+  // Venue-wide rows apply to every booking (plan §4). Loaded separately rather than with
+  // `.or()` so the two halves stay simple to reason about and to fake in tests.
+  const venueQuery = admin
     .from('service_compliance_requirements')
-    .select(
-      'id, compliance_type_id, enforcement, lock_period_hours, online_collection, compliance_types!inner(id, name, is_active, validity_period_days)',
-    )
-    .eq('venue_id', venueId);
-  query = appointmentServiceId
-    ? query.eq('appointment_service_id', appointmentServiceId)
-    : query.eq('service_item_id', serviceItemId as string);
+    .select(REQ_SELECT)
+    .eq('venue_id', venueId)
+    .eq('scope', 'venue');
 
-  const { data: reqRows, error: reqErr } = await query;
+  const [{ data: serviceRows, error: reqErr }, { data: venueRows, error: venueErr }] = await Promise.all([
+    serviceQuery,
+    venueQuery,
+  ]);
   if (reqErr) {
     console.error('[resolve-requirements] requirement load failed:', reqErr.message, { venueId });
     return { applicable: true, resolved: [] };
   }
+  if (venueErr) {
+    // Fail quiet on the venue half: the service rows still enforce; the log shows the gap.
+    console.error('[resolve-requirements] venue-wide requirement load failed:', venueErr.message, { venueId });
+  }
 
-  const requirements: ResolverRequirement[] = (reqRows ?? []).map((row) => {
+  const toRequirement = (row: unknown): ResolverRequirement => {
     const r = row as {
       id: string;
       compliance_type_id: string;
       enforcement: ComplianceEnforcement;
       lock_period_hours: number | null;
       online_collection: ComplianceOnlineCollection | null;
+      scope?: ComplianceRequirementScope | null;
       compliance_types: TypeJoin | TypeJoin[] | null;
     };
     const typeJoin = Array.isArray(r.compliance_types) ? r.compliance_types[0] : r.compliance_types;
@@ -304,8 +352,13 @@ export async function loadAndResolveServiceRequirements(
       type_is_active: typeJoin?.is_active ?? true,
       validity_period_days: typeJoin?.validity_period_days ?? null,
       online_collection: r.online_collection ?? 'confirmation_link',
+      scope: r.scope ?? 'service',
     };
-  });
+  };
+  const requirements = mergeRequirementsServiceWins(
+    (serviceRows ?? []).map(toRequirement),
+    (venueRows ?? []).map(toRequirement),
+  );
 
   if (requirements.length === 0 || !guestId) {
     // No requirements → nothing to resolve. No guest yet → everything MISSING.

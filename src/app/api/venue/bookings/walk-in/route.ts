@@ -68,7 +68,6 @@ const walkInSchema = z.object({
   /** When no `table_ids` are sent, scopes service inference, suggestions, and temporary tables to this dining area. */
   area_id: z.string().uuid().optional(),
   /** Admin-only: acknowledge and proceed past an unmet compliance block (§5.2). */
-  override_compliance: z.boolean().optional(),
 });
 
 function isUuid(value: string | null): value is string {
@@ -402,8 +401,8 @@ export async function POST(request: NextRequest) {
       }
       const { guest: apptGuest, created: apptGuestCreated } = guestResolved;
 
-      // Compliance gate (§5.1, audit H1). Staff context blocks only on `block_all`;
-      // an admin may acknowledge and proceed (§5.2). Mirrors POST /api/venue/bookings,
+      // Compliance check (§5.1, audit H1). Staff are never blocked (plan §5, 2026-09-01),
+      // so this cannot reject a walk-in in practice. Mirrors POST /api/venue/bookings,
       // including the unified-vs-legacy service-column branch so it does not no-op for
       // unified-storage venues. The resolved walk-in guest is kept on a block so staff
       // can capture the record and re-seat them.
@@ -418,7 +417,6 @@ export async function POST(request: NextRequest) {
         bookingDate: today,
         bookingTime: walkInTime,
         context: 'staff',
-        adminOverride: staff.role === 'admin' && parsed.data.override_compliance === true,
       });
       if (walkInCompliance.blocked) {
         return NextResponse.json(walkInCompliance.body, { status: 409 });

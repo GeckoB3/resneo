@@ -319,7 +319,7 @@ const jsonLd = {
 
 export default function SalonBookingSoftwarePage() {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -356,27 +356,19 @@ function Hero() {
             "radial-gradient(circle at 18% 18%, rgba(0,59,111,0.14) 0%, transparent 45%), radial-gradient(circle at 88% 78%, rgba(0,194,199,0.12) 0%, transparent 50%)",
         }}
       />
-      <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
 
       <div className="relative mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-5 lg:gap-10 lg:py-28">
         <div className="lg:col-span-3 lg:pt-6">
           <Breadcrumb />
-          <span className="mt-5 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
+          <span className="mt-5 inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-accent-700">
             <span className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br from-brand-600 to-brand-800`} />
             Built for salons &amp; barbers
           </span>
-          <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+          <h1 className="mt-6 text-4xl font-black leading-[1.05] tracking-tight text-brand-600 sm:text-5xl lg:text-6xl">
             Booking software for hair salons &amp; barbers
           </h1>
           <p className="mt-5 text-xl font-semibold sm:text-2xl">
-            <span className="bg-gradient-to-r from-brand-800 via-brand-600 to-brand-700 bg-clip-text text-transparent">
+            <span className="text-accent-700">
               Fewer no-shows. Fuller chairs. Less admin.
             </span>
           </p>
@@ -390,14 +382,14 @@ function Hero() {
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
             <a
               href={SIGNUP}
-              className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30"
+              className="inline-flex h-12 items-center justify-center rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30"
             >
               Start your free 14-day trial
               <ArrowRightIcon />
             </a>
             <a
               href="#booking-flow"
-              className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
+              className="inline-flex h-12 items-center justify-center rounded-full border border-[#EEE9E0] bg-white px-6 text-base font-extrabold text-brand-600 shadow-sm transition-colors hover:border-accent-200 hover:bg-brand-50/40"
             >
               See the booking flow
             </a>
@@ -462,7 +454,7 @@ function HeroPhoneVisual() {
     <div className="relative mx-auto w-full max-w-sm">
       <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-accent-200/50 blur-2xl" />
 
-      <div className="relative rounded-[2.25rem] border border-slate-200 bg-slate-900 p-2 shadow-2xl shadow-brand-900/20">
+      <div className="relative rounded-[2.25rem] border border-[#EEE9E0] bg-slate-900 p-2 shadow-2xl shadow-brand-900/20">
         <div className="relative overflow-hidden rounded-[1.85rem] bg-white">
           <div className="flex items-center justify-between px-5 pt-3 text-[10px] font-semibold text-slate-600">
             <span>9:41</span>
@@ -493,20 +485,20 @@ function HeroPhoneVisual() {
               <p className="mt-1 text-xs text-brand-800">Half head of foils last visit · prefers cooler tones.</p>
             </div>
 
-            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div className="mt-4 rounded-xl border border-[#EEE9E0] bg-[#FDFBF7] p-3">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Reminder queued</p>
               <p className="mt-1 text-xs text-slate-700">SMS confirm-or-cancel · 24 hours before</p>
             </div>
 
             <div className="mt-5 flex gap-2">
               <div className="h-9 flex-1 rounded-lg bg-brand-600" />
-              <div className="h-9 flex-1 rounded-lg border border-slate-200 bg-white" />
+              <div className="h-9 flex-1 rounded-lg border border-[#EEE9E0] bg-white" />
             </div>
           </div>
         </div>
       </div>
 
-      <div className="absolute -top-6 -left-6 hidden rotate-[-6deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
+      <div className="absolute -top-6 -left-6 hidden rotate-[-6deg] rounded-xl border border-[#EEE9E0] bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-50 text-accent-700">
             <TickIcon />
@@ -518,7 +510,7 @@ function HeroPhoneVisual() {
         </div>
       </div>
 
-      <div className="absolute -bottom-6 -right-4 hidden rotate-[4deg] rounded-xl border border-slate-100 bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
+      <div className="absolute -bottom-6 -right-4 hidden rotate-[4deg] rounded-xl border border-[#EEE9E0] bg-white p-3 shadow-xl shadow-slate-900/10 sm:block">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
             <BellIcon />
@@ -556,7 +548,7 @@ function TrustStrip() {
     { value: "15 min", label: "Typical setup time" },
   ];
   return (
-    <section className="border-y border-slate-100 bg-white py-10">
+    <section className="border-y border-[#EEE9E0] bg-white py-10">
       <div className="mx-auto grid max-w-5xl grid-cols-2 gap-6 px-6 text-center sm:grid-cols-4">
         {items.map((s) => (
           <div key={s.label}>
@@ -573,9 +565,9 @@ function TrustStrip() {
 
 const accentStyles = {
   rose: {
-    chip: "bg-rose-100 text-rose-700",
-    icon: "bg-rose-50 text-rose-600 ring-rose-100",
-    bar: "from-rose-400 to-rose-200",
+    chip: "bg-brand-600 text-white",
+    icon: "bg-brand-600 text-white ring-brand-700",
+    bar: "from-brand-600 to-brand-400",
   },
   brand: {
     chip: "bg-brand-100 text-brand-700",
@@ -591,13 +583,13 @@ const accentStyles = {
 
 function OutcomesSection() {
   return (
-    <section className="bg-slate-50 py-20 sm:py-28">
+    <section className="bg-[#FDFBF7] py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             Outcomes first
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             Three things every owner wants. Here is how ResNeo delivers them.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -612,13 +604,13 @@ function OutcomesSection() {
             return (
               <div
                 key={o.title}
-                className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm"
+                className="overflow-hidden rounded-[32px] border border-[#EEE9E0] bg-white shadow-sm"
               >
                 <div className={`h-1.5 w-full bg-gradient-to-r ${s.bar}`} />
                 <div className="grid gap-8 p-7 sm:p-10 lg:grid-cols-[0.9fr_1.6fr] lg:gap-12">
                   <div>
                     <span
-                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider ${s.chip}`}
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider ${s.chip}`}
                     >
                       {o.eyebrow}
                     </span>
@@ -632,7 +624,7 @@ function OutcomesSection() {
                     {o.features.map((f) => (
                       <div
                         key={f.title}
-                        className="rounded-2xl border border-slate-100 bg-slate-50/70 p-5 transition-colors hover:border-slate-200 hover:bg-white"
+                        className="rounded-[24px] border border-[#EEE9E0] bg-[#FDFBF7] p-5 transition-colors hover:border-[#EEE9E0] hover:bg-white"
                       >
                         <div
                           className={`flex h-10 w-10 items-center justify-center rounded-xl ring-1 ${s.icon}`}
@@ -664,7 +656,7 @@ function BookingFlowSection() {
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             The actual booking flow
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             From Instagram bio to booked chair, without a phone call.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -675,7 +667,7 @@ function BookingFlowSection() {
 
         {/* Step mock */}
         <div className="relative mt-16">
-          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-100/40 via-white/0 to-accent-200/40 blur-3xl" />
+          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-100/40 via-white/0 to-accent-200/40" />
           <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <FlowStep step="1" title="Pick a service">
               <div className="mt-3 space-y-1.5">
@@ -726,7 +718,7 @@ function BookingFlowSection() {
                   <span className="text-slate-500">Deposit</span>
                   <span className="font-semibold text-slate-900">£10</span>
                 </div>
-                <div className="rounded-md bg-slate-50 px-2 py-1 text-[10px] leading-snug text-slate-600">
+                <div className="rounded-md bg-[#FDFBF7] px-2 py-1 text-[10px] leading-snug text-slate-600">
                   Reminder sends automatically. Cancellation policy shown up front.
                 </div>
                 <div className="mt-1 rounded-md bg-brand-600 py-1.5 text-center text-[11px] font-bold text-white">
@@ -744,7 +736,7 @@ function BookingFlowSection() {
               {i < bookingSteps.length - 1 ? (
                 <div className="absolute left-10 top-5 hidden h-0.5 w-full bg-gradient-to-r from-brand-200 to-transparent lg:block" />
               ) : null}
-              <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-800 text-sm font-extrabold text-white shadow-md shadow-brand-600/25">
+              <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 text-sm font-extrabold text-white shadow-md shadow-brand-600/25">
                 {s.step}
               </div>
               <h3 className="mt-4 text-base font-bold text-slate-900">{s.title}</h3>
@@ -759,7 +751,7 @@ function BookingFlowSection() {
 
 function FlowStep({ step, title, children }: { step: string; title: string; children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-[24px] border border-[#EEE9E0] bg-white p-4 shadow-sm">
       <div className="flex items-center gap-2">
         <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[10px] font-bold text-brand-700">
           {step}
@@ -798,7 +790,7 @@ function DashboardSection() {
       />
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/80 backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-white/80">
             Your day at a glance
           </span>
           <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">
@@ -811,7 +803,7 @@ function DashboardSection() {
         </div>
 
         <div className="relative mt-14">
-          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-500/30 via-white/0 to-accent-400/30 blur-3xl" />
+          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-500/30 via-white/0 to-accent-400/30" />
           <SalonDashboardMock />
         </div>
       </div>
@@ -858,8 +850,8 @@ function SalonDashboardMock() {
   };
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl shadow-slate-900/30">
-      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
+    <div className="relative overflow-hidden rounded-2xl border border-[#EEE9E0] bg-white text-slate-900 shadow-2xl shadow-slate-900/30">
+      <div className="flex items-center gap-2 border-b border-[#EEE9E0] bg-[#FDFBF7] px-4 py-3">
         <span className="h-2.5 w-2.5 rounded-full bg-red-400/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-300/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-accent/80" />
@@ -868,7 +860,7 @@ function SalonDashboardMock() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#EEE9E0] px-5 py-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saturday</p>
           <h3 className="mt-0.5 text-lg font-bold text-slate-900">The Chair Co. · Day view</h3>
@@ -904,7 +896,7 @@ function SalonDashboardMock() {
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold">{b.time}</span>
                     {"dep" in b && b.dep ? (
-                      <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide">
+                      <span className="rounded-full bg-white px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">
                         Deposit
                       </span>
                     ) : null}
@@ -953,22 +945,14 @@ function LinkedAccountsSection() {
   return (
     <section id="linked-accounts" className="relative scroll-mt-16 overflow-hidden bg-white py-20 sm:py-28">
       <div className="absolute inset-0 bg-gradient-to-b from-white via-brand-50/70 to-white" />
-      <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
 
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-accent-700">
             <span className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br from-brand-600 to-brand-800`} />
             Rent-a-chair &amp; self-employed stylists
           </span>
-          <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-5 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             Chairs under one roof. Books that never touch.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -980,12 +964,12 @@ function LinkedAccountsSection() {
 
         {/* Diagram: combined page on top, two fully separate books below */}
         <div className="relative mx-auto mt-14 max-w-3xl">
-          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-100/50 via-white/0 to-accent-200/50 blur-3xl" />
+          <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-r from-brand-100/50 via-white/0 to-accent-200/50" />
 
           <div className="relative">
             {/* One combined booking page */}
-            <div className="mx-auto max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-brand-900/5">
-              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5">
+            <div className="mx-auto max-w-md overflow-hidden rounded-2xl border border-[#EEE9E0] bg-white shadow-xl shadow-brand-900/5">
+              <div className="flex items-center gap-2 border-b border-[#EEE9E0] bg-[#FDFBF7] px-4 py-2.5">
                 <span className="h-2.5 w-2.5 rounded-full bg-brand-200" />
                 <span className="h-2.5 w-2.5 rounded-full bg-brand-200" />
                 <span className="h-2.5 w-2.5 rounded-full bg-brand-200" />
@@ -995,7 +979,7 @@ function LinkedAccountsSection() {
               </div>
               <div className="p-5">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-brand-700">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wider text-accent-700">
                     <LinkIcon small /> Combined booking page
                   </span>
                 </div>
@@ -1008,7 +992,7 @@ function LinkedAccountsSection() {
                   ].map((p) => (
                     <div
                       key={p.name}
-                      className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5"
+                      className="flex items-center justify-between rounded-xl border border-[#EEE9E0] bg-[#FDFBF7] px-3 py-2.5"
                     >
                       <div className="flex items-center gap-2.5">
                         <span
@@ -1035,7 +1019,7 @@ function LinkedAccountsSection() {
               <span className="absolute top-0 h-8 w-px bg-gradient-to-b from-brand-300 to-transparent" />
             </div>
             <div className="flex justify-center">
-              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-[11px] font-semibold text-slate-600 shadow-sm">
+              <span className="inline-flex items-center gap-2 rounded-full border border-[#EEE9E0] bg-white px-3.5 py-1.5 text-[11px] font-semibold text-slate-600 shadow-sm">
                 <LinkIcon small />
                 Linked to share availability
                 <span className="text-slate-300">·</span>
@@ -1051,7 +1035,7 @@ function LinkedAccountsSection() {
               ].map((b) => (
                 <div
                   key={b.name}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                  className="rounded-[24px] border border-[#EEE9E0] bg-white p-4 shadow-sm"
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-bold text-slate-900">{b.name}</p>
@@ -1088,9 +1072,9 @@ function LinkedAccountsSection() {
           {linkedBenefits.map((b) => (
             <div
               key={b.title}
-              className="rounded-2xl border border-slate-100 bg-white/80 p-5 shadow-sm backdrop-blur transition-colors hover:border-brand-200"
+              className="rounded-[24px] border border-[#EEE9E0] bg-white/80 p-5 shadow-sm backdrop-blur transition-colors hover:border-brand-200"
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-100">
                 <b.icon />
               </div>
               <h3 className="mt-4 text-sm font-bold text-slate-900">{b.title}</h3>
@@ -1100,12 +1084,12 @@ function LinkedAccountsSection() {
         </div>
 
         {/* Separate-books callout */}
-        <div className="mt-10 overflow-hidden rounded-3xl border border-brand-100 bg-white shadow-sm">
+        <div className="mt-10 overflow-hidden rounded-[32px] border border-brand-100 bg-white shadow-sm">
           <div className="h-1.5 w-full bg-gradient-to-r from-brand-400 to-accent-400" />
           <div className="grid gap-6 p-7 sm:p-9 lg:grid-cols-[1.5fr_1fr] lg:items-center lg:gap-10">
             <div>
               <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
+                <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
                   <ShieldCheckIcon />
                 </span>
                 <div>
@@ -1128,14 +1112,14 @@ function LinkedAccountsSection() {
             <div className="flex flex-col gap-3">
               <a
                 href={SIGNUP}
-                className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
+                className="inline-flex h-12 items-center justify-center rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
               >
                 Start your free 14-day trial
                 <ArrowRightIcon />
               </a>
               <Link
                 href="/solutions"
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
+                className="inline-flex h-12 items-center justify-center rounded-full border border-[#EEE9E0] bg-white px-6 text-base font-extrabold text-brand-600 shadow-sm transition-colors hover:border-accent-200 hover:bg-brand-50/40"
               >
                 Explore all solutions
               </Link>
@@ -1157,7 +1141,7 @@ function FeaturesSection() {
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             Everything in the kit
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             Salon-grade tooling, without the enterprise price tag.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -1193,11 +1177,11 @@ function FeaturesSection() {
 
 function BusinessTypesSection() {
   return (
-    <section className="bg-slate-50 py-20 sm:py-28">
+    <section className="bg-[#FDFBF7] py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Who it&rsquo;s for</span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             One chair or ten, the floor runs the same.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -1210,7 +1194,7 @@ function BusinessTypesSection() {
           {businessTypes.map((u) => (
             <div
               key={u.name}
-              className="group flex items-center gap-3 rounded-xl border border-slate-100 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
+              className="group flex items-center gap-3 rounded-xl border border-[#EEE9E0] bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
             >
               <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-lg">
                 {u.icon}
@@ -1237,7 +1221,7 @@ function CompareSection() {
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             ResNeo vs marketplace apps
           </span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl lg:text-5xl">
             The client who books stays your client.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
@@ -1246,11 +1230,11 @@ function CompareSection() {
           </p>
         </div>
 
-        <div className="mt-14 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
-          <div className="grid grid-cols-[1.3fr_1fr_1fr] bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 sm:text-sm">
+        <div className="mt-14 overflow-hidden rounded-2xl border border-[#EEE9E0] shadow-sm">
+          <div className="grid grid-cols-[1.3fr_1fr_1fr] bg-[#FDFBF7] text-xs font-bold uppercase tracking-wider text-slate-500 sm:text-sm">
             <div className="p-4" />
-            <div className="border-l border-slate-200 bg-brand-600 p-4 text-center text-white">ResNeo</div>
-            <div className="border-l border-slate-200 p-4 text-center">Marketplace apps</div>
+            <div className="border-l border-[#EEE9E0] bg-brand-600 p-4 text-center text-white">ResNeo</div>
+            <div className="border-l border-[#EEE9E0] p-4 text-center">Marketplace apps</div>
           </div>
           {compareRows.map((row, i) => (
             <div
@@ -1258,13 +1242,13 @@ function CompareSection() {
               className={`grid grid-cols-[1.3fr_1fr_1fr] text-sm ${i % 2 ? "bg-slate-50/50" : "bg-white"}`}
             >
               <div className="flex items-center p-4 font-semibold text-slate-800">{row.label}</div>
-              <div className="flex items-center justify-center gap-1.5 border-l border-slate-100 bg-brand-50/40 p-4 text-center font-semibold text-brand-800">
+              <div className="flex items-center justify-center gap-1.5 border-l border-[#EEE9E0] bg-brand-50/40 p-4 text-center font-semibold text-brand-800">
                 <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-brand-600 text-white">
                   <TickIcon small />
                 </span>
                 {row.resneo}
               </div>
-              <div className="flex items-center justify-center border-l border-slate-100 p-4 text-center text-slate-500">
+              <div className="flex items-center justify-center border-l border-[#EEE9E0] p-4 text-center text-slate-500">
                 {row.marketplace}
               </div>
             </div>
@@ -1282,18 +1266,18 @@ function CompareSection() {
 
 function FaqSection() {
   return (
-    <section id="faq" className="scroll-mt-16 bg-slate-50 py-20 sm:py-28">
+    <section id="faq" className="scroll-mt-16 bg-[#FDFBF7] py-20 sm:py-28">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">Good to know</span>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
             What salon owners ask us first.
           </h2>
         </div>
 
         <div className="mt-12 space-y-3">
           {faqs.map((f) => (
-            <details key={f.q} className="group rounded-2xl border border-slate-200 bg-white p-6 open:shadow-md">
+            <details key={f.q} className="group rounded-[24px] border border-[#EEE9E0] bg-white p-6 open:shadow-md">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-base font-semibold text-slate-900">
                 {f.q}
                 <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-transform group-open:rotate-45 group-open:bg-brand-100 group-open:text-brand-700">
@@ -1315,7 +1299,7 @@ function ClosingCta() {
   return (
     <section id="contact" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-900 via-brand-800 to-slate-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
+        <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-brand-900 via-brand-800 to-slate-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
           <div
             className="absolute inset-0 opacity-30"
             style={{
@@ -1325,7 +1309,7 @@ function ClosingCta() {
           />
           <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
             <div className="min-w-0">
-              <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
+              <h2 className="text-3xl font-black tracking-tight text-white sm:text-4xl lg:text-5xl">
                 Open your chairs to online booking.
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
@@ -1349,21 +1333,21 @@ function ClosingCta() {
               <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <a
                   href={SIGNUP}
-                  className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
+                  className="inline-flex h-12 items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-accent-400"
                 >
                   Start your free 14-day trial
                   <ArrowRightIcon />
                 </a>
                 <Link
                   href="/solutions"
-                  className="inline-flex h-12 items-center justify-center rounded-xl border border-white/25 bg-transparent px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
+                  className="inline-flex h-12 items-center justify-center rounded-full border border-white/25 bg-transparent px-6 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/10"
                 >
                   Explore all solutions
                 </Link>
               </div>
             </div>
 
-            <div className="min-w-0 w-full max-w-full rounded-2xl bg-white p-5 text-slate-900 shadow-xl sm:p-8">
+            <div className="min-w-0 w-full max-w-full rounded-[24px] bg-white p-5 text-slate-900 shadow-xl sm:p-8">
               <h3 className="text-lg font-bold">Prefer to talk it through?</h3>
               <p className="mt-1 text-sm text-slate-500">
                 Tell us about your salon and we&rsquo;ll reply within one working day.

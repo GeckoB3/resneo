@@ -113,6 +113,29 @@ async function maybeInsertMarketingConsentEvent(
   }
 }
 
+/**
+ * Read-only guest lookup by email, using the same normalisation and exact match as
+ * `findOrCreateGuest`, so a pre-booking check (the public compliance booking-requirements
+ * endpoint) resolves the same guest row the booking itself will attach to. Phone is
+ * deliberately not consulted: an online booking that carries an email never matches by
+ * phone (see `isAccountLinkedPublicMode`), so a phone match here would contradict creation.
+ */
+export async function findGuestByEmail(
+  supabase: SupabaseClient,
+  venueId: string,
+  email: string,
+): Promise<{ id: string } | null> {
+  const normalised = normaliseEmail(email);
+  if (!normalised) return null;
+  const { data } = await supabase
+    .from('guests')
+    .select('id')
+    .eq('venue_id', venueId)
+    .eq('email', normalised)
+    .maybeSingle();
+  return data ? { id: (data as { id: string }).id } : null;
+}
+
 const guestSelect =
   'id, venue_id, first_name, last_name, email, phone, visit_count, user_id, marketing_opt_out, marketing_consent, marketing_consent_at';
 

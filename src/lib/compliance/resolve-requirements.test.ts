@@ -4,6 +4,7 @@ import {
   bookingDatetime,
 
   isBlocking,
+  mergeRequirementsServiceWins,
   isRecordValidForBooking,
   resolveRequirement,
   resolveRequirements,
@@ -161,7 +162,7 @@ describe('isBlocking', () => {
     ['block_online', 'online', true],
     ['block_online', 'staff', false],
     ['block_all', 'online', true],
-    ['block_all', 'staff', true],
+    ['block_all', 'staff', false], // staff are never blocked (plan §5)
   ];
   it.each(cases)('%s in %s context → blocking=%s (for MISSING)', (enforcement, context, expected) => {
     expect(isBlocking('missing', enforcement, context)).toBe(expected);
@@ -189,8 +190,41 @@ describe('summariseBlocking', () => {
     expect(online.blocked).toBe(true);
     expect(online.unmet.map((u) => u.compliance_type_id).sort()).toEqual(['t1', 't3']);
 
+    expect(online.warnings.map((w) => [w.compliance_type_id, w.severity])).toEqual([['t2', 'advisory']]);
+
     const staff = summariseBlocking(resolved, 'staff');
-    expect(staff.unmet.map((u) => u.compliance_type_id)).toEqual(['t1']); // only block_all blocks staff
+    expect(staff.blocked).toBe(false); // staff are never blocked (plan §5)
+    expect(staff.unmet).toEqual([]);
+    // Every unmet requirement reaches staff as a warning, the block_all rule first as `required`.
+    expect(staff.warnings.map((w) => [w.compliance_type_id, w.severity])).toEqual([
+      ['t1', 'required'],
+      ['t2', 'advisory'],
+      ['t3', 'advisory'],
+    ]);
+  });
+});
+
+describe('mergeRequirementsServiceWins (venue-wide requirements, plan §4.2)', () => {
+  it('adds venue-wide rows for types the service does not name itself', () => {
+    const merged = mergeRequirementsServiceWins(
+      [req({ id: 's1', compliance_type_id: 'patch-test', enforcement: 'block_all' })],
+      [req({ id: 'v1', compliance_type_id: 'intake', enforcement: 'block_online', scope: 'venue' })],
+    );
+    expect(merged.map((r) => r.id)).toEqual(['s1', 'v1']);
+  });
+
+  it('lets the service row win when both name the same type', () => {
+    const merged = mergeRequirementsServiceWins(
+      [req({ id: 's1', compliance_type_id: 'intake', enforcement: 'block_all', lock_period_hours: 48 })],
+      [req({ id: 'v1', compliance_type_id: 'intake', enforcement: 'warn_client', scope: 'venue' })],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ id: 's1', enforcement: 'block_all', lock_period_hours: 48 });
+  });
+
+  it('is the venue rows alone for a service with none of its own', () => {
+    const merged = mergeRequirementsServiceWins([], [req({ id: 'v1', compliance_type_id: 'intake', scope: 'venue' })]);
+    expect(merged.map((r) => r.id)).toEqual(['v1']);
   });
 });
 

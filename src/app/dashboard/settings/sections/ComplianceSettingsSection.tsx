@@ -30,7 +30,7 @@ type SubTab = 'general' | 'types' | 'requirements';
 const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string }> = [
   { id: 'general', label: 'General settings' },
   { id: 'types', label: 'Templates & types' },
-  { id: 'requirements', label: 'Service requirements' },
+  { id: 'requirements', label: 'Requirements' },
 ];
 
 function isSubTab(v: string | null): v is SubTab {

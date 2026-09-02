@@ -53,8 +53,21 @@ describe('submissionStoragePathsAreSafe', () => {
 });
 
 describe('captureBookingComplianceSubmissions guards', () => {
-  function fakeWithType(captureMethods: string[]) {
+  function fakeWithType(captureMethods: string[], onlineCollection = 'inline') {
     return new FakeSupabase({
+      venues: [{ id: VENUE, booking_model: 'unified_scheduling', enabled_models: null }],
+      service_compliance_requirements: [
+        {
+          id: 'r1',
+          venue_id: VENUE,
+          service_item_id: 'svc-1',
+          appointment_service_id: 'svc-1',
+          compliance_type_id: 't1',
+          enforcement: 'block_online',
+          lock_period_hours: null,
+          online_collection: onlineCollection,
+        },
+      ],
       compliance_types: [
         {
           id: 't1',
@@ -89,6 +102,7 @@ describe('captureBookingComplianceSubmissions guards', () => {
       venueId: VENUE,
       guestId: GUEST,
       draftId: DRAFT,
+      serviceIds: ['svc-1'],
       submissions: [{ compliance_type_id: 't1', responses: {} }],
     });
     expect(res.ok).toBe(false);
@@ -105,6 +119,7 @@ describe('captureBookingComplianceSubmissions guards', () => {
       venueId: VENUE,
       guestId: GUEST,
       draftId: DRAFT,
+      serviceIds: ['svc-1'],
       submissions: [{ compliance_type_id: 'does-not-exist', responses: {} }],
     });
     expect(res.ok).toBe(false);
@@ -117,11 +132,82 @@ describe('captureBookingComplianceSubmissions guards', () => {
       venueId: VENUE,
       guestId: GUEST,
       draftId: DRAFT,
+      serviceIds: ['svc-1'],
       submissions: [{ compliance_type_id: 't1', responses: {} }],
     });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.recordIds).toHaveLength(1);
     expect((fake.tables.compliance_records ?? []).length).toBe(1);
+  });
+
+  it('rejects a type that is not an inline requirement of the booked service (plan §3.5)', async () => {
+    // Required, but collected by confirmation link: a booking-time submission is not expected.
+    const byLink = fakeWithType(['client_online'], 'confirmation_link');
+    const res = await captureBookingComplianceSubmissions(byLink.asClient(), {
+      venueId: VENUE,
+      guestId: GUEST,
+      draftId: DRAFT,
+      serviceIds: ['svc-1'],
+      submissions: [{ compliance_type_id: 't1', responses: {} }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.status).toBe(400);
+      expect(res.error).toMatch(/not part of this booking/i);
+    }
+
+    // Inline, but for a different service than the one being booked.
+    const otherService = fakeWithType(['client_online']);
+    const res2 = await captureBookingComplianceSubmissions(otherService.asClient(), {
+      venueId: VENUE,
+      guestId: GUEST,
+      draftId: DRAFT,
+      serviceIds: ['svc-9'],
+      submissions: [{ compliance_type_id: 't1', responses: {} }],
+    });
+    expect(res2.ok).toBe(false);
+    expect((otherService.tables.compliance_records ?? []).length).toBe(0);
+  });
+
+  it('accepts a type the venue requires on all bookings, whatever service is booked (plan §4)', async () => {
+    const fake = fakeWithType(['client_online']);
+    fake.tables.service_compliance_requirements = [
+      { id: 'v1', venue_id: VENUE, scope: 'venue', compliance_type_id: 't1', enforcement: 'block_online', online_collection: 'inline' },
+    ];
+    const res = await captureBookingComplianceSubmissions(fake.asClient(), {
+      venueId: VENUE,
+      guestId: GUEST,
+      draftId: DRAFT,
+      serviceIds: ['svc-anything'],
+      submissions: [{ compliance_type_id: 't1', responses: {} }],
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rejects answers given against a version that is no longer current', async () => {
+    const fake = fakeWithType(['client_online']);
+    const res = await captureBookingComplianceSubmissions(fake.asClient(), {
+      venueId: VENUE,
+      guestId: GUEST,
+      draftId: DRAFT,
+      serviceIds: ['svc-1'],
+      submissions: [{ compliance_type_id: 't1', version_id: 'v0-stale', responses: {} }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.status).toBe(409);
+      expect(res.error).toMatch(/updated while you were booking/i);
+    }
+    expect((fake.tables.compliance_records ?? []).length).toBe(0);
+
+    const current = await captureBookingComplianceSubmissions(fakeWithType(['client_online']).asClient(), {
+      venueId: VENUE,
+      guestId: GUEST,
+      draftId: DRAFT,
+      serviceIds: ['svc-1'],
+      submissions: [{ compliance_type_id: 't1', version_id: 'v1', responses: {} }],
+    });
+    expect(current.ok).toBe(true);
   });
 });
 
@@ -136,6 +222,18 @@ describe('captureBookingComplianceSubmissions — per-visit forms completed duri
   function fakePerVisit() {
     return new FakeSupabase({
       venues: [{ id: VENUE, name: 'Glow Studio', timezone: TZ }],
+      service_compliance_requirements: [
+        {
+          id: 'r1',
+          venue_id: VENUE,
+          service_item_id: 'svc-1',
+          appointment_service_id: 'svc-1',
+          compliance_type_id: 't1',
+          enforcement: 'block_online',
+          lock_period_hours: null,
+          online_collection: 'inline',
+        },
+      ],
       compliance_types: [
         {
           id: 't1',
@@ -170,6 +268,7 @@ describe('captureBookingComplianceSubmissions — per-visit forms completed duri
       venueId: VENUE,
       guestId: GUEST,
       draftId: DRAFT,
+      serviceIds: ['svc-1'],
       submissions: [{ compliance_type_id: 't1', responses: {} }],
       visitDate: VISIT_DAY,
     });
@@ -185,6 +284,7 @@ describe('captureBookingComplianceSubmissions — per-visit forms completed duri
       venueId: VENUE,
       guestId: GUEST,
       draftId: DRAFT,
+      serviceIds: ['svc-1'],
       submissions: [{ compliance_type_id: 't1', responses: {} }],
     });
     expect(res.ok).toBe(true);

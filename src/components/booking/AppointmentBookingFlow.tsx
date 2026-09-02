@@ -8,9 +8,10 @@ import type { VenuePublic, GuestDetails } from './types';
 import { usePublicBookingAccountGateContext } from '@/components/booking/PublicBookingAccountGate';
 import { mergeGuestDetailsPrefill } from '@/lib/booking/public-booking-account-gate';
 import { DetailsStep } from './DetailsStep';
-import BookingComplianceBlock from './BookingComplianceBlock';
+import BookingComplianceBlock, { type BookingComplianceState } from './BookingComplianceBlock';
 import { BrandSpinner } from '@/components/ui/primitives';
-import { clearBookingComplianceDrafts, type BookingComplianceState } from './BookingComplianceForms';
+import { clearBookingComplianceDrafts } from './BookingComplianceForms';
+import { COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/constants';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import {
@@ -136,6 +137,71 @@ interface CatalogVariant {
   price_pence: number | null;
   deposit_pence: number | null;
   sort_order: number;
+}
+
+/** The earliest slot in a group, so lock periods are judged against the first appointment. */
+function earliestGroupSlot(people: Array<{ date: string; time: string }>): { date: string | null; time: string | null } {
+  let best: { date: string; time: string } | null = null;
+  for (const p of people) {
+    if (!best || `${p.date} ${p.time}` < `${best.date} ${best.time}`) best = { date: p.date, time: p.time };
+  }
+  return { date: best?.date ?? null, time: best?.time ?? null };
+}
+
+/** An unmet compliance requirement returned to a staff booking (the server never blocks staff). */
+type StaffComplianceWarning = {
+  compliance_type_id?: string;
+  compliance_type_name: string;
+  /** `required` is a block_all rule the venue set for everyone; `advisory` is everything else. */
+  severity?: 'required' | 'advisory';
+};
+
+/**
+ * Staff confirmation: compliance requirements the guest has not met. Staff are never
+ * blocked by compliance (plan §5), so a `required` item (the venue's block_all rule) is
+ * shown first and in red, with a link to capture the record straight away.
+ */
+function StaffComplianceWarningsCard({
+  warnings,
+  bookingId,
+}: {
+  warnings?: StaffComplianceWarning[];
+  bookingId?: string | null;
+}) {
+  if (!warnings || warnings.length === 0) return null;
+  const required = warnings.filter((w) => w.severity === 'required');
+  const advisory = warnings.filter((w) => w.severity !== 'required');
+  const names = (list: StaffComplianceWarning[]) => list.map((w) => w.compliance_type_name).join(', ');
+  const strong = required.length > 0;
+  const tone = strong ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50';
+  const heading = strong ? 'text-red-900' : 'text-amber-900';
+  const body = strong ? 'text-red-800' : 'text-amber-800';
+  return (
+    <div className={`mt-4 max-w-sm mx-auto rounded-lg border p-3 text-left ${tone}`}>
+      <p className={`text-xs font-semibold ${heading}`}>Outstanding compliance forms</p>
+      {required.length > 0 ? (
+        <p className={`mt-0.5 text-xs ${body}`}>
+          The booking is made, but this venue requires {names(required)} for this booking and{' '}
+          {required.length === 1 ? 'it is' : 'they are'} not on file. Capture the record in venue or send the form
+          before the appointment.
+        </p>
+      ) : null}
+      {advisory.length > 0 ? (
+        <p className={`mt-0.5 text-xs ${body}`}>
+          {names(advisory)} {advisory.length === 1 ? 'is' : 'are'} not on file yet. Collect the record or send the
+          form before the appointment.
+        </p>
+      ) : null}
+      {bookingId ? (
+        <a
+          href={`/dashboard/bookings?openBooking=${encodeURIComponent(bookingId)}`}
+          className={`mt-2 inline-block text-xs font-semibold underline underline-offset-2 ${heading}`}
+        >
+          Capture in venue
+        </a>
+      ) : null}
+    </div>
+  );
 }
 
 /** Staff-only booking duration overrides: parent service id if no variant; composite key when a variant is chosen. */
@@ -729,6 +795,17 @@ export function AppointmentBookingFlow({
   // submissions + whether every mandatory form is done (gates Confirm) + the type ids
   // (so the pre-check notice suppresses the forms it is already rendering).
   const [bookingCompliance, setBookingCompliance] = useState<BookingComplianceState | null>(null);
+  // The inline compliance forms sit below the contact fields, so a "complete the form" error
+  // raised from the submit button needs to bring them into view.
+  const bookingComplianceRef = useRef<HTMLDivElement | null>(null);
+  // Bumped when the server rejects a booking on compliance, so the block re-resolves and
+  // shows the form the client had not seen.
+  const [complianceRefreshKey, setComplianceRefreshKey] = useState(0);
+  // A submit that arrived while the compliance check for the typed email was still running.
+  // Held here and resumed by the effect below the handlers, so the guest never has to click twice.
+  const [pendingComplianceSubmit, setPendingComplianceSubmit] = useState<
+    { kind: 'single' | 'group'; details: GuestDetails } | null
+  >(null);
 
   const isLockedPractitionerFlow = Boolean(
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
@@ -926,8 +1003,8 @@ export function AppointmentBookingFlow({
     card_hold_consent_text?: string | null;
     /** Staff create requested a card hold, so `payment_url` is a card request link (design doc 7.6). */
     card_hold_requested?: boolean;
-    /** Unmet warn_staff/warn_client requirements flagged at staff booking time (audit M2). */
-    compliance_warnings?: Array<{ compliance_type_name: string }>;
+    /** Unmet requirements flagged at staff booking time (audit M2; staff are never blocked, plan §5). */
+    compliance_warnings?: StaffComplianceWarning[];
   } | null>(null);
   /** Server-verified payment outcome (plan Phase 5): drives honest confirmation copy. */
   const [paymentOutcome, setPaymentOutcome] = useState<ConfirmOutcome | null>(null);
@@ -976,6 +1053,8 @@ export function AppointmentBookingFlow({
     payment_mode?: CardHoldPaymentMode;
     card_hold_fee_pence?: number | null;
     card_hold_consent_text?: string | null;
+    /** Unmet requirements flagged at staff booking time (staff are never blocked, plan §5). */
+    compliance_warnings?: StaffComplianceWarning[];
   } | null>(null);
 
   /**
@@ -2043,6 +2122,44 @@ export function AppointmentBookingFlow({
   }, [catalogStaff, selectedServiceId, isCombined, selectedPractitionerId]);
   const serviceHasAddons = addonGroupsForSelectedService.length > 0;
   /**
+   * The add-ons chosen for the primary service, priced from the same groups the
+   * add-on step offered (practitioner-scoped on a combined page, like the groups
+   * above). Every price shown after the add-on step has to include this: the
+   * practitioner cards, the banner over them and the single-booking summary were
+   * all quoting the service alone, so a guest who had just added a paid
+   * treatment was told the visit cost less than it did.
+   */
+  const selectedAddonSummary = useMemo<ReturnType<typeof addonSelectionDetails>>(
+    () =>
+      selectedServiceId
+        ? addonSelectionDetails(
+            catalogStaff,
+            selectedServiceId,
+            selectedAddonIds,
+            isCombined ? selectedPractitionerId : undefined,
+          )
+        : { filteredIds: [], totalPence: 0, totalMinutes: 0, lines: [] },
+    [catalogStaff, selectedServiceId, selectedAddonIds, isCombined, selectedPractitionerId],
+  );
+  const groupSelectedAddonSummary = useMemo<ReturnType<typeof addonSelectionDetails>>(
+    () =>
+      groupServiceId
+        ? addonSelectionDetails(catalogStaff, groupServiceId, groupSelectedAddonIds)
+        : { filteredIds: [], totalPence: 0, totalMinutes: 0, lines: [] },
+    [catalogStaff, groupServiceId, groupSelectedAddonIds],
+  );
+  /**
+   * A service price with the chosen add-ons on top. An unset service price still
+   * reads as unset (which formats as Free) unless paid add-ons were chosen, in
+   * which case the add-ons are the price.
+   */
+  const priceWithAddons = (pence: number | null | undefined, addonPence: number): number | null =>
+    addonPence > 0 ? (pence ?? 0) + addonPence : pence ?? null;
+  const priceWithSelectedAddons = (pence: number | null | undefined) =>
+    priceWithAddons(pence, selectedAddonSummary.totalPence);
+  const addonCountSuffix = (count: number) =>
+    count > 0 ? ` incl. ${count} add-on${count === 1 ? '' : 's'}` : '';
+  /**
    * Combined page: "any available" is only safe when an offering's calendars share the
    * same options (the merged catalog marks this per offering). Otherwise the customer
    * must pick a specific calendar to reach its variants/add-ons.
@@ -2560,8 +2677,13 @@ export function AppointmentBookingFlow({
       }
       // Block until every mandatory inline compliance form is completed (Phase 2c). The
       // server also re-checks, so this is a friendly guard, not the security boundary.
+      if (isPublicGuest && bookingCompliance?.resolving) {
+        setPendingComplianceSubmit({ kind: 'single', details });
+        return;
+      }
       if (isPublicGuest && bookingCompliance && !bookingCompliance.mandatoryComplete) {
-        setError('Please complete the required form(s) above before booking.');
+        setError('Please complete the required form(s) before booking.');
+        bookingComplianceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
       const complianceCreateFields =
@@ -2633,6 +2755,10 @@ export function AppointmentBookingFlow({
           const data = await res.json();
           if (!res.ok) {
             setError(publicCreateErrorMessage(res, data));
+            if ((data as { error?: unknown } | null)?.error === COMPLIANCE_REQUIREMENT_UNMET) {
+              setComplianceRefreshKey((k) => k + 1);
+              bookingComplianceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
             return;
           }
           const ids = data.booking_ids as string[] | undefined;
@@ -2650,6 +2776,7 @@ export function AppointmentBookingFlow({
             payment_mode: data.payment_mode,
             card_hold_fee_pence: data.card_hold_fee_pence ?? null,
             card_hold_consent_text: data.card_hold_consent_text ?? null,
+            compliance_warnings: Array.isArray(data.compliance_warnings) ? data.compliance_warnings : undefined,
           });
           const needsStripe = Boolean(data.requires_deposit && data.client_secret);
           setStep(needsStripe ? 'payment' : 'confirmation');
@@ -2772,6 +2899,10 @@ export function AppointmentBookingFlow({
         const data = await res.json();
         if (!res.ok) {
           setError(publicCreateErrorMessage(res, data));
+          if ((data as { error?: unknown } | null)?.error === COMPLIANCE_REQUIREMENT_UNMET) {
+            setComplianceRefreshKey((k) => k + 1);
+            bookingComplianceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
           return;
         }
         setCreateResult({
@@ -2972,8 +3103,13 @@ export function AppointmentBookingFlow({
       }
     }
     // Gate on mandatory inline compliance forms (the server re-checks; this is a friendly guard).
+    if (isPublicGuest && bookingCompliance?.resolving) {
+      setPendingComplianceSubmit({ kind: 'group', details });
+      return;
+    }
     if (isPublicGuest && bookingCompliance && !bookingCompliance.mandatoryComplete) {
-      setError('Please complete the required form(s) above before booking.');
+      setError('Please complete the required form(s) before booking.');
+      bookingComplianceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
     const complianceCreateFields =
@@ -3027,6 +3163,10 @@ export function AppointmentBookingFlow({
             ? publicCreateErrorMessage(res, data)
             : (data.message ?? data.error ?? 'Group booking failed'),
         );
+        if (isPublicGuest && (data as { error?: unknown } | null)?.error === COMPLIANCE_REQUIREMENT_UNMET) {
+          setComplianceRefreshKey((k) => k + 1);
+          bookingComplianceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
         return;
       }
       setGroupCreateResult({
@@ -3040,6 +3180,7 @@ export function AppointmentBookingFlow({
         payment_mode: data.payment_mode,
         card_hold_fee_pence: data.card_hold_fee_pence ?? null,
         card_hold_consent_text: data.card_hold_consent_text ?? null,
+        compliance_warnings: Array.isArray(data.compliance_warnings) ? data.compliance_warnings : undefined,
       });
       const needsStripe = Boolean(data.requires_deposit && data.client_secret);
       setStep(needsStripe ? 'group_payment' : 'group_confirmation');
@@ -3049,6 +3190,18 @@ export function AppointmentBookingFlow({
       setSubmitting(false);
     }
   }, [venue.id, groupPeople, refundNoticeHours, isStaff, staffBookingSource, isStaffWalkInAppointment, staffRequireDeposit, staffRequireCardHold, isPublicGuest, accountGate, publicCreateErrorMessage, bookingCompliance]);
+
+  // Resume a submit that was held while the compliance check ran (see the guards above).
+  const complianceResolving = bookingCompliance?.resolving ?? false;
+  useEffect(() => {
+    if (!pendingComplianceSubmit || complianceResolving) return;
+    const { kind, details } = pendingComplianceSubmit;
+    queueMicrotask(() => {
+      setPendingComplianceSubmit(null);
+      if (kind === 'single') void handleDetailsSubmit(details);
+      else void handleGroupDetailsSubmit(details);
+    });
+  }, [pendingComplianceSubmit, complianceResolving, handleDetailsSubmit, handleGroupDetailsSubmit]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
@@ -3614,11 +3767,14 @@ export function AppointmentBookingFlow({
                 return (
                   <div key={svc.id} className="relative">
                     <div className="flex w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
-                      <div className="min-w-0 flex-1">
+                      {/* Shell/target split (see `choiceCardShellClass`): the button's stretched
+                          target covers this whole column, description included, while the custom
+                          duration box and price button sit outside it as their own controls. */}
+                      <div className="ap-card-shell min-w-0 flex-1 transition-colors hover:bg-slate-50/60">
                         <button
                           type="button"
                           onClick={navigateFromServiceRow}
-                          className="w-full px-4 py-3.5 text-left transition-colors hover:bg-slate-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+                          className="ap-card-stretch w-full px-4 py-3.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
                         >
                           <div className="font-medium text-slate-900">{svc.name}</div>
                           {serviceHasVariants ? (
@@ -4243,7 +4399,7 @@ export function AppointmentBookingFlow({
           {selectedService && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
               <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {serviceSelectionDurationMinutes ?? selectedService.duration_minutes} min &middot; {selectedVariant ? formatPrice(selectedVariant.price_pence) : formatFromPrice(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence)}</span></div>
+              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {(serviceSelectionDurationMinutes ?? selectedService.duration_minutes) + selectedAddonSummary.totalMinutes} min &middot; {selectedVariant ? formatPrice(priceWithSelectedAddons(selectedVariant.price_pence)) : formatFromPrice(priceWithSelectedAddons(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence))}{addonCountSuffix(selectedAddonSummary.lines.length)}</span></div>
             </div>
           )}
           {anyRouteActive ? (
@@ -4255,7 +4411,7 @@ export function AppointmentBookingFlow({
           <p className="mb-4 text-sm text-slate-500">
             {isEdit
               ? `Choose the ${terms.staff.toLowerCase()} for your changed appointment.`
-              : `Choose your preferred ${terms.staff.toLowerCase()}. Prices shown are what they charge for this service.`}
+              : `Choose your preferred ${terms.staff.toLowerCase()}. Prices shown are what they charge for this service${selectedAddonSummary.lines.length > 0 ? ', including your add-ons' : ''}.`}
           </p>
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />)}</div>
@@ -4340,7 +4496,7 @@ export function AppointmentBookingFlow({
                         <div className="font-medium text-slate-900">{prac.name}</div>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-2">
-                        <span className={APPOINTMENT_PUBLIC_PRICE}>{formatPrice(offer?.price_pence ?? null)}</span>
+                        <span className={APPOINTMENT_PUBLIC_PRICE}>{formatPrice(priceWithSelectedAddons(offer?.price_pence))}</span>
                         <svg className={APPOINTMENT_PUBLIC_CHEVRON_SM} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                       </div>
                     </div>
@@ -4818,13 +4974,33 @@ export function AppointmentBookingFlow({
                 {effectiveOfferForBooking?.duration_minutes != null && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Duration</span>
-                    <span className="font-medium text-slate-900">{effectiveOfferForBooking.duration_minutes} min</span>
+                    <span className="font-medium text-slate-900">{effectiveOfferForBooking.duration_minutes + selectedAddonSummary.totalMinutes} min</span>
                   </div>
                 )}
                 {effectiveOfferForBooking?.price_pence != null && (
                   <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
-                    <span className="font-medium text-slate-700">Price</span>
+                    <span className="font-medium text-slate-700">{selectedAddonSummary.lines.length > 0 ? 'Service' : 'Price'}</span>
                     <span className="font-semibold text-brand-600">{formatPrice(effectiveOfferForBooking.price_pence)}</span>
+                  </div>
+                )}
+                {/* The chosen add-ons, each priced, then the total they make with the service. */}
+                {selectedAddonSummary.lines.map((line) => (
+                  <div key={line.id} className="flex justify-between pl-3 text-xs">
+                    <span className="min-w-0 truncate text-slate-500">
+                      + {line.name}
+                      {line.durationMinutes > 0 ? ` (+${line.durationMinutes} min)` : ''}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-slate-700">
+                      {line.pricePence > 0 ? `+${sym}${(line.pricePence / 100).toFixed(2)}` : 'Free'}
+                    </span>
+                  </div>
+                ))}
+                {selectedAddonSummary.lines.length > 0 && (
+                  <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
+                    <span className="font-medium text-slate-700">Total</span>
+                    <span className="font-semibold text-brand-600">
+                      {formatPrice(priceWithSelectedAddons(effectiveOfferForBooking?.price_pence))}
+                    </span>
                   </div>
                 )}
                 {(() => {
@@ -4841,12 +5017,16 @@ export function AppointmentBookingFlow({
                       </p>
                     );
                   }
+                  // Full payment charges the add-ons too; a deposit does not. The same
+                  // rule the segment builder applies when the booking is created.
+                  const amountPence =
+                    o.amountPence + (o.chargeLabel === 'full_payment' ? selectedAddonSummary.totalPence : 0);
                   return (
                     <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
                       <span className="font-medium text-slate-700">
                         {o.chargeLabel === 'full_payment' ? 'Pay now' : 'Deposit'}
                       </span>
-                      <span className="font-semibold text-amber-700">{formatPrice(o.amountPence)}</span>
+                      <span className="font-semibold text-amber-700">{formatPrice(amountPence)}</span>
                     </div>
                   );
                 })()}
@@ -4931,21 +5111,6 @@ export function AppointmentBookingFlow({
             <BookingSubmittingPanel variant="appointment" />
           ) : (
             <>
-              {isPublicGuest && (
-                <BookingComplianceBlock
-                  venueId={venue.id}
-                  serviceIds={
-                    multiServiceSegments && multiServiceSegments.length > 0
-                      ? multiServiceSegments.map((s) => s.serviceId)
-                      : selectedServiceId
-                        ? [selectedServiceId]
-                        : []
-                  }
-                  email={precheckEmail}
-                  submittingBooking={submitting}
-                  onChange={setBookingCompliance}
-                />
-              )}
             <DetailsStep
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
               date={date}
@@ -4981,6 +5146,32 @@ export function AppointmentBookingFlow({
               initialAppointmentComments={editBooking ? undefined : staffRebookBootstrap?.appointmentComments}
               hideAppointmentRequestField={isEdit}
               submitLabel={isEdit ? 'Save changes' : undefined}
+              beforeFooter={
+                isPublicGuest ? (
+                  <div ref={bookingComplianceRef}>
+                    <BookingComplianceBlock
+                      venueId={venue.id}
+                      serviceIds={
+                        multiServiceSegments && multiServiceSegments.length > 0
+                          ? multiServiceSegments.map((s) => s.serviceId)
+                          : selectedServiceId
+                            ? [selectedServiceId]
+                            : []
+                      }
+                      email={precheckEmail}
+                      bookingDate={date}
+                      bookingTime={
+                        multiServiceSegments && multiServiceSegments.length > 0
+                          ? (multiServiceSegments[0]?.startTime ?? selectedTime)
+                          : selectedTime
+                      }
+                      refreshKey={complianceRefreshKey}
+                      submittingBooking={submitting}
+                      onChange={setBookingCompliance}
+                    />
+                  </div>
+                ) : undefined
+              }
               {...publicDetailsFieldProps}
             />
             </>
@@ -5104,16 +5295,11 @@ export function AppointmentBookingFlow({
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
             </p>
           ) : null}
-          {isStaff && createResult?.compliance_warnings && createResult.compliance_warnings.length > 0 ? (
-            <div className="mt-4 max-w-sm mx-auto rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
-              <p className="text-xs font-semibold text-amber-900">Outstanding compliance forms</p>
-              <p className="mt-0.5 text-xs text-amber-800">
-                The booking is made, but{' '}
-                {createResult.compliance_warnings.map((w) => w.compliance_type_name).join(', ')}{' '}
-                {createResult.compliance_warnings.length === 1 ? 'is' : 'are'} not on file yet. Collect the record or
-                send the form before the appointment.
-              </p>
-            </div>
+          {isStaff ? (
+            <StaffComplianceWarningsCard
+              warnings={createResult?.compliance_warnings}
+              bookingId={createResult?.booking_id}
+            />
           ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
           {bookAnotherButton}
@@ -5708,7 +5894,7 @@ export function AppointmentBookingFlow({
                         <div className="font-medium text-slate-900">{prac.name}</div>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold text-brand-600">{formatPrice(offer?.price_pence ?? null)}</span>
+                        <span className="text-sm font-semibold text-brand-600">{formatPrice(priceWithAddons(offer?.price_pence, groupSelectedAddonSummary.totalPence))}</span>
                         <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                       </div>
                     </div>
@@ -5824,15 +6010,6 @@ export function AppointmentBookingFlow({
             <BookingSubmittingPanel variant="appointment" />
           ) : (
             <>
-              {isPublicGuest && (
-                <BookingComplianceBlock
-                  venueId={venue.id}
-                  serviceIds={groupPeople.map((p) => p.serviceId)}
-                  email={precheckEmail}
-                  submittingBooking={submitting}
-                  onChange={setBookingCompliance}
-                />
-              )}
               {isStaff && (() => {
                 /**
                  * The group flow had no charge control of any kind. One decision
@@ -5901,6 +6078,22 @@ export function AppointmentBookingFlow({
                 initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
                 emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
                 onEmailChange={isPublicGuest ? setPrecheckEmail : undefined}
+                beforeFooter={
+                  isPublicGuest ? (
+                    <div ref={bookingComplianceRef}>
+                      <BookingComplianceBlock
+                        venueId={venue.id}
+                        serviceIds={groupPeople.map((p) => p.serviceId)}
+                        email={precheckEmail}
+                        bookingDate={earliestGroupSlot(groupPeople).date}
+                        bookingTime={earliestGroupSlot(groupPeople).time}
+                        refreshKey={complianceRefreshKey}
+                        submittingBooking={submitting}
+                        onChange={setBookingCompliance}
+                      />
+                    </div>
+                  ) : undefined
+                }
                 {...publicDetailsFieldProps}
               />
             </>
@@ -5980,6 +6173,12 @@ export function AppointmentBookingFlow({
             <p className="mt-4 max-w-md mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change these appointments at any time before they start (subject to the venue&apos;s terms).
             </p>
+          ) : null}
+          {isStaff ? (
+            <StaffComplianceWarningsCard
+              warnings={groupCreateResult?.compliance_warnings}
+              bookingId={groupCreateResult?.booking_ids?.[0]}
+            />
           ) : null}
           {isStaff ? <StaffBookingConfirmationFooter onDone={acknowledgeStaffBooking} /> : null}
           {bookAnotherButton}

@@ -6,7 +6,7 @@ export const troubleshootingCategory: HelpCategory = {
   slug: 'troubleshooting',
   title: 'Troubleshooting',
   description:
-    'Stripe Connect, SMS, availability, CSV imports, and access problems. What differs by Appointments vs Restaurant plans.',
+    'Stripe Connect, SMS, availability, CSV imports, and access problems.',
   plan: 'all',
   articles: [
     {
@@ -39,7 +39,7 @@ Connect the **venue** that should receive funds. Changing entity later means goi
 
 These are separate:
 
-- **Settings → Plan** is your **ResNeo** subscription (Light, Plus, Pro, Restaurant, Founding Partner). If that is **past due** or fully ended, **dashboard writes** can be blocked and **public online booking** may be paused depending on tier (see the availability troubleshooting article).
+- **Settings → Plan** is your **ResNeo** subscription (Light, Plus, Pro). If that is **past due** or fully ended, **dashboard writes** can be blocked and **public online booking** may be paused depending on tier (see the availability troubleshooting article).
 - **Settings → Payments** is **Connect** for **guest** card charges.
 
 Fix the side that matches the banner you see, then retest guest payment in a clean browser session.
@@ -119,7 +119,7 @@ On **Appointments Light**, if Stripe shows **no** subscription yet, Communicatio
 
 ## 4. Included bundles and overage
 
-**Light**, **Plus**, and **Pro** (and Restaurant tiers) use included monthly segments with metered **overage** billed per segment at **£0.06** beyond the bundle unless you are on complimentary access (then sends stop at the allowance).
+**Light**, **Plus**, and **Pro** use included monthly segments with metered **overage** billed per segment at **£0.06** beyond the bundle unless you are on complimentary access (then sends stop at the allowance).
 
 ## 5. Read the booking timeline
 
@@ -177,7 +177,7 @@ Restaurant tiers use the bundled SMS model with **£0.06** overage per segment b
 
 ## Light banner does not apply
 
-The **Appointments Light** “add a card before SMS” banner only appears for venues on that tier. Standard **Restaurant** and **Founding** tiers will not see that exact banner.
+The **Appointments Light** “add a card before SMS” banner only appears for venues on that tier.
 
 ## Phone numbers and templates
 
@@ -214,7 +214,7 @@ Long **buffers**, long **durations**, or **variant** rules can remove most appar
 
 ## Closures and exceptions
 
-**Settings → Business hours → Closures & special days** edits venue wide blocks. Restaurant tiers can add **Reduced capacity** for table bookings. Always check the test date for overlapping blocks.
+**Settings → Business hours → Closures & special days** edits venue wide blocks. Always check the test date for overlapping blocks.
 
 ## Dining tables need the service engine
 
@@ -267,7 +267,6 @@ If the browser network tab shows **403** with **Online booking is temporarily un
 
 ## Hybrid venues (tables plus schedule)
 
-If your venue also enables table booking, you may need **Dining Availability** in addition to calendar tools. See Restaurant troubleshooting for the dining service engine message.
 `.trim(),
       markdownRestaurant: `
 # Slots not showing (Restaurant and Founding Partner)

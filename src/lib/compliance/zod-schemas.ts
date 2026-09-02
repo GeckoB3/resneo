@@ -5,6 +5,7 @@ import {
   COMPLIANCE_ENFORCEMENT_LEVELS,
   COMPLIANCE_CAPTURE_CHANNELS,
   COMPLIANCE_ONLINE_COLLECTION_MODES,
+  COMPLIANCE_REQUIREMENT_SCOPES,
 } from '@/lib/compliance/constants';
 import { COMPLIANCE_RESULT_TYPES } from '@/lib/compliance/form-schema';
 
@@ -62,14 +63,25 @@ export type ComplianceTypeVersionCreateInput = z.infer<typeof complianceTypeVers
 
 const lockPeriodHoursSchema = z.number().int().min(0).max(8760).nullable();
 
-/** `service_id` is the booked-service row id; the API resolves the polymorphic column by venue type. */
-export const complianceRequirementCreateSchema = z.object({
-  service_id: z.string().uuid(),
-  compliance_type_id: z.string().uuid(),
-  enforcement: z.enum(COMPLIANCE_ENFORCEMENT_LEVELS),
-  lock_period_hours: lockPeriodHoursSchema.optional(),
-  online_collection: z.enum(COMPLIANCE_ONLINE_COLLECTION_MODES).optional(),
-});
+/**
+ * `service_id` is the booked-service row id; the API resolves the polymorphic column by
+ * venue type. `scope: 'venue'` (plan §4) needs no service: the type is then required on
+ * every appointment booking.
+ */
+export const complianceRequirementCreateSchema = z
+  .object({
+    scope: z.enum(COMPLIANCE_REQUIREMENT_SCOPES).default('service'),
+    service_id: z.string().uuid().optional(),
+    compliance_type_id: z.string().uuid(),
+    enforcement: z.enum(COMPLIANCE_ENFORCEMENT_LEVELS),
+    lock_period_hours: lockPeriodHoursSchema.optional(),
+    online_collection: z.enum(COMPLIANCE_ONLINE_COLLECTION_MODES).optional(),
+  })
+  .superRefine((d, ctx) => {
+    if (d.scope === 'service' && !d.service_id) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['service_id'], message: 'service_id is required' });
+    }
+  });
 export type ComplianceRequirementCreateInput = z.infer<typeof complianceRequirementCreateSchema>;
 
 export const complianceRequirementPatchSchema = z
@@ -86,6 +98,8 @@ export type ComplianceRequirementPatchInput = z.infer<typeof complianceRequireme
 /** One compliance form a guest completed inline while booking (spec §9.3, Phase 2b). */
 export const complianceBookingSubmissionSchema = z.object({
   compliance_type_id: z.string().uuid(),
+  /** The form version the guest was shown (plan §3.5); optional for older clients. */
+  version_id: z.string().uuid().optional(),
   responses: z.record(z.string(), z.unknown()),
 });
 export type ComplianceBookingSubmissionInput = z.infer<typeof complianceBookingSubmissionSchema>;

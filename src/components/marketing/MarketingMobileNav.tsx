@@ -146,7 +146,7 @@ export function MarketingMobileNav({
   }, [open]);
 
   const linkClass =
-    'flex min-h-12 items-center rounded-xl px-4 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 aria-[current=page]:bg-brand-50 aria-[current=page]:text-brand-700 aria-[current=true]:bg-brand-50 aria-[current=true]:text-brand-700';
+    'flex min-h-12 items-center rounded-full px-4 text-base font-bold text-slate-700 transition-colors hover:bg-white hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 aria-[current=page]:bg-white aria-[current=page]:text-brand-700 aria-[current=true]:bg-white aria-[current=true]:text-brand-700';
 
   const primary = extraLink ? [...MARKETING_NAV_ITEMS, extraLink] : MARKETING_NAV_ITEMS;
 
@@ -186,7 +186,7 @@ export function MarketingMobileNav({
         aria-controls={panelId}
         aria-label={open ? 'Close menu' : 'Open menu'}
         onClick={() => setOpen((v) => !v)}
-        className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+        className="grid h-11 w-11 place-items-center rounded-full border border-[#E8E4DC] bg-white text-slate-700 transition-colors hover:bg-brand-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
       >
         <svg
           className="h-5 w-5"
@@ -231,7 +231,7 @@ export function MarketingMobileNav({
         ref={panelRef}
         id={panelId}
         hidden={!open}
-        className="absolute left-0 right-0 top-full max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain border-b border-slate-200 bg-white shadow-lg shadow-slate-900/5"
+        className="absolute left-0 right-0 top-full max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain border-b border-[#EEE9E0] bg-[#FDFBF7] shadow-lg shadow-slate-900/5"
       >
         {/* Plain list, not a nav landmark: this sits inside the shared header's
             own nav aria-label="Primary", and nesting a second one duplicates it. */}

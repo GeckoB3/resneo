@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -1121,7 +1120,12 @@ export default function OnboardingPage() {
     }
   }
 
-  async function handleGoLive() {
+  /**
+   * Marks onboarding complete, then navigates. The dashboard layout redirects any
+   * venue with `onboarding_completed = false` back to `/onboarding`, so every link
+   * on the final step must go through here rather than a plain link.
+   */
+  async function handleGoLive(destination: string = '/dashboard') {
     setSaving(true);
     setError(null);
     try {
@@ -1134,7 +1138,7 @@ export default function OnboardingPage() {
         }),
       });
       if (!res.ok) throw new Error('Failed to complete onboarding');
-      router.push('/dashboard');
+      router.push(destination);
     } catch {
       setError('Failed to complete setup. Please try again.');
     } finally {
@@ -1231,20 +1235,11 @@ export default function OnboardingPage() {
             <p className="mb-4 text-sm text-slate-600">
               This setup is only for customer payments. Your <strong className="font-medium text-slate-800">ResNeo subscription</strong>{' '}
               is billed separately. Manage your plan and payment method under{' '}
-              <Link
-                href="/dashboard/settings?tab=plan"
-                className="font-medium text-brand-600 underline hover:text-brand-700"
-              >
-                Settings → Plan &amp; billing
-              </Link>
-              .
+              <span className="font-medium text-slate-700">Settings → Plan &amp; billing</span> once setup is complete.
             </p>
             <p className="mb-4 text-sm text-slate-500">
               Optional: use <span className="font-medium text-slate-700">Continue</span> to skip for now and connect later in{' '}
-              <Link href="/dashboard/settings?tab=payments" className="font-medium text-brand-600 underline hover:text-brand-700">
-                Settings → Payments
-              </Link>
-              .
+              <span className="font-medium text-slate-700">Settings → Payments</span>.
             </p>
             <StripeConnectSection
               stripeAccountId={venue.stripe_connected_account_id ?? null}
@@ -1486,35 +1481,20 @@ export default function OnboardingPage() {
                 Appointments Light is limited to one bookable calendar and one user. Give your calendar a name
                 (usually your name or business name), and you’ll set its working hours next. Need more calendars or
                 team logins? Upgrade under{' '}
-                <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
-                  Settings → Plan
-                </Link>
-                .
+                <span className="font-medium text-slate-700">Settings → Plan</span> once setup is complete.
               </p>
             ) : isPlusPlanTier(venue.pricing_tier) ? (
               <p className="mb-4 text-sm text-slate-500">
                 Add a <strong>calendar column</strong> for each lane on your schedule. Your Appointments
                 Plus plan includes up to <strong>5 calendar columns</strong>. You can add or remove columns
                 any time from{' '}
-                <Link
-                  href="/dashboard/calendar-availability"
-                  className="font-medium text-brand-600 underline hover:text-brand-700"
-                >
-                  Calendar availability
-                </Link>
-                .
+                <span className="font-medium text-slate-700">Calendar availability</span> once setup is complete.
               </p>
             ) : (
               <p className="mb-4 text-sm text-slate-500">
                 Add a <strong>calendar column</strong> for each lane on your schedule. You can add or remove
                 columns any time from{' '}
-                <Link
-                  href="/dashboard/calendar-availability"
-                  className="font-medium text-brand-600 underline hover:text-brand-700"
-                >
-                  Calendar availability
-                </Link>
-                .
+                <span className="font-medium text-slate-700">Calendar availability</span> once setup is complete.
               </p>
             )}
 
@@ -1644,10 +1624,7 @@ export default function OnboardingPage() {
                 <p className="mt-1 text-center text-xs text-slate-500">
                   You&apos;ve reached the {calendarPlanLimit}-calendar limit on your Appointments Plus
                   plan. Remove one above to add a different calendar, or upgrade from{' '}
-                  <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
-                    Settings → Plan
-                  </Link>
-                  .
+                  <span className="font-medium text-slate-700">Settings → Plan</span> once setup is complete.
                 </p>
               )}
             </div>
@@ -1696,13 +1673,7 @@ export default function OnboardingPage() {
               </div>
               <p className="mt-3 text-xs text-slate-500">
                 Breaks, day-off, and date-specific closures can be added from{' '}
-                <Link
-                  href="/dashboard/calendar-availability"
-                  className="font-medium text-brand-600 underline hover:text-brand-700"
-                >
-                  Calendar availability
-                </Link>{' '}
-                any time.
+                <span className="font-medium text-slate-700">Calendar availability</span> any time after setup.
               </p>
             </div>
             {!isAppointmentsPlanVenue && (
@@ -1859,22 +1830,37 @@ export default function OnboardingPage() {
                 <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
                   {previewMissing && (
                     <li>
-                      <Link href={previewMissing.href} className="font-medium text-brand-600 underline hover:text-brand-700">
+                      <button
+                        type="button"
+                        onClick={() => handleGoLive(previewMissing.href)}
+                        disabled={saving}
+                        className="font-medium text-brand-600 underline hover:text-brand-700 disabled:opacity-50"
+                      >
                         {previewMissing.linkLabel}
-                      </Link>
+                      </button>
                       : add your first {previewMissing.noun}
                     </li>
                   )}
                   <li>
-                    <Link href="/dashboard/settings" className="font-medium text-brand-600 underline hover:text-brand-700">
+                    <button
+                      type="button"
+                      onClick={() => handleGoLive('/dashboard/settings?tab=payments')}
+                      disabled={saving}
+                      className="font-medium text-brand-600 underline hover:text-brand-700 disabled:opacity-50"
+                    >
                       Settings
-                    </Link>
+                    </button>
                     : Stripe Connect and venue payment options
                   </li>
                   <li>
-                    <Link href="/dashboard/calendar-availability" className="font-medium text-brand-600 underline hover:text-brand-700">
+                    <button
+                      type="button"
+                      onClick={() => handleGoLive('/dashboard/calendar-availability')}
+                      disabled={saving}
+                      className="font-medium text-brand-600 underline hover:text-brand-700 disabled:opacity-50"
+                    >
                       Calendar availability
-                    </Link>
+                    </button>
                     : breaks, closures, and fine-tune schedules anytime
                   </li>
                 </ul>
@@ -1892,23 +1878,38 @@ export default function OnboardingPage() {
                 <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
                   {enabledSecondaryModels.includes('event_ticket') && (
                     <li>
-                      <Link href="/dashboard/event-manager" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      <button
+                        type="button"
+                        onClick={() => handleGoLive('/dashboard/event-manager')}
+                        disabled={saving}
+                        className="font-medium text-brand-600 underline hover:text-brand-700 disabled:opacity-50"
+                      >
                         Events
-                      </Link>
+                      </button>
                     </li>
                   )}
                   {enabledSecondaryModels.includes('class_session') && (
                     <li>
-                      <Link href="/dashboard/class-timetable" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      <button
+                        type="button"
+                        onClick={() => handleGoLive('/dashboard/class-timetable')}
+                        disabled={saving}
+                        className="font-medium text-brand-600 underline hover:text-brand-700 disabled:opacity-50"
+                      >
                         Classes & timetable
-                      </Link>
+                      </button>
                     </li>
                   )}
                   {enabledSecondaryModels.includes('resource_booking') && (
                     <li>
-                      <Link href="/dashboard/resource-timeline" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      <button
+                        type="button"
+                        onClick={() => handleGoLive('/dashboard/resource-timeline')}
+                        disabled={saving}
+                        className="font-medium text-brand-600 underline hover:text-brand-700 disabled:opacity-50"
+                      >
                         Resources
-                      </Link>
+                      </button>
                     </li>
                   )}
                 </ul>
@@ -1969,7 +1970,7 @@ export default function OnboardingPage() {
             {currentStepKey === 'preview' ? (
               <button
                 type="button"
-                onClick={handleGoLive}
+                onClick={() => handleGoLive()}
                 disabled={saving}
                 className="min-h-11 w-full rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
               >

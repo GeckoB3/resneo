@@ -103,7 +103,7 @@ export function CalendarMock({ className }: { className?: string }) {
   const hours = ['09', '10', '11', '12', '13', '14', '15'];
   return (
     <div
-      className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_30px_70px_-20px_rgba(2,32,71,0.35)] ${className ?? ''}`}
+      className={`overflow-hidden rounded-[28px] border border-[#EEE9E0] bg-white shadow-[0_30px_70px_-20px_rgba(2,32,71,0.35)] ${className ?? ''}`}
     >
       <WindowChrome title="Calendar · Today" live />
       <div className="grid grid-cols-[40px_1fr_1fr_1fr] text-slate-700">
@@ -153,7 +153,7 @@ export function CalendarMock({ className }: { className?: string }) {
 export function BookingConfirmedCard({ className, style }: { className?: string; style?: CSSProperties }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-2xl border border-slate-100 bg-white/95 p-3 shadow-[0_20px_45px_-18px_rgba(2,32,71,0.5)] backdrop-blur ${className ?? ''}`}
+      className={`flex items-center gap-3 rounded-[20px] border border-[#EEE9E0] bg-white/95 p-3 shadow-[0_20px_45px_-18px_rgba(2,32,71,0.5)] backdrop-blur ${className ?? ''}`}
       style={style}
     >
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500 text-white shadow-lg shadow-emerald-500/30">
@@ -173,7 +173,7 @@ export function BookingConfirmedCard({ className, style }: { className?: string;
 export function DepositCard({ className, style }: { className?: string; style?: CSSProperties }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-2xl border border-slate-100 bg-white/95 p-3 shadow-[0_20px_45px_-18px_rgba(2,32,71,0.5)] backdrop-blur ${className ?? ''}`}
+      className={`flex items-center gap-3 rounded-[20px] border border-[#EEE9E0] bg-white/95 p-3 shadow-[0_20px_45px_-18px_rgba(2,32,71,0.5)] backdrop-blur ${className ?? ''}`}
       style={style}
     >
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-600 text-white shadow-lg shadow-brand-600/30">
@@ -194,7 +194,7 @@ export function BookingFlowMock({ className }: { className?: string }) {
   return (
     <div className={`flex items-center gap-1.5 sm:gap-2 ${className ?? ''}`}>
       {/* Step 1 */}
-      <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
+      <div className="min-w-0 flex-1 rounded-2xl border border-[#EEE9E0] bg-white p-2.5 shadow-sm sm:p-3">
         <div className="flex items-center gap-2">
           <span className="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">1</span>
           <p className="text-[11px] font-bold text-slate-800">Choose service</p>
@@ -206,7 +206,7 @@ export function BookingFlowMock({ className }: { className?: string }) {
       </div>
       <Arrow />
       {/* Step 2 */}
-      <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
+      <div className="min-w-0 flex-1 rounded-2xl border border-[#EEE9E0] bg-white p-2.5 shadow-sm sm:p-3">
         <div className="flex items-center gap-2">
           <span className="grid h-5 w-5 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">2</span>
           <p className="text-[11px] font-bold text-slate-800">Pick a time</p>
@@ -220,7 +220,7 @@ export function BookingFlowMock({ className }: { className?: string }) {
       </div>
       <Arrow />
       {/* Step 3 */}
-      <div className="min-w-0 flex-1 rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-center shadow-sm sm:p-3">
+      <div className="min-w-0 flex-1 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-center shadow-sm sm:p-3">
         <span className="mx-auto grid h-8 w-8 place-items-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="m5 13 4 4L19 7" />

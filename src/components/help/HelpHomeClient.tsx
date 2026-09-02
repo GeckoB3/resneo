@@ -4,20 +4,18 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import type { HelpAudienceContext } from '@/lib/help/help-audience-context';
 import type { HelpCategory, HelpPlanFilter } from '@/lib/help/types';
-import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { HelpCategoryCard } from '@/components/help/HelpCategoryCard';
 
 type Filter = 'all' | HelpPlanFilter;
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All topics' },
-  { id: 'restaurant', label: 'Restaurant' },
   { id: 'appointments', label: 'Appointments' },
 ];
 
 function defaultTopicFilter(ctx: HelpAudienceContext): Filter {
   if (ctx.mode === 'anonymous') return 'all';
-  if (isRestaurantTableProductTier(ctx.pricingTier)) return 'restaurant';
   if (isAppointmentPlanTier(ctx.pricingTier)) return 'appointments';
   return 'all';
 }
@@ -44,8 +42,8 @@ export function HelpHomeClient({
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">How can we help?</h1>
         <p className="mt-2 max-w-2xl text-base text-slate-600">
-          Step-by-step guides for running your venue on ResNeo: dashboard basics, restaurant tables and dining
-          setup, appointment calendars and services, settings, billing, and fixes for common problems.
+          Step-by-step guides for running your venue on ResNeo: dashboard basics, your booking page,
+          appointment calendars and services, settings, billing, and fixes for common problems.
         </p>
         {audienceContext.mode === 'venue' ? (
           <p className="mt-3 max-w-2xl text-sm text-slate-600">

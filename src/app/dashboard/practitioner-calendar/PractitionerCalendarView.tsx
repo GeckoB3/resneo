@@ -8117,7 +8117,7 @@ export function PractitionerCalendarView({
                           >
                             {(handle) => (
                               <div
-                                className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
+                                className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse' : ''
                                 }`}
                                 style={bookingCalendarBlockCardStyle(clusterPalette, {
@@ -8128,6 +8128,42 @@ export function PractitionerCalendarView({
                                 {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >
                                 <CalendarBookingStatusStripe palette={clusterPalette} />
+                                {/*
+                                  Processing strips for every segment, painted at bar level
+                                  the way a single booking's is. They used to live inside
+                                  each segment, and the segment stack sits to the RIGHT of
+                                  the move grip, so every strip started where the grip
+                                  ended and its left edge looked cut off. Here they span the
+                                  full bar and show through the transparent grip. Each one
+                                  is placed by the same `flex: dur` proportions the segments
+                                  are laid out by, so it lines up with its segment exactly.
+                                */}
+                                <div className="pointer-events-none absolute inset-0 z-0" aria-hidden>
+                                  {(() => {
+                                    const durs = items.map(segmentDurationOf);
+                                    const total = durs.reduce((a, d) => a + d, 0);
+                                    if (total <= 0) return null;
+                                    let before = 0;
+                                    return items.map((b, segIdx) => {
+                                      const dur = durs[segIdx]!;
+                                      const topPct = (before / total) * 100;
+                                      before += dur;
+                                      return (
+                                        <div
+                                          key={b.id}
+                                          className="absolute inset-x-0"
+                                          style={{ top: `${topPct}%`, height: `${(dur / total) * 100}%` }}
+                                        >
+                                          <BookingProcessingStrip
+                                            b={b}
+                                            serviceMap={serviceMapForBooking(b)}
+                                            wallPaintMinutes={dur}
+                                          />
+                                        </div>
+                                      );
+                                    });
+                                  })()}
+                                </div>
                                 {/*
                                   The visit's move grip. This branch used to
                                   discard the shell's drag handle, so a
@@ -8181,22 +8217,19 @@ export function PractitionerCalendarView({
                                     const actionInset = computeBookingActionCornerInset(first, visitBlockH);
                                     return (
                                     <>
-                                      <div
-                                        className="flex min-h-0 min-w-0 flex-1 flex-col"
-                                        /**
-                                         * Horizontal clearance only. The action tray is absolutely
-                                         * positioned in the bottom-right corner, so keeping text
-                                         * out from under it is `paddingRight`'s job. Reserving its
-                                         * full height here as well squeezed EVERY segment: on a
-                                         * 50 minute two-service visit the tray is ~67px of a 160px
-                                         * bar, which left the first segment 48px of the 88px its
-                                         * card had been told it had. Only the last segment sits
-                                         * beside the tray, so only it reserves the height (below).
-                                         */
-                                        style={{
-                                          paddingRight: actionInset.hasActions ? actionInset.right : undefined,
-                                        }}
-                                      >
+                                      {/*
+                                        No `paddingRight` on this stack. The action gutter used
+                                        to be reserved here, which kept the text clear of the
+                                        tray but also narrowed every segment's box by the same
+                                        amount, and each segment paints its own processing strip
+                                        inside that box. The strips therefore stopped 76px short
+                                        of the right edge for the whole height of the bar, while
+                                        the buttons only ever occupy a corner of it. A single
+                                        booking's strip spans the full bar because its gutter is
+                                        on the text button alone; each segment button below now
+                                        does the same.
+                                      */}
+                                      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                                         {items.map((b, segIdx) => {
                                           const dur = segmentDurationOf(b);
                                           const sid = serviceIdForBooking(b);
@@ -8254,18 +8287,20 @@ export function PractitionerCalendarView({
                                                */
                                               style={{ flex: dur }}
                                             >
-                                              <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} wallPaintMinutes={dur} />
                                               <button
                                                 type="button"
                                                 onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
                                                 className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300`}
-                                                // Keeps the bottom segment's last line clear of the
-                                                // action tray it shares a corner with.
-                                                style={
-                                                  segmentTrayReservePx
-                                                    ? { paddingBottom: segmentTrayReservePx }
-                                                    : undefined
-                                                }
+                                                // Horizontal clearance for the bottom-right action
+                                                // tray, on the text button rather than the segment
+                                                // stack so the processing strip behind it can paint
+                                                // the full width. The bottom reserve is the last
+                                                // segment's share of the tray height, when the inset
+                                                // asks for one.
+                                                style={{
+                                                  paddingRight: actionInset.hasActions ? actionInset.right : undefined,
+                                                  paddingBottom: segmentTrayReservePx || undefined,
+                                                }}
                                                 aria-label={`Open booking details for ${b.guest_name}`}
                                               >
                                                 <BookingCard
@@ -8315,7 +8350,10 @@ export function PractitionerCalendarView({
                                       <CalendarBookingRightColumn
                                         b={first}
                                         busy={qBusy}
-                                        blockHeightPx={height}
+                                        // The same height the inset above was planned from, so
+                                        // the tray and the gutter agree during a resize preview
+                                        // as well as at rest.
+                                        blockHeightPx={visitBlockH}
                                         onStatus={(_id, s) => void quickPatchBookingCluster(items, { status: s })}
                                         onArrived={(_id, v) => void quickPatchBookingCluster(items, { client_arrived: v })}
                                         narrow={isOverlapLane}

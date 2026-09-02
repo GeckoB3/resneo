@@ -1,20 +1,18 @@
 import type { HelpArticle, HelpCategory, HelpPlanFilter, HelpSearchDoc } from './types';
 import { stripHelpFigureMarkers } from './split-markdown-figures';
 import { gettingStartedCategory } from './articles/getting-started';
-import { restaurantCategory } from './articles/restaurant';
 import { appointmentsCategory } from './articles/appointments';
 import { settingsCategory } from './articles/settings';
 import { troubleshootingCategory } from './articles/troubleshooting';
 
 /**
- * Drives the order of the help home cards and the sidebar. Appointments leads
- * the two plan categories: it is the primary product, so Restaurant sits below
- * it rather than above.
+ * Drives the order of the help home cards and the sidebar. Appointments is
+ * the product, so its guides sit directly after Getting started. The Restaurant
+ * plan is no longer sold and its category has been retired.
  */
 export const HELP_CATEGORIES: HelpCategory[] = [
   gettingStartedCategory,
   appointmentsCategory,
-  restaurantCategory,
   settingsCategory,
   troubleshootingCategory,
 ];

@@ -34,7 +34,7 @@ export const ENFORCEMENT_OPTIONS: Array<{ value: string; label: string; descript
     value: 'block_all',
     label: 'Block all bookings',
     description:
-      'No one can book this service until a valid record is on file, online or from the dashboard. An admin can override when booking from the dashboard.',
+      'Clients cannot book this service online until a valid record is on file. Your team can still book it from the dashboard, and sees a red reminder that the venue requires the record before the appointment.',
   },
 ];
 
@@ -140,6 +140,8 @@ export interface ComplianceTypeSummary {
 
 export interface RequirementRowData {
   id: string;
+  /** `venue` rows apply to every appointment booking (plan §4). */
+  scope?: 'service' | 'venue';
   compliance_type_id: string;
   enforcement: string;
   lock_period_hours: number | null;

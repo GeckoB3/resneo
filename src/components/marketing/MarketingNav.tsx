@@ -64,12 +64,12 @@ export function MarketingNav({
   // lg:inline-flex`, and an unprefixed `inline-flex` here would out-cascade the
   // unprefixed `hidden` and leak that link onto every width.
   const linkClass =
-    "min-h-11 items-center whitespace-nowrap text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-600 aria-[current=page]:font-semibold aria-[current=page]:text-brand-700 aria-[current=true]:font-semibold aria-[current=true]:text-brand-700";
+    "min-h-10 items-center whitespace-nowrap rounded-full px-3.5 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 aria-[current=page]:bg-brand-50 aria-[current=page]:text-brand-700 aria-[current=true]:bg-brand-50 aria-[current=true]:text-brand-700";
 
   return (
     <nav
       aria-label="Primary"
-      className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/80 backdrop-blur-xl"
+      className="sticky top-0 z-50 border-b border-[#EEE9E0] bg-[#FDFBF7]/85 backdrop-blur-xl"
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3.5">
         <Link
@@ -81,7 +81,7 @@ export function MarketingNav({
 
         {/* Four links so the bar still fits at 768px. Everything else stays
             reachable from the mobile panel and the footer. */}
-        <div className="hidden items-center gap-6 md:flex lg:gap-8">
+        <div className="hidden items-center gap-0.5 rounded-full border border-[#E8E4DC] bg-white p-1 shadow-[0_6px_20px_rgba(0,59,111,0.06)] md:flex">
           {MARKETING_NAV_ITEMS.map((item) =>
             item.route ? (
               <Link
@@ -113,13 +113,13 @@ export function MarketingNav({
         <div className="flex items-center gap-2 sm:gap-3">
           <Link
             href="/login"
-            className="hidden min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-slate-700 transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 sm:inline-flex"
+            className="hidden min-h-11 items-center rounded-full px-3 text-sm font-bold text-brand-600 transition-colors hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 sm:inline-flex"
           >
             Log in
           </Link>
           <a
             href={ctaHref}
-            className="inline-flex min-h-11 items-center rounded-xl bg-brand-600 px-4 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 hover:shadow-md hover:shadow-brand-600/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+            className="inline-flex min-h-11 items-center rounded-full bg-brand-600 px-5 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(0,59,111,0.22)] transition-all hover:-translate-y-0.5 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
           >
             {/* Short label below lg. It keeps the bar on one line at 320px, and
                 at md it buys back the headroom the four links need when a page

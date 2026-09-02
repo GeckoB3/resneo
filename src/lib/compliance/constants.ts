@@ -65,6 +65,14 @@ export const COMPLIANCE_REQUIREMENT_STATES = [
 export type ComplianceRequirementState = (typeof COMPLIANCE_REQUIREMENT_STATES)[number];
 
 /** Window (days) within which a still-valid record is flagged "expiring soon". */
+/**
+ * Who a requirement row binds to (plan §4, 2026-09-01):
+ *   service — one Model B service (the row carries that service's FK)
+ *   venue   — every Model B booking at the venue (no service FK): intake forms, general consents
+ */
+export const COMPLIANCE_REQUIREMENT_SCOPES = ['service', 'venue'] as const;
+export type ComplianceRequirementScope = (typeof COMPLIANCE_REQUIREMENT_SCOPES)[number];
+
 export const COMPLIANCE_EXPIRING_SOON_DAYS = 30;
 
 /** Structured error code returned when a booking is blocked by an unmet requirement. */

@@ -17,7 +17,7 @@ const SIGNUP = "/#pricing";
 export const metadata: Metadata = {
   title: "Booking Software by Business Type | ResNeo Solutions",
   description:
-    "See how ResNeo works for your trade: salons and barbers, beauty, wellbeing, classes, courts and restaurants. Online booking, deposits, and automated reminders, with no booking commission. Link independent chairs into one booking page and break the link in a click, while everyone keeps their own separate books.",
+    "See how ResNeo works for your trade: salons and barbers, beauty, wellbeing, classes and courts. Online booking, deposits, and automated reminders, with no booking commission. Link independent chairs into one booking page and break the link in a click, while everyone keeps their own separate books.",
   keywords: [
     "booking software solutions",
     "booking system by business type",
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "ResNeo Solutions: Booking Software for Your Business",
     description:
-      "Booking software tailored to your business type: salons, barbers, beauty, wellbeing, classes, courts and restaurants. Cut no-shows, fill your diary, lose the admin, and link independent chairs while keeping separate books.",
+      "Booking software tailored to your business type: salons, barbers, beauty, wellbeing, classes and courts. Cut no-shows, fill your diary, lose the admin, and link independent chairs while keeping separate books.",
     url: PAGE_PATH,
     type: "website",
   },
@@ -54,7 +54,7 @@ type Vertical = {
   /** Three concrete capabilities, each mirrored on the linked page. */
   highlights: [string, string, string];
   icon: (props: { className?: string }) => ReactNode;
-  /** Brand-palette gradient for the icon tile, varied so the grid reads as six distinct trades. */
+  /** Brand-palette gradient for the icon tile, varied so the grid reads as five distinct trades. */
   tile: string;
 };
 
@@ -109,16 +109,6 @@ const verticals: Vertical[] = [
     icon: CourtIcon,
     tile: "from-accent-800 to-brand-800",
   },
-  {
-    name: "Restaurants",
-    short: "Restaurants",
-    blurb:
-      "Table reservations and deposits that protect covers, with a day sheet and a live floor plan to run the room through service.",
-    href: "/restaurant",
-    highlights: ["Table reservations", "Live floor plan", "Day sheet"],
-    icon: TableIcon,
-    tile: "from-brand-700 to-brand-900",
-  },
 ];
 
 /** Capabilities that come with every ResNeo plan, regardless of trade. */
@@ -160,7 +150,7 @@ const capabilities: {
   {
     title: "One platform, every model",
     description:
-      "Appointments, classes, events, resources, and restaurant tables: flip on the booking models you need as you grow.",
+      "Appointments, classes, events, and resources: flip on the booking models you need as you grow.",
     icon: GridIcon,
   },
 ];
@@ -224,7 +214,7 @@ const jsonLd = {
 
 export default function SolutionsHubPage() {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -258,14 +248,6 @@ function Hero() {
             "radial-gradient(circle at 12% 16%, rgba(0,59,111,0.16) 0%, transparent 46%), radial-gradient(circle at 88% 8%, rgba(0,194,199,0.16) 0%, transparent 44%), radial-gradient(circle at 62% 100%, rgba(0,59,111,0.10) 0%, transparent 52%)",
         }}
       />
-      <div
-        className="absolute inset-0 opacity-[0.035]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
       {/* Soft horizon so the hero melts into the card grid below. */}
       <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-white" />
 
@@ -288,13 +270,13 @@ function Hero() {
             </ol>
           </nav>
 
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-accent-700">
             <span className="h-1.5 w-1.5 rounded-full bg-accent-600" />
             Solutions
           </span>
-          <h1 className="mt-5 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+          <h1 className="mt-5 text-4xl font-black leading-[1.05] tracking-tight text-brand-600 sm:text-5xl lg:text-6xl">
             Booking software,{" "}
-            <span className="bg-gradient-to-r from-brand-700 via-brand-600 to-accent-700 bg-clip-text text-transparent">
+            <span className="text-accent-700">
               tuned to your trade.
             </span>
           </h1>
@@ -308,14 +290,14 @@ function Hero() {
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <a
               href={SIGNUP}
-              className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:bg-brand-700 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              className="inline-flex h-12 items-center justify-center rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:bg-brand-700 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
             >
               Start your {SIGNUP_TRIAL_SHORT_LABEL}
               <ArrowRightIcon />
             </a>
             <a
               href="#by-business-type"
-              className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              className="inline-flex h-12 items-center justify-center rounded-full border border-[#EEE9E0] bg-white px-6 text-base font-extrabold text-brand-600 shadow-sm transition-colors hover:border-accent-200 hover:bg-brand-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
             >
               Browse business types
             </a>
@@ -338,7 +320,7 @@ function Hero() {
               <li key={v.href}>
                 <Link
                   href={v.href}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition-all hover:border-brand-300 hover:text-brand-700 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[#EEE9E0] bg-white/90 px-4 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur transition-all hover:border-brand-300 hover:text-brand-700 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
                 >
                   <v.icon className="h-4 w-4 text-brand-600" />
                   {v.short}
@@ -368,7 +350,7 @@ function HeroBookingVisual() {
     <div aria-hidden className="relative mx-auto w-full max-w-sm">
       <div className="absolute -inset-4 rounded-[2.5rem] bg-gradient-to-tr from-brand-200/60 via-white/0 to-accent-200/50 blur-2xl" />
 
-      <div className="relative rounded-[2.25rem] border border-slate-200 bg-slate-900 p-2 shadow-2xl shadow-brand-900/25">
+      <div className="relative rounded-[2.25rem] border border-[#EEE9E0] bg-slate-900 p-2 shadow-2xl shadow-brand-900/25">
         <div className="overflow-hidden rounded-[1.85rem] bg-white">
           {/* Branded header */}
           <div className="bg-gradient-to-br from-brand-600 to-brand-800 px-5 pb-5 pt-4 text-white">
@@ -432,7 +414,7 @@ function HeroBookingVisual() {
           </div>
 
           {/* Deposit + confirm */}
-          <div className="mt-4 border-t border-slate-100 bg-slate-50 px-4 py-3">
+          <div className="mt-4 border-t border-[#EEE9E0] bg-[#FDFBF7] px-4 py-3">
             <div className="flex items-center justify-between text-[11px]">
               <span className="font-semibold text-slate-600">Deposit to confirm</span>
               <span className="font-bold text-slate-900">&pound;15</span>
@@ -464,7 +446,7 @@ function SectionHeading({
   return (
     <div className="max-w-2xl">
       <p className="text-xs font-semibold uppercase tracking-widest text-accent-700">{eyebrow}</p>
-      <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{title}</h2>
+      <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">{title}</h2>
       {children ? (
         <p className="mt-4 text-base leading-relaxed text-slate-600">{children}</p>
       ) : null}
@@ -489,7 +471,7 @@ function VerticalsSection() {
                 // Without this the whole card (icon, blurb, every chip) becomes
                 // one 232-character link name, read out six times over.
                 aria-label={v.name}
-                className="group relative flex w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:border-brand-300 hover:shadow-xl hover:shadow-brand-600/10 motion-safe:hover:-translate-y-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                className="group relative flex w-full flex-col overflow-hidden rounded-[32px] border border-[#EEE9E0] bg-white p-6 shadow-sm transition-all hover:border-brand-300 hover:shadow-xl hover:shadow-brand-600/10 motion-safe:hover:-translate-y-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
               >
                 {/* Brand wash that blooms on hover, kept behind the content. */}
                 <span
@@ -503,7 +485,7 @@ function VerticalsSection() {
                   >
                     <v.icon className="h-7 w-7" />
                   </span>
-                  <span className="mt-1 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-all group-hover:border-brand-300 group-hover:bg-brand-600 group-hover:text-white">
+                  <span className="mt-1 flex h-9 w-9 items-center justify-center rounded-full border border-[#EEE9E0] text-slate-400 transition-all group-hover:border-brand-300 group-hover:bg-brand-600 group-hover:text-white">
                     <svg
                       className="h-4 w-4"
                       fill="none"
@@ -530,11 +512,11 @@ function VerticalsSection() {
 
                 {/* mt-auto pins the chips and the CTA to the card floor, so the
                     six cards line up despite blurbs of different lengths. */}
-                <span className="relative mt-auto flex min-h-[4.5rem] flex-wrap content-start gap-1.5 border-t border-slate-100 pt-4">
+                <span className="relative mt-auto flex min-h-[4.5rem] flex-wrap content-start gap-1.5 border-t border-[#EEE9E0] pt-4">
                   {v.highlights.map((h) => (
                     <span
                       key={h}
-                      className="rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200/70"
+                      className="rounded-full bg-[#FDFBF7] px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200/70"
                     >
                       {h}
                     </span>
@@ -557,13 +539,13 @@ function VerticalsSection() {
 
 function CapabilitiesSection() {
   return (
-    <section className="border-y border-slate-100 bg-slate-50 py-16 sm:py-20">
+    <section className="border-y border-[#EEE9E0] bg-[#FDFBF7] py-16 sm:py-20">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <p className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             On every ResNeo plan
           </p>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+          <h2 className="mt-3 text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
             The same dependable toolkit, whatever you book.
           </h2>
         </div>
@@ -571,9 +553,9 @@ function CapabilitiesSection() {
           {capabilities.map((c) => (
             <div
               key={c.title}
-              className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5 motion-safe:hover:-translate-y-0.5"
+              className="group rounded-[24px] border border-[#EEE9E0] bg-white p-6 shadow-sm transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5 motion-safe:hover:-translate-y-0.5"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 transition-colors group-hover:bg-brand-600 group-hover:text-white">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 transition-colors group-hover:bg-brand-600 group-hover:text-white">
                 <c.icon className="h-5 w-5" />
               </div>
               <h3 className="mt-4 text-base font-bold text-slate-900">{c.title}</h3>
@@ -600,7 +582,7 @@ function LinkBreakBand() {
       />
       <div className="relative mx-auto grid max-w-6xl gap-12 px-6 lg:grid-cols-2 lg:items-center lg:gap-16">
         <div>
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/90 backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-white/90">
             <LinkIcon className="h-3.5 w-3.5" /> Link &amp; break
           </span>
           <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">
@@ -629,14 +611,14 @@ function LinkBreakBand() {
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <a
               href={SIGNUP}
-              className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:bg-brand-50 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              className="inline-flex h-12 items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg transition-all hover:bg-accent-400 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
             >
               Start your {SIGNUP_TRIAL_SHORT_LABEL}
               <ArrowRightIcon />
             </a>
             <Link
               href="/salon-booking-software#linked-accounts"
-              className="inline-flex h-12 items-center justify-center rounded-xl border border-white/30 bg-transparent px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              className="inline-flex h-12 items-center justify-center rounded-full border border-white/30 bg-transparent px-6 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
             >
               See how it works
             </Link>
@@ -644,9 +626,9 @@ function LinkBreakBand() {
         </div>
 
         {/* Separate-books callout card */}
-        <div className="rounded-3xl border border-white/10 bg-white p-7 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-9">
+        <div className="rounded-[32px] border border-white/10 bg-white p-7 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-9">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
+            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
               <ShieldCheckIcon />
             </span>
             <div>
@@ -666,7 +648,7 @@ function LinkBreakBand() {
               { label: "Shared till", value: "Never" },
               { label: "Unlink", value: "One click" },
             ].map((stat) => (
-              <div key={stat.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div key={stat.label} className="rounded-xl border border-[#EEE9E0] bg-[#FDFBF7] p-3">
                 <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
                   {stat.label}
                 </dt>
@@ -695,7 +677,7 @@ function GuidesSection() {
             <Link
               key={g.href}
               href={g.href}
-              className="group block rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:border-brand-300 hover:shadow-lg hover:shadow-brand-600/5 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              className="group block rounded-[24px] border border-[#EEE9E0] bg-white p-6 shadow-sm transition-all hover:border-brand-300 hover:shadow-lg hover:shadow-brand-600/5 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
             >
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{g.meta}</p>
               <h3 className="mt-2 text-lg font-bold text-slate-900 group-hover:text-brand-700">
@@ -731,7 +713,7 @@ function GuidesSection() {
 
 function ComparisonsSection() {
   return (
-    <section className="border-t border-slate-100 bg-slate-50 py-16 sm:py-20">
+    <section className="border-t border-[#EEE9E0] bg-[#FDFBF7] py-16 sm:py-20">
       <div className="mx-auto max-w-4xl px-6">
         <SectionHeading eyebrow="ResNeo vs the alternatives" title="Weighing up your options?">
           An honest look at how ResNeo compares.
@@ -741,7 +723,7 @@ function ComparisonsSection() {
             <Link
               key={c.name}
               href={c.href}
-              className="group flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 transition-colors hover:border-brand-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              className="group flex min-h-14 items-center justify-between gap-4 rounded-[24px] border border-[#EEE9E0] bg-white p-5 transition-colors hover:border-brand-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
             >
               <span className="text-sm font-semibold text-slate-800 sm:text-base">{c.name}</span>
               <span className="inline-flex flex-shrink-0 items-center gap-1.5 text-sm font-semibold text-brand-600">
@@ -775,7 +757,7 @@ function ClosingCta() {
   return (
     <section className="bg-white py-20 sm:py-24">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-6 py-14 text-center text-white shadow-2xl shadow-brand-900/25 sm:px-10 sm:py-16">
+        <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-6 py-14 text-center text-white shadow-2xl shadow-brand-900/25 sm:px-10 sm:py-16">
           <div
             className="absolute inset-0 opacity-40"
             style={{
@@ -794,14 +776,14 @@ function ClosingCta() {
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <a
                 href={SIGNUP}
-                className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:bg-brand-50 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                className="inline-flex h-12 items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg transition-all hover:bg-accent-400 motion-safe:hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
                 Start your {SIGNUP_TRIAL_SHORT_LABEL}
                 <ArrowRightIcon />
               </a>
               <Link
                 href="/#contact"
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-white/30 px-6 text-base font-semibold text-white transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                className="inline-flex h-12 items-center justify-center rounded-full border border-white/30 px-6 text-base font-extrabold text-white transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
                 Talk to us
               </Link>
@@ -1075,21 +1057,3 @@ function CourtIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
-function TableIcon({ className = "h-5 w-5" }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.6}
-      stroke="currentColor"
-      aria-hidden
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6.75 3v6a2.25 2.25 0 0 0 4.5 0V3M9 9v12M17.25 3c-1.243 0-2.25 1.79-2.25 4s1.007 4 2.25 4V3Zm0 0v18"
-      />
-    </svg>
-  );
-}

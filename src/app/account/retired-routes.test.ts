@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import nextConfig from '../../../next.config';
 import { RETIRED_ACCOUNT_ROUTES } from './retired-routes';
+import { RETIRED_MARKETING_ROUTES } from '@/lib/marketing/retired-marketing-routes';
 import { PASSES_TABS, parsePassesTab } from './passes/passes-tabs';
 import { PROFILE_SECTION_ANCHORS } from './profile/page';
 
@@ -20,10 +21,19 @@ import { PROFILE_SECTION_ANCHORS } from './profile/page';
  * `node:path` and this table; the `NextConfig` import is type-only and erases.
  */
 
-async function redirectTable() {
+async function shippedRedirects() {
   const redirects = nextConfig.redirects;
   expect(typeof redirects, 'next.config.ts defines no redirects() block').toBe('function');
   return await redirects!();
+}
+
+/**
+ * The portal's share of the shipped table. Retired marketing pages redirect
+ * from the same config, so the sweep below scopes itself to `/account/`
+ * sources rather than asserting the whole table is the portal's.
+ */
+async function redirectTable() {
+  return (await shippedRedirects()).filter((r) => r.source.startsWith('/account/'));
 }
 
 /** Every path the portal has retired, across P1-5 and P1-3. */
@@ -143,5 +153,25 @@ describe('the retired portal routes', () => {
     expect(table.length).toBe(EXPECTED_SOURCES.length);
     expect(RETIRED_ACCOUNT_ROUTES.length).toBe(EXPECTED_SOURCES.length);
     expect(EXPECTED_SOURCES.length).toBe(9);
+  });
+});
+
+describe('the retired marketing routes', () => {
+  it('ship every retired page as a temporary redirect, and nothing else rides along', async () => {
+    const shipped = await shippedRedirects();
+    const others = shipped.filter((r) => !r.source.startsWith('/account/'));
+    expect(others.map((r) => r.source).sort()).toEqual(
+      RETIRED_MARKETING_ROUTES.map((r) => r.from).sort(),
+    );
+    for (const entry of others) {
+      expect(entry.permanent, `${entry.source} should stay a 307 in case the page returns`).toBe(false);
+    }
+  });
+
+  it('leaves no page behind at a retired path', () => {
+    for (const { from } of RETIRED_MARKETING_ROUTES) {
+      const dir = path.join(process.cwd(), 'src', 'app', from.replace(/^\//, ''));
+      expect(fs.existsSync(dir), `${from} still has a route directory at ${dir}`).toBe(false);
+    }
   });
 });

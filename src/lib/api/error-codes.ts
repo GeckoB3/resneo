@@ -15,7 +15,10 @@
  * THE RULE THAT MATTERS: add `code`, never move a value out of `error`.
  * All three booking create routes return `error: 'COMPLIANCE_REQUIREMENT_UNMET'`
  * and the shipped app matches that exact string in four places to drive its
- * `override_compliance` retry. Tidying it into `code` breaks that flow.
+ * `override_compliance` retry. Tidying it into `code` breaks that flow. (Since
+ * 2026-09-01 staff are never blocked by compliance, so the app no longer sees
+ * that 409 on its own bookings and the retry is dormant; the field it sends is
+ * ignored, not rejected, because the staff schemas strip unknown keys.)
  * Because the app checks `code` first and falls back to prose, new codes can
  * ship on the server before any app release, which is the cheapest upgrade
  * path available.

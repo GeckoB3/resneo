@@ -53,7 +53,7 @@ export function PricingCalculator() {
       <div className="grid gap-8 lg:grid-cols-[380px_1fr] lg:items-start">
         {/* ------------------------------------------------ controls */}
         <form
-          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:sticky lg:top-24"
+          className="rounded-[24px] border border-[#EEE9E0] bg-white p-6 shadow-sm lg:sticky lg:top-24"
           onSubmit={(e) => e.preventDefault()}
           aria-label="Your business"
         >
@@ -117,7 +117,7 @@ export function PricingCalculator() {
             />
           </div>
 
-          <div className="mt-6 space-y-3 border-t border-slate-100 pt-5">
+          <div className="mt-6 space-y-3 border-t border-[#EEE9E0] pt-5">
             <Toggle
               id="marketplace"
               label="Use each platform's marketplace"
@@ -134,7 +134,7 @@ export function PricingCalculator() {
             />
           </div>
 
-          <fieldset className="mt-6 border-t border-slate-100 pt-5">
+          <fieldset className="mt-6 border-t border-[#EEE9E0] pt-5">
             <legend className="text-sm font-semibold text-slate-900">
               Subscriptions we cannot look up
             </legend>
@@ -163,7 +163,7 @@ export function PricingCalculator() {
           <button
             type="button"
             onClick={() => setInputs(DEFAULT_INPUTS)}
-            className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+            className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-full border border-[#EEE9E0] text-sm font-extrabold text-brand-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
           >
             Reset to a typical salon
           </button>
@@ -171,7 +171,7 @@ export function PricingCalculator() {
 
         {/* ------------------------------------------------ results */}
         <div>
-          <div className="rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white p-6 shadow-sm sm:p-8">
+          <div className="rounded-[24px] border border-brand-100 bg-gradient-to-br from-brand-50 to-white p-6 shadow-sm sm:p-8">
             <p className="text-xs font-bold uppercase tracking-widest text-accent-700">
               Your monthly cost on ResNeo
             </p>
@@ -273,7 +273,7 @@ export function PricingCalculator() {
             separately if you plan to take payment online.
           </p>
 
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
+          <div className="mt-6 rounded-[24px] border border-[#EEE9E0] bg-[#FDFBF7] p-5">
             <h3 className="text-sm font-bold text-slate-900">One thing we should be straight about</h3>
             <p className="mt-2 text-sm leading-relaxed text-slate-700">
               ResNeo does not run a marketplace. Booksy, Fresha and Treatwell do, and that is a real
@@ -292,13 +292,13 @@ export function PricingCalculator() {
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <Link
               href="/#pricing"
-              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-xl bg-brand-600 px-6 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-full bg-brand-600 px-6 text-sm font-extrabold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
             >
               Start your {SIGNUP_TRIAL_SHORT_LABEL}
             </Link>
             <Link
               href="/help/getting-started/welcome"
-              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-full border border-[#EEE9E0] bg-white px-6 text-sm font-extrabold text-brand-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
             >
               See how setup works
             </Link>
@@ -357,12 +357,12 @@ function ProviderRow({
               {provider.name}
             </span>
             {isResneo ? (
-              <span className="rounded-full bg-accent-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-accent-800">
+              <span className="rounded-full bg-accent-100 px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-accent-800">
                 You
               </span>
             ) : null}
             {provider.estimated ? (
-              <span className="rounded-full border border-dashed border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+              <span className="rounded-full border border-dashed border-slate-300 bg-[#FDFBF7] px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                 Your estimate
               </span>
             ) : null}
@@ -401,7 +401,7 @@ function ProviderRow({
 
       {/* Rendered even when collapsed: aria-controls must resolve to a real
           element, or the button announces a relationship that does not exist. */}
-      <div hidden={!open} id={panelId} className="border-t border-slate-100 bg-slate-50/60 px-5 py-4">
+      <div hidden={!open} id={panelId} className="border-t border-[#EEE9E0] bg-[#FDFBF7] px-5 py-4">
           <dl className="space-y-2.5">
             {provider.lines.map((line) => (
               <div key={line.label} className="flex justify-between gap-4">
@@ -421,7 +421,7 @@ function ProviderRow({
             ) : null}
           </dl>
           {provider.note ? (
-            <p className="mt-3 border-t border-slate-200 pt-3 text-xs leading-relaxed text-slate-600">
+            <p className="mt-3 border-t border-[#EEE9E0] pt-3 text-xs leading-relaxed text-slate-600">
               {provider.note}
             </p>
           ) : null}
@@ -524,7 +524,7 @@ function MoneyInput({
       <label htmlFor={id} className="text-xs font-semibold text-slate-700">
         {label}
       </label>
-      <div className="mt-1 flex items-center rounded-xl border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-brand-600/30">
+      <div className="mt-1 flex items-center rounded-xl border border-[#EEE9E0] bg-white focus-within:ring-2 focus-within:ring-brand-600/30">
         <span className="pl-3 text-sm text-slate-500">£</span>
         <input
           id={id}

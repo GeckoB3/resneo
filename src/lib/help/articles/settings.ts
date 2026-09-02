@@ -17,7 +17,7 @@ export const settingsCategory: HelpCategory = {
       content: `
 # Settings overview
 
-ResNeo splits **venue configuration** from **personal login details**. What you see depends on whether you are a **venue admin** or **staff**, and on whether the venue is on an **Appointments** (Light, Plus, or Pro) plan or a **Restaurant / Founding Partner** plan.
+ResNeo splits **venue configuration** from **personal login details**. What you see depends on whether you are a **venue admin** or **staff**.
 
 ## Venue admins
 
@@ -39,10 +39,6 @@ Simple profile fields tend to save as you work; **opening hours**, **staff** act
 Staff still use the route \`/dashboard/settings\`, but the server renders **Account settings** only: name, email, phone, and password. They do **not** get the tabbed venue console. The sidebar label is **Account** instead of **Settings**.
 
 If a staff member tries a deep link such as \`?tab=staff\` or \`?tab=data-import\`, the app sends them back to the account style view.
-
-## Restaurant only surfaces
-
-On **Restaurant** or **Founding Partner** tiers, **Profile** can include a **Dining** card that links to **Dining Availability → Table Management** (\`/dashboard/availability?tab=table\`) for floor plan, combinations, and related table controls. Appointments tier venues do not use that card.
 
 ## Anonymous takeaway
 
@@ -69,7 +65,6 @@ Your venue runs on an **Appointments** subscription (Light, Plus, or Pro). **Set
 - **Staff**: invite **admin** or **staff** users, assign **staff** to bookable **calendar columns** so **Appointment Calendar** and **Mine** views line up, resend invites, reset passwords, and set optional **session timeout** for shared tablets.
 - **Data import**: opens the guided importer at \`/dashboard/import\`.
 
-There is **no** “dining floor plan” card inside Appointments **Profile**; table geometry is not part of this plan.
 
 ## Staff on Appointments plans
 
@@ -137,7 +132,6 @@ Same query pattern as other plans: \`?tab=profile\`, \`booking-page\`, \`busines
 The lower card (**Closures & special days**) edits **venue availability blocks**: pick a date range on the calendar, choose a block type, then save.
 
 - Every venue gets **Closure** and **Amended hours** (venue wide).
-- **Restaurant** and **Founding Partner** tiers also get **Reduced capacity**, which applies to **table** bookings. Optional **yield** style numeric overrides appear for those restaurant blocks when the form exposes them.
 
 ## Timezone
 
@@ -167,7 +161,6 @@ For Appointments SKUs the block type picker includes:
 - **Closure**: treat the range as closed for venue wide availability.
 - **Amended hours**: supply replacement open windows for those dates.
 
-You do **not** get the **Reduced capacity** block type that Restaurant tiers use for table only capacity trims.
 
 Pick dates on the month grid (click to start a range, click again to finish), complete the form, then save. Past blocks stay listed for audit; future blocks drive what guests can book.
 
@@ -241,7 +234,7 @@ Still on **Settings → Staff**: configure optional inactivity timeout for share
 
 ## Plan caps
 
-**Appointments Light** allows **1** team login, **Plus** up to **5**, **Pro** unlimited (see \`planStaffLimit\` behaviour). **Restaurant** and **Founding** tiers use the unlimited path in code, so the “upgrade to Pro” banner only appears when a capped tier hits its limit.
+**Appointments Light** allows **1** team login, **Plus** up to **5**, **Pro** unlimited (see \`planStaffLimit\` behaviour). The “upgrade to Pro” banner only appears when a capped tier hits its limit.
 
 ## Security hygiene
 
@@ -328,7 +321,7 @@ Open **Settings → Plan**.
 
 ## What the card shows
 
-- Named **tier** (Appointments Light / Plus / Pro, Restaurant, Founding Partner, or complimentary copy when \`billing_access_source\` marks free access).
+- Named **tier** (Appointments Light / Plus / Pro, or complimentary copy when \`billing_access_source\` marks free access).
 - **Subscription status** pills such as active, trialing, past due, cancelling, or cancelled, derived from \`plan_status\` and Stripe.
 - **Next billing** or **Access until** copy when a cancel is mid period.
 - **SMS usage**: segment counts. **Light**, **Plus**, and **Pro** show used vs included (${SMS_INCLUDED_LIGHT} / ${SMS_INCLUDED_PLUS} / ${SMS_INCLUDED_APPOINTMENTS} at the time of writing), plus metered overage text (currently £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per segment beyond the bundle when billing is not free access).

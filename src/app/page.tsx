@@ -6,6 +6,7 @@ import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from "@/lib/embed/widget-frame";
 import { normalizePublicBaseUrl } from "@/lib/public-base-url";
 import HomeFaq from "@/components/home/HomeFaq";
 import { PricingSection } from "@/components/home/PricingSection";
+import { IncludedFeaturesSection } from "@/components/home/IncludedFeaturesSection";
 import { HomeReveal } from "@/components/home/HomeReveal";
 import { AppShowcase } from "@/components/home/AppShowcase";
 import { HomeMobileNav } from "@/components/home/HomeMobileNav";
@@ -33,7 +34,7 @@ const demoResizeScriptSrc = `${demoPublicOrigin}/embed/resize.js`;
 const businessTypes = [
   "Barbers", "Hairdressers", "Beauty Therapists", "Physiotherapists",
   "Yoga Studios", "Gyms", "Tennis Courts", "Escape Rooms", "Dog Groomers",
-  "Photography Studios", "Meeting Rooms", "Golf Tee Times", "Driving Instructors", "Restaurants",
+  "Photography Studios", "Meeting Rooms", "Golf Tee Times", "Driving Instructors",
 ];
 
 const steps = [
@@ -41,7 +42,7 @@ const steps = [
     number: "1",
     title: "Pick your plan",
     description:
-      "Choose Appointments Light, Plus, or Pro, or the Restaurant plan, then create your account. Every paid plan includes a 14-day free trial.",
+      "Choose Appointments Light, Plus, or Pro, then create your account. Every plan includes every feature and a 14-day free trial.",
   },
   {
     number: "2",
@@ -87,26 +88,28 @@ const promises = [
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       {/* ── Nav ─────────────────────────────────────────────── */}
-      <nav className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/80 backdrop-blur-xl">
+      <nav className="sticky top-0 z-50 border-b border-[#EEE9E0] bg-[#FDFBF7]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <Link href="/" className="flex min-h-11 flex-shrink-0 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
             <img src="/Logo.png" alt="ResNeo" className="h-8 w-auto" />
           </Link>
-          {/* Four links so the bar still fits at 768px. Link & break, FAQ and
-              About stay reachable from the mobile menu and the footer. */}
-          <div className="hidden items-center gap-6 md:flex lg:gap-8">
-            <a href="#features" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Features</a>
-            <Link href="/solutions" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Solutions</Link>
-            <a href="#pricing" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Pricing</a>
-            <Link href="/help" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Help</Link>
+          {/* Five links, with the gap tightened so the bar still fits at 768px.
+              Link & break, FAQ and About stay reachable from the mobile menu
+              and the footer. */}
+          <div className="hidden items-center gap-0.5 rounded-full border border-[#E8E4DC] bg-white p-1 shadow-[0_6px_20px_rgba(0,59,111,0.06)] md:flex">
+            <a href="#features" className="rounded-full px-3.5 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700">Features</a>
+            <Link href="/solutions" className="rounded-full px-3.5 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700">Solutions</Link>
+            <a href="#pricing" className="rounded-full px-3.5 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700">Pricing</a>
+            <Link href="/help" className="rounded-full px-3.5 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700">Help</Link>
+            <a href="#contact" className="rounded-full px-3.5 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700">Contact</a>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <Link href="/login" className="hidden min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-slate-700 transition-colors hover:text-slate-900 sm:inline-flex">
+            <Link href="/login" className="hidden min-h-11 items-center rounded-full px-3 text-sm font-bold text-brand-600 transition-colors hover:text-brand-700 sm:inline-flex">
               Log in
             </Link>
-            <a href="#pricing" className="inline-flex min-h-11 items-center rounded-xl bg-brand-600 px-4 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 hover:shadow-md hover:shadow-brand-600/20">
+            <a href="#pricing" className="inline-flex min-h-11 items-center rounded-full bg-brand-600 px-5 text-sm font-extrabold text-white shadow-[0_10px_24px_rgba(0,59,111,0.22)] transition-all hover:-translate-y-0.5 hover:bg-brand-700">
               Start free
             </a>
             <HomeMobileNav />
@@ -116,34 +119,32 @@ export default function Home() {
 
       {/* ── Hero ────────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
-        {/* Ambient brand wash */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-50/80 via-white to-white" aria-hidden />
-        <div
-          className="pointer-events-none absolute inset-0 opacity-[0.04] [mask-image:radial-gradient(ellipse_at_top,black,transparent_70%)]"
-          style={{
-            backgroundImage:
-              "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-            backgroundSize: "44px 44px",
-          }}
-          aria-hidden
-        />
-        <div className="pointer-events-none absolute -left-32 -top-24 h-[28rem] w-[28rem] rounded-full bg-accent/10 blur-3xl" aria-hidden />
-        <div className="pointer-events-none absolute -right-32 top-10 h-[30rem] w-[30rem] rounded-full bg-brand-200/30 blur-3xl" aria-hidden />
-
+        {/* Soft organic shapes. The warmth is the cream ground plus tinted teal
+            and navy blobs, not new colours. */}
+        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-80 rounded-[48%_52%_41%_59%/55%_40%_60%_45%] bg-accent-100/70 sm:-right-32 sm:-top-36 sm:h-[34rem] sm:w-[38rem]" aria-hidden />
+        <div className="pointer-events-none absolute -left-32 top-[30rem] h-64 w-64 rounded-[58%_42%_55%_45%/48%_60%_40%_52%] bg-brand-50 sm:-left-44 sm:top-[26rem] sm:h-[24rem] sm:w-[26rem]" aria-hidden />
         <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:py-28">
           {/* Copy */}
           <div className="text-center lg:text-left">
             <HomeReveal>
-              <span className="inline-flex items-center gap-2 rounded-full border border-brand-200/70 bg-white/80 px-3.5 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-brand-700 shadow-sm backdrop-blur">
+              <span className="inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-[0.18em] text-accent-700 shadow-sm">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(0,194,199,0.8)]" />
                 Booking software, simplified
               </span>
             </HomeReveal>
             <HomeReveal delay={80}>
-              <h1 className="mt-6 text-balance text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+              <h1 className="mt-6 text-balance text-4xl font-black leading-[1.05] tracking-tight text-brand-600 sm:text-5xl lg:text-6xl">
                 Take bookings your way.
-                <span className="mt-1 block bg-gradient-to-r from-brand-600 via-brand-500 to-accent-dark bg-clip-text pb-[0.12em] text-transparent">
-                  Cut no-shows for good.
+                <span className="mt-1 block pb-[0.12em]">
+                  Cut{" "}
+                  <span className="relative inline-block">
+                    no-shows
+                    {/* Hand-drawn underline in the accent teal. */}
+                    <svg className="pointer-events-none absolute -bottom-1 left-0 h-3 w-full sm:-bottom-1.5 sm:h-3.5" viewBox="0 0 200 14" preserveAspectRatio="none" fill="none" aria-hidden>
+                      <path d="M3 9 C 40 2, 70 12, 100 7 S 160 3, 197 8" stroke="#00C2C7" strokeWidth={5} strokeLinecap="round" />
+                    </svg>
+                  </span>{" "}
+                  for good.
                 </span>
               </h1>
             </HomeReveal>
@@ -154,11 +155,11 @@ export default function Home() {
             </HomeReveal>
             <HomeReveal delay={220}>
               <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
-                <a href="#pricing" className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30 sm:w-auto">
+                <a href="#pricing" className="inline-flex h-12 w-full items-center justify-center rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30 sm:w-auto">
                   Start your free trial
                 </a>
-                <a href="#video" className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50 sm:w-auto">
-                  <svg className="h-4 w-4 text-brand-600" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <a href="#video" className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border-2 border-brand-50 bg-white px-6 text-base font-extrabold text-brand-600 transition-all hover:border-brand-100 hover:bg-brand-50/40 sm:w-auto">
+                  <svg className="h-4 w-4 text-accent-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                     <path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.79-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14Z" />
                   </svg>
                   Watch the demo
@@ -169,7 +170,7 @@ export default function Home() {
               <ul className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 lg:justify-start">
                 {heroTrust.map((t) => (
                   <li key={t} className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
-                    <svg className="h-4 w-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                    <svg className="h-4 w-4 text-accent-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
                       <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                     </svg>
                     {t}
@@ -180,7 +181,7 @@ export default function Home() {
                 <li>
                   <a
                     href="#link-break"
-                    className="group inline-flex min-h-11 items-center gap-2 rounded-full border border-brand-200 bg-white px-4 text-sm font-semibold text-brand-700 shadow-sm transition-all hover:border-brand-300 hover:bg-brand-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                    className="group inline-flex min-h-11 items-center gap-2 rounded-full border border-accent-100 bg-white px-4 text-sm font-bold text-brand-700 shadow-sm transition-all hover:border-accent-200 hover:bg-accent-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
                   >
                     <svg className="h-4 w-4 shrink-0 text-accent-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13.2 10.8a4.5 4.5 0 0 0-6.4 0l-2.5 2.5a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" />
@@ -199,7 +200,10 @@ export default function Home() {
           {/* Product shot */}
           <HomeReveal delay={200} className="relative mx-auto w-full max-w-xl lg:max-w-none">
             <div className="relative">
-              <CalendarMock className="motion-safe:animate-home-float-slow" />
+              {/* A slight tilt makes the product shot read as a card on a desk rather than a screenshot. */}
+              <div className="-rotate-1">
+                <CalendarMock className="motion-safe:animate-home-float-slow" />
+              </div>
               <BookingConfirmedCard className="absolute -right-3 -top-5 hidden w-60 motion-safe:animate-home-float sm:flex lg:-right-8" />
               <DepositCard className="absolute -bottom-6 -left-3 hidden w-56 motion-safe:animate-home-float-slow sm:flex lg:-left-8" />
             </div>
@@ -207,8 +211,13 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Wavy divider from the cream hero into the white band. */}
+      <svg className="block h-10 w-full bg-[#FDFBF7] sm:h-14" viewBox="0 0 1440 60" preserveAspectRatio="none" fill="#ffffff" aria-hidden>
+        <path d="M0 30 C 240 70, 480 -10, 720 30 S 1200 70, 1440 30 V 60 H 0 Z" />
+      </svg>
+
       {/* ── Trust marquee ───────────────────────────────────── */}
-      <section className="border-y border-slate-100 bg-white py-7">
+      <section className="bg-white py-7">
         <div className="mx-auto max-w-6xl px-6">
           <p className="text-center text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
             One platform for every business that takes bookings
@@ -218,7 +227,7 @@ export default function Home() {
               {[...businessTypes, ...businessTypes].map((bt, i) => (
                 <span
                   key={`${bt}-${i}`}
-                  className="whitespace-nowrap rounded-full border border-slate-200 bg-slate-50/80 px-4 py-1.5 text-sm font-medium text-slate-600"
+                  className="whitespace-nowrap rounded-full border border-[#EEE9E0] bg-[#FDFBF7] px-4 py-1.5 text-sm font-semibold text-slate-600"
                 >
                   {bt}
                 </span>
@@ -233,7 +242,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6">
           <HomeReveal className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-brand-600">Everything in one place</p>
-            <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-balance text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               Run your bookings on autopilot
             </h2>
             <p className="mt-4 text-slate-500">
@@ -284,7 +293,7 @@ export default function Home() {
                 title="Every booking, every team member"
                 body="A live calendar across your whole team, with colour-coded statuses, drag-to-reschedule, and client records a click away."
               >
-                <div className="overflow-hidden rounded-xl">
+                <div className="overflow-hidden rounded-[22px]">
                   <CalendarMock />
                 </div>
               </BentoTile>
@@ -300,21 +309,21 @@ export default function Home() {
       <LinkBreakSection />
 
       {/* ── Getting started: three steps, then the video ────── */}
-      <section className="bg-white py-20 sm:py-28">
+      <section className="bg-[#FDFBF7] py-20 sm:py-28">
         <div className="mx-auto max-w-5xl px-6">
           <HomeReveal className="text-center">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-brand-600">Getting started</p>
-            <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-balance text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               Live in three simple steps
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-slate-500">From sign-up to your first booking in an afternoon.</p>
           </HomeReveal>
           <div className="relative mt-16">
-            <div className="pointer-events-none absolute left-0 right-0 top-6 hidden h-px bg-gradient-to-r from-transparent via-brand-200 to-transparent sm:block" aria-hidden />
+            <div className="pointer-events-none absolute left-0 right-0 top-6 hidden h-px bg-gradient-to-r from-transparent via-accent-200 to-transparent sm:block" aria-hidden />
             <ol className="grid gap-10 sm:grid-cols-3">
               {steps.map((s, i) => (
                 <HomeReveal as="li" key={s.number} delay={i * 90} className="relative text-center">
-                  <span className="relative z-10 mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-lg font-bold text-white shadow-lg shadow-brand-600/25 ring-4 ring-white">
+                  <span className="relative z-10 mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-lg font-extrabold text-white shadow-lg shadow-brand-600/25 ring-4 ring-[#FDFBF7]">
                     {s.number}
                   </span>
                   <h3 className="mt-5 text-lg font-semibold text-slate-900">{s.title}</h3>
@@ -328,10 +337,10 @@ export default function Home() {
       </section>
 
       {/* ── Video ───────────────────────────────────────────── */}
-      <section id="video" className="scroll-mt-16 bg-slate-50 py-20 sm:py-24">
+      <section id="video" className="scroll-mt-16 bg-white py-20 sm:py-24">
         <div className="mx-auto max-w-4xl px-6">
           <HomeReveal className="text-center">
-            <h2 className="text-balance text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="text-balance text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               See ResNeo in action
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-slate-500">
@@ -339,7 +348,7 @@ export default function Home() {
             </p>
           </HomeReveal>
           <HomeReveal delay={100}>
-            <div className="mt-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-900 shadow-2xl shadow-brand-900/20 ring-1 ring-slate-900/5">
+            <div className="mt-10 overflow-hidden rounded-[28px] border-4 border-[#FDFBF7] bg-slate-900 shadow-[0_30px_60px_-20px_rgba(0,59,111,0.35)]">
               <div className="aspect-video">
                 <iframe
                   className="h-full w-full"
@@ -356,11 +365,11 @@ export default function Home() {
       </section>
 
       {/* ── Promises behind the price ───────────────────────── */}
-      <section className="border-t border-slate-200/70 bg-white py-20 sm:py-24">
+      <section className="bg-[#FDFBF7] py-20 sm:py-24">
         <div className="mx-auto max-w-6xl px-6">
           <HomeReveal className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-brand-600">Owner first</p>
-            <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="mt-3 text-balance text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
               No commission. No lock-in. No surprises.
             </h2>
             <p className="mt-4 text-slate-500">
@@ -370,8 +379,8 @@ export default function Home() {
           <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {promises.map((p, i) => (
               <HomeReveal key={p.title} delay={i * 70}>
-                <div className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-colors hover:border-brand-200">
-                  <span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
+                <div className="flex h-full flex-col rounded-[28px] border border-[#EEE9E0] bg-white p-6 shadow-[0_18px_40px_-24px_rgba(0,59,111,0.2)] transition-all hover:-translate-y-0.5">
+                  <span className="grid h-10 w-10 place-items-center rounded-2xl bg-accent-100 text-accent-800">
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
                       <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                     </svg>
@@ -391,11 +400,14 @@ export default function Home() {
       {/* ── Pricing ─────────────────────────────────────────── */}
       <PricingSection />
 
+      {/* ── Everything included ─────────────────────────── */}
+      <IncludedFeaturesSection />
+
       {/* ── Price calculator ────────────────────────────────── */}
-      <section className="border-t border-slate-100 bg-slate-50/70 py-16 sm:py-20">
+      <section className="bg-white py-16 sm:py-20">
         <div className="mx-auto max-w-4xl px-6">
           <HomeReveal>
-            <div className="overflow-hidden rounded-3xl border border-brand-100 bg-white p-8 shadow-sm sm:p-10">
+            <div className="overflow-hidden rounded-[32px] border border-[#EEE9E0] bg-[#FDFBF7] p-8 sm:p-10">
               <div className="grid items-center gap-8 md:grid-cols-[1fr_auto]">
                 <div>
                   <p className="text-sm font-bold uppercase tracking-[0.18em] text-accent-700">
@@ -413,7 +425,7 @@ export default function Home() {
                 </div>
                 <Link
                   href="/calculator"
-                  className="inline-flex h-12 items-center justify-center whitespace-nowrap rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                  className="inline-flex h-12 items-center justify-center whitespace-nowrap rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
                 >
                   Compare the cost
                 </Link>
@@ -424,10 +436,10 @@ export default function Home() {
       </section>
 
       {/* ── Founders card ───────────────────────────────────── */}
-      <section className="border-t border-slate-100 bg-white py-16 sm:py-20">
+      <section className="bg-white py-16 sm:py-20">
         <div className="mx-auto max-w-4xl px-6">
           <HomeReveal>
-            <div className="relative overflow-hidden rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 via-white to-brand-50 p-8 shadow-sm sm:p-12">
+            <div className="relative overflow-hidden rounded-[32px] border border-[#EEE9E0] bg-[#FDFBF7] p-8 sm:p-12">
               <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-accent/15 blur-3xl" aria-hidden />
               <div className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-brand-200/30 blur-3xl" aria-hidden />
               <div className="relative flex flex-col items-start gap-7 sm:flex-row sm:items-center sm:justify-between">
@@ -456,7 +468,7 @@ export default function Home() {
                 </div>
                 <Link
                   href="/about"
-                  className="group inline-flex h-12 flex-shrink-0 items-center rounded-xl bg-brand-600 px-7 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30 sm:text-base"
+                  className="group inline-flex h-12 flex-shrink-0 items-center rounded-full bg-brand-600 px-7 text-sm font-extrabold text-white shadow-lg shadow-brand-600/20 transition-all hover:-translate-y-0.5 hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30 sm:text-base"
                 >
                   About ResNeo
                   <svg className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
@@ -473,22 +485,22 @@ export default function Home() {
       <HomeFaq />
 
       {/* ── Final CTA band ──────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-brand-800 via-brand-700 to-brand-600 py-20 sm:py-24">
-        <div className="pointer-events-none absolute -left-20 -top-20 h-80 w-80 rounded-full bg-accent/20 blur-3xl" aria-hidden />
-        <div className="pointer-events-none absolute -bottom-24 right-0 h-80 w-80 rounded-full bg-white/5 blur-3xl" aria-hidden />
+      <section className="relative overflow-hidden bg-brand-600 py-20 sm:py-24">
+        <div className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-[48%_52%_41%_59%/55%_40%_60%_45%] bg-accent-500/20" aria-hidden />
+        <div className="pointer-events-none absolute -bottom-28 -right-16 h-80 w-80 rounded-[58%_42%_55%_45%/48%_60%_40%_52%] bg-white/10" aria-hidden />
         <div className="relative mx-auto max-w-3xl px-6 text-center">
           <HomeReveal>
-            <h2 className="text-balance text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">
+            <h2 className="text-balance text-3xl font-black tracking-tight text-white sm:text-4xl lg:text-5xl">
               Ready to get your time back?
             </h2>
             <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-brand-100/90 sm:text-lg">
               Start your 14-day free trial today. No setup fees, no booking commission, cancel anytime.
             </p>
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <a href="#pricing" className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-brand-700 shadow-lg shadow-brand-900/30 transition-all hover:-translate-y-0.5 hover:bg-brand-50 sm:w-auto">
+              <a href="#pricing" className="inline-flex h-12 w-full items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg shadow-brand-900/30 transition-all hover:-translate-y-0.5 hover:bg-accent-400 sm:w-auto">
                 Start your free trial
               </a>
-              <a href="#contact" className="inline-flex h-12 w-full items-center justify-center rounded-xl border border-white/25 bg-white/10 px-7 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/20 sm:w-auto">
+              <a href="#contact" className="inline-flex h-12 w-full items-center justify-center rounded-full border border-white/25 bg-white/10 px-7 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/20 sm:w-auto">
                 Talk to us
               </a>
             </div>
@@ -497,13 +509,13 @@ export default function Home() {
       </section>
 
       {/* ── Contact ─────────────────────────────────────────── */}
-      <section id="contact" className="scroll-mt-16 bg-slate-50 py-20 sm:py-28">
+      <section id="contact" className="scroll-mt-16 bg-[#FDFBF7] py-20 sm:py-28">
         <div className="mx-auto max-w-6xl px-6">
           {/* min-w-0: grid items default to min-width:auto, so the phone field's
               country selector was forcing the column wider than the viewport. */}
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 [&>*]:min-w-0">
             <HomeReveal>
-              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Get in touch</h2>
+              <h2 className="text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">Get in touch</h2>
               <p className="mt-4 max-w-md text-slate-500">
                 Ready to get started, or just want to learn more? Tell us about your business and we will help you find the right fit.
               </p>
@@ -514,7 +526,7 @@ export default function Home() {
                   "Speak to a real person who knows the product",
                 ].map((point) => (
                   <li key={point} className="flex items-start gap-3 text-sm text-slate-600">
-                    <span className="mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full bg-brand-100 text-brand-700">
+                    <span className="mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full bg-accent-100 text-accent-800">
                       <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
                         <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                       </svg>
@@ -531,7 +543,7 @@ export default function Home() {
               </p>
             </HomeReveal>
             <HomeReveal delay={100}>
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+              <div className="rounded-[28px] border border-[#EEE9E0] bg-white p-6 shadow-[0_18px_40px_-24px_rgba(0,59,111,0.2)] sm:p-8">
                 <ContactForm className="space-y-4" />
                 <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
                   We&rsquo;ll use the details you provide to respond to your enquiry. See our{" "}
@@ -551,7 +563,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
             <HomeReveal>
-              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Book a demo</h2>
+              <h2 className="text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">Book a demo</h2>
               <p className="mt-4 max-w-md text-slate-500">
                 Pick a time that suits you and one of the team will give you a personal walkthrough of ResNeo.
               </p>
@@ -562,7 +574,7 @@ export default function Home() {
                   "No commitment",
                 ].map((point) => (
                   <li key={point} className="flex items-start gap-3 text-sm text-slate-600">
-                    <span className="mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full bg-brand-100 text-brand-700">
+                    <span className="mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full bg-accent-100 text-accent-800">
                       <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
                         <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                       </svg>
@@ -577,7 +589,7 @@ export default function Home() {
               </p>
             </HomeReveal>
             <HomeReveal delay={100}>
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="overflow-hidden rounded-[28px] border border-[#EEE9E0] bg-white shadow-[0_18px_40px_-24px_rgba(0,59,111,0.2)]">
                 <iframe
                   src={demoEmbedSrc}
                   width="100%"
@@ -594,7 +606,7 @@ export default function Home() {
       </section>
 
       {/* ── Footer ──────────────────────────────────────────── */}
-      <footer className="border-t border-slate-100 bg-slate-50 py-10">
+      <footer className="border-t border-[#EEE9E0] bg-[#FDFBF7] py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <div className="flex flex-col items-center gap-3 sm:items-start">
             <p className="max-w-xl text-center leading-snug sm:text-left">
@@ -635,7 +647,7 @@ function BentoTile({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-full min-w-0 flex-col rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/50 p-5 shadow-sm transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5 sm:p-7">
+    <div className="flex h-full min-w-0 flex-col rounded-[28px] border border-[#EEE9E0] bg-[#FDFBF7] p-5 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-brand-600/10 sm:p-7">
       {/* accent-700, not accent-dark: the lighter teal is 3.2:1 at 12px. */}
       <p className="text-xs font-bold uppercase tracking-[0.16em] text-accent-700">{eyebrow}</p>
       <h3 className="mt-2 text-xl font-bold tracking-tight text-slate-900">{title}</h3>

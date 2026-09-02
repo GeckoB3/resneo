@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useForm, Controller, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -163,6 +163,13 @@ interface DetailsStepProps {
   fieldClassName?: string;
   /** Notified as the guest types their email (debounced upstream) — drives the compliance pre-check. */
   onEmailChange?: (email: string) => void;
+  /**
+   * Rendered between the contact fields and the footer (consent checkboxes + submit). The
+   * public flow puts the inline compliance forms here, so they read as part of the details
+   * step but sit below the fields. The content may contain its own `<form>` elements: it is
+   * rendered as a sibling of the fields form, never inside it.
+   */
+  beforeFooter?: React.ReactNode;
 }
 
 export function DetailsStep({
@@ -193,7 +200,10 @@ export function DetailsStep({
   submitClassName,
   fieldClassName,
   onEmailChange,
+  beforeFooter,
 }: DetailsStepProps) {
+  // The submit button lives outside the fields form (see `beforeFooter`) and targets it by id.
+  const formId = useId();
   const isStaff = audience === 'staff';
   const isStaffWalkIn = audience === 'staff_walk_in';
   const detailsSchemaWithTerms = useMemo(
@@ -440,7 +450,7 @@ export function DetailsStep({
         </div>
       )}
 
-      <form onSubmit={handleSubmit(onValidSubmit)} className="space-y-4">
+      <form id={formId} onSubmit={handleSubmit(onValidSubmit)} className="space-y-4">
         {useStaffContactAutocomplete ? (
           <>
             <StaffGuestContactFields
@@ -650,7 +660,14 @@ export function DetailsStep({
             />
           </FormField>
         )}
+      </form>
 
+      {beforeFooter}
+
+      {/* Footer: consents + submit. Outside the fields form so `beforeFooter` can hold forms of
+          its own; the button submits the fields form via `form={formId}`, and the checkboxes stay
+          registered with react-hook-form (registration is by ref, not by DOM ancestry). */}
+      <div className="space-y-4">
         {audience === 'public' && (
           <>
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
@@ -675,6 +692,7 @@ export function DetailsStep({
 
         <button
           type="submit"
+          form={formId}
           disabled={isSubmitting}
           className={
             submitClassName ??
@@ -704,7 +722,7 @@ export function DetailsStep({
                   : 'Confirm Booking')
           )}
         </button>
-      </form>
+      </div>
     </div>
   );
 }

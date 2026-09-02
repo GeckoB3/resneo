@@ -65,17 +65,17 @@ function PhoneFrame({
 export function AppShowcase() {
   return (
     <HomeReveal className="mt-16 sm:mt-20">
-      <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-8 shadow-sm sm:p-12 lg:p-14">
+      <div className="relative overflow-hidden rounded-[32px] border border-[#EEE9E0] bg-[#FDFBF7] p-8 sm:p-12 lg:p-14">
 
         <div className="relative grid items-center gap-12 lg:grid-cols-[1fr_1.05fr] lg:gap-8">
           {/* ── Copy ───────────────────────────────────────────── */}
           <div className="text-center lg:text-left">
-            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-brand-700">
+            <span className="inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-[0.18em] text-accent-700">
               Available on iPhone and Android
             </span>
-            <h2 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+            <h2 className="mt-6 text-4xl font-black leading-[1.05] tracking-tight text-brand-600 sm:text-5xl lg:text-6xl">
               Your whole business,
-              <span className="mt-1 block bg-gradient-to-r from-brand-600 to-accent-600 bg-clip-text text-transparent">
+              <span className="mt-1 block text-accent-700">
                 in your pocket
               </span>
             </h2>

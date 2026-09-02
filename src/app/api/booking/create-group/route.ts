@@ -59,7 +59,8 @@ import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitle
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import {
-  checkBookingCompliance,
+  enforceBookingCompliance,
+  type ComplianceDetailBrief,
   complianceUnmetMessage,
   COMPLIANCE_REQUIREMENT_UNMET,
 } from '@/lib/compliance/enforce-booking';
@@ -621,6 +622,7 @@ export async function POST(request: NextRequest) {
         guestId: guest.id,
         draftId: parsed.data.compliance_draft_id ?? null,
         submissions: parsed.data.compliance_submissions,
+        serviceIds: validatedPeople.map((p) => p.appointment_service_id),
         // Per-visit forms (validity 0) expire at the end of the appointment's day. One
         // record has to satisfy every attendee, so anchor it to the LAST date in the group
         // (booking_date is YYYY-MM-DD, so the string max is the latest date).
@@ -659,8 +661,11 @@ export async function POST(request: NextRequest) {
       enforcement: string;
       state: string;
     }> = [];
+    // Staff are never blocked (plan §5); their unmet requirements are merged by type and
+    // returned as `compliance_warnings` so the confirmation screen can prompt for capture.
+    const complianceWarnings = new Map<string, ComplianceDetailBrief>();
     for (const person of validatedPeople) {
-      const check = await checkBookingCompliance(supabase, {
+      const check = await enforceBookingCompliance(supabase, {
         venueId: venue_id,
         guestId: guest.id,
         appointmentServiceId: useUnifiedBookingRows ? null : person.appointment_service_id,
@@ -669,9 +674,14 @@ export async function POST(request: NextRequest) {
         bookingTime: person.booking_time + ':00',
         context: complianceContext,
       });
-      for (const d of check.details) {
-        blockedDetails.push({ person_label: person.person_label, ...d });
-        blockedUnmet.push(d);
+      if (check.blocked) {
+        for (const d of check.details) {
+          blockedDetails.push({ person_label: person.person_label, ...d });
+          blockedUnmet.push(d);
+        }
+      }
+      for (const w of check.warnings) {
+        if (!complianceWarnings.has(w.compliance_type_id)) complianceWarnings.set(w.compliance_type_id, w);
       }
     }
     if (blockedDetails.length > 0) {
@@ -1020,6 +1030,9 @@ export async function POST(request: NextRequest) {
       {
         group_booking_id: groupBookingId,
         booking_ids: bookingIds,
+        ...(complianceContext === 'staff' && complianceWarnings.size > 0
+          ? { compliance_warnings: [...complianceWarnings.values()] }
+          : {}),
         // requires_deposit is true whenever a payment step must render (spec §18):
         // setup mode carries the SetupIntent secret in the existing client_secret field.
         requires_deposit: hasPaymentStep,

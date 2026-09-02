@@ -946,3 +946,17 @@ button, a, input, select, textarea {
 @media (prefers-reduced-motion: reduce) {
   .ops-toolbar :is(button, a[href], [role='button']):active { transform: none; }
 }
+
+/* Homepage "Warm studio" look: Nunito for display, Nunito Sans for body, scoped so no other page changes. */
+.home-warm {
+  font-family: var(--font-home-body), "Segoe UI", system-ui, sans-serif;
+}
+.home-warm h1,
+.home-warm h2,
+.home-warm h3,
+.home-warm .home-display {
+  font-family: var(--font-home-display), "Segoe UI", system-ui, sans-serif;
+}
+.home-warm h3 {
+  font-weight: 800;
+}

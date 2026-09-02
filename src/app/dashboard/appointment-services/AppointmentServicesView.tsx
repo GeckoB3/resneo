@@ -216,6 +216,8 @@ export function AppointmentServicesView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
+  /** Services whose active flag is being flipped from the card, so the switch can lock while it saves. */
+  const [activeToggling, setActiveToggling] = useState<Set<string>>(() => new Set());
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
   const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +226,7 @@ export function AppointmentServicesView({
   // at-a-glance indicator. Refreshed when requirements change in the editor.
   const { data: complianceSummary, mutate: mutateComplianceSummary } = useSWR<{
     requirements: Array<{
+      scope?: string;
       appointment_service_id: string | null;
       service_item_id: string | null;
       compliance_type_name: string;
@@ -232,12 +235,21 @@ export function AppointmentServicesView({
   const complianceTypeNamesByService = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const r of complianceSummary?.requirements ?? []) {
+      if (r.scope === 'venue') continue;
       const serviceId = r.appointment_service_id ?? r.service_item_id;
       if (!serviceId) continue;
       m.set(serviceId, [...(m.get(serviceId) ?? []), r.compliance_type_name]);
     }
     return m;
   }, [complianceSummary]);
+  // Types every booking already requires (plan §4), shown read-only in the service editor.
+  const venueWideComplianceTypeNames = useMemo(
+    () =>
+      (complianceSummary?.requirements ?? [])
+        .filter((r) => r.scope === 'venue' || (!r.appointment_service_id && !r.service_item_id))
+        .map((r) => r.compliance_type_name),
+    [complianceSummary],
+  );
 
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
   // `?tab=addons` so deep-links and the back button work as expected.
@@ -674,6 +686,45 @@ export function AppointmentServicesView({
       setAddCalendarModalError('Failed to create calendar');
     } finally {
       setCreatingCalendar(false);
+    }
+  }
+
+  /**
+   * Flip a service's active flag straight from its card.
+   *
+   * Activating or parking a service used to mean opening it, scrolling to the
+   * switch, flipping it and saving, once per service. The PATCH route accepts a
+   * partial body, so this sends the one field and shows the result at once,
+   * rolling back if the save fails.
+   */
+  async function toggleServiceActive(svc: Service, nextActive: boolean) {
+    if (activeToggling.has(svc.id)) return;
+    setActiveToggling((prev) => new Set(prev).add(svc.id));
+    setError(null);
+    const apply = (value: boolean) =>
+      setServices((prev) => prev.map((s) => (s.id === svc.id ? { ...s, is_active: value } : s)));
+    apply(nextActive);
+    try {
+      const res = await fetch('/api/venue/appointment-services', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: svc.id, is_active: nextActive }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(
+          data.error ?? `Failed to ${nextActive ? 'activate' : 'deactivate'} ${svc.name}`,
+        );
+      }
+    } catch (err) {
+      apply(!nextActive);
+      setError(err instanceof Error ? err.message : 'Failed to update service');
+    } finally {
+      setActiveToggling((prev) => {
+        const next = new Set(prev);
+        next.delete(svc.id);
+        return next;
+      });
     }
   }
 
@@ -1153,7 +1204,42 @@ export function AppointmentServicesView({
                     (linkedPractitionerIds.length > 0 &&
                       Boolean(currentStaffId) &&
                       svc.created_by_staff_id === currentStaffId)) && (
-                    <div className="flex flex-shrink-0 items-center sm:pt-1">
+                    <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-2 sm:pt-1">
+                      {/*
+                        Admins only. The PATCH route filters a team member's
+                        body down to the fields their calendar permissions
+                        cover, and the active flag is not one of them, so their
+                        switch would flip and then roll straight back.
+                      */}
+                      {isAdmin ? (() => {
+                        const toggling = activeToggling.has(svc.id);
+                        const switchId = `service-active-${svc.id}`;
+                        return (
+                          <span className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              id={switchId}
+                              role="switch"
+                              aria-checked={svc.is_active}
+                              aria-label={`Active (visible to guests): ${svc.name}`}
+                              disabled={toggling}
+                              onClick={() => void toggleServiceActive(svc, !svc.is_active)}
+                              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-wait disabled:opacity-60 ${
+                                svc.is_active ? 'bg-brand-600' : 'bg-slate-300'
+                              }`}
+                            >
+                              <span
+                                className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                                  svc.is_active ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                            <label htmlFor={switchId} className="cursor-pointer select-none text-xs text-slate-600">
+                              Active (visible to guests)
+                            </label>
+                          </span>
+                        );
+                      })() : null}
                       <DashboardEntityRowActions
                         onEdit={() => openEdit(svc)}
                         onDelete={() => {
@@ -1330,6 +1416,7 @@ export function AppointmentServicesView({
                 <ComplianceRequirementsEditor
                   appointmentServiceId={editingId}
                   complianceEnabled={complianceEnabled}
+                  venueWideTypeNames={venueWideComplianceTypeNames}
                   onChanged={() => void mutateComplianceSummary()}
                 />
               </div>

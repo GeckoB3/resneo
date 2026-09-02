@@ -108,7 +108,7 @@ A many-to-many link between a service row and one or more compliance types (`ser
 - **warn_staff** — staff see a warning indicator on the booking; no client-side effect
 - **warn_client** — client sees a warning on the public booking page; can proceed
 - **block_online** — client cannot complete an online booking until the record is on file
-- **block_all** — booking cannot be created at all (staff or online) without a valid record
+- **block_all** — the public booking page cannot create the booking without a valid record; staff can, and see a `required`-severity warning (changed 2026-09-01, see `compliance-booking-flow-plan.md` §5)
 
 §5.4 covers how the requirements engine resolves these at booking time.
 
@@ -484,6 +484,8 @@ Three consequences follow from a per-visit record belonging to one appointment:
 
 Binds a Model B service row to a compliance type. v1 does not support requirements on Model C/D/E entities.
 
+> **Added 2026-09-01 (`compliance-booking-flow-plan.md` §4):** a `scope text NOT NULL DEFAULT 'service'` column (`CHECK (scope IN ('service','venue'))`). A `venue` row has **no** service FK and applies to every Model B booking at the venue (a new client intake form, a general consent). The one-service CHECK became `(scope = 'service' AND num_nonnulls(...) = 1) OR (scope = 'venue' AND num_nonnulls(...) = 0)`, with a partial unique index on `(venue_id, compliance_type_id) WHERE scope = 'venue'`. Every loader merges the venue rows into a booking's requirements with the **service row winning** when both name the same type (`mergeRequirementsServiceWins`). Migration `20270201120000_compliance_venue_wide_requirements.sql`. The table below shows the original shape.
+
 Because Model B has two possible service tables (see §0), this table carries **polymorphic FKs** — exactly one of `appointment_service_id` or `service_item_id` must be non-null, enforced by a CHECK constraint. The `/api/venue/compliance/requirements` endpoint uses `venueUsesUnifiedAppointmentServiceData()` to decide which column to populate on write and which to filter on read, exactly as the appointment-services endpoint does.
 
 ```
@@ -647,7 +649,7 @@ When a booking is created (staff-side or online), the system runs the **Requirem
          If enforcement = warn_staff    → allow; staff see a warning badge on the booking card
          If enforcement = warn_client   → allow; see §5.1.1 for public-page UX
          If enforcement = block_online  → allow staff-side; block public booking page submission
-         If enforcement = block_all     → block both; return HTTP 409 + structured error
+         If enforcement = block_all     → block public booking page submission (HTTP 409); allow staff-side with a `required` warning (2026-09-01: staff are never blocked)
 ```
 
 Implemented in `src/lib/compliance/resolve-requirements.ts`. Called from the existing booking-creation paths:
@@ -659,6 +661,8 @@ Implemented in `src/lib/compliance/resolve-requirements.ts`. Called from the exi
 Blocked requests return the standard Resneo error envelope with `error: 'COMPLIANCE_REQUIREMENT_UNMET'` and a `details` array listing which types are missing/expired.
 
 #### 5.1.1 `warn_client` UX on the public booking page
+
+> **Superseded 2026-09-01.** The three calls below were folded into one, `POST /api/public/compliance/booking-requirements` (§9.2), which also decides per guest whether an inline form is shown at all: a requirement the identified guest already satisfies renders nothing. See `compliance-booking-flow-plan.md` §3. The steps below describe the original mechanism.
 
 When `enforcement = 'warn_client'` the booking submission is allowed to proceed, but the public booking page must surface the warning **before** the guest submits. The mechanism is a pre-check call:
 
@@ -690,7 +694,7 @@ If an unconsumed link for the same `(guest_id, compliance_type_id)` pair already
 
 - The "Send link" button in the booking compliance section is replaced by a disabled button with tooltip "Add an email address to this guest to send a form link."
 - Staff should instead capture the record directly using the "Capture now" modal (§3.1), selecting `capture_channel = 'client_walkin'` if the client completes the form on a staff device at the venue, or `staff_web` if staff enter the data on their behalf.
-- If the service has `block_online` or `block_all` enforcement, a staff member with admin permission can acknowledge and proceed regardless. The booking creation still succeeds for staff-side bookings; the requirement surfaces as unmet in the booking compliance section.
+- Staff-side bookings are never blocked by compliance (2026-09-01, `compliance-booking-flow-plan.md` §5): the booking succeeds, every unmet requirement is returned as a warning (`required` severity for `block_all`, shown in red on the staff confirmation with a "Capture in venue" link), and it surfaces as unmet in the booking compliance section. The former admin override (`override_compliance`) was removed with this change.
 - `block_all` for walk-in guests without contact details is a venue-operations decision. If the venue wants hard blocking for genuinely uncapturable guests, they should set `block_online` instead and handle anonymous guests operationally.
 
 ### 5.3 Public form submission
@@ -935,8 +939,7 @@ The two right-most routes deliberately live under `/bookings/` and `/guests/` ra
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/public/compliance/pre-check` | Return service requirements + enforcement levels for a `?venue_id=&service_id=` (no guest identity needed; used when the service is selected on the booking page) |
-| `POST` | `/api/public/compliance/pre-check` | Body `{ venue_id, service_id, email }` — additionally resolves whether the guest identified by email has valid records; returns per-requirement resolved state (`SATISFIED`, `MISSING`, `EXPIRED`, `LOCK_PASSED`) |
+| `POST` | `/api/public/compliance/booking-requirements` | Body `{ venue_id, service_ids[], booking_date?, booking_time?, email? }` — the one call the details step makes (2026-09-01, `compliance-booking-flow-plan.md` §3). Returns every requirement of the chosen service(s) merged by type; once `email` is well-formed, each carries its resolved `state` (`SATISFIED`, `MISSING`, `EXPIRED`, `LOCK_PASSED`) for the guest that email identifies (email-only match, as booking creation) and, for an unmet `inline` client-completable requirement, the current form (`version_id`, staff_only-stripped `form_schema`). Replaced `GET`/`POST /pre-check` and `GET /inline-forms` |
 | `GET` | `/api/public/compliance/forms/[code]` | Fetch the form schema bound to a link (no auth) |
 | `POST` | `/api/public/compliance/forms/[code]/submit` | Submit responses (no auth, single-use) |
 

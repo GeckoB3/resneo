@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   bookingDatetime,
+  mergeRequirementsServiceWins,
   resolveRequirements,
   type ResolverRecord,
   type ResolverRequirement,
@@ -89,14 +90,22 @@ export async function loadBookingComplianceFlags(
         .in('service_item_id', serviceItemIds),
     );
   }
+  // Venue-wide rows (plan §4) apply to every booking; a service row for the same type wins.
+  reqQueries.push(
+    admin
+      .from('service_compliance_requirements')
+      .select('id, compliance_type_id, enforcement, lock_period_hours, scope, compliance_types!inner(name, is_active)')
+      .eq('venue_id', venueId)
+      .eq('scope', 'venue'),
+  );
   const reqResults = await Promise.all(reqQueries);
   const reqRows = reqResults.flatMap((r) => r.data ?? []) as Array<Record<string, unknown>>;
   if (reqRows.length === 0) return {};
 
   const reqsByService = new Map<string, ResolverRequirement[]>();
+  const venueReqs: ResolverRequirement[] = [];
   const typeIds = new Set<string>();
   for (const row of reqRows) {
-    const svcId = (row.appointment_service_id ?? row.service_item_id) as string;
     const req: ResolverRequirement = {
       id: row.id as string,
       compliance_type_id: row.compliance_type_id as string,
@@ -104,11 +113,17 @@ export async function loadBookingComplianceFlags(
       enforcement: row.enforcement as ResolverRequirement['enforcement'],
       lock_period_hours: (row.lock_period_hours as number | null) ?? null,
       type_is_active: readActive(row.compliance_types as Parameters<typeof readActive>[0]),
+      scope: row.scope === 'venue' ? 'venue' : 'service',
     };
+    typeIds.add(req.compliance_type_id);
+    const svcId = (row.appointment_service_id ?? row.service_item_id) as string | null;
+    if (req.scope === 'venue' || !svcId) {
+      venueReqs.push(req);
+      continue;
+    }
     const list = reqsByService.get(svcId) ?? [];
     list.push(req);
     reqsByService.set(svcId, list);
-    typeIds.add(req.compliance_type_id);
   }
 
   // Batch-load the guests' records for the involved types.
@@ -146,8 +161,8 @@ export async function loadBookingComplianceFlags(
   const flags: Record<string, BookingComplianceFlag> = {};
   for (const b of bookings) {
     const svcId = (b.appointment_service_id ?? b.service_item_id) as string;
-    const reqs = reqsByService.get(svcId);
-    if (!reqs || reqs.length === 0) continue;
+    const reqs = mergeRequirementsServiceWins(reqsByService.get(svcId) ?? [], venueReqs);
+    if (reqs.length === 0) continue;
     const records = recordsByGuest.get(b.guest_id as string) ?? [];
     const resolved = resolveRequirements(
       reqs,

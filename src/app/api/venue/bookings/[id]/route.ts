@@ -2860,9 +2860,9 @@ export async function PATCH(
         }
       }
 
-      // Compliance gate on the edited service/time (§5.1). Staff context blocks
-      // only on `block_all`; an admin may acknowledge via override_compliance.
-      // No-ops when the feature is off or the booking is not Model B.
+      // Compliance check on the edited service/time (§5.1). Staff are never blocked
+      // (plan §5, 2026-09-01), so the 409 branch is unreachable here; it is kept as the
+      // helper's contract. No-ops when the feature is off or the booking is not Model B.
       if (isAppointment) {
         // A per-visit record was completed for THIS booking, so it moves with it. This runs
         // before the gate below, which would otherwise reject the reschedule on the consent
@@ -2892,10 +2892,7 @@ export async function PATCH(
           bookingTime: timeStr,
           context: 'staff',
         });
-        if (
-          patchCompliance.blocked &&
-          !(staff.role === 'admin' && (body as { override_compliance?: unknown }).override_compliance === true)
-        ) {
+        if (patchCompliance.blocked) {
           return NextResponse.json(
             {
               error: COMPLIANCE_REQUIREMENT_UNMET,

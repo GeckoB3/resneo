@@ -281,7 +281,7 @@ const jsonLd = {
 
 export default function ChairRentalEmploymentStatusPage() {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -322,14 +322,6 @@ function Hero() {
   return (
     <section className="relative overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-accent-50/40" />
-      <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #0f172a 1px, transparent 1px), linear-gradient(to bottom, #0f172a 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
       <div className="relative mx-auto max-w-3xl px-6 py-16 sm:py-20">
         <nav aria-label="Breadcrumb" className="text-sm text-slate-500">
           <ol className="flex flex-wrap items-center gap-x-2">
@@ -349,12 +341,12 @@ function Hero() {
           </ol>
         </nav>
 
-        <span className="mt-6 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 backdrop-blur">
+        <span className="mt-6 inline-flex items-center gap-2 rounded-full border border-accent-100 bg-white px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-accent-700">
           <span className="h-1.5 w-1.5 rounded-full bg-accent" />
           Guide for salon owners
         </span>
 
-        <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl">
+        <h1 className="mt-5 text-4xl font-black leading-[1.1] tracking-tight text-brand-600 sm:text-5xl">
           Is your salon accidentally employing your chair renters?
         </h1>
 
@@ -381,7 +373,7 @@ function QuickAnswer() {
   return (
     <section className="bg-white pb-4">
       <div className="mx-auto max-w-3xl px-6">
-        <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-6 sm:p-8">
+        <div className="rounded-[24px] border border-brand-100 bg-brand-50/60 p-6 sm:p-8">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-accent-700">
             The short answer
           </h2>
@@ -452,7 +444,7 @@ function ArticleBody() {
           {checks.map((c, i) => (
             <li
               key={c.question}
-              className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm transition-colors hover:border-brand-200"
+              className="rounded-[24px] border border-[#EEE9E0] bg-white p-6 shadow-sm transition-colors hover:border-brand-200"
             >
               <div className="flex items-start gap-4">
                 <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm font-bold text-brand-700 ring-1 ring-brand-100">
@@ -481,7 +473,7 @@ function ArticleBody() {
         </p>
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
           {costs.map((c) => (
-            <div key={c.title} className="rounded-2xl border border-rose-100 bg-rose-50/50 p-5">
+            <div key={c.title} className="rounded-[24px] border border-rose-100 bg-rose-50/50 p-5">
               <h3 className="text-sm font-bold text-slate-900">{c.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.detail}</p>
             </div>
@@ -533,7 +525,7 @@ function LinkBreakSection() {
         }}
       />
       <div className="relative mx-auto max-w-3xl px-6">
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white/80 backdrop-blur">
+        <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-white/80">
           <LinkIcon className="h-3.5 w-3.5" /> Link &amp; break
         </span>
         <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -557,9 +549,9 @@ function LinkBreakSection() {
           ))}
         </ul>
 
-        <div className="mt-9 rounded-2xl border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-8">
+        <div className="mt-9 rounded-[24px] border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-900/40 sm:p-8">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
+            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-md shadow-brand-600/25">
               <ShieldCheckIcon />
             </span>
             <div>
@@ -581,14 +573,14 @@ function LinkBreakSection() {
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <a
             href={SIGNUP}
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
+            className="inline-flex h-12 items-center justify-center rounded-full bg-accent-500 px-7 text-base font-extrabold text-brand-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-accent-400"
           >
             Start your free 14-day trial
             <ArrowRightIcon />
           </a>
           <Link
             href="/salon-booking-software#linked-accounts"
-            className="inline-flex h-12 items-center justify-center rounded-xl border border-white/25 bg-transparent px-6 text-base font-semibold text-white backdrop-blur transition-colors hover:bg-white/10"
+            className="inline-flex h-12 items-center justify-center rounded-full border border-white/25 bg-transparent px-6 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/10"
           >
             See how Link &amp; Break works
           </Link>
@@ -602,7 +594,7 @@ function LinkBreakSection() {
 
 function FaqSection() {
   return (
-    <section id="faq" className="scroll-mt-16 bg-slate-50 py-16 sm:py-20">
+    <section id="faq" className="scroll-mt-16 bg-[#FDFBF7] py-16 sm:py-20">
       <div className="mx-auto max-w-3xl px-6">
         <span className="text-xs font-semibold uppercase tracking-widest text-accent-700">
           Common questions
@@ -615,7 +607,7 @@ function FaqSection() {
           {faqs.map((f) => (
             <details
               key={f.q}
-              className="group rounded-2xl border border-slate-200 bg-white p-6 open:shadow-md"
+              className="group rounded-[24px] border border-[#EEE9E0] bg-white p-6 open:shadow-md"
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-base font-semibold text-slate-900">
                 {f.q}
@@ -652,7 +644,7 @@ function SourcesSection() {
           {Object.values(SOURCES).map((s, i) => (
             <li
               key={s.href}
-              className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5 transition-colors hover:border-brand-200"
+              className="rounded-[24px] border border-[#EEE9E0] bg-[#FDFBF7] p-5 transition-colors hover:border-brand-200"
             >
               <div className="flex items-start gap-4">
                 <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white text-xs font-bold text-brand-700 ring-1 ring-brand-100">
@@ -682,7 +674,7 @@ function Disclaimer() {
   return (
     <section className="bg-white py-12">
       <div className="mx-auto max-w-3xl px-6">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
+        <div className="rounded-[24px] border border-[#EEE9E0] bg-[#FDFBF7] p-6">
           <h2 className="text-sm font-bold text-slate-900">A note on advice</h2>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">
             This article explains general HMRC principles and publicly reported context. It is not
@@ -710,7 +702,7 @@ function ClosingCta() {
   return (
     <section className="bg-white pb-20 sm:pb-24">
       <div className="mx-auto max-w-3xl px-6 text-center">
-        <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+        <h2 className="text-3xl font-black tracking-tight text-brand-600 sm:text-4xl">
           Want to see how Link &amp; Break works for your salon?
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-slate-600">
@@ -720,13 +712,13 @@ function ClosingCta() {
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <a
             href={SIGNUP}
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-brand-600 px-7 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
+            className="inline-flex h-12 items-center justify-center rounded-full bg-brand-600 px-7 text-base font-extrabold text-white shadow-lg shadow-brand-600/25 transition-all hover:-translate-y-0.5 hover:bg-brand-700"
           >
             Start your free 14-day trial
           </a>
           <Link
             href="/#contact"
-            className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300"
+            className="inline-flex h-12 items-center justify-center rounded-full border border-[#EEE9E0] bg-white px-6 text-base font-extrabold text-brand-600 shadow-sm transition-colors hover:border-accent-200"
           >
             Book a demo
           </Link>

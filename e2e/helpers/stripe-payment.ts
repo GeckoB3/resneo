@@ -4,7 +4,16 @@ const TEST_CARD = {
   number: '4242424242424242',
   expiry: '12 / 34',
   cvc: '123',
-  zip: 'BT1 1AA',
+  /** UK layout: the element labels the field "Postal code" or "Postcode". */
+  postcode: 'BT1 1AA',
+  /**
+   * US layout: the element labels it "ZIP" and validates it as five digits, so the UK
+   * value above fails with "Your ZIP code is invalid". Stripe picks the layout from the
+   * country it infers from the caller's IP, and GitHub's runners are in the US, so CI
+   * sees this layout while a local run in the UK never does. Any five digits pass in
+   * test mode.
+   */
+  zip: '12345',
 };
 
 /**
@@ -66,8 +75,14 @@ async function tryFillFrame(frame: ReturnType<Page['frameLocator']>): Promise<bo
     if ((await country.count()) > 0) {
       await country.selectOption({ label: 'United Kingdom' }).catch(() => {});
     }
-    const zip = frame.getByRole('textbox', { name: /zip|postal/i });
-    if ((await zip.count()) > 0) await zip.fill(TEST_CARD.zip);
+    // Match the value to the format the element is asking for, not to where the venue is.
+    const zip = frame.getByRole('textbox', { name: /zip/i });
+    if ((await zip.count()) > 0) {
+      await zip.fill(TEST_CARD.zip);
+    } else {
+      const postcode = frame.getByRole('textbox', { name: /postal|postcode/i });
+      if ((await postcode.count()) > 0) await postcode.fill(TEST_CARD.postcode);
+    }
     return true;
   }
 

@@ -1,28 +1,33 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
+import { complianceEnabledForVenue } from '@/lib/compliance/venue-enabled';
 import {
   bookingDatetime,
   loadAndResolveServiceRequirements,
   summariseBlocking,
+  type ComplianceWarningSeverity,
   type EnforcementContext,
 } from '@/lib/compliance/resolve-requirements';
 import { COMPLIANCE_REQUIREMENT_UNMET } from '@/lib/compliance/constants';
 
 export { COMPLIANCE_REQUIREMENT_UNMET };
 
-interface ComplianceDetailBrief {
+export interface ComplianceDetailBrief {
   compliance_type_id: string;
   compliance_type_name: string;
   enforcement: string;
   state: string;
+  /** `required` for a block_all rule, `advisory` otherwise (see resolve-requirements). */
+  severity: ComplianceWarningSeverity;
 }
 
 export interface BookingComplianceCheck {
   blocked: boolean;
   /** Unmet requirements that block creation in this context. */
   details: ComplianceDetailBrief[];
-  /** Unmet warn_staff / warn_client requirements: non-blocking, surfaced to staff (audit M2). */
+  /**
+   * Unmet requirements that do not block here, `required` first. For staff that is every
+   * unmet requirement, since staff are never blocked (plan §5); online it is the warn_* rules.
+   */
   warnings: ComplianceDetailBrief[];
 }
 
@@ -34,7 +39,7 @@ const ALLOWED: BookingComplianceCheck = { blocked: false, details: [], warnings:
  * can surface something actionable instead of a raw code.
  */
 export function complianceUnmetMessage(
-  details: BookingComplianceCheck['details'],
+  details: ReadonlyArray<Pick<ComplianceDetailBrief, 'compliance_type_name'>>,
   context: EnforcementContext,
 ): string {
   const names = [...new Set(details.map((d) => d.compliance_type_name))];
@@ -56,7 +61,8 @@ export function complianceUnmetMessage(
  *   - the venue is not on an Appointments tier, or the feature flag is off
  *   - the service has no requirements, or none are blocking in this context
  *
- * Only `block_online` (online context) and `block_all` (any context) block.
+ * Only the online context can be blocked (`block_online` / `block_all`). Staff always
+ * proceed and receive the unmet requirements as `warnings` (plan §5, 2026-09-01).
  */
 export async function checkBookingCompliance(
   admin: SupabaseClient,
@@ -73,16 +79,7 @@ export async function checkBookingCompliance(
   if (!params.appointmentServiceId && !params.serviceItemId) return ALLOWED;
 
   // Compliance must be active for the venue (tier + flag).
-  const { data: venue } = await admin
-    .from('venues')
-    .select('pricing_tier, feature_flags')
-    .eq('id', params.venueId)
-    .maybeSingle();
-  if (!venue) return ALLOWED;
-  const tier = (venue as { pricing_tier?: string | null }).pricing_tier ?? null;
-  if (!isAppointmentPlanTier(tier)) return ALLOWED;
-  const flags = parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags);
-  if (!resolveAppointmentsFeatureFlag('compliance_records_enabled', flags)) return ALLOWED;
+  if (!(await complianceEnabledForVenue(admin, params.venueId))) return ALLOWED;
 
   const resolution = await loadAndResolveServiceRequirements(admin, {
     venueId: params.venueId,
@@ -94,24 +91,17 @@ export async function checkBookingCompliance(
   if (!resolution.applicable) return ALLOWED;
 
   const summary = summariseBlocking(resolution.resolved, params.context);
-  const warnings = summary.warnings.map((w) => ({
-    compliance_type_id: w.compliance_type_id,
-    compliance_type_name: w.compliance_type_name,
-    enforcement: w.enforcement,
-    state: w.state,
-  }));
+  const toBrief = (b: (typeof summary.warnings)[number]): ComplianceDetailBrief => ({
+    compliance_type_id: b.compliance_type_id,
+    compliance_type_name: b.compliance_type_name,
+    enforcement: b.enforcement,
+    state: b.state,
+    severity: b.severity,
+  });
+  const warnings = summary.warnings.map(toBrief);
   if (!summary.blocked) return { blocked: false, details: [], warnings };
 
-  return {
-    blocked: true,
-    details: summary.unmet.map((u) => ({
-      compliance_type_id: u.compliance_type_id,
-      compliance_type_name: u.compliance_type_name,
-      enforcement: u.enforcement,
-      state: u.state,
-    })),
-    warnings,
-  };
+  return { blocked: true, details: summary.unmet.map(toBrief), warnings };
 }
 
 export interface ComplianceGateInput {
@@ -122,18 +112,14 @@ export interface ComplianceGateInput {
   bookingDate: string;
   bookingTime: string | null;
   context: EnforcementContext;
-  /**
-   * Staff context only: when true (the CALLER must have verified the actor is an
-   * admin) a block is acknowledged and the booking proceeds (§5.2). Ignored in the
-   * online context, where a guest can never override a block.
-   */
-  adminOverride?: boolean;
 }
 
 export interface ComplianceGateResult {
-  /** True when the write must be rejected (blocked and not overridden). */
+  /** True when the write must be rejected. Never true in the staff context (plan §5). */
   blocked: boolean;
   details: BookingComplianceCheck['details'];
+  /** Non-blocking unmet requirements, `required` first; staff surfaces show these. */
+  warnings: BookingComplianceCheck['warnings'];
   /** Canonical 409 JSON body to return when `blocked`; undefined otherwise. */
   body?: {
     error: typeof COMPLIANCE_REQUIREMENT_UNMET;
@@ -144,10 +130,13 @@ export interface ComplianceGateResult {
 
 /**
  * Single gate every Model B booking write path should call (spec §5.1). Wraps
- * {@link checkBookingCompliance}, applies the staff admin-override (§5.2), and
- * prepares the canonical 409 body so call sites cannot drift on shape. Callers
- * that gate multiple segments (multi-service / group) should call this per
- * segment and collect `details` from results where `blocked` is true.
+ * {@link checkBookingCompliance} and prepares the canonical 409 body so call sites
+ * cannot drift on shape. Callers that gate multiple segments (multi-service / group)
+ * should call this per segment, collect `details` from results where `blocked` is
+ * true, and merge `warnings` by type for the staff response.
+ *
+ * There is no staff override any more: staff are never blocked, so nothing is left
+ * to override (the former `override_compliance` request field was removed 2026-09-01).
  */
 export async function enforceBookingCompliance(
   admin: SupabaseClient,
@@ -162,13 +151,13 @@ export async function enforceBookingCompliance(
     bookingTime: input.bookingTime,
     context: input.context,
   });
-  const overridden = input.context === 'staff' && input.adminOverride === true;
-  if (!check.blocked || overridden) {
-    return { blocked: false, details: check.details };
+  if (!check.blocked) {
+    return { blocked: false, details: check.details, warnings: check.warnings };
   }
   return {
     blocked: true,
     details: check.details,
+    warnings: check.warnings,
     body: {
       error: COMPLIANCE_REQUIREMENT_UNMET,
       message: complianceUnmetMessage(check.details, input.context),

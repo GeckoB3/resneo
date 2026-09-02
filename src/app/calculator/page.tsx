@@ -77,16 +77,16 @@ const CHARGING_MODELS: {
 
 export default function CalculatorPage() {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="home-warm min-h-screen bg-[#FDFBF7] text-slate-900">
       <MarketingNav currentHref="/calculator" ctaHref="/#pricing" />
 
       {/* ---------------------------------------------------------- hero */}
-      <section className="border-b border-slate-100 bg-gradient-to-b from-brand-50/70 to-white py-14 sm:py-20">
+      <section className="border-b border-[#EEE9E0] bg-gradient-to-b from-brand-50/70 to-white py-14 sm:py-20">
         <div className="mx-auto max-w-3xl px-6 text-center">
           <p className="text-xs font-bold uppercase tracking-widest text-accent-700">
             Price calculator
           </p>
-          <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
+          <h1 className="mt-3 text-4xl font-black tracking-tight text-brand-600 sm:text-5xl">
             What does your booking software actually cost?
           </h1>
           <p className="mt-5 text-lg leading-relaxed text-slate-600">
@@ -103,9 +103,9 @@ export default function CalculatorPage() {
       </section>
 
       {/* ------------------------------------------------ charging models */}
-      <section className="border-y border-slate-100 bg-slate-50/70 py-16 sm:py-20">
+      <section className="border-y border-[#EEE9E0] bg-[#FDFBF7] py-16 sm:py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+          <h2 className="text-3xl font-black tracking-tight text-brand-600">
             How each platform builds your bill
           </h2>
           <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-600">
@@ -114,10 +114,10 @@ export default function CalculatorPage() {
             on the features you assumed were included.
           </p>
 
-          <div className="mt-8 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="mt-8 overflow-x-auto rounded-2xl border border-[#EEE9E0] bg-white shadow-sm">
             <table className="w-full min-w-[52rem] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
+                <tr className="border-b border-[#EEE9E0] bg-[#FDFBF7]">
                   <th scope="col" className="px-5 py-4 font-bold text-slate-900">
                     Platform
                   </th>
@@ -138,7 +138,7 @@ export default function CalculatorPage() {
                   return (
                     <tr
                       key={row.name}
-                      className={`border-b border-slate-100 last:border-0 ${isResneo ? 'bg-brand-50/60' : ''}`}
+                      className={`border-b border-[#EEE9E0] last:border-0 ${isResneo ? 'bg-brand-50/60' : ''}`}
                     >
                       <th
                         scope="row"
@@ -179,7 +179,7 @@ export default function CalculatorPage() {
       {/* ------------------------------------------------ where it bites */}
       <section className="py-16 sm:py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+          <h2 className="text-3xl font-black tracking-tight text-brand-600">
             Why commission adds up faster than you expect
           </h2>
           <div className="mt-8 grid gap-6 md:grid-cols-3">
@@ -197,7 +197,7 @@ export default function CalculatorPage() {
             />
           </div>
 
-          <div className="mt-10 rounded-2xl border border-brand-100 bg-brand-50/50 p-6 sm:p-8">
+          <div className="mt-10 rounded-[24px] border border-brand-100 bg-brand-50/50 p-6 sm:p-8">
             <h3 className="text-xl font-bold text-brand-800">The ResNeo position, plainly</h3>
             <p className="mt-3 max-w-4xl text-base leading-relaxed text-slate-700">
               We charge one flat fee a month and take nothing from your bookings. We also do not run
@@ -210,7 +210,7 @@ export default function CalculatorPage() {
             </p>
             <Link
               href="/#pricing"
-              className="mt-6 inline-flex min-h-12 items-center justify-center rounded-xl bg-brand-600 px-6 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              className="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-brand-600 px-6 text-sm font-extrabold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
             >
               See ResNeo pricing
             </Link>
@@ -219,13 +219,13 @@ export default function CalculatorPage() {
       </section>
 
       {/* -------------------------------------------- sources + disclaimer */}
-      <section id="sources" className="scroll-mt-20 border-t border-slate-100 bg-slate-50/70 py-16 sm:py-20">
+      <section id="sources" className="scroll-mt-20 border-t border-[#EEE9E0] bg-[#FDFBF7] py-16 sm:py-20">
         <div className="mx-auto max-w-4xl px-6">
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">
             Where these figures come from
           </h2>
 
-          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/80 p-6">
+          <div className="mt-6 rounded-[24px] border border-amber-200 bg-amber-50/80 p-6">
             <h3 className="text-sm font-bold uppercase tracking-wide text-amber-900">
               Important: please read
             </h3>
@@ -258,7 +258,7 @@ export default function CalculatorPage() {
             {PRICING_ASSUMPTIONS.map((assumption) => (
               <li
                 key={assumption}
-                className="flex gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700"
+                className="flex gap-3 rounded-xl border border-[#EEE9E0] bg-white px-4 py-3 text-sm leading-relaxed text-slate-700"
               >
                 <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500" />
                 <span>{assumption}</span>
@@ -271,7 +271,7 @@ export default function CalculatorPage() {
             {PRICING_SOURCES.map((source) => (
               <li
                 key={`${source.provider}-${source.url}`}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
+                className="rounded-xl border border-[#EEE9E0] bg-white px-4 py-3 text-sm"
               >
                 <span className="font-semibold text-slate-900">{source.provider}</span>
                 <span className="mt-0.5 block text-slate-600">{source.what}</span>
@@ -307,7 +307,7 @@ export default function CalculatorPage() {
 
 function Point({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="rounded-[24px] border border-[#EEE9E0] bg-white p-6 shadow-sm">
       <h3 className="text-base font-bold text-slate-900">{title}</h3>
       <p className="mt-2 text-sm leading-relaxed text-slate-600">{body}</p>
     </div>

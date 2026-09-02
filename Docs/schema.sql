@@ -268,7 +268,8 @@
 -- compliance_types                  Venue definitions of a record type (patch test, consent, …)
 -- compliance_type_versions          Immutable form-schema snapshots per type
 -- compliance_records                Captured instances of a type against a guest
--- service_compliance_requirements   Links Model B services (appointment_services
+-- service_compliance_requirements   Links Model B services (appointment_services;
+--                                   scope='venue' rows have no service FK and apply to every booking, 2026-09-01)
 --                                   or service_items) to required types
 -- compliance_form_links             Single-use public submission links (/p/forms/{code})
 -- compliance_audit_events           Append-only compliance audit trail

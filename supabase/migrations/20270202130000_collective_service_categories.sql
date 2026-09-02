@@ -59,35 +59,59 @@ COMMENT ON COLUMN public.venue_collectives.categories_seeded_at IS
   'When the app first inherited headings from member venues for this page. NULL means '
   'the one-time seeding has not run; set once so a host who removes headings is not overruled.';
 
--- RLS mirrors collective_service_items: staff of the host or any member venue may
--- read; the public policy covers active unified_catalog collectives (defence in
--- depth: the page renders through the admin client); the service role does the
--- writes on behalf of the host, gated in the catalogue route.
+-- The collectives the caller hosts or is an active member of.
+--
+-- WHY A FUNCTION AND NOT THE SUBQUERIES the items table's policy uses. Those
+-- subqueries read venue_collectives and venue_collective_members, whose own
+-- staff policies read each other back (20260919120000, staff_select_collectives
+-- and staff_select_collective_members), so any authenticated evaluation raises
+-- "infinite recursion detected in policy". Nothing noticed because the app reads
+-- every collective table through the service role; the pgTAP suite for this
+-- table is the first thing to evaluate that chain as `authenticated`. SECURITY
+-- DEFINER reads both tables as their owner, outside RLS, the same way
+-- current_staff_venue_ids reads staff. Read-only and parameterised on the
+-- caller's own identity, so it belongs on the client-executable allowlist
+-- (scripts/check-client-executable-functions.mjs) beside the other RLS helpers.
+CREATE OR REPLACE FUNCTION public.current_staff_collective_ids()
+RETURNS SETOF uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT c.id FROM public.venue_collectives c
+  WHERE c.host_venue_id IN (SELECT public.current_staff_venue_ids())
+  UNION
+  SELECT m.collective_id FROM public.venue_collective_members m
+  WHERE m.status = 'active'
+    AND m.venue_id IN (SELECT public.current_staff_venue_ids());
+$$;
+
+-- Whether a combined page is live and public (active, unified_catalog). Same
+-- reason as above: the anonymous policy cannot subquery venue_collectives either,
+-- because staff_select_collectives applies to every role and recurses through
+-- the members table. Returns only what the public page already shows.
+CREATE OR REPLACE FUNCTION public.collective_is_public_catalog(p_collective uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.venue_collectives c
+    WHERE c.id = p_collective AND c.status = 'active' AND c.page_mode = 'unified_catalog'
+  );
+$$;
+
+-- RLS mirrors collective_service_items in intent: staff of the host or any
+-- member venue may read; the public policy covers active unified_catalog
+-- collectives (defence in depth: the page renders through the admin client); the
+-- service role does the writes on behalf of the host, gated in the catalogue
+-- route.
 ALTER TABLE public.collective_service_categories ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "staff_select_collective_service_categories" ON public.collective_service_categories;
 CREATE POLICY "staff_select_collective_service_categories"
   ON public.collective_service_categories FOR SELECT
-  USING (
-    collective_id IN (
-      SELECT id FROM public.venue_collectives
-      WHERE host_venue_id IN (SELECT public.current_staff_venue_ids())
-    )
-    OR collective_id IN (
-      SELECT collective_id FROM public.venue_collective_members
-      WHERE venue_id IN (SELECT public.current_staff_venue_ids())
-    )
-  );
+  USING (collective_id IN (SELECT public.current_staff_collective_ids()));
 
 DROP POLICY IF EXISTS "public_read_active_collective_service_categories" ON public.collective_service_categories;
 CREATE POLICY "public_read_active_collective_service_categories"
   ON public.collective_service_categories FOR SELECT TO anon
-  USING (
-    collective_id IN (
-      SELECT id FROM public.venue_collectives
-      WHERE status = 'active' AND page_mode = 'unified_catalog'
-    )
-  );
+  USING (public.collective_is_public_catalog(collective_id));
 
 DROP POLICY IF EXISTS "service_role_collective_service_categories" ON public.collective_service_categories;
 CREATE POLICY "service_role_collective_service_categories"

@@ -125,6 +125,19 @@ The same feature, per combined page, curated by the host:
   per service, so the booking flow renders identically to a venue page; the Services tab gets
   `category` and `sort_order`.
 
+### A pre-existing RLS fault this work surfaced
+
+`staff_select_collectives` (on `venue_collectives`) subqueries `venue_collective_members`, and
+`staff_select_collective_members` subqueries `venue_collectives` back. Both policies apply to every
+role, so any policy evaluation that reads either table as `anon` or `authenticated` raises
+"infinite recursion detected in policy". `collective_service_items` and
+`collective_service_providers` carry policies with exactly those subqueries and are therefore
+unreadable through PostgREST for those roles; nothing noticed because every collective read in
+the app goes through the service role. The new categories table avoids the chain with two
+SECURITY DEFINER helpers (`current_staff_collective_ids`, `collective_is_public_catalog`), both
+allowlisted in `scripts/check-client-executable-functions.mjs`. The older policies are left as
+they are: fixing them is a separate, security-reviewed change, and the helpers are ready for it.
+
 ## Out of scope, by decision
 
 - Category photos or descriptions.

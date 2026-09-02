@@ -1,5 +1,7 @@
 'use client';
 
+import { RotatingScheduleEditor } from '@/app/dashboard/availability/RotatingScheduleEditor';
+import type { WorkingHoursRota } from '@/lib/availability/working-hours-rota';
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
@@ -33,6 +35,8 @@ interface Practitioner {
   /** unified_calendars.calendar_type — resource rows are excluded from appointment calendar UI */
   calendar_type?: string | null;
   working_hours: Record<string, Array<{ start: string; end: string }>>;
+  /** Rotating schedule, as stored; see working-hours-rota.ts. */
+  working_hours_rota?: unknown;
   break_times: Array<{ start: string; end: string }>;
   break_times_by_day?: WorkingHours | null;
   days_off: string[];
@@ -786,6 +790,74 @@ export function AppointmentAvailabilitySettings({
     }
   }
 
+  /**
+   * PATCH one calendar's rotating schedule (null removes it), with the same
+   * narrowing-hours confirmation a plain hours save gets.
+   */
+  async function patchRota(calendarId: string, rota: WorkingHoursRota | null): Promise<'saved' | 'cancelled'> {
+    const doSave = async (acknowledge: boolean): Promise<'saved' | 'cancelled'> => {
+      const res = await fetch(
+        acknowledge ? '/api/venue/practitioners?acknowledge_affected_bookings=true' : '/api/venue/practitioners',
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: calendarId, working_hours_rota: rota }),
+        },
+      );
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        requires_confirmation?: boolean;
+        message?: string;
+      };
+      if (res.status === 409 && body.requires_confirmation) {
+        if (
+          typeof window !== 'undefined' &&
+          window.confirm(`${body.message ?? 'Some upcoming bookings fall outside the new hours.'}\n\nSave this schedule anyway?`)
+        ) {
+          return doSave(true);
+        }
+        return 'cancelled';
+      }
+      if (!res.ok) throw new Error(body.error ?? 'Failed to save');
+      return 'saved';
+    };
+    return doSave(false);
+  }
+
+  async function saveRota(rota: WorkingHoursRota | null) {
+    if (!selectedPrac || !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if ((await patchRota(selectedPrac.id, rota)) === 'saved') {
+        flash(rota ? 'Rotating schedule saved' : 'Rotating schedule removed');
+        await fetchData();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save the rotating schedule');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function copyRotaTo(calendarIds: string[], rota: WorkingHoursRota) {
+    if (!isAdmin || calendarIds.length === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      let copied = 0;
+      for (const id of calendarIds) {
+        if ((await patchRota(id, rota)) === 'saved') copied += 1;
+      }
+      flash(`Rotating schedule copied to ${copied} calendar${copied === 1 ? '' : 's'}`);
+      await fetchData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to copy the rotating schedule');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // ─── Breaks Tab ─────────────────────────────────────────────────────
   /**
    * Save breaks for the selected calendar, or for every staff calendar at once
@@ -1245,6 +1317,37 @@ export function AppointmentAvailabilitySettings({
                           ? 'View only - this calendar is not linked to your account. You can edit working hours on calendars you manage, or ask an admin.'
                           : undefined
                       }
+                    />
+                  )}
+
+                  {selectedPrac && tab === 'hours' && (selectedPrac.calendar_type ?? 'practitioner') !== 'resource' && (
+                    <RotatingScheduleEditor
+                      key={`${selectedPrac.id}:${JSON.stringify(selectedPrac.working_hours_rota ?? null)}`}
+                      calendarName={selectedPrac.name}
+                      value={selectedPrac.working_hours_rota ?? null}
+                      weeklyHours={selectedPrac.working_hours ?? {}}
+                      onSave={saveRota}
+                      saving={saving}
+                      readOnly={!canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)}
+                      renderDayContext={(dayKey, periods) => {
+                        const ctx = venueDayContext(venueHours, dayKey);
+                        if (ctx.kind === 'unset') return null;
+                        const outside = calendarHoursOutsideVenue(periods, ctx);
+                        return (
+                          <span className={outside ? 'text-amber-700' : 'text-slate-500'}>
+                            Venue: {describeVenueDay(ctx)}
+                            {outside ? ' (hours outside this are not bookable)' : ''}
+                          </span>
+                        );
+                      }}
+                      copyTargets={
+                        isAdmin
+                          ? practitionersForScheduleTabs
+                              .filter((p) => p.id !== selectedPrac.id && (p.calendar_type ?? 'practitioner') !== 'resource')
+                              .map((p) => ({ id: p.id, name: p.name }))
+                          : []
+                      }
+                      onCopyTo={copyRotaTo}
                     />
                   )}
 

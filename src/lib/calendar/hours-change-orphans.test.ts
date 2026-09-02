@@ -68,3 +68,24 @@ describe('describeHoursChangeOrphans', () => {
     expect(msg).toContain('1 upcoming booking outside');
   });
 });
+
+describe('calendarWorkingMinutesForDate with a rotating schedule', () => {
+  it('follows the rota week for dates it covers and the weekly shape otherwise', () => {
+    // TUE is a Tuesday; the cycle starts on the Monday before it, so TUE is in week one.
+    const monday = (() => {
+      const [y, m, d] = TUE.split('-').map(Number);
+      const date = new Date(Date.UTC(y!, m! - 1, d! - 1));
+      return date.toISOString().slice(0, 10);
+    })();
+    const periods = calendarWorkingMinutesForDate({
+      working_hours: { '2': [{ start: '09:00', end: '18:00' }] },
+      working_hours_rota: {
+        version: 1,
+        cycle_start: monday,
+        weeks: [{ '2': [{ start: '12:00', end: '14:00' }] }, { '2': [{ start: '09:00', end: '18:00' }] }],
+        repeat_until: null,
+      },
+    });
+    expect(periods(TUE)).toEqual([{ start: 720, end: 840 }]);
+  });
+});

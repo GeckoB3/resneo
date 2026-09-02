@@ -34,6 +34,7 @@ import type { WorkingHours } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { unionMinuteRanges } from '@/lib/availability/calendar-resource-occupancy';
+import { effectiveWorkingHoursForDate } from '@/lib/availability/working-hours-rota';
 
 export interface MinuteRange {
   start: number;
@@ -57,6 +58,12 @@ export interface CalendarScheduleRow {
   break_times_by_day?: WorkingHours | null;
   days_off?: string[] | null;
   availability_exceptions?: Record<string, CalendarDateOverride> | null;
+  /**
+   * Rotating schedule (`unified_calendars.working_hours_rota`): a cycle of weekly shapes
+   * that replaces `working_hours` for the dates it covers. Read as `unknown` and parsed
+   * per call, so stored garbage degrades to "no rota". See working-hours-rota.ts.
+   */
+  working_hours_rota?: unknown;
 }
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
@@ -119,7 +126,10 @@ export function calendarHours(row: CalendarScheduleRow, dateStr: string): Minute
 
   if (calendarDayOff(row, dateStr)) return [];
 
-  const hours = (row.working_hours ?? {}) as Record<string, Array<{ start: string; end: string }>>;
+  // A rotating schedule supplies the weekly shape for the dates it covers; outside it the
+  // ordinary `working_hours` apply. Same tag (`hours`), same precedence: below overrides
+  // and days off, skippable by `allowOutsideHours`.
+  const hours = effectiveWorkingHoursForDate(row, dateStr) as Record<string, Array<{ start: string; end: string }>>;
   const { key, name } = dayKeys(dateStr);
   const ranges = toRanges(hours[key] ?? hours[name]);
   return ranges.length > 0 ? unionMinuteRanges(ranges) : [];

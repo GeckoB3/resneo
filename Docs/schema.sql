@@ -134,7 +134,7 @@
 -- service_capacity_rules           Capacity rules per service
 -- service_schedule_exceptions      Per-service availability exceptions
 -- venue_services                   Venue-level service configuration
--- unified_calendars                Bookable calendar columns
+-- unified_calendars                Bookable calendar columns (working_hours_rota: rotating multi-week schedule)
 -- calendar_service_assignments     Which services a calendar offers
 -- calendar_blocks                  Calendar-level blocks
 -- calendar_date_overrides          Per-date calendar availability overrides; secondary mirror

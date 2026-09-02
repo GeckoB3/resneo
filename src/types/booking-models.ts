@@ -105,6 +105,11 @@ export interface Practitioner {
    * maps the row directly. §1.2 item 21.
    */
   availability_exceptions?: ResourceAvailabilityExceptions | null;
+  /**
+   * Rotating schedule (`unified_calendars.working_hours_rota`). Kept as `unknown` here and
+   * parsed by `src/lib/availability/working-hours-rota.ts` wherever it is read.
+   */
+  working_hours_rota?: unknown;
   is_active: boolean;
   sort_order: number;
   created_at: string;
@@ -483,6 +488,8 @@ export interface VenueResource {
     days_off: string[];
     break_times: Array<{ start: string; end: string }>;
     break_times_by_day: WorkingHours | null;
+    /** The host's rotating schedule, so a hosted resource follows it. */
+    working_hours_rota?: unknown;
     /**
      * Windows the host is unavailable for on a given date: staff leave and ad-hoc blocked
      * time, keyed by "YYYY-MM-DD". A hosted resource stayed bookable straight through both

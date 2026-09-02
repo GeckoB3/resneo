@@ -10,6 +10,7 @@ export interface AppointmentWaitlistOfferNotifyInput {
   venueId: string;
   venueName: string;
   venueLogoUrl?: string | null;
+  venueBrandColour?: string | null;
   venueAddress?: string | null;
   venuePhone: string | null;
   bookingPageUrl: string | null;
@@ -60,6 +61,7 @@ export async function sendAppointmentWaitlistOfferNotification(
   const { subject, html, text } = renderAppointmentWaitlistOfferEmail({
     venueName: input.venueName,
     venueLogoUrl: input.venueLogoUrl,
+    venueBrandColour: input.venueBrandColour ?? null,
     venueAddress: input.venueAddress,
     venuePhone: input.venuePhone,
     guestName,

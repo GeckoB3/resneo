@@ -1190,7 +1190,7 @@ export async function PATCH(
           .single();
         const { data: venueRow } = await staff.db
           .from('venues')
-          .select('name, address, phone, email, reply_to_email')
+          .select('name, address, phone, email, reply_to_email, booking_page_config')
           .eq('id', scopeVenueId)
           .single();
         if (guestRow && venueRow?.name) {
@@ -1233,6 +1233,7 @@ export async function PATCH(
             phone: venueRow.phone ?? null,
             email: venueRow.email ?? null,
             reply_to_email: venueRow.reply_to_email ?? null,
+            booking_page_config: venueRow.booking_page_config ?? null,
           });
           const vid = scopeVenueId;
           const refundMsg = refund_message;

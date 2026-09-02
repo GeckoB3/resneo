@@ -461,7 +461,7 @@ export async function sendCardHoldChargedReceipt(params: {
 
   const { data: venueRow } = await admin
     .from('venues')
-    .select('name, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model')
+    .select('name, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model, booking_page_config')
     .eq('id', venueId)
     .maybeSingle();
   const v = venueRow as
@@ -475,6 +475,7 @@ export async function sendCardHoldChargedReceipt(params: {
         website_url?: string | null;
         timezone?: string | null;
         booking_model?: string | null;
+        booking_page_config?: unknown;
       }
     | null;
   if (!v?.name) return { sent: false, reason: 'venue_not_found' };
@@ -527,6 +528,7 @@ export async function sendCardHoldChargedReceipt(params: {
     logo_url: v.logo_url ?? null,
     website_url: v.website_url ?? null,
     timezone: v.timezone ?? null,
+    booking_page_config: v.booking_page_config ?? null,
   });
 
   const rendered = renderCardHoldChargedEmail(booking, venueData, { chargedPence, chargedAt });
@@ -591,7 +593,7 @@ export async function sendPaymentReceiptEmail(params: {
 
   const { data: venueRow } = await admin
     .from('venues')
-    .select('name, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model')
+    .select('name, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model, booking_page_config')
     .eq('id', venueId)
     .maybeSingle();
   const v = venueRow as
@@ -605,6 +607,7 @@ export async function sendPaymentReceiptEmail(params: {
         website_url?: string | null;
         timezone?: string | null;
         booking_model?: string | null;
+        booking_page_config?: unknown;
       }
     | null;
   if (!v?.name) return { sent: false, reason: 'venue_not_found' };
@@ -656,6 +659,7 @@ export async function sendPaymentReceiptEmail(params: {
     logo_url: v.logo_url ?? null,
     website_url: v.website_url ?? null,
     timezone: v.timezone ?? null,
+    booking_page_config: v.booking_page_config ?? null,
   });
 
   // Receipt money picture (best-effort): the visit total + remaining balance

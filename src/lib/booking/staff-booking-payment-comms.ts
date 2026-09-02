@@ -44,6 +44,8 @@ export async function applyStaffBookingPaymentAndComms(params: {
   venueProfileEmail?: string | null;
   /** venues.reply_to_email — Reply-To for guest emails. */
   venueReplyToEmail?: string | null;
+  /** `venues.booking_page_config`, so customer emails can carry the venue brand colour. */
+  venueBookingPageConfig?: unknown;
   stripeConnectedAccountId: string | null;
   bookingId: string;
   guestName: string;
@@ -78,6 +80,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
     venueAddress,
     venueProfileEmail,
     venueReplyToEmail,
+    venueBookingPageConfig,
     stripeConnectedAccountId,
     bookingId,
     guestName,
@@ -162,6 +165,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
             address: venueAddress ?? null,
             email: venueProfileEmail ?? null,
             reply_to_email: venueReplyToEmail ?? null,
+            booking_page_config: venueBookingPageConfig ?? null,
           }),
           venueId,
           payment_url!,
@@ -230,6 +234,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
             address: venueAddress ?? null,
             email: venueProfileEmail ?? null,
             reply_to_email: venueReplyToEmail ?? null,
+            booking_page_config: venueBookingPageConfig ?? null,
           }),
           venueId,
           payment_url!,
@@ -280,6 +285,7 @@ export async function applyStaffBookingPaymentAndComms(params: {
               address: venueAddress ?? null,
               email: venueProfileEmail ?? null,
               reply_to_email: venueReplyToEmail ?? null,
+              booking_page_config: venueBookingPageConfig ?? null,
             }),
             venueId,
           );

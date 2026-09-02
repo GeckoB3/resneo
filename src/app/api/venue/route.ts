@@ -85,7 +85,7 @@ const venueProfileSchema = z.object({
   booking_page_config: z
     .object({
       brand_primary: z.string().max(7).nullable().optional(),
-      brand_accent: z.string().max(7).nullable().optional(),
+      brand_emails: z.boolean().optional(),
       about: z.string().max(4000).nullable().optional(),
       announcement: z.string().max(600).nullable().optional(),
       font_preset: z.string().max(40).nullable().optional(),

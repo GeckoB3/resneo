@@ -156,7 +156,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   // ── Booking Site Studio: branding & content ──────────────────────────────
   const cfg0 = adapter.getConfig();
   const [brandPrimary, setBrandPrimary] = useState(cfg0.brand_primary ?? '');
-  const [brandAccent, setBrandAccent] = useState(cfg0.brand_accent ?? '');
+  const [brandEmails, setBrandEmails] = useState(cfg0.brand_emails === true);
   const [fontPreset, setFontPreset] = useState<BookingFontPreset>(cfg0.font_preset ?? 'default');
   const [logoCrop, setLogoCrop] = useState<BookingPageLogoCrop>(() =>
     resolveBookingPageLogoCrop(cfg0.logo_crop),
@@ -243,8 +243,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     const config: BookingPageConfig = {};
     const primary = normalizeHexColor(brandPrimary);
     if (primary) config.brand_primary = primary;
-    const accent = normalizeHexColor(brandAccent);
-    if (accent) config.brand_accent = accent;
+    config.brand_emails = brandEmails;
     if (fontPreset && fontPreset !== 'default') config.font_preset = fontPreset;
     if (about.trim()) config.about = about.trim();
     if (announcement.trim()) config.announcement = announcement.trim();
@@ -295,7 +294,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   }, [
     adapter.capabilities.servicePhotosInConfig,
     brandPrimary,
-    brandAccent,
+    brandEmails,
     fontPreset,
     logoCrop,
     coverCropBox,
@@ -394,7 +393,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   useEffect(() => {
     const c = adapter.getConfig();
     setBrandPrimary(c.brand_primary ?? '');
-    setBrandAccent(c.brand_accent ?? '');
+    setBrandEmails(c.brand_emails === true);
     setFontPreset(c.font_preset ?? 'default');
     setAbout(c.about ?? '');
     setAnnouncement(c.announcement ?? '');
@@ -752,7 +751,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
       const c = source.config;
       if (scope === 'all' || scope === 'book_now') {
         setBrandPrimary(c.brand_primary ?? '');
-        setBrandAccent(c.brand_accent ?? '');
+        setBrandEmails(c.brand_emails === true);
         setFontPreset(c.font_preset ?? 'default');
         setAnnouncement(c.announcement ?? '');
         setCoverFullWidth(c.cover_full_width === true);
@@ -1154,27 +1153,19 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Quick palettes</span>
               <div className="flex flex-wrap gap-2">
                 {BOOKING_THEME_PRESETS.map((preset) => {
-                  const active =
-                    normalizeHexColor(brandPrimary) === preset.primary &&
-                    normalizeHexColor(brandAccent) === preset.accent;
+                  const active = normalizeHexColor(brandPrimary) === preset.primary;
                   return (
                     <button
                       key={preset.key}
                       type="button"
-                      onClick={() => {
-                        setBrandPrimary(preset.primary);
-                        setBrandAccent(preset.accent);
-                      }}
+                      onClick={() => setBrandPrimary(preset.primary)}
                       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                         active
                           ? 'border-brand-300 bg-brand-50 text-brand-800'
                           : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                       }`}
                     >
-                      <span className="flex -space-x-1">
-                        <span className="h-4 w-4 rounded-full ring-1 ring-white" style={{ backgroundColor: preset.primary }} />
-                        <span className="h-4 w-4 rounded-full ring-1 ring-white" style={{ backgroundColor: preset.accent }} />
-                      </span>
+                      <span className="h-4 w-4 rounded-full ring-1 ring-white" style={{ backgroundColor: preset.primary }} />
                       {preset.label}
                     </button>
                   );
@@ -1183,76 +1174,66 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Brand colour</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  aria-label="Brand colour"
-                  disabled={!isAdmin}
-                  value={normalizeHexColor(brandPrimary) ?? '#003b6f'}
-                  onChange={(e) => setBrandPrimary(e.target.value)}
-                  className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 disabled:opacity-50"
-                />
-                <input
-                  type="text"
-                  disabled={!isAdmin}
-                  value={brandPrimary}
-                  onChange={(e) => setBrandPrimary(e.target.value)}
-                  placeholder="#003B6F"
-                  className={inputClass}
-                />
-                {brandPrimary.trim() && isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setBrandPrimary('')}
-                    className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-slate-500">Buttons, highlights and accents on your booking page.</p>
-              {primaryLowContrast && (
-                <p className="mt-1 text-xs text-amber-800">
-                  This colour is quite light. White button text may be hard to read; a darker shade works best.
-                </p>
+          <div className="sm:max-w-sm">
+            <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Brand colour</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                aria-label="Brand colour"
+                disabled={!isAdmin}
+                value={normalizeHexColor(brandPrimary) ?? '#003b6f'}
+                onChange={(e) => setBrandPrimary(e.target.value)}
+                className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 disabled:opacity-50"
+              />
+              <input
+                type="text"
+                disabled={!isAdmin}
+                value={brandPrimary}
+                onChange={(e) => setBrandPrimary(e.target.value)}
+                placeholder="#003B6F"
+                className={inputClass}
+              />
+              {brandPrimary.trim() && isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setBrandPrimary('')}
+                  className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700"
+                >
+                  Reset
+                </button>
               )}
             </div>
-
-            <div>
-              <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
-                Accent colour <span className="font-normal text-slate-400">(optional)</span>
+            <p className="mt-1 text-xs text-slate-500">Buttons, highlights and accents on your booking page.</p>
+            {primaryLowContrast && (
+              <p className="mt-1 text-xs text-amber-800">
+                This colour is quite light. White button text may be hard to read; a darker shade works best.
+              </p>
+            )}
+            {adapter.capabilities.emailBranding ? (
+              <label htmlFor="bp-brand-emails" className="mt-3 flex items-start gap-2">
+                <input
+                  id="bp-brand-emails"
+                  type="checkbox"
+                  className="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  checked={brandEmails}
+                  disabled={!isAdmin || !primaryHasColour}
+                  onChange={(e) => setBrandEmails(e.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-medium text-slate-700">
+                    Use my brand colour in customer emails
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {primaryHasColour
+                      ? 'Buttons, links and highlights in booking confirmations, reminders and receipts. Leave this off to keep the ResNeo colours.'
+                      : 'Choose a brand colour first.'}
+                    {primaryHasColour && primaryLowContrast
+                      ? ' A light colour is darkened a little in emails so white button text stays readable.'
+                      : ''}
+                  </span>
+                </span>
               </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  aria-label="Accent colour"
-                  disabled={!isAdmin}
-                  value={normalizeHexColor(brandAccent) ?? '#00c2c7'}
-                  onChange={(e) => setBrandAccent(e.target.value)}
-                  className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 disabled:opacity-50"
-                />
-                <input
-                  type="text"
-                  disabled={!isAdmin}
-                  value={brandAccent}
-                  onChange={(e) => setBrandAccent(e.target.value)}
-                  placeholder="#00C2C7"
-                  className={inputClass}
-                />
-                {brandAccent.trim() && isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setBrandAccent('')}
-                    className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-            </div>
+            ) : null}
           </div>
 
           <div>

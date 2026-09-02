@@ -368,7 +368,7 @@ export async function POST(request: NextRequest) {
 
       const { data: venue, error: venueErr } = await supabase
         .from('venues')
-        .select('name, address, email, reply_to_email')
+        .select('name, address, email, reply_to_email, booking_page_config')
         .eq('id', booking.venue_id)
         .single();
       if (venueErr) {
@@ -391,6 +391,7 @@ export async function POST(request: NextRequest) {
         address: venue?.address ?? null,
         email: venue?.email ?? null,
         reply_to_email: venue?.reply_to_email ?? null,
+        booking_page_config: venue?.booking_page_config ?? null,
       });
 
       const venueIdForAfter = booking.venue_id;
@@ -684,7 +685,7 @@ export async function POST(request: NextRequest) {
 
       const { data: venue, error: venueErr } = await supabase
         .from('venues')
-        .select('name, address, email, reply_to_email')
+        .select('name, address, email, reply_to_email, booking_page_config')
         .eq('id', venueId)
         .single();
       if (venueErr) {
@@ -707,6 +708,7 @@ export async function POST(request: NextRequest) {
         address: venue?.address ?? null,
         email: venue?.email ?? null,
         reply_to_email: venue?.reply_to_email ?? null,
+        booking_page_config: venue?.booking_page_config ?? null,
       });
 
       const venueIdForAfter = venueId;

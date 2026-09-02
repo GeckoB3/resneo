@@ -145,7 +145,7 @@ export async function materializeRecurringReservation(
 
   const { data: venue, error: vErr } = await admin
     .from('venues')
-    .select('id, name, address, email, reply_to_email, timezone')
+    .select('id, name, address, email, reply_to_email, timezone, booking_page_config')
     .eq('id', row.venue_id)
     .maybeSingle();
 

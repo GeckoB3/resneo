@@ -55,6 +55,11 @@ export interface BookingPageEditorCapabilities {
    * collectives (offering photos live on the item, so the serialized config omits them).
    */
   servicePhotosInConfig: boolean;
+  /**
+   * Show the "use my brand colour in customer emails" switch. Only a venue sends customer
+   * emails; a combined page books into its host venue, whose own setting applies.
+   */
+  emailBranding?: boolean;
 }
 
 /** One image slot (logo OR cover). Abstracts WHERE the url lives and HOW it persists. */

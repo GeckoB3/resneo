@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, logo_url, cover_photo_url, website_url, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags',
+        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, logo_url, cover_photo_url, website_url, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags, booking_page_config',
       )
       .eq('id', venue_id)
       .single();
@@ -722,6 +722,7 @@ export async function POST(request: NextRequest) {
                 cover_photo_url: (venue as { cover_photo_url?: string | null }).cover_photo_url ?? null,
                 website_url: (venue as { website_url?: string | null }).website_url ?? null,
                 timezone: (venue as { timezone?: string | null }).timezone ?? null,
+                booking_page_config: venue.booking_page_config ?? null,
               }),
               venue.id,
             );
@@ -2187,6 +2188,7 @@ async function handleNonTableBooking(
               cover_photo_url: (venue as { cover_photo_url?: string | null }).cover_photo_url ?? null,
               website_url: (venue as { website_url?: string | null }).website_url ?? null,
               timezone: (venue as { timezone?: string | null }).timezone ?? null,
+              booking_page_config: venue.booking_page_config ?? null,
             }),
             venue_id,
           );

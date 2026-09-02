@@ -5,6 +5,8 @@ import { renderTransactionalEmailHtml } from './booking-confirmation-layout';
 export interface AppointmentWaitlistOfferEmailInput {
   venueName: string;
   venueLogoUrl?: string | null;
+  /** Brand colour for buttons and links when the venue brands its emails. */
+  venueBrandColour?: string | null;
   venueAddress?: string | null;
   venuePhone?: string | null;
   guestName: string;
@@ -43,6 +45,7 @@ export function renderAppointmentWaitlistOfferEmail(
 
   const html = renderTransactionalEmailHtml({
     venueName: input.venueName,
+    brandColour: input.venueBrandColour ?? null,
     venueLogoUrl: input.venueLogoUrl,
     heading: 'Appointment availability',
     mainContent,

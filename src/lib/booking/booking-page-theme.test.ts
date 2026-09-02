@@ -71,13 +71,12 @@ describe('bookingPageThemeVars', () => {
     expect(vars['--accent']).toBe('#7c3aed');
     expect(vars['--brand-50']).toBeDefined();
     expect(vars['--brand-900']).toBeDefined();
-    // No accent vars unless an accent is provided.
     expect(vars['--accent-500']).toBeUndefined();
   });
-  it('emits accent variables when an accent is provided', () => {
-    const vars = bookingPageThemeVars({ brand_primary: '#7c3aed', brand_accent: '#10b981' });
-    expect(vars['--brand-accent']).toBe('#10b981');
-    expect(vars['--accent-600']).toBe('#10b981');
+  it('ignores a legacy brand_accent left in a stored config', () => {
+    const vars = bookingPageThemeVars({ brand_primary: '#7c3aed', brand_accent: '#10b981' } as never);
+    expect(vars['--brand-accent']).toBeUndefined();
+    expect(vars['--accent-600']).toBeUndefined();
   });
 });
 
@@ -92,7 +91,7 @@ describe('sanitizeBookingPageConfig', () => {
       social_links: { instagram: ' https://insta/x ', bogus: 'drop-me' },
     });
     expect(out.brand_primary).toBe('#7c3aed');
-    expect(out.brand_accent).toBe('#10b981');
+    expect(out).not.toHaveProperty('brand_accent');
     expect(out.font_preset).toBe('elegant');
     expect(out.about).toBe('Welcome');
     expect(out.announcement).toBe('Closed Monday');

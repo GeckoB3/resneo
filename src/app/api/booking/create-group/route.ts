@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags',
+        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags, booking_page_config',
       )
       .eq('id', venue_id)
       .single();
@@ -1017,6 +1017,7 @@ export async function POST(request: NextRequest) {
               address: venue.address ?? null,
               email: venue.email ?? null,
               reply_to_email: venue.reply_to_email ?? null,
+              booking_page_config: venue.booking_page_config ?? null,
             }),
             venue_id,
           );

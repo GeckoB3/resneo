@@ -150,7 +150,7 @@ async function handlePost(request: NextRequest) {
 
         const { data: venue } = await supabase
           .from('venues')
-          .select('name, address, email, reply_to_email')
+          .select('name, address, email, reply_to_email, booking_page_config')
           .eq('id', booking.venue_id)
           .single();
         const { data: guest } = await supabase
@@ -177,6 +177,7 @@ async function handlePost(request: NextRequest) {
             address: venue.address ?? null,
             email: venue.email ?? null,
             reply_to_email: venue.reply_to_email ?? null,
+            booking_page_config: venue.booking_page_config ?? null,
           }),
           booking.venue_id,
           paymentLink,

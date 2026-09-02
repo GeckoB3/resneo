@@ -543,7 +543,7 @@ export async function POST(
     .single();
   const { data: venue } = await admin
     .from('venues')
-    .select('name, address, email, reply_to_email')
+    .select('name, address, email, reply_to_email, booking_page_config')
     .eq('id', scopeVenueId)
     .single();
   if (!venue?.name) return NextResponse.json({ error: 'Venue not found' }, { status: 400 });
@@ -573,6 +573,7 @@ export async function POST(
     address: venue.address ?? null,
     email: venue.email ?? null,
     reply_to_email: venue.reply_to_email ?? null,
+    booking_page_config: venue.booking_page_config ?? null,
   });
 
   if (hold) {

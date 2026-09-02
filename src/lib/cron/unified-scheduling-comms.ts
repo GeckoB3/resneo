@@ -220,6 +220,7 @@ async function runLaneReminder(opts: {
     phone?: string | null;
     timezone?: string | null;
     booking_model?: string | null;
+    booking_page_config?: unknown;
   };
   messageKey: 'confirm_or_cancel_prompt' | 'pre_visit_reminder';
   resultsKey: 'unified_reminder_1' | 'unified_reminder_2' | 'cde_reminder_1' | 'cde_reminder_2';
@@ -362,6 +363,7 @@ async function runLanePostVisit(opts: {
     phone?: string | null;
     timezone?: string | null;
     booking_model?: string | null;
+    booking_page_config?: unknown;
   };
   resultsKey: 'unified_post_visit' | 'cde_post_visit';
   results: UnifiedCommsResults | SecondaryModelCommsResults;
@@ -455,7 +457,7 @@ export async function runUnifiedSchedulingComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, pricing_tier, enabled_models, active_booking_models, email, reply_to_email');
+    .select('id, name, address, phone, timezone, booking_model, pricing_tier, enabled_models, active_booking_models, email, reply_to_email, booking_page_config');
 
   for (const venue of venues ?? []) {
     if (!venueSupportsUnifiedSchedulingComms(venue)) continue;
@@ -492,7 +494,7 @@ export async function runSecondaryModelScheduledComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_config');
 
   for (const venue of venues ?? []) {
     await runLaneReminder({

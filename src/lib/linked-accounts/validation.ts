@@ -161,7 +161,6 @@ const socialLinkValue = z.string().max(500).nullable().optional();
 export const collectiveBookingPageConfigSchema = z
   .object({
     brand_primary: hexColour,
-    brand_accent: hexColour,
     font_preset: z.string().max(40).nullable().optional(),
     logo_crop: imageFramingSchema,
     cover_crop_box: coverCropBoxSchema,

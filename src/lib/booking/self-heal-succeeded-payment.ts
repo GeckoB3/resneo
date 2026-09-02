@@ -91,7 +91,7 @@ export async function selfHealSucceededPaymentIntent(
     const { data: venue } = await admin
       .from('venues')
       .select(
-        'name, address, email, reply_to_email, logo_url, cover_photo_url, website_url, timezone',
+        'name, address, email, reply_to_email, logo_url, cover_photo_url, website_url, timezone, booking_page_config',
       )
       .eq('id', venueId)
       .single();
@@ -126,6 +126,7 @@ export async function selfHealSucceededPaymentIntent(
       cover_photo_url: (venue as { cover_photo_url?: string | null } | null)?.cover_photo_url ?? null,
       website_url: (venue as { website_url?: string | null } | null)?.website_url ?? null,
       timezone: (venue as { timezone?: string | null } | null)?.timezone ?? null,
+      booking_page_config: venue?.booking_page_config ?? null,
     });
 
     if (confirmedIds.length > 0) {

@@ -162,7 +162,7 @@ async function buildGuestBookingContext(
   const venueRow = await admin
     .from('venues')
     .select(
-      'name, address, phone, booking_model, email, reply_to_email, logo_url, cover_photo_url, website_url, timezone',
+      'name, address, phone, booking_model, email, reply_to_email, logo_url, cover_photo_url, website_url, timezone, booking_page_config',
     )
     .eq('id', ctx.venue_id)
     .maybeSingle();
@@ -184,6 +184,7 @@ async function buildGuestBookingContext(
         cover_photo_url?: string | null;
         website_url?: string | null;
         timezone?: string | null;
+        booking_page_config?: unknown;
       }
     | null;
 
@@ -290,6 +291,7 @@ async function buildGuestBookingContext(
       cover_photo_url: venue.cover_photo_url ?? null,
       website_url: venue.website_url ?? null,
       timezone: venue.timezone ?? null,
+      booking_page_config: venue.booking_page_config ?? null,
     }),
   };
 }

@@ -10,6 +10,7 @@ import {
   sanitizeBookingPageImageFraming,
   type BookingPageImageFraming,
 } from '@/lib/booking/booking-page-image-framing';
+import { readableAccentForWhiteText } from '@/lib/linked-accounts/branding-contrast';
 
 export type { BookingPageCoverCropBox, BookingPageLogoCrop, BookingPageImageFraming };
 
@@ -67,10 +68,17 @@ export const BOOKING_FONT_PRESET_LABELS: Record<BookingFontPreset, string> = {
 };
 
 export interface BookingPageConfig {
-  /** Brand primary as `#rrggbb`; drives the booking-page colour ramp. */
+  /**
+   * Brand primary as `#rrggbb`; drives the booking-page colour ramp. This is the only colour the
+   * page consumes: a legacy `brand_accent` key may still sit in stored configs and is ignored.
+   */
   brand_primary?: string | null;
-  /** Optional accent as `#rrggbb`; falls back to the primary when unset. */
-  brand_accent?: string | null;
+  /**
+   * When true, customer emails (confirmations, reminders, receipts and the like) use
+   * `brand_primary` for buttons, links and highlights instead of the ResNeo colours.
+   * Off by default; meaningless without a valid `brand_primary`.
+   */
+  brand_emails?: boolean;
   /** Curated heading/body font pairing. */
   font_preset?: BookingFontPreset | null;
   /** Circular logo framing on the public booking page header. */
@@ -144,14 +152,13 @@ export const BOOKING_THEME_PRESETS: Array<{
   key: string;
   label: string;
   primary: string;
-  accent: string;
 }> = [
-  { key: 'navy', label: 'ResNeo Navy', primary: '#003b6f', accent: '#00c2c7' },
-  { key: 'forest', label: 'Forest', primary: '#14532d', accent: '#65a30d' },
-  { key: 'plum', label: 'Plum', primary: '#6b21a8', accent: '#db2777' },
-  { key: 'charcoal', label: 'Charcoal', primary: '#1f2937', accent: '#f59e0b' },
-  { key: 'rose', label: 'Rose', primary: '#9f1239', accent: '#fb7185' },
-  { key: 'ocean', label: 'Ocean', primary: '#0e7490', accent: '#22d3ee' },
+  { key: 'navy', label: 'ResNeo Navy', primary: '#003b6f' },
+  { key: 'forest', label: 'Forest', primary: '#14532d' },
+  { key: 'plum', label: 'Plum', primary: '#6b21a8' },
+  { key: 'charcoal', label: 'Charcoal', primary: '#1f2937' },
+  { key: 'rose', label: 'Rose', primary: '#9f1239' },
+  { key: 'ocean', label: 'Ocean', primary: '#0e7490' },
 ];
 
 const ABOUT_MAX = 2000;
@@ -296,16 +303,23 @@ export function bookingPageThemeVars(
     vars[`--brand-${stop}`] = ramp[stop];
   }
 
-  const accent = normalizeHexColor(config?.brand_accent);
-  if (accent) {
-    const accentRamp = buildBrandRamp(accent);
-    vars['--brand-accent'] = accentRamp[600];
-    for (const stop of Object.keys(accentRamp) as unknown as BrandStop[]) {
-      vars[`--accent-${stop}`] = accentRamp[stop];
-    }
-  }
-
   return vars;
+}
+
+/**
+ * The colour this venue's customer emails should use, or null for the ResNeo default.
+ *
+ * Takes the raw `booking_page_config` column so a send path that only has the venue row needs
+ * no parsing. An email cannot fall back to dark text the way the web page can, so a light brand
+ * colour is darkened until white button text clears WCAG AA.
+ */
+export function bookingPageEmailBrandColour(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw as Record<string, unknown>;
+  if (src.brand_emails !== true) return null;
+  const primary = normalizeHexColor(typeof src.brand_primary === 'string' ? src.brand_primary : null);
+  if (!primary) return null;
+  return readableAccentForWhiteText(primary);
 }
 
 function trimToNull(raw: unknown, max: number): string | null {
@@ -338,8 +352,7 @@ export function sanitizeBookingPageConfig(raw: unknown): BookingPageConfig {
   const primary = normalizeHexColor(typeof src.brand_primary === 'string' ? src.brand_primary : null);
   if (primary) config.brand_primary = primary;
 
-  const accent = normalizeHexColor(typeof src.brand_accent === 'string' ? src.brand_accent : null);
-  if (accent) config.brand_accent = accent;
+  if (src.brand_emails === true) config.brand_emails = true;
 
   if (isBookingFontPreset(src.font_preset) && src.font_preset !== 'default') {
     config.font_preset = src.font_preset;
@@ -401,6 +414,13 @@ export function mergeBookingPageConfigPatch(
   }
   if ('cover_full_width' in incoming) {
     merged.cover_full_width = incoming.cover_full_width === true;
+  }
+  if ('brand_emails' in incoming) {
+    if (incoming.brand_emails === true) {
+      merged.brand_emails = true;
+    } else {
+      delete merged.brand_emails;
+    }
   }
   if ('cover_crop_box' in incoming) {
     const box = sanitizeBookingPageCoverCropBox(incoming.cover_crop_box);

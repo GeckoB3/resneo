@@ -58,7 +58,7 @@ export async function sendMarketingContactMessage(
 
   const { data: venueRow, error: vErr } = await admin
     .from('venues')
-    .select('name, address, phone, booking_page_url, logo_url, timezone, reply_to_email, email')
+    .select('name, address, phone, booking_page_url, logo_url, timezone, reply_to_email, email, booking_page_config')
     .eq('id', input.venueId)
     .maybeSingle();
   if (vErr || !venueRow) {

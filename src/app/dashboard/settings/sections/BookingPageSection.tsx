@@ -208,6 +208,7 @@ export function BookingPageSection({ venue, onUpdate, isAdmin, publicBaseUrl }: 
         isAppointmentVenue: isUnifiedSchedulingVenue(venue.booking_model),
         canEdit: isAdmin,
         servicePhotosInConfig: true,
+        emailBranding: true,
       },
       importSources: [],
     };

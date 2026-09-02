@@ -49,7 +49,7 @@ export async function dispatchComplianceFormLink(
       .maybeSingle(),
     admin
       .from('venues')
-      .select('name, address, phone, booking_model, email, reply_to_email, timezone')
+      .select('name, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config')
       .eq('id', params.venueId)
       .maybeSingle(),
     admin
@@ -76,6 +76,7 @@ export async function dispatchComplianceFormLink(
     email?: string | null;
     reply_to_email?: string | null;
     timezone?: string | null;
+    booking_page_config?: unknown;
   };
   if (!vr.name) return { ok: false, reason: 'not_found' };
 
@@ -86,6 +87,7 @@ export async function dispatchComplianceFormLink(
     email: vr.email ?? null,
     reply_to_email: vr.reply_to_email ?? null,
     timezone: vr.timezone ?? null,
+    booking_page_config: vr.booking_page_config ?? null,
   });
 
   const link = linkRow as {

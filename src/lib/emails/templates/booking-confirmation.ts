@@ -19,6 +19,7 @@ import {
 import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
 import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from "@/lib/emails/external-links";
 import { buildCardHoldNoticeHtml, renderBookingConfirmationDocumentHtml } from "./booking-confirmation-layout";
+import { emailAccent } from '../email-accent';
 
 /** Non-table detail block: appointments (B/USE) or C/D/E with labels. */
 function isAppointmentStyle(booking: BookingEmailData): boolean {
@@ -80,7 +81,7 @@ export function renderBookingConfirmation(
   const accountPortal =
     booking.account_bookings_link ?? accountBookingsMagicLinkUrl(booking.guest_email) ?? accountBookingsPortalUrl();
   const postCtaAccountHtml = accountPortal
-    ? `<p style="margin:0;font-size:14px;line-height:1.55;color:#475569">All your bookings: <a href="${escapeHtml(accountPortal)}" style="color:#003B6F;font-weight:600">View or sign in to your account</a></p>`
+    ? `<p style="margin:0;font-size:14px;line-height:1.55;color:#475569">All your bookings: <a href="${escapeHtml(accountPortal)}" style="color:${emailAccent(venue.brand_colour)};font-weight:600">View or sign in to your account</a></p>`
     : null;
 
   let preambleHtml = "";

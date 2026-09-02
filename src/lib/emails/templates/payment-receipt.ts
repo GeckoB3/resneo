@@ -224,6 +224,7 @@ export function renderPaymentReceiptEmail(
 
   const html = renderTransactionalEmailHtml({
     venueName: venue.name,
+    brandColour: venue.brand_colour ?? null,
     venueLogoUrl: venue.logo_url,
     heading: "Payment received",
     mainContent,

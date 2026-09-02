@@ -17,6 +17,7 @@ export function renderPostVisitEmail(
 
   const html = renderTransactionalEmailHtml({
     venueName: venue.name,
+    brandColour: venue.brand_colour ?? null,
     venueLogoUrl: venue.logo_url,
     heading: "Thanks for your visit!",
     mainContent,

@@ -11,6 +11,7 @@ import {
   formatDepositAmount,
 } from "./base-template";
 import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
+import { emailAccent } from '../email-accent';
 import { accountBookingsMagicLinkUrl, accountBookingsPortalUrl } from "@/lib/emails/account-portal-links";
 
 function isAppointment(booking: BookingEmailData): boolean {
@@ -43,7 +44,7 @@ export function renderDepositConfirmation(
     accountBookingsMagicLinkUrl(booking.guest_email) ??
     accountBookingsPortalUrl();
   const portalHtml = portal
-    ? `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${escapeHtml(portal)}" style="color:#003B6F;font-weight:600">View your bookings</a> (sign-in may be required).</p>`
+    ? `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">All your bookings in one place: <a href="${escapeHtml(portal)}" style="color:${emailAccent(venue.brand_colour)};font-weight:600">View your bookings</a> (sign-in may be required).</p>`
     : "";
 
   const mainContent =
@@ -53,6 +54,7 @@ export function renderDepositConfirmation(
 
   const html = renderTransactionalEmailHtml({
     venueName: venue.name,
+    brandColour: venue.brand_colour ?? null,
     venueLogoUrl: venue.logo_url,
     heading: "Deposit received",
     mainContent,

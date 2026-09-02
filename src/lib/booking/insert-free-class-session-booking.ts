@@ -255,6 +255,7 @@ export async function insertFreeClassSessionBooking(
             address: (venue.address as string | null) ?? null,
             email: (venue as { email?: string | null }).email ?? null,
             reply_to_email: (venue as { reply_to_email?: string | null }).reply_to_email ?? null,
+            booking_page_config: venue.booking_page_config ?? null,
           }),
           venueId,
         );

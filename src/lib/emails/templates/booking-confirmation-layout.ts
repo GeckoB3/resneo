@@ -24,10 +24,12 @@ import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links
 import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { resolveEmailLocation } from '@/lib/emails/booking-location';
 import { escapeHtml, escapeHtmlMultiline, formatDate, formatTime } from './base-template';
+import { emailAccent } from '../email-accent';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
-const ACCENT = '#003B6F';
+// The accent (buttons, highlights, links) is per email: see `emailAccent` and
+// `VenueEmailData.brand_colour`. Every renderer resolves it once and hands it down.
 const PAGE_BG = '#f0f2f5';
 const CARD_BG = '#ffffff';
 const CARD_BORDER = '#e2e8f0';
@@ -133,9 +135,9 @@ const ACCOUNT_CALLOUT_BG = '#eef4fa';
 const ACCOUNT_CALLOUT_BORDER = '#d6e3ef';
 
 /** Wraps the provided account-link HTML in a centred, brand-tinted end-of-email callout. */
-function buildAccountCalloutInner(linkHtml: string): string {
+function buildAccountCalloutInner(linkHtml: string, accent: string): string {
   return (
-    `<p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${ACCENT};font-family:${FONT};text-align:center">Your ResNeo account</p>` +
+    `<p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${accent};font-family:${FONT};text-align:center">Your ResNeo account</p>` +
     `<div style="text-align:center;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${linkHtml}</div>`
   );
 }
@@ -143,6 +145,7 @@ function buildAccountCalloutInner(linkHtml: string): string {
 // ─── Action pill links (text-only; SVGs are stripped by Gmail/Outlook) ────────
 
 function buildActionButtons(opts: {
+  accent: string;
   calendarUrl: string | null;
   mapsUrl: string | null;
   venueUrl: string | null;
@@ -165,7 +168,7 @@ function buildActionButtons(opts: {
     (b) =>
       `<a href="${escapeHtml(b.href)}" target="_blank" rel="noopener noreferrer" ` +
       `style="display:inline-block;margin:4px 3px;padding:10px 18px;border:1px solid ${CARD_BORDER};border-radius:9999px;` +
-      `font-family:${FONT};font-size:13px;font-weight:600;color:${ACCENT};line-height:1.4;` +
+      `font-family:${FONT};font-size:13px;font-weight:600;color:${opts.accent};line-height:1.4;` +
       `text-decoration:none;background:#f8fafc;white-space:nowrap">${escapeHtml(b.label)}</a>`,
   );
 
@@ -423,6 +426,7 @@ function buildTableDetailRows(booking: BookingEmailData): string {
 // ─── Location card inner HTML ─────────────────────────────────────────────────
 
 function buildLocationInner(opts: {
+  accent: string;
   venueName: string;
   address: string;
   mapsUrl: string | null;
@@ -431,7 +435,7 @@ function buildLocationInner(opts: {
     ? `<p style="margin:16px 0 0">` +
       `<a href="${escapeHtml(opts.mapsUrl)}" target="_blank" rel="noopener noreferrer" ` +
       `style="display:inline-block;padding:9px 18px;border:1px solid ${CARD_BORDER};border-radius:9999px;` +
-      `font-family:${FONT};font-size:13px;font-weight:600;color:${ACCENT};text-decoration:none;background:#f8fafc">` +
+      `font-family:${FONT};font-size:13px;font-weight:600;color:${opts.accent};text-decoration:none;background:#f8fafc">` +
       `Get directions &#8594;</a></p>`
     : '';
 
@@ -444,12 +448,16 @@ function buildLocationInner(opts: {
 }
 
 /** Online services: "Location — Online" card with join button and joining info. */
-function buildOnlineLocationInner(opts: { joinUrl: string | null; info: string | null }): string {
+function buildOnlineLocationInner(opts: {
+  accent: string;
+  joinUrl: string | null;
+  info: string | null;
+}): string {
   const joinButton = opts.joinUrl
     ? `<p style="margin:14px 0 0">` +
       `<a href="${escapeHtml(opts.joinUrl)}" target="_blank" rel="noopener noreferrer" ` +
       `style="display:inline-block;padding:8px 18px;border-radius:9999px;` +
-      `font-family:${FONT};font-size:13px;font-weight:600;color:#ffffff;text-decoration:none;background:${ACCENT}">` +
+      `font-family:${FONT};font-size:13px;font-weight:600;color:#ffffff;text-decoration:none;background:${opts.accent}">` +
       `Join online &#8594;</a></p>` +
       `<p style="margin:8px 0 0;font-size:12px;color:${TEXT_MUTED};word-break:break-all;font-family:${FONT}">${escapeHtml(opts.joinUrl)}</p>`
     : '';
@@ -513,6 +521,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
   manageButtonLabel?: string;
 }): string {
   const { booking, venue, appointmentStyle, blocks, priceDisplay, manageButtonLabel } = input;
+  const accent = emailAccent(venue.brand_colour);
 
   const calendarUrl = buildGoogleCalendarAddUrlForBooking(booking, venue);
   const resolvedLocation = resolveEmailLocation(booking, venue);
@@ -530,7 +539,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
     `<p style="margin:0 0 10px;font-size:15px;color:${TEXT_MUTED};font-family:${FONT}">Hi ${escapeHtml(firstName)},</p>` +
     // Title: "Your appointment is" + line break + "confirmed" in accent
     `<p style="margin:0;font-family:${FONT};font-size:28px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;color:${TEXT_DARK}">` +
-    `${escapeHtml(before)}<br/><span style="color:${ACCENT}">${escapeHtml(highlight)}</span>` +
+    `${escapeHtml(before)}<br/><span style="color:${accent}">${escapeHtml(highlight)}</span>` +
     `</p>` +
     // Venue thumbnail
     (thumbUrl
@@ -548,6 +557,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
     dateTimeChip(escapeHtml(dateTimeLine(booking))) +
     // Action buttons
     buildActionButtons({
+      accent,
       calendarUrl,
       mapsUrl,
       venueUrl: venueWebUrl,
@@ -560,7 +570,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
 
   const confirmedPill =
     `<span style="display:inline-block;padding:6px 14px 6px 11px;border-radius:9999px;` +
-    `background:${ACCENT};color:#fff;font-size:12px;font-weight:700;font-family:${FONT};letter-spacing:0.02em">&#10003; Confirmed</span>`;
+    `background:${accent};color:#fff;font-size:12px;font-weight:700;font-family:${FONT};letter-spacing:0.02em">&#10003; Confirmed</span>`;
 
   const detailsHeading =
     booking.booking_model === 'event_ticket'
@@ -607,6 +617,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
   if (resolvedLocation.kind === 'online') {
     locationCardHtml = card(
       buildOnlineLocationInner({
+        accent,
         joinUrl: resolvedLocation.joinUrl,
         info: booking.booking_location?.online_info?.trim() || null,
       }),
@@ -620,6 +631,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
   } else if (venue.address?.trim()) {
     locationCardHtml = card(
       buildLocationInner({
+        accent,
         venueName: venue.name,
         address: venue.address.trim(),
         mapsUrl,
@@ -636,7 +648,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
   // ── Account portal callout (final card, just above the footer) ─────────────
 
   const accountCardHtml = blocks.postCtaAccountHtml?.trim()
-    ? card(buildAccountCalloutInner(blocks.postCtaAccountHtml), '22px', {
+    ? card(buildAccountCalloutInner(blocks.postCtaAccountHtml, accent), '22px', {
         bg: ACCOUNT_CALLOUT_BG,
         border: ACCOUNT_CALLOUT_BORDER,
       })
@@ -689,6 +701,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
 // rule, then body content, detail rows, optional CTA pills.
 
 function buildTransactionalDetailRows(opts: {
+  accent: string;
   bookingDate?: string;
   bookingTime?: string;
   partySize?: number;
@@ -788,7 +801,7 @@ function buildTransactionalDetailRows(opts: {
       (opts.locationJoinUrl?.trim()
         ? `<p style="margin:6px 0 0;font-size:13px;font-family:${FONT}">` +
           `<a href="${escapeHtml(opts.locationJoinUrl.trim())}" target="_blank" rel="noopener noreferrer" ` +
-          `style="color:${ACCENT};font-weight:600;text-decoration:underline;word-break:break-all">Join online &#8594;</a></p>`
+          `style="color:${opts.accent};font-weight:600;text-decoration:underline;word-break:break-all">Join online &#8594;</a></p>`
         : '');
     items.push({
       label: 'Location',
@@ -822,13 +835,13 @@ function buildTransactionalDetailRows(opts: {
   );
 }
 
-function ctaPillButton(label: string, href: string, outlined = false): string {
+function ctaPillButton(label: string, href: string, accent: string, outlined = false): string {
   return (
     `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto">` +
-    `<tr><td align="center" style="border-radius:9999px;background:${outlined ? CARD_BG : ACCENT};${outlined ? `border:2px solid ${ACCENT};` : ''}">` +
+    `<tr><td align="center" style="border-radius:9999px;background:${outlined ? CARD_BG : accent};${outlined ? `border:2px solid ${accent};` : ''}">` +
     `<a href="${escapeHtml(href)}" target="_blank" ` +
     `style="display:inline-block;padding:${outlined ? '13px 34px' : '15px 36px'};font-family:${FONT};font-size:15px;font-weight:600;` +
-    `text-decoration:none;border-radius:9999px;color:${outlined ? ACCENT : '#ffffff'}">${escapeHtml(label)}</a>` +
+    `text-decoration:none;border-radius:9999px;color:${outlined ? accent : '#ffffff'}">${escapeHtml(label)}</a>` +
     `</td></tr></table>`
   );
 }
@@ -865,6 +878,8 @@ export interface TransactionalEmailOptions {
   secondaryCtaUrl?: string | null;
   postCtaHtml?: string | null;
   footerNote?: string;
+  /** Venue brand colour for buttons and links; absent means the ResNeo default. */
+  brandColour?: string | null;
 }
 
 /**
@@ -873,6 +888,7 @@ export interface TransactionalEmailOptions {
  */
 export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): string {
   const base = baseUrl();
+  const accent = emailAccent(opts.brandColour);
   const logoUrl = opts.venueLogoUrl?.trim() || null;
 
   // ── Hero section (top of card) ─────────────────────────────────────────────
@@ -904,6 +920,7 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
   // ── Body section ───────────────────────────────────────────────────────────
 
   const detailRows = buildTransactionalDetailRows({
+    accent,
     bookingDate: opts.bookingDate,
     bookingTime: opts.bookingTime,
     partySize: opts.partySize,
@@ -929,11 +946,11 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
 
   const primaryCta =
     opts.ctaLabel && opts.ctaUrl
-      ? `<div style="text-align:center;margin:28px 0 0">${ctaPillButton(opts.ctaLabel, opts.ctaUrl)}</div>`
+      ? `<div style="text-align:center;margin:28px 0 0">${ctaPillButton(opts.ctaLabel, opts.ctaUrl, accent)}</div>`
       : '';
   const secondaryCta =
     opts.secondaryCtaLabel && opts.secondaryCtaUrl
-      ? `<div style="text-align:center;margin:12px 0 0">${ctaPillButton(opts.secondaryCtaLabel, opts.secondaryCtaUrl, true)}</div>`
+      ? `<div style="text-align:center;margin:12px 0 0">${ctaPillButton(opts.secondaryCtaLabel, opts.secondaryCtaUrl, accent, true)}</div>`
       : '';
 
   const postCtaSection = opts.postCtaHtml?.trim()

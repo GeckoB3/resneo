@@ -82,9 +82,13 @@ interface VenueProfileSectionProps {
 }
 
 function buildRequestBody(data: ProfileForm) {
+  // A blank building name is filled with the business name, matching onboarding, so the
+  // address reads "Name, Street, Town, Postcode" and the booking page's map can find it.
+  // Only once there is a street: a venue with no address must not gain one of just its name.
+  const street = (data.address_street ?? '').trim();
   const combinedAddress = buildAddress({
-    name: data.address_name ?? '',
-    street: data.address_street ?? '',
+    name: (data.address_name ?? '').trim() || (street ? data.name.trim() : ''),
+    street,
     town: data.address_town ?? '',
     postcode: data.address_postcode ?? '',
   });

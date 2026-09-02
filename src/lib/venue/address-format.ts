@@ -9,12 +9,16 @@ export function parseAddress(address: string | null): {
   postcode: string;
 } {
   if (!address) return { name: '', street: '', town: '', postcode: '' };
-  const parts = address.split(',').map((p) => p.trim());
+  const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
   const postcodeMatch = parts[parts.length - 1]?.match(/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i);
   if (postcodeMatch && parts.length >= 2) {
     const postcode = parts.pop()!;
     const town = parts.pop() ?? '';
-    const name = parts.shift() ?? '';
+    // What remains is "name, street" when both were saved, or the street alone when the
+    // building name was blank. The street is never optional, so a single leftover part is
+    // the street, not the name; reading it as the name emptied the Street field on every
+    // reload of an address saved without a building name.
+    const name = parts.length >= 2 ? parts.shift()! : '';
     const street = parts.join(', ');
     return { name, street, town, postcode };
   }

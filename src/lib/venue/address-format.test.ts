@@ -43,6 +43,16 @@ describe('parseAddress', () => {
     expect(parseAddress('12 Main Street, Belfast, bt11aa')).toEqual({ name: '', street: '12 Main Street', town: 'Belfast', postcode: 'bt11aa' });
   });
 
+  it('reads by position, so non-UK postcodes work the same way', () => {
+    const paris = { name: 'Salon Belle', street: '12 Rue de Rivoli', town: 'Paris', postcode: '75001' };
+    expect(parseAddress(buildAddress(paris))).toEqual(paris);
+    expect(parseAddress('12 Rue de Rivoli, Paris, 75001')).toEqual({ ...paris, name: '' });
+    const newYork = { name: 'Fifth Avenue Studio', street: '350 5th Avenue', town: 'New York', postcode: '10118' };
+    expect(parseAddress(buildAddress(newYork))).toEqual(newYork);
+    const dublin = { name: '', street: '1 Grafton Street', town: 'Dublin', postcode: 'D02 X285' };
+    expect(parseAddress(buildAddress(dublin))).toEqual(dublin);
+  });
+
   it('falls back sensibly when there is no recognisable postcode', () => {
     expect(parseAddress('12 Main Street, Belfast')).toEqual({ name: '', street: '12 Main Street', town: 'Belfast', postcode: '' });
     expect(parseAddress('12 Main Street')).toEqual({ name: '', street: '12 Main Street', town: '', postcode: '' });

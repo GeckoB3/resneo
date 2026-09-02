@@ -1,7 +1,7 @@
 'use client';
 
-import { RotatingScheduleEditor } from '@/app/dashboard/availability/RotatingScheduleEditor';
-import type { WorkingHoursRota } from '@/lib/availability/working-hours-rota';
+import { ScheduleTimelineEditor } from '@/app/dashboard/availability/ScheduleTimelineEditor';
+import type { CalendarSchedule } from '@/lib/availability/working-hours-rota';
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
@@ -35,7 +35,8 @@ interface Practitioner {
   /** unified_calendars.calendar_type — resource rows are excluded from appointment calendar UI */
   calendar_type?: string | null;
   working_hours: Record<string, Array<{ start: string; end: string }>>;
-  /** Rotating schedule, as stored; see working-hours-rota.ts. */
+  /** Schedule periods and the older rota, as stored; see working-hours-rota.ts. */
+  schedule_periods?: unknown;
   working_hours_rota?: unknown;
   break_times: Array<{ start: string; end: string }>;
   break_times_by_day?: WorkingHours | null;
@@ -791,17 +792,17 @@ export function AppointmentAvailabilitySettings({
   }
 
   /**
-   * PATCH one calendar's rotating schedule (null removes it), with the same
+   * PATCH one calendar's schedule periods (null removes them all), with the same
    * narrowing-hours confirmation a plain hours save gets.
    */
-  async function patchRota(calendarId: string, rota: WorkingHoursRota | null): Promise<'saved' | 'cancelled'> {
+  async function patchSchedule(calendarId: string, schedule: CalendarSchedule | null): Promise<'saved' | 'cancelled'> {
     const doSave = async (acknowledge: boolean): Promise<'saved' | 'cancelled'> => {
       const res = await fetch(
         acknowledge ? '/api/venue/practitioners?acknowledge_affected_bookings=true' : '/api/venue/practitioners',
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: calendarId, working_hours_rota: rota }),
+          body: JSON.stringify({ id: calendarId, schedule_periods: schedule }),
         },
       );
       const body = (await res.json().catch(() => ({}))) as {
@@ -824,35 +825,35 @@ export function AppointmentAvailabilitySettings({
     return doSave(false);
   }
 
-  async function saveRota(rota: WorkingHoursRota | null) {
+  async function saveSchedule(schedule: CalendarSchedule | null) {
     if (!selectedPrac || !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)) return;
     setSaving(true);
     setError(null);
     try {
-      if ((await patchRota(selectedPrac.id, rota)) === 'saved') {
-        flash(rota ? 'Rotating schedule saved' : 'Rotating schedule removed');
+      if ((await patchSchedule(selectedPrac.id, schedule)) === 'saved') {
+        flash('Schedule saved');
         await fetchData();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save the rotating schedule');
+      setError(e instanceof Error ? e.message : 'Failed to save the schedule');
     } finally {
       setSaving(false);
     }
   }
 
-  async function copyRotaTo(calendarIds: string[], rota: WorkingHoursRota) {
+  async function copyScheduleTo(calendarIds: string[], schedule: CalendarSchedule) {
     if (!isAdmin || calendarIds.length === 0) return;
     setSaving(true);
     setError(null);
     try {
       let copied = 0;
       for (const id of calendarIds) {
-        if ((await patchRota(id, rota)) === 'saved') copied += 1;
+        if ((await patchSchedule(id, schedule)) === 'saved') copied += 1;
       }
-      flash(`Rotating schedule copied to ${copied} calendar${copied === 1 ? '' : 's'}`);
+      flash(`Schedule copied to ${copied} calendar${copied === 1 ? '' : 's'}`);
       await fetchData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to copy the rotating schedule');
+      setError(e instanceof Error ? e.message : 'Failed to copy the schedule');
     } finally {
       setSaving(false);
     }
@@ -1321,12 +1322,16 @@ export function AppointmentAvailabilitySettings({
                   )}
 
                   {selectedPrac && tab === 'hours' && (selectedPrac.calendar_type ?? 'practitioner') !== 'resource' && (
-                    <RotatingScheduleEditor
-                      key={`${selectedPrac.id}:${JSON.stringify(selectedPrac.working_hours_rota ?? null)}`}
+                    <ScheduleTimelineEditor
+                      key={`${selectedPrac.id}:${JSON.stringify(selectedPrac.schedule_periods ?? selectedPrac.working_hours_rota ?? null)}`}
+                      calendarId={selectedPrac.id}
                       calendarName={selectedPrac.name}
-                      value={selectedPrac.working_hours_rota ?? null}
+                      value={selectedPrac.schedule_periods ?? null}
+                      legacyRota={selectedPrac.working_hours_rota ?? null}
                       weeklyHours={selectedPrac.working_hours ?? {}}
-                      onSave={saveRota}
+                      daysOff={selectedPrac.days_off ?? []}
+                      venueHours={venueHours}
+                      onSave={saveSchedule}
                       saving={saving}
                       readOnly={!canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)}
                       renderDayContext={(dayKey, periods) => {
@@ -1347,7 +1352,7 @@ export function AppointmentAvailabilitySettings({
                               .map((p) => ({ id: p.id, name: p.name }))
                           : []
                       }
-                      onCopyTo={copyRotaTo}
+                      onCopyTo={copyScheduleTo}
                     />
                   )}
 

@@ -100,7 +100,39 @@ change.
 - The pending Stage 6a editor consolidation; the rota editor is built on the shared
   `WorkingHoursControl` so that work absorbs it.
 
+## Revision 2 (2026-09-02, same day): a timeline of periods and a planning calendar
+
+Two questions from the owner reshaped the model before the first migration reached production:
+"how do I change hours from a future date?" (the single rota could not, its minimum cycle
+being two weeks) and "can I see the bookable hours on any date and plan ahead?".
+
+- **Model.** `unified_calendars.schedule_periods` (migration `20270204120000`, which backfills
+  the applied `working_hours_rota` column and leaves it as a read-only fallback):
+  `{version:1, periods:[{id, from (Monday), until (Sunday|null), cycle_start, weeks: [1..6]}]}`.
+  A one-week period is "these hours from this date"; two to six is a rota. Periods never
+  overlap: `validateCalendarSchedule` refuses an overlapping record and `insertSchedulePeriod`
+  trims, splits or replaces whatever a new period covers, the new period winning in full.
+  A split keeps the right-hand part's `cycle_start`, so a rota keeps its rhythm across the
+  gap. Dates no period covers keep `working_hours`, so a change from a future date leaves
+  earlier dates as they were. Decision with the owner: refuse overlaps and have the editor
+  split or trim the neighbour.
+- **Resolution.** `resolveScheduleForDate` returns the hours and their source (base, or
+  period and week), used by `calendarHours`, the diary header and the planning calendar.
+- **Editor.** `ScheduleTimelineEditor` replaces `RotatingScheduleEditor`: a timeline of
+  changes (edit, remove), `SchedulePeriodForm` to add or edit one (Monday start, pattern of
+  one to six weeks, runs until further notice / for N / until a Sunday, with the trims it
+  will cause listed before saving), and `ScheduleCalendarPreview`, a month grid paged as far
+  ahead as wanted showing each day's bookable hours (calendar hours inside business hours,
+  minus days off and leave) tinted by the period that set them; picking a day names the rule
+  and offers "change hours from this week" or "edit this change".
+- **Route.** `schedule_periods` replaces `working_hours_rota` on the write surface; writing
+  the timeline (even null) sets the old column to null so it cannot resurface.
+
 ## Progress (2026-09-02)
+
+- [x] Revision 2: migration `20270204120000_calendar_schedule_periods.sql` (backfill), timeline
+      model and helpers with tests, route, timeline editor, period form and planning
+      calendar with tests, help copy
 
 - [x] Migration `20270203120000_calendar_working_hours_rota.sql`
 - [x] `working-hours-rota.ts` + tests; `calendarHours` reads the rota; resolver tests

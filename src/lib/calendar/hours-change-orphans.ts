@@ -94,7 +94,9 @@ export function venueWeeklyMinutesForDate(
 
 /** Open minute-ranges for a date under a calendar's `working_hours` (`[{start,end}]` shape). */
 type WeeklyHours = Record<string, Array<{ start: string; end: string }>>;
-type CalendarHoursSource = WeeklyHours | { working_hours?: WeeklyHours | null; working_hours_rota?: unknown };
+type CalendarHoursSource =
+  | WeeklyHours
+  | { working_hours?: WeeklyHours | null; schedule_periods?: unknown; working_hours_rota?: unknown };
 
 /**
  * Accepts either the weekly shape on its own or a calendar row carrying a rotating
@@ -102,9 +104,9 @@ type CalendarHoursSource = WeeklyHours | { working_hours?: WeeklyHours | null; w
  * will actually apply on each date.
  */
 export function calendarWorkingMinutesForDate(source: CalendarHoursSource | null | undefined): PeriodsForDate {
-  const row: { working_hours?: WeeklyHours | null; working_hours_rota?: unknown } =
-    source && ('working_hours' in source || 'working_hours_rota' in source)
-      ? (source as { working_hours?: WeeklyHours | null; working_hours_rota?: unknown })
+  const row: { working_hours?: WeeklyHours | null; schedule_periods?: unknown; working_hours_rota?: unknown } =
+    source && ('working_hours' in source || 'schedule_periods' in source || 'working_hours_rota' in source)
+      ? (source as { working_hours?: WeeklyHours | null; schedule_periods?: unknown; working_hours_rota?: unknown })
       : { working_hours: (source as WeeklyHours | null | undefined) ?? {} };
   return (dateStr: string) => {
     const hours = effectiveWorkingHoursForDate(row, dateStr) as WeeklyHours;

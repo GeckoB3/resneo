@@ -1,4 +1,9 @@
-import { parseWorkingHoursRota, ROTA_MAX_WEEKS, ROTA_MIN_WEEKS } from '@/lib/availability/working-hours-rota';
+import {
+  ROTA_MAX_WEEKS,
+  ROTA_MIN_WEEKS,
+  SCHEDULE_MAX_PERIODS,
+  validateCalendarSchedule,
+} from '@/lib/availability/working-hours-rota';
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
@@ -41,6 +46,7 @@ function unifiedCalendarToPractitionerRow(
     break_times: row.break_times ?? [],
     break_times_by_day: row.break_times_by_day ?? null,
     days_off: row.days_off ?? [],
+    schedule_periods: row.schedule_periods ?? null,
     working_hours_rota: row.working_hours_rota ?? null,
     is_active: row.is_active,
     sort_order: row.sort_order ?? 0,
@@ -252,23 +258,29 @@ const daysOffSchema = z.array(
 );
 
 /**
- * Rotating schedule: a Monday start, two to six weekly shapes, and an inclusive end date
- * or null. The parser is the single validator so the route and the resolver agree.
+ * Schedule periods: a timeline of non-overlapping changes, each a Monday start, an
+ * optional Sunday end and one to six weekly shapes. The library validator is the single
+ * authority so the route, the editor and the resolver agree, and its message is the 400.
  */
-const workingHoursRotaSchema = z
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const schedulePeriodsSchema = z
   .object({
     version: z.literal(1),
-    cycle_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    weeks: z.array(z.record(z.string(), timeRangeArraySchema)).min(ROTA_MIN_WEEKS).max(ROTA_MAX_WEEKS),
-    repeat_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+    periods: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(64),
+          from: z.string().regex(YMD),
+          until: z.string().regex(YMD).nullable(),
+          cycle_start: z.string().regex(YMD).optional(),
+          weeks: z.array(z.record(z.string(), timeRangeArraySchema)).min(ROTA_MIN_WEEKS).max(ROTA_MAX_WEEKS),
+        }),
+      )
+      .max(SCHEDULE_MAX_PERIODS),
   })
   .superRefine((value, ctx) => {
-    if (!parseWorkingHoursRota(value)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'The rotating schedule must start on a Monday, have 2 to 6 weeks, and end on or after it starts.',
-      });
-    }
+    const checked = validateCalendarSchedule(value);
+    if (!checked.ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: checked.error });
   });
 
 const practitionerSchema = z.object({
@@ -278,8 +290,8 @@ const practitionerSchema = z.object({
   /** Public URL segment: /book/{venue-slug}/{slug} - lowercase, numbers, hyphens; empty clears */
   slug: z.string().max(64).nullable().optional(),
   working_hours: z.record(z.string(), timeRangeArraySchema).optional(),
-  /** Rotating schedule; null removes it. */
-  working_hours_rota: workingHoursRotaSchema.nullable().optional(),
+  /** Schedule periods (hours planned ahead, rotas); null removes every period. */
+  schedule_periods: schedulePeriodsSchema.nullable().optional(),
   break_times: timeRangeArraySchema.optional(),
   /** Non-null object = per-weekday breaks; null clears to “same every day” mode (uses break_times). */
   break_times_by_day: z.record(z.string(), timeRangeArraySchema).nullable().optional(),
@@ -653,12 +665,13 @@ export async function PATCH(request: NextRequest) {
       rest.working_hours !== null &&
       typeof rest.working_hours === 'object' &&
       !Array.isArray(rest.working_hours);
-    // A rotating schedule changes the effective hours on every date it covers, so it is
-    // checked the same way a plain hours change is (removing it, null, included).
-    const rotaPatch = Object.prototype.hasOwnProperty.call(rest, 'working_hours_rota');
-    if ((hoursPatch || rotaPatch) && request.nextUrl.searchParams.get('acknowledge_affected_bookings') !== 'true') {
+    // Schedule periods change the effective hours on every date they cover, so they are
+    // checked the same way a plain hours change is (removing them, null, included).
+    const schedulePatch = Object.prototype.hasOwnProperty.call(rest, 'schedule_periods');
+    if ((hoursPatch || schedulePatch) && request.nextUrl.searchParams.get('acknowledge_affected_bookings') !== 'true') {
       let found = false;
       let oldWorking: Record<string, Array<{ start: string; end: string }>> = {};
+      let oldSchedule: unknown = null;
       let oldRota: unknown = null;
       let calName: string | null = null;
       const { data: pracRow } = await admin
@@ -674,13 +687,14 @@ export async function PATCH(request: NextRequest) {
       } else {
         const { data: ucRow } = await admin
           .from('unified_calendars')
-          .select('working_hours, working_hours_rota, name')
+          .select('working_hours, schedule_periods, working_hours_rota, name')
           .eq('id', id)
           .eq('venue_id', staff.venue_id)
           .maybeSingle();
         if (ucRow) {
           found = true;
           oldWorking = (ucRow.working_hours as Record<string, Array<{ start: string; end: string }>>) ?? {};
+          oldSchedule = (ucRow as { schedule_periods?: unknown }).schedule_periods ?? null;
           oldRota = (ucRow as { working_hours_rota?: unknown }).working_hours_rota ?? null;
           calName = (ucRow.name as string | null) ?? null;
         }
@@ -713,12 +727,18 @@ export async function PATCH(request: NextRequest) {
             venueId: staff.venue_id,
             fromDate,
             calendarColumnId: id,
-            oldPeriodsForDate: calendarWorkingMinutesForDate({ working_hours: oldWorking, working_hours_rota: oldRota }),
+            oldPeriodsForDate: calendarWorkingMinutesForDate({
+              working_hours: oldWorking,
+              schedule_periods: oldSchedule,
+              working_hours_rota: oldRota,
+            }),
             newPeriodsForDate: calendarWorkingMinutesForDate({
               working_hours: hoursPatch
                 ? (rest.working_hours as Record<string, Array<{ start: string; end: string }>>)
                 : oldWorking,
-              working_hours_rota: rotaPatch ? (rest.working_hours_rota as unknown) : oldRota,
+              // Writing the timeline (even null) retires the older rota for that calendar.
+              schedule_periods: schedulePatch ? (rest.schedule_periods as unknown) : oldSchedule,
+              working_hours_rota: schedulePatch ? null : oldRota,
             }),
           });
           if (orphans.total > 0) {
@@ -747,7 +767,7 @@ export async function PATCH(request: NextRequest) {
       if (keys.length === 0) {
         return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
       }
-      const allowed = new Set(['break_times', 'break_times_by_day', 'working_hours', 'working_hours_rota']);
+      const allowed = new Set(['break_times', 'break_times_by_day', 'working_hours', 'schedule_periods']);
       if (keys.some((k) => !allowed.has(k))) {
         return NextResponse.json(
           { error: 'You can only update your own working hours and breaks. Ask an admin for other changes.' },
@@ -758,7 +778,7 @@ export async function PATCH(request: NextRequest) {
       const parsed = staffBreaksOnlySchema
         .extend({
           working_hours: practitionerSchema.shape.working_hours.optional(),
-          working_hours_rota: practitionerSchema.shape.working_hours_rota.optional(),
+          schedule_periods: practitionerSchema.shape.schedule_periods.optional(),
         })
         .safeParse(rest);
       if (!parsed.success) {
@@ -879,7 +899,7 @@ export async function PATCH(request: NextRequest) {
         'name',
         'slug',
         'working_hours',
-        'working_hours_rota',
+        'schedule_periods',
         'break_times',
         'break_times_by_day',
         'days_off',
@@ -890,6 +910,11 @@ export async function PATCH(request: NextRequest) {
         if (Object.prototype.hasOwnProperty.call(updatePayload, k)) {
           ucPayload[k] = updatePayload[k];
         }
+      }
+      // The older single rota is read only while schedule_periods is null; writing the
+      // timeline (even to null) retires it so it cannot come back.
+      if (Object.prototype.hasOwnProperty.call(ucPayload, 'schedule_periods')) {
+        ucPayload.working_hours_rota = null;
       }
       const { data: ucData, error: ucErr } = await admin
         .from('unified_calendars')

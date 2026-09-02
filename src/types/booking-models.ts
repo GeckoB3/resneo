@@ -106,9 +106,11 @@ export interface Practitioner {
    */
   availability_exceptions?: ResourceAvailabilityExceptions | null;
   /**
-   * Rotating schedule (`unified_calendars.working_hours_rota`). Kept as `unknown` here and
-   * parsed by `src/lib/availability/working-hours-rota.ts` wherever it is read.
+   * Schedule periods (`unified_calendars.schedule_periods`) and the older single rota
+   * (`working_hours_rota`, fallback). Kept as `unknown` here and parsed by
+   * `src/lib/availability/working-hours-rota.ts` wherever they are read.
    */
+  schedule_periods?: unknown;
   working_hours_rota?: unknown;
   is_active: boolean;
   sort_order: number;
@@ -488,7 +490,8 @@ export interface VenueResource {
     days_off: string[];
     break_times: Array<{ start: string; end: string }>;
     break_times_by_day: WorkingHours | null;
-    /** The host's rotating schedule, so a hosted resource follows it. */
+    /** The host's schedule periods (and older rota), so a hosted resource follows them. */
+    schedule_periods?: unknown;
     working_hours_rota?: unknown;
     /**
      * Windows the host is unavailable for on a given date: staff leave and ad-hoc blocked

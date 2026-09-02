@@ -218,7 +218,8 @@ interface Practitioner {
   sort_order?: number;
   /** Per-day template from Calendar availability (Settings). */
   working_hours?: WorkingHours;
-  /** Rotating schedule; the header line resolves it per date. */
+  /** Schedule periods and the older rota; the header line resolves them per date. */
+  schedule_periods?: unknown;
   working_hours_rota?: unknown;
   break_times?: Array<{ start: string; end: string }>;
   break_times_by_day?: WorkingHours | null;
@@ -366,6 +367,7 @@ function apiResourceRowToVenueResource(
       ? {
           id: hostPractitioner.id,
           working_hours: hostPractitioner.working_hours ?? {},
+          schedule_periods: hostPractitioner.schedule_periods ?? null,
           working_hours_rota: hostPractitioner.working_hours_rota ?? null,
           days_off: hostPractitioner.days_off ?? [],
           break_times: hostPractitioner.break_times ?? [],

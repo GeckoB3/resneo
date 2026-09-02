@@ -59,10 +59,13 @@ export interface CalendarScheduleRow {
   days_off?: string[] | null;
   availability_exceptions?: Record<string, CalendarDateOverride> | null;
   /**
-   * Rotating schedule (`unified_calendars.working_hours_rota`): a cycle of weekly shapes
-   * that replaces `working_hours` for the dates it covers. Read as `unknown` and parsed
-   * per call, so stored garbage degrades to "no rota". See working-hours-rota.ts.
+   * Schedule periods (`unified_calendars.schedule_periods`): a timeline of weekly shapes
+   * that replace `working_hours` for the dates they cover, and the older single rota
+   * (`working_hours_rota`) read as a fallback while the timeline is null. Both are read as
+   * `unknown` and parsed per call, so stored garbage degrades to "no periods". See
+   * working-hours-rota.ts.
    */
+  schedule_periods?: unknown;
   working_hours_rota?: unknown;
 }
 
@@ -126,9 +129,9 @@ export function calendarHours(row: CalendarScheduleRow, dateStr: string): Minute
 
   if (calendarDayOff(row, dateStr)) return [];
 
-  // A rotating schedule supplies the weekly shape for the dates it covers; outside it the
-  // ordinary `working_hours` apply. Same tag (`hours`), same precedence: below overrides
-  // and days off, skippable by `allowOutsideHours`.
+  // A schedule period supplies the weekly shape for the dates it covers; outside every
+  // period the ordinary `working_hours` apply. Same tag (`hours`), same precedence: below
+  // overrides and days off, skippable by `allowOutsideHours`.
   const hours = effectiveWorkingHoursForDate(row, dateStr) as Record<string, Array<{ start: string; end: string }>>;
   const { key, name } = dayKeys(dateStr);
   const ranges = toRanges(hours[key] ?? hours[name]);

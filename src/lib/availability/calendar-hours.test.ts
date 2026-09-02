@@ -299,6 +299,15 @@ describe('rotating schedule', () => {
     expect(calendarHours({ ...NINE_TO_FIVE, working_hours_rota: { version: 1, weeks: [] } }, DATE)).toEqual([{ start: 540, end: 1020 }]);
   });
 
+  it('reads schedule_periods first, and the older rota only while the timeline is null', () => {
+    const timeline = {
+      version: 1,
+      periods: [{ id: 'p', from: '2030-05-27', until: null, weeks: [{ [DK]: [{ start: '07:00', end: '09:00' }] }] }],
+    };
+    expect(calendarHours({ ...NINE_TO_FIVE, schedule_periods: timeline, working_hours_rota: rota }, DATE)).toEqual([{ start: 420, end: 540 }]);
+    expect(calendarHours({ ...NINE_TO_FIVE, schedule_periods: null, working_hours_rota: rota }, DATE)).toEqual([{ start: 780, end: 1200 }]);
+  });
+
   it('breaks still apply during a rota week', () => {
     const row = { ...NINE_TO_FIVE, working_hours_rota: rota, break_times: [{ start: '14:00', end: '15:00' }] };
     expect(calendarBookableSegments(row, DATE)).toEqual([

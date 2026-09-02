@@ -130,22 +130,23 @@ describe('service step with categories', () => {
     await screen.findByRole('heading', { name: 'Who would you like to see?' });
   });
 
-  it('collapsible categories: the first is open, others open on demand', async () => {
+  it('collapsible categories: every category starts closed and opens on demand', async () => {
     installFetch(categorisedCatalog());
     await openServiceStep({ booking_page_config: { services_layout: 'accordion' } });
 
     expect(screen.queryByRole('navigation', { name: /service categories/i })).toBeNull();
     const hairHeader = screen.getByRole('button', { name: /^Hair/ });
     const nailsHeader = screen.getByRole('button', { name: /^Nails/ });
-    expect(hairHeader).toHaveAttribute('aria-expanded', 'true');
+    expect(hairHeader).toHaveAttribute('aria-expanded', 'false');
     expect(nailsHeader).toHaveAttribute('aria-expanded', 'false');
 
     // A closed category's services are out of the accessibility tree until it opens.
-    expect(screen.getByRole('button', { name: /Cut/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Cut/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Manicure/i })).toBeNull();
     fireEvent.click(nailsHeader);
     expect(nailsHeader).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: /Manicure/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Cut/i })).toBeNull();
   });
 
   it('a venue with no categories keeps the flat list', async () => {

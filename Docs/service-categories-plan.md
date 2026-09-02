@@ -95,8 +95,9 @@ New `ServiceCategoryList` component used by every list site:
   flat with a small category label.
 - Sections: sticky horizontal category chips (venue-accent pills) that scroll to the section and
   track the visible section; headed sections with counts.
-- Accordion: category headers with counts and chevrons, smooth height animation, first category
-  open by default, several may be open; a carried or preselected service opens its category.
+- Accordion: category headers with counts and chevrons, smooth height animation, every category
+  closed when the customer arrives (owner decision, 2026-09-02), several may be open at once; a
+  carried or preselected service opens its category so it never hides.
 - Fully keyboard operable, `aria-expanded`/`aria-controls`, reduced-motion respected.
 
 ## Combined (collective) pages (added 2026-09-02)

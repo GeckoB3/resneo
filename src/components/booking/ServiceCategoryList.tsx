@@ -143,17 +143,18 @@ export function ServiceCategoryList<T extends ServiceCategoryListItem>({
     const g = groups.find((group) => group.services.some((s) => s.id === revealServiceId));
     return g ? g.id : undefined;
   }, [groups, revealServiceId]);
-  // The customer's own opens and closes, over the defaults (the first category,
-  // plus the one holding a revealed service). Overrides rather than a copied set,
-  // so a reveal that arrives later needs no effect to apply.
+  // The customer's own opens and closes, over the default: every category starts
+  // closed, except the one holding a service the customer was already booking
+  // (a carried or preselected service must never hide). Overrides rather than a
+  // copied set, so a reveal that arrives later needs no effect to apply.
   const [toggles, setToggles] = useState<Map<string | null, boolean>>(() => new Map());
   const isGroupOpen = useCallback(
     (id: string | null) => {
       const override = toggles.get(id);
       if (override !== undefined) return override;
-      return (groups.length > 0 && id === groups[0]!.id) || (revealGroupId !== undefined && id === revealGroupId);
+      return revealGroupId !== undefined && id === revealGroupId;
     },
-    [toggles, groups, revealGroupId],
+    [toggles, revealGroupId],
   );
   const toggleGroup = useCallback(
     (id: string | null) => {

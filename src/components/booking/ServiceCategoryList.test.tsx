@@ -93,20 +93,23 @@ describe('ServiceCategoryList', () => {
     expect(document.getElementById('t-cat-c-nails')).not.toBeNull();
   });
 
-  it('accordion: first category open, the rest closed, toggled by their headers', () => {
+  it('accordion: every category starts closed, each toggled by its header', () => {
     renderList({ services: CATEGORISED, layout: 'accordion' });
     expect(screen.queryByRole('navigation')).toBeNull();
     const hairButton = screen.getByRole('button', { name: /^Hair/ });
     const nailsButton = screen.getByRole('button', { name: /^Nails/ });
-    expect(hairButton).toHaveAttribute('aria-expanded', 'true');
+    expect(hairButton).toHaveAttribute('aria-expanded', 'false');
     expect(nailsButton).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: /^Other services/ })).toHaveAttribute('aria-expanded', 'false');
     expect(document.getElementById('t-cat-c-nails')).toHaveAttribute('aria-hidden', 'true');
 
     fireEvent.click(nailsButton);
     expect(nailsButton).toHaveAttribute('aria-expanded', 'true');
     expect(document.getElementById('t-cat-c-nails')).toHaveAttribute('aria-hidden', 'false');
+    fireEvent.click(hairButton);
     // Opening one does not close another.
     expect(hairButton).toHaveAttribute('aria-expanded', 'true');
+    expect(nailsButton).toHaveAttribute('aria-expanded', 'true');
 
     fireEvent.click(hairButton);
     expect(hairButton).toHaveAttribute('aria-expanded', 'false');

@@ -63,7 +63,7 @@ async function handleClassInstancesGet(request: NextRequest) {
     const to = addDaysIso(from, days);
 
     const supabase = getSupabaseAdminClient();
-    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId, request);
     if (blocked) return blocked;
 
     const venueMode = await resolveVenueMode(supabase, venueId);

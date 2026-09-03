@@ -36,7 +36,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(catalog);
     }
 
-    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    // Staff of the venue, or of a partner linked to it with booking rights, are not
+    // the public: the linked calendar's "New booking" reads this catalog for them.
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId, request);
     if (blocked) return blocked;
 
     const venueMode = await resolveVenueMode(supabase, venueId);

@@ -16,7 +16,7 @@ import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unifi
 import { z } from 'zod';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
-import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
+import { publicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import {
   loadActiveWaitlistOfferForGuestAccess,
   validateBookingAgainstWaitlistOffer,
@@ -115,13 +115,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (
-      isPublicOnlineBookingBlocked({
-        pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier,
-        plan_status: (venue as { plan_status?: string | null }).plan_status,
-        subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
-          .subscription_current_period_end,
-        billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
-      })
+      await publicBookingBlockedForRequest(
+        {
+          pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier,
+          plan_status: (venue as { plan_status?: string | null }).plan_status,
+          subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
+            .subscription_current_period_end,
+          billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
+        },
+        { request, admin: supabase },
+        venue_id,
+      )
     ) {
       return NextResponse.json({ ok: false, error: 'Online booking is temporarily unavailable for this venue.' });
     }

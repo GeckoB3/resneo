@@ -96,7 +96,7 @@ import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/v
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import { DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES } from '@/lib/booking/resource-booking-defaults';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
-import { isPublicOnlineBookingBlocked } from '@/lib/billing/subscription-entitlement';
+import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { sumAvailableClassCreditsForClassType } from '@/lib/class-commerce/available-class-credits';
 import { consumeClassCreditsForBooking } from '@/lib/class-commerce/consume-class-credits';
 import { userCourseCoversClassInstance } from '@/lib/class-commerce/course-instance-coverage';
@@ -302,20 +302,20 @@ export async function POST(request: NextRequest) {
     });
     if (loginDenied) return loginDenied;
 
-    if (
-      isPublicOnlineBookingBlocked({
+    // Staff of the venue, or of a partner linked to it with booking rights, are
+    // not the public: their session lets a blocked venue's diary keep working.
+    const publicBlocked = await nextResponseIfPublicBookingBlockedForRequest(
+      {
         pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier,
         plan_status: (venue as { plan_status?: string | null }).plan_status,
         subscription_current_period_end: (venue as { subscription_current_period_end?: string | null })
           .subscription_current_period_end,
         billing_access_source: (venue as { billing_access_source?: string | null }).billing_access_source,
-      })
-    ) {
-      return NextResponse.json(
-        { error: 'Online booking is temporarily unavailable for this venue.' },
-        { status: 403 },
-      );
-    }
+      },
+      { request, admin: supabase },
+      venue_id,
+    );
+    if (publicBlocked) return publicBlocked;
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
 

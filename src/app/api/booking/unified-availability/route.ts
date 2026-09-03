@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
     const { venue_id, calendar_id, date, service_item_id, duration_minutes } = parsed.data;
     const supabase = getSupabaseAdminClient();
-    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venue_id);
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venue_id, request);
     if (blocked) return blocked;
 
     const venueMode = await resolveVenueMode(supabase, venue_id);

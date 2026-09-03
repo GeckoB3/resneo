@@ -133,7 +133,7 @@ async function handleAppointmentCalendarGet(request: NextRequest) {
       });
     }
 
-    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId, request);
     if (blocked) return blocked;
 
     const venueMode = await resolveVenueMode(supabase, venueId);

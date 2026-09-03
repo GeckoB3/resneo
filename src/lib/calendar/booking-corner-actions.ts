@@ -87,8 +87,15 @@ export const BOOKING_CORNER_BUTTON_MIN_HEIGHT_PX = 16;
  */
 export const BOOKING_CORNER_BUTTON_FLOOR_HEIGHT_PX = 14;
 
-/** Preferred per-button height; only shrink below this when the bar cannot fit it. */
-export const BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX = 28;
+/**
+ * Preferred per-button height; only shrink below this when the bar cannot fit it.
+ *
+ * A 10px label on its 1.2 line box, 4px of padding each side and a 1px border
+ * comes to 22px, so 24 is the label's natural height with a pixel of air. The
+ * old 28 was six pixels of empty padding on every button, and the stack read
+ * as chunky against the text beside it.
+ */
+export const BOOKING_CORNER_BUTTON_COMFORT_HEIGHT_PX = 24;
 
 /**
  * Most of a bar's height a single button may take.
@@ -348,4 +355,120 @@ export function planBookingCornerActions(
     layout: bookingCornerActionLayout(layoutBudgetPx, actionCount, padYPx, capPx),
     actionCount,
   };
+}
+
+/**
+ * Narrowest text column worth keeping BESIDE the tray.
+ *
+ * The gutter reserves the tray's full width for the whole height of the bar,
+ * which is the right trade on a full-width column (the text loses 76px of ~300)
+ * and the wrong one in an overlap lane: three bookings sharing a column left
+ * each text column about 30px wide, and every bar in the cluster read as a
+ * single initial, "J...", above three rows of ellipsis. Below this width the
+ * buttons move UNDER the text instead, and the text runs the full lane.
+ */
+export const BOOKING_ACTIONS_BESIDE_MIN_TEXT_WIDTH_PX = 128;
+/**
+ * A text column this narrow shows nothing legible, so the buttons go below it
+ * even when that leaves only a single row of text above them.
+ */
+export const BOOKING_ACTIONS_BESIDE_UNUSABLE_TEXT_WIDTH_PX = 72;
+/** Clear space between the last text row and the top of a tray stacked below it. */
+export const BOOKING_ACTIONS_BELOW_GAP_PX = 2;
+
+/** Where a bar's text stays clear of its corner action tray. */
+export type BookingActionClearanceMode = 'beside' | 'below' | 'none';
+
+export interface BookingActionClearance {
+  /** Right padding the text gives up so it never runs under the tray. */
+  right: number;
+  /** Bottom padding the text gives up so it never runs under the tray. */
+  bottom: number;
+  hasActions: boolean;
+  mode: BookingActionClearanceMode;
+  /**
+   * Height the tray must be planned and drawn against. The bar's own height in
+   * `beside` mode; in `below` mode it may be less, so that a short bar sheds its
+   * secondary button and keeps a row of text above the one it keeps. The tray
+   * renderer re-plans from this number, so both sides agree.
+   */
+  trayBlockHeightPx: number;
+}
+
+/**
+ * Height the tray occupies from the bar's bottom edge, gap above it included, on
+ * a bar of this height. This is what the text has to stay above when the tray
+ * sits below it rather than beside it.
+ */
+export function bookingCornerTrayFootprintPx(
+  plan: BookingCornerActionPlan,
+  trayBlockHeightPx: number,
+): number {
+  if (plan.actionCount <= 0) return 0;
+  return (
+    bookingCornerTrayBottomInsetPx(trayBlockHeightPx) +
+    plan.layout.stackHeightPx +
+    BOOKING_ACTIONS_BELOW_GAP_PX
+  );
+}
+
+/**
+ * Decides whether a bar's text clears the tray by giving up width (the tray
+ * beside it) or by giving up height (the tray below it).
+ *
+ * Beside is the default and the only option until the text row has been
+ * measured. Below is chosen only when the column left beside the tray would be
+ * too narrow to read AND the bar can show text above the stack: at least two
+ * rows, or one row when the column beside would be unusable. In that unusable
+ * case, if the full stack leaves no room for even one row, the tray is
+ * re-planned against the height that remains once the text has its row, which
+ * lets it shed the secondary button the way it already does on a short bar.
+ *
+ * @param rowWidthPx measured width of the text-plus-tray row, `null` before layout
+ * @param textPaddingPx vertical padding the text box spends on itself
+ * @param minRowPx height of one row of card text
+ */
+export function planBookingActionClearance(
+  input: BookingCornerActionInput,
+  blockHeightPx: number,
+  rowWidthPx: number | null | undefined,
+  textPaddingPx: number,
+  minRowPx: number,
+): BookingActionClearance {
+  const fullPlan = planBookingCornerActions(input, blockHeightPx);
+  if (fullPlan.actionCount <= 0) {
+    return { right: 0, bottom: 0, hasActions: false, mode: 'none', trayBlockHeightPx: blockHeightPx };
+  }
+  const beside: BookingActionClearance = {
+    right: BOOKING_ACTIONS_CORNER_RIGHT_PX,
+    bottom: 0,
+    hasActions: true,
+    mode: 'beside',
+    trayBlockHeightPx: blockHeightPx,
+  };
+  if (rowWidthPx == null || rowWidthPx <= 0) return beside;
+
+  const besideTextWidthPx = rowWidthPx - BOOKING_ACTIONS_CORNER_RIGHT_PX;
+  if (besideTextWidthPx >= BOOKING_ACTIONS_BESIDE_MIN_TEXT_WIDTH_PX) return beside;
+
+  const rowsNeeded = besideTextWidthPx < BOOKING_ACTIONS_BESIDE_UNUSABLE_TEXT_WIDTH_PX ? 1 : 2;
+  const textNeedsPx = rowsNeeded * minRowPx + textPaddingPx;
+
+  const fullFootprintPx = bookingCornerTrayFootprintPx(fullPlan, blockHeightPx);
+  if (blockHeightPx - fullFootprintPx >= textNeedsPx) {
+    return { right: 0, bottom: fullFootprintPx, hasActions: true, mode: 'below', trayBlockHeightPx: blockHeightPx };
+  }
+
+  // A tight-but-readable column is still worth more than a shed button, so only
+  // an unusable column pays for its text row with the tray's secondary action.
+  if (rowsNeeded > 1) return beside;
+
+  // Give the tray only what the text can spare and let it shrink into that.
+  const trayBlockHeightPx = Math.max(0, blockHeightPx - textNeedsPx);
+  const tightPlan = planBookingCornerActions(input, trayBlockHeightPx);
+  if (tightPlan.actionCount <= 0) return beside;
+  const tightFootprintPx = bookingCornerTrayFootprintPx(tightPlan, trayBlockHeightPx);
+  if (blockHeightPx - tightFootprintPx < textNeedsPx) return beside;
+
+  return { right: 0, bottom: tightFootprintPx, hasActions: true, mode: 'below', trayBlockHeightPx };
 }

@@ -172,16 +172,17 @@ describe('backFromStaffPick', () => {
     expect(backFromStaffPick(vStF)).toBe('mode_choice');
   });
 
-  it('has nothing behind it on a combined page', () => {
-    expect(backFromStaffPick(cStF)).toBeNull();
+  it('returns to the chooser on a combined page too', () => {
+    expect(backFromStaffPick(cStF)).toBe('mode_choice');
   });
 });
 
 describe('backFromService', () => {
-  // 2787-2796: only a normal venue page has a chooser behind the service list.
+  // Venue and combined pages have the chooser behind the service list; only a
+  // per-practitioner page opens on it.
   const rows: Array<[AppointmentFlowShape, string | null]> = [
     [vSF, 'mode_choice'],
-    [cSF, null],
+    [cSF, 'mode_choice'],
     [lSF, null],
     [vStF, 'staff_pick'],
     [cStF, 'staff_pick'],

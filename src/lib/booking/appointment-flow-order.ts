@@ -138,10 +138,10 @@ export function afterPractitioner(
   return 'slot';
 }
 
-export function backFromStaffPick(shape: AppointmentFlowShape): 'mode_choice' | null {
+export function backFromStaffPick(shape: AppointmentFlowShape): 'mode_choice' {
   assertStaffFirst('backFromStaffPick', shape);
-  // Combined pages open on the picker, so there is nothing behind it.
-  return shape.surface === 'combined' ? null : 'mode_choice';
+  // Venue and combined pages both open on the single-or-group chooser.
+  return 'mode_choice';
 }
 
 export function backFromService(
@@ -149,8 +149,9 @@ export function backFromService(
 ): 'mode_choice' | 'staff_pick' | null {
   assertOrderingFitsSurface('backFromService', shape);
   if (shape.ordering === 'staff_first') return 'staff_pick';
-  // Combined and per-practitioner pages both open on the service list.
-  return shape.surface === 'venue' ? 'mode_choice' : null;
+  // Only a per-practitioner page opens on the service list; venue and combined
+  // pages have the single-or-group chooser behind it.
+  return shape.surface === 'locked' ? null : 'mode_choice';
 }
 
 export function backFromVariant(shape: AppointmentFlowShape): 'service' | 'practitioner' {

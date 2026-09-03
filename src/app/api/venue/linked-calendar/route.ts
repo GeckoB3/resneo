@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { loadAccessibleLinkedVenueIds } from '@/lib/linked-accounts/queries';
 import { recordReadAudit } from '@/lib/linked-accounts/audit';
 import { venueUsesUnifiedCalendarList } from '@/lib/booking/unified-calendar-list';
+import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import {
   resolveLinkedBookingColumnId,
   type LinkedBooking,
@@ -217,18 +218,32 @@ export async function GET(request: NextRequest) {
         practitioners = practitioners.filter((p) => allowed.has(p.id));
       }
 
-      // Services — only meaningful to full_details viewers (used by the
-      // cross-venue "new booking" form when the link allows creating).
+      // Services — only meaningful to full_details viewers. The viewer's grid
+      // paints a linked booking's duration and processing gap from these, the
+      // way it paints its own from `/api/venue/appointment-services`.
+      //
+      // Read from `service_items`, the catalogue every venue is on. This used to
+      // read the legacy `appointment_services` table, which is empty for every
+      // venue, so the list came back empty and every linked bar fell back to a
+      // 60 minute default with no processing strip. Archived services are kept,
+      // as the native list keeps them: a booking made before its service was
+      // retired still has a pattern to paint.
       let services: LinkedService[] = [];
       if (fullDetails) {
         const { data: serviceRows } = await admin
-          .from('appointment_services')
+          .from('service_items')
           .select(
             'id, name, duration_minutes, buffer_minutes, processing_time_blocks, colour, price_pence',
           )
           .eq('venue_id', access.venueId)
-          .eq('is_active', true)
           .order('name', { ascending: true });
+        const serviceIds = (serviceRows ?? []).map((s) => s.id as string);
+        const variantMap = await loadVariantsForServices({
+          admin,
+          venueId: access.venueId,
+          schema: 'service_item',
+          parentIds: serviceIds,
+        });
         services = (serviceRows ?? []).map((s) => ({
           id: s.id as string,
           name: (s.name as string) ?? 'Service',
@@ -237,6 +252,11 @@ export async function GET(request: NextRequest) {
           processingTimeBlocks: (s.processing_time_blocks as LinkedService['processingTimeBlocks']) ?? [],
           colour: (s.colour as string) ?? '#6366f1',
           pricePence: (s.price_pence as number | null) ?? null,
+          variants: (variantMap.get(s.id as string) ?? []).map((v) => ({
+            id: v.id,
+            name: v.name,
+            processingTimeBlocks: v.processing_time_blocks,
+          })),
         }));
       }
 

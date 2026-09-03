@@ -682,18 +682,43 @@ describe('venue page, service-first: any available', () => {
 const combinedVenue = venue({ is_collective: true });
 
 describe('combined page, service-first: calendar before options', () => {
-  it('opens on the service list, with no single-or-group chooser', async () => {
+  /**
+   * A combined page used to open straight on the service list because the
+   * group create route had no collective routing. It now offers the same
+   * single-or-group chooser as a venue page.
+   */
+  it('opens on the single-or-group chooser, like a venue page', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
 
+    await waitForStep(STEP.modeChoice);
+    notAtStep(STEP.service);
+    clickButton(/Book an appointment/i);
     await waitForStep(STEP.service);
-    notAtStep(STEP.modeChoice);
+  });
+
+  it('offers the group path from the chooser', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedVenue });
+
+    await waitForStep(STEP.modeChoice);
+    clickButton(/Group appointment/i);
+    await waitForStep(STEP.groupReview);
+  });
+
+  it('unwinds from the service list back to the chooser', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedVenue });
+    await startSingleBooking();
+
+    clickBack();
+    await waitForStep(STEP.modeChoice);
   });
 
   it('picks the calendar before extras, even when the offering has them', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Divergent Offering');
     await waitForStep(STEP.practitioner);
@@ -709,7 +734,7 @@ describe('combined page, service-first: calendar before options', () => {
   it('goes calendar to times for an offering with no options', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Plain Offering');
     await waitForStep(STEP.practitioner);
@@ -720,7 +745,7 @@ describe('combined page, service-first: calendar before options', () => {
   it('collects the chosen calendar\'s own options after the calendar', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Options Offering');
     await waitForStep(STEP.practitioner);
@@ -740,7 +765,7 @@ describe('combined page, service-first: calendar before options', () => {
   it('walks calendar to options to extras to times for a full offering', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Full Offering');
     await waitForStep(STEP.practitioner);
@@ -755,7 +780,7 @@ describe('combined page, service-first: calendar before options', () => {
   it('unwinds a full offering back through options to the calendar', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Full Offering');
     await waitForStep(STEP.practitioner);
@@ -779,7 +804,7 @@ describe('combined page, service-first: calendar before options', () => {
   it('unwinds times to extras to calendar to services', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Divergent Offering');
     await waitForStep(STEP.practitioner);
@@ -802,7 +827,7 @@ describe('combined page, service-first: calendar before options', () => {
     // scoped to the chosen calendar, in both toggle states.
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Divergent Offering');
     await waitForStep(STEP.practitioner);
@@ -816,7 +841,7 @@ describe('combined page, service-first: calendar before options', () => {
   it('shows the other calendar\'s extras when that one is chosen', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
 
     clickService('Divergent Offering');
     await waitForStep(STEP.practitioner);
@@ -1121,16 +1146,16 @@ describe('reset event', () => {
     await waitForStep(STEP.modeChoice);
   });
 
-  it('returns a combined page to its service list', async () => {
+  it('returns a combined page to the chooser, like a venue page', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
-    await waitForStep(STEP.service);
+    await startSingleBooking();
     clickService('Plain Offering');
     await waitForStep(STEP.practitioner);
 
     fireEvent(window, new Event(APPOINTMENT_BOOKING_RESET_EVENT));
 
-    await waitForStep(STEP.service);
+    await waitForStep(STEP.modeChoice);
   });
 });
 
@@ -2008,19 +2033,23 @@ describe('staff-first: group booking', () => {
 describe('staff-first: combined page', () => {
   const combinedStaffFirst = staffFirstVenue({ is_collective: true });
 
-  it('opens straight on the picker, with nothing behind it', async () => {
+  it('opens on the chooser, then the picker with the chooser behind it', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
 
+    await waitForStep(STEP.modeChoice);
+    clickButton(/Book an appointment/i);
     await waitForStaffPick();
-    notAtStep(STEP.modeChoice);
-    expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^back$/i })).toBeInTheDocument();
+
+    clickBack();
+    await waitForStep(STEP.modeChoice);
   });
 
   it('keeps the cards to a face and a name here too', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     // No venue line, for the same reason there is no bio: this is a quick pick.
     expect(personCard('Ada')).not.toHaveTextContent('Harbour Clinic');
@@ -2031,7 +2060,7 @@ describe('staff-first: combined page', () => {
   it('walks calendar to their own options to times', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     clickPractitioner('Ben');
     await waitForStep(STEP.service);
@@ -2052,7 +2081,7 @@ describe('staff-first: combined page', () => {
   it('unwinds back to the picker without passing a calendar list', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
@@ -2074,16 +2103,16 @@ describe('staff-first: combined page', () => {
     await waitForStaffPick();
   });
 
-  it('returns to the picker on reset', async () => {
+  it('returns to the chooser on reset', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedStaffFirst });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
     clickPractitioner('Ada');
     await waitForStep(STEP.service);
 
     fireEvent(window, new Event(APPOINTMENT_BOOKING_RESET_EVENT));
 
-    await waitForStaffPick();
+    await waitForStep(STEP.modeChoice);
   });
 });
 
@@ -2106,7 +2135,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('offers the pool when at least one offering is the same everywhere', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     expect(screen.getByRole('button', { name: /Any available/i })).toBeInTheDocument();
   });
@@ -2114,7 +2143,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('hides the pool when nothing can actually be pooled', async () => {
     installFetch(nonUniformOnlyCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     expect(screen.queryByRole('button', { name: /Any available/i })).not.toBeInTheDocument();
   });
@@ -2122,7 +2151,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('still lists every offering after the pool is chosen', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2136,7 +2165,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('goes straight to times for an offering that is the same everywhere', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2149,7 +2178,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('asks for a calendar, with a reason, when the offering differs', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2164,7 +2193,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('then behaves exactly like the calendar-first flow', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2190,7 +2219,7 @@ describe('staff-first: combined page, pooled offerings', () => {
   it('puts the pool back when the guest backs out of the calendar list', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2213,7 +2242,7 @@ describe('staff-first: combined page, pooled offerings', () => {
     // were still owed, and Back would land on a calendar list they never saw.
     installEmptyAvailability(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);
@@ -2244,7 +2273,7 @@ describe('staff-first: combined page, pooled offerings', () => {
     // next person's steps would route as though a calendar were still owed.
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedPooled });
-    await waitForStaffPick();
+    await startStaffFirstBooking();
 
     fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
     await waitForStep(STEP.service);

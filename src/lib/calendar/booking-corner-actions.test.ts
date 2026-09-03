@@ -11,6 +11,7 @@ import {
   bookingCornerTrayPadYPx,
   bookingCornerTrayTopGapPx,
   cornerStackHeightPx,
+  planBookingActionClearance,
   planBookingCornerActions,
   type BookingCornerActionInput,
 } from './booking-corner-actions';
@@ -196,5 +197,80 @@ describe('bookingCornerTrayTopGapPx', () => {
   it('collapses the tray padding only on bars that cannot spare it', () => {
     expect(bookingCornerTrayPadYPx(25)).toBe(0);
     expect(bookingCornerTrayPadYPx(96)).toBeGreaterThan(0);
+  });
+});
+
+describe('planBookingActionClearance', () => {
+  const twoActions: BookingCornerActionInput = {
+    fullActionCount: 2,
+    hasArrivalToggle: true,
+    showsSeatedUndo: false,
+  };
+  const clearance = (blockHeightPx: number, rowWidthPx: number | null) =>
+    planBookingActionClearance(twoActions, blockHeightPx, rowWidthPx, 12, 20);
+
+  it('keeps the tray beside the text until the row has been measured', () => {
+    expect(clearance(280, null).mode).toBe('beside');
+    expect(clearance(280, null).right).toBe(BOOKING_ACTIONS_CORNER_RIGHT_PX);
+  });
+
+  it('keeps the tray beside the text on a full-width column', () => {
+    const c = clearance(94, 300);
+    expect(c.mode).toBe('beside');
+    expect(c.bottom).toBe(0);
+  });
+
+  /**
+   * The bug this pins: three overlapping 90 minute bookings gave each lane about
+   * 110px, so 76px of gutter left 34px of text and every bar showed "J..." and
+   * three rows of ellipsis. The buttons now drop below the text instead.
+   */
+  it('moves the tray below the text in a narrow overlap lane on a tall bar', () => {
+    const c = clearance(280, 110);
+    expect(c.mode).toBe('below');
+    expect(c.right).toBe(0);
+    expect(c.bottom).toBeGreaterThan(0);
+    // Two comfortable buttons, their gap, tray padding, inset and the text gap.
+    expect(c.bottom).toBeLessThan(90);
+    expect(280 - c.bottom - 12).toBeGreaterThanOrEqual(2 * 20);
+  });
+
+  it('stays beside on a short bar in a narrow lane when nothing would fit below', () => {
+    expect(clearance(24, 110).mode).toBe('beside');
+  });
+
+  it('accepts a single row below when the column beside would be unusable', () => {
+    // 34px of text beside is unreadable; one full-width row is better. Two
+    // comfortable buttons do not fit under it, so the tray is planned against
+    // what is left and sheds its secondary button.
+    const c = clearance(94, 110);
+    expect(c.mode).toBe('below');
+    expect(94 - c.bottom - 12).toBeGreaterThanOrEqual(20);
+    expect(c.trayBlockHeightPx).toBeLessThan(94);
+    expect(planBookingCornerActions(twoActions, c.trayBlockHeightPx).actionCount).toBe(1);
+  });
+
+  it('keeps the full bar height for the tray when the stack already fits below', () => {
+    expect(clearance(280, 110).trayBlockHeightPx).toBe(280);
+  });
+
+  it('wants two rows below before giving up a readable-but-tight column', () => {
+    // 190px lane: 114px beside is tight but readable, so only stack below when
+    // the bar can show at least two full-width rows above the FULL stack. It
+    // never sheds a button to get there.
+    expect(clearance(94, 190).mode).toBe('beside');
+    expect(clearance(150, 190).mode).toBe('below');
+  });
+
+  it('reports no clearance for a bar with no actions', () => {
+    expect(
+      planBookingActionClearance(
+        { fullActionCount: 0, hasArrivalToggle: false, showsSeatedUndo: false },
+        120,
+        110,
+        12,
+        20,
+      ),
+    ).toEqual({ right: 0, bottom: 0, hasActions: false, mode: 'none', trayBlockHeightPx: 120 });
   });
 });

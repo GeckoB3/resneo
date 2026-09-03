@@ -13,6 +13,7 @@
  */
 
 import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { inheritCollectivePageConfigFromHost } from '@/lib/linked-accounts/collective-page-config';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
@@ -70,7 +71,7 @@ export async function loadCollectiveVenuePublic(
   const { data: host } = await admin
     .from('venues')
     .select(
-      'currency, deposit_config, booking_rules, terminology, address, phone, website_url, feature_flags, opening_hours',
+      'currency, deposit_config, booking_rules, terminology, address, phone, website_url, feature_flags, opening_hours, booking_page_config',
     )
     .eq('id', col.host_venue_id)
     .maybeSingle();
@@ -114,10 +115,16 @@ export async function loadCollectiveVenuePublic(
       }
     }
   }
-  const config: BookingPageConfig & { cover_photo_url?: string | null } = {
-    ...hostConfig,
-    team_profiles: { ...inheritedTeamProfiles, ...(hostConfig.team_profiles ?? {}) },
-  };
+  // The host venue's own booking page fills in the tabs and About content the
+  // combined page has not been given yet, so linking does not strip the page
+  // its clients already knew. See `inheritCollectivePageConfigFromHost`.
+  const config: BookingPageConfig & { cover_photo_url?: string | null } = inheritCollectivePageConfigFromHost(
+    {
+      ...hostConfig,
+      team_profiles: { ...inheritedTeamProfiles, ...(hostConfig.team_profiles ?? {}) },
+    },
+    (host?.booking_page_config as BookingPageConfig | null) ?? null,
+  );
 
   return {
     id: col.id,

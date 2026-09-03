@@ -374,7 +374,7 @@ async function handleAvailabilityGet(request: NextRequest) {
       return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
     }
 
-    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId, request);
     if (blocked) return blocked;
 
     const venueMode = await resolveVenueMode(supabase, venueId);

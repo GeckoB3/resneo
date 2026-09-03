@@ -24,6 +24,8 @@ Card hold deposits: `POST /api/venue/bookings` accepts an optional `require_card
 
 `GET /api/booking/appointment-catalog` is a public guest-facing endpoint (no auth). It uses the admin client and does not require Bearer tokens.
 
+Since 2026-09-03 the public-booking billing guard on `/api/booking/*` (the 403 "Online booking is temporarily unavailable for this venue.", for a Light venue past due or a subscription that has ended) no longer applies to a **staff session**: a Bearer token for staff of that venue, or of a venue holding an active link over it that allows booking changes, is let through on `appointment-catalog`, `availability`, `appointment-calendar`, `validate-appointment-slot`, `create`, `create-multi-service` and `create-group`. The app's linked-calendar "New booking" reads a linked venue's catalog and creates multi-service visits through these public routes with `venue_id` set to the linked venue, and was being answered with the public's message. Send the Bearer token on those calls; without it the guard behaves as before.
+
 Since 2026-09-02 the response also carries service categories, additively: a top-level `categories` array of `{ id, name, sort_order }` in booking-page order, and on each service in `practitioners[].services[]` a `category` object of the same shape, or `null` when the service has no category. A venue with no categories returns `categories: []`. Clients that ignore both keep working; a client that groups should list services under `category` in `categories` order, with uncategorised services last under a heading such as "Other services".
 
 ## Example request

@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
-    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, parsed.data.venue_id);
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, parsed.data.venue_id, request);
     if (blocked) return blocked;
 
     const { data: venueRow } = await supabase

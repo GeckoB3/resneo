@@ -65,6 +65,12 @@ export interface BookingPageEditorCapabilities {
    * emails; a combined page books into its host venue, whose own setting applies.
    */
   emailBranding?: boolean;
+  /**
+   * Set for a combined page: the name of the host venue whose Profile (address, phone,
+   * website, opening hours) and booking settings the page follows. Drives the copy that
+   * would otherwise send the host to the wrong Settings page.
+   */
+  inheritsFromHostName?: string;
 }
 
 /** One image slot (logo OR cover). Abstracts WHERE the url lives and HOW it persists. */

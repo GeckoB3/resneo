@@ -25,8 +25,12 @@ export async function generateMetadata({
   if (known.status !== 'active') return { title: known.name };
   return {
     title: `${known.name}: Book online`,
+    // The host writes the About text in the page editor; the legacy branding
+    // description has no UI, so it is only a fallback.
     description:
-      known.branding.description ?? `Book with the venues of the ${known.name} collective.`,
+      known.about ??
+      known.branding.description ??
+      `Book with the venues of the ${known.name} collective.`,
   };
 }
 

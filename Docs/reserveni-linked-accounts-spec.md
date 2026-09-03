@@ -790,6 +790,15 @@ visibility:
 - Both affected venues are auto-removed (`status = 'removed'`).
 - Remaining members are notified.
 - If `active` membership drops below 2, the collective is dissolved (`status = 'dissolved'`).
+  **Open invitations keep it alive (fixed 2026-09-03).** A collective that has not *yet*
+  reached 2 active members is not dissolved while at least one active member remains and
+  outstanding `invited` rows could still bring it to 2. Before this fix, `reconcileCollective`
+  counted only `active` rows, so a freshly created collective (host active + invitee still
+  `invited`) was dissolved by the first reconcile to run — the host opening `/book/c/{slug}`
+  (or the sidebar's combined-page link), any permission grant on the underlying link, or the
+  daily cron — before the invitee ever saw the invitation. The sidebar link is now also only
+  shown once the page can render (≥2 active members). When a dissolve does happen with
+  invitations still open, those rows are closed (`removed`) and the invitees are notified.
 - If the removed venue was the **host** and ≥2 members survive, hosting is automatically
   reassigned to the longest-tenured survivor (§7.4) rather than orphaning the collective.
 
@@ -830,6 +839,26 @@ There is no "collective-level booking". A booking routed through the collective 
 existing `booking_source` enum value `'online'` and may record the collective via a nullable
 `bookings.collective_id` column if attribution reporting is wanted (optional; decide at
 Phase 2 build).
+
+### 7.7.1 Combined-page fixes shipped 2026-09-03
+
+- **Variants and add-ons on a single offering.** `POST /api/booking/create` applied the
+  collective override *after* the variant, resetting a variant booking to the base length and
+  base price (the multi-service and validate-slot routes already applied it first). Day and
+  month availability for a collective ignored `variant_id` / `addon_ids` entirely, so slots
+  were sized at base length and the confirm step failed with "no longer available". Both now
+  resolve the variant and add-ons per provider calendar (`collective-booking-bridge.ts`).
+- **Compliance forms.** The details-step requirements lookup sent the collective id and
+  offering ids, found no venue, and showed nothing, while create enforced the owning venue's
+  `block_online` rules: a 409 with no way out. `/api/public/compliance/booking-requirements`
+  now resolves a collective through the merged catalogue (with the chosen calendar, or every
+  provider venue for "any available") and answers with the owning venue id for uploads.
+- **Category column tolerance.** The two `collective_service_items` reads named `category_id`
+  explicitly, so a database without migration `20270202130000` returned no offerings and the
+  public page showed "not available". They now `select('*')`.
+- **Page parity.** The combined page now inherits the host's opening hours, surfaces the
+  account-login gate when any bookable member requires it, uses the editor's About text as its
+  meta description, and the editor states which settings follow the host venue.
 
 ### 7.8 Branding scope
 

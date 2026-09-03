@@ -69,7 +69,9 @@ export async function loadCollectiveVenuePublic(
   // come from the host too (matching the standard single-venue booking header).
   const { data: host } = await admin
     .from('venues')
-    .select('currency, deposit_config, booking_rules, terminology, address, phone, website_url, feature_flags')
+    .select(
+      'currency, deposit_config, booking_rules, terminology, address, phone, website_url, feature_flags, opening_hours',
+    )
     .eq('id', col.host_venue_id)
     .maybeSingle();
 
@@ -92,12 +94,20 @@ export async function loadCollectiveVenuePublic(
     ...new Set((catalogue?.items ?? []).flatMap((i) => i.providers.map((p) => p.venueId))),
   ];
   const inheritedTeamProfiles: Record<string, NonNullable<BookingPageConfig['team_profiles']>[string]> = {};
+  // A combined booking lands in the calendar's OWNING venue, and the create route
+  // enforces that venue's "require an account to book" setting. Surface the gate
+  // on the page whenever any bookable member requires it, so customers sign in
+  // up front instead of being refused at the final step.
+  let requireAccountLogin = false;
   if (memberVenueIds.length > 0) {
     const { data: memberRows } = await admin
       .from('venues')
-      .select('booking_page_config')
+      .select('booking_page_config, require_account_login_for_bookings')
       .in('id', memberVenueIds);
     for (const row of memberRows ?? []) {
+      if ((row as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings) {
+        requireAccountLogin = true;
+      }
       const tp = ((row.booking_page_config as BookingPageConfig | null) ?? {}).team_profiles ?? {};
       for (const [calendarId, profile] of Object.entries(tp)) {
         if (!inheritedTeamProfiles[calendarId]) inheritedTeamProfiles[calendarId] = profile;
@@ -121,7 +131,8 @@ export async function loadCollectiveVenuePublic(
     booking_page_config: config,
     deposit_config: (host?.deposit_config as VenuePublic['deposit_config']) ?? null,
     booking_rules: (host?.booking_rules as VenuePublic['booking_rules']) ?? null,
-    opening_hours: null,
+    // Header/About-tab hours follow the host venue, like its address and phone.
+    opening_hours: (host?.opening_hours as VenuePublic['opening_hours']) ?? null,
     timezone: col.timezone ?? 'Europe/London',
     booking_model: 'unified_scheduling',
     active_booking_models: ['unified_scheduling'],
@@ -132,6 +143,7 @@ export async function loadCollectiveVenuePublic(
     terminology: mergeVenueTerminology('unified_scheduling', host?.terminology),
     currency: (host?.currency as string) ?? 'GBP',
     booking_paused: !bookable,
+    require_account_login_for_bookings: requireAccountLogin,
     is_collective: true,
     feature_flags: {
       resolved: {

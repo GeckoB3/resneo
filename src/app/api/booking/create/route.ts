@@ -1102,6 +1102,31 @@ async function handleNonTableBooking(
     }
     const input = await fetchAppointmentInput({ supabase, venueId: venue_id, date: booking_date, practitionerId: practitioner_id, serviceId: appointment_service_id });
 
+    // Combined booking page (plan §6.3): resolve the server-side price/duration
+    // override from the approved provider row and inject the effective duration
+    // so the slot check reserves the right length. No-op for ordinary bookings.
+    // Applied BEFORE the variant and add-ons, as validate-appointment-slot and
+    // create-multi-service do: the override stands in for the source service's
+    // base terms, and whatever the customer chose on top of it still stacks.
+    // Applying it after the variant used to reset a 90-minute variant to the
+    // 30-minute base, so the booking was reserved and charged at base terms.
+    collectiveOverride = await resolveCollectiveServiceOverride(supabase, {
+      collectiveId: collective_id,
+      collectiveServiceItemId: collective_service_item_id,
+      venueId: venue_id,
+      sourceServiceId: appointment_service_id,
+      practitionerId: practitioner_id,
+    });
+    if (collectiveOverride?.durationMinutes != null) {
+      const oidx = input.services.findIndex((s) => s.id === appointment_service_id);
+      if (oidx >= 0) {
+        input.services[oidx] = {
+          ...input.services[oidx]!,
+          duration_minutes: collectiveOverride.durationMinutes,
+        };
+      }
+    }
+
     let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
     if (service_variant_id) {
       chosenVariant = await loadActiveVariantForService({
@@ -1121,26 +1146,6 @@ async function handleNonTableBooking(
         serviceId: appointment_service_id,
         variant: chosenVariant,
       });
-    }
-
-    // Combined booking page (plan §6.3): resolve the server-side price/duration
-    // override from the approved provider row and inject the effective duration
-    // so the slot check reserves the right length. No-op for ordinary bookings.
-    collectiveOverride = await resolveCollectiveServiceOverride(supabase, {
-      collectiveId: collective_id,
-      collectiveServiceItemId: collective_service_item_id,
-      venueId: venue_id,
-      sourceServiceId: appointment_service_id,
-      practitionerId: practitioner_id,
-    });
-    if (collectiveOverride?.durationMinutes != null) {
-      const oidx = input.services.findIndex((s) => s.id === appointment_service_id);
-      if (oidx >= 0) {
-        input.services[oidx] = {
-          ...input.services[oidx]!,
-          duration_minutes: collectiveOverride.durationMinutes,
-        };
-      }
     }
 
     // Resolve + validate add-ons up-front so the slot check below uses the EXTENDED
@@ -1249,8 +1254,12 @@ async function handleNonTableBooking(
     const practRow = input.practitioners.find((p) => p.id === practitioner_id);
     // Combined page (plan §6.3 / D7): the customer is charged/deposited against the
     // effective (overridden) price shown on the combined page, not the venue's own.
+    // The override is the offering's BASE price; a chosen variant carries its own
+    // price and replaces it, exactly as it does on a venue's own page.
     const effectivePricePence =
-      collectiveOverride?.pricePence != null ? collectiveOverride.pricePence : svc?.price_pence ?? null;
+      collectiveOverride?.pricePence != null && !chosenVariant
+        ? collectiveOverride.pricePence
+        : svc?.price_pence ?? null;
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'unified_scheduling',
@@ -1293,7 +1302,7 @@ async function handleNonTableBooking(
       // the deposit rules (mode / percentage) stay the venue's own. For full_payment
       // the addon prices roll in; deposit stays on base+variant.
       const svcForCharge =
-        collectiveOverride?.pricePence != null
+        collectiveOverride?.pricePence != null && !chosenVariant
           ? { ...svc, price_pence: collectiveOverride.pricePence }
           : svc;
       const online = resolveAppointmentServiceOnlineChargeWithAddons({

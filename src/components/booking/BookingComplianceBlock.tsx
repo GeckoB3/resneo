@@ -53,6 +53,11 @@ interface Props {
   venueId: string;
   /** Catalog service id(s) for the booking (one per chosen service / group attendee). */
   serviceIds: string[];
+  /**
+   * The chosen calendar. On a combined booking page (`venueId` is a collective) the
+   * server needs it to find which member venue's requirements apply.
+   */
+  practitionerId?: string | null;
   /** Guest email as typed (signed-in prefill or the details form); resolved once well-formed. */
   email?: string | null;
   /** The chosen slot, so lock periods and expiry are judged against the actual booking. */
@@ -74,6 +79,7 @@ const EMPTY_FORMS_STATE: BookingComplianceFormsState = {
 export default function BookingComplianceBlock({
   venueId,
   serviceIds,
+  practitionerId,
   email,
   bookingDate,
   bookingTime,
@@ -83,6 +89,9 @@ export default function BookingComplianceBlock({
 }: Props) {
   const [requirements, setRequirements] = useState<BookingRequirementView[] | null>(null);
   const [identityKnown, setIdentityKnown] = useState(false);
+  // The venue the forms and pre-booking uploads belong to. Normally `venueId`; on a
+  // combined page the server answers with the owning member venue instead.
+  const [formsVenueId, setFormsVenueId] = useState<string>(venueId);
   // The request key the current `requirements` answer; `resolving` is derived from it so
   // no state is written synchronously inside the effect body.
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
@@ -97,7 +106,15 @@ export default function BookingComplianceBlock({
   const identityEmail = EMAIL_RE.test(trimmedEmail) ? trimmedEmail : '';
   const lastEmailRef = useRef(identityEmail);
 
-  const requestKey = JSON.stringify([venueId, serviceKey, identityEmail, bookingDate ?? '', bookingTime ?? '', refreshKey]);
+  const requestKey = JSON.stringify([
+    venueId,
+    practitionerId ?? '',
+    serviceKey,
+    identityEmail,
+    bookingDate ?? '',
+    bookingTime ?? '',
+    refreshKey,
+  ]);
   const hasServices = Boolean(venueId) && uniqueServiceIds.length > 0;
   const resolving = hasServices && resolvedKey !== requestKey;
 
@@ -124,6 +141,7 @@ export default function BookingComplianceBlock({
             body: JSON.stringify({
               venue_id: venueId,
               service_ids: uniqueServiceIds,
+              practitioner_id: practitionerId || undefined,
               email: identityEmail || undefined,
               booking_date: bookingDate || undefined,
               booking_time: bookingTime || undefined,
@@ -139,10 +157,15 @@ export default function BookingComplianceBlock({
             setResolvedKey(requestKey);
             return;
           }
-          const data = (await res.json()) as { identity_known?: boolean; requirements?: BookingRequirementView[] };
+          const data = (await res.json()) as {
+            identity_known?: boolean;
+            requirements?: BookingRequirementView[];
+            venue_id?: string;
+          };
           if (cancelled) return;
           setRequirements(data.requirements ?? []);
           setIdentityKnown(Boolean(data.identity_known));
+          setFormsVenueId(data.venue_id || venueId);
           setResolvedKey(requestKey);
         } catch {
           if (!cancelled) {
@@ -225,7 +248,7 @@ export default function BookingComplianceBlock({
           </p>
         )}
         <BookingComplianceForms
-          venueId={venueId}
+          venueId={formsVenueId}
           forms={forms}
           submittingBooking={submittingBooking}
           onChange={setFormsState}

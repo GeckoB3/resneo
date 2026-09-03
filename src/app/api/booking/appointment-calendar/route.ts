@@ -108,6 +108,9 @@ async function handleAppointmentCalendarGet(request: NextRequest) {
         year,
         month,
         durationMinutes: customDurationMinutes,
+        // Chosen variant / add-ons as ids, sized per provider calendar by the bridge.
+        variantId: variantId || null,
+        addonIds: searchParams.getAll('addon_ids').filter(Boolean),
       });
       return NextResponse.json(result, {
         headers: {

@@ -299,7 +299,19 @@ export async function loadCollectiveViewsForVenue(
     }
   }
 
-  return (collectives ?? []).map((c) => {
+  // A dissolved collective this venue never joined (its invitation was still open
+  // when the collective ended) is noise in its list: there is nothing to accept,
+  // leave or manage. Hosts and former active members keep the row.
+  const visible = (collectives ?? []).filter((c) => {
+    const row = c as VenueCollectiveRow;
+    if (row.status !== 'dissolved' || row.host_venue_id === venueId) return true;
+    const mine = (allMembers ?? []).find(
+      (m) => m.collective_id === row.id && m.venue_id === venueId,
+    );
+    return mine?.status !== 'invited';
+  });
+
+  return visible.map((c) => {
     const row = c as VenueCollectiveRow;
     const members = (allMembers ?? [])
       .filter((m) => m.collective_id === row.id)
@@ -398,12 +410,15 @@ export async function reconcileCollective(
     .from('venue_collective_members')
     .select('id, venue_id, status, joined_at')
     .eq('collective_id', collectiveId)
-    .eq('status', 'active');
-  const active = (members ?? []).map((m) => ({
-    id: m.id as string,
-    venueId: m.venue_id as string,
-    joinedAt: (m.joined_at as string | null) ?? null,
-  }));
+    .in('status', ['active', 'invited']);
+  const active = (members ?? [])
+    .filter((m) => m.status === 'active')
+    .map((m) => ({
+      id: m.id as string,
+      venueId: m.venue_id as string,
+      joinedAt: (m.joined_at as string | null) ?? null,
+    }));
+  const pendingInviteCount = (members ?? []).filter((m) => m.status === 'invited').length;
 
   // Each active member must still hold full mutual links with all other actives.
   // Read every member's link state FIRST. If any read fails, the membership state is
@@ -431,11 +446,29 @@ export async function reconcileCollective(
   }
 
   const survivors = active.filter((m) => !removedVenueIds.includes(m.venueId));
-  if (survivors.length < 2) {
+  // §7.5 — dissolve when active membership has DROPPED below 2. A collective that
+  // has not yet reached 2 active members because an invitation is still open is
+  // not a failure: a freshly created collective is exactly one active member (the
+  // host) plus invited venues, and the invitee has not had a chance to accept.
+  // Dissolving it here (reconcile runs on every public render, link change and
+  // cron pass) used to kill new collectives before the invitee ever saw them.
+  // Keep it alive while at least one active member remains and open invitations
+  // could still bring it to 2; the public page stays "unavailable" until then.
+  const canStillReachTwo = survivors.length >= 1 && survivors.length + pendingInviteCount >= 2;
+  if (survivors.length < 2 && !canStillReachTwo) {
     await admin
       .from('venue_collectives')
       .update({ status: 'dissolved', slug: dissolvedCollectiveSlug(collectiveId) })
       .eq('id', collectiveId);
+    // Close any invitation that can no longer be accepted, so the invitee's list
+    // does not carry a dead "Invitation pending" row.
+    if (pendingInviteCount > 0) {
+      await admin
+        .from('venue_collective_members')
+        .update({ status: 'removed', left_at: new Date().toISOString() })
+        .eq('collective_id', collectiveId)
+        .eq('status', 'invited');
+    }
     // No catalogue cleanup needed on dissolve: `status='dissolved'` takes the
     // page offline, and the overrides are collective-scoped so every venue's own
     // services are already pristine (plan §8.3, the non-destructive guarantee).
@@ -449,7 +482,7 @@ export async function reconcileCollective(
   // active member again, later reconciles leave it untouched.
   let hostTransferredTo: string | null = null;
   const hostStillActive = survivors.some((m) => m.venueId === collective.host_venue_id);
-  if (!hostStillActive) {
+  if (!hostStillActive && survivors.length >= 1) {
     const newHostVenueId = selectReplacementHost(survivors);
     if (newHostVenueId) {
       await admin
@@ -560,12 +593,14 @@ export async function reconcileCollectivesAfterLinkChange(
     try {
       // Snapshot the active membership and name before reconcile so we know
       // who to notify afterwards.
+      // Invited venues are included: a dissolution closes their invitation too,
+      // so they should hear about it rather than find a dead row in their list.
       const [{ data: beforeRows }, { data: collectiveRow }] = await Promise.all([
         admin
           .from('venue_collective_members')
           .select('venue_id')
           .eq('collective_id', collectiveId)
-          .eq('status', 'active'),
+          .in('status', ['active', 'invited']),
         admin
           .from('venue_collectives')
           .select('name')
@@ -630,7 +665,13 @@ export interface PublicCollective {
 export async function loadCollectiveBrandingBySlug(
   admin: SupabaseClient,
   slug: string,
-): Promise<{ name: string; branding: CollectiveBranding; status: CollectiveStatus } | null> {
+): Promise<{
+  name: string;
+  branding: CollectiveBranding;
+  status: CollectiveStatus;
+  /** The editor's "About / welcome" text, for the page's meta description. */
+  about: string | null;
+} | null> {
   const { data } = await admin
     .from('venue_collectives')
     .select('name, branding, status, booking_page_config')
@@ -640,14 +681,17 @@ export async function loadCollectiveBrandingBySlug(
   const branding = (data.branding as CollectiveBranding) ?? {};
   // Unified colour source (plan §23): prefer the page config's brand colour so the
   // branded "unavailable" state matches the live page.
-  const brandPrimary =
-    ((data.booking_page_config as { brand_primary?: string | null } | null)?.brand_primary) ??
-    branding.primary_colour ??
-    null;
+  const pageConfig = data.booking_page_config as {
+    brand_primary?: string | null;
+    about?: string | null;
+  } | null;
+  const brandPrimary = pageConfig?.brand_primary ?? branding.primary_colour ?? null;
+  const about = (pageConfig?.about ?? '').trim();
   return {
     name: (data.name as string) ?? 'Venue collective',
     branding: { ...branding, primary_colour: brandPrimary },
     status: data.status as CollectiveStatus,
+    about: about || null,
   };
 }
 
@@ -742,9 +786,24 @@ export async function loadCollectiveBookingLinksForVenue(
     .in('id', ids)
     .eq('status', 'active')
     .eq('page_mode', 'unified_catalog');
+  if (!cols || cols.length === 0) return [];
+
+  // Only link to a page that can actually render: a collective still waiting on
+  // an invitation has one active member and its address shows "not available".
+  const { data: activeRows } = await admin
+    .from('venue_collective_members')
+    .select('collective_id')
+    .in('collective_id', cols.map((c) => c.id as string))
+    .eq('status', 'active');
+  const activeCount = new Map<string, number>();
+  for (const r of activeRows ?? []) {
+    const k = r.collective_id as string;
+    activeCount.set(k, (activeCount.get(k) ?? 0) + 1);
+  }
 
   const out: { id: string; name: string; url: string }[] = [];
-  for (const c of cols ?? []) {
+  for (const c of cols) {
+    if ((activeCount.get(c.id as string) ?? 0) < 2) continue;
     const name = (c.name as string) ?? 'Combined booking page';
     if ((c.slug_strategy as string) === 'adopt_member' && c.adopted_venue_id) {
       if ((c.adopted_venue_id as string) === venueId) continue; // already shown as the venue's own page

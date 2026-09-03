@@ -12,6 +12,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, btnPrimary, btnSecondary, btnDanger } from './linked-accounts-ui';
 import { type BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import { BookingPageEditor } from '@/components/booking-page-editor/BookingPageEditor';
+import {
+  ServiceCategoriesManager,
+  type ServiceCategoryApi,
+} from '@/components/dashboard/appointment-services/ServiceCategoriesManager';
+import { UNCATEGORISED_GROUP_LABEL, type ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { normaliseCategoryName } from '@/lib/linked-accounts/collective-categories';
 import type {
   BookingPageEditorAdapter,
   EditorServiceItem,
@@ -137,27 +143,67 @@ export function CombinedPageManager({
     void load();
   }, [load]);
 
-  /** PATCH a catalogue action; refresh from the response. */
+  /**
+   * PATCH a catalogue action and refresh from the response. Throws the server's
+   * message on failure so a caller with its own error surface can show it.
+   */
+  const actionResult = useCallback(
+    async (body: Record<string, unknown>): Promise<CatalogueManagementView> => {
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/venue/collectives/${collective.id}/catalogue`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? 'Action failed.');
+        if (json.catalogue) setCatalogue(json.catalogue);
+        return json.catalogue as CatalogueManagementView;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [collective.id],
+  );
+
+  /** PATCH a catalogue action; surfaces failure in the manager's own banner. */
   const action = async (body: Record<string, unknown>): Promise<boolean> => {
-    setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/venue/collectives/${collective.id}/catalogue`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Action failed.');
-      if (json.catalogue) setCatalogue(json.catalogue);
+      await actionResult(body);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed.');
       return false;
-    } finally {
-      setBusy(false);
     }
   };
+
+  /** The shared category manager, writing through catalogue actions instead of venue routes. */
+  const categoryApi = useMemo<ServiceCategoryApi>(
+    () => ({
+      create: async (name) => {
+        const next = await actionResult({ action: 'create_category', categoryName: name });
+        const key = normaliseCategoryName(name);
+        const ref = next.categories.find((c) => normaliseCategoryName(c.name) === key);
+        if (!ref) throw new Error('The category was created but could not be found. Refresh the page.');
+        return ref;
+      },
+      rename: async (id, name) => {
+        const next = await actionResult({ action: 'rename_category', categoryId: id, categoryName: name });
+        const ref = next.categories.find((c) => c.id === id);
+        if (!ref) throw new Error('That category no longer exists. Refresh the page and try again.');
+        return ref;
+      },
+      remove: async (id) => {
+        await actionResult({ action: 'delete_category', categoryId: id });
+      },
+      reorder: async (ids) => {
+        await actionResult({ action: 'reorder_categories', categoryIds: ids });
+      },
+    }),
+    [actionResult],
+  );
 
   // Read/record staged calendar-assignment changes. Toggling a calendar back to its
   // server state clears the entry, so a tick-then-untick nets to nothing.
@@ -385,15 +431,19 @@ export function CombinedPageManager({
 
   const pageServices = useMemo<EditorServiceItem[]>(() => {
     if (!catalogue) return [];
+    const categoryById = new Map(catalogue.categories.map((c) => [c.id, c]));
     return catalogue.items
       .filter((i) => i.status === 'active')
-      .map((i) => ({
+      .map((i, index) => ({
         id: i.id,
         name: i.name,
         description: i.description,
         price_pence: i.defaultPricePence,
         duration_minutes: i.defaultDurationMinutes ?? undefined,
         imageUrl: i.imageUrl,
+        // The preview groups as the live page does.
+        category: i.categoryId ? categoryById.get(i.categoryId) ?? null : null,
+        sort_order: index,
       }));
   }, [catalogue]);
 
@@ -567,6 +617,7 @@ export function CombinedPageManager({
               catalogue={catalogue}
               busy={busy}
               action={action}
+              categoryApi={categoryApi}
               providerStaging={providerStaging}
             />
           ) : null
@@ -902,15 +953,40 @@ function HostCatalogue({
   catalogue,
   busy,
   action,
+  categoryApi,
   providerStaging,
 }: {
   catalogue: CatalogueManagementView;
   busy: boolean;
   action: (body: Record<string, unknown>) => Promise<boolean>;
+  categoryApi: ServiceCategoryApi;
   providerStaging: ProviderStaging;
 }) {
   const [newItemName, setNewItemName] = useState('');
   const activeItems = catalogue.items.filter((i) => i.status === 'active');
+
+  // Offerings under their headings, in page order, uncategorised last.
+  const categoryById = new Map(catalogue.categories.map((c) => [c.id, c]));
+  const buckets = new Map<string | null, CatalogueItemView[]>();
+  for (const item of activeItems) {
+    const key = item.categoryId && categoryById.has(item.categoryId) ? item.categoryId : null;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(item);
+    else buckets.set(key, [item]);
+  }
+  const groups: Array<{ id: string | null; name: string; items: CatalogueItemView[] }> = [];
+  for (const category of catalogue.categories) {
+    const bucket = buckets.get(category.id);
+    if (bucket) groups.push({ id: category.id, name: category.name, items: bucket });
+  }
+  const rest = buckets.get(null);
+  if (rest) groups.push({ id: null, name: groups.length > 0 ? UNCATEGORISED_GROUP_LABEL : '', items: rest });
+
+  const serviceCountByCategory = new Map<string, number>();
+  for (const item of activeItems) {
+    if (item.categoryId) serviceCountByCategory.set(item.categoryId, (serviceCountByCategory.get(item.categoryId) ?? 0) + 1);
+  }
+  const uncategorisedCount = rest?.length ?? 0;
 
   return (
     <div className="space-y-4">
@@ -921,9 +997,31 @@ function HostCatalogue({
         action={action}
       />
 
+      <ServiceCategoriesManager
+        categories={catalogue.categories}
+        serviceCountByCategory={serviceCountByCategory}
+        uncategorisedCount={uncategorisedCount}
+        isAdmin
+        api={categoryApi}
+        onChange={() => {}}
+        settingsHint="Choose how categories look on the page, as sections with a menu or as collapsible headings, on the Page tab."
+        uncategorisedHint="Pick a category on each offering below, or match them from your venues."
+      />
+
       <section className="space-y-3">
-        <div className="flex items-end justify-between gap-2">
+        <div className="flex flex-wrap items-end justify-between gap-2">
           <p className="text-sm font-bold text-slate-900">Offerings on your combined page</p>
+          {uncategorisedCount > 0 ? (
+            <button
+              type="button"
+              className={btnSecondary}
+              disabled={busy}
+              title="Files each offering without a category under the heading its service has at its own venue."
+              onClick={() => void action({ action: 'sync_categories' })}
+            >
+              Match categories from your venues
+            </button>
+          ) : null}
         </div>
         {activeItems.length === 0 ? (
           <p className="text-sm text-slate-500">
@@ -931,15 +1029,28 @@ function HostCatalogue({
             below.
           </p>
         ) : (
-          activeItems.map((item) => (
-            <ItemCard
-              key={item.id}
-              item={item}
-              memberSources={catalogue.memberSources}
-              busy={busy}
-              action={action}
-              providerStaging={providerStaging}
-            />
+          groups.map((group) => (
+            <div key={group.id ?? 'other'} className="space-y-3">
+              {group.name ? (
+                <div className="flex items-baseline justify-between gap-3 pt-1">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{group.name}</h3>
+                  <span className="text-xs text-slate-400">
+                    {group.items.length} offering{group.items.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+              ) : null}
+              {group.items.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  categories={catalogue.categories}
+                  memberSources={catalogue.memberSources}
+                  busy={busy}
+                  action={action}
+                  providerStaging={providerStaging}
+                />
+              ))}
+            </div>
           ))
         )}
         <div className="flex gap-2">
@@ -1204,12 +1315,14 @@ function VenueServicesPicker({
 
 function ItemCard({
   item,
+  categories,
   memberSources,
   busy,
   action,
   providerStaging,
 }: {
   item: CatalogueItemView;
+  categories: ServiceCategoryRef[];
   memberSources: CatalogueMemberSource[];
   busy: boolean;
   action: (body: Record<string, unknown>) => Promise<boolean>;
@@ -1238,6 +1351,26 @@ function ItemCard({
             {item.providers.length} calendar{item.providers.length === 1 ? '' : 's'} · customers see the
             “from” price
           </p>
+          {categories.length > 0 ? (
+            <label className="mt-1 flex items-center gap-2 px-1 text-xs text-slate-600">
+              <span>Category</span>
+              <select
+                value={item.categoryId ?? ''}
+                disabled={busy}
+                onChange={(e) =>
+                  void action({ action: 'update_item', itemId: item.id, categoryId: e.target.value || null })
+                }
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">No category</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         <button
           type="button"

@@ -32,6 +32,7 @@ test.describe('Service-first smoke: options and extras', () => {
     });
     await expect(page.locator('[data-testid="staff-pick-step"]')).toHaveCount(0);
     await page.getByRole('button', { name: e2e.optionsServiceName }).click();
+    await page.getByRole('button', { name: /^continue$/i }).click();
 
     await expect(page.getByRole('heading', { name: /choose your option/i })).toBeVisible();
     await page.locator('.appointment-public .space-y-2 button').first().click();
@@ -61,6 +62,7 @@ test.describe('Service-first smoke: options and extras', () => {
     await declineCookiesIfPresent(page);
     await page.getByRole('button', { name: /book an appointment/i }).click();
     await page.getByRole('button', { name: e2e.optionsServiceName }).click();
+    await page.getByRole('button', { name: /^continue$/i }).click();
 
     await expect(page.getByRole('heading', { name: /choose your option/i })).toBeVisible();
     await page.locator('.appointment-public .space-y-2 button').first().click();

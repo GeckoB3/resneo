@@ -572,6 +572,22 @@ button, a, input, select, textarea {
   transform: scale(0.995);
 }
 
+/* A service ticked on the multi-service picker. */
+.appointment-public .ap-choice-card-selected {
+  border-color: var(--ap-accent);
+  background: var(--ap-accent-soft);
+  box-shadow: 0 0 0 1px var(--ap-accent);
+}
+.appointment-public .ap-pick-check {
+  background-color: var(--ap-accent);
+}
+.appointment-public .ap-pick-box {
+  border-color: var(--ap-accent-border);
+}
+.appointment-public .ap-picker-bar {
+  border-color: var(--ap-accent-border);
+}
+
 /*
  * Choice cards that carry a description.
  *
@@ -885,6 +901,14 @@ button, a, input, select, textarea {
 .appointment-public .focus\:ring-brand-500:focus,
 .appointment-public .focus-visible\:ring-brand-500:focus-visible {
   --tw-ring-color: color-mix(in srgb, var(--ap-accent) 35%, transparent);
+}
+
+/* ── Service category menu (public flow, staff modal, Services tab) ─────────
+   Sticky inside whichever scrollport holds it; the fade hides cards sliding
+   underneath without a hard edge. Top offset comes from --ap-sticky-top, set by
+   the page when a sticky tab bar sits above the form. */
+.ap-cat-nav {
+  background: linear-gradient(to bottom, #ffffff 0%, #ffffff 82%, rgba(255, 255, 255, 0) 100%);
 }
 
 /* ── Expanded booking detail: Apple-style polish ──────────────────────────────

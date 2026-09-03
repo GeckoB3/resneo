@@ -129,11 +129,12 @@
 -- practitioner_calendar_blocks     Manual calendar blocks (block-time UI)
 -- appointment_services             Service catalogue (duration, buffers, price, deposit)
 -- service_variants                 Per-service variants
--- service_items                    Service catalogue items
+-- service_items                    Service catalogue items (category_id -> service_categories)
+-- service_categories               Headings a venue groups its services under on the booking pages
 -- service_capacity_rules           Capacity rules per service
 -- service_schedule_exceptions      Per-service availability exceptions
 -- venue_services                   Venue-level service configuration
--- unified_calendars                Bookable calendar columns
+-- unified_calendars                Bookable calendar columns (schedule_periods: hours planned ahead / rotas; working_hours_rota superseded)
 -- calendar_service_assignments     Which services a calendar offers
 -- calendar_blocks                  Calendar-level blocks
 -- calendar_date_overrides          Per-date calendar availability overrides; secondary mirror
@@ -223,7 +224,8 @@
 -- account_link_notifications        Per-venue in-app notification feed for Linked Accounts
 -- venue_collectives                 Multi-venue collective groupings
 -- venue_collective_members          Collective membership
--- collective_service_items          Combined booking page service items (Model B collectives)
+-- collective_service_items          Combined booking page service items (Model B collectives; category_id -> collective_service_categories)
+-- collective_service_categories     Headings a combined page groups its offerings under (host-curated, inherited from member venues)
 -- collective_service_providers      Which collective member/venue service fulfils an item
 
 -- --- Import tool -------------------------------------------------------------

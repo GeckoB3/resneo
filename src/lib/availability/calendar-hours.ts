@@ -34,6 +34,7 @@ import type { WorkingHours } from '@/types/booking-models';
 import { timeToMinutes } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { unionMinuteRanges } from '@/lib/availability/calendar-resource-occupancy';
+import { effectiveWorkingHoursForDate } from '@/lib/availability/working-hours-rota';
 
 export interface MinuteRange {
   start: number;
@@ -57,6 +58,15 @@ export interface CalendarScheduleRow {
   break_times_by_day?: WorkingHours | null;
   days_off?: string[] | null;
   availability_exceptions?: Record<string, CalendarDateOverride> | null;
+  /**
+   * Schedule periods (`unified_calendars.schedule_periods`): a timeline of weekly shapes
+   * that replace `working_hours` for the dates they cover, and the older single rota
+   * (`working_hours_rota`) read as a fallback while the timeline is null. Both are read as
+   * `unknown` and parsed per call, so stored garbage degrades to "no periods". See
+   * working-hours-rota.ts.
+   */
+  schedule_periods?: unknown;
+  working_hours_rota?: unknown;
 }
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
@@ -119,7 +129,10 @@ export function calendarHours(row: CalendarScheduleRow, dateStr: string): Minute
 
   if (calendarDayOff(row, dateStr)) return [];
 
-  const hours = (row.working_hours ?? {}) as Record<string, Array<{ start: string; end: string }>>;
+  // A schedule period supplies the weekly shape for the dates it covers; outside every
+  // period the ordinary `working_hours` apply. Same tag (`hours`), same precedence: below
+  // overrides and days off, skippable by `allowOutsideHours`.
+  const hours = effectiveWorkingHoursForDate(row, dateStr) as Record<string, Array<{ start: string; end: string }>>;
   const { key, name } = dayKeys(dateStr);
   const ranges = toRanges(hours[key] ?? hours[name]);
   return ranges.length > 0 ? unionMinuteRanges(ranges) : [];

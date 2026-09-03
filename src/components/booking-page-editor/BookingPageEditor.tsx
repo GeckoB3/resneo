@@ -53,9 +53,11 @@ import {
   BOOKING_THEME_PRESETS,
   normalizeHexColor,
   primaryNeedsDarkText,
+  resolveServicesLayout,
   type BookingFontPreset,
   type BookingPageConfig,
   type BookingTeamProfile,
+  type ServicesLayout,
 } from '@/lib/booking/booking-page-theme';
 import {
   DEFAULT_BOOKING_PAGE_LOGO_CROP,
@@ -156,7 +158,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   // ── Booking Site Studio: branding & content ──────────────────────────────
   const cfg0 = adapter.getConfig();
   const [brandPrimary, setBrandPrimary] = useState(cfg0.brand_primary ?? '');
-  const [brandAccent, setBrandAccent] = useState(cfg0.brand_accent ?? '');
+  const [brandEmails, setBrandEmails] = useState(cfg0.brand_emails === true);
   const [fontPreset, setFontPreset] = useState<BookingFontPreset>(cfg0.font_preset ?? 'default');
   const [logoCrop, setLogoCrop] = useState<BookingPageLogoCrop>(() =>
     resolveBookingPageLogoCrop(cfg0.logo_crop),
@@ -182,6 +184,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   const [showServicesTab, setShowServicesTab] = useState(cfg0.show_services_tab === true);
   const [showTeamTab, setShowTeamTab] = useState(cfg0.show_team_tab === true);
   const [showAboutTab, setShowAboutTab] = useState(cfg0.show_about_tab === true);
+  const [servicesLayout, setServicesLayout] = useState<ServicesLayout>(() => resolveServicesLayout(cfg0));
   const [servicePhotoBusyId, setServicePhotoBusyId] = useState<string | null>(null);
   const [servicePhotoError, setServicePhotoError] = useState<string | null>(null);
   const [teamProfiles, setTeamProfiles] = useState<Record<string, BookingTeamProfile>>(cfg0.team_profiles ?? {});
@@ -243,8 +246,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     const config: BookingPageConfig = {};
     const primary = normalizeHexColor(brandPrimary);
     if (primary) config.brand_primary = primary;
-    const accent = normalizeHexColor(brandAccent);
-    if (accent) config.brand_accent = accent;
+    config.brand_emails = brandEmails;
     if (fontPreset && fontPreset !== 'default') config.font_preset = fontPreset;
     if (about.trim()) config.about = about.trim();
     if (announcement.trim()) config.announcement = announcement.trim();
@@ -266,6 +268,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     config.show_services_tab = showServicesTab;
     config.show_team_tab = showTeamTab;
     config.show_about_tab = showAboutTab;
+    config.services_layout = servicesLayout;
     // Team profiles: keep only members that still exist and carry content.
     const liveTeamIds = new Set(teamList.map((m) => m.id));
     const profiles: Record<string, BookingTeamProfile> = {};
@@ -295,7 +298,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   }, [
     adapter.capabilities.servicePhotosInConfig,
     brandPrimary,
-    brandAccent,
+    brandEmails,
     fontPreset,
     logoCrop,
     coverCropBox,
@@ -317,6 +320,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     showServicesTab,
     showTeamTab,
     showAboutTab,
+    servicesLayout,
     teamProfiles,
     teamList,
   ]);
@@ -372,6 +376,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     [adapter, draftBookingPageConfig],
   );
 
+  const serviceHasCategories = useMemo(() => serviceList.some((s) => s.category != null), [serviceList]);
+
   const previewServices = useMemo((): BookingPagePublicService[] => {
     if (!showServicesTab) return [];
     return serviceList.map((s) => {
@@ -384,6 +390,8 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         image_crop: imageUrl ? servicePhotoCrops[s.id] ?? null : null,
         price_pence: typeof s.price_pence === 'number' ? s.price_pence : null,
         duration_minutes: typeof s.duration_minutes === 'number' && s.duration_minutes > 0 ? s.duration_minutes : 60,
+        category: s.category ?? null,
+        sort_order: s.sort_order ?? 0,
       };
     });
   }, [showServicesTab, serviceList, effectiveServicePhotos, servicePhotoCrops]);
@@ -394,7 +402,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   useEffect(() => {
     const c = adapter.getConfig();
     setBrandPrimary(c.brand_primary ?? '');
-    setBrandAccent(c.brand_accent ?? '');
+    setBrandEmails(c.brand_emails === true);
     setFontPreset(c.font_preset ?? 'default');
     setAbout(c.about ?? '');
     setAnnouncement(c.announcement ?? '');
@@ -408,6 +416,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setShowServicesTab(c.show_services_tab === true);
     setShowTeamTab(c.show_team_tab === true);
     setShowAboutTab(c.show_about_tab === true);
+    setServicesLayout(resolveServicesLayout(c));
     setTeamProfiles(c.team_profiles ?? {});
     setLogoCrop(resolveBookingPageLogoCrop(c.logo_crop));
     setCoverCropBox(resolveBookingPageCoverCropBox(c.cover_crop_box));
@@ -424,6 +433,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
     setShowServicesTab(c.show_services_tab === true);
     setShowTeamTab(c.show_team_tab === true);
     setShowAboutTab(c.show_about_tab === true);
+    setServicesLayout(resolveServicesLayout(c));
     setCoverFullWidth(c.cover_full_width === true);
     setCoverCropBox(resolveBookingPageCoverCropBox(c.cover_crop_box));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sync only when the saved config changes
@@ -752,7 +762,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
       const c = source.config;
       if (scope === 'all' || scope === 'book_now') {
         setBrandPrimary(c.brand_primary ?? '');
-        setBrandAccent(c.brand_accent ?? '');
+        setBrandEmails(c.brand_emails === true);
         setFontPreset(c.font_preset ?? 'default');
         setAnnouncement(c.announcement ?? '');
         setCoverFullWidth(c.cover_full_width === true);
@@ -773,6 +783,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         setShowServicesTab(c.show_services_tab === true);
         setShowTeamTab(c.show_team_tab === true);
         setShowAboutTab(c.show_about_tab === true);
+        setServicesLayout(resolveServicesLayout(c));
       }
     },
     [adapter],
@@ -1154,27 +1165,19 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Quick palettes</span>
               <div className="flex flex-wrap gap-2">
                 {BOOKING_THEME_PRESETS.map((preset) => {
-                  const active =
-                    normalizeHexColor(brandPrimary) === preset.primary &&
-                    normalizeHexColor(brandAccent) === preset.accent;
+                  const active = normalizeHexColor(brandPrimary) === preset.primary;
                   return (
                     <button
                       key={preset.key}
                       type="button"
-                      onClick={() => {
-                        setBrandPrimary(preset.primary);
-                        setBrandAccent(preset.accent);
-                      }}
+                      onClick={() => setBrandPrimary(preset.primary)}
                       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                         active
                           ? 'border-brand-300 bg-brand-50 text-brand-800'
                           : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                       }`}
                     >
-                      <span className="flex -space-x-1">
-                        <span className="h-4 w-4 rounded-full ring-1 ring-white" style={{ backgroundColor: preset.primary }} />
-                        <span className="h-4 w-4 rounded-full ring-1 ring-white" style={{ backgroundColor: preset.accent }} />
-                      </span>
+                      <span className="h-4 w-4 rounded-full ring-1 ring-white" style={{ backgroundColor: preset.primary }} />
                       {preset.label}
                     </button>
                   );
@@ -1183,76 +1186,66 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Brand colour</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  aria-label="Brand colour"
-                  disabled={!isAdmin}
-                  value={normalizeHexColor(brandPrimary) ?? '#003b6f'}
-                  onChange={(e) => setBrandPrimary(e.target.value)}
-                  className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 disabled:opacity-50"
-                />
-                <input
-                  type="text"
-                  disabled={!isAdmin}
-                  value={brandPrimary}
-                  onChange={(e) => setBrandPrimary(e.target.value)}
-                  placeholder="#003B6F"
-                  className={inputClass}
-                />
-                {brandPrimary.trim() && isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setBrandPrimary('')}
-                    className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-slate-500">Buttons, highlights and accents on your booking page.</p>
-              {primaryLowContrast && (
-                <p className="mt-1 text-xs text-amber-800">
-                  This colour is quite light. White button text may be hard to read; a darker shade works best.
-                </p>
+          <div className="sm:max-w-sm">
+            <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Brand colour</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                aria-label="Brand colour"
+                disabled={!isAdmin}
+                value={normalizeHexColor(brandPrimary) ?? '#003b6f'}
+                onChange={(e) => setBrandPrimary(e.target.value)}
+                className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 disabled:opacity-50"
+              />
+              <input
+                type="text"
+                disabled={!isAdmin}
+                value={brandPrimary}
+                onChange={(e) => setBrandPrimary(e.target.value)}
+                placeholder="#003B6F"
+                className={inputClass}
+              />
+              {brandPrimary.trim() && isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setBrandPrimary('')}
+                  className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700"
+                >
+                  Reset
+                </button>
               )}
             </div>
-
-            <div>
-              <label className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>
-                Accent colour <span className="font-normal text-slate-400">(optional)</span>
+            <p className="mt-1 text-xs text-slate-500">Buttons, highlights and accents on your booking page.</p>
+            {primaryLowContrast && (
+              <p className="mt-1 text-xs text-amber-800">
+                This colour is quite light. White button text may be hard to read; a darker shade works best.
+              </p>
+            )}
+            {adapter.capabilities.emailBranding ? (
+              <label htmlFor="bp-brand-emails" className="mt-3 flex items-start gap-2">
+                <input
+                  id="bp-brand-emails"
+                  type="checkbox"
+                  className="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  checked={brandEmails}
+                  disabled={!isAdmin || !primaryHasColour}
+                  onChange={(e) => setBrandEmails(e.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-medium text-slate-700">
+                    Use my brand colour in customer emails
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {primaryHasColour
+                      ? 'Buttons, links and highlights in booking confirmations, reminders and receipts. Leave this off to keep the ResNeo colours.'
+                      : 'Choose a brand colour first.'}
+                    {primaryHasColour && primaryLowContrast
+                      ? ' A light colour is darkened a little in emails so white button text stays readable.'
+                      : ''}
+                  </span>
+                </span>
               </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  aria-label="Accent colour"
-                  disabled={!isAdmin}
-                  value={normalizeHexColor(brandAccent) ?? '#00c2c7'}
-                  onChange={(e) => setBrandAccent(e.target.value)}
-                  className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 disabled:opacity-50"
-                />
-                <input
-                  type="text"
-                  disabled={!isAdmin}
-                  value={brandAccent}
-                  onChange={(e) => setBrandAccent(e.target.value)}
-                  placeholder="#00C2C7"
-                  className={inputClass}
-                />
-                {brandAccent.trim() && isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setBrandAccent('')}
-                    className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-            </div>
+            ) : null}
           </div>
 
           <div>
@@ -1298,6 +1291,54 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               onChange: setShowServicesTab,
             }}
           >
+              <fieldset className="mb-5">
+                <legend className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>How services are listed</legend>
+                <p className="mb-2 text-xs text-slate-500">
+                  {serviceHasCategories
+                    ? 'Applies wherever customers pick a service: the booking form and the Services tab.'
+                    : 'Create categories on the Services page to group your services. Until then the list shows as it does now.'}
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(
+                    [
+                      {
+                        value: 'sections',
+                        label: 'Sections with a category menu',
+                        hint: 'Every category is shown with its services below. A menu at the top jumps between them.',
+                      },
+                      {
+                        value: 'accordion',
+                        label: 'Collapsible categories',
+                        hint: 'Customers open a category to see its services. Good for long menus.',
+                      },
+                    ] as const
+                  ).map((option) => {
+                    const selected = servicesLayout === option.value;
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 text-sm transition-colors ${
+                          selected ? 'border-brand-300 bg-brand-50/60' : 'border-slate-200 bg-white hover:border-slate-300'
+                        } ${!isAdmin ? 'cursor-not-allowed opacity-60' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="bp-services-layout"
+                          value={option.value}
+                          checked={selected}
+                          disabled={!isAdmin}
+                          onChange={() => setServicesLayout(option.value)}
+                          className="mt-0.5 text-brand-600 focus:ring-brand-500"
+                        />
+                        <span>
+                          <span className="block font-medium text-slate-800">{option.label}</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">{option.hint}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
               {serviceList.length > 0 ? (
               <div>
               <span className={BOOKING_PAGE_FIELD_HEADING_MB15_CLASS}>Service photos</span>

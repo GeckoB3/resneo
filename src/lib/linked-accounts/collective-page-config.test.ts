@@ -97,3 +97,11 @@ describe('mergeCollectiveBookingPageConfigPatch', () => {
     expect(merged.service_photos).toBeUndefined();
   });
 });
+
+describe('services_layout on a combined page', () => {
+  it('keeps the collapsible-categories choice and drops the default', () => {
+    expect(sanitizeCollectiveBookingPageConfig({ services_layout: 'accordion' }).services_layout).toBe('accordion');
+    expect(sanitizeCollectiveBookingPageConfig({ services_layout: 'sections' })).not.toHaveProperty('services_layout');
+    expect(sanitizeCollectiveBookingPageConfig({ services_layout: 'grid' })).not.toHaveProperty('services_layout');
+  });
+});

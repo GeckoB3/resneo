@@ -105,6 +105,13 @@ export interface Practitioner {
    * maps the row directly. §1.2 item 21.
    */
   availability_exceptions?: ResourceAvailabilityExceptions | null;
+  /**
+   * Schedule periods (`unified_calendars.schedule_periods`) and the older single rota
+   * (`working_hours_rota`, fallback). Kept as `unknown` here and parsed by
+   * `src/lib/availability/working-hours-rota.ts` wherever they are read.
+   */
+  schedule_periods?: unknown;
+  working_hours_rota?: unknown;
   is_active: boolean;
   sort_order: number;
   created_at: string;
@@ -178,6 +185,8 @@ export interface AppointmentService {
   colour: string;
   is_active: boolean;
   sort_order: number;
+  /** Category heading on the booking pages; null or absent when uncategorised. */
+  category_id?: string | null;
   created_at: string;
   /** Admin: which fields individual staff may override for their own calendar. */
   staff_may_customize_name?: boolean;
@@ -481,6 +490,9 @@ export interface VenueResource {
     days_off: string[];
     break_times: Array<{ start: string; end: string }>;
     break_times_by_day: WorkingHours | null;
+    /** The host's schedule periods (and older rota), so a hosted resource follows them. */
+    schedule_periods?: unknown;
+    working_hours_rota?: unknown;
     /**
      * Windows the host is unavailable for on a given date: staff leave and ad-hoc blocked
      * time, keyed by "YYYY-MM-DD". A hosted resource stayed bookable straight through both

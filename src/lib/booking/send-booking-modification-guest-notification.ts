@@ -80,7 +80,7 @@ export async function executeBookingModificationGuestNotification(
 
   const { data: venueRow } = await admin
     .from('venues')
-    .select('name, address, phone, email, reply_to_email')
+    .select('name, address, phone, email, reply_to_email, booking_page_config')
     .eq('id', venueId)
     .single();
 
@@ -129,6 +129,7 @@ export async function executeBookingModificationGuestNotification(
     phone: venueRow.phone ?? null,
     email: venueRow.email ?? null,
     reply_to_email: venueRow.reply_to_email ?? null,
+    booking_page_config: venueRow.booking_page_config ?? null,
   });
 
   const enriched = await enrichBookingEmailForComms(admin, bookingId, bookingEmail);

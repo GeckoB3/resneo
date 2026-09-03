@@ -725,8 +725,10 @@ export default function OnboardingPage() {
         setError('Enter a valid business website URL, or leave it blank.');
         return;
       }
+      // A blank building name is filled with the business name, so the address reads
+      // "Name, Street, Town, Postcode" and the booking page's map can find the business.
       const combinedAddress = buildAddress({
-        name: addressName.trim(),
+        name: addressName.trim() || name.trim(),
         street,
         town,
         postcode,

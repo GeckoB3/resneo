@@ -196,10 +196,14 @@ function clickButton(name: string | RegExp): void {
   fireEvent.click(screen.getByRole('button', { name }));
 }
 
-/** Staff on a service-first venue open on the service list. */
-async function pickServiceAndSlot(serviceName: string): Promise<void> {
+/**
+ * Staff on a service-first venue open on the service list. Every service of
+ * the visit is ticked there, then Continue; two or more make it multi-service.
+ */
+async function pickServicesAndSlot(serviceNames: string[]): Promise<void> {
   await waitForStep('Select a service');
-  clickButton(new RegExp(serviceName, 'i'));
+  for (const name of serviceNames) clickButton(new RegExp(name, 'i'));
+  clickButton(/^Continue$/);
   await waitForStep('Who would you like to see?');
   fireEvent.click(screen.getByRole('button', { name: new RegExp(`\\b${ADA.name}\\b`, 'i') }));
   await waitForStep('Date and time');
@@ -207,13 +211,8 @@ async function pickServiceAndSlot(serviceName: string): Promise<void> {
   await waitForStep('Review your services');
 }
 
-/** From the visit review, append a second service to make it multi-service. */
-async function appendService(serviceName: string): Promise<void> {
-  clickButton(/Add another service/i);
-  fireEvent.click(await screen.findByRole('button', { name: new RegExp(serviceName, 'i') }));
-  await waitFor(() => {
-    expect(screen.queryByRole('button', { name: /Add another service/i })).toBeInTheDocument();
-  });
+async function pickServiceAndSlot(serviceName: string): Promise<void> {
+  await pickServicesAndSlot([serviceName]);
 }
 
 async function continueToDetails(): Promise<void> {
@@ -281,8 +280,7 @@ describe('multi-service visit', () => {
     installFetch();
     renderStaffFlow();
 
-    await pickServiceAndSlot('Deposit Service A');
-    await appendService('Deposit Service B');
+    await pickServicesAndSlot(['Deposit Service A', 'Deposit Service B']);
     await continueToDetails();
 
     expect(chargeCheckbox()).toBeInTheDocument();
@@ -292,8 +290,7 @@ describe('multi-service visit', () => {
     installFetch();
     renderStaffFlow();
 
-    await pickServiceAndSlot('Deposit Service A');
-    await appendService('Deposit Service B');
+    await pickServicesAndSlot(['Deposit Service A', 'Deposit Service B']);
     await continueToDetails();
 
     // £10 + £15, not the £10 of the first service alone.
@@ -304,8 +301,7 @@ describe('multi-service visit', () => {
     const { creates } = installFetch();
     renderStaffFlow();
 
-    await pickServiceAndSlot('Deposit Service A');
-    await appendService('Deposit Service B');
+    await pickServicesAndSlot(['Deposit Service A', 'Deposit Service B']);
     await continueToDetails();
     await submitDetails();
 
@@ -318,8 +314,7 @@ describe('multi-service visit', () => {
     const { creates } = installFetch();
     renderStaffFlow();
 
-    await pickServiceAndSlot('Deposit Service A');
-    await appendService('Deposit Service B');
+    await pickServicesAndSlot(['Deposit Service A', 'Deposit Service B']);
     await continueToDetails();
     fireEvent.click(chargeCheckbox()!);
     await submitDetails();
@@ -361,8 +356,7 @@ describe('walk-ins', () => {
     installFetch();
     renderStaffFlow({ staffBookingSource: 'walk-in' });
 
-    await pickServiceAndSlot('Deposit Service A');
-    await appendService('Deposit Service B');
+    await pickServicesAndSlot(['Deposit Service A', 'Deposit Service B']);
     await continueToDetails();
 
     expect(chargeCheckbox()).not.toBeInTheDocument();
@@ -372,8 +366,7 @@ describe('walk-ins', () => {
     const { creates } = installFetch();
     renderStaffFlow({ staffBookingSource: 'walk-in' });
 
-    await pickServiceAndSlot('Deposit Service A');
-    await appendService('Deposit Service B');
+    await pickServicesAndSlot(['Deposit Service A', 'Deposit Service B']);
     await continueToDetails();
     await submitDetails();
 

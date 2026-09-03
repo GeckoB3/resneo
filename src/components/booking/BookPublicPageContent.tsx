@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { BookPublicBookingFlowSuspense } from '@/components/booking/BookPublicBookingFlowSuspense';
 import type { LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -14,7 +14,8 @@ import {
   type BookingPageTabId,
   type BookingPageTeamMember,
 } from '@/lib/booking/booking-page-tabs';
-import type { BookingPageSocialLinks } from '@/lib/booking/booking-page-theme';
+import { resolveServicesLayout, type BookingPageSocialLinks, type ServicesLayout } from '@/lib/booking/booking-page-theme';
+import { ServiceCategoryList } from '@/components/booking/ServiceCategoryList';
 import {
   bookingPageImageFramingStyle,
   type BookingPageImageFraming,
@@ -136,7 +137,15 @@ function BookingPageServiceCard({ svc }: { svc: BookingPagePublicService }) {
   );
 }
 
-function BookingPageServicesPanel({ services }: { services: BookingPagePublicService[] }) {
+function BookingPageServicesPanel({
+  services,
+  layout,
+  style,
+}: {
+  services: BookingPagePublicService[];
+  layout: ServicesLayout;
+  style?: CSSProperties;
+}) {
   if (services.length === 0) {
     return (
       <div className={`${BOOKING_TAB_PANEL_CLASS} px-4 py-10 text-center`}>
@@ -146,15 +155,19 @@ function BookingPageServicesPanel({ services }: { services: BookingPagePublicSer
   }
 
   return (
-    <div className={`${BOOKING_TAB_PANEL_CLASS} ${BOOKING_TAB_PANEL_INSET_CLASS}`}>
+    <div className={`${BOOKING_TAB_PANEL_CLASS} ${BOOKING_TAB_PANEL_INSET_CLASS}`} style={style}>
       <h2 className="mb-5 text-pretty text-lg font-semibold tracking-tight text-slate-900">Our services</h2>
-      <ul className="flex list-none flex-col gap-4 p-0 m-0">
-        {services.map((svc) => (
-          <li key={svc.id} className="min-w-0">
+      <ServiceCategoryList
+        services={services}
+        layout={layout}
+        idPrefix="bp-services"
+        listClassName="flex flex-col gap-4"
+        renderService={(svc) => (
+          <div key={svc.id} className="min-w-0">
             <BookingPageServiceCard svc={svc} />
-          </li>
-        ))}
-      </ul>
+          </div>
+        )}
+      />
     </div>
   );
 }
@@ -249,6 +262,24 @@ export function BookPublicPageContent({
   const [activeTab, setActiveTab] = useState<BookingPageTabId>('book');
   const effectiveTab = tabs.includes(activeTab) ? activeTab : 'book';
 
+  // The tab bar is sticky at the top; a service category menu inside the booking
+  // form sticks just below it, so it needs the bar's height as a CSS variable.
+  const tabBarRef = useRef<HTMLDivElement | null>(null);
+  const [tabBarHeight, setTabBarHeight] = useState(0);
+  useEffect(() => {
+    const el = tabBarRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => setTabBarHeight(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasExtraTabs]);
+  const stickyVarStyle = hasExtraTabs
+    ? ({ '--ap-sticky-top': `${tabBarHeight}px` } as CSSProperties)
+    : undefined;
+  const servicesLayout = resolveServicesLayout(venue.booking_page_config ?? null);
+
   const showBookPanel = !hasExtraTabs || effectiveTab === 'book';
   const showServicesPanel = hasExtraTabs && effectiveTab === 'services';
   const showTeamPanel = hasExtraTabs && effectiveTab === 'team';
@@ -257,7 +288,7 @@ export function BookPublicPageContent({
   return (
     <>
       {hasExtraTabs ? (
-        <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <div ref={tabBarRef} className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
           <div className={`${BOOKING_TAB_PANEL_CLASS} px-4 py-3`}>
             <div
               className="flex gap-1 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/80"
@@ -290,7 +321,7 @@ export function BookPublicPageContent({
 
       {showBookPanel ? (
         <>
-          <div className="flex flex-1 flex-col">
+          <div className="flex flex-1 flex-col" style={stickyVarStyle}>
             <div
               id="booking-form-start"
               className={`mx-auto w-full flex-1 scroll-mt-4 px-4 pb-6 ${isAppointment ? 'py-6 sm:py-8' : 'max-w-lg py-8'}`}
@@ -301,7 +332,9 @@ export function BookPublicPageContent({
         </>
       ) : null}
 
-      {showServicesPanel ? <BookingPageServicesPanel services={services} /> : null}
+      {showServicesPanel ? (
+        <BookingPageServicesPanel services={services} layout={servicesLayout} style={stickyVarStyle} />
+      ) : null}
       {showTeamPanel ? <BookingPageTeamPanel members={teamMembers} /> : null}
       {showAboutPanel ? (
         <BookingPageAboutPanel

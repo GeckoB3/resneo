@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { bookingPageEmailBrandColour } from '@/lib/booking/booking-page-theme';
 import {
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlag,
@@ -54,7 +55,7 @@ export async function notifyAppointmentWaitlistOfferForEntry(
 ): Promise<AppointmentWaitlistOfferNotifyResult & { skipped?: boolean }> {
   const { data: venueRow, error: venueErr } = await admin
     .from('venues')
-    .select('name, phone, slug, logo_url, address, feature_flags')
+    .select('name, phone, slug, logo_url, address, feature_flags, booking_page_config')
     .eq('id', venueId)
     .maybeSingle();
 
@@ -86,6 +87,7 @@ export async function notifyAppointmentWaitlistOfferForEntry(
     venueId,
     venueName,
     venueLogoUrl: typeof venueRow.logo_url === 'string' ? venueRow.logo_url : null,
+    venueBrandColour: bookingPageEmailBrandColour(venueRow.booking_page_config),
     venueAddress: typeof venueRow.address === 'string' ? venueRow.address : null,
     venuePhone: typeof venueRow.phone === 'string' ? venueRow.phone : null,
     bookingPageUrl,

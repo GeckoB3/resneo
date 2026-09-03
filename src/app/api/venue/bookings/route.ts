@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours, venue_opening_exceptions, email, reply_to_email, feature_flags')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours, venue_opening_exceptions, email, reply_to_email, feature_flags, booking_page_config')
       .eq('id', venueId)
       .single();
 
@@ -478,6 +478,7 @@ export async function POST(request: NextRequest) {
           venueName: venue.name,
           venueAddress: venue.address ?? undefined,
           venueProfileEmail: venue.email ?? null,
+          venueBookingPageConfig: venue.booking_page_config ?? null,
           venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: evBooking.id,
@@ -684,6 +685,7 @@ export async function POST(request: NextRequest) {
           venueName: venue.name,
           venueAddress: venue.address ?? undefined,
           venueProfileEmail: venue.email ?? null,
+          venueBookingPageConfig: venue.booking_page_config ?? null,
           venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: classBooking.id,
@@ -933,6 +935,7 @@ export async function POST(request: NextRequest) {
           venueName: venue.name,
           venueAddress: venue.address ?? undefined,
           venueProfileEmail: venue.email ?? null,
+          venueBookingPageConfig: venue.booking_page_config ?? null,
           venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: resBooking.id,
@@ -1464,6 +1467,7 @@ export async function POST(request: NextRequest) {
             venueName: venue.name,
             venueAddress: venue.address ?? undefined,
             venueProfileEmail: venue.email ?? null,
+            venueBookingPageConfig: venue.booking_page_config ?? null,
             venueReplyToEmail: venue.reply_to_email ?? null,
             stripeConnectedAccountId: venue.stripe_connected_account_id,
             bookingId: apptBooking.id,
@@ -1545,6 +1549,7 @@ export async function POST(request: NextRequest) {
                 address: venue.address ?? null,
                 email: venue.email ?? null,
                 reply_to_email: venue.reply_to_email ?? null,
+                booking_page_config: venue.booking_page_config ?? null,
               }),
               venueId,
               payment_url!,
@@ -1597,6 +1602,7 @@ export async function POST(request: NextRequest) {
                   address: venue.address ?? null,
                   email: venue.email ?? null,
                   reply_to_email: venue.reply_to_email ?? null,
+                  booking_page_config: venue.booking_page_config ?? null,
                 }),
                 venueId,
               );
@@ -1864,6 +1870,7 @@ export async function POST(request: NextRequest) {
           venueName: venue.name,
           venueAddress: venue.address ?? undefined,
           venueProfileEmail: venue.email ?? null,
+          venueBookingPageConfig: venue.booking_page_config ?? null,
           venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: booking.id,
@@ -1947,6 +1954,7 @@ export async function POST(request: NextRequest) {
               address: venue.address ?? null,
               email: venue.email ?? null,
               reply_to_email: venue.reply_to_email ?? null,
+              booking_page_config: venue.booking_page_config ?? null,
             }),
             venueId,
             payment_url!,
@@ -2001,6 +2009,7 @@ export async function POST(request: NextRequest) {
                 address: venue.address ?? null,
                 email: venue.email ?? null,
                 reply_to_email: venue.reply_to_email ?? null,
+                booking_page_config: venue.booking_page_config ?? null,
               }),
               venueId,
             );

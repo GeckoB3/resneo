@@ -1,5 +1,6 @@
 'use client';
 
+import { effectiveWorkingHoursForDate } from '@/lib/availability/working-hours-rota';
 import {
   useCallback,
   useEffect,
@@ -217,6 +218,9 @@ interface Practitioner {
   sort_order?: number;
   /** Per-day template from Calendar availability (Settings). */
   working_hours?: WorkingHours;
+  /** Schedule periods and the older rota; the header line resolves them per date. */
+  schedule_periods?: unknown;
+  working_hours_rota?: unknown;
   break_times?: Array<{ start: string; end: string }>;
   break_times_by_day?: WorkingHours | null;
   days_off?: string[];
@@ -363,6 +367,8 @@ function apiResourceRowToVenueResource(
       ? {
           id: hostPractitioner.id,
           working_hours: hostPractitioner.working_hours ?? {},
+          schedule_periods: hostPractitioner.schedule_periods ?? null,
+          working_hours_rota: hostPractitioner.working_hours_rota ?? null,
           days_off: hostPractitioner.days_off ?? [],
           break_times: hostPractitioner.break_times ?? [],
           break_times_by_day: hostPractitioner.break_times_by_day ?? null,
@@ -7154,7 +7160,7 @@ export function PractitionerCalendarView({
                   {dayGridColumns.map((col) => {
                     if (col.kind === 'native') {
                       const hoursLine = formatWorkingHoursLineForDate(
-                        col.practitioner.working_hours,
+                        effectiveWorkingHoursForDate(col.practitioner, date),
                         date,
                         venueTimezone,
                         // Native columns only. Linked columns belong to another venue with

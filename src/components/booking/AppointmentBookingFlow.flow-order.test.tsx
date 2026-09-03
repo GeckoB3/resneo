@@ -384,8 +384,18 @@ async function startSingleBooking(): Promise<void> {
   await waitForStep(STEP.service);
 }
 
-/** Service rows are buttons labelled with the service name (plus price and duration). */
+/**
+ * Service rows are buttons labelled with the service name (plus price and
+ * duration). Since the multi-service picker, a row ticks the service and the
+ * bar's Continue moves on, so choosing one service is two clicks.
+ */
 function clickService(name: string): void {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(name, 'i') }));
+  fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }));
+}
+
+/** Editing changes one booking, so its service list still moves on at a tap. */
+function clickServiceInEdit(name: string): void {
   fireEvent.click(screen.getByRole('button', { name: new RegExp(name, 'i') }));
 }
 
@@ -906,7 +916,7 @@ describe('edit mode: order is preserved', () => {
     renderFlow({ editBooking: EDIT_BOOKING });
     await waitForStep(STEP.service);
 
-    clickService('Plain Service');
+    clickServiceInEdit('Plain Service');
     await waitForStep(STEP.slot);
     notAtStep(STEP.practitioner);
   });
@@ -918,7 +928,7 @@ describe('edit mode: order is preserved', () => {
     renderFlow({ editBooking: EDIT_BOOKING });
     await waitForStep(STEP.service);
 
-    clickService('Both Service');
+    clickServiceInEdit('Both Service');
     await waitForStep(STEP.variant);
     clickButton(/Short/);
     await waitForStep(STEP.addons);

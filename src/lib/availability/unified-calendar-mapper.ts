@@ -41,5 +41,7 @@ export function unifiedCalendarRowToPractitioner(uc: Record<string, unknown>): P
      * §1.2 item 21.
      */
     availability_exceptions: (uc.availability_exceptions ?? null) as Practitioner['availability_exceptions'],
+    schedule_periods: uc.schedule_periods ?? null,
+    working_hours_rota: uc.working_hours_rota ?? null,
   };
 }

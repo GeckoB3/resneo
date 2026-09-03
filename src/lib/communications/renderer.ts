@@ -12,6 +12,7 @@ import {
 } from '@/lib/emails/templates/base-template';
 import { confirmationSubject } from '@/lib/emails/templates/booking-confirmation';
 import { buildCardHoldNoticeHtml, renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
+import { emailAccent } from '@/lib/emails/email-accent';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
 import {
   bookingDisplayStart,
@@ -90,7 +91,10 @@ function htmlParagraph(text: string): string {
 }
 
 /** Account portal / magic-link line for policy-driven booking emails (complements single-booking manage URL). */
-function accountBookingsLinkParts(booking: BookingEmailData): { html: string; textLine: string | null } {
+function accountBookingsLinkParts(
+  booking: BookingEmailData,
+  brandColour?: string | null,
+): { html: string; textLine: string | null } {
   const url =
     (booking.account_bookings_link ?? '').trim() ||
     accountBookingsMagicLinkUrl(booking.guest_email) ||
@@ -98,18 +102,21 @@ function accountBookingsLinkParts(booking: BookingEmailData): { html: string; te
   if (!url) return { html: '', textLine: null };
   const safe = escapeHtml(url);
   return {
-    html: `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">Your bookings across venues: <a href="${safe}" style="color:#003B6F;font-weight:600">View or sign in to your account</a>.</p>`,
+    html: `<p style="margin:0 0 12px 0;font-size:14px;color:#475569">Your bookings across venues: <a href="${safe}" style="color:${emailAccent(brandColour)};font-weight:600">View or sign in to your account</a>.</p>`,
     textLine: `View or sign in to your account: ${url}`,
   };
 }
 
 /** "Forms to complete before your visit" block (compliance auto-send, Phase 1). */
-function complianceFormsHtml(forms?: Array<{ name: string; url: string }>): string {
+function complianceFormsHtml(
+  forms?: Array<{ name: string; url: string }>,
+  brandColour?: string | null,
+): string {
   if (!forms || forms.length === 0) return '';
   const items = forms
     .map(
       (f) =>
-        `<li style="margin:2px 0"><a href="${escapeHtml(f.url)}" style="color:#003B6F;font-weight:600">${escapeHtml(f.name)}</a></li>`,
+        `<li style="margin:2px 0"><a href="${escapeHtml(f.url)}" style="color:${emailAccent(brandColour)};font-weight:600">${escapeHtml(f.name)}</a></li>`,
     )
     .join('');
   return (
@@ -368,7 +375,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
 
   switch (opts.messageKey) {
     case 'booking_confirmation': {
-      const acct = accountBookingsLinkParts(opts.booking);
+      const acct = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       const structuredPrice = appointment ? confirmationStructuredPriceText(opts.booking) : null;
       const structuredTextLines = structuredPrice
         ? ['Price and payment:', ...structuredPrice.split('\n')]
@@ -387,7 +394,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? 'Your booking is confirmed. Here are the details:'
               : 'Your table is booked. Here are the details:',
           ),
-          complianceFormsHtml(opts.booking.compliance_forms),
+          complianceFormsHtml(opts.booking.compliance_forms, opts.venue.brand_colour),
           opts.cancellationPolicy ? htmlRaw(`<strong>Cancellation policy:</strong> ${escapeHtml(opts.cancellationPolicy)}`) : '',
           opts.preAppointmentInstructions && appointment
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
@@ -421,7 +428,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       };
     }
     case 'deposit_payment_request': {
-      const acctDep = accountBookingsLinkParts(opts.booking);
+      const acctDep = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       return {
         subject: `Complete your booking at ${opts.venue.name}`,
         heading: 'Complete your booking',
@@ -463,7 +470,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       };
     }
     case 'deposit_confirmation': {
-      const acctPaid = accountBookingsLinkParts(opts.booking);
+      const acctPaid = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       return {
         subject: `Deposit received for ${opts.venue.name}`,
         heading: 'Deposit received',
@@ -488,7 +495,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
       // already had it, so a customer's discovery of the portal depended on which
       // email they happened to receive.
-      const acctConfirm = accountBookingsLinkParts(opts.booking);
+      const acctConfirm = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       const hasPaidDeposit =
         opts.booking.deposit_status === 'Paid' && Boolean(opts.booking.deposit_amount_pence);
       const policyText = hasPaidDeposit ? (opts.cancellationPolicy ?? null) : null;
@@ -534,7 +541,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
       // already had it, so a customer's discovery of the portal depended on which
       // email they happened to receive.
-      const acctDepRem = accountBookingsLinkParts(opts.booking);
+      const acctDepRem = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       return {
         subject: `Reminder: Complete your deposit for ${opts.venue.name}`,
         heading: 'Deposit reminder',
@@ -574,7 +581,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
       // already had it, so a customer's discovery of the portal depended on which
       // email they happened to receive.
-      const acctHold = accountBookingsLinkParts(opts.booking);
+      const acctHold = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       // Card-hold deposits (§10.3): no payment is taken and there is no refund
       // deadline copy (holds have none; the consent rule is stated in the body).
       const isReminder = opts.messageKey === 'card_hold_payment_reminder';
@@ -607,7 +614,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       };
     }
     case 'pre_visit_reminder': {
-      const acctPre = accountBookingsLinkParts(opts.booking);
+      const acctPre = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       return {
         subject: appointment
           ? `Reminder: Your appointment at ${opts.venue.name} is coming up`
@@ -651,7 +658,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       };
     }
     case 'booking_modification': {
-      const acctMod = accountBookingsLinkParts(opts.booking);
+      const acctMod = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       return {
         subject: appointment
           ? `Your appointment at ${opts.venue.name} has been updated`
@@ -682,7 +689,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
       // already had it, so a customer's discovery of the portal depended on which
       // email they happened to receive.
-      const acctCancel = accountBookingsLinkParts(opts.booking);
+      const acctCancel = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       return {
         subject: appointment
           ? `Your appointment at ${opts.venue.name} has been cancelled`
@@ -792,7 +799,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
       // already had it, so a customer's discovery of the portal depended on which
       // email they happened to receive.
-      const acctThanks = accountBookingsLinkParts(opts.booking);
+      const acctThanks = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       // Opt-in per venue, and silently absent when unset, so the email is unchanged for anyone who
       // has not asked for it. Named after the practitioner where we know who delivered the service,
       // because a review that names someone is both likelier and more use to the venue.
@@ -830,7 +837,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
       // P3-5: the account callout. Six templates lacked it while `pre_visit_reminder`
       // already had it, so a customer's discovery of the portal depended on which
       // email they happened to receive.
-      const acctForm = accountBookingsLinkParts(opts.booking);
+      const acctForm = accountBookingsLinkParts(opts.booking, opts.venue.brand_colour);
       const formName = opts.complianceFormName ?? 'form';
       const formLink = opts.complianceFormLink?.trim() ?? '';
       const expiryDays = opts.complianceExpiryDays ?? 14;
@@ -935,7 +942,7 @@ export function renderCommunicationEmail(
       priceDisplay: structuredPrice?.trim() ? structuredPrice : null,
       manageButtonLabel: manageBookingActionButtonLabel(cancelOnly),
       blocks: {
-        preambleHtml: complianceFormsHtml(opts.booking.compliance_forms),
+        preambleHtml: complianceFormsHtml(opts.booking.compliance_forms, opts.venue.brand_colour),
         depositHtml: holdNoticeHtml,
         customMessage: opts.emailCustomMessage ?? null,
         postCtaAccountHtml: config.postCtaHtml ?? null,
@@ -950,6 +957,7 @@ export function renderCommunicationEmail(
     html = renderTransactionalEmailHtml({
       venueName: opts.venue.name,
       venueLogoUrl: opts.venue.logo_url ?? null,
+      brandColour: opts.venue.brand_colour ?? null,
       heading: config.heading,
       mainContent: config.mainContent,
       bookingDate: formatDate(bookingDisplayStart(opts.booking).date),

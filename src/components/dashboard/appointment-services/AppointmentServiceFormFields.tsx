@@ -20,6 +20,7 @@ import type { OpeningHours } from '@/types/availability';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import type { WorkingHours } from '@/types/booking-models';
 import type { AvailabilityBlock } from '@/types/availability';
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
 
 function parsePositivePounds(value: string): boolean {
   const t = value.trim().replace(/,/g, '');
@@ -60,6 +61,12 @@ export interface AppointmentServiceFormFieldsProps {
    * Omit (or pass false) to keep the form charge-only, e.g. during onboarding.
    */
   cardHoldEnabled?: boolean;
+  /**
+   * The venue's service categories, in booking-page order. When present and non-empty,
+   * admins get a Category select; omit it for surfaces without categories (onboarding,
+   * the import wizard).
+   */
+  categories?: ServiceCategoryRef[];
 }
 
 export function AppointmentServiceFormFields({
@@ -77,6 +84,7 @@ export function AppointmentServiceFormFields({
   hideStaffMaySection = false,
   staffNotice,
   cardHoldEnabled = false,
+  categories = [],
 }: AppointmentServiceFormFieldsProps) {
   const usesVariants = isAdmin && form.variants.length > 0;
   const isCardHold = form.payment_requirement === 'card_hold';
@@ -122,6 +130,30 @@ export function AppointmentServiceFormFields({
           placeholder="Brief description of the service"
         />
       </div>
+
+      {isAdmin && categories.length > 0 ? (
+        <div>
+          <label htmlFor={`service-category-${fieldGroupSuffix}`} className="mb-1 block text-sm font-medium text-slate-700">
+            Category
+          </label>
+          <select
+            id={`service-category-${fieldGroupSuffix}`}
+            value={form.category_id ?? ''}
+            onChange={(e) => setForm({ ...form, category_id: e.target.value || null })}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="">No category</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            The heading this service is listed under on your booking page. Manage headings on the Categories tab.
+          </p>
+        </div>
+      ) : null}
 
       {!usesVariants && (
         <>

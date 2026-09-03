@@ -161,7 +161,6 @@ const socialLinkValue = z.string().max(500).nullable().optional();
 export const collectiveBookingPageConfigSchema = z
   .object({
     brand_primary: hexColour,
-    brand_accent: hexColour,
     font_preset: z.string().max(40).nullable().optional(),
     logo_crop: imageFramingSchema,
     cover_crop_box: coverCropBoxSchema,
@@ -172,6 +171,8 @@ export const collectiveBookingPageConfigSchema = z
     show_services_tab: z.boolean().optional(),
     show_team_tab: z.boolean().optional(),
     show_about_tab: z.boolean().optional(),
+    /** Sections with a category menu, or collapsible categories (shared with single venues). */
+    services_layout: z.enum(['sections', 'accordion']).nullable().optional(),
     social_links: z
       .object({
         instagram: socialLinkValue,
@@ -265,12 +266,25 @@ export const catalogueActionSchema = z.object({
     'add_provider',
     'remove_provider',
     'set_providers',
+    // Headings on the combined page (Docs/service-categories-plan.md, "Combined pages").
+    'create_category',
+    'rename_category',
+    'delete_category',
+    'reorder_categories',
+    'reorder_items',
+    'sync_categories',
   ]),
   // Item fields.
   itemId: z.string().uuid().optional(),
   name: z.string().min(1).max(160).optional(),
   description: z.string().max(2000).nullable().optional(),
+  /** Legacy free-text label; kept for old clients, no longer written. */
   category: z.string().max(120).nullable().optional(),
+  /** Heading for create_item / update_item (null clears it); the id for rename/delete. */
+  categoryId: z.string().uuid().nullable().optional(),
+  categoryName: z.string().min(1).max(80).optional(),
+  categoryIds: z.array(z.string().uuid()).min(1).max(500).optional(),
+  itemIds: z.array(z.string().uuid()).min(1).max(1000).optional(),
   displayOrder: z.number().int().min(0).max(9999).optional(),
   defaultDurationMinutes: z.number().int().min(0).max(1440).nullable().optional(),
   defaultPricePence: z.number().int().min(0).max(PRICE_PENCE_MAX).nullable().optional(),

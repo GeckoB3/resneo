@@ -17,6 +17,11 @@ export interface VenueEmailData {
    */
   google_review_url?: string | null;
   review_request_enabled?: boolean | null;
+  /**
+   * Accent for buttons, links and highlights when the venue has chosen to brand its customer
+   * emails (Booking page settings). Null or absent means the ResNeo default.
+   */
+  brand_colour?: string | null;
 }
 
 /**

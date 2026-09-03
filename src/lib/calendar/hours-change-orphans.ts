@@ -18,6 +18,7 @@ import { getOpeningPeriodsForDay, timeToMinutes } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
+import { effectiveWorkingHoursForDate } from '@/lib/availability/working-hours-rota';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
@@ -92,11 +93,23 @@ export function venueWeeklyMinutesForDate(
 }
 
 /** Open minute-ranges for a date under a calendar's `working_hours` (`[{start,end}]` shape). */
-export function calendarWorkingMinutesForDate(
-  workingHours: Record<string, Array<{ start: string; end: string }>> | null | undefined,
-): PeriodsForDate {
+type WeeklyHours = Record<string, Array<{ start: string; end: string }>>;
+type CalendarHoursSource =
+  | WeeklyHours
+  | { working_hours?: WeeklyHours | null; schedule_periods?: unknown; working_hours_rota?: unknown };
+
+/**
+ * Accepts either the weekly shape on its own or a calendar row carrying a rotating
+ * schedule as well, so the narrowing-hours confirmation compares what the resolver
+ * will actually apply on each date.
+ */
+export function calendarWorkingMinutesForDate(source: CalendarHoursSource | null | undefined): PeriodsForDate {
+  const row: { working_hours?: WeeklyHours | null; schedule_periods?: unknown; working_hours_rota?: unknown } =
+    source && ('working_hours' in source || 'schedule_periods' in source || 'working_hours_rota' in source)
+      ? (source as { working_hours?: WeeklyHours | null; schedule_periods?: unknown; working_hours_rota?: unknown })
+      : { working_hours: (source as WeeklyHours | null | undefined) ?? {} };
   return (dateStr: string) => {
-    const hours = workingHours ?? {};
+    const hours = effectiveWorkingHoursForDate(row, dateStr) as WeeklyHours;
     const dow = getDayOfWeek(dateStr);
     const ranges = hours[String(dow)] ?? hours[DAY_NAMES[dow]!] ?? [];
     if (!Array.isArray(ranges)) return [];

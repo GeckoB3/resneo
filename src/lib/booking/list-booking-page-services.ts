@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
-import { compareByVenueServiceOrder } from '@/lib/booking/service-display-order';
+import { compareByCategoryThenServiceOrder } from '@/lib/booking/service-categories';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import {
   sanitizeBookingPageImageFraming,
@@ -67,6 +67,8 @@ export async function listBookingPageServices(
           image_crop: photo ? servicePhotoCrops[svc.id] ?? null : null,
           price_pence: svc.price_pence,
           duration_minutes: svc.duration_minutes,
+          category: svc.category ?? null,
+          sort_order: svc.sort_order ?? 0,
         });
         sortOrderById.set(svc.id, svc.sort_order ?? 0);
         continue;
@@ -82,9 +84,9 @@ export async function listBookingPageServices(
   }
 
   return [...byId.values()].sort((a, b) =>
-    compareByVenueServiceOrder(
-      { sort_order: sortOrderById.get(a.id), name: a.name },
-      { sort_order: sortOrderById.get(b.id), name: b.name },
+    compareByCategoryThenServiceOrder(
+      { sort_order: sortOrderById.get(a.id), name: a.name, category: a.category },
+      { sort_order: sortOrderById.get(b.id), name: b.name, category: b.category },
     ),
   );
 }

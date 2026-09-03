@@ -264,3 +264,55 @@ describe('unified mapper carries per-date overrides (§1.2 item 21)', () => {
     expect(calendarHours(mapped as CalendarScheduleRow, DATE)).toEqual([]);
   });
 });
+
+describe('rotating schedule', () => {
+  // DATE (Wed 5 June 2030) falls in the second week of a cycle starting Mon 27 May 2030.
+  const WEEK_ONE = { [DK]: [{ start: '08:00', end: '12:00' }] };
+  const WEEK_TWO = { [DK]: [{ start: '13:00', end: '20:00' }] };
+  const rota = { version: 1, cycle_start: '2030-05-27', weeks: [WEEK_ONE, WEEK_TWO], repeat_until: null };
+
+  it('takes the weekly shape from the rota week that covers the date', () => {
+    expect(calendarHours({ ...NINE_TO_FIVE, working_hours_rota: rota }, DATE)).toEqual([{ start: 780, end: 1200 }]);
+    expect(calendarHours({ ...NINE_TO_FIVE, working_hours_rota: rota }, '2030-05-29')).toEqual([{ start: 480, end: 720 }]);
+  });
+
+  it('falls back to working_hours before the cycle starts and after it ends', () => {
+    expect(calendarHours({ ...NINE_TO_FIVE, working_hours_rota: rota }, '2030-05-22')).toEqual([{ start: 540, end: 1020 }]);
+    const ending = { ...rota, repeat_until: '2030-06-02' };
+    expect(calendarHours({ ...NINE_TO_FIVE, working_hours_rota: ending }, DATE)).toEqual([{ start: 540, end: 1020 }]);
+  });
+
+  it('sits below per-date overrides and days off', () => {
+    expect(
+      calendarHours({ ...NINE_TO_FIVE, working_hours_rota: rota, availability_exceptions: { [DATE]: { closed: true } } }, DATE),
+    ).toEqual([]);
+    expect(
+      calendarHours(
+        { ...NINE_TO_FIVE, working_hours_rota: rota, availability_exceptions: { [DATE]: { periods: [{ start: '10:00', end: '11:00' }] } } },
+        DATE,
+      ),
+    ).toEqual([{ start: 600, end: 660 }]);
+    expect(calendarHours({ ...NINE_TO_FIVE, working_hours_rota: rota, days_off: [DATE] }, DATE)).toEqual([]);
+  });
+
+  it('ignores a malformed rota', () => {
+    expect(calendarHours({ ...NINE_TO_FIVE, working_hours_rota: { version: 1, weeks: [] } }, DATE)).toEqual([{ start: 540, end: 1020 }]);
+  });
+
+  it('reads schedule_periods first, and the older rota only while the timeline is null', () => {
+    const timeline = {
+      version: 1,
+      periods: [{ id: 'p', from: '2030-05-27', until: null, weeks: [{ [DK]: [{ start: '07:00', end: '09:00' }] }] }],
+    };
+    expect(calendarHours({ ...NINE_TO_FIVE, schedule_periods: timeline, working_hours_rota: rota }, DATE)).toEqual([{ start: 420, end: 540 }]);
+    expect(calendarHours({ ...NINE_TO_FIVE, schedule_periods: null, working_hours_rota: rota }, DATE)).toEqual([{ start: 780, end: 1200 }]);
+  });
+
+  it('breaks still apply during a rota week', () => {
+    const row = { ...NINE_TO_FIVE, working_hours_rota: rota, break_times: [{ start: '14:00', end: '15:00' }] };
+    expect(calendarBookableSegments(row, DATE)).toEqual([
+      { start: 780, end: 840 },
+      { start: 900, end: 1200 },
+    ]);
+  });
+});

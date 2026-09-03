@@ -104,7 +104,12 @@ const createGroupSchema = z.object({
    */
   require_deposit: z.boolean().optional(),
   require_card_hold: z.boolean().optional(),
-  people: z.array(personEntrySchema).min(1).max(10),
+  /**
+   * One row per person per service: a guest who ticks several services for
+   * one attendee sends one consecutive row each. Ten people with four
+   * services apiece is the ceiling the picker enforces.
+   */
+  people: z.array(personEntrySchema).min(1).max(40),
   dietary_notes: z.string().max(1000).optional(),
   marketing_consent: z.boolean().optional(),
   /** Compliance forms completed inline during booking (§9.3) + the draft id used for any file uploads. */
@@ -187,7 +192,7 @@ export async function POST(request: NextRequest) {
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
       .select(
-        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags',
+        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, require_account_login_for_bookings, feature_flags, booking_page_config',
       )
       .eq('id', venue_id)
       .single();
@@ -1017,6 +1022,7 @@ export async function POST(request: NextRequest) {
               address: venue.address ?? null,
               email: venue.email ?? null,
               reply_to_email: venue.reply_to_email ?? null,
+              booking_page_config: venue.booking_page_config ?? null,
             }),
             venue_id,
           );

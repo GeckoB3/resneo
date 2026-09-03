@@ -40,7 +40,7 @@ export async function POST(
 
   const [{ data: guest }, { data: venue }] = await Promise.all([
     admin.from('guests').select('first_name, last_name, email, phone').eq('id', booking.guest_id).maybeSingle(),
-    admin.from('venues').select('name, address, email, reply_to_email').eq('id', booking.venue_id).maybeSingle(),
+    admin.from('venues').select('name, address, email, reply_to_email, booking_page_config').eq('id', booking.venue_id).maybeSingle(),
   ]);
   if (!venue?.name || !guest?.email) {
     return NextResponse.json({ error: 'Guest email not available' }, { status: 400 });
@@ -92,6 +92,7 @@ export async function POST(
       address: venue.address ?? null,
       email: venue.email ?? null,
       reply_to_email: venue.reply_to_email ?? null,
+      booking_page_config: venue.booking_page_config ?? null,
     }),
     staff.venue_id,
   );

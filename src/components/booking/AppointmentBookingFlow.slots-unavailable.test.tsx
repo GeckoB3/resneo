@@ -152,6 +152,7 @@ async function walkToSlots(): Promise<void> {
     expect(screen.getByRole('button', { name: /Plain Service/i })).toBeInTheDocument(),
   );
   fireEvent.click(screen.getByRole('button', { name: /Plain Service/i }));
+  fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }));
 
   await screen.findByText('Who would you like to see?');
   await waitFor(() => expect(screen.getByRole('button', { name: /\bAda\b/i })).toBeInTheDocument());

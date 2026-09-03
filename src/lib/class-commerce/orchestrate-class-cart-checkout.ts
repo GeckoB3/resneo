@@ -65,7 +65,7 @@ export async function orchestrateClassCartCheckout(
 
   const { data: venue, error: vErr } = await admin
     .from('venues')
-    .select('id, name, address, email, reply_to_email, timezone, stripe_connected_account_id')
+    .select('id, name, address, email, reply_to_email, timezone, stripe_connected_account_id, booking_page_config')
     .eq('id', venueId)
     .maybeSingle();
 

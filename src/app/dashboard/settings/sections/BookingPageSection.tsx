@@ -1,5 +1,7 @@
 'use client';
 
+import { serviceCategoryLookup } from '@/lib/booking/service-categories-db';
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookingPageEditor } from '@/components/booking-page-editor/BookingPageEditor';
 import type {
@@ -59,9 +61,13 @@ export function BookingPageSection({ venue, onUpdate, isAdmin, publicBaseUrl }: 
             description?: string | null;
             price_pence?: number | null;
             duration_minutes?: number;
+            sort_order?: number;
+            category_id?: string | null;
           }>;
+          categories?: ServiceCategoryRef[];
         }>(res);
         if (!cancelled && Array.isArray(data.services)) {
+          const categoryFor = serviceCategoryLookup(Array.isArray(data.categories) ? data.categories : []);
           setServiceList(
             data.services.map((s) => ({
               id: s.id,
@@ -69,6 +75,8 @@ export function BookingPageSection({ venue, onUpdate, isAdmin, publicBaseUrl }: 
               description: s.description ?? null,
               price_pence: s.price_pence ?? null,
               duration_minutes: s.duration_minutes,
+              sort_order: s.sort_order ?? 0,
+              category: categoryFor(s.category_id),
             })),
           );
         }
@@ -208,6 +216,7 @@ export function BookingPageSection({ venue, onUpdate, isAdmin, publicBaseUrl }: 
         isAppointmentVenue: isUnifiedSchedulingVenue(venue.booking_model),
         canEdit: isAdmin,
         servicePhotosInConfig: true,
+        emailBranding: true,
       },
       importSources: [],
     };

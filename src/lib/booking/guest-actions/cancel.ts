@@ -352,7 +352,7 @@ export async function cancelBookingForGuest(
 
   const { data: venue } = await supabase
     .from("venues")
-    .select("name, address, phone, booking_rules, email, reply_to_email")
+    .select("name, address, phone, booking_rules, email, reply_to_email, booking_page_config")
     .eq("id", booking.venue_id)
     .single();
   const { data: guest } = await supabase
@@ -456,6 +456,7 @@ export async function cancelBookingForGuest(
       phone: venue.phone ?? null,
       email: venue.email ?? null,
       reply_to_email: venue.reply_to_email ?? null,
+      booking_page_config: venue.booking_page_config ?? null,
     });
     const vid = booking.venue_id;
     const refundMsg = refund_message || lateCancelFeeLine || null;

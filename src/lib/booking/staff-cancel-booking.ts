@@ -388,7 +388,7 @@ export async function cancelStaffBookingWithNotify(
 
   const { data: venueRow } = await staffDb
     .from('venues')
-    .select('name, address, phone, booking_rules, email, reply_to_email')
+    .select('name, address, phone, booking_rules, email, reply_to_email, booking_page_config')
     .eq('id', venueId)
     .single();
   const { data: guestRow } = await staffDb
@@ -459,6 +459,7 @@ export async function cancelStaffBookingWithNotify(
     phone: venueRow?.phone ?? null,
     email: (venueRow as { email?: string | null } | null)?.email ?? null,
     reply_to_email: (venueRow as { reply_to_email?: string | null } | null)?.reply_to_email ?? null,
+    booking_page_config: venueRow?.booking_page_config ?? null,
   });
 
   const cancelledBookingForWaitlist = {

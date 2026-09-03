@@ -36,6 +36,13 @@ import {
   type AppointmentServiceFormValues,
 } from '@/components/dashboard/appointment-services/appointment-service-form-values';
 import { AppointmentServiceFormFields } from '@/components/dashboard/appointment-services/AppointmentServiceFormFields';
+import { ServiceCategoriesManager } from '@/components/dashboard/appointment-services/ServiceCategoriesManager';
+import {
+  compareByCategoryThenServiceOrder,
+  UNCATEGORISED_GROUP_LABEL,
+  type ServiceCategoryRef,
+} from '@/lib/booking/service-categories';
+import { serviceCategoryLookup } from '@/lib/booking/service-categories-db';
 import { appointmentServiceFormToPayload } from '@/components/dashboard/appointment-services/appointment-service-form-to-payload';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { OpeningHours } from '@/types/availability';
@@ -74,6 +81,8 @@ interface Service {
   colour: string;
   is_active: boolean;
   sort_order: number;
+  /** Category heading on the booking pages; null when uncategorised. */
+  category_id?: string | null;
   max_advance_booking_days?: number;
   min_booking_notice_hours?: number;
   cancellation_notice_hours?: number;
@@ -123,6 +132,12 @@ interface PractitionerServiceLink {
   custom_colour?: string | null;
 }
 
+
+type ServicesPageTab = 'services' | 'categories' | 'addons';
+
+function servicesPageTabFromParam(raw: string | null): ServicesPageTab {
+  return raw === 'addons' || raw === 'categories' ? raw : 'services';
+}
 
 function GripVerticalIcon({ className }: { className?: string }) {
   return (
@@ -209,6 +224,7 @@ export function AppointmentServicesView({
   }
 
   const [services, setServices] = useState<Service[]>([]);
+  const [categories, setCategories] = useState<ServiceCategoryRef[]>([]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -256,22 +272,20 @@ export function AppointmentServicesView({
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const initialTab: 'services' | 'addons' =
-    searchParams.get('tab') === 'addons' ? 'addons' : 'services';
-  const [activeTab, setActiveTab] = useState<'services' | 'addons'>(initialTab);
+  const initialTab: ServicesPageTab = servicesPageTabFromParam(searchParams.get('tab'));
+  const [activeTab, setActiveTab] = useState<ServicesPageTab>(initialTab);
   useEffect(() => {
-    const t = searchParams.get('tab');
-    if (t === 'addons' && activeTab !== 'addons') setActiveTab('addons');
-    if (t !== 'addons' && activeTab !== 'services') setActiveTab('services');
+    const t = servicesPageTabFromParam(searchParams.get('tab'));
+    if (t !== activeTab) setActiveTab(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-  function changeTab(next: 'services' | 'addons') {
+  function changeTab(next: ServicesPageTab) {
     setActiveTab(next);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
-    if (next === 'addons') {
-      params.set('tab', 'addons');
-    } else {
+    if (next === 'services') {
       params.delete('tab');
+    } else {
+      params.set('tab', next);
     }
     const q = params.toString();
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
@@ -328,6 +342,7 @@ export function AppointmentServicesView({
       const practData = await practRes.json();
       setServices(svcData.services ?? []);
       setLinks(svcData.practitioner_services ?? []);
+      setCategories(Array.isArray(svcData.categories) ? (svcData.categories as ServiceCategoryRef[]) : []);
       setPractitioners(practData.practitioners ?? []);
     } catch {
       setError('Failed to load services. Please check your connection.');
@@ -392,9 +407,19 @@ export function AppointmentServicesView({
   const [reorderSaving, setReorderSaving] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
 
+  const categoryFor = useMemo(() => serviceCategoryLookup(categories), [categories]);
+
   useEffect(() => {
-    setOrderedServiceIds(services.map((s) => s.id));
-  }, [services]);
+    // Category first, then the venue drag order: each category's services sit
+    // together, which is what makes within-group dragging a flat reorder.
+    const sorted = [...services].sort((a, b) =>
+      compareByCategoryThenServiceOrder(
+        { sort_order: a.sort_order, name: a.name, category: categoryFor(a.category_id) },
+        { sort_order: b.sort_order, name: b.name, category: categoryFor(b.category_id) },
+      ),
+    );
+    setOrderedServiceIds(sorted.map((s) => s.id));
+  }, [services, categoryFor]);
 
   const canReorderServices = isAdmin && services.length > 1;
 
@@ -406,6 +431,41 @@ export function AppointmentServicesView({
     const seen = new Set(inOrder.map((s) => s.id));
     return [...inOrder, ...visibleServices.filter((s) => !seen.has(s.id))];
   }, [visibleServices, orderedServiceIds]);
+
+  /**
+   * The ordered list bucketed under category headings, in category order, with
+   * uncategorised services last. Buckets keep the ordered list's own order rather
+   * than re-sorting, so an optimistic drag shows immediately.
+   */
+  const groupedVisibleServices = useMemo(() => {
+    const buckets = new Map<string | null, Service[]>();
+    for (const svc of orderedVisibleServices) {
+      const key = svc.category_id && categoryFor(svc.category_id) ? svc.category_id : null;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(svc);
+      else buckets.set(key, [svc]);
+    }
+    const groups: Array<{ id: string | null; name: string; services: Service[] }> = [];
+    for (const category of categories) {
+      const bucket = buckets.get(category.id);
+      if (bucket) groups.push({ id: category.id, name: category.name, services: bucket });
+    }
+    const rest = buckets.get(null);
+    if (rest) groups.push({ id: null, name: groups.length > 0 ? UNCATEGORISED_GROUP_LABEL : '', services: rest });
+    return groups;
+  }, [orderedVisibleServices, categories, categoryFor]);
+
+  const serviceCountByCategory = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const svc of services) {
+      if (svc.category_id) counts.set(svc.category_id, (counts.get(svc.category_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [services]);
+  const uncategorisedCount = useMemo(
+    () => services.filter((svc) => !svc.category_id || !categoryFor(svc.category_id)).length,
+    [services, categoryFor],
+  );
 
   const reorderSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -577,6 +637,7 @@ export function AppointmentServicesView({
         (svc.deposit_pence != null && svc.deposit_pence > 0 ? 'deposit' : 'none'),
       colour: svc.colour || '#3B82F6',
       is_active: svc.is_active,
+      category_id: svc.category_id ?? null,
       practitioner_ids: svcLinks,
       staffMay: {
         name: svc.staff_may_customize_name ?? false,
@@ -829,7 +890,7 @@ export function AppointmentServicesView({
     <div className="space-y-4">
       <PageHeader
         eyebrow="Appointments"
-        title={showServicesTab ? 'Services' : 'Services & add-ons'}
+        title={showServicesTab ? 'Services' : activeTab === 'categories' ? 'Service categories' : 'Services & add-ons'}
         subtitle={
           showServicesTab
             ? !isAdmin
@@ -837,7 +898,9 @@ export function AppointmentServicesView({
                 ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
                 : 'Add services and link them only to calendars you control. Use Availability → Services to toggle which columns offer each service.'
               : 'Define what guests can book, pricing, buffers, and online payment rules.'
-            : isAdmin
+            : activeTab === 'categories'
+              ? 'Group your services under headings so customers find what they want faster, and set the order the headings appear in.'
+              : isAdmin
               ? 'Build reusable add-on groups. Link them to one or many services from each service’s edit form.'
               : 'Add-on groups configured by your venue admin.'
         }
@@ -860,6 +923,7 @@ export function AppointmentServicesView({
       <TabBar
         tabs={[
           { id: 'services', label: 'Services' },
+          { id: 'categories', label: 'Categories' },
           { id: 'addons', label: 'Add-ons' },
         ] as const}
         value={activeTab}
@@ -869,6 +933,14 @@ export function AppointmentServicesView({
 
       {activeTab === 'addons' ? (
         <AddonsLibraryView isAdmin={isAdmin} currencySymbol={sym} embedded />
+      ) : activeTab === 'categories' ? (
+        <ServiceCategoriesManager
+          categories={categories}
+          serviceCountByCategory={serviceCountByCategory}
+          uncategorisedCount={uncategorisedCount}
+          isAdmin={isAdmin}
+          onChange={setCategories}
+        />
       ) : (
         <>
       {!showModal && error && (
@@ -921,10 +993,20 @@ export function AppointmentServicesView({
               {reorderError}
             </div>
           ) : null}
+          {groupedVisibleServices.map((group) => (
+          <section key={group.id ?? 'other'} aria-label={group.name || 'Services'} className="space-y-3">
+            {group.name ? (
+              <div className="flex items-baseline justify-between gap-3 pt-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{group.name}</h2>
+                <span className="text-xs text-slate-400">
+                  {group.services.length} service{group.services.length === 1 ? '' : 's'}
+                </span>
+              </div>
+            ) : null}
           <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={onServiceDragEnd}>
-            <SortableContext items={orderedVisibleServices.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+            <SortableContext items={group.services.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-3">
-          {orderedVisibleServices.map((svc, svcIndex) => {
+          {group.services.map((svc, svcIndex) => {
             // Disable dragging while a save is in flight so a second move cannot be
             // silently dropped by the in-flight guard in onServiceDragEnd.
             const dragEnabled = canReorderServices && !reorderSaving;
@@ -971,7 +1053,7 @@ export function AppointmentServicesView({
                           <button
                             type="button"
                             onClick={() => moveServiceByOffset(svc.id, 1)}
-                            disabled={reorderSaving || svcIndex === orderedVisibleServices.length - 1}
+                            disabled={reorderSaving || svcIndex === group.services.length - 1}
                             aria-label={`Move ${svc.name} down`}
                             className="inline-flex h-8 w-6 items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                           >
@@ -1259,6 +1341,8 @@ export function AppointmentServicesView({
               </div>
             </SortableContext>
           </DndContext>
+          </section>
+          ))}
         </div>
       )}
         </>
@@ -1295,6 +1379,7 @@ export function AppointmentServicesView({
               cardHoldEnabled={cardHoldEnabled}
               currencySymbol={sym}
               fieldGroupSuffix={editingId ?? 'new-service'}
+              categories={categories}
               venueOpeningHours={venueOpeningHours}
               venueOpeningExceptions={venueOpeningExceptions}
               venueWideBlocks={venueWideBlocks}

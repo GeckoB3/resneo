@@ -1,3 +1,4 @@
+import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
 import type { ReactNode } from 'react';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { VenuePublic } from '@/components/booking/types';
@@ -27,6 +28,10 @@ export interface EditorServiceItem {
    * collective offerings carry it here (item image), so the editor seeds from this.
    */
   imageUrl?: string | null;
+  /** Category heading on the booking page, so the preview groups as the live page does. */
+  category?: ServiceCategoryRef | null;
+  /** Venue drag order, so the preview keeps it inside each category. */
+  sort_order?: number;
 }
 
 /** A bookable team member shown in the "Meet the team" group + the preview. */
@@ -55,6 +60,11 @@ export interface BookingPageEditorCapabilities {
    * collectives (offering photos live on the item, so the serialized config omits them).
    */
   servicePhotosInConfig: boolean;
+  /**
+   * Show the "use my brand colour in customer emails" switch. Only a venue sends customer
+   * emails; a combined page books into its host venue, whose own setting applies.
+   */
+  emailBranding?: boolean;
 }
 
 /** One image slot (logo OR cover). Abstracts WHERE the url lives and HOW it persists. */

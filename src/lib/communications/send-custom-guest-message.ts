@@ -78,7 +78,7 @@ export async function sendCustomGuestMessage(
 
   const { data: venueRow, error: venueError } = await admin
     .from('venues')
-    .select('name, address, phone, booking_model, email, reply_to_email, timezone')
+    .select('name, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config')
     .eq('id', input.venueId)
     .maybeSingle();
 
@@ -97,6 +97,7 @@ export async function sendCustomGuestMessage(
     email: venueRow.email ?? null,
     reply_to_email: venueRow.reply_to_email ?? null,
     timezone: venueRow.timezone ?? null,
+    booking_page_config: venueRow.booking_page_config ?? null,
   });
 
   const bookingModel: BookingModel =

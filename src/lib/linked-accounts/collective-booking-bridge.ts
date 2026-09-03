@@ -19,6 +19,10 @@ import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-an
 import type { PhantomBooking } from '@/lib/availability/appointment-engine';
 import { computeChainStartsForPractitioner } from '@/lib/availability/appointment-chain';
 import { prepareChainSegments, type ChainSegmentRequest, type VenueClockRow } from '@/lib/availability/appointment-chain-server';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
+import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import type { ServiceChainSegmentParam } from '@/lib/booking/service-chain';
 import {
   loadCollectiveAppointmentCatalog,
@@ -69,6 +73,57 @@ export async function resolveCombinedBookingTarget(
   };
 }
 
+/**
+ * The length a single offering occupies on ONE provider calendar once the
+ * customer's variant and add-ons are applied to that calendar's source service.
+ * Mirrors the per-segment logic in `prepareChainSegments`, so a service booked
+ * alone is sized the same way as one booked in a visit. Returns null when the
+ * chosen variant or add-ons do not belong to this calendar's source service
+ * (another member's calendar in the "any available" pool), meaning the calendar
+ * cannot honour the request and offers no slots.
+ */
+async function resolveOfferingDurationForCalendar(
+  admin: SupabaseClient,
+  target: { venueId: string; sourceServiceId: string; durationMinutes: number | null },
+  choice: { variantId: string | null; addonIds: string[]; customDurationMinutes: number | null },
+): Promise<number | null> {
+  let duration = target.durationMinutes;
+  if (choice.variantId) {
+    const variant = await loadActiveVariantForService({
+      admin,
+      venueId: target.venueId,
+      serviceId: target.sourceServiceId,
+      variantId: choice.variantId,
+    });
+    if (!variant) return null;
+    const variantDuration = (variant as { duration_minutes?: number | null }).duration_minutes;
+    if (variantDuration != null) duration = variantDuration;
+  }
+  if (choice.customDurationMinutes != null) duration = choice.customDurationMinutes;
+  if (choice.addonIds.length > 0) {
+    const schema = (await venueUsesUnifiedAppointmentServiceData(admin, target.venueId))
+      ? 'service_item'
+      : 'appointment_service';
+    const { groups } = await loadAddonsForBooking({
+      admin,
+      venueId: target.venueId,
+      schema,
+      parentId: target.sourceServiceId,
+      includeHidden: false,
+    });
+    const validation = validateAddonSelections({
+      selections: choice.addonIds.map((id) => ({ addon_id: id })),
+      groupsForService: groups,
+      source: 'public',
+    });
+    if (!validation.ok) return null;
+    let delta = 0;
+    for (const a of validation.resolvedAddons) delta += a.additional_duration_minutes;
+    if (delta > 0 && duration != null) duration += delta;
+  }
+  return duration;
+}
+
 interface DaySlot {
   start_time: string;
   service_id: string; // the OFFERING id (so the flow matches)
@@ -113,8 +168,11 @@ export async function loadCollectiveDayAvailability(
     calendarId: string | null; // null/ANY → any-available pool
     anyAvailable: boolean;
     date: string;
-    /** Total duration (base + chosen variant + add-ons) from the calendar-first flow. */
+    /** A staff-entered custom length; null for public guests. */
     durationMinutes?: number | null;
+    /** The customer's chosen variant / add-ons, resolved per provider calendar. */
+    variantId?: string | null;
+    addonIds?: string[];
   },
 ): Promise<{ date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean }> {
   const { collectiveId, offeringId, date } = params;
@@ -143,9 +201,19 @@ export async function loadCollectiveDayAvailability(
     targets.map(async (t): Promise<DaySlot[]> => {
       const clock = clocks[t.venueId];
       if (!clock) return [];
-      // Honour the variant/add-on-adjusted duration when the flow supplied one (a
-      // specific calendar was chosen), else the offering's effective duration.
-      const dur = params.durationMinutes ?? t.durationMinutes;
+      // Size the slot for THIS calendar: the offering's length on it, plus the
+      // customer's variant and add-ons (which the public flow sends as ids, never
+      // as a pre-summed duration). A calendar that cannot honour them offers none.
+      const dur = await resolveOfferingDurationForCalendar(
+        admin,
+        { venueId: t.venueId, sourceServiceId: t.sourceServiceId, durationMinutes: t.durationMinutes },
+        {
+          variantId: params.variantId ?? null,
+          addonIds: params.addonIds ?? [],
+          customDurationMinutes: params.durationMinutes ?? null,
+        },
+      );
+      if (dur === null && (params.variantId || (params.addonIds?.length ?? 0) > 0)) return [];
       try {
         const input = await fetchAppointmentInput({
           supabase: admin,
@@ -221,8 +289,11 @@ export async function loadCollectiveMonthAvailableDates(
     anyAvailable: boolean;
     year: number;
     month: number;
-    /** Total duration (base + chosen variant + add-ons) from the calendar-first flow. */
+    /** A staff-entered custom length; null for public guests. */
     durationMinutes?: number | null;
+    /** The customer's chosen variant / add-ons, resolved per provider calendar. */
+    variantId?: string | null;
+    addonIds?: string[];
   },
 ): Promise<{ venue_id: string; practitioner_id: string; service_id: string; year: number; month: number; available_dates: string[]; any_available?: boolean }> {
   const { collectiveId, offeringId, year, month } = params;
@@ -236,9 +307,19 @@ export async function loadCollectiveMonthAvailableDates(
   const perCalendar = await Promise.all(
     targets.map(async (t) => {
       try {
+        const dur = await resolveOfferingDurationForCalendar(
+          admin,
+          { venueId: t.venueId, sourceServiceId: t.sourceServiceId, durationMinutes: t.durationMinutes },
+          {
+            variantId: params.variantId ?? null,
+            addonIds: params.addonIds ?? [],
+            customDurationMinutes: params.durationMinutes ?? null,
+          },
+        );
+        if (dur === null && (params.variantId || (params.addonIds?.length ?? 0) > 0)) return [] as string[];
         return await computeAppointmentAvailableDatesInMonth(admin, t.venueId, t.calendarId, t.sourceServiceId, year, month, {
           audience: 'public',
-          customDurationMinutes: params.durationMinutes ?? t.durationMinutes ?? undefined,
+          customDurationMinutes: dur ?? undefined,
         });
       } catch {
         return [] as string[];

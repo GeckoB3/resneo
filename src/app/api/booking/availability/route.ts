@@ -601,6 +601,10 @@ async function handleAppointmentAvailability(
       anyAvailable,
       date,
       durationMinutes: Number.isFinite(durParsed) ? durParsed : null,
+      // The public flow sends the chosen variant and add-ons as ids (never as a
+      // pre-summed length); the bridge sizes each provider calendar's slot with them.
+      variantId: searchParams.get('variant_id') || null,
+      addonIds: searchParams.getAll('addon_ids').filter(Boolean),
     });
     return NextResponse.json(result);
   }

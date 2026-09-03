@@ -463,6 +463,7 @@ export function CombinedPageManager({
         <div className="space-y-4">
           <PageNameField collective={collective} busy={busy} onSettings={settings} />
           <PageAddressSection collective={collective} busy={busy} onSettings={settings} />
+          <HostInheritedSettingsNote collective={collective} />
         </div>
       ),
       logo: {
@@ -520,6 +521,7 @@ export function CombinedPageManager({
         isAppointmentVenue: true,
         canEdit: isHost,
         servicePhotosInConfig: false,
+        inheritsFromHostName: hostVenueName(collective),
       },
       importSources,
     };
@@ -724,6 +726,50 @@ function PageAddressSection({
           </p>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings the combined page follows from the host venue
+// ---------------------------------------------------------------------------
+
+function hostVenueName(collective: CollectiveView): string {
+  return (
+    collective.members.find((m) => m.venueId === collective.hostVenueId)?.venueName ??
+    'the host venue'
+  );
+}
+
+/**
+ * The combined page has no settings of its own for the things below: it works
+ * like one venue and follows the HOST venue. Say so, because a host looking for
+ * these switches here would otherwise conclude the combined page cannot do them.
+ */
+function HostInheritedSettingsNote({ collective }: { collective: CollectiveView }) {
+  const host = hostVenueName(collective);
+  return (
+    <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-sm font-bold text-slate-900">Settings that follow the host venue</p>
+      <p className="text-xs text-slate-600">
+        Your combined page follows {host} for these. Change them in that venue&rsquo;s Settings
+        and the combined page updates with it.
+      </p>
+      <ul className="list-disc space-y-1 pl-5 text-xs text-slate-600">
+        <li>
+          Any available practitioner (currently{' '}
+          {collective.hostAnyAvailablePractitioner ? 'on' : 'off'}) and staff-first booking
+          (currently {collective.hostStaffFirstBookingFlow ? 'on' : 'off'}): Settings, Booking
+          settings.
+        </li>
+        <li>Address, phone, website and opening hours shown in the header: Settings, Profile.</li>
+        <li>Currency and wording (for example &ldquo;appointment&rdquo;): Settings, Profile.</li>
+      </ul>
+      <p className="text-xs text-slate-600">
+        Prices, durations, deposits and cancellation notice come from each member venue&rsquo;s own
+        service, because every booking is made with that venue. If any member requires customers to
+        sign in to book, the combined page asks them to sign in too.
+      </p>
     </section>
   );
 }

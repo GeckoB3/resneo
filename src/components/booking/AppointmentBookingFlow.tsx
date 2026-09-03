@@ -5724,6 +5724,10 @@ export function AppointmentBookingFlow({
                   <div ref={bookingComplianceRef}>
                     <BookingComplianceBlock
                       venueId={venue.id}
+                      practitionerId={practitionerIdForBookingCreate(
+                        selectedPractitionerId,
+                        multiServiceSegments,
+                      )}
                       serviceIds={
                         multiServiceSegments && multiServiceSegments.length > 0
                           ? multiServiceSegments.map((s) => s.serviceId)

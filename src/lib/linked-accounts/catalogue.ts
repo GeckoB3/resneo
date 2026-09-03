@@ -408,14 +408,18 @@ export async function loadCatalogueForManagement(
     });
   }
 
-  // Items + providers.
-  const { data: itemRows } = await admin
+  // Items + providers. `select('*')` rather than a column list: `category_id`
+  // arrives with migration 20270202130000, applied by hand per environment, and
+  // naming a column the database does not have fails the whole read (which the
+  // code below would treat as "no offerings", taking the combined page offline).
+  const { data: itemRows, error: itemErr } = await admin
     .from('collective_service_items')
-    .select(
-      'id, name, description, category, category_id, image_url, display_order, default_duration_minutes, default_price_pence, pricing_display, allow_any_available, status',
-    )
+    .select('*')
     .eq('collective_id', collectiveId)
     .order('display_order', { ascending: true });
+  if (itemErr) {
+    console.error('[catalogue] collective_service_items read failed:', itemErr.message, { collectiveId });
+  }
   const items = (itemRows ?? []) as Array<Record<string, unknown>>;
   const itemIds = items.map((i) => i.id as string);
 
@@ -711,15 +715,19 @@ export async function loadPublicCombinedCatalogue(
     }
   }
 
-  // Active offerings + bookable providers.
-  const { data: itemRows } = await admin
+  // Active offerings + bookable providers. `select('*')` for the same reason as
+  // the management read above: a column list naming `category_id` fails on a
+  // database that has not had migration 20270202130000 yet, and a failed read
+  // here renders the public combined page as "not available".
+  const { data: itemRows, error: itemErr } = await admin
     .from('collective_service_items')
-    .select(
-      'id, name, description, category, category_id, image_url, display_order, default_duration_minutes, default_price_pence, pricing_display, allow_any_available',
-    )
+    .select('*')
     .eq('collective_id', collectiveId)
     .eq('status', 'active')
     .order('display_order', { ascending: true });
+  if (itemErr) {
+    console.error('[catalogue] collective_service_items read failed:', itemErr.message, { collectiveId });
+  }
   const items = (itemRows ?? []) as Array<Record<string, unknown>>;
   const itemIds = items.map((i) => i.id as string);
 

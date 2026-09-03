@@ -141,6 +141,7 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
   const { report } = reporter;
   const isAdmin = adapter.capabilities.canEdit;
   const isAppointmentVenue = adapter.capabilities.isAppointmentVenue;
+  const inheritsFromHostName = adapter.capabilities.inheritsFromHostName ?? null;
   const logoUrl = adapter.logo.getUrl();
   const coverUrl = adapter.cover.getUrl();
   const serviceList = adapter.services.list;
@@ -929,9 +930,11 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
         <BookingPageSettingsGroup
           title="Book now"
           description={
-            isAppointmentVenue
-              ? 'Header, booking flow, and styling for the Book now tab. Address and phone are edited under Profile.'
-              : 'Logo, cover, branding, and your public booking flow.'
+            inheritsFromHostName
+              ? `Header, booking flow, and styling for the Book now tab. Address and phone come from the host venue (${inheritsFromHostName}) and are edited in that venue’s Profile.`
+              : isAppointmentVenue
+                ? 'Header, booking flow, and styling for the Book now tab. Address and phone are edited under Profile.'
+                : 'Logo, cover, branding, and your public booking flow.'
           }
           tabToggle={isAppointmentVenue ? { kind: 'always-on' } : undefined}
           headerAction={
@@ -1021,8 +1024,12 @@ export function BookingPageEditor({ adapter, reporter }: BookingPageEditorProps)
               {logoError && <p className="text-sm text-red-600">{logoError}</p>}
               <p className="text-xs text-slate-500">
                 {logoUrl
-                  ? 'Drag the logo to reposition it. Shown on your booking page and in guest emails.'
-                  : 'Shown on your booking page and in guest emails.'}
+                  ? inheritsFromHostName
+                    ? 'Drag the logo to reposition it. Shown on your combined booking page. Customer emails carry the booked venue’s own logo.'
+                    : 'Drag the logo to reposition it. Shown on your booking page and in guest emails.'
+                  : inheritsFromHostName
+                    ? 'Shown on your combined booking page. Customer emails carry the booked venue’s own logo.'
+                    : 'Shown on your booking page and in guest emails.'}
               </p>
             </div>
           )}

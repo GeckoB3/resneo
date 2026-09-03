@@ -76,33 +76,13 @@ const BOOKING_BLOCK_FLASH_RING = 'inset 0 0 0 2px rgba(56,189,248,0.90)';
 
 export function bookingCalendarBlockCardStyle(
   p: BookingBlockPalette,
-  opts: { linked?: boolean; flash?: boolean } = {},
+  opts: { flash?: boolean } = {},
 ): CSSProperties {
-  if (opts.linked) {
-    // Linked (other-venue) cards must be instantly distinct from own-venue cards
-    // *without relying on colour alone* (§19.1, WCAG 1.4.1): a dashed border, a
-    // subtle diagonal hatch, and a light veil read clearly even in greyscale,
-    // while the saturated status hue still shows boldly underneath. The veil is
-    // kept light enough that white bar text stays legible over the fill.
-    return {
-      color: p.text,
-      backgroundColor: p.bg,
-      backgroundImage: [
-        'repeating-linear-gradient(45deg, rgba(255,255,255,0.16) 0, rgba(255,255,255,0.16) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 7px)',
-        'linear-gradient(176deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.10) 34%, rgba(255,255,255,0) 60%, rgba(0,0,0,0.10) 100%)',
-        `linear-gradient(0deg, ${p.bg}, ${p.bg})`,
-      ].join(', '),
-      borderStyle: 'dashed',
-      borderWidth: 1,
-      borderColor: p.border,
-      boxShadow: [
-        ...(opts.flash ? [BOOKING_BLOCK_FLASH_RING] : []),
-        'inset 0 1px 0 rgba(255,255,255,0.28)',
-        '0 1px 2px rgba(15,23,42,0.10)',
-        '0 12px 24px -14px rgba(2,32,71,0.40)',
-      ].join(', '),
-    };
-  }
+  // One look for every bar, linked or own. Linked cards used to carry a dashed
+  // border, a diagonal hatch and a white veil so they read as foreign at a
+  // glance; the column header already says "Linked · {venue}", and the hatch
+  // read as a fault rather than a label ("why are these bars shaded?"), so the
+  // distinction now lives in the header alone.
   return {
     color: p.text,
     // Bold saturated fill is the hero. A restrained top-light → base-shade sheen
@@ -119,7 +99,12 @@ export function bookingCalendarBlockCardStyle(
       ...(opts.flash ? [BOOKING_BLOCK_FLASH_RING] : []),
       'inset 0 1px 0 rgba(255,255,255,0.30)', // glossy top edge
       'inset 0 -1px 0 rgba(0,0,0,0.12)', // grounded base edge
-      '0 1px 2px rgba(15,23,42,0.10)', // tight contact shadow
+      // A pale hairline outside the border. Two bars of the same status that
+      // touch, or one drawn inside another's processing gap, share a hue and
+      // a border colour, so their edges melted together; the light ring keeps
+      // every bar's outline readable against its neighbours.
+      '0 0 0 1px rgba(255,255,255,0.85)',
+      '0 1px 2px rgba(15,23,42,0.18)', // contact shadow, a touch firmer
       '0 16px 30px -14px rgba(2,32,71,0.42)', // soft brand-tinted lift
     ].join(', '),
   };

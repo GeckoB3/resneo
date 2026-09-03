@@ -136,13 +136,22 @@ import {
   type BookingBlockPalette,
 } from '@/lib/calendar/booking-calendar-block-style';
 import {
+  clusterLayoutHorizontalStyle,
+  hostRegionsAroundNested,
+  layoutOverlapClusters,
+  type BookingClusterLayout,
+  type MinuteRange,
+} from '@/lib/calendar/booking-cluster-layout';
+import {
   BOOKING_ACTIONS_CORNER_RIGHT_PX,
   BOOKING_ACTION_BUTTON_WIDTH_PX,
   BOOKING_ACTION_TRAY_TOP_GAP_PX,
   BOOKING_CORNER_BUTTON_FLOOR_HEIGHT_PX,
   BOOKING_CORNER_TRAY_RIGHT_PX,
   bookingCornerTraySpacing,
+  planBookingActionClearance,
   planBookingCornerActions,
+  type BookingActionClearance,
   type BookingCornerActionInput,
 } from '@/lib/calendar/booking-corner-actions';
 import {
@@ -908,6 +917,69 @@ function practitionerWallBusyIntervalsForCandidateAtSlot(
   return offsets.map((o) => ({ start: slotStartWallMin + o.start, end: slotStartWallMin + o.end }));
 }
 
+/**
+ * Wall-clock ranges inside this booking when its column is free: the processing
+ * blocks the strip paints, clamped to the core duration the way the strip is.
+ * These are the ranges another booking may nest into.
+ */
+function bookingProcessingWallGaps(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): MinuteRange[] {
+  const wall0 = timeToMinutes(b.booking_time.slice(0, 5));
+  if (!Number.isFinite(wall0)) return [];
+  const core = bookingCoreDurationForProcessing(b, serviceMap);
+  return bookingProcessingBlocksForLayout(b, serviceMap)
+    .map((blk) => ({
+      start: wall0 + blk.start_minute,
+      end: wall0 + Math.min(core, blk.start_minute + blk.duration_minutes),
+    }))
+    .filter((g) => g.end > g.start);
+}
+
+/**
+ * A host bar's text and tray spans in pixels from its top edge, once nested
+ * bars have taken their share. A bar with nothing nested keeps the whole box.
+ */
+interface HostRegionsPx {
+  textTopPx: number;
+  textBottomPx: number;
+  trayTopPx: number;
+  trayBottomPx: number;
+  traySharesText: boolean;
+}
+
+function hostRegionsPx(
+  layout: BookingClusterLayout,
+  hostStartMin: number,
+  blockHeightPx: number,
+  slotHeightPx: number,
+): HostRegionsPx {
+  const whole: HostRegionsPx = {
+    textTopPx: 0,
+    textBottomPx: blockHeightPx,
+    trayTopPx: 0,
+    trayBottomPx: blockHeightPx,
+    traySharesText: true,
+  };
+  const nested = layout.nestedRanges;
+  if (!nested || nested.length === 0 || blockHeightPx <= 0) return whole;
+  const pxPerMin = slotHeightPx / SLOT_MINUTES;
+  const hostEndMin = hostStartMin + blockHeightPx / pxPerMin;
+  // A tray needs at least its smallest button plus a pixel each side.
+  const minTraySpanMin = (BOOKING_CORNER_BUTTON_FLOOR_HEIGHT_PX + 4) / pxPerMin;
+  const r = hostRegionsAroundNested({ start: hostStartMin, end: hostEndMin }, nested, minTraySpanMin);
+  if (!r) return whole;
+  const px = (m: number) => Math.max(0, Math.min(blockHeightPx, Math.round((m - hostStartMin) * pxPerMin)));
+  return {
+    textTopPx: px(r.textStart),
+    textBottomPx: px(r.textEnd),
+    trayTopPx: px(r.trayStart),
+    trayBottomPx: px(r.trayEnd),
+    traySharesText: r.traySharesText,
+  };
+}
+
 function BookingProcessingStrip({
   b,
   serviceMap,
@@ -981,11 +1053,6 @@ function overlapsRange(a0: number, a1: number, b0: number, b1: number): boolean 
 
 type BookingCluster = { kind: 'single'; booking: Booking } | { kind: 'group'; items: Booking[] };
 
-interface BookingClusterLayout {
-  laneIndex: number;
-  laneCount: number;
-}
-
 /** Merge consecutive multi-service rows (same group_booking_id) into one visual stack. */
 function clusterMultiServiceBookings(bookings: Booking[]): BookingCluster[] {
   const sorted = [...bookings].sort((a, b) => timeToMinutes(a.booking_time) - timeToMinutes(b.booking_time));
@@ -1035,54 +1102,28 @@ function clusterTimeRange(cluster: BookingCluster, getDuration: (booking: Bookin
   return { start, end };
 }
 
+/**
+ * Lane and nesting layout for one column's clusters. A cluster that fits
+ * entirely inside another's processing gap nests in it (drawn indented over the
+ * host's band) rather than forcing both into half-width lanes; see
+ * `layoutOverlapClusters`. `getProcessingGaps` supplies each booking's free
+ * wall-clock ranges; a visit's gaps are the union of its segments'.
+ */
 function computeBookingClusterLayouts(
   clusters: BookingCluster[],
   getDuration: (booking: Booking) => number,
+  getProcessingGaps: (booking: Booking) => MinuteRange[],
 ): Map<string, BookingClusterLayout> {
-  const layouts = new Map<string, BookingClusterLayout>();
-  const sorted = clusters
-    .map((cluster) => ({ cluster, key: clusterKey(cluster), ...clusterTimeRange(cluster, getDuration) }))
-    .sort((a, b) => {
-      if (a.start !== b.start) return a.start - b.start;
-      return a.end - b.end;
-    });
-
-  let groupItems: typeof sorted = [];
-  let groupEnd = -Infinity;
-
-  const flushGroup = () => {
-    if (groupItems.length === 0) return;
-    const laneEnds: number[] = [];
-    const groupLayouts: Array<{ key: string; layout: BookingClusterLayout }> = [];
-    for (const item of groupItems) {
-      let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= item.start);
-      if (laneIndex === -1) {
-        laneEnds.push(item.end);
-        laneIndex = laneEnds.length - 1;
-      } else {
-        laneEnds[laneIndex] = item.end;
-      }
-      groupLayouts.push({ key: item.key, layout: { laneIndex, laneCount: 1 } });
-    }
-    const laneCount = Math.max(1, laneEnds.length);
-    for (const item of groupLayouts) {
-      item.layout.laneCount = laneCount;
-      layouts.set(item.key, item.layout);
-    }
-    groupItems = [];
-    groupEnd = -Infinity;
-  };
-
-  for (const item of sorted) {
-    if (groupItems.length > 0 && item.start >= groupEnd) {
-      flushGroup();
-    }
-    groupItems.push(item);
-    groupEnd = Math.max(groupEnd, item.end);
-  }
-  flushGroup();
-
-  return layouts;
+  return layoutOverlapClusters(
+    clusters.map((cluster) => {
+      const members = cluster.kind === 'single' ? [cluster.booking] : cluster.items;
+      return {
+        key: clusterKey(cluster),
+        ...clusterTimeRange(cluster, getDuration),
+        gaps: members.flatMap(getProcessingGaps),
+      };
+    }),
+  );
 }
 
 /** Deposit + attendance “Confirmed” pill — bottom-left; pill uses white + indigo ring to read on any block hue. */
@@ -1197,7 +1238,10 @@ function ScheduleEditFollowUpPill({
 }) {
   return (
     <div
-      className="pointer-events-auto absolute left-1/2 z-[45] -translate-x-1/2"
+      // Centred on the bar but never narrower than its own controls: it may
+      // overhang a narrow lane or a short bar, which is the point of drawing it
+      // outside the clipped card.
+      className="pointer-events-auto absolute left-1/2 z-[45] w-max max-w-[calc(100vw-1rem)] -translate-x-1/2"
       style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
       data-no-calendar-pan="true"
     >
@@ -1539,27 +1583,37 @@ function bookingCornerActionInput(b: Booking): BookingCornerActionInput {
 /**
  * Padding for booking info so text stays clear of the bottom-right action tray.
  *
- * HORIZONTAL CLEARANCE ONLY. The tray is a fixed-width column pinned to the
- * bottom-right, so `right` keeps every text row out of its column for the whole
- * height of the bar, and the text can then run the full height without ever
- * reaching it. Reserving the stack's HEIGHT as well was reserving the same space
- * twice: on a 30 minute bar that took 84px of 94px and left 2px for text, which
- * rendered as a lone 10px name. The multi-service branch reached the same
- * conclusion; this is the single-booking half of it.
+ * Horizontal clearance by default. The tray is a fixed-width column pinned to
+ * the bottom-right, so `right` keeps every text row out of its column for the
+ * whole height of the bar, and the text can then run the full height without
+ * ever reaching it. Reserving the stack's HEIGHT as well was reserving the same
+ * space twice: on a 30 minute bar that took 84px of 94px and left 2px for text,
+ * which rendered as a lone 10px name.
+ *
+ * Vertical clearance when the lane is narrow. In an overlap lane that same
+ * 76px gutter took nearly the whole width, so every bar in a three-way cluster
+ * showed "J..." above three rows of ellipsis. Once the row has been measured
+ * and the column beside the tray would be too narrow to read, the tray drops
+ * BELOW the text instead and `bottom` carries its footprint, so the text runs
+ * the full lane. The decision lives in `planBookingActionClearance` so the
+ * tray is drawn against the same height the gutter was planned from.
+ *
+ * @param shellRowWidthPx measured width of the text-plus-tray row; `null` until layout
+ * @param textPaddingPx vertical padding the text button spends on itself
  */
 function computeBookingActionCornerInset(
   b: Booking,
   blockHeightPx: number,
-): { right: number; bottom: number; hasActions: boolean } {
-  const plan = planBookingCornerActions(bookingCornerActionInput(b), blockHeightPx);
-  if (plan.actionCount <= 0) {
-    return { right: 0, bottom: 0, hasActions: false };
-  }
-  return {
-    right: BOOKING_ACTIONS_CORNER_RIGHT_PX,
-    bottom: 0,
-    hasActions: true,
-  };
+  shellRowWidthPx: number | null | undefined,
+  textPaddingPx: number,
+): BookingActionClearance {
+  return planBookingActionClearance(
+    bookingCornerActionInput(b),
+    blockHeightPx,
+    shellRowWidthPx,
+    textPaddingPx,
+    BOOKING_CARD_MIN_ROW_PX,
+  );
 }
 
 /** Transparent hit target at the bottom-right; only as tall/wide as its buttons. */
@@ -1612,10 +1666,13 @@ function CalendarBookingRightColumn({
   narrow = false,
   shellRowWidthPx,
   floating = false,
+  bottomOffsetPx = 0,
 }: {
   b: Booking;
   busy: boolean;
   blockHeightPx: number;
+  /** Lifts the tray off the bar's bottom edge, when a nested bar covers it. */
+  bottomOffsetPx?: number;
   onStatus: (id: string, next: BookingStatus) => void;
   onArrived: (id: string, arrived: boolean) => void;
   narrow?: boolean;
@@ -1660,7 +1717,7 @@ function CalendarBookingRightColumn({
       // The spacing already carries the corner inset the resize strip needs, and
       // taking the larger of the two put the tray 3px above where the plan sized
       // it, so the button overhung the top edge of every short bar.
-      bottomPx={spacing.bottomInsetPx}
+      bottomPx={spacing.bottomInsetPx + bottomOffsetPx}
       rightPx={BOOKING_CORNER_TRAY_RIGHT_PX}
       maxWidthPx={trayMaxWidthPx}
       topGapPx={spacing.topGapPx}
@@ -1937,15 +1994,17 @@ function DragBookingPreview({
   );
 }
 
+const SINGLE_LANE_LAYOUT: BookingClusterLayout = { laneIndex: 0, laneCount: 1 };
+
 const DraggableBookingShell = memo(function DraggableBookingShell({
   booking,
   top,
   height,
   slotHeightPx,
   heightExtraPx = 0,
-  laneIndex = 0,
-  laneCount = 1,
+  layout = SINGLE_LANE_LAYOUT,
   canDrag,
+  raised = false,
   children,
 }: {
   booking: Booking;
@@ -1955,9 +2014,11 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   slotHeightPx: number;
   /** Live vertical stretch while resizing (pixels). */
   heightExtraPx?: number;
-  laneIndex?: number;
-  laneCount?: number;
+  /** Lane, or the host it nests inside; see `layoutOverlapClusters`. */
+  layout?: BookingClusterLayout;
   canDrag: boolean;
+  /** Lifts the bar above its neighbours while it carries a prompt that must not be covered. */
+  raised?: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
@@ -1974,14 +2035,15 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
    * exactly the same size, and a saved 5 minute appointment still painted 15.
    */
   const totalHeight = Math.max(BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX, height + heightExtraPx);
-  const widthPct = 100 / Math.max(1, laneCount);
+  const horizontal = clusterLayoutHorizontalStyle(layout);
+  const nested = Boolean(layout.nestedInKey);
   const style = {
     top,
     height: totalHeight,
-    left: `calc(${laneIndex * widthPct}% + 0.25rem)`,
-    width: `calc(${widthPct}% - 0.5rem)`,
+    left: horizontal.left,
+    width: horizontal.width,
     transform: CSS.Translate.toString(transform),
-    zIndex: isDragging ? 50 : 20 + laneIndex,
+    zIndex: isDragging ? 50 : raised ? 48 : horizontal.zIndex,
     opacity: isDragging ? 0.85 : 1,
     pointerEvents: isDragging ? 'none' : undefined,
   } as CSSProperties;
@@ -1989,7 +2051,17 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
     ? { listeners, attributes, setActivatorNodeRef }
     : { listeners: undefined, attributes: undefined, setActivatorNodeRef: () => {} };
   return (
-    <div ref={setNodeRef} className="absolute" style={style}>
+    <div
+      ref={setNodeRef}
+      // Lane and nesting changes glide rather than snap: a resize that carries a
+      // booking out of a processing gap re-lanes it mid-drag, and a drop that
+      // lands one in a gap tucks it in. Top and height are deliberately NOT
+      // animated; both are under the pointer's direct control during a drag.
+      className={`absolute motion-safe:transition-[left,width] motion-safe:duration-200 motion-safe:ease-out ${
+        nested ? 'rounded-2xl shadow-[-10px_0_16px_-8px_rgba(2,32,71,0.55)]' : ''
+      }`}
+      style={style}
+    >
       {children(handleProps)}
     </div>
   );
@@ -2163,6 +2235,9 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   booking,
   visibility,
   venueName,
+  venueId,
+  columnKey,
+  serviceMap,
   variant,
   blockHeightPx = COMFORTABLE_SLOT_PX,
   rowOverlay = {},
@@ -2170,6 +2245,11 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   booking: LinkedBooking;
   visibility: LinkedColumn['visibility'];
   venueName: string;
+  /** Owner venue and column, for the grid-shape conversion the processing strip reads. */
+  venueId?: string;
+  columnKey?: string;
+  /** The owner venue's services, so the strip can fall back to the catalogue pattern. */
+  serviceMap?: Map<string, AppointmentService>;
   variant: 'day-grid' | 'week-grid';
   blockHeightPx?: number;
   rowOverlay?: BookingRowOverlay;
@@ -2213,14 +2293,28 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
   const cardDensity = contentHeightPx < 56 ? 'compact' : 'comfortable';
   const blockH = blockHeightPx;
 
+  /**
+   * The same processing strip an own booking paints. A read-only linked bar
+   * showed none, so a colour service on a linked column looked like one solid
+   * block of time while the same booking on its own venue showed the gap.
+   */
+  const processingStrip =
+    venueId && columnKey && serviceMap && visibility === 'full_details' ? (
+      <BookingProcessingStrip
+        b={linkedBookingToGridBooking(booking, venueId, columnKey) as Booking}
+        serviceMap={serviceMap}
+      />
+    ) : null;
+
   return (
     <div
       className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl"
-      style={bookingCalendarBlockCardStyle(palette, { linked: true })}
+      style={bookingCalendarBlockCardStyle(palette)}
     >
       <CalendarBookingStatusStripe palette={palette} />
+      {processingStrip}
       <div
-        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-2.5 text-left ${
+        className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-2.5 text-left ${
           blockH < 56 ? 'py-1.5' : 'py-2'
         }`}
       >
@@ -2322,9 +2416,12 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   onClassBlockClick,
   onCreateAt,
   bookingRowOverlayForId,
+  serviceMap,
 }: {
   column: LinkedColumn;
   bookings: LinkedBooking[];
+  /** The owner venue's services, for processing strips on this column's bars. */
+  serviceMap?: Map<string, AppointmentService>;
   eventBlocks?: ScheduleBlockDTO[];
   classBlocks?: ScheduleBlockDTO[];
   resourceMintSlots?: ResourceAvailabilityMintSlot[];
@@ -2340,6 +2437,29 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
   onCreateAt?: (time: string, ev: MouseEvent) => void;
   bookingRowOverlayForId?: (id: string) => BookingRowOverlay;
 }) {
+  /**
+   * The same lane and nesting layout the native grid uses. This column stacked
+   * every overlap on top of the last one, so two bookings at once were one bar.
+   */
+  const layouts = useMemo(() => {
+    const map = serviceMap ?? new Map<string, AppointmentService>();
+    return layoutOverlapClusters(
+      bookings.map((lb) => {
+        const asGrid = linkedBookingToGridBooking(lb, column.venueId, column.key) as Booking;
+        const start = linkedTimeToMinutes(lb.bookingTime);
+        const end = lb.bookingEndTime
+          ? linkedTimeToMinutes(lb.bookingEndTime)
+          : start + bookingCalendarDisplaySpanMinutes(asGrid, map);
+        return {
+          key: lb.id,
+          start,
+          end: Math.max(end, start + 1),
+          gaps: bookingProcessingWallGaps(asGrid, map),
+        };
+      }),
+    );
+  }, [bookings, column.key, column.venueId, serviceMap]);
+
   return (
     <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-300 last:border-r-0 sm:min-w-[240px]">
       <div className="relative" style={{ height: totalSlots * slotHeightPx }}>
@@ -2447,11 +2567,15 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
         {bookings.map((b) => {
           const top = linkedSlotTop(b.bookingTime, startHour, slotHeightPx);
           const height = linkedBlockHeight(b.bookingTime, b.bookingEndTime, slotHeightPx);
+          const layout = layouts.get(b.id) ?? SINGLE_LANE_LAYOUT;
+          const horizontal = clusterLayoutHorizontalStyle(layout, { baseZIndex: 15 });
           return (
             <div
               key={b.id}
-              className="absolute left-1 right-1 z-[15]"
-              style={{ top, height }}
+              className={`absolute motion-safe:transition-[left,width] motion-safe:duration-200 motion-safe:ease-out ${
+                layout.nestedInKey ? 'rounded-2xl shadow-[-10px_0_16px_-8px_rgba(2,32,71,0.55)]' : ''
+              }`}
+              style={{ top, height, left: horizontal.left, width: horizontal.width, zIndex: horizontal.zIndex }}
             >
               <button
                 type="button"
@@ -2473,6 +2597,9 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
                   booking={b}
                   visibility={column.visibility}
                   venueName={column.venueName}
+                  venueId={column.venueId}
+                  columnKey={column.key}
+                  serviceMap={serviceMap}
                   variant="day-grid"
                   blockHeightPx={height}
                   rowOverlay={bookingRowOverlayForId?.(b.id) ?? {}}
@@ -3046,6 +3173,38 @@ export function PractitionerCalendarView({
     if (res.kind === 'closed') return [];
     return res.ranges;
   }, [openingHours, activeDayDate, venueWideBlocks]);
+  /**
+   * Each linked venue's services in the native `AppointmentService` shape, so a
+   * linked booking paints its duration and processing gap exactly as an own
+   * booking does. Every linked venue is included, not only those on the native
+   * grid: the read-only column paints processing strips too, and the day range
+   * below needs a service duration for a linked booking with no stored end.
+   */
+  const linkedServiceMapsByVenue = useMemo(() => {
+    const out = new Map<string, Map<string, AppointmentService>>();
+    for (const v of linkedVenues) {
+      const m = new Map<string, AppointmentService>();
+      for (const s of v.services) {
+        m.set(s.id, {
+          id: s.id,
+          name: s.name,
+          duration_minutes: s.durationMinutes ?? 60,
+          buffer_minutes: s.bufferMinutes ?? 0,
+          processing_time_blocks: s.processingTimeBlocks ?? [],
+          colour: s.colour ?? '#6366f1',
+          price_pence: s.pricePence ?? null,
+          variants: (s.variants ?? []).map((v) => ({
+            id: v.id,
+            name: v.name,
+            processing_time_blocks: v.processingTimeBlocks,
+          })),
+        });
+      }
+      out.set(v.venueId, m);
+    }
+    return out;
+  }, [linkedVenues]);
+
   const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
     () => {
       // Pass the blocks so the grid follows the venue's RESOLVED hours for this date. An
@@ -3079,6 +3238,30 @@ export function PractitionerCalendarView({
         maxM = Math.max(maxM, endM);
       }
       /**
+       * Linked columns' bookings widen the day the same way. Only own bookings
+       * were counted, so a linked venue's 09:30 booking on a grid that opened at
+       * 10:00 was drawn above the top of the grid, over the column header, with
+       * no way to reach it. Hidden linked columns are left out: a booking the
+       * user has filtered off the page should not stretch it.
+       */
+      const shownLinkedColumnKeys =
+        visibleLinkedColumnIds === null ? null : new Set(visibleLinkedColumnIds);
+      for (const v of linkedVenues) {
+        const linkedServiceMap = linkedServiceMapsByVenue.get(v.venueId) ?? new Map();
+        for (const lb of v.bookings) {
+          if (lb.bookingDate !== activeDayDate || !lb.practitionerId) continue;
+          if (lb.experienceEventId && v.visibility === 'full_details') continue;
+          const key = linkedColumnKey(v.venueId, lb.practitionerId);
+          if (shownLinkedColumnKeys && !shownLinkedColumnKeys.has(key)) continue;
+          const asGrid = linkedBookingToGridBooking(lb, v.venueId, key) as Booking;
+          const startM = timeToMinutes(asGrid.booking_time);
+          if (!Number.isFinite(startM)) continue;
+          const endM = startM + bookingCalendarDisplaySpanMinutes(asGrid, linkedServiceMap);
+          minM = Math.min(minM, startM);
+          maxM = Math.max(maxM, endM);
+        }
+      }
+      /**
        * REAL blocks only. `displayBlocks` also carries `scheduleClosureBlocks`, which are
        * generated FROM these bounds by buildVenueScheduleClosureBlocks and then clipped to
        * them. Feeding those back in makes the computation circular: on a day amended to
@@ -3103,7 +3286,7 @@ export function PractitionerCalendarView({
       const endHour = Math.max(startHour + 1, Math.ceil(maxM / 60));
       return { startHour, endHour };
     },
-    [activeDayDate, blocks, practitionerBreakBlocks, bookings, openingHours, scheduleBlocks, services, venueTimezone, venueWideBlocks, viewMode],
+    [activeDayDate, blocks, practitionerBreakBlocks, bookings, linkedServiceMapsByVenue, linkedVenues, openingHours, scheduleBlocks, services, venueTimezone, venueWideBlocks, viewMode, visibleLinkedColumnIds],
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
@@ -3993,26 +4176,6 @@ export function PractitionerCalendarView({
 
   const serviceMap = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
 
-  const linkedServiceMapsByVenue = useMemo(() => {
-    const out = new Map<string, Map<string, AppointmentService>>();
-    for (const v of linkedVenues) {
-      if (!linkedColumnUsesNativeGrid(v)) continue;
-      const m = new Map<string, AppointmentService>();
-      for (const s of v.services) {
-        m.set(s.id, {
-          id: s.id,
-          name: s.name,
-          duration_minutes: s.durationMinutes ?? 60,
-          buffer_minutes: s.bufferMinutes ?? 0,
-          processing_time_blocks: s.processingTimeBlocks ?? [],
-          colour: s.colour ?? '#6366f1',
-          price_pence: s.pricePence ?? null,
-        });
-      }
-      out.set(v.venueId, m);
-    }
-    return out;
-  }, [linkedVenues]);
 
   const serviceMapForBooking = useCallback(
     (b: Booking): Map<string, AppointmentService> => {
@@ -7037,7 +7200,6 @@ export function PractitionerCalendarView({
                                       linkedBookingStatusBooking(b, bookingRowOverlayForId(b.id)),
                                       bookingRowOverlayForId(b.id),
                                     ),
-                                    { linked: true },
                                   )}
                                   title={
                                     clickable
@@ -7713,7 +7875,11 @@ export function PractitionerCalendarView({
                           const resizeDeltaMins = (resizeVisual.deltaYPx / slotHeightPx) * SLOT_MINUTES;
                           return Math.max(MIN_APPOINTMENT_CORE_DURATION_MINUTES, baseDuration + resizeDeltaMins);
                         };
-                        const clusterLayouts = computeBookingClusterLayouts(bookingClusters, durationForLayout);
+                        const clusterLayouts = computeBookingClusterLayouts(
+                          bookingClusters,
+                          durationForLayout,
+                          (b) => bookingProcessingWallGaps(b, serviceMapForBooking(b)),
+                        );
                         return bookingClusters.map((cluster) => {
                           const layout = clusterLayouts.get(clusterKey(cluster)) ?? { laneIndex: 0, laneCount: 1 };
                         if (cluster.kind === 'single') {
@@ -7753,7 +7919,21 @@ export function PractitionerCalendarView({
                            * here rather than inside the render prop so the height budget can
                            * account for it (the same value is reused down there).
                            */
-                          const actionBlockHeight = Math.max(0, height + resizeExtra - reservePx);
+                          /**
+                           * Bars nested in this one (booked into its processing gap) cover
+                           * everything under them but the left inset, so the text keeps to
+                           * the span above the first of them and the tray sits below the
+                           * lowest, or moves up beside the text when a nested bar runs to the
+                           * bottom edge. A bar with nothing nested keeps the whole box.
+                           */
+                          const hostRegions = hostRegionsPx(layout, timeToMinutes(b.booking_time), blockH, slotHeightPx);
+                          const trayBottomOffsetPx = blockH - hostRegions.trayBottomPx;
+                          const traySpanPx = hostRegions.trayBottomPx - hostRegions.trayTopPx;
+                          const actionBlockHeight = Math.max(
+                            0,
+                            traySpanPx - (trayBottomOffsetPx > 0 ? 0 : reservePx),
+                          );
+                          const textSpanPx = hostRegions.textBottomPx - hostRegions.textTopPx;
                           /**
                            * Where the actions go, decided PER BAR rather than per view mode.
                            *
@@ -7775,30 +7955,13 @@ export function PractitionerCalendarView({
                            * costs no height (it clears the text via `right` alone) and
                            * shrinks its buttons to fit, so it serves short bars too.
                            */
-                          const barActionInset = computeBookingActionCornerInset(b, actionBlockHeight);
-                          // Room left inside the bar once the resize affordance, the action
-                          // tray and the button's own padding are taken out. Density and the
-                          // pills-row decision are made from this, not the raw bar height.
-                          const barInnerHeightPx = Math.max(
-                            0,
-                            blockH -
-                              BOOKING_CARD_BORDER_PX -
-                              reservePx -
-                              (barActionInset.hasActions ? barActionInset.bottom : 0) -
-                              bookingCardPadding(blockH).budgetPx,
-                          );
-                          const cardDensity =
-                            isOverlapLane || barInnerHeightPx < 56 ? 'compact' : 'comfortable';
-                          const showPillsRow =
-                            !isOverlapLane &&
-                            barInnerHeightPx >= (cardDensity === 'compact' ? 72 : 88) &&
-                            bookingHasBlockPills(b);
-                          // The pills row is a sibling of the card inside the same box, so
-                          // its height is not the card's to spend.
-                          const contentHeightPx = Math.max(
-                            0,
-                            barInnerHeightPx - (showPillsRow ? BOOKING_PILLS_ROW_PX : 0),
-                          );
+                          // Width-agnostic: whether the bar carries any actions at all. The
+                          // gutter itself is decided inside the measured row below, because
+                          // in a narrow lane the tray drops under the text rather than
+                          // beside it, and that needs the row's width.
+                          const barHasActions =
+                            planBookingCornerActions(bookingCornerActionInput(b), actionBlockHeight)
+                              .actionCount > 0;
                           return (
                             <DraggableBookingShell
                               key={`${b.id}-${b.status}-${b.client_arrived_at ?? ''}`}
@@ -7807,17 +7970,17 @@ export function PractitionerCalendarView({
                               height={height}
                               slotHeightPx={slotHeightPx}
                               heightExtraPx={resizeExtra}
-                              laneIndex={layout.laneIndex}
-                              laneCount={layout.laneCount}
+                              layout={layout}
                               canDrag={canDrag}
+                              raised={showInlineScheduleFollowUp}
                             >
                               {(handle) => (
+                                <>
                                 <div
                                   className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
                                     flash ? 'motion-safe:animate-pulse' : ''
                                   }`}
                                   style={bookingCalendarBlockCardStyle(palette, {
-                                    linked: Boolean(b._linkedColumnKey),
                                     // Ring must ride the inline shadow; a `ring-*`
                                     // class here loses to this very style object.
                                     flash,
@@ -7895,8 +8058,44 @@ export function PractitionerCalendarView({
                                     className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col"
                                   >
                                       {(shellRowWidthPx) => {
-                                        // Same value the height budget above was built from.
-                                        const actionInset = barActionInset;
+                                        const cardPad = bookingCardPadding(textSpanPx);
+                                        // When the tray has a strip of its own under the nested
+                                        // bars, the text needs no clearance from it: the row width
+                                        // is withheld so the planner keeps its default (beside)
+                                        // and the gutter is then zeroed below.
+                                        const planned = computeBookingActionCornerInset(
+                                          b,
+                                          actionBlockHeight,
+                                          hostRegions.traySharesText ? shellRowWidthPx : null,
+                                          cardPad.budgetPx,
+                                        );
+                                        const actionInset = hostRegions.traySharesText
+                                          ? planned
+                                          : { ...planned, right: 0, bottom: 0 };
+                                        // Room left for text once the resize affordance, the action
+                                        // tray, nested bars and the button's own padding are taken
+                                        // out. Density and the pills-row decision are made from
+                                        // this, not the raw bar height.
+                                        const barInnerHeightPx = Math.max(
+                                          0,
+                                          textSpanPx -
+                                            BOOKING_CARD_BORDER_PX -
+                                            (hostRegions.textBottomPx >= blockH ? reservePx : 0) -
+                                            (actionInset.hasActions ? actionInset.bottom : 0) -
+                                            cardPad.budgetPx,
+                                        );
+                                        const cardDensity =
+                                          isOverlapLane || barInnerHeightPx < 56 ? 'compact' : 'comfortable';
+                                        const showPillsRow =
+                                          !isOverlapLane &&
+                                          barInnerHeightPx >= (cardDensity === 'compact' ? 72 : 88) &&
+                                          bookingHasBlockPills(b);
+                                        // The pills row is a sibling of the card inside the same
+                                        // box, so its height is not the card's to spend.
+                                        const contentHeightPx = Math.max(
+                                          0,
+                                          barInnerHeightPx - (showPillsRow ? BOOKING_PILLS_ROW_PX : 0),
+                                        );
                                         return (
                                           <>
                                             <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -7912,13 +8111,14 @@ export function PractitionerCalendarView({
                                               title={resName ? 'Open to change slot' : undefined}
                                               className={`flex min-h-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} text-left transition focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300`}
                                               style={{
-                                                paddingTop: bookingCardPadding(blockH).topPx,
-                                                paddingRight: actionInset.hasActions
+                                                paddingTop: cardPad.topPx + hostRegions.textTopPx,
+                                                paddingRight: actionInset.hasActions && actionInset.right > 0
                                                   ? actionInset.right
                                                   : undefined,
-                                                paddingBottom: actionInset.hasActions
-                                                  ? actionInset.bottom + reservePx
-                                                  : reservePx || undefined,
+                                                paddingBottom:
+                                                  (blockH - hostRegions.textBottomPx) +
+                                                    (actionInset.hasActions ? actionInset.bottom : 0) +
+                                                    reservePx || undefined,
                                               }}
                                               aria-label={`Open booking details for ${b.guest_name}`}
                                             >
@@ -7962,7 +8162,11 @@ export function PractitionerCalendarView({
                                             <CalendarBookingRightColumn
                                               b={b}
                                               busy={qBusy}
-                                              blockHeightPx={actionBlockHeight}
+                                              // The height the gutter was planned from: the bar's
+                                              // own, or less when the tray sits below the text
+                                              // and had to shrink to leave a row above it.
+                                              blockHeightPx={actionInset.trayBlockHeightPx}
+                                              bottomOffsetPx={trayBottomOffsetPx}
                                               onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
                                               onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
                                               narrow={isOverlapLane}
@@ -7983,17 +8187,6 @@ export function PractitionerCalendarView({
                                           Until {resizePreviewEnd.endHm}
                                         </span>
                                       ) : null}
-                                      {showInlineScheduleFollowUp ? (
-                                        <ScheduleEditFollowUpPill
-                                          palette={palette}
-                                          kind={scheduleFollowUpKind}
-                                          countdownSec={modificationNotifyCountdownSec}
-                                          disabled={scheduleUndoPending}
-                                          onNotifyNow={() => void confirmInlineDragMove()}
-                                          onSkip={dismissPendingModificationGuestNotify}
-                                          onUndo={() => void undoLastScheduleEdit()}
-                                        />
-                                      ) : null}
                                       {resizeArmingThis ? <ResizeHoldHint label="Hold to adjust" /> : null}
                                       {/* touch-action stays pannable so a scroll that merely grazes this thin
                                           handle still pans the page; a deliberate ~1s hold (withResizeHold) is
@@ -8008,7 +8201,7 @@ export function PractitionerCalendarView({
                                             ? 'bg-black/[0.12]'
                                             : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
                                         }`}
-                                        style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX, right: barActionInset.hasActions ? BOOKING_ACTIONS_CORNER_RIGHT_PX : 0 }}
+                                        style={{ height: BOOKING_RESIZE_HANDLE_HEIGHT_PX, right: barHasActions ? BOOKING_ACTIONS_CORNER_RIGHT_PX : 0 }}
                                         onPointerDown={beginAppointmentResize(b)}
                                         onMouseDown={(e) => e.stopPropagation()}
                                       >
@@ -8024,6 +8217,24 @@ export function PractitionerCalendarView({
                                     </>
                                   ) : null}
                                 </div>
+                                {/*
+                                  Outside the card on purpose. The card clips its overflow, and
+                                  the prompt is taller than a compact bar and wider than an
+                                  overlap lane, so it was cut off exactly when it mattered.
+                                  The shell is not clipped, and is raised while this shows.
+                                */}
+                                {canDrag && showInlineScheduleFollowUp ? (
+                                  <ScheduleEditFollowUpPill
+                                    palette={palette}
+                                    kind={scheduleFollowUpKind}
+                                    countdownSec={modificationNotifyCountdownSec}
+                                    disabled={scheduleUndoPending}
+                                    onNotifyNow={() => void confirmInlineDragMove()}
+                                    onSkip={dismissPendingModificationGuestNotify}
+                                    onUndo={() => void undoLastScheduleEdit()}
+                                  />
+                                ) : null}
+                                </>
                               )}
                             </DraggableBookingShell>
                           );
@@ -8054,6 +8265,12 @@ export function PractitionerCalendarView({
                         const visitResizeExtra =
                           resizeVisual?.bookingId === first.id ? resizeVisual.deltaYPx : 0;
                         const visitBlockH = height + visitResizeExtra;
+                        // Bars nested in this visit's processing gaps; the tray moves off
+                        // the bottom edge when one of them covers it. Segment text is not
+                        // re-flowed around them (each segment keeps its own box).
+                        const visitRegions = hostRegionsPx(layout, timeToMinutes(first.booking_time), visitBlockH, slotHeightPx);
+                        const visitTrayBottomOffsetPx = visitBlockH - visitRegions.trayBottomPx;
+                        const visitTrayHeightPx = Math.max(0, visitRegions.trayBottomPx - visitRegions.trayTopPx);
                         const visitPreview = (() => {
                           if (visitResizeExtra === 0) return null;
                           const visit = resolveAppointmentVisit(items.map(visitRowFor));
@@ -8117,17 +8334,17 @@ export function PractitionerCalendarView({
                             height={height}
                             slotHeightPx={slotHeightPx}
                             heightExtraPx={visitResizeExtra}
-                            laneIndex={layout.laneIndex}
-                            laneCount={layout.laneCount}
+                            layout={layout}
                             canDrag={visitResizable}
+                            raised={showVisitScheduleFollowUp}
                           >
                             {(handle) => (
+                              <>
                               <div
                                 className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse' : ''
                                 }`}
                                 style={bookingCalendarBlockCardStyle(clusterPalette, {
-                                  linked: Boolean(first._linkedColumnKey),
                                   flash,
                                 })}
                                 title={serviceTitle || undefined}
@@ -8220,7 +8437,23 @@ export function PractitionerCalendarView({
                                 {visitMoveArming ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
                                 <BookingGuestActionsRowMeasured className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                                   {(shellRowWidthPx) => {
-                                    const actionInset = computeBookingActionCornerInset(first, visitBlockH);
+                                    const actionInset = computeBookingActionCornerInset(
+                                      first,
+                                      visitTrayHeightPx,
+                                      shellRowWidthPx,
+                                      BOOKING_CARD_PADDING_SEGMENT_PX,
+                                    );
+                                    // The tray's band, measured up from the bar's bottom edge.
+                                    const trayBottomFromBottomPx = visitTrayBottomOffsetPx;
+                                    const trayTopFromBottomPx =
+                                      visitTrayBottomOffsetPx + (actionInset.hasActions ? actionInset.bottom : 0);
+                                    // Each segment's distance from the bar's bottom edge, so a
+                                    // tray stacked BELOW the text can be charged to exactly the
+                                    // segments it overlaps rather than to the last one alone.
+                                    const segmentApproxHeights = items.map(
+                                      (seg) =>
+                                        visitBlockH * (segmentDurationOf(seg) / Math.max(segmentSpanMins, 1)),
+                                    );
                                     return (
                                     <>
                                       {/*
@@ -8240,24 +8473,48 @@ export function PractitionerCalendarView({
                                           const dur = segmentDurationOf(b);
                                           const sid = serviceIdForBooking(b);
                                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
-                                          const segmentApproxPx =
-                                            visitBlockH * (dur / Math.max(segmentSpanMins, 1));
+                                          const segmentApproxPx = segmentApproxHeights[segIdx]!;
                                           /**
-                                           * Only the bottom segment shares its box with the action
-                                           * tray, so only it gives up height for it.
+                                           * Clearance for the tray, per segment.
+                                           *
+                                           * Beside (wide lanes): every segment keeps the gutter on
+                                           * its right, and no height is spent.
+                                           *
+                                           * Below (narrow lanes): only the segments whose box the
+                                           * tray's footprint reaches give up height, each by the
+                                           * amount it overlaps. A segment that cannot spare that
+                                           * and still show one row keeps the gutter instead, so
+                                           * its text never runs under the buttons.
                                            */
-                                          const segmentTrayReservePx =
-                                            segIdx === items.length - 1 && actionInset.hasActions
-                                              ? Math.min(
-                                                  actionInset.bottom,
-                                                  Math.max(
-                                                    0,
-                                                    segmentApproxPx -
-                                                      BOOKING_CARD_PADDING_SEGMENT_PX -
-                                                      BOOKING_CARD_MIN_ROW_PX,
-                                                  ),
+                                          const segmentBottomOffsetPx = segmentApproxHeights
+                                            .slice(segIdx + 1)
+                                            .reduce((a, h) => a + h, 0);
+                                          const segmentTopFromBottomPx = segmentBottomOffsetPx + segmentApproxPx;
+                                          const segmentTrayOverlapPx =
+                                            actionInset.hasActions &&
+                                            actionInset.mode === 'below' &&
+                                            trayBottomFromBottomPx < segmentTopFromBottomPx
+                                              ? Math.max(
+                                                  0,
+                                                  Math.min(segmentApproxPx, trayTopFromBottomPx - segmentBottomOffsetPx),
                                                 )
                                               : 0;
+                                          const segmentCanAffordOverlap =
+                                            segmentTrayOverlapPx <=
+                                            segmentApproxPx -
+                                              BOOKING_CARD_PADDING_SEGMENT_PX -
+                                              BOOKING_CARD_MIN_ROW_PX;
+                                          const segmentTrayReservePx =
+                                            segmentTrayOverlapPx > 0 && segmentCanAffordOverlap
+                                              ? segmentTrayOverlapPx
+                                              : 0;
+                                          const segmentGutterPx = !actionInset.hasActions
+                                            ? 0
+                                            : actionInset.mode === 'below'
+                                              ? segmentTrayOverlapPx > 0 && !segmentCanAffordOverlap
+                                                ? BOOKING_ACTIONS_CORNER_RIGHT_PX
+                                                : 0
+                                              : actionInset.right;
                                           // Room left in this segment once its own padding, the
                                           // tray reserve and (below) the pills row have had their
                                           // share. Spending the raw segment height is what pushed
@@ -8304,7 +8561,7 @@ export function PractitionerCalendarView({
                                                 // segment's share of the tray height, when the inset
                                                 // asks for one.
                                                 style={{
-                                                  paddingRight: actionInset.hasActions ? actionInset.right : undefined,
+                                                  paddingRight: segmentGutterPx || undefined,
                                                   paddingBottom: segmentTrayReservePx || undefined,
                                                 }}
                                                 aria-label={`Open booking details for ${b.guest_name}`}
@@ -8358,8 +8615,10 @@ export function PractitionerCalendarView({
                                         busy={qBusy}
                                         // The same height the inset above was planned from, so
                                         // the tray and the gutter agree during a resize preview
-                                        // as well as at rest.
-                                        blockHeightPx={visitBlockH}
+                                        // as well as at rest (and shrink together in a narrow
+                                        // lane where the tray sits below the text).
+                                        blockHeightPx={actionInset.trayBlockHeightPx}
+                                        bottomOffsetPx={visitTrayBottomOffsetPx}
                                         onStatus={(_id, s) => void quickPatchBookingCluster(items, { status: s })}
                                         onArrived={(_id, v) => void quickPatchBookingCluster(items, { client_arrived: v })}
                                         narrow={isOverlapLane}
@@ -8374,17 +8633,6 @@ export function PractitionerCalendarView({
                                         and the resolver decides which service
                                         absorbs it.
                                       */}
-                                      {showVisitScheduleFollowUp ? (
-                                        <ScheduleEditFollowUpPill
-                                          palette={clusterPalette}
-                                          kind={visitScheduleFollowUpKind}
-                                          countdownSec={modificationNotifyCountdownSec}
-                                          disabled={scheduleUndoPending}
-                                          onNotifyNow={() => void confirmInlineDragMove()}
-                                          onSkip={dismissPendingModificationGuestNotify}
-                                          onUndo={() => void undoLastScheduleEdit()}
-                                        />
-                                      ) : null}
                                       {/* The same running end time a single booking shows under the drag. */}
                                       {resizePreviewEnd?.bookingId === first.id ? (
                                         <span
@@ -8428,6 +8676,19 @@ export function PractitionerCalendarView({
                                   }}
                                 </BookingGuestActionsRowMeasured>
                               </div>
+                              {/* Outside the clipped card, as on a single booking. */}
+                              {showVisitScheduleFollowUp ? (
+                                <ScheduleEditFollowUpPill
+                                  palette={clusterPalette}
+                                  kind={visitScheduleFollowUpKind}
+                                  countdownSec={modificationNotifyCountdownSec}
+                                  disabled={scheduleUndoPending}
+                                  onNotifyNow={() => void confirmInlineDragMove()}
+                                  onSkip={dismissPendingModificationGuestNotify}
+                                  onUndo={() => void undoLastScheduleEdit()}
+                                />
+                              ) : null}
+                              </>
                             )}
                           </DraggableBookingShell>
                         );
@@ -8473,6 +8734,7 @@ export function PractitionerCalendarView({
                       totalSlots={TOTAL_SLOTS}
                       slotHeightPx={slotHeightPx}
                       bookingRowOverlayForId={bookingRowOverlayForId}
+                      serviceMap={linkedServiceMapsByVenue.get(col.venueId)}
                       onBookingClick={(b, anchor) => openLinkedBooking(col, b, anchor)}
                       onEventBlockClick={(b) => openEventInstanceDetail(b, col)}
                       onClassBlockClick={openClassInstanceDetail}

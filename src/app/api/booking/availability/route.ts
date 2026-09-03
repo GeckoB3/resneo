@@ -605,6 +605,8 @@ async function handleAppointmentAvailability(
       // pre-summed length); the bridge sizes each provider calendar's slot with them.
       variantId: searchParams.get('variant_id') || null,
       addonIds: searchParams.getAll('addon_ids').filter(Boolean),
+      // A group booking on the combined page sends the people already placed.
+      phantoms: phantomBookings,
     });
     return NextResponse.json(result);
   }

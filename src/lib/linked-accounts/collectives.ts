@@ -806,7 +806,19 @@ export async function loadCollectiveBookingLinksForVenue(
     if ((activeCount.get(c.id as string) ?? 0) < 2) continue;
     const name = (c.name as string) ?? 'Combined booking page';
     if ((c.slug_strategy as string) === 'adopt_member' && c.adopted_venue_id) {
-      if ((c.adopted_venue_id as string) === venueId) continue; // already shown as the venue's own page
+      if ((c.adopted_venue_id as string) === venueId) {
+        // The combined page lives at this venue's own address. It is returned
+        // here, as a combined link, so the sidebar can show ONE entry for it and
+        // hide the solo "Your Booking Page" link that would point at the same
+        // page under a different name.
+        const { data: own } = await admin
+          .from('venues')
+          .select('slug')
+          .eq('id', venueId)
+          .maybeSingle();
+        if (own?.slug) out.push({ id: c.id as string, name, url: `/book/${own.slug as string}` });
+        continue;
+      }
       const { data: adopted } = await admin
         .from('venues')
         .select('slug')

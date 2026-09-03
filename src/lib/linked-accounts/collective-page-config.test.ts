@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   sanitizeCollectiveBookingPageConfig,
   mergeCollectiveBookingPageConfigPatch,
+  inheritCollectivePageConfigFromHost,
+  collectivePageConfigHasOwnTabSettings,
 } from './collective-page-config';
 
 const CAL_ID = '11111111-1111-1111-1111-111111111111';
@@ -103,5 +105,64 @@ describe('services_layout on a combined page', () => {
     expect(sanitizeCollectiveBookingPageConfig({ services_layout: 'accordion' }).services_layout).toBe('accordion');
     expect(sanitizeCollectiveBookingPageConfig({ services_layout: 'sections' })).not.toHaveProperty('services_layout');
     expect(sanitizeCollectiveBookingPageConfig({ services_layout: 'grid' })).not.toHaveProperty('services_layout');
+  });
+});
+
+describe('inheritCollectivePageConfigFromHost', () => {
+  const host = {
+    show_services_tab: true,
+    show_team_tab: true,
+    show_about_tab: true,
+    about: 'Welcome to the salon',
+    gallery: ['https://cdn.example.com/g1.jpg'],
+    social_links: { instagram: 'https://instagram.com/salon' },
+    brand_primary: '#ff0000',
+  };
+
+  /**
+   * The bug this pins: a freshly linked combined page has an empty config, so
+   * the host's Services, Meet the team and About tabs all disappeared.
+   */
+  it('borrows the host tabs and About content when the combined page has none of its own', () => {
+    const out = inheritCollectivePageConfigFromHost({ logo_crop: { x: 50, y: 50, zoom: 1 } }, host);
+    expect(out.show_services_tab).toBe(true);
+    expect(out.show_team_tab).toBe(true);
+    expect(out.show_about_tab).toBe(true);
+    expect(out.about).toBe('Welcome to the salon');
+    expect(out.gallery).toEqual(['https://cdn.example.com/g1.jpg']);
+    expect(out.social_links).toEqual({ instagram: 'https://instagram.com/salon' });
+    // Branding is the collective's own and is never borrowed.
+    expect(out.brand_primary).toBeUndefined();
+    expect(out.logo_crop).toEqual({ x: 50, y: 50, zoom: 1 });
+  });
+
+  it('leaves the combined page alone once the host has saved any tab setting there', () => {
+    const own = { show_services_tab: true, show_about_tab: false };
+    expect(inheritCollectivePageConfigFromHost(own, host)).toEqual(own);
+  });
+
+  it('keeps the combined page text over the host text', () => {
+    const out = inheritCollectivePageConfigFromHost({ about: 'Our combined studio' }, host);
+    expect(out.about).toBe('Our combined studio');
+    expect(out.show_team_tab).toBe(true);
+  });
+
+  it('does nothing without a host config', () => {
+    expect(inheritCollectivePageConfigFromHost({}, null)).toEqual({});
+  });
+});
+
+describe('sanitizeCollectiveBookingPageConfig tab settings', () => {
+  it('keeps an explicit off so switching every tab off does not read as never set', () => {
+    const out = sanitizeCollectiveBookingPageConfig({
+      show_services_tab: false,
+      show_team_tab: false,
+      show_about_tab: false,
+    });
+    expect(out.show_services_tab).toBe(false);
+    expect(out.show_team_tab).toBe(false);
+    expect(out.show_about_tab).toBe(false);
+    expect(collectivePageConfigHasOwnTabSettings(out)).toBe(true);
+    expect(collectivePageConfigHasOwnTabSettings({})).toBe(false);
   });
 });

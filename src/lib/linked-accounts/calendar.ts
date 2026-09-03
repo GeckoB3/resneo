@@ -114,6 +114,15 @@ export interface LinkedService {
   processingTimeBlocks?: import('@/types/booking-models').ProcessingTimeBlock[];
   colour?: string;
   pricePence?: number | null;
+  /**
+   * Variants, for the processing pattern a variant booking paints when it has
+   * no stored snapshot. The native grid resolves the same way.
+   */
+  variants?: {
+    id: string;
+    name: string;
+    processingTimeBlocks?: import('@/types/booking-models').ProcessingTimeBlock[];
+  }[];
 }
 
 /** Bookable resource assigned to a staff calendar column (for free-slot indicators). */

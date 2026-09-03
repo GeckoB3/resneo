@@ -173,6 +173,8 @@ export async function loadCollectiveDayAvailability(
     /** The customer's chosen variant / add-ons, resolved per provider calendar. */
     variantId?: string | null;
     addonIds?: string[];
+    /** Earlier members of a group booking, so their slots count as taken. */
+    phantoms?: PhantomBooking[];
   },
 ): Promise<{ date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean }> {
   const { collectiveId, offeringId, date } = params;
@@ -226,6 +228,7 @@ export async function loadCollectiveDayAvailability(
           const idx = input.services.findIndex((s) => s.id === t.sourceServiceId);
           if (idx >= 0) input.services[idx] = { ...input.services[idx]!, duration_minutes: dur };
         }
+        if (params.phantoms && params.phantoms.length > 0) input.phantomBookings = params.phantoms;
         attachVenueClockToAppointmentInput(input, clock, null);
         const result = computeAppointmentAvailability(input);
         const slots: DaySlot[] = [];

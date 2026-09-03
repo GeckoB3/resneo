@@ -32,7 +32,51 @@ export function sanitizeCollectiveBookingPageConfig(raw: unknown): CollectiveBoo
   const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const cover = sanitizeCoverPhotoUrl(src.cover_photo_url);
   if (cover) base.cover_photo_url = cover;
+  // A combined page inherits the host venue's tab settings until the host has
+  // set its own (see `inheritCollectivePageConfigFromHost`), so an explicit
+  // "off" must survive sanitising or switching every tab off would read as
+  // "never set" and the host's tabs would come straight back.
+  if (src.show_services_tab === false) base.show_services_tab = false;
+  if (src.show_team_tab === false) base.show_team_tab = false;
   return base;
+}
+
+const TAB_KEYS = ['show_services_tab', 'show_team_tab', 'show_about_tab'] as const;
+
+/** True once the host has saved any tab setting for the combined page. */
+export function collectivePageConfigHasOwnTabSettings(
+  config: BookingPageConfig | null | undefined,
+): boolean {
+  if (!config) return false;
+  return TAB_KEYS.some((key) => typeof config[key] === 'boolean');
+}
+
+/**
+ * Fill a combined page's config from the host venue's own booking page, for the
+ * parts the host has not set on the combined page yet.
+ *
+ * A collective is created with an empty page config, and the tab toggles are
+ * opt-in, so a freshly linked combined page showed the booking form alone:
+ * the Services, Meet the team and About tabs the host had on its own page all
+ * vanished the moment its clients were sent to the combined address. The page
+ * is designed to look like one venue and already borrows the host's address,
+ * phone and hours, so it borrows the host's tabs too, plus the About tab's
+ * text, gallery and social links, until the host edits them on the combined
+ * page. Once any tab setting has been saved there, the host's choices stand.
+ */
+export function inheritCollectivePageConfigFromHost(
+  collectiveConfig: CollectiveBookingPageConfig,
+  hostConfig: BookingPageConfig | null | undefined,
+): CollectiveBookingPageConfig {
+  if (!hostConfig || collectivePageConfigHasOwnTabSettings(collectiveConfig)) return collectiveConfig;
+  const out: CollectiveBookingPageConfig = { ...collectiveConfig };
+  for (const key of TAB_KEYS) {
+    if (typeof hostConfig[key] === 'boolean') out[key] = hostConfig[key];
+  }
+  if (out.about == null && typeof hostConfig.about === 'string') out.about = hostConfig.about;
+  if (out.gallery == null && Array.isArray(hostConfig.gallery)) out.gallery = hostConfig.gallery;
+  if (out.social_links == null && hostConfig.social_links) out.social_links = hostConfig.social_links;
+  return out;
 }
 
 /**

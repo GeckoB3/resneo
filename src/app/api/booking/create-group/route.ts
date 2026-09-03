@@ -55,6 +55,8 @@ import {
 } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
+import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
@@ -136,7 +138,7 @@ export async function POST(request: NextRequest) {
     }
 
     const {
-      venue_id,
+      venue_id: requestedVenueId,
       first_name,
       last_name,
       email,
@@ -148,6 +150,7 @@ export async function POST(request: NextRequest) {
       dietary_notes,
       marketing_consent: marketingConsentRaw,
     } = parsed.data;
+    let venue_id = requestedVenueId;
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
@@ -188,6 +191,51 @@ export async function POST(request: NextRequest) {
       isOnlineLikeSource && marketingConsentRaw !== undefined ? marketingConsentRaw : undefined;
 
     const supabase = getSupabaseAdminClient();
+
+    /**
+     * Combined booking page (plan §22). The public flow targets the synthetic
+     * collective venue (its id IS the collective id), as it does for a single
+     * booking. Resolve every person's (offering, calendar) to the owning venue
+     * and the real source service, the way `booking/create` does for one.
+     *
+     * A group shares one venue row, one guest contact and one payment, so every
+     * person must land in the same owning venue. A party split across member
+     * venues is refused with a message that says what to do instead; the
+     * alternative was silently writing half the group to the wrong venue.
+     */
+    let collectiveId: string | null = null;
+    const collectiveOfferingByPerson = new Map<number, string>();
+    if (await isCollectiveId(supabase, venue_id)) {
+      collectiveId = venue_id;
+      let owningVenueId: string | null = null;
+      for (let i = 0; i < people.length; i++) {
+        const person = people[i]!;
+        const target = await resolveCombinedBookingTarget(supabase, {
+          collectiveId,
+          offeringId: person.appointment_service_id,
+          calendarId: person.practitioner_id,
+        });
+        if (!target) {
+          return NextResponse.json(
+            { error: 'This booking option is no longer available.' },
+            { status: 409 },
+          );
+        }
+        if (owningVenueId && owningVenueId !== target.venueId) {
+          return NextResponse.json(
+            {
+              error:
+                'Everyone in a group booking needs to be with the same venue. Please book the other people separately.',
+            },
+            { status: 409 },
+          );
+        }
+        owningVenueId = target.venueId;
+        collectiveOfferingByPerson.set(i, person.appointment_service_id);
+        person.appointment_service_id = target.sourceServiceId;
+      }
+      if (owningVenueId) venue_id = owningVenueId;
+    }
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
@@ -270,6 +318,8 @@ export async function POST(request: NextRequest) {
       addon_snapshots: BookingAddonSnapshot[];
       addons_total_price_pence: number;
       addons_total_duration_minutes: number;
+      /** The combined-page offering this person booked through, for attribution. */
+      collective_service_item_id: string | null;
     }> = [];
 
     const phantoms: PhantomBooking[] = [];
@@ -296,6 +346,30 @@ export async function POST(request: NextRequest) {
 
       // Inject phantom bookings from earlier people in this group (overlap checks)
       input.phantomBookings = [...phantoms];
+      // Combined page: the offering's effective price and duration on this
+      // calendar stand in for the source service's base terms, applied before
+      // the variant and add-ons as the single-booking route does.
+      const collectiveOverride = collectiveId
+        ? await resolveCollectiveServiceOverride(supabase, {
+            collectiveId,
+            collectiveServiceItemId: collectiveOfferingByPerson.get(i) ?? null,
+            venueId: venue_id,
+            sourceServiceId: person.appointment_service_id,
+            practitionerId: person.practitioner_id,
+          })
+        : null;
+      if (collectiveOverride) {
+        const oidx = input.services.findIndex((s) => s.id === person.appointment_service_id);
+        if (oidx >= 0) {
+          input.services[oidx] = {
+            ...input.services[oidx]!,
+            ...(collectiveOverride.durationMinutes != null
+              ? { duration_minutes: collectiveOverride.durationMinutes }
+              : {}),
+            ...(collectiveOverride.pricePence != null ? { price_pence: collectiveOverride.pricePence } : {}),
+          };
+        }
+      }
 
       let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
       if (person.service_variant_id) {
@@ -519,6 +593,7 @@ export async function POST(request: NextRequest) {
         addon_snapshots: personAddonSnapshots,
         addons_total_price_pence: personAddonTotals.total_price_pence,
         addons_total_duration_minutes: personAddonTotals.total_duration_minutes,
+        collective_service_item_id: collectiveOverride ? collectiveOverride.collectiveServiceItemId : null,
       });
 
       phantoms.push({
@@ -777,6 +852,15 @@ export async function POST(request: NextRequest) {
         processing_time_blocks: person.processing_time_blocks,
         addons_total_price_pence: person.addons_total_price_pence,
         addons_total_duration_minutes: person.addons_total_duration_minutes,
+        // §7.7 attribution, as on a single combined-page booking. The bridge
+        // above only resolves offerings of a collective this venue is an
+        // active member of, so the tag cannot be forged onto another venue.
+        ...(collectiveId
+          ? {
+              collective_id: collectiveId,
+              collective_service_item_id: person.collective_service_item_id,
+            }
+          : {}),
         ...(useUnifiedBookingRows
           ? {
               calendar_id: person.practitioner_id,

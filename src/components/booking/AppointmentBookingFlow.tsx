@@ -954,18 +954,18 @@ export function AppointmentBookingFlow({
   );
 
   // Shared state
-  // A combined page (venue collective) skips the single/group mode choice: the
-  // group pipeline has no collective routing, so only single bookings are offered.
+  // A combined page (venue collective) opens on the same single-or-group
+  // chooser as a venue page. It used to skip it because the group create route
+  // had no collective routing; `booking/create-group` now resolves each person
+  // to the owning venue, so a group can be booked from the combined page too.
   const [step, setStep] = useState<Step>(() => {
     if (isStaffFirst) {
-      // A combined page has no single-or-group chooser, staff never see one
-      // either (group bookings are reached only from `mode_choice`), and
-      // `?start=service` means "skip the chooser". All three land on the picker.
-      return venue.is_collective || isStaff || initialStep
-        ? 'staff_pick'
-        : 'mode_choice';
+      // Staff never see the chooser (group bookings are reached only from
+      // `mode_choice`), and `?start=service` means "skip the chooser". Both
+      // land on the picker.
+      return isStaff || initialStep ? 'staff_pick' : 'mode_choice';
     }
-    return editBooking || isLockedPractitionerFlow || isStaff || venue.is_collective || initialStep
+    return editBooking || isLockedPractitionerFlow || isStaff || initialStep
       ? 'service'
       : 'mode_choice';
   });
@@ -1241,16 +1241,16 @@ export function AppointmentBookingFlow({
       } else if (isStaffFirst) {
         setAnyRouteActive(false);
         setCarriedServiceId(null);
-        setStep(venue.is_collective || isStaff ? 'staff_pick' : 'mode_choice');
+        setStep(isStaff ? 'staff_pick' : 'mode_choice');
         setSelectedPractitionerId(null);
       } else {
-        setStep(isStaff || venue.is_collective ? 'service' : 'mode_choice');
+        setStep(isStaff ? 'service' : 'mode_choice');
         setSelectedPractitionerId(null);
       }
     }
     window.addEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
     return () => window.removeEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
-  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff, isStaffFirst, venue.is_collective, isPublicGuest, accountGate.guestDetailsPrefill?.email]);
+  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug, isStaff, isStaffFirst, isPublicGuest, accountGate.guestDetailsPrefill?.email]);
 
   // Build phantom bookings from already-selected group people
   const phantomBookings = useMemo(() => {
@@ -4097,7 +4097,7 @@ export function AppointmentBookingFlow({
       {/* ════════════════════════════════════════════════
           MODE CHOICE: Book for myself vs Group
           ════════════════════════════════════════════════ */}
-      {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && (
+      {step === 'mode_choice' && !isLockedPractitionerFlow && !isEdit && !isStaff && (
         <div>
           <AppointmentStepHeader
             title="How would you like to book?"
@@ -4230,7 +4230,7 @@ export function AppointmentBookingFlow({
                 setStep('mode_choice');
               }}
             />
-          ) : !isLockedPractitionerFlow && !isEdit && !isStaff && !isCombined && !initialStep ? (
+          ) : !isLockedPractitionerFlow && !isEdit && !isStaff && !initialStep ? (
             isPublicGuest ? (
               <AppointmentBackLink onClick={() => { setPendingServiceIds([]); setStep('mode_choice'); }} />
             ) : (

@@ -548,8 +548,11 @@ export function DashboardSidebar({
             );
           })}
 
-          {/* Your Booking Page - external link */}
-          {venueSlug && (
+          {/* Your Booking Page - external link. Hidden while the venue belongs
+              to a live combined booking page: the combined page is the one
+              clients should be sent to, and listing both invited the solo link
+              to be shared by mistake. */}
+          {venueSlug && collectiveBookingLinks.length === 0 && (
             <NavLinkItem
               href={`/book/${venueSlug}`}
               label="Your Booking Page"

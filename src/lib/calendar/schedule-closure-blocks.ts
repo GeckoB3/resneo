@@ -310,7 +310,8 @@ function isFullDayLeave(row: PractitionerLeavePeriodInput): boolean {
   );
 }
 
-function leaveForPractitionerOnDate(
+/** A calendar's recorded leave on one date: a full day, or the partial windows, merged. */
+export function leaveForPractitionerOnDate(
   practitionerId: string,
   dateStr: string,
   leavePeriods: PractitionerLeavePeriodInput[],

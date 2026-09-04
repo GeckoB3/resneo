@@ -2,6 +2,17 @@
 
 import { effectiveWorkingHoursForDate } from '@/lib/availability/working-hours-rota';
 import {
+  DEFAULT_CALENDAR_FILTERS,
+  calendarFiltersAreDefault,
+  readCalendarFilterPreferences,
+  writeCalendarFilterPreferences,
+  type PractitionerCalendarFilters,
+} from '@/lib/calendar/calendar-filter-preferences';
+import {
+  calendarHasAvailableHoursOnDate,
+  calendarWorksOnDate,
+} from '@/lib/calendar/calendar-works-on-date';
+import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -106,7 +117,12 @@ import {
   computeResourceAvailabilityMintSlots,
   type ResourceAvailabilityMintSlot,
 } from '@/lib/calendar/resource-availability-mint-slots';
-import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
+import type {
+  ClassPaymentRequirement,
+  Practitioner as VenuePractitioner,
+  VenueResource,
+  WorkingHours,
+} from '@/types/booking-models';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 import {
   addCalendarDays,
@@ -2726,6 +2742,8 @@ export function PractitionerCalendarView({
     } | null
   >(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  /** Filter menu: in day view, show only the columns with working hours on the selected date. */
+  const [workingHoursOnly, setWorkingHoursOnly] = useState(false);
   const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
@@ -3323,23 +3341,34 @@ export function PractitionerCalendarView({
     );
     if (remembered.viewMode) setViewMode(remembered.viewMode);
     // Date navigation resets to venue-local today on each visit (see initialIsoDate).
-    if (remembered.visibleCalendarIdsState !== undefined) {
-      setVisibleCalendarIdsState(remembered.visibleCalendarIdsState);
+    //
+    // The Filter menu is kept in a per-venue cookie so it stays until the user
+    // changes it, across tabs, restarts and sign-out. The session copy is only
+    // read when no cookie exists yet, so a tab open from before the cookie was
+    // introduced keeps its filters for the rest of that session.
+    const persistedFilters = readCalendarFilterPreferences(venueId);
+    const filters: Partial<PractitionerCalendarFilters> = persistedFilters ?? {
+      visibleCalendarIdsState: remembered.visibleCalendarIdsState,
+      visibleLinkedColumnIds: remembered.visibleLinkedColumnIds,
+      filterStatus: remembered.filterStatus,
+    };
+    if (filters.visibleCalendarIdsState !== undefined) {
+      setVisibleCalendarIdsState(filters.visibleCalendarIdsState);
     }
-    if (remembered.visibleLinkedColumnIds !== undefined) {
-      setVisibleLinkedColumnIds(remembered.visibleLinkedColumnIds);
+    if (filters.visibleLinkedColumnIds !== undefined) {
+      setVisibleLinkedColumnIds(filters.visibleLinkedColumnIds);
     }
     if (
-      remembered.filterStatus &&
-      CALENDAR_STATUS_FILTERS.some((s) => s.value === remembered.filterStatus)
+      filters.filterStatus &&
+      CALENDAR_STATUS_FILTERS.some((s) => s.value === filters.filterStatus)
     ) {
-      setFilterStatus(remembered.filterStatus);
+      setFilterStatus(filters.filterStatus);
     }
     if (remembered.startHourOverride !== undefined) setStartHourOverride(remembered.startHourOverride);
     if (remembered.endHourOverride !== undefined) setEndHourOverride(remembered.endHourOverride);
     if (remembered.compactDay !== undefined) setCompactDay(remembered.compactDay);
     setCalendarPrefsHydrated(true);
-  }, [preferencesKey]);
+  }, [preferencesKey, venueId]);
   const startHour = startHourOverride ?? derivedStartHour;
   const endHour = endHourOverride ?? derivedEndHour;
   const TOTAL_SLOTS = (() => {
@@ -3369,15 +3398,7 @@ export function PractitionerCalendarView({
       endHourOverride,
       compactDay,
     }),
-    [
-      viewMode,
-      visibleCalendarIdsState,
-      visibleLinkedColumnIds,
-      filterStatus,
-      startHourOverride,
-      endHourOverride,
-      compactDay,
-    ],
+    [viewMode, startHourOverride, endHourOverride, compactDay],
   );
 
   useEffect(() => {
@@ -3385,8 +3406,28 @@ export function PractitionerCalendarView({
     writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, calendarPrefsSnapshot);
   }, [calendarPrefsHydrated, preferencesKey, calendarPrefsSnapshot]);
 
+  const calendarFilters = useMemo(
+    (): PractitionerCalendarFilters => ({
+      workingHoursOnly,
+    }),
+    [visibleCalendarIdsState, visibleLinkedColumnIds, filterStatus, workingHoursOnly],
+  );
+
+  useEffect(() => {
+    if (!calendarPrefsHydrated) return;
+    writeCalendarFilterPreferences(venueId, calendarFilters);
+  }, [calendarPrefsHydrated, venueId, calendarFilters]);
+
+  const resetCalendarFilters = useCallback(() => {
+    setVisibleCalendarIdsState(DEFAULT_CALENDAR_FILTERS.visibleCalendarIdsState);
+    setVisibleLinkedColumnIds(DEFAULT_CALENDAR_FILTERS.visibleLinkedColumnIds);
+    setFilterStatus(DEFAULT_CALENDAR_FILTERS.filterStatus);
+    setWorkingHoursOnly(DEFAULT_CALENDAR_FILTERS.workingHoursOnly);
+  }, []);
+
   /**
    * Compact day view: measure how much vertical room the slot canvas has inside the page's
+    if (filters.workingHoursOnly !== undefined) setWorkingHoursOnly(filters.workingHoursOnly);
    * scroll container and shrink each slot so the whole day (open → close) fits one screen.
    *
    * We measure the canvas's own offset within `<main>` (which folds in the toolbar, page
@@ -3897,7 +3938,7 @@ export function PractitionerCalendarView({
     return filtered;
   }, [visibleCalendarIdsState, columnPractitioners]);
 
-  const filteredPractitioners = useMemo(() => {
+  const calendarFilteredPractitioners = useMemo(() => {
     if (calendarFilterIds === null) return columnPractitioners;
     const allowed = new Set(calendarFilterIds);
     return columnPractitioners.filter((p) => allowed.has(p.id));
@@ -3928,10 +3969,17 @@ export function PractitionerCalendarView({
 
   /** Linked columns visible on the grid. */
   const visibleLinkedColumns = useMemo(() => {
-    if (visibleLinkedColumnIds === null) return linkedColumns;
-    const allowed = new Set(visibleLinkedColumnIds);
-    return linkedColumns.filter((c) => allowed.has(c.key));
-  }, [linkedColumns, visibleLinkedColumnIds]);
+    const chosen =
+      visibleLinkedColumnIds === null
+        ? linkedColumns
+        : linkedColumns.filter((c) => new Set(visibleLinkedColumnIds).has(c.key));
+    if (!workingHoursFilterActive) return chosen;
+    // A linked column carries its owner's weekly template only (no rota or days
+    // off), read in the owner venue's timezone as its header line is.
+    return chosen.filter((c) =>
+      calendarWorksOnDate({ working_hours: c.workingHours ?? null }, date, c.venueTimezone),
+    );
+  }, [linkedColumns, visibleLinkedColumnIds, workingHoursFilterActive, date]);
 
   /** Read-only linked columns (time_only or view-only full_details). */
   const readOnlyLinkedColumns = useMemo(
@@ -3955,6 +4003,36 @@ export function PractitionerCalendarView({
     const native: DayGridColumn[] = filteredPractitioners.map((practitioner) => ({
       kind: 'native',
       practitioner,
+  /**
+   * "Only calendars working on the selected day" applies to the day grid alone:
+   * week and month views lay days out, not columns, so every calendar stays.
+   */
+  const workingHoursFilterActive = viewMode === 'day' && workingHoursOnly;
+
+  const filteredPractitioners = useMemo(() => {
+    if (!workingHoursFilterActive) return calendarFilteredPractitioners;
+    // "Working" means the column has bookable hours left on the date: its hours
+    // for that day minus recorded leave and the venue's closures. A calendar on
+    // leave all day, or a day the venue is closed, is off even though its weekly
+    // template has hours.
+    return calendarFilteredPractitioners.filter((p) =>
+      calendarHasAvailableHoursOnDate({
+        practitioner: p as unknown as VenuePractitioner,
+        dateYmd: date,
+        leavePeriods,
+        openingHours,
+        venueWideBlocks,
+      }),
+    );
+  }, [calendarFilteredPractitioners, workingHoursFilterActive, date, leavePeriods, openingHours, venueWideBlocks]);
+
+  /** Columns the working-hours filter is hiding today, so their bookings leave the counts too. */
+  const workingHoursHiddenColumnIds = useMemo(() => {
+    if (!workingHoursFilterActive) return null;
+    const shown = new Set(filteredPractitioners.map((p) => p.id));
+    return new Set(calendarFilteredPractitioners.filter((p) => !shown.has(p.id)).map((p) => p.id));
+  }, [workingHoursFilterActive, calendarFilteredPractitioners, filteredPractitioners]);
+
     }));
     const linked: DayGridColumn[] = nativeGridLinkedColumns.map((column) => ({
       kind: 'linked',
@@ -6286,7 +6364,7 @@ export function PractitionerCalendarView({
       if (!bookingMatchesCalendarStatusFilter(b, filterStatus)) return false;
       return true;
     });
-  }, [bookings, calendarFilterIds, filterStatus, resourceParentById]);
+  }, [bookings, calendarFilterIds, workingHoursHiddenColumnIds, filterStatus, resourceParentById]);
 
   /** Toolbar + status counts: team-column bookings only (matches day/week grid), scoped to the visible period - not the 6-week fetch padding in month view. */
   const bookingsForToolbarStats = useMemo(() => {
@@ -6311,7 +6389,8 @@ export function PractitionerCalendarView({
   const calendarFilterCount =
     (calendarFilterIds === null ? 0 : 1) +
     (filterStatus !== 'all' ? 1 : 0) +
-    (visibleLinkedColumnIds !== null && linkedColumns.length > 0 ? 1 : 0);
+    (visibleLinkedColumnIds !== null && linkedColumns.length > 0 ? 1 : 0) +
+    (workingHoursOnly ? 1 : 0);
   const calendarControlsLabel = calendarFilterCount > 0 ? `Filter (${calendarFilterCount})` : 'Filter';
   const calendarSummaryContent = (
     <div
@@ -6335,6 +6414,10 @@ export function PractitionerCalendarView({
         <span className="tabular-nums text-slate-600">{completedCount}</span>
       </span>
     </div>
+      if (workingHoursHiddenColumnIds && workingHoursHiddenColumnIds.size > 0) {
+        const colId = resolveBookingColumnId(b, resourceParentById);
+        if (colId && workingHoursHiddenColumnIds.has(colId)) return false;
+      }
   );
 
   const calendarFilterPanel = (
@@ -6400,6 +6483,20 @@ export function PractitionerCalendarView({
                 }}
               />
               <span className="font-medium">All linked calendars</span>
+        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
+          <input
+            type="checkbox"
+            className="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            checked={workingHoursOnly}
+            onChange={(e) => setWorkingHoursOnly(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Only calendars working on the selected day</span>
+            <span className="block text-xs text-slate-500">
+              In day view, hides columns with no working hours on the date you are viewing.
+            </span>
+          </span>
+        </label>
             </label>
             <div className="border-t border-slate-100" />
             {[
@@ -6481,19 +6578,14 @@ export function PractitionerCalendarView({
         </div>
       </div>
 
-      {calendarFilterCount > 0 ? (
-        <button
-          type="button"
-          onClick={() => {
-            setVisibleCalendarIdsState(null);
-            setVisibleLinkedColumnIds(null);
-            setFilterStatus('all');
-          }}
-          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-        >
-          Clear filters
-        </button>
-      ) : null}
+      <button
+        type="button"
+        onClick={resetCalendarFilters}
+        disabled={calendarFiltersAreDefault(calendarFilters)}
+        className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline disabled:cursor-default disabled:text-slate-400 disabled:no-underline"
+      >
+        Reset filters
+      </button>
     </div>
   );
 
@@ -6864,7 +6956,7 @@ export function PractitionerCalendarView({
         <div className="min-h-[40vh] py-2">
           <DashboardCalendarSkeleton />
         </div>
-      ) : filteredPractitioners.length === 0 ? (
+      ) : calendarFilteredPractitioners.length === 0 ? (
         <div className="flex min-h-[40vh] items-center justify-center px-4">
           <div className="w-full max-w-md">
             <EmptyState
@@ -6925,6 +7017,24 @@ export function PractitionerCalendarView({
               </thead>
               <tbody>
                 {filteredPractitioners.map((prac) => (
+      ) : workingHoursFilterActive && filteredPractitioners.length === 0 && visibleLinkedColumns.length === 0 ? (
+        <div className="flex min-h-[40vh] items-center justify-center px-4">
+          <div className="w-full max-w-md">
+            <EmptyState
+              title="No calendars working on this day"
+              description="Every calendar is off on this date. Pick another day, or turn off 'Only calendars working on the selected day' in Filter to see them all."
+              action={
+                <button
+                  type="button"
+                  onClick={() => setWorkingHoursOnly(false)}
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                >
+                  Show all calendars
+                </button>
+              }
+            />
+          </div>
+        </div>
                   <tr key={prac.id} className="border-b border-slate-100 transition-colors hover:bg-slate-50/70">
                     <td className="sticky left-0 bg-white/95 px-3 py-2 font-semibold text-slate-900 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
                       {prac.name}

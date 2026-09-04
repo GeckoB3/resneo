@@ -44,11 +44,11 @@ export interface BookingClusterLayout {
 }
 
 /**
- * How far a nested bar is indented from its host's left edge. Enough to leave
- * the host's status stripe, its drag grip and a sliver of the hatched
- * processing band showing beside the nested bar.
+ * How far a nested bar is indented from its host's left edge: a thin strip of
+ * the host (its status stripe and a sliver of the hatched processing band), so
+ * the nested booking keeps almost the full column width.
  */
-export const NESTED_BOOKING_INSET_PX = 20;
+export const NESTED_BOOKING_INSET_PX = 5;
 
 /**
  * Where a host bar keeps its text and its action buttons once nested bars

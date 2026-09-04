@@ -41,6 +41,7 @@ import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { ComplianceSection } from '@/components/dashboard/compliance/ComplianceSection';
+import { GuestRecordsSection } from '@/components/dashboard/contacts/GuestRecordsSection';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import {
   bookingExpandAccordionBodyClass,
@@ -408,6 +409,7 @@ export function ExpandedBookingContent({
   const [statusActionPending, setStatusActionPending] = useState(false);
   const [refCopied, setRefCopied] = useState(false);
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
+  const [recordsCount, setRecordsCount] = useState<number | null>(null);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
   const [groupVisitBookings, setGroupVisitBookings] = useState<GroupVisitBookingRow[]>(
     () => initialGroupVisitBookings ?? [],
@@ -2049,9 +2051,9 @@ export function ExpandedBookingContent({
               appointmentServiceId={booking.appointment_service_id ?? null}
               serviceItemId={booking.service_item_id ?? null}
               complianceEnabled={complianceEnabled}
+              ownerVenueId={linkedBookingContext ? venueId : null}
             />
           </div>
-              ownerVenueId={linkedBookingContext ? venueId : null}
         </details>
       ) : null}
 
@@ -2138,6 +2140,27 @@ export function ExpandedBookingContent({
           ) : null}
         </div>
       </details>
+
+      {/* Records: the guest's documents and photos, identical to the contact panel's
+          Records section. They belong to the person, not this booking, so every
+          booking for the guest shows the same files. A linked venue's guest keeps
+          its files on that venue's dashboard. */}
+      {(activeDetail?.guest?.id ?? booking.guest_id) && !linkedBookingContext ? (
+        <details className={bookingExpandAccordionDetailsClass}>
+          <summary className={bookingExpandAccordionSummaryClass}>
+            <span>Records</span>
+            <span className="text-[11px] font-medium text-slate-400 group-open:hidden">
+              {recordsCount === null ? 'Documents & photos' : recordsCount === 0 ? 'No files yet' : `${recordsCount} file${recordsCount === 1 ? '' : 's'}`}
+            </span>
+            <svg className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </summary>
+          <div className={bookingExpandAccordionBodyClass}>
+            <GuestRecordsSection guestId={(activeDetail?.guest?.id ?? booking.guest_id)!} onChanged={() => {}} onCount={setRecordsCount} />
+          </div>
+        </details>
+      ) : null}
 
       {!profileGuestId ? multiServiceVisitCard : null}
 

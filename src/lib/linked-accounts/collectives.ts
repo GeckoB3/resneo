@@ -4,6 +4,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAcceptedLinkBetween } from './queries';
 import { evaluateLinkEligibility } from './eligibility';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
+import {
+  inheritCollectivePageConfigFromHost,
+  type CollectiveBookingPageConfig,
+} from '@/lib/linked-accounts/collective-page-config';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -131,7 +136,16 @@ export interface CollectiveView {
   slugStrategy: SlugStrategy;
   adoptedVenueId: string | null;
   timezone: string | null;
-  /** Single-venue-grade public-page config for the combined page (plan §22 / G6). */
+  /**
+   * Single-venue-grade public-page config for the combined page (plan §22 / G6).
+   *
+   * This is the EFFECTIVE config, with the host venue's tabs and About content
+   * filled in wherever the combined page has none of its own, exactly as the
+   * live page resolves it (`inheritCollectivePageConfigFromHost`). The editors
+   * seed their toggles from this and write every tab boolean back on each save,
+   * so seeding them from the raw stored row showed inherited tabs as off and an
+   * unrelated save (a colour change) silently switched them off on the live page.
+   */
   bookingPageConfig: Record<string, unknown> | null;
   isHost: boolean;
   /** The host venue's id (so the UI can identify which member is the host). */
@@ -242,6 +256,20 @@ export function planProviderStatuses(
   return changes;
 }
 
+/**
+ * The combined page's config as the live page resolves it: the stored row with
+ * the host venue's tabs and About content filled in until the host saves its own
+ * there. Serving this (rather than the raw row) keeps the editors' toggles in
+ * step with the public page; see `CollectiveView.bookingPageConfig`.
+ */
+function effectiveCollectivePageConfig(
+  stored: CollectiveBookingPageConfig | null,
+  hostConfig: BookingPageConfig | null,
+): Record<string, unknown> | null {
+  if (!hostConfig) return stored as Record<string, unknown> | null;
+  return inheritCollectivePageConfigFromHost(stored ?? {}, hostConfig) as Record<string, unknown>;
+}
+
 /** Load every collective `venueId` hosts or is a member of, as views. */
 export async function loadCollectiveViewsForVenue(
   admin: SupabaseClient,
@@ -284,10 +312,11 @@ export async function loadCollectiveViewsForVenue(
   const venueNames: Record<string, string> = {};
   const venueAnyAvailable: Record<string, boolean> = {};
   const venueStaffFirst: Record<string, boolean> = {};
+  const venuePageConfigs: Record<string, BookingPageConfig | null> = {};
   if (venueIdsToLoad.size > 0) {
     const { data: venues } = await admin
       .from('venues')
-      .select('id, name, feature_flags')
+      .select('id, name, feature_flags, booking_page_config')
       .in('id', [...venueIdsToLoad]);
     for (const v of venues ?? []) {
       venueNames[v.id as string] = (v.name as string) ?? 'Venue';
@@ -296,6 +325,8 @@ export async function loadCollectiveViewsForVenue(
       );
       venueAnyAvailable[v.id as string] = flags.any_available_practitioner;
       venueStaffFirst[v.id as string] = flags.staff_first_booking_flow;
+      venuePageConfigs[v.id as string] =
+        ((v as { booking_page_config?: unknown }).booking_page_config as BookingPageConfig | null) ?? null;
     }
   }
 
@@ -340,7 +371,10 @@ export async function loadCollectiveViewsForVenue(
       slugStrategy: (row.slug_strategy as SlugStrategy) ?? 'dedicated',
       adoptedVenueId: row.adopted_venue_id ?? null,
       timezone: row.timezone ?? null,
-      bookingPageConfig: (row.booking_page_config as Record<string, unknown> | null) ?? null,
+      bookingPageConfig: effectiveCollectivePageConfig(
+        (row.booking_page_config as CollectiveBookingPageConfig | null) ?? null,
+        venuePageConfigs[row.host_venue_id] ?? null,
+      ),
       isHost: row.host_venue_id === venueId,
       hostVenueId: row.host_venue_id,
       myVenueId: venueId,

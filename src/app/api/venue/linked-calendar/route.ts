@@ -227,13 +227,14 @@ export async function GET(request: NextRequest) {
       // venue, so the list came back empty and every linked bar fell back to a
       // 60 minute default with no processing strip. Archived services are kept,
       // as the native list keeps them: a booking made before its service was
-      // retired still has a pattern to paint.
+      // retired still has a pattern to paint. Each carries `isActive` so the
+      // new-booking picker can leave the archived ones out.
       let services: LinkedService[] = [];
       if (fullDetails) {
         const { data: serviceRows } = await admin
           .from('service_items')
           .select(
-            'id, name, duration_minutes, buffer_minutes, processing_time_blocks, colour, price_pence',
+            'id, name, is_active, duration_minutes, buffer_minutes, processing_time_blocks, colour, price_pence',
           )
           .eq('venue_id', access.venueId)
           .order('name', { ascending: true });
@@ -247,6 +248,7 @@ export async function GET(request: NextRequest) {
         services = (serviceRows ?? []).map((s) => ({
           id: s.id as string,
           name: (s.name as string) ?? 'Service',
+          isActive: s.is_active !== false,
           durationMinutes: (s.duration_minutes as number) ?? 60,
           bufferMinutes: (s.buffer_minutes as number) ?? 0,
           processingTimeBlocks: (s.processing_time_blocks as LinkedService['processingTimeBlocks']) ?? [],

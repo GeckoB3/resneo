@@ -2051,6 +2051,7 @@ export function ExpandedBookingContent({
               complianceEnabled={complianceEnabled}
             />
           </div>
+              ownerVenueId={linkedBookingContext ? venueId : null}
         </details>
       ) : null}
 

@@ -35,12 +35,18 @@ interface BookingComplianceData {
  * Shared compliance surface (spec §11.2) used in the booking detail accordion and
  * the contact panel. Requirements panel only renders with a booking + Model B
  * service; the records list + audit trail always render for the guest.
+ *
+ * With `ownerVenueId` set, the booking and guest belong to a LINKED venue (the
+ * detail panel opened from that venue's column on the diary). The records are
+ * that venue's, read through the link, and shown read only: capture, send and
+ * record actions all write to the owner's data and stay on its own dashboard.
  */
 export function ComplianceSection({
   guestId,
   bookingId,
   complianceEnabled,
   onRecordCount,
+  ownerVenueId = null,
 }: {
   guestId: string;
   bookingId?: string | null;
@@ -49,13 +55,17 @@ export function ComplianceSection({
   complianceEnabled: boolean;
   /** Reports the guest's record count once loaded (e.g. for a parent accordion summary). */
   onRecordCount?: (count: number | null) => void;
+  /** The linked venue the booking and guest belong to; null for the caller's own venue. */
+  ownerVenueId?: string | null;
 }) {
+  const readOnly = Boolean(ownerVenueId);
+  const ownerQuery = ownerVenueId ? `?owner_venue_id=${encodeURIComponent(ownerVenueId)}` : '';
   const {
     data: guestData,
     error: guestError,
     mutate: mutateGuest,
   } = useSWR<GuestComplianceData>(
-    complianceEnabled && guestId ? `/api/venue/guests/${guestId}/compliance` : null,
+    complianceEnabled && guestId ? `/api/venue/guests/${guestId}/compliance${ownerQuery}` : null,
     complianceJsonFetcher,
   );
   const { data: bookingData, error: bookingError, mutate: mutateBooking } = useSWR<BookingComplianceData>(
@@ -63,6 +73,20 @@ export function ComplianceSection({
     complianceJsonFetcher,
   );
   const loadError = Boolean(guestError || bookingError);
+  /**
+   * Across a link the routes refuse for reasons that are answers, not faults
+   * (the link does not share personal data; the other venue does not use
+   * compliance records), so say which as a plain note rather than asking for a
+   * refresh that will not help.
+   */
+  const loadNotice = (() => {
+    const message = (guestError ?? bookingError) instanceof Error ? ((guestError ?? bookingError) as Error).message : '';
+    if (readOnly && message.startsWith('This link does not share')) return { kind: 'note' as const, text: message };
+    if (readOnly && message === 'Feature not available') {
+      return { kind: 'note' as const, text: 'That venue does not use compliance records, so there is nothing to show here.' };
+    }
+    return { kind: 'error' as const, text: 'Couldn’t load compliance details. Please refresh to try again.' };
+  })();
 
   const recordCount = guestData ? guestData.records.length : null;
   useEffect(() => {
@@ -187,12 +211,25 @@ export function ComplianceSection({
     revoked: { variant: 'compliance-voided', label: 'Revoked' },
   };
 
+  // A failed load has nothing to list: rendering the empty sections beneath it
+  // read as "no records on file", which is not known.
+  if (loadError) {
+    return loadNotice.kind === 'error' ? (
+      <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
+        {loadNotice.text}
+      </div>
+    ) : (
+      <p className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">{loadNotice.text}</p>
+    );
+  }
+
   return (
     <div className="space-y-5">
-      {loadError && (
-        <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
-          Couldn’t load compliance details. Please refresh to try again.
-        </div>
+      {readOnly && (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
+          Held by the linked venue and shown here read only. To capture, send or open a record, use that venue&apos;s
+          dashboard.
+        </p>
       )}
       {actionMessage && (
         <div role="status" className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">
@@ -224,41 +261,45 @@ export function ComplianceSection({
                       </Pill>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCapture({
-                            typeId: r.requirement.compliance_type_id,
-                            typeName: r.requirement.compliance_type_name,
-                            channel: 'client_walkin',
-                          })
-                        }
-                        className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700"
-                      >
-                        Hand to client
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCapture({
-                            typeId: r.requirement.compliance_type_id,
-                            typeName: r.requirement.compliance_type_name,
-                            channel: 'staff_web',
-                          })
-                        }
-                        className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        Capture now
-                      </button>
-                      <button
-                        type="button"
-                        disabled={sendingTypeId === r.requirement.compliance_type_id}
-                        onClick={() => sendLink(r.requirement.compliance_type_id)}
-                        className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        Send link
-                      </button>
-                      {r.matching_record && (
+                      {!readOnly && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCapture({
+                                typeId: r.requirement.compliance_type_id,
+                                typeName: r.requirement.compliance_type_name,
+                                channel: 'client_walkin',
+                              })
+                            }
+                            className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700"
+                          >
+                            Hand to client
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCapture({
+                                typeId: r.requirement.compliance_type_id,
+                                typeName: r.requirement.compliance_type_name,
+                                channel: 'staff_web',
+                              })
+                            }
+                            className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                          >
+                            Capture now
+                          </button>
+                          <button
+                            type="button"
+                            disabled={sendingTypeId === r.requirement.compliance_type_id}
+                            onClick={() => sendLink(r.requirement.compliance_type_id)}
+                            className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Send link
+                          </button>
+                        </>
+                      )}
+                      {r.matching_record && !readOnly && (
                         <button
                           type="button"
                           onClick={() => setViewRecordId(r.matching_record!.id)}
@@ -287,7 +328,7 @@ export function ComplianceSection({
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
             {pendingFormLinks.map((link) => {
               const pill = linkStatusPill[link.status] ?? { variant: 'compliance-voided' as const, label: link.status };
-              const isPending = link.status === 'pending';
+              const isPending = link.status === 'pending' && !readOnly;
               return (
                 <li key={link.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
                   <div className="min-w-0">
@@ -378,13 +419,15 @@ export function ComplianceSection({
                     <Pill variant={pill.variant} size="sm" dot>
                       {pill.label}
                     </Pill>
-                    <button
-                      type="button"
-                      onClick={() => setViewRecordId(rec.id)}
-                      className="text-xs font-medium text-brand-600 hover:text-brand-700"
-                    >
-                      View
-                    </button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => setViewRecordId(rec.id)}
+                        className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        View
+                      </button>
+                    )}
                   </div>
                 </li>
               );

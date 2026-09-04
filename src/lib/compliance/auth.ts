@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenueStaff } from '@/lib/venue-auth';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
@@ -16,22 +17,30 @@ export interface CompliancePlanContext {
   featureFlags: VenueFeatureFlags;
 }
 
+export type CompliancePlanGate =
+  | { ok: true; ctx: CompliancePlanContext }
+  | { ok: false; response: NextResponse };
+
 /**
- * Single-line guard for every `/api/venue/compliance/*` route (spec §9.3).
- * Requires both an Appointments plan tier AND the `compliance_records_enabled`
- * feature flag. On failure returns a ready-to-send 403 response.
+ * The plan + flag gate for one venue's compliance data (spec §9.3): an
+ * Appointments plan tier AND the `compliance_records_enabled` feature flag.
+ *
+ * Takes the venue rather than the caller so a read through a link can gate on
+ * the venue that OWNS the records; `requireCompliancePlan` is the caller's-own
+ * case. On failure returns a ready-to-send 403 response.
  */
-export async function requireCompliancePlan(
-  staff: VenueStaff,
-): Promise<{ ok: true; ctx: CompliancePlanContext } | { ok: false; response: NextResponse }> {
-  const { data: venue, error } = await staff.db
+export async function requireCompliancePlanForVenue(
+  db: SupabaseClient,
+  venueId: string,
+): Promise<CompliancePlanGate> {
+  const { data: venue, error } = await db
     .from('venues')
     .select('id, pricing_tier, feature_flags')
-    .eq('id', staff.venue_id)
+    .eq('id', venueId)
     .maybeSingle();
 
   if (error) {
-    console.error('[requireCompliancePlan] venue lookup failed:', error.message, { venueId: staff.venue_id });
+    console.error('[requireCompliancePlan] venue lookup failed:', error.message, { venueId });
     return {
       ok: false,
       response: NextResponse.json({ error: 'Could not verify plan availability.' }, { status: 500 }),
@@ -60,10 +69,15 @@ export async function requireCompliancePlan(
   return {
     ok: true,
     ctx: {
-      venueId: staff.venue_id,
+      venueId,
       pricingTier: tier,
       config: parseComplianceConfig(raw),
       featureFlags: raw,
     },
   };
+}
+
+/** Single-line guard for every `/api/venue/compliance/*` route: the caller's own venue. */
+export async function requireCompliancePlan(staff: VenueStaff): Promise<CompliancePlanGate> {
+  return requireCompliancePlanForVenue(staff.db, staff.venue_id);
 }

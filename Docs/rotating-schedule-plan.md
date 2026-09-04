@@ -148,3 +148,31 @@ Owed: apply the migration to staging, test the Availability tab, the diary heade
 booking page against a rota calendar live, apply to production, merge. Until the column
 exists, saving a rota fails at the database; reading is unaffected (the column is absent, so
 every calendar resolves as it does today).
+
+## Revision 3 (2026-09-04): history, the full timeline, and closures on the planning calendar
+
+Review after live use with several changes on one calendar:
+
+- **The list shows what still matters.** `ScheduleTimelineEditor` lists the change running
+  now and any still to come. A change whose `until` is before today stays in the stored
+  timeline but moves behind "Show N past changes", where it can still be edited or removed.
+  Tints follow the index in the full timeline, so a change keeps its colour on the calendar
+  whether or not the list shows it. Today is injectable (`todayYmd`) so the tests do not age.
+- **The calendar pages back as well as ahead.** Ended changes are kept precisely so the
+  planning calendar can show what the hours were; past days render slightly muted.
+- **A full timeline makes room.** `SCHEDULE_MAX_PERIODS` (50) used to be a cliff: a calendar
+  that changes its hours every few weeks reached it in a couple of years and every further
+  save failed with the validator's error. `pruneEndedSchedulePeriods` drops the change that
+  ended longest ago, never a current or upcoming one, and `SchedulePeriodForm` lists the
+  drop alongside the trims before the save.
+- **Closures and amended hours on the planning calendar.** `summariseDay` used to intersect
+  with the weekly opening hours alone (`venueDayContext`), so a closure or an amended-hours
+  day on the calendar page disagreed with what a guest could book. It now goes through
+  `resolveVenueWideAllowedMinuteRanges`, the resolver the engines and the diary use, with the
+  venue-wide blocks loaded once per mount (`loadVenueBlocks`, injectable). A closure reads
+  "Venue closed" with its own reason (`venue-closure`) so the day panel can say why.
+- Copy: the standard-hours row reads "on every date the changes below do not cover"; the
+  help article says the calendar pages back and mentions past changes.
+
+Not changed: `availability_exceptions` (per-date overrides) are written only for resources,
+which do not get this panel, so the planning calendar does not read them.

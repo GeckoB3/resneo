@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { OpeningHours } from '@/types/availability';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { TimeRange, WorkingHours } from '@/types/booking-models';
-import { venueDayContext } from '@/lib/calendar/venue-hours-context';
 import { getDayOfWeek } from '@/lib/availability/engine';
+import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
 import {
   resolveScheduleForDate,
   type CalendarSchedule,
@@ -14,9 +14,10 @@ import {
 /**
  * The planning calendar on the Availability tab: every day of a month with the hours
  * the calendar is actually bookable (its hours for that date, inside the venue's
- * business hours, minus days off and leave), tinted by which schedule period
- * produced them. Read-only; picking a day hands the date to the parent.
- * See Docs/rotating-schedule-plan.md.
+ * business hours and closures, minus days off and leave), tinted by which schedule
+ * period produced them. Read-only; picking a day hands the date and its summary to
+ * the parent. Pages back through past months as well as ahead, so a change that has
+ * ended can still be seen where it applied. See Docs/rotating-schedule-plan.md.
  */
 
 export interface LeaveRow {
@@ -26,7 +27,7 @@ export interface LeaveRow {
   unavailable_end_time?: string | null;
 }
 
-export type DayReason = 'base' | 'period' | 'no-hours' | 'day-off' | 'venue-closed' | 'leave';
+export type DayReason = 'base' | 'period' | 'no-hours' | 'day-off' | 'venue-closed' | 'venue-closure' | 'leave';
 
 export interface DaySummary {
   date: string;
@@ -44,7 +45,7 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-/** Tints for periods, by index in the timeline. */
+/** Tints for periods, by index in the full timeline (past changes included, so a colour never moves). */
 export const PERIOD_TINTS = [
   { cell: 'bg-sky-50 border-sky-200', swatch: 'bg-sky-200' },
   { cell: 'bg-violet-50 border-violet-200', swatch: 'bg-violet-200' },
@@ -69,7 +70,10 @@ function rangesForDay(hours: WorkingHours, dow: number): TimeRange[] {
   return Array.isArray(named) ? named : [];
 }
 
-function intersectWithVenue(ranges: TimeRange[], venue: Array<{ open: string; close: string }> | null): Array<{ start: number; end: number }> {
+function intersectWithVenue(
+  ranges: TimeRange[],
+  venue: Array<{ start: number; end: number }> | null,
+): Array<{ start: number; end: number }> {
   const out: Array<{ start: number; end: number }> = [];
   for (const r of ranges) {
     const s = toMinutes(r.start);
@@ -80,15 +84,21 @@ function intersectWithVenue(ranges: TimeRange[], venue: Array<{ open: string; cl
       continue;
     }
     for (const v of venue) {
-      const start = Math.max(s, toMinutes(v.open));
-      const end = Math.min(e, toMinutes(v.close));
+      const start = Math.max(s, v.start);
+      const end = Math.min(e, v.end);
       if (end > start) out.push({ start, end });
     }
   }
   return out.sort((a, b) => a.start - b.start);
 }
 
-/** Everything the cell shows for one date. Pure, so the calendar and its tests agree. */
+/**
+ * Everything the cell shows for one date. Pure, so the calendar and its tests agree.
+ *
+ * The venue side goes through `resolveVenueWideAllowedMinuteRanges`, the same
+ * resolver the booking engines and the diary use, so a closure, an amended-hours
+ * day and a weekday the venue does not trade all read here exactly as they book.
+ */
 export function summariseDay(input: {
   date: string;
   baseHours: WorkingHours;
@@ -96,6 +106,8 @@ export function summariseDay(input: {
   daysOff: readonly string[];
   venueHours: OpeningHours | null | undefined;
   leave: readonly LeaveRow[];
+  /** Venue-wide closures and amended hours; omit for the weekly hours alone. */
+  venueWideBlocks?: readonly AvailabilityBlock[];
 }): DaySummary {
   const { date } = input;
   const resolution = resolveScheduleForDate({ working_hours: input.baseHours, schedule_periods: input.schedule }, date);
@@ -107,10 +119,12 @@ export function summariseDay(input: {
   if (fullDayLeave) return { ...base, text: 'Leave', reason: 'leave' };
   if (input.daysOff.includes(date) || input.daysOff.includes(DAY_NAMES[dow]!)) return { ...base, text: 'Day off', reason: 'day-off' };
 
-  const venue = venueDayContext(input.venueHours, String(dow));
-  if (venue.kind === 'closed') return { ...base, text: 'Venue closed', reason: 'venue-closed' };
+  const venue = resolveVenueWideAllowedMinuteRanges(input.venueHours, date, [...(input.venueWideBlocks ?? [])]);
+  if (venue.kind === 'closed') {
+    return { ...base, text: 'Venue closed', reason: venue.cause === 'weekly' ? 'venue-closed' : 'venue-closure' };
+  }
 
-  const ranges = intersectWithVenue(rangesForDay(resolution.hours, dow), venue.kind === 'open' ? venue.periods : null);
+  const ranges = intersectWithVenue(rangesForDay(resolution.hours, dow), venue.kind === 'allowed' ? venue.ranges : null);
   const partial = leaveToday.find((l) => l.unavailable_start_time && l.unavailable_end_time);
   const partialLeave = partial ? `${partial.unavailable_start_time!.slice(0, 5)}–${partial.unavailable_end_time!.slice(0, 5)}` : null;
   if (ranges.length === 0) return { ...base, text: 'Closed', reason: 'no-hours', partialLeave };
@@ -140,11 +154,15 @@ export interface ScheduleCalendarPreviewProps {
   daysOff: readonly string[];
   venueHours: OpeningHours | null | undefined;
   selectedDate?: string | null;
-  onPickDate?: (date: string) => void;
+  onPickDate?: (date: string, summary: DaySummary) => void;
   /** Loads leave for a date range; defaults to the practitioner-leave route. Injected for tests. */
   loadLeave?: (calendarId: string, from: string, to: string) => Promise<LeaveRow[]>;
+  /** Loads the venue's closures and amended hours; defaults to the availability-blocks route. Injected for tests. */
+  loadVenueBlocks?: () => Promise<AvailabilityBlock[]>;
   /** The month shown first; defaults to the current month. */
   initialMonth?: { year: number; monthIndex: number };
+  /** Today, `YYYY-MM-DD`; defaults to the browser's date. Injected for tests. */
+  todayYmd?: string;
 }
 
 async function defaultLoadLeave(calendarId: string, from: string, to: string): Promise<LeaveRow[]> {
@@ -153,6 +171,19 @@ async function defaultLoadLeave(calendarId: string, from: string, to: string): P
   if (!res.ok) return [];
   const data = (await res.json().catch(() => ({}))) as { periods?: LeaveRow[] };
   return Array.isArray(data.periods) ? data.periods : [];
+}
+
+async function defaultLoadVenueBlocks(): Promise<AvailabilityBlock[]> {
+  const res = await fetch('/api/venue/availability-blocks');
+  if (!res.ok) return [];
+  const data = (await res.json().catch(() => ({}))) as { blocks?: AvailabilityBlock[] };
+  // Venue-wide rows only: a service-scoped block does not close the venue.
+  return Array.isArray(data.blocks) ? data.blocks.filter((b) => b.service_id == null) : [];
+}
+
+function localTodayYmd(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 export function ScheduleCalendarPreview({
@@ -164,14 +195,17 @@ export function ScheduleCalendarPreview({
   selectedDate = null,
   onPickDate,
   loadLeave = defaultLoadLeave,
+  loadVenueBlocks = defaultLoadVenueBlocks,
   initialMonth,
+  todayYmd,
 }: ScheduleCalendarPreviewProps) {
+  const today = todayYmd ?? localTodayYmd();
   const [month, setMonth] = useState(() => {
     if (initialMonth) return initialMonth;
-    const now = new Date();
-    return { year: now.getFullYear(), monthIndex: now.getMonth() };
+    return { year: Number(today.slice(0, 4)), monthIndex: Number(today.slice(5, 7)) - 1 };
   });
   const [leave, setLeave] = useState<LeaveRow[]>([]);
+  const [venueWideBlocks, setVenueWideBlocks] = useState<AvailabilityBlock[]>([]);
 
   const cells = useMemo(() => monthCells(month.year, month.monthIndex), [month]);
   const firstDay = cells.find((c): c is string => c != null) ?? '';
@@ -188,18 +222,23 @@ export function ScheduleCalendarPreview({
     };
   }, [calendarId, firstDay, lastDay, loadLeave]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void loadVenueBlocks().then((rows) => {
+      if (!cancelled) setVenueWideBlocks(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadVenueBlocks]);
+
   const summaries = useMemo(() => {
     const map = new Map<string, DaySummary>();
     for (const c of cells) {
-      if (c) map.set(c, summariseDay({ date: c, baseHours, schedule, daysOff, venueHours, leave }));
+      if (c) map.set(c, summariseDay({ date: c, baseHours, schedule, daysOff, venueHours, leave, venueWideBlocks }));
     }
     return map;
-  }, [cells, baseHours, schedule, daysOff, venueHours, leave]);
-
-  const today = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  }, []);
+  }, [cells, baseHours, schedule, daysOff, venueHours, leave, venueWideBlocks]);
 
   function shift(delta: number) {
     setMonth((m) => {
@@ -222,10 +261,7 @@ export function ScheduleCalendarPreview({
           </h4>
           <button
             type="button"
-            onClick={() => {
-              const now = new Date();
-              setMonth({ year: now.getFullYear(), monthIndex: now.getMonth() });
-            }}
+            onClick={() => setMonth({ year: Number(today.slice(0, 4)), monthIndex: Number(today.slice(5, 7)) - 1 })}
             className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
           >
             Today
@@ -256,10 +292,10 @@ export function ScheduleCalendarPreview({
               role="gridcell"
               aria-selected={selected}
               aria-label={`${cell}: ${s.text}${s.partialLeave ? `, leave ${s.partialLeave}` : ''}`}
-              onClick={() => onPickDate?.(cell)}
+              onClick={() => onPickDate?.(cell, s)}
               className={`flex min-h-[64px] flex-col items-start rounded-lg border p-1.5 text-left transition-colors hover:border-brand-400 ${tint} ${
                 closed ? 'text-slate-400' : 'text-slate-800'
-              } ${selected ? 'ring-2 ring-brand-500' : ''} ${cell === today ? 'font-semibold' : ''}`}
+              } ${selected ? 'ring-2 ring-brand-500' : ''} ${cell === today ? 'font-semibold' : ''} ${cell < today ? 'opacity-80' : ''}`}
             >
               <span className="flex w-full items-center justify-between text-xs">
                 <span>{Number(cell.slice(8, 10))}</span>

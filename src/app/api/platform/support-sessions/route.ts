@@ -2,14 +2,9 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
-import {
-  getStaffDisplayName,
-  listVenueAdminEmails,
-  startSupportSession,
-} from '@/lib/support-session-core';
+import { startSupportSession } from '@/lib/support-session-core';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setSupportSessionCookie } from '@/lib/support-session-server';
-import { sendSupportSessionStartedEmails } from '@/lib/support-session-email';
 
 const postBodySchema = z.object({
   staff_id: z.string().uuid(),
@@ -71,7 +66,15 @@ export async function GET() {
   });
 }
 
-/** POST /api/platform/support-sessions — start support session with selected staff permissions (superuser only). */
+/**
+ * POST /api/platform/support-sessions — start a support session with the
+ * selected staff member's permissions (superuser only).
+ *
+ * The session is recorded in `support_sessions` and the platform audit log,
+ * which is where a venue's access history lives. Venue admins used to be
+ * emailed as well; that was dropped, as a routine support session is not
+ * something a venue owner needs to be told about each time.
+ */
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
@@ -100,30 +103,6 @@ export async function POST(request: Request) {
     }
 
     await setSupportSessionCookie(started.session.id);
-
-    const admin = getSupabaseAdminClient();
-    const { data: venue } = await admin
-      .from('venues')
-      .select('name')
-      .eq('id', started.session.venue_id)
-      .maybeSingle();
-    const venueName = (venue as { name?: string } | null)?.name?.trim() || 'Your venue';
-
-    const adminEmails = await listVenueAdminEmails(admin, started.session.venue_id);
-    const apparentLabel =
-      (await getStaffDisplayName(admin, started.session.apparent_staff_id)) ??
-      started.session.apparent_staff_id;
-
-    await sendSupportSessionStartedEmails({
-      toEmails: adminEmails.length > 0 ? adminEmails : [],
-      venueName,
-      superuserDisplayName:
-        started.session.superuser_display_name?.trim() ||
-        (user.email ?? 'ResNeo support'),
-      apparentStaffLabel: apparentLabel,
-      reason: parsed.data.reason.trim(),
-      expiresAtIso: started.session.expires_at,
-    });
 
     return NextResponse.json({
       session_id: started.session.id,

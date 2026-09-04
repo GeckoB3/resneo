@@ -26,6 +26,9 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
+import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
+import { loadCollectiveDayAvailability } from '@/lib/linked-accounts/collective-booking-bridge';
+import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-any-practitioner';
 import { withScheduleFailClosed } from '@/lib/availability/schedule-unavailable-response';
 
 const UUID_RE =
@@ -98,11 +101,32 @@ async function handleStaffAppointmentAvailabilityGet(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const ownerVenueParam = searchParams.get('owner_venue_id');
-    const scope = await resolveLinkedStaffCatalogScope(
-      admin,
-      staff.venue_id,
-      ownerVenueParam && UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null,
-    );
+    const ownerVenueId = ownerVenueParam && UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null;
+
+    // A live venue collective the caller belongs to: slots come from the merged
+    // catalogue, each calendar sized and clocked by its owning venue, as the
+    // combined public page computes them, with the staff allowance for today.
+    const collective = ownerVenueId
+      ? await resolveStaffCollectiveScope(admin, staff.venue_id, ownerVenueId)
+      : null;
+    if (collective) {
+      const anyAvailable = practitionerId === ANY_AVAILABLE_PRACTITIONER_ID;
+      const payload = await loadCollectiveDayAvailability(admin, {
+        collectiveId: collective.collectiveId,
+        offeringId: serviceId,
+        calendarId: anyAvailable ? null : practitionerId,
+        anyAvailable,
+        date,
+        durationMinutes: customDurationMinutes,
+        variantId: variantId ?? null,
+        addonIds: searchParams.getAll('addon_ids').filter(Boolean),
+        audience: 'staff',
+        excludeBookingId: excludeBookingId && UUID_RE.test(excludeBookingId) ? excludeBookingId : null,
+      });
+      return NextResponse.json(payload);
+    }
+
+    const scope = await resolveLinkedStaffCatalogScope(admin, staff.venue_id, ownerVenueId);
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status });
     }

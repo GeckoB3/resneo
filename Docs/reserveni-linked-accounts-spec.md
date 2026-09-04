@@ -967,6 +967,39 @@ venue's own `/book/[venue-slug]` page:
 
 ---
 
+### 8.7 Staff booking for a collective (shipped to staging 2026-09-04)
+
+A venue that is an active member of a live collective (`unified_catalog`, at least two
+currently eligible members: the gate the combined public page applies, in
+`src/lib/linked-accounts/collective-staff-scope.ts`) books for the collective as one business
+from every staff entry point:
+
+- `/dashboard/bookings/new` (the sidebar's New Appointment) renders the standard staff flow over
+  the collective's virtual venue: every member's offered calendars, the combined offerings at
+  collective prices, merged availability, and "Any available" per offering.
+- On the diary, New and Walk-in open the same form over the whole collective; a slot on a column
+  that is one of the collective's calendars, own or partner's, opens it with that calendar
+  preselected. A column with no combined offering, or a partner outside any collective, keeps
+  the per-venue form it had.
+- Venues with pairwise links but no collective see no change.
+
+How it is built: the single-partner path (`linkedOwnerVenueId` on `StaffSurfaceBookingStack`)
+carries the collective id. `GET /api/venue/linked-calendar/venue-profile`,
+`GET /api/venue/appointment-calendar`, `GET /api/venue/appointment-availability` and
+`POST /api/venue/bookings` resolve a collective through the bridge (`collective-booking-bridge.ts`)
+before continuing down their existing linked paths, so a booking is written in the OWNING venue
+against the real source service with the collective's override, attributed with
+`bookings.collective_id` and `collective_service_item_id`, and, when the owner is another member,
+recorded in the link audit and notified as a cross-venue create. Visits and groups keep using the
+public create routes, which now record the same audit for a staff actor
+(`collective-staff-audit.ts`). `GET /api/venue/staff-collective` tells the diary which collective,
+members and calendars apply.
+
+What the venue sees afterwards is unchanged: a booking on a partner's calendar shows on the
+diary's linked column and under Linked / All in the bookings list; one on the venue's own
+calendar shows under My venue. The guest record is matched or created in the owning venue,
+exactly as a combined-page booking is.
+
 ## 9. Notifications
 
 All link-related emails are sent via the existing **SendGrid** integration on the

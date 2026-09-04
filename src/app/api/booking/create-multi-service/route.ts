@@ -25,6 +25,7 @@ import {
   MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
 import { MAX_SERVICES_PER_VISIT } from '@/lib/booking/service-chain';
 import {
   createAppointmentSlotRecheck,
@@ -1133,6 +1134,12 @@ export async function POST(request: NextRequest) {
           console.error('[after] multi-service confirmation email failed:', err);
         }
       });
+    }
+
+    // A member venue's staff booking for the collective onto a partner's calendar:
+    // record the cross-venue write and tell the owner, as the staff create route does.
+    if (collectiveIdFromVenue) {
+      void recordStaffCollectiveCrossVenueCreate({ admin: supabase, request, owningVenueId: venue_id, bookingIds });
     }
 
     return NextResponse.json(

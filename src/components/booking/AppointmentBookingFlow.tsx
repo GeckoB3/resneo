@@ -1301,12 +1301,22 @@ export function AppointmentBookingFlow({
     }
   }, [editBooking, preselectedServiceId, catalogStaff]);
 
+  /**
+   * Opened for a particular calendar (a diary column's "New booking", a slot):
+   * that calendar is chosen as if its card had been tapped, so the form lands on
+   * its services rather than asking "who" again. Applied once per mount: a staff
+   * member who then goes back to pick someone else must not be bounced forward.
+   */
+  const preselectedPractitionerAppliedRef = useRef(false);
   useEffect(() => {
     if (editBooking || !preselectedPractitionerId || catalogStaff.length === 0 || lockedPractitioner) return;
-    if (catalogStaff.some((p) => p.id === preselectedPractitionerId)) {
-      setSelectedPractitionerId(preselectedPractitionerId);
+    if (!catalogStaff.some((p) => p.id === preselectedPractitionerId)) return;
+    setSelectedPractitionerId(preselectedPractitionerId);
+    if (!preselectedPractitionerAppliedRef.current && step === 'staff_pick') {
+      preselectedPractitionerAppliedRef.current = true;
+      setStep('service');
     }
-  }, [editBooking, preselectedPractitionerId, catalogStaff, lockedPractitioner]);
+  }, [editBooking, preselectedPractitionerId, catalogStaff, lockedPractitioner, step]);
 
   const fetchAvailability = useCallback(
     async (opts: {

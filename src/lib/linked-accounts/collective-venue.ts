@@ -224,6 +224,10 @@ const DEFAULT_CANCELLATION_NOTICE_HOURS = 24;
 export async function loadCollectiveAppointmentCatalog(
   admin: SupabaseClient,
   collectiveId: string,
+  options?: {
+    /** Staff of a member venue see `hidden_from_online` add-on groups, as they do on their own catalogue. */
+    includeHiddenAddons?: boolean;
+  },
 ): Promise<{ practitioners: CollectiveCatalogPractitioner[]; categories: ServiceCategoryRef[] }> {
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
   if (!catalogue || catalogue.items.length === 0) {
@@ -290,7 +294,14 @@ export async function loadCollectiveAppointmentCatalog(
       const schema = venueIsUnified[venueId] ? 'service_item' : 'appointment_service';
       const [variantMap, addonMap, metaRows] = await Promise.all([
         loadVariantsForServices({ admin, venueId, schema, parentIds: ids }),
-        loadAddonGroupsForServices({ admin, venueId, schema, parentIds: ids, includeHidden: false, includeInactive: false }),
+        loadAddonGroupsForServices({
+          admin,
+          venueId,
+          schema,
+          parentIds: ids,
+          includeHidden: options?.includeHiddenAddons ?? false,
+          includeInactive: false,
+        }),
         admin
           .from(venueIsUnified[venueId] ? 'service_items' : 'appointment_services')
           .select(

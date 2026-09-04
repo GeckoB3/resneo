@@ -69,6 +69,9 @@ import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import { logStaffBookingFlowEvent } from '@/lib/metrics/log-staff-booking-flow-event';
 import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
+import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
+import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
@@ -225,6 +228,42 @@ export async function POST(request: NextRequest) {
     const bookingSource = (parsed.data.source ?? 'phone') as 'phone' | 'walk-in';
     const staffWalkIn = bookingSource === 'walk-in';
     const admin = getSupabaseAdminClient();
+
+    /**
+     * A live venue collective the caller belongs to, sent as `owner_venue_id`: the
+     * staff form books for the whole collective as one business. The chosen
+     * offering and calendar resolve here to the OWNING venue and its real source
+     * service (the same routing the combined public page uses), and the request
+     * then continues as an ordinary linked create against that venue, so the
+     * scope check, audit and cross-venue notification all apply. The booking is
+     * attributed to the collective like a combined-page booking.
+     */
+    let collectiveAttribution: { collectiveId: string; offeringId: string } | null = null;
+    if (parsed.data.owner_venue_id) {
+      const collective = await resolveStaffCollectiveScope(admin, staff.venue_id, parsed.data.owner_venue_id);
+      if (collective) {
+        if (!parsed.data.practitioner_id || !parsed.data.appointment_service_id) {
+          return NextResponse.json({ error: 'Choose a calendar and a service.' }, { status: 400 });
+        }
+        const target = await resolveCombinedBookingTarget(admin, {
+          collectiveId: collective.collectiveId,
+          offeringId: parsed.data.appointment_service_id,
+          calendarId: parsed.data.practitioner_id,
+        });
+        if (!target) {
+          return NextResponse.json(
+            { error: 'That service is not currently bookable on this calendar.' },
+            { status: 400 },
+          );
+        }
+        collectiveAttribution = {
+          collectiveId: collective.collectiveId,
+          offeringId: parsed.data.appointment_service_id,
+        };
+        parsed.data.owner_venue_id = target.venueId;
+        parsed.data.appointment_service_id = target.sourceServiceId;
+      }
+    }
 
     const scope = await resolveLinkedStaffCreateScope(
       admin,
@@ -1015,6 +1054,30 @@ export async function POST(request: NextRequest) {
         serviceId: appointment_service_id,
       });
 
+      // Combined booking (collective): the offering's own price and length stand
+      // in for the source service's base terms, applied BEFORE the variant and
+      // add-ons so whatever staff choose on top still stacks, exactly as the
+      // public create does. No-op for an ordinary booking.
+      let collectiveOverride: Awaited<ReturnType<typeof resolveCollectiveServiceOverride>> = null;
+      if (collectiveAttribution) {
+        collectiveOverride = await resolveCollectiveServiceOverride(admin, {
+          collectiveId: collectiveAttribution.collectiveId,
+          collectiveServiceItemId: collectiveAttribution.offeringId,
+          venueId,
+          sourceServiceId: appointment_service_id,
+          practitionerId: practitioner_id,
+        });
+        if (collectiveOverride?.durationMinutes != null) {
+          const oidx = appointmentInput.services.findIndex((s) => s.id === appointment_service_id);
+          if (oidx >= 0) {
+            appointmentInput.services[oidx] = {
+              ...appointmentInput.services[oidx]!,
+              duration_minutes: collectiveOverride.durationMinutes,
+            };
+          }
+        }
+      }
+
       attachVenueClockToAppointmentInput(
         appointmentInput,
         venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
@@ -1156,6 +1219,12 @@ export async function POST(request: NextRequest) {
       if (!svc) {
         return NextResponse.json({ error: 'Service not available with this practitioner' }, { status: 400 });
       }
+      // The collective's price is the offering's BASE price; a chosen variant carries
+      // its own price and replaces it, as on a venue's own page.
+      const svcForCharge =
+        collectiveOverride?.pricePence != null && !chosenVariant
+          ? { ...svc, price_pence: collectiveOverride.pricePence }
+          : svc;
       if (staffWalkIn) {
         // Walk-ins are taken "regardless": once the front desk hits Start Appointment
         // Now, the decision is final. So they may be booked past opening hours / outside
@@ -1209,7 +1278,7 @@ export async function POST(request: NextRequest) {
         practitioner_name: practRow?.name ?? null,
         appointment_service_name: svc?.name ?? null,
         appointment_price_display:
-          svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
+          svcForCharge?.price_pence != null ? `£${(svcForCharge.price_pence / 100).toFixed(2)}` : null,
       };
 
       // Booking duration. `svc.duration_minutes` already includes the add-on extension
@@ -1246,7 +1315,7 @@ export async function POST(request: NextRequest) {
 
       const online = svc
         ? resolveAppointmentServiceOnlineChargeWithAddons({
-            svc,
+            svc: svcForCharge,
             addons_total_price_pence: chosenAddonTotals.total_price_pence,
           })
         : null;
@@ -1328,6 +1397,14 @@ export async function POST(request: NextRequest) {
         addons_total_duration_minutes: chosenAddonTotals.total_duration_minutes,
         service_variant_id: parsed.data.service_variant_id ?? null,
       };
+
+      // §7.7 attribution: a booking made for the collective carries the collective
+      // and the offering, as a combined-page booking does. Membership was checked
+      // when the target resolved, so no forged id reaches here.
+      if (collectiveAttribution) {
+        apptInsert.collective_id = collectiveAttribution.collectiveId;
+        apptInsert.collective_service_item_id = collectiveAttribution.offeringId;
+      }
 
       if (useUnifiedAppointmentStorage) {
         apptInsert.calendar_id = practitioner_id;

@@ -2748,6 +2748,58 @@ export function PractitionerCalendarView({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
+  /**
+   * The live venue collective this venue books for as one business, or null.
+   * A click on a column that is one of the collective's calendars opens the
+   * staff form for the collective with that calendar preselected; New and
+   * Walk-in open it over the whole collective; a column outside the collective
+   * (a calendar with no combined offering, or a link with no collective) keeps
+   * the per-venue form it has today.
+   */
+  const [staffCollective, setStaffCollective] = useState<{
+    id: string;
+    name: string;
+    memberVenueIds: string[];
+    calendarIds: string[];
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/staff-collective');
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          collective?: { id: string; name: string; member_venue_ids: string[]; calendar_ids: string[] } | null;
+        };
+        if (cancelled) return;
+        setStaffCollective(
+          json.collective
+            ? {
+                id: json.collective.id,
+                name: json.collective.name,
+                memberVenueIds: json.collective.member_venue_ids,
+                calendarIds: json.collective.calendar_ids,
+              }
+            : null,
+        );
+      } catch {
+        /* the per-venue form is the fallback */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venueId]);
+  /** Where a new booking for `calendarId` on `columnVenueId` goes: the collective, or null for the venue itself. */
+  const collectiveTargetFor = useCallback(
+    (columnVenueId: string, calendarId: string | null): { id: string; name: string } | null => {
+      if (!staffCollective) return null;
+      if (!staffCollective.memberVenueIds.includes(columnVenueId)) return null;
+      if (calendarId && !staffCollective.calendarIds.includes(calendarId)) return null;
+      return { id: staffCollective.id, name: staffCollective.name };
+    },
+    [staffCollective],
+  );
   const [showResourceBooking, setShowResourceBooking] = useState(false);
   const [resourceBookingResourceId, setResourceBookingResourceId] = useState<string | undefined>();
   const [resourceBookingVenue, setResourceBookingVenue] = useState<VenuePublic | null>(null);
@@ -3364,6 +3416,7 @@ export function PractitionerCalendarView({
     ) {
       setFilterStatus(filters.filterStatus);
     }
+    if (filters.workingHoursOnly !== undefined) setWorkingHoursOnly(filters.workingHoursOnly);
     if (remembered.startHourOverride !== undefined) setStartHourOverride(remembered.startHourOverride);
     if (remembered.endHourOverride !== undefined) setEndHourOverride(remembered.endHourOverride);
     if (remembered.compactDay !== undefined) setCompactDay(remembered.compactDay);
@@ -3391,9 +3444,6 @@ export function PractitionerCalendarView({
   const calendarPrefsSnapshot = useMemo(
     (): PractitionerCalendarPreferences => ({
       viewMode,
-      visibleCalendarIdsState,
-      visibleLinkedColumnIds,
-      filterStatus,
       startHourOverride,
       endHourOverride,
       compactDay,
@@ -3408,6 +3458,9 @@ export function PractitionerCalendarView({
 
   const calendarFilters = useMemo(
     (): PractitionerCalendarFilters => ({
+      visibleCalendarIdsState,
+      visibleLinkedColumnIds,
+      filterStatus,
       workingHoursOnly,
     }),
     [visibleCalendarIdsState, visibleLinkedColumnIds, filterStatus, workingHoursOnly],
@@ -3427,7 +3480,6 @@ export function PractitionerCalendarView({
 
   /**
    * Compact day view: measure how much vertical room the slot canvas has inside the page's
-    if (filters.workingHoursOnly !== undefined) setWorkingHoursOnly(filters.workingHoursOnly);
    * scroll container and shrink each slot so the whole day (open → close) fits one screen.
    *
    * We measure the canvas's own offset within `<main>` (which folds in the toolbar, page
@@ -3944,6 +3996,36 @@ export function PractitionerCalendarView({
     return columnPractitioners.filter((p) => allowed.has(p.id));
   }, [columnPractitioners, calendarFilterIds]);
 
+  /**
+   * "Only calendars working on the selected day" applies to the day grid alone:
+   * week and month views lay days out, not columns, so every calendar stays.
+   */
+  const workingHoursFilterActive = viewMode === 'day' && workingHoursOnly;
+
+  const filteredPractitioners = useMemo(() => {
+    if (!workingHoursFilterActive) return calendarFilteredPractitioners;
+    // "Working" means the column has bookable hours left on the date: its hours
+    // for that day minus recorded leave and the venue's closures. A calendar on
+    // leave all day, or a day the venue is closed, is off even though its weekly
+    // template has hours.
+    return calendarFilteredPractitioners.filter((p) =>
+      calendarHasAvailableHoursOnDate({
+        practitioner: p as unknown as VenuePractitioner,
+        dateYmd: date,
+        leavePeriods,
+        openingHours,
+        venueWideBlocks,
+      }),
+    );
+  }, [calendarFilteredPractitioners, workingHoursFilterActive, date, leavePeriods, openingHours, venueWideBlocks]);
+
+  /** Columns the working-hours filter is hiding today, so their bookings leave the counts too. */
+  const workingHoursHiddenColumnIds = useMemo(() => {
+    if (!workingHoursFilterActive) return null;
+    const shown = new Set(filteredPractitioners.map((p) => p.id));
+    return new Set(calendarFilteredPractitioners.filter((p) => !shown.has(p.id)).map((p) => p.id));
+  }, [workingHoursFilterActive, calendarFilteredPractitioners, filteredPractitioners]);
+
   /** Every practitioner column exposed by a linked venue (§8.2). */
   const linkedColumns = useMemo<LinkedColumn[]>(() => {
     const out: LinkedColumn[] = [];
@@ -4003,36 +4085,6 @@ export function PractitionerCalendarView({
     const native: DayGridColumn[] = filteredPractitioners.map((practitioner) => ({
       kind: 'native',
       practitioner,
-  /**
-   * "Only calendars working on the selected day" applies to the day grid alone:
-   * week and month views lay days out, not columns, so every calendar stays.
-   */
-  const workingHoursFilterActive = viewMode === 'day' && workingHoursOnly;
-
-  const filteredPractitioners = useMemo(() => {
-    if (!workingHoursFilterActive) return calendarFilteredPractitioners;
-    // "Working" means the column has bookable hours left on the date: its hours
-    // for that day minus recorded leave and the venue's closures. A calendar on
-    // leave all day, or a day the venue is closed, is off even though its weekly
-    // template has hours.
-    return calendarFilteredPractitioners.filter((p) =>
-      calendarHasAvailableHoursOnDate({
-        practitioner: p as unknown as VenuePractitioner,
-        dateYmd: date,
-        leavePeriods,
-        openingHours,
-        venueWideBlocks,
-      }),
-    );
-  }, [calendarFilteredPractitioners, workingHoursFilterActive, date, leavePeriods, openingHours, venueWideBlocks]);
-
-  /** Columns the working-hours filter is hiding today, so their bookings leave the counts too. */
-  const workingHoursHiddenColumnIds = useMemo(() => {
-    if (!workingHoursFilterActive) return null;
-    const shown = new Set(filteredPractitioners.map((p) => p.id));
-    return new Set(calendarFilteredPractitioners.filter((p) => !shown.has(p.id)).map((p) => p.id));
-  }, [workingHoursFilterActive, calendarFilteredPractitioners, filteredPractitioners]);
-
     }));
     const linked: DayGridColumn[] = nativeGridLinkedColumns.map((column) => ({
       kind: 'linked',
@@ -6361,6 +6413,10 @@ export function PractitionerCalendarView({
         const colId = resolveBookingColumnId(b, resourceParentById);
         if (!colId || !calendarFilterIds.includes(colId)) return false;
       }
+      if (workingHoursHiddenColumnIds && workingHoursHiddenColumnIds.size > 0) {
+        const colId = resolveBookingColumnId(b, resourceParentById);
+        if (colId && workingHoursHiddenColumnIds.has(colId)) return false;
+      }
       if (!bookingMatchesCalendarStatusFilter(b, filterStatus)) return false;
       return true;
     });
@@ -6414,10 +6470,6 @@ export function PractitionerCalendarView({
         <span className="tabular-nums text-slate-600">{completedCount}</span>
       </span>
     </div>
-      if (workingHoursHiddenColumnIds && workingHoursHiddenColumnIds.size > 0) {
-        const colId = resolveBookingColumnId(b, resourceParentById);
-        if (colId && workingHoursHiddenColumnIds.has(colId)) return false;
-      }
   );
 
   const calendarFilterPanel = (
@@ -6431,6 +6483,20 @@ export function PractitionerCalendarView({
           onChange={setVisibleCalendarIdsState}
           maxHeightClass="max-h-56"
         />
+        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
+          <input
+            type="checkbox"
+            className="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            checked={workingHoursOnly}
+            onChange={(e) => setWorkingHoursOnly(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Only calendars working on the selected day</span>
+            <span className="block text-xs text-slate-500">
+              In day view, hides columns with no working hours on the date you are viewing.
+            </span>
+          </span>
+        </label>
       </div>
 
       {linkFeature ? (
@@ -6483,20 +6549,6 @@ export function PractitionerCalendarView({
                 }}
               />
               <span className="font-medium">All linked calendars</span>
-        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
-          <input
-            type="checkbox"
-            className="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-            checked={workingHoursOnly}
-            onChange={(e) => setWorkingHoursOnly(e.target.checked)}
-          />
-          <span>
-            <span className="font-medium">Only calendars working on the selected day</span>
-            <span className="block text-xs text-slate-500">
-              In day view, hides columns with no working hours on the date you are viewing.
-            </span>
-          </span>
-        </label>
             </label>
             <div className="border-t border-slate-100" />
             {[
@@ -6965,6 +7017,24 @@ export function PractitionerCalendarView({
             />
           </div>
         </div>
+      ) : workingHoursFilterActive && filteredPractitioners.length === 0 && visibleLinkedColumns.length === 0 ? (
+        <div className="flex min-h-[40vh] items-center justify-center px-4">
+          <div className="w-full max-w-md">
+            <EmptyState
+              title="No calendars working on this day"
+              description="Every calendar is off on this date. Pick another day, or turn off 'Only calendars working on the selected day' in Filter to see them all."
+              action={
+                <button
+                  type="button"
+                  onClick={() => setWorkingHoursOnly(false)}
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                >
+                  Show all calendars
+                </button>
+              }
+            />
+          </div>
+        </div>
       ) : viewMode === 'month' ? (
         <MonthScheduleGrid
           monthAnchor={monthAnchor}
@@ -7017,24 +7087,6 @@ export function PractitionerCalendarView({
               </thead>
               <tbody>
                 {filteredPractitioners.map((prac) => (
-      ) : workingHoursFilterActive && filteredPractitioners.length === 0 && visibleLinkedColumns.length === 0 ? (
-        <div className="flex min-h-[40vh] items-center justify-center px-4">
-          <div className="w-full max-w-md">
-            <EmptyState
-              title="No calendars working on this day"
-              description="Every calendar is off on this date. Pick another day, or turn off 'Only calendars working on the selected day' in Filter to see them all."
-              action={
-                <button
-                  type="button"
-                  onClick={() => setWorkingHoursOnly(false)}
-                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
-                >
-                  Show all calendars
-                </button>
-              }
-            />
-          </div>
-        </div>
                   <tr key={prac.id} className="border-b border-slate-100 transition-colors hover:bg-slate-50/70">
                     <td className="sticky left-0 bg-white/95 px-3 py-2 font-semibold text-slate-900 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
                       {prac.name}
@@ -9203,39 +9255,56 @@ export function PractitionerCalendarView({
         />
       ) : null}
 
-      {staffBookingModal ? (
-        <CalendarStaffBookingModal
-          open
-          intent={staffBookingModal}
-          onClose={() => {
-            setStaffBookingModal(null);
-            clearStaffBookingPrefill();
-          }}
-          onCreated={() => {
-            setStaffBookingModal(null);
-            clearStaffBookingPrefill();
-            void refetchBookingsList();
-          }}
-          onBookingSubmitted={() => void refetchBookingsList()}
-          venueId={eventBookPrefill?.linkedOwnerVenueId ?? venueId}
-          currency={currency}
-          bookingModel={bookingModel}
-          enabledModels={enabledModels}
-          preselectedDate={prefillDate ?? eventBookPrefill?.date ?? (viewMode === 'day' ? date : undefined)}
-          preselectedPractitionerId={prefillPractitionerId}
-          preselectedTime={prefillTime}
-          preselectedExperienceEventId={eventBookPrefill?.eventId}
-          preselectedEventDate={eventBookPrefill?.date}
-          preselectedEventTime={eventBookPrefill?.time}
-          linkedOwnerVenueId={eventBookPrefill?.linkedOwnerVenueId}
-          linkedVenueName={eventBookPrefill?.linkedVenueName}
-          stackKey={
-            eventBookPrefill
-              ? `event-${eventBookPrefill.eventId}-${eventBookPrefill.date}-${eventBookPrefill.time ?? ''}`
-              : undefined
-          }
-        />
-      ) : null}
+      {staffBookingModal
+        ? (() => {
+            // An own column inside the collective, or the toolbar's New and Walk-in,
+            // book for the collective; an own column outside it books for the venue.
+            const collectiveTarget = eventBookPrefill
+              ? null
+              : collectiveTargetFor(venueId, prefillPractitionerId ?? null);
+            const ownerVenueId = eventBookPrefill?.linkedOwnerVenueId ?? collectiveTarget?.id;
+            return (
+              <CalendarStaffBookingModal
+                open
+                intent={staffBookingModal}
+                onClose={() => {
+                  setStaffBookingModal(null);
+                  clearStaffBookingPrefill();
+                }}
+                onCreated={() => {
+                  setStaffBookingModal(null);
+                  clearStaffBookingPrefill();
+                  void refetchBookingsList();
+                  // A collective booking may have landed on a partner's calendar.
+                  if (collectiveTarget) void loadLinkedData();
+                }}
+                onBookingSubmitted={() => {
+                  void refetchBookingsList();
+                  if (collectiveTarget) void loadLinkedData();
+                }}
+                venueId={ownerVenueId ?? venueId}
+                currency={currency}
+                bookingModel={bookingModel}
+                enabledModels={enabledModels}
+                preselectedDate={prefillDate ?? eventBookPrefill?.date ?? (viewMode === 'day' ? date : undefined)}
+                preselectedPractitionerId={prefillPractitionerId}
+                preselectedTime={prefillTime}
+                preselectedExperienceEventId={eventBookPrefill?.eventId}
+                preselectedEventDate={eventBookPrefill?.date}
+                preselectedEventTime={eventBookPrefill?.time}
+                linkedOwnerVenueId={ownerVenueId}
+                linkedVenueName={eventBookPrefill?.linkedVenueName ?? collectiveTarget?.name}
+                stackKey={
+                  eventBookPrefill
+                    ? `event-${eventBookPrefill.eventId}-${eventBookPrefill.date}-${eventBookPrefill.time ?? ''}`
+                    : collectiveTarget
+                      ? `collective-${collectiveTarget.id}-${prefillPractitionerId ?? 'any'}`
+                      : undefined
+                }
+              />
+            );
+          })()
+        : null}
       {showResourceBooking && resourceBookingResourceId ? (
         <Dialog
           open
@@ -9291,28 +9360,45 @@ export function PractitionerCalendarView({
         />
       ) : null}
 
-      {linkedCreating ? (
-        <CalendarStaffBookingModal
-          open
-          intent={linkedCreating.intent}
-          linkedOwnerVenueId={linkedCreating.venue.venueId}
-          linkedVenueName={linkedCreating.venue.venueName}
-          stackKey={`linked-${linkedCreating.venue.venueId}-${linkedCreating.practitionerId ?? 'any'}`}
-          onClose={() => setLinkedCreating(null)}
-          onCreated={() => {
-            setLinkedCreating(null);
-            void loadLinkedData();
-          }}
-          onBookingSubmitted={() => void loadLinkedData()}
-          venueId={linkedCreating.venue.venueId}
-          currency={currency}
-          bookingModel={bookingModel}
-          enabledModels={enabledModels}
-          preselectedDate={viewMode === 'day' ? date : weekStart}
-          preselectedPractitionerId={linkedCreating.practitionerId}
-          preselectedTime={linkedCreating.time}
-        />
-      ) : null}
+      {linkedCreating
+        ? (() => {
+            // A partner's column inside the collective books for the collective with
+            // that calendar preselected; a partner outside it keeps the single-venue
+            // linked form (its own catalogue, its own grant).
+            const collectiveTarget = collectiveTargetFor(
+              linkedCreating.venue.venueId,
+              linkedCreating.practitionerId ?? null,
+            );
+            const ownerVenueId = collectiveTarget?.id ?? linkedCreating.venue.venueId;
+            return (
+              <CalendarStaffBookingModal
+                open
+                intent={linkedCreating.intent}
+                linkedOwnerVenueId={ownerVenueId}
+                linkedVenueName={collectiveTarget?.name ?? linkedCreating.venue.venueName}
+                stackKey={`linked-${ownerVenueId}-${linkedCreating.practitionerId ?? 'any'}`}
+                onClose={() => setLinkedCreating(null)}
+                onCreated={() => {
+                  setLinkedCreating(null);
+                  void loadLinkedData();
+                  // A collective booking may have landed on one of this venue's own calendars.
+                  if (collectiveTarget) void refetchBookingsList();
+                }}
+                onBookingSubmitted={() => {
+                  void loadLinkedData();
+                  if (collectiveTarget) void refetchBookingsList();
+                }}
+                venueId={ownerVenueId}
+                currency={currency}
+                bookingModel={bookingModel}
+                enabledModels={enabledModels}
+                preselectedDate={viewMode === 'day' ? date : weekStart}
+                preselectedPractitionerId={linkedCreating.practitionerId}
+                preselectedTime={linkedCreating.time}
+              />
+            );
+          })()
+        : null}
       {acceptUnpaidGuard.dialog}
     </div>
   );

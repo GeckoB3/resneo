@@ -175,6 +175,10 @@ export async function loadCollectiveDayAvailability(
     addonIds?: string[];
     /** Earlier members of a group booking, so their slots count as taken. */
     phantoms?: PhantomBooking[];
+    /** Staff may book a slot earlier today; the public may not. Defaults to public. */
+    audience?: 'public' | 'staff';
+    /** A booking being rescheduled, whose own slot must not count as taken. */
+    excludeBookingId?: string | null;
   },
 ): Promise<{ date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean }> {
   const { collectiveId, offeringId, date } = params;
@@ -229,7 +233,12 @@ export async function loadCollectiveDayAvailability(
           if (idx >= 0) input.services[idx] = { ...input.services[idx]!, duration_minutes: dur };
         }
         if (params.phantoms && params.phantoms.length > 0) input.phantomBookings = params.phantoms;
+        if (params.excludeBookingId) {
+          const excludeLc = params.excludeBookingId.toLowerCase();
+          input.existingBookings = input.existingBookings.filter((b) => b.id.toLowerCase() !== excludeLc);
+        }
         attachVenueClockToAppointmentInput(input, clock, null);
+        if (params.audience === 'staff') input.skipPastSlotFilter = true;
         const result = computeAppointmentAvailability(input);
         const slots: DaySlot[] = [];
         for (const prac of result.practitioners) {
@@ -297,6 +306,13 @@ export async function loadCollectiveMonthAvailableDates(
     /** The customer's chosen variant / add-ons, resolved per provider calendar. */
     variantId?: string | null;
     addonIds?: string[];
+    /**
+     * Staff see the dates staff see on their own venue (same-day allowed); the
+     * public gets the guest booking window. Defaults to public.
+     */
+    audience?: 'public' | 'staff';
+    /** A booking being rescheduled, whose own slot must not count as taken. */
+    excludeBookingId?: string | null;
   },
 ): Promise<{ venue_id: string; practitioner_id: string; service_id: string; year: number; month: number; available_dates: string[]; any_available?: boolean }> {
   const { collectiveId, offeringId, year, month } = params;
@@ -321,8 +337,9 @@ export async function loadCollectiveMonthAvailableDates(
         );
         if (dur === null && (params.variantId || (params.addonIds?.length ?? 0) > 0)) return [] as string[];
         return await computeAppointmentAvailableDatesInMonth(admin, t.venueId, t.calendarId, t.sourceServiceId, year, month, {
-          audience: 'public',
+          audience: params.audience ?? 'public',
           customDurationMinutes: dur ?? undefined,
+          excludeBookingId: params.excludeBookingId ?? null,
         });
       } catch {
         return [] as string[];

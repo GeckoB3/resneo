@@ -8,6 +8,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { isCollectiveId } from '@/lib/linked-accounts/collective-booking-bridge';
 import { loadCollectiveAppointmentCatalog } from '@/lib/linked-accounts/collective-venue';
+import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
 
 /**
  * GET /api/booking/appointment-catalog?venue_id=uuid
@@ -32,7 +33,17 @@ export async function GET(request: NextRequest) {
     // return the merged "virtual venue" catalogue (offerings as services, the
     // union of provider calendars as staff).
     if (await isCollectiveId(supabase, venueId)) {
-      const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId);
+      // Staff of a member venue booking for the collective see hidden add-on
+      // groups, as they do on their own catalogue; the public never does.
+      let includeHiddenAddons = false;
+      if (includeHiddenRequested) {
+        const authClient = await createVenueRouteClient(request);
+        const staff = await getVenueStaff(authClient);
+        includeHiddenAddons = Boolean(
+          staff && (await resolveStaffCollectiveScope(supabase, staff.venue_id, venueId)),
+        );
+      }
+      const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId, { includeHiddenAddons });
       return NextResponse.json(catalog);
     }
 

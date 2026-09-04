@@ -56,6 +56,7 @@ import {
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
@@ -1114,6 +1115,12 @@ export async function POST(request: NextRequest) {
           console.error('[after] group confirmation email failed:', err);
         }
       });
+    }
+
+    // A member venue's staff booking for the collective onto a partner's calendar:
+    // record the cross-venue write and tell the owner, as the staff create route does.
+    if (collectiveId) {
+      void recordStaffCollectiveCrossVenueCreate({ admin: supabase, request, owningVenueId: venue_id, bookingIds });
     }
 
     return NextResponse.json(

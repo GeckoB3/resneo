@@ -282,3 +282,31 @@ still there.
 `GET /api/booking/availability` accepts an optional `services` query parameter: a JSON array of up to four `{ service_id, variant_id?, addon_ids?, duration_minutes? }` entries in visit order. When present, the day view returns the starts at which the WHOLE chain fits back to back with one person (or, with `any_available=1`, with anyone who offers every service). Slots are labelled with the first `service_id` and carry the visit's span as `duration_minutes`. The top-level `service_id`, `variant_id`, `addon_ids` and `duration_minutes` are ignored when `services` is sent. Works on combined (collective) pages, where each entry is an offering id.
 
 `POST /api/booking/create-multi-service` now accepts an optional per-entry `duration_minutes` (staff custom core duration, honoured for the `phone` and `walk-in` sources only) and resolves a collective id in `venue_id` with offering ids in `service_id`, as `create` already did. `POST /api/booking/create-group` accepts up to 40 rows (ten people, four services each).
+
+## Staff booking for a venue collective (2026-09-04)
+
+A venue that is an active member of a live collective (`unified_catalog`, two or more eligible
+members) can book for the whole collective as one business. Nothing changes for a venue with
+pairwise links only, and nothing changes for the app until it opts in; every addition below is
+additive.
+
+- `GET /api/venue/linked-calendar/venue-profile?venueId=<collective id>` answers with the
+  collective's virtual venue (`venue.id` is the collective id, `venue.is_collective: true`),
+  `booking_model: "unified_scheduling"`, `enabled_models: []`, and a `collective` object
+  (`id`, `member_venue_ids`). A partner venue id answers as before.
+- `GET /api/venue/appointment-calendar` and `GET /api/venue/appointment-availability` accept
+  the collective id as `owner_venue_id`; `practitioner_id` is a calendar from the merged
+  catalogue (`GET /api/booking/appointment-catalog?venue_id=<collective id>`) and `service_id`
+  an offering. Availability is the union of the provider calendars, each on its owning venue's
+  clock, with the staff allowance for today.
+- `POST /api/venue/bookings` accepts the collective id as `owner_venue_id` with the offering as
+  `appointment_service_id` and the calendar as `practitioner_id`. The server resolves the owning
+  venue and source service, applies the collective's price and duration, writes the booking in
+  the owning venue with `collective_id` and `collective_service_item_id` set, and records the
+  link audit and cross-venue notification when the owner is another member.
+- `GET /api/venue/staff-collective` returns `{ collective: null }` or
+  `{ collective: { id, name, host_venue_id, member_venue_ids, calendar_ids } }`, the collective
+  the caller's venue books for and the calendars its combined catalogue offers.
+- Visits and groups keep using `POST /api/booking/create-multi-service` and `create-group` with
+  `venue_id = <collective id>`; when a member's staff session is on the request and the bookings
+  land in another member's venue, the same audit and notification are now recorded.

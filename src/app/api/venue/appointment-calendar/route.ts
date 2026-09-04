@@ -24,6 +24,8 @@ import {
 } from '@/lib/feature-flags';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { resolveLinkedStaffCatalogScope } from '@/lib/booking/staff-booking-access';
+import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
+import { loadCollectiveMonthAvailableDates } from '@/lib/linked-accounts/collective-booking-bridge';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
 import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
@@ -103,11 +105,32 @@ async function handleStaffAppointmentCalendarGet(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     const ownerVenueParam = searchParams.get('owner_venue_id');
-    const scope = await resolveLinkedStaffCatalogScope(
-      admin,
-      staff.venue_id,
-      ownerVenueParam && UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null,
-    );
+    const ownerVenueId = ownerVenueParam && UUID_RE.test(ownerVenueParam) ? ownerVenueParam : null;
+
+    // A live venue collective the caller belongs to: the staff form books for the
+    // whole collective, so the month is the union of every provider calendar's
+    // real availability, exactly as the combined public page computes it.
+    const collective = ownerVenueId
+      ? await resolveStaffCollectiveScope(admin, staff.venue_id, ownerVenueId)
+      : null;
+    if (collective) {
+      const payload = await loadCollectiveMonthAvailableDates(admin, {
+        collectiveId: collective.collectiveId,
+        offeringId: serviceId,
+        calendarId: anyAvailable ? null : practitionerId,
+        anyAvailable,
+        year,
+        month,
+        durationMinutes: customDurationMinutes,
+        variantId: variantId ?? null,
+        addonIds: searchParams.getAll('addon_ids').filter(Boolean),
+        audience: 'staff',
+        excludeBookingId: excludeBookingId && UUID_RE.test(excludeBookingId) ? excludeBookingId : null,
+      });
+      return NextResponse.json(payload, { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } });
+    }
+
+    const scope = await resolveLinkedStaffCatalogScope(admin, staff.venue_id, ownerVenueId);
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status });
     }

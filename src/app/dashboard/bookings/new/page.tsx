@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/server';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { buildVenuePublicForBookingById } from '@/lib/booking/build-venue-public';
+import { findStaffCollectiveForVenue } from '@/lib/linked-accounts/collective-staff-scope';
 import { NewBookingPageClient } from './NewBookingPageClient';
 
 export default async function NewBookingPage() {
@@ -43,6 +45,13 @@ export default async function NewBookingPage() {
     );
   }
 
+  // A venue in a live collective books appointments for the whole collective as
+  // one business: the stack renders the appointment surface over the collective's
+  // virtual venue (every member's calendars, the combined offerings, merged
+  // availability). The venue's own classes, events and other surfaces stay its own.
+  // Pairwise links without a collective change nothing.
+  const collective = await findStaffCollectiveForVenue(getSupabaseAdminClient(), venueId);
+
   return (
     <NewBookingPageClient
       venueId={venueId}
@@ -51,6 +60,7 @@ export default async function NewBookingPage() {
       bookingModel={bookingModel}
       currency={currency}
       enabledModels={enabledModels}
+      collective={collective ? { id: collective.collectiveId, name: collective.name } : null}
     />
   );
 }

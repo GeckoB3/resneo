@@ -121,6 +121,55 @@ describe('layoutOverlapClusters', () => {
     });
   });
 
+  /** Three hour colour whose processing time is its last hour, the chair free until it ends. */
+  function balayage(key: string, start: number): ClusterLayoutItem {
+    return { key, start, end: start + 180, gaps: [{ start: start + 120, end: start + 180 }] };
+  }
+
+  it('nests a booking that starts in a tail gap and runs on past the host, keeping one lane', () => {
+    const layouts = layoutOverlapClusters([
+      balayage('colour', t(13, 30)),
+      { key: 'cut', start: t(16), end: t(17) },
+    ]);
+    expect(layouts.get('cut')).toEqual({ laneIndex: 0, laneCount: 1, nestedInKey: 'colour' });
+    expect(layouts.get('colour')).toEqual({
+      laneIndex: 0,
+      laneCount: 1,
+      nestedRanges: [{ start: t(16), end: t(17) }],
+    });
+  });
+
+  it('does not nest a booking that starts at the very end of a tail gap', () => {
+    const layouts = layoutOverlapClusters([
+      balayage('colour', t(13, 30)),
+      { key: 'cut', start: t(16, 30), end: t(17, 30) },
+    ]);
+    // They do not overlap at all, so both keep the full column.
+    expect(layouts.get('cut')).toEqual({ laneIndex: 0, laneCount: 1 });
+  });
+
+  it("keeps the host's lane taken until the bar nested in its tail gap ends", () => {
+    const layouts = layoutOverlapClusters([
+      balayage('colour', t(13, 30)),
+      { key: 'cut', start: t(16), end: t(17) },
+      { key: 'next', start: t(16, 30), end: t(17, 30) },
+    ]);
+    expect(layouts.get('cut')?.nestedInKey).toBe('colour');
+    expect(layouts.get('next')?.nestedInKey).toBeUndefined();
+    expect(layouts.get('next')?.laneIndex).toBe(1);
+    expect(layouts.get('colour')?.laneCount).toBe(2);
+    expect(layouts.get('cut')?.laneIndex).toBe(layouts.get('colour')?.laneIndex);
+  });
+
+  it('lets a booking longer than its host ride out of a tail gap', () => {
+    const layouts = layoutOverlapClusters([
+      { key: 'gloss', start: t(15), end: t(16), gaps: [{ start: t(15, 30), end: t(16) }] },
+      { key: 'long', start: t(15, 30), end: t(18) },
+    ]);
+    expect(layouts.get('long')?.nestedInKey).toBe('gloss');
+    expect(layouts.get('long')?.laneCount).toBe(1);
+  });
+
   it('re-lanes live when a resize grows the nested booking past the gap', () => {
     const before = layoutOverlapClusters([tint('tint', t(11)), { key: 'cut', start: t(11, 30), end: t(12) }]);
     const after = layoutOverlapClusters([tint('tint', t(11)), { key: 'cut', start: t(11, 30), end: t(12, 5) }]);

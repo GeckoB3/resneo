@@ -16,6 +16,7 @@ import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
 import { BookingPageSection } from './sections/BookingPageSection';
+import { CombinedPageNotice, type SettingsCollectiveNote } from './sections/CombinedPageNotice';
 import {
   BOOKING_PAGE_EYEBROW_CLASS,
   BOOKING_PAGE_SECTION_HEADING_CLASS,
@@ -95,6 +96,8 @@ interface SettingsViewProps {
   referralsProgrammeAvailable?: boolean;
   /** Trial-window breakdown for the Plan tab (free-trial countdown + source). */
   trialBreakdown?: VenueTrialBreakdown | null;
+  /** The live venue collective this venue belongs to, for the Booking page tab's pointer. */
+  collective?: SettingsCollectiveNote | null;
 }
 
 const TABS = [
@@ -1124,12 +1127,19 @@ function SettingsViewInner({
   referralsDashboard = null,
   referralsProgrammeAvailable = false,
   trialBreakdown = null,
+  collective = null,
 }: SettingsViewProps) {
   const router = useRouter();
+  /**
+   * Set by the Booking page tab's "Manage combined page" button: the Linked
+   * accounts tab opens the manager for this collective once its list is in,
+   * then clears the request.
+   */
+  const [manageCollectiveId, setManageCollectiveId] = useState<string | null>(null);
   const pathname = usePathname() ?? '/dashboard/settings';
   const searchParams = useSearchParams();
   // Pushes freshly-saved feature flags into the dashboard-wide provider so a
-  // toggle (e.g. Card hold deposits) takes effect everywhere immediately; the
+  // toggle (e.g. Staff-first booking) takes effect everywhere immediately; the
   // layout only re-supplies flags on a full server render.
   const updateVenueFeatureFlags = useUpdateVenueFeatureFlags();
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
@@ -1569,6 +1579,16 @@ function SettingsViewInner({
 
         {visitedTabs.has('booking-page') && selectedTab === 'booking-page' ? (
         <div className="space-y-10">
+          {collective ? (
+            <CombinedPageNotice
+              collective={collective}
+              onManage={() => {
+                setManageCollectiveId(collective.id);
+                replaceWithTab('linked-accounts');
+              }}
+              onOpenLinkedAccounts={() => replaceWithTab('linked-accounts')}
+            />
+          ) : null}
           <SettingsProfileGroup
             brandHeadings
             eyebrow="Guest-facing page"
@@ -1691,7 +1711,11 @@ function SettingsViewInner({
         ) : null}
 
         {linkedAccountsAvailable && visitedTabs.has('linked-accounts') && selectedTab === 'linked-accounts' ? (
-              <LinkedAccountsSection venueName={venue.name ?? 'Your venue'} />
+              <LinkedAccountsSection
+                venueName={venue.name ?? 'Your venue'}
+                manageCollectiveId={manageCollectiveId}
+                onManageCollectiveOpened={() => setManageCollectiveId(null)}
+              />
         ) : null}
       </div>
       </div>

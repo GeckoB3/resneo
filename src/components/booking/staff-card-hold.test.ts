@@ -93,7 +93,6 @@ describe('resolveStaffEntityCardHold (appointments, classes, events, resources)'
       resolveStaffEntityCardHold({
         paymentRequirement: 'card_hold',
         feePerUnitPence: 2500,
-        cardHoldFlagEnabled: true,
       }),
     ).toEqual({ feePence: 2500 });
   });
@@ -103,20 +102,9 @@ describe('resolveStaffEntityCardHold (appointments, classes, events, resources)'
       resolveStaffEntityCardHold({
         paymentRequirement: 'card_hold',
         feePerUnitPence: 1500,
-        cardHoldFlagEnabled: true,
         units: 3,
       }),
     ).toEqual({ feePence: 4500 });
-  });
-
-  it('returns null when the venue flag is off (payloads are flag-independent)', () => {
-    expect(
-      resolveStaffEntityCardHold({
-        paymentRequirement: 'card_hold',
-        feePerUnitPence: 2500,
-        cardHoldFlagEnabled: false,
-      }),
-    ).toBeNull();
   });
 
   it('returns null for other payment requirements', () => {
@@ -125,7 +113,6 @@ describe('resolveStaffEntityCardHold (appointments, classes, events, resources)'
         resolveStaffEntityCardHold({
           paymentRequirement: req,
           feePerUnitPence: 2500,
-          cardHoldFlagEnabled: true,
         }),
       ).toBeNull();
     }
@@ -138,7 +125,6 @@ describe('resolveStaffEntityCardHold (appointments, classes, events, resources)'
       resolveStaffEntityCardHold({
         paymentRequirement: chargeLabel,
         feePerUnitPence: 3000,
-        cardHoldFlagEnabled: true,
       }),
     ).toEqual({ feePence: 3000 });
   });
@@ -149,7 +135,6 @@ describe('resolveStaffEntityCardHold (appointments, classes, events, resources)'
         resolveStaffEntityCardHold({
           paymentRequirement: 'card_hold',
           feePerUnitPence: fee,
-          cardHoldFlagEnabled: true,
         }),
       ).toBeNull();
     }
@@ -160,7 +145,6 @@ describe('resolveStaffEntityCardHold (appointments, classes, events, resources)'
       resolveStaffEntityCardHold({
         paymentRequirement: 'card_hold',
         feePerUnitPence: 1000,
-        cardHoldFlagEnabled: true,
         units: 0,
       }),
     ).toEqual({ feePence: 1000 });

@@ -34,16 +34,18 @@ export async function GET(request: NextRequest) {
     // union of provider calendars as staff).
     if (await isCollectiveId(supabase, venueId)) {
       // Staff of a member venue booking for the collective see hidden add-on
-      // groups, as they do on their own catalogue; the public never does.
-      let includeHiddenAddons = false;
+      // groups, as they do on their own catalogue, and every member's own services
+      // next to the combined offerings; the public sees neither.
+      let memberStaff = false;
       if (includeHiddenRequested) {
         const authClient = await createVenueRouteClient(request);
         const staff = await getVenueStaff(authClient);
-        includeHiddenAddons = Boolean(
-          staff && (await resolveStaffCollectiveScope(supabase, staff.venue_id, venueId)),
-        );
+        memberStaff = Boolean(staff && (await resolveStaffCollectiveScope(supabase, staff.venue_id, venueId)));
       }
-      const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId, { includeHiddenAddons });
+      const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId, {
+        includeHiddenAddons: memberStaff,
+        includeMemberOwnServices: memberStaff,
+      });
       return NextResponse.json(catalog);
     }
 

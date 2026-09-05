@@ -50,7 +50,6 @@ import {
   WeekHoursEditor,
   type ResourceListItem,
 } from './resource-timeline-ui';
-import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -349,8 +348,6 @@ export function ResourceTimelineView({
   stripeConnected?: boolean;
 }) {
   const sym = currency === 'EUR' ? '\u20ac' : '\u00a3';
-  /** Card-hold deposits rollout flag, resolved server-side by the dashboard layout (VenueFeatureFlagsProvider). */
-  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
@@ -1634,7 +1631,6 @@ export function ResourceTimelineView({
                 depositValue={formDeposit}
                 onDepositChange={setFormDeposit}
                 stripeConnected={stripeConnected}
-                cardHoldEnabled={cardHoldEnabled}
               />
               <StripePaymentWarning
                 stripeConnected={stripeConnected}

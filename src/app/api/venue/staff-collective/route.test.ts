@@ -34,6 +34,10 @@ describe('GET /api/venue/staff-collective', () => {
     expect(await res.json()).toEqual({
       collective: { id: COLLECTIVE, name: 'Plus Light', host_venue_id: CALLER, member_venue_ids: [CALLER, PARTNER], calendar_ids: ['cal-a', 'cal-b'] },
     });
+    // Own-service calendars count too: a column with no combined offering still books for the collective.
+    expect(vi.mocked(loadCollectiveAppointmentCatalog)).toHaveBeenCalledWith(expect.anything(), COLLECTIVE, {
+      includeMemberOwnServices: true,
+    });
   });
 
   it('answers null for a venue with links but no live collective', async () => {

@@ -235,7 +235,6 @@ export function AppointmentServicesView({
   /** Services whose active flag is being flipped from the card, so the switch can lock while it saves. */
   const [activeToggling, setActiveToggling] = useState<Set<string>>(() => new Set());
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
-  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   const [error, setError] = useState<string | null>(null);
 
   // Venue-wide compliance requirements, so each service card can show an
@@ -1125,18 +1124,11 @@ export function AppointmentServicesView({
                         // D5: for card-hold services the deposit column holds the
                         // no-show fee; no money is taken at booking time.
                         return (
-                          <>
-                            <Pill variant="info" size="sm">
-                              {display.deposit_pence != null && display.deposit_pence > 0
-                                ? `Card hold: ${formatPrice(display.deposit_pence)} no-show fee`
-                                : 'Card hold'}
-                            </Pill>
-                            {!cardHoldEnabled ? (
-                              <Pill variant="warning" size="sm">
-                                Card holds are switched off in Settings
-                              </Pill>
-                            ) : null}
-                          </>
+                          <Pill variant="info" size="sm">
+                            {display.deposit_pence != null && display.deposit_pence > 0
+                              ? `Card hold: ${formatPrice(display.deposit_pence)} no-show fee`
+                              : 'Card hold'}
+                          </Pill>
                         );
                       }
                       return (
@@ -1376,7 +1368,6 @@ export function AppointmentServicesView({
               setForm={setForm}
               isAdmin={isAdmin}
               stripeConnected={stripeConnected}
-              cardHoldEnabled={cardHoldEnabled}
               currencySymbol={sym}
               fieldGroupSuffix={editingId ?? 'new-service'}
               categories={categories}

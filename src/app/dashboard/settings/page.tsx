@@ -28,6 +28,9 @@ import {
   resolveSmsBillingPeriod,
 } from '@/lib/sms-usage';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { findStaffCollectiveForVenue } from '@/lib/linked-accounts/collective-staff-scope';
+import type { SettingsCollectiveNote } from './sections/CombinedPageNotice';
 import { referralProgrammeEnabled } from '@/lib/referrals/constants';
 import { loadReferralsDashboardForVenue } from '@/lib/referrals/load-dashboard';
 import { loadVenueTrialBreakdown } from '@/lib/billing/trial-info';
@@ -237,6 +240,26 @@ export default async function SettingsPage({
   );
   const featureFlagsResolved = resolveAppointmentsFeatureFlags(featureFlagsRaw);
 
+  // A live venue collective this venue belongs to: the Booking page tab then
+  // opens with a pointer to Manage combined page (hosts) or to Linked accounts.
+  let collective: SettingsCollectiveNote | null = null;
+  const staffCollective = await findStaffCollectiveForVenue(getSupabaseAdminClient(), venueId);
+  if (staffCollective) {
+    const admin = getSupabaseAdminClient();
+    const [{ data: host }, { data: row }] = await Promise.all([
+      admin.from('venues').select('name').eq('id', staffCollective.hostVenueId).maybeSingle(),
+      admin.from('venue_collectives').select('slug_strategy, adopted_venue_id').eq('id', staffCollective.collectiveId).maybeSingle(),
+    ]);
+    collective = {
+      id: staffCollective.collectiveId,
+      name: staffCollective.name,
+      isHost: staffCollective.hostVenueId === venueId,
+      hostVenueName: (host?.name as string | undefined) ?? 'The host venue',
+      adoptedThisVenue:
+        (row?.slug_strategy as string | undefined) === 'adopt_member' && (row?.adopted_venue_id as string | undefined) === venueId,
+    };
+  }
+
   const bookingModelForReports = ((venue as { booking_model?: string } | null)?.booking_model ??
     'table_reservation') as BookingModel;
   const reportsContext =
@@ -301,6 +324,7 @@ export default async function SettingsPage({
           referralsDashboard={referralsDashboard}
           referralsProgrammeAvailable={referralsProgrammeAvailable}
           trialBreakdown={trialBreakdown}
+          collective={collective}
         />
       </Suspense>
     </PageFrame>

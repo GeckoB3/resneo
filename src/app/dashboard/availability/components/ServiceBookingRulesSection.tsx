@@ -16,8 +16,6 @@ const FIELD_CLASS =
 interface Props {
   serviceId: string;
   restriction: ServiceBookingRestriction | undefined;
-  /** Venue `card_hold_deposits` flag; the Deposit type selector renders only when on. */
-  cardHoldDepositsEnabled: boolean;
   showToast: (msg: string) => void;
   onRestrictionSaved: (r: ServiceBookingRestriction) => void;
 }
@@ -65,7 +63,7 @@ function comparableEqual(a: ComparableFields, b: ComparableFields): boolean {
   );
 }
 
-export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDepositsEnabled, showToast, onRestrictionSaved }: Props) {
+export function ServiceBookingRulesSection({ serviceId, restriction, showToast, onRestrictionSaved }: Props) {
   const [draft, setDraft] = useState<ServiceBookingRestriction>(() =>
     restriction
       ? { ...restriction, deposit_amount_per_person_gbp: restriction.deposit_amount_per_person_gbp ?? null }
@@ -113,11 +111,6 @@ export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDep
       ...rest,
       online_requires_deposit: true as const,
     };
-    if (!cardHoldDepositsEnabled) {
-      // Card hold is flag-gated server-side; never send deposit_type while the flag is
-      // off so a stored 'card_hold' value is left untouched (and other edits still save).
-      delete payload.deposit_type;
-    }
 
     try {
       if (existing?.id && existing.service_id === d.service_id) {
@@ -266,39 +259,32 @@ export function ServiceBookingRulesSection({ serviceId, restriction, cardHoldDep
                 <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
                 <NumericInput min={1} value={draft.deposit_required_from_party_size} onChange={(v) => setDraft({ ...draft, deposit_required_from_party_size: v })} className={FIELD_CLASS} />
               </div>
-              {!cardHoldDepositsEnabled && draft.deposit_type === 'card_hold' && (
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  Card hold is disabled for this venue; this service currently takes no deposit.
-                </p>
-              )}
-              {cardHoldDepositsEnabled && (
-                <div className="max-w-xs">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Deposit type</label>
-                  <select
-                    value={draft.deposit_type === 'card_hold' ? 'card_hold' : 'charge'}
-                    onChange={(e) =>
-                      setDraft({ ...draft, deposit_type: e.target.value === 'card_hold' ? 'card_hold' : 'charge' })
-                    }
-                    className={FIELD_CLASS}
-                  >
-                    <option value="charge">Take deposit payment</option>
-                    <option value="card_hold">Card hold</option>
-                  </select>
-                  {draft.deposit_type === 'card_hold' && (
-                    <p className="mt-1 text-xs text-slate-500">
-                      No payment is taken when the client books. Their card is stored securely and you can charge a no-show fee if they do not attend.
-                    </p>
-                  )}
-                </div>
-              )}
+              <div className="max-w-xs">
+                <label className="mb-1 block text-xs font-medium text-slate-600">Deposit type</label>
+                <select
+                  value={draft.deposit_type === 'card_hold' ? 'card_hold' : 'charge'}
+                  onChange={(e) =>
+                    setDraft({ ...draft, deposit_type: e.target.value === 'card_hold' ? 'card_hold' : 'charge' })
+                  }
+                  className={FIELD_CLASS}
+                >
+                  <option value="charge">Take deposit payment</option>
+                  <option value="card_hold">Card hold</option>
+                </select>
+                {draft.deposit_type === 'card_hold' && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    No payment is taken when the client books. Their card is stored securely and you can charge a no-show fee if they do not attend.
+                  </p>
+                )}
+              </div>
               <div className="max-w-xs">
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                  {cardHoldDepositsEnabled && draft.deposit_type === 'card_hold'
+                  {draft.deposit_type === 'card_hold'
                     ? 'No-show fee per person (£)'
                     : 'Amount per person (£)'}{' '}
                   <HelpTooltip
                     content={
-                      cardHoldDepositsEnabled && draft.deposit_type === 'card_hold'
+                      draft.deposit_type === 'card_hold'
                         ? 'The most you can charge per guest if the party does not attend. Example: £5 fee for 4 guests = £20 total.'
                         : 'Charged per guest when the party size threshold is met. Example: £5 × 4 guests = £20 total.'
                     }

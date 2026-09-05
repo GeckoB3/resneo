@@ -7,6 +7,7 @@ import {
   reconcileCollective,
 } from '@/lib/linked-accounts/collectives';
 import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
+import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -84,6 +85,8 @@ export async function PATCH(
       .maybeSingle();
 
     const finish = async () => {
+      // Membership decides whose calendars the memoised catalogue may offer.
+      invalidateCollectiveCatalogMemo(collectiveId);
       const collectives = await loadCollectiveViewsForVenue(ctx.admin, ctx.venueId);
       return NextResponse.json({
         collective: collectives.find((c) => c.id === collectiveId) ?? null,

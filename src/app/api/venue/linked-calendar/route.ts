@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -472,17 +472,20 @@ export async function GET(request: NextRequest) {
         ? bookings.filter((b) => b.practitionerId != null && columnIds.has(b.practitionerId))
         : bookings;
 
-      // Record the cross-venue calendar view (debounced 5 minutes).
-      void recordReadAudit({
-        admin,
-        linkId: access.linkId,
-        actingVenueId: staff.venue_id,
-        actingUserId: user?.id ?? null,
-        owningVenueId: access.venueId,
-        actionType: 'viewed_calendar',
-        resourceType: 'practitioner',
-        resourceId: null,
-      });
+      // Record the cross-venue calendar view (debounced 5 minutes). `after()`
+      // keeps the write alive past the response on a serverless host.
+      after(() =>
+        recordReadAudit({
+          admin,
+          linkId: access.linkId,
+          actingVenueId: staff.venue_id,
+          actingUserId: user?.id ?? null,
+          owningVenueId: access.venueId,
+          actionType: 'viewed_calendar',
+          resourceType: 'practitioner',
+          resourceId: null,
+        }),
+      );
 
       return {
         venueId: access.venueId,

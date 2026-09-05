@@ -8,6 +8,7 @@ import {
   backfillPerCalendarProviders,
 } from '@/lib/linked-accounts/catalogue';
 import { loadCollectiveAccess } from '@/lib/linked-accounts/collective-access';
+import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { loadCollectiveMemberImportSources } from '@/lib/linked-accounts/collective-page-config';
 import { ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
 import { loadVenueLookup } from '@/lib/linked-accounts/queries';
@@ -122,6 +123,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     const result = await applyCatalogueAction(ctx.admin, id, ctx.venueId, ctx.userId, input);
+    // The booking routes memoise the merged catalogue briefly; a host edit must show
+    // on the staff form and the public page at once, not after the window.
+    invalidateCollectiveCatalogMemo(id);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }

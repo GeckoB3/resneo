@@ -4,6 +4,7 @@ import {
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlag,
   resolveAppointmentsFeatureFlags,
+  resolvedAppointmentsFeatureFlagsForApi,
   venueFeatureFlagsForStorage,
 } from '@/lib/feature-flags/resolve';
 
@@ -34,11 +35,6 @@ describe('resolveAppointmentsFeatureFlag', () => {
   it('defaults to false when unset', () => {
     expect(resolveAppointmentsFeatureFlag('waitlist_v2', {})).toBe(false);
     expect(resolveAppointmentsFeatureFlag('waitlist_v2', { waitlist_v2: true })).toBe(true);
-  });
-
-  it('defaults card_hold_deposits to false when unset (not in FLAG_DEFAULT_ON)', () => {
-    expect(resolveAppointmentsFeatureFlag('card_hold_deposits', {})).toBe(false);
-    expect(resolveAppointmentsFeatureFlag('card_hold_deposits', { card_hold_deposits: true })).toBe(true);
   });
 
   it('defaults guest_self_reschedule to true when unset', () => {
@@ -155,8 +151,23 @@ describe('resolveAppointmentsFeatureFlags', () => {
       waitlist_v2: false,
       guest_self_reschedule: true,
       any_available_practitioner: false,
-      card_hold_deposits: false,
       staff_first_booking_flow: false,
     });
+  });
+
+  it('drops the retired card_hold_deposits key from storage', () => {
+    // Card holds are standard for every venue since 2026-09-05; a stale stored key is inert.
+    expect(parseVenueFeatureFlags({ card_hold_deposits: true, waitlist_v2: true })).toEqual({
+      waitlist_v2: true,
+    });
+    expect(resolveAppointmentsFeatureFlags({})).not.toHaveProperty('card_hold_deposits');
+  });
+});
+
+describe('resolvedAppointmentsFeatureFlagsForApi', () => {
+  it('keeps serving the retired card_hold_deposits key as true for the mobile app', () => {
+    const served = resolvedAppointmentsFeatureFlagsForApi(resolveAppointmentsFeatureFlags({}));
+    expect(served.card_hold_deposits).toBe(true);
+    expect(served.waitlist_v2).toBe(false);
   });
 });

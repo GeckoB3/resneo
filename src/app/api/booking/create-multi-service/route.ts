@@ -26,6 +26,7 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
+import { resolveStaffCollectiveScopeFromRequest } from '@/lib/linked-accounts/collective-staff-request';
 import { MAX_SERVICES_PER_VISIT } from '@/lib/booking/service-chain';
 import {
   createAppointmentSlotRecheck,
@@ -82,7 +83,6 @@ import {
   insertCardHoldRows,
 } from '@/lib/booking/card-hold-capture';
 import { buildCardHoldTermsSnapshot, renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 const serviceEntrySchema = z.object({
   service_id: z.string().uuid(),
@@ -225,6 +225,11 @@ export async function POST(request: NextRequest) {
     }));
     let collectiveIdFromVenue: string | null = null;
     if (await isCollectiveId(supabase, requestedVenueId)) {
+      // A member venue's staff (the staff form uses this route for visits) may
+      // also book the members' own services; the session is verified first.
+      const includeMemberOwnServices =
+        (source === 'phone' || source === 'walk-in') &&
+        Boolean(await resolveStaffCollectiveScopeFromRequest(supabase, request, requestedVenueId));
       const resolved: SegmentEntry[] = [];
       let owningVenueId: string | null = null;
       for (const s of rawServices) {
@@ -232,6 +237,7 @@ export async function POST(request: NextRequest) {
           collectiveId: requestedVenueId,
           offeringId: s.service_id,
           calendarId: s.practitioner_id,
+          includeMemberOwnServices,
         });
         if (!target || (owningVenueId && target.venueId !== owningVenueId)) {
           return NextResponse.json(
@@ -240,11 +246,13 @@ export async function POST(request: NextRequest) {
           );
         }
         owningVenueId = target.venueId;
+        // A member venue's own service (no offering) books at the venue's own terms
+        // with no collective attribution.
         resolved.push({
           ...s,
           service_id: target.sourceServiceId,
-          collective_service_item_id: s.service_id,
-          collective_duration_override: target.durationMinutes,
+          collective_service_item_id: target.offering ? s.service_id : null,
+          collective_duration_override: target.offering ? target.durationMinutes : null,
         });
       }
       services = resolved;
@@ -264,12 +272,6 @@ export async function POST(request: NextRequest) {
     if (venueErr || !venue) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
-
-    // Card-hold flag resolved once per request (design doc §6.1/§7.1).
-    const cardHoldEnabled = resolveAppointmentsFeatureFlag(
-      'card_hold_deposits',
-      parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
-    );
 
     // Bearer-capable, not cookie-only: with createClient() a mobile Bearer
     // caller resolved as signed OUT here, so no app could book at any venue
@@ -576,14 +578,8 @@ export async function POST(request: NextRequest) {
         if (online != null && online.amountPence > 0) {
           if (online.chargeLabel === 'card_hold') {
             // Card hold (spec 7.1): fixed fee, no money due at booking for this row.
-            // Flag off resolves as 'none' (spec 6.3). Staff may waive per booking
-            // (D6), walk-ins included.
-            if (!cardHoldEnabled) {
-              console.warn(
-                '[booking/create-multi-service] card_hold service booked while card_hold_deposits flag is off; treating as no charge',
-                { venue_id, service_id: seg.service_id },
-              );
-            } else if (staffCharges.holdCards) {
+            // Staff may waive per booking (D6), walk-ins included.
+            if (staffCharges.holdCards) {
               segCardHoldFeePence = online.amountPence;
             }
           } else if (staffCharges.chargeDeposits) {
@@ -872,10 +868,16 @@ export async function POST(request: NextRequest) {
         service_variant_id: seg.service_variant_id,
         group_booking_id: groupBookingId,
         person_label: null,
-        collective_id: collectiveIdForInsert,
-        collective_service_item_id: collectiveIdForInsert
-          ? seg.collective_service_item_id ?? collective_service_item_id ?? null
-          : null,
+        // A member venue's own service booked through the staff form carries no
+        // offering and is a plain booking in its venue: no attribution on that row.
+        collective_id:
+          collectiveIdForInsert && !(collectiveIdFromVenue && seg.collective_service_item_id == null)
+            ? collectiveIdForInsert
+            : null,
+        collective_service_item_id:
+          collectiveIdForInsert && !(collectiveIdFromVenue && seg.collective_service_item_id == null)
+            ? seg.collective_service_item_id ?? collective_service_item_id ?? null
+            : null,
         processing_time_blocks: seg.processing_time_blocks,
         addons_total_price_pence: seg.addons_total_price_pence,
         addons_total_duration_minutes: seg.addons_total_duration_minutes,
@@ -1138,8 +1140,11 @@ export async function POST(request: NextRequest) {
 
     // A member venue's staff booking for the collective onto a partner's calendar:
     // record the cross-venue write and tell the owner, as the staff create route does.
+    // Registered with `after` like the emails above: a promise merely left running
+    // when the response goes out may never finish on a serverless host.
     if (collectiveIdFromVenue) {
-      void recordStaffCollectiveCrossVenueCreate({ admin: supabase, request, owningVenueId: venue_id, bookingIds });
+      const owningVenueId = venue_id;
+      after(() => recordStaffCollectiveCrossVenueCreate({ admin: supabase, request, owningVenueId, bookingIds }));
     }
 
     return NextResponse.json(

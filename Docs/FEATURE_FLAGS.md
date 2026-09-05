@@ -11,7 +11,6 @@ Controlled rollout for Phase 1a work in [Resneo-Appointments-Review-And-Roadmap.
 | `any_available_practitioner` | “Any available” practitioner pooling on public + staff booking | P1a.1 |
 | `class_commerce_enabled` | Gates the entire class-commerce surface area: credit packs, courses, memberships, recurring reservations, and the dashboard products UI. See [reserveni-class-products-plan.md](./archive/reserveni-class-products-plan.md) §10. Off-state hides the dashboard `/dashboard/class-timetable/products` page and returns 403 from all `/api/venue/class-{credit,course,membership}-products/*` routes. Existing class instances and guest bookings continue to work — the flag strictly gates **prepaid commerce** surfaces. | Class products §10 |
 | `compliance_records_enabled` | Gates the Compliance Records feature (patch tests, consent/intake forms, service requirements, public form submission). See [reserveni-compliance-spec.md](./reserveni-compliance-spec.md). Off-state hides the `/dashboard/compliance` nav item, the Settings → Compliance tab, the booking/contact compliance sections, and the service-editor requirements section; all `/api/venue/compliance/*` routes return 403. Also requires `isAppointmentPlanTier(pricing_tier)` (not available on restaurant/founding SKUs). | Compliance v1 |
-| `card_hold_deposits` | Card hold deposits: card on file with a chargeable no-show fee, no payment taken at booking. Default **off** (not in `FLAG_DEFAULT_ON`). Gates **creation of new holds only** (config acceptance of `card_hold`, booking-flow branches, staff-toggle visibility); it never gates charging, refunding, or releasing existing holds — guests keep the deal they consented to. See [CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md](./CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md) §6.1. | Card hold v1 |
 | `staff_first_booking_flow` | Staff-first booking: the public appointment flow asks the guest to choose a team member first, then shows that person's services. Default **off** (the flow stays service-first). Applies to the public single flow, the public group flow, and combined pages (which inherit the **host venue's** value, like `any_available_practitioner`). Never applies to the staff dashboard, edit/reschedule flows, per-practitioner pages, or sessions entered with a preselected service. Venue admins toggle it themselves under Settings → Booking settings → Optional Booking features. See [staff-first-booking-flow-plan.md](./staff-first-booking-flow-plan.md). | Staff-first v1 |
 
 When `compliance_records_enabled` is on, venues can set a `compliance` config object in the same JSONB (Settings → Compliance → General settings):
@@ -38,6 +37,12 @@ The flag schema also carries a nested `waitlist_config` sub-object (alongside `a
 
 All flags default to **off** until enabled per venue or via environment override, **except `guest_self_reschedule`**, which defaults **on** unless a venue explicitly stores `false` (per `FLAG_DEFAULT_ON` in `src/lib/feature-flags/resolve.ts`). An environment override still wins over both.
 
+## Retired flags
+
+| Key | Retired | Notes |
+|-----|---------|-------|
+| `card_hold_deposits` | 2026-09-05 | Card holds are a standard payment option for every venue, offered next to deposit and full payment in every entity editor (see [CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md](./CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md)). The key is dropped from `venues.feature_flags` on parse, `FEATURE_FLAG_CARD_HOLD_DEPOSITS` is ignored, and nothing on the web gates on it. **API compatibility:** staff venue payloads (`GET /api/venue`, `GET`/`PATCH /api/venue/feature-flags`) still serve `resolved.card_hold_deposits: true` because the mobile app (1.1.0) gates its service, class, event and resource editors and its staff "Card hold" toggle on that key, and shows a Booking settings toggle for it; a PATCH that sends the key is stripped and ignored, so that toggle reads as permanently on. Delete `resolvedAppointmentsFeatureFlagsForApi` in `src/lib/feature-flags/resolve.ts` once the app stops reading the key. |
+
 ## Resolution order
 
 1. **Environment** — if set to `true` / `false` (also `1` / `0`, `yes` / `no`, `on` / `off`), wins globally.
@@ -53,7 +58,6 @@ All flags default to **off** until enabled per venue or via environment override
 | `any_available_practitioner` | `FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER` |
 | `class_commerce_enabled` | `FEATURE_FLAG_CLASS_COMMERCE_ENABLED` |
 | `compliance_records_enabled` | `FEATURE_FLAG_COMPLIANCE_RECORDS_ENABLED` |
-| `card_hold_deposits` | `FEATURE_FLAG_CARD_HOLD_DEPOSITS` |
 | `staff_first_booking_flow` | `FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW` |
 
 Example (enable all in staging):

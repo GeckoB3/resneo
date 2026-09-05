@@ -4,10 +4,11 @@ import {
   planProviderStatuses,
   hasFullMutualWriteLinks,
 } from './collectives';
-import { getAcceptedLinkBetween } from './queries';
+import { getAcceptedLinkBetween, getStandingLinkBetween } from './queries';
 
-vi.mock('./queries', () => ({ getAcceptedLinkBetween: vi.fn() }));
+vi.mock('./queries', () => ({ getAcceptedLinkBetween: vi.fn(), getStandingLinkBetween: vi.fn() }));
 const mockGetLink = vi.mocked(getAcceptedLinkBetween);
+const mockGetStandingLink = vi.mocked(getStandingLinkBetween);
 
 /** A minimal accepted-link row builder for the write-gate tests. */
 function linkRow(
@@ -171,5 +172,17 @@ describe('hasFullMutualWriteLinks', () => {
     mockGetLink.mockResolvedValue(linkRow());
     await hasFullMutualWriteLinks(admin, 'v1', ['v1', 'v2']);
     expect(mockGetLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a suspended link as holding only when asked to (the reconcile ladder)', async () => {
+    mockGetLink.mockResolvedValue(null);
+    mockGetStandingLink.mockReset();
+    mockGetStandingLink.mockResolvedValue(linkRow());
+    // The create / invite / accept gates: a paused link does not admit a venue.
+    await expect(hasFullMutualWriteLinks(admin, 'v1', ['v2'])).resolves.toBe(false);
+    // The reconcile ladder: a paused link keeps the providers as they are.
+    await expect(
+      hasFullMutualWriteLinks(admin, 'v1', ['v2'], { includeSuspended: true }),
+    ).resolves.toBe(true);
   });
 });

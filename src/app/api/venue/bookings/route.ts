@@ -74,7 +74,6 @@ import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-b
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 function endHHmmFromDuration(startHHmm: string, durationMinutes: number): string {
   const [startH, startM] = startHHmm.split(':').map(Number);
@@ -235,8 +234,10 @@ export async function POST(request: NextRequest) {
      * offering and calendar resolve here to the OWNING venue and its real source
      * service (the same routing the combined public page uses), and the request
      * then continues as an ordinary linked create against that venue, so the
-     * scope check, audit and cross-venue notification all apply. The booking is
-     * attributed to the collective like a combined-page booking.
+     * scope check, audit and cross-venue notification all apply. An offering is
+     * attributed to the collective like a combined-page booking; a member venue's
+     * own service (the staff catalogue lists those too) books as a plain booking
+     * in its venue, exactly as it did before the collective existed.
      */
     let collectiveAttribution: { collectiveId: string; offeringId: string } | null = null;
     if (parsed.data.owner_venue_id) {
@@ -249,6 +250,7 @@ export async function POST(request: NextRequest) {
           collectiveId: collective.collectiveId,
           offeringId: parsed.data.appointment_service_id,
           calendarId: parsed.data.practitioner_id,
+          includeMemberOwnServices: true,
         });
         if (!target) {
           return NextResponse.json(
@@ -256,10 +258,9 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        collectiveAttribution = {
-          collectiveId: collective.collectiveId,
-          offeringId: parsed.data.appointment_service_id,
-        };
+        collectiveAttribution = target.offering
+          ? { collectiveId: collective.collectiveId, offeringId: parsed.data.appointment_service_id }
+          : null;
         parsed.data.owner_venue_id = target.venueId;
         parsed.data.appointment_service_id = target.sourceServiceId;
       }
@@ -289,12 +290,8 @@ export async function POST(request: NextRequest) {
 
     const venueMode = await resolveVenueMode(admin, venueId);
 
-    // Card-hold gate (spec 7.6 / D6): the flag is the OWNER venue's (`venue` is the
-    // owner row via `resolveLinkedStaffCreateScope`); the hold rides its account.
-    const cardHoldEnabled = resolveAppointmentsFeatureFlag(
-      'card_hold_deposits',
-      parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
-    );
+    // Card hold (spec 7.6 / D6): `venue` is the OWNER row via `resolveLinkedStaffCreateScope`,
+    // and the hold rides its account.
     const require_card_hold = parsed.data.require_card_hold;
 
     const phoneRaw = (phone ?? '').trim();
@@ -389,18 +386,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Card hold (spec 7.6): per-person fee x tickets, server-derived. Unlike
-      // deposits, holds are honoured for walk-ins too (D6). Flag off resolves as none.
-      let eventCardHoldFeePence: number | null = null;
-      if (eventValidation.value.cardHoldFeePence != null) {
-        if (cardHoldEnabled) {
-          eventCardHoldFeePence = eventValidation.value.cardHoldFeePence;
-        } else {
-          console.warn(
-            '[venue/bookings] card_hold event booked while card_hold_deposits flag is off; ignoring',
-            { venue_id: venueId, experience_event_id: parsed.data.experience_event_id },
-          );
-        }
-      }
+      // deposits, holds are honoured for walk-ins too (D6).
+      const eventCardHoldFeePence: number | null = eventValidation.value.cardHoldFeePence ?? null;
       const eventHoldRequired = eventCardHoldFeePence != null && (require_card_hold ?? true);
 
       const ticketTotalDisplay = ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
@@ -602,19 +589,13 @@ export async function POST(request: NextRequest) {
         depositAmountPence = classDepPerPerson * party_size;
       }
 
-      // Card hold (spec 7.6): the engine degrades a card_hold class type to 'none',
-      // so read the raw class type. Per-person fee x spots; walk-ins included (D6).
-      // Flag-off and zero-fee configs resolve as none.
+      // Card hold (spec 7.6): the engine degrades a zero-fee card_hold class type to
+      // 'none', so read the raw class type. Per-person fee x spots; walk-ins included (D6).
       let classCardHoldFeePence: number | null = null;
       const rawClassType = classInput.classTypes.find((ct) => ct.id === cls.class_type_id);
       if (rawClassType?.payment_requirement === 'card_hold') {
         const holdPerPerson = rawClassType.deposit_amount_pence ?? 0;
-        if (!cardHoldEnabled) {
-          console.warn(
-            '[venue/bookings] card_hold class booked while card_hold_deposits flag is off; ignoring',
-            { venue_id: venueId, class_instance_id: parsed.data.class_instance_id },
-          );
-        } else if (holdPerPerson > 0) {
+        if (holdPerPerson > 0) {
           classCardHoldFeePence = holdPerPerson * party_size;
         } else {
           console.warn(
@@ -842,18 +823,18 @@ export async function POST(request: NextRequest) {
         depositAmountPenceRes = depConfiguredRes;
       }
 
-      // Card hold (spec 7.6): flat no-show fee; walk-ins included (D6). Flag-off and
-      // zero-fee configs resolve as none and the requirement snapshot degrades to
-      // 'none', mirroring the public create route.
+      // Card hold (spec 7.6): flat no-show fee; walk-ins included (D6). Zero-fee
+      // configs resolve as none and the requirement snapshot degrades to 'none',
+      // mirroring the public create route.
       let resourceCardHoldFeePence: number | null = null;
       let resourcePaymentRequirementSnapshot = payReqRes;
       if (payReqRes === 'card_hold') {
-        if (cardHoldEnabled && depConfiguredRes > 0) {
+        if (depConfiguredRes > 0) {
           resourceCardHoldFeePence = depConfiguredRes;
         } else {
           resourcePaymentRequirementSnapshot = 'none';
           console.warn(
-            '[venue/bookings] card_hold resource degraded to no protection (flag off or fee <= 0)',
+            '[venue/bookings] card_hold resource degraded to no protection (fee <= 0)',
             { venue_id: venueId, resource_id: parsed.data.resource_id },
           );
         }
@@ -1341,18 +1322,11 @@ export async function POST(request: NextRequest) {
       const depositAmountPence = requiresDeposit ? online!.amountPence : null;
 
       // Card hold (spec 7.6): fixed service fee (variant-adjusted, add-ons excluded);
-      // walk-ins included (D6). Flag off resolves as none.
-      let apptCardHoldFeePence: number | null = null;
-      if (online != null && online.chargeLabel === 'card_hold' && online.amountPence > 0) {
-        if (cardHoldEnabled) {
-          apptCardHoldFeePence = online.amountPence;
-        } else {
-          console.warn(
-            '[venue/bookings] card_hold service booked while card_hold_deposits flag is off; ignoring',
-            { venue_id: venueId, appointment_service_id },
-          );
-        }
-      }
+      // walk-ins included (D6).
+      const apptCardHoldFeePence: number | null =
+        online != null && online.chargeLabel === 'card_hold' && online.amountPence > 0
+          ? online.amountPence
+          : null;
       const apptHoldRequired = apptCardHoldFeePence != null && (require_card_hold ?? true);
 
       if (requiresDeposit && !venue.stripe_connected_account_id) {
@@ -1511,24 +1485,31 @@ export async function POST(request: NextRequest) {
       }
 
       if (linkedCreate) {
-        void recordBookingWriteAudit({
-          admin,
-          linkId: linkedCreate.linkId,
-          actingVenueId: linkedCreate.actingVenueId,
-          actingUserId: linkedCreate.actorUserId,
-          owningVenueId: linkedCreate.ownerVenueId,
-          actionType: 'created_booking',
-          bookingId: apptBooking.id,
-          afterState: { id: apptBooking.id, venue_id: venueId },
-        });
-        // §17.3 — email the owning venue if it opted in to "new booking" emails.
-        void notifyCrossVenueBookingWrite({
-          admin,
-          owningVenueId: linkedCreate.ownerVenueId,
-          actingVenueId: linkedCreate.actingVenueId,
-          actionType: 'created_booking',
-          before: null,
-          after: { booking_date, booking_time: timeForDb },
+        // Registered with `after` so the audit entry and the owner's email survive
+        // the response going out; a promise merely left running may never finish
+        // on a serverless host.
+        const audited = linkedCreate;
+        const auditedBookingId = apptBooking.id;
+        after(async () => {
+          await recordBookingWriteAudit({
+            admin,
+            linkId: audited.linkId,
+            actingVenueId: audited.actingVenueId,
+            actingUserId: audited.actorUserId,
+            owningVenueId: audited.ownerVenueId,
+            actionType: 'created_booking',
+            bookingId: auditedBookingId,
+            afterState: { id: auditedBookingId, venue_id: venueId },
+          });
+          // §17.3 — email the owning venue if it opted in to "new booking" emails.
+          await notifyCrossVenueBookingWrite({
+            admin,
+            owningVenueId: audited.ownerVenueId,
+            actingVenueId: audited.actingVenueId,
+            actionType: 'created_booking',
+            before: null,
+            after: { booking_date, booking_time: timeForDb },
+          });
         });
       }
 
@@ -1812,13 +1793,7 @@ export async function POST(request: NextRequest) {
         ? legacyDepositConfig.type
         : null;
     const tableDepositType = restrictionDepositType ?? legacyDepositType ?? 'charge';
-    const tableEntityIsCardHold = tableDepositType === 'card_hold' && cardHoldEnabled;
-    if (tableDepositType === 'card_hold' && !cardHoldEnabled) {
-      console.warn(
-        '[venue/bookings] card_hold table service booked while card_hold_deposits flag is off; ignoring',
-        { venue_id: venueId, service_id: slot.service_id },
-      );
-    }
+    const tableEntityIsCardHold = tableDepositType === 'card_hold';
 
     // Card-hold services never charge a deposit (D6: the two toggles are never shown
     // together); staff discretion is `require_card_hold`, default on, walk-ins included.

@@ -20,7 +20,6 @@ import {
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import { venueLocalWallTimeToUtcMs } from '@/lib/venue/venue-local-clock';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 
 // Types
@@ -36,12 +35,6 @@ export interface EventEngineInput {
   /** Venue-wide Business Hours blocks (closures / amended hours) for `date`. */
   venueWideBlocks?: AvailabilityBlock[];
   venueOpeningHours?: OpeningHours | null;
-  /**
-   * Resolved venue `card_hold_deposits` feature flag (spec 6.3). When true, events
-   * configured `card_hold` with a positive fee pass through as 'card_hold'; otherwise
-   * they degrade to 'none' with a warning. Omitted/false = degrade.
-   */
-  cardHoldDepositsEnabled?: boolean;
 }
 
 export interface EventAvailabilitySlot {
@@ -179,23 +172,19 @@ export function computeEventAvailability(
     const seriesKey = event.parent_event_id ?? event.id;
     const refundHours = entityBookingWindowFromRow(event as unknown as Record<string, unknown>).cancellation_notice_hours;
 
-    // Card-hold passthrough (spec 6.3): 'card_hold' reaches guests only when the
-    // venue flag is on AND a positive fee is configured; otherwise degrade to
-    // 'none' (and drop the fee) with a warning, matching what create will do.
+    // Card-hold passthrough (spec 6.3): 'card_hold' reaches guests only when a
+    // positive fee is configured; otherwise degrade to 'none' (and drop the fee)
+    // with a warning, matching what create will do.
     let paymentRequirement =
       (event.payment_requirement as 'none' | 'deposit' | 'full_payment' | 'card_hold') ?? 'none';
     let depositAmountPence = (event.deposit_amount_pence as number | null) ?? null;
     if (paymentRequirement === 'card_hold') {
-      const flagOn = input.cardHoldDepositsEnabled === true;
-      if (!flagOn || (depositAmountPence ?? 0) <= 0) {
+      if ((depositAmountPence ?? 0) <= 0) {
         if (!cardHoldWarnedEventIds.has(event.id)) {
           cardHoldWarnedEventIds.add(event.id);
-          console.warn(
-            flagOn
-              ? '[event-ticket-engine] card_hold event has no positive fee; treating as none'
-              : '[event-ticket-engine] card_hold event configured but card_hold_deposits flag is off; treating as none',
-            { event_id: event.id },
-          );
+          console.warn('[event-ticket-engine] card_hold event has no positive fee; treating as none', {
+            event_id: event.id,
+          });
         }
         paymentRequirement = 'none';
         depositAmountPence = null;
@@ -308,10 +297,6 @@ export async function fetchEventInput(params: {
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
   const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
-  const cardHoldDepositsEnabled = resolveAppointmentsFeatureFlag(
-    'card_hold_deposits',
-    parseVenueFeatureFlags((venueRes.data as { feature_flags?: unknown } | null)?.feature_flags),
-  );
 
   return {
     date,
@@ -321,7 +306,6 @@ export async function fetchEventInput(params: {
     bookedByTicketType,
     venueWideBlocks,
     venueOpeningHours,
-    cardHoldDepositsEnabled,
   };
 }
 
@@ -468,10 +452,6 @@ export async function fetchEventInputForRange(params: {
 
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
   const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
-  const cardHoldDepositsEnabled = resolveAppointmentsFeatureFlag(
-    'card_hold_deposits',
-    parseVenueFeatureFlags((venueRes.data as { feature_flags?: unknown } | null)?.feature_flags),
-  );
 
   return {
     date: fromDate,
@@ -481,6 +461,5 @@ export async function fetchEventInputForRange(params: {
     bookedByTicketType,
     venueWideBlocks,
     venueOpeningHours,
-    cardHoldDepositsEnabled,
   };
 }

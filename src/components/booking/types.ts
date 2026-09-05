@@ -52,12 +52,6 @@ export interface VenuePublic {
       guest_self_reschedule?: boolean;
       waitlist_v2?: boolean;
       /**
-       * Owner venue's card-hold flag; gates the staff "Card hold" toggle
-       * (design doc 7.6 / D6). Absent on the public /api/booking/venue payload,
-       * which never needs it (the toggle is staff-audience only).
-       */
-      card_hold_deposits?: boolean;
-      /**
        * Staff-first booking: the public flow asks the guest to choose a team
        * member before a service. Combined pages inherit the host venue's value.
        */

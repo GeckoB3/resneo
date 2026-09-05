@@ -18,7 +18,7 @@ The React Native app (`reserveni-app`) authenticates with Supabase and sends `Au
 | GET | `/api/venue/guests/[guestId]` |
 | GET | `/api/venue/appointment-availability` |
 
-Card hold deposits: `POST /api/venue/bookings` accepts an optional `require_card_hold` boolean (default true for card-hold entities), and `GET /api/venue/bookings/[id]` returns a `card_hold` object (or `null`). See `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` §18 for the full contract.
+Card hold deposits: `POST /api/venue/bookings` accepts an optional `require_card_hold` boolean (default true for card-hold entities), and `GET /api/venue/bookings/[id]` returns a `card_hold` object (or `null`). See `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` §18 for the full contract. Since 2026-09-05 card holds are standard for every venue and the `card_hold_deposits` venue flag is retired: `feature_flags.resolved.card_hold_deposits` is still served as a constant `true` on `GET /api/venue` and `GET`/`PATCH /api/venue/feature-flags` so the app's entity editors and staff "Card hold" toggle keep working, and a PATCH that sends the key is ignored (the app's Booking settings toggle for it therefore reads as permanently on). The app should drop those gates and that toggle row; the compatibility key goes away once it has.
 
 ### Public endpoint (unchanged)
 
@@ -310,3 +310,14 @@ additive.
 - Visits and groups keep using `POST /api/booking/create-multi-service` and `create-group` with
   `venue_id = <collective id>`; when a member's staff session is on the request and the bookings
   land in another member's venue, the same audit and notification are now recorded.
+- Since 2026-09-05 the staff catalogue (`GET /api/booking/appointment-catalog?venue_id=<collective
+  id>&include_hidden=true` with a member's session) also lists every member's own services on its
+  own calendars, after the offerings, each flagged `venue_only: true` with `id` equal to
+  `source_service_id`, under a `"{Venue} only"` category; a calendar with no offering appears
+  too, and an offering with no category carries one named after the collective so the
+  offerings sort first. Booking one writes a plain booking in the owning venue (no `collective_id`). The staff
+  routes resolve these by themselves; the shared public routes do so only on a verified member
+  session and only when asked: `GET /api/booking/availability` takes `staff=1`,
+  `POST /api/booking/validate-appointment-slot` takes `staff: true`, and the visit and group
+  creates key off a staff `source`. All additive; a client that never sends them sees the
+  offerings-only catalogue it saw before.

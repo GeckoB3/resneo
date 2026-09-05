@@ -16,7 +16,6 @@ import type {
   VenueService,
 } from '@/types/availability';
 import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 export interface FetchEngineInputParams {
   supabase: SupabaseClient;
@@ -205,10 +204,6 @@ export async function fetchEngineInput({
     depositFromJson(areaRes.data?.deposit_config) ?? depositFromJson(venueRes.data?.deposit_config);
   const deposit_legacy_type =
     depositTypeFromJson(areaRes.data?.deposit_config) ?? depositTypeFromJson(venueRes.data?.deposit_config);
-  const card_hold_deposits_enabled = resolveAppointmentsFeatureFlag(
-    'card_hold_deposits',
-    parseVenueFeatureFlags((venueRes.data as { feature_flags?: unknown } | null)?.feature_flags),
-  );
 
   if (restrictionExcRes.error) {
     console.error('fetchEngineInput: booking_restriction_exceptions', restrictionExcRes.error.message);
@@ -286,7 +281,6 @@ export async function fetchEngineInput({
     bookings,
     deposit_legacy_amount_per_person_gbp,
     deposit_legacy_type,
-    card_hold_deposits_enabled,
     now: now ?? new Date(),
   };
 }

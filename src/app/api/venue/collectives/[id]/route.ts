@@ -79,6 +79,7 @@ export async function PATCH(
         .ilike('name', name)
         .eq('status', 'active')
         .neq('id', id)
+        .limit(1)
         .maybeSingle();
       if (nameTaken) {
         return NextResponse.json(
@@ -99,6 +100,9 @@ export async function PATCH(
         .gte('updated_at', cooldownCutoff)
         .neq('id', id)
         .neq('host_venue_id', ctx.venueId)
+        // Several dissolved collectives can share a name; more than one row makes
+        // maybeSingle() report an error, not a match, and the hold would be skipped.
+        .limit(1)
         .maybeSingle();
       if (recentlyDissolved) {
         return NextResponse.json(

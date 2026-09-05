@@ -783,13 +783,13 @@ Phone and walk-in bookings follow the same payment rules. If the catalogue expec
 
 A **card hold** protects you from no-shows without charging clients when they book. No payment is taken. The client's card is stored securely with Stripe, and you can charge a **no-show fee** if they do not attend. Nothing is ever charged automatically.
 
-## Turn on card holds
+## Set up a card hold on a service
 
 1. In **Settings**, open the **service editor** (the same place you set deposits today).
-2. Choose **Card hold** as the deposit type.
+2. Choose **Card hold** as the payment option. It sits alongside deposit and full payment, and every venue can use it.
 3. Set the **no-show fee (£)**. This is the most you can charge if the client does not attend.
 
-Card holds also work for class types, events, resources, and table booking rules. For classes, events, and tables the fee is **per person**. If you do not see the Card hold option, it is not switched on for your venue yet; contact support.
+Card holds also work for class types, events, resources, and table booking rules. For classes, events, and tables the fee is **per person**.
 
 ## What clients see online
 

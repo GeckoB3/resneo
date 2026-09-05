@@ -39,9 +39,10 @@ export function NewBookingPageClient({
   currency?: string;
   enabledModels?: BookingModel[];
   /**
-   * The live venue collective this venue books for as one business. `venue` is
-   * then the collective's virtual venue and the stack books through it, so the
-   * form shows every member's calendars and the combined offerings.
+   * The live venue collective this venue books for as one business. The stack
+   * loads the collective's virtual venue for the appointment surface, so that
+   * form shows every member's calendars and the combined offerings; `venue`
+   * stays the venue's own profile for its other surfaces.
    */
   collective?: { id: string; name: string } | null;
 }) {

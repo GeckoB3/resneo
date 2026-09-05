@@ -35,14 +35,14 @@ async function activeMemberVenueIds(admin: SupabaseClient, collectiveId: string)
   return (data ?? []).map((m) => m.venue_id as string);
 }
 
-/** Members that are appointments-family venues on an active plan, the public page's rule. */
-async function countEligible(admin: SupabaseClient, venueIds: string[]): Promise<number> {
-  if (venueIds.length === 0) return 0;
+/** Of `venueIds`, those that are appointments-family venues on an active plan, the public page's rule. */
+async function eligibleAmong(admin: SupabaseClient, venueIds: string[]): Promise<string[]> {
+  if (venueIds.length === 0) return [];
   const { data: venues } = await admin
     .from('venues')
     .select('id, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source')
     .in('id', venueIds);
-  let eligible = 0;
+  const eligible: string[] = [];
   for (const v of venues ?? []) {
     const result = evaluateLinkEligibility({
       pricing_tier: (v.pricing_tier as string | null) ?? null,
@@ -51,9 +51,18 @@ async function countEligible(admin: SupabaseClient, venueIds: string[]): Promise
       subscription_current_period_end: (v.subscription_current_period_end as string | null) ?? null,
       billing_access_source: (v.billing_access_source as string | null) ?? null,
     });
-    if (result.canCreate) eligible += 1;
+    if (result.canCreate) eligible.push(v.id as string);
   }
   return eligible;
+}
+
+/**
+ * The active members of `collectiveId` that are currently eligible: the venues
+ * whose calendars and services the combined page, and the staff form booking for
+ * the collective, may offer.
+ */
+export async function eligibleMemberVenueIds(admin: SupabaseClient, collectiveId: string): Promise<string[]> {
+  return eligibleAmong(admin, await activeMemberVenueIds(admin, collectiveId));
 }
 
 function isLiveCollectiveRow(row: CollectiveRow | null | undefined): row is CollectiveRow {
@@ -79,7 +88,7 @@ export async function resolveStaffCollectiveScope(
   if (!isLiveCollectiveRow(row)) return null;
   const memberVenueIds = await activeMemberVenueIds(admin, row.id);
   if (!memberVenueIds.includes(staffVenueId)) return null;
-  if ((await countEligible(admin, memberVenueIds)) < 2) return null;
+  if ((await eligibleAmong(admin, memberVenueIds)).length < 2) return null;
   return { collectiveId: row.id, name: row.name, hostVenueId: row.host_venue_id, memberVenueIds };
 }
 

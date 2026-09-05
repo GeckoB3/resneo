@@ -23,7 +23,13 @@ import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/f
 import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
-import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
+import {
+  fetchAppointmentCatalog,
+  variantToCatalog,
+  type AppointmentCatalog,
+  type AppointmentCatalogVariant,
+} from '@/lib/availability/appointment-catalog';
+import { eligibleMemberVenueIds } from './collective-staff-scope';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
@@ -197,6 +203,15 @@ export interface CollectiveCatalogService {
   any_available: boolean;
   /** Routing: the real source service id in the owning venue (for booking create). */
   source_service_id: string;
+  /**
+   * A member venue's own service that is not a combined-page offering. Only the
+   * staff catalogue carries these (`includeMemberOwnServices`): `id` is the real
+   * service id, and a booking of one is a plain booking in the owning venue with
+   * no collective attribution.
+   */
+  venue_only?: boolean;
+  /** Where the service is delivered; a `client_address` service collects an address. */
+  location_type?: import('@/types/booking-models').ServiceLocationType;
 }
 
 export interface CollectiveCatalogPractitioner {
@@ -214,23 +229,160 @@ export interface CollectiveCatalogPractitioner {
 }
 
 const DEFAULT_CANCELLATION_NOTICE_HOURS = 24;
+/** "{Venue} only" headings sort after every combined-page category. */
+const VENUE_ONLY_CATEGORY_SORT_BASE = 100_000;
+
+/**
+ * Give every combined offering without a heading the collective's own heading,
+ * so on the staff form the offerings all sort before the "{Venue} only" groups
+ * (an uncategorised service lands under "Other services", last, otherwise).
+ * Own services are left alone. Returns whether any offering took the heading.
+ */
+export function labelUncategorisedOfferings(
+  practitioners: CollectiveCatalogPractitioner[],
+  heading: ServiceCategoryRef,
+): boolean {
+  let used = false;
+  for (const p of practitioners) {
+    for (const s of p.services) {
+      if (s.venue_only || s.category) continue;
+      s.category = heading;
+      used = true;
+    }
+  }
+  return used;
+}
+
+/** One member venue's own catalogue, as its staff see it on their own form. */
+export interface MemberOwnCatalogue {
+  venueId: string;
+  name: string;
+  /** The venue's own "Any available" setting, applied to its own services. */
+  anyAvailable: boolean;
+  catalog: Pick<AppointmentCatalog, 'practitioners'>;
+}
+
+/**
+ * Fold each member venue's own services into the merged catalogue for a member's
+ * staff: every service on every calendar of that venue that is not already
+ * offered there through the combined page. Own services keep their real id (so
+ * `source_service_id` equals `id`), sit after the offerings under a "{Venue}
+ * only" heading, and carry `venue_only`, which the routes read as "a plain
+ * booking in this venue, no collective attribution". Returns the headings
+ * actually used, in the order the members were given.
+ */
+export function mergeMemberOwnServices(params: {
+  members: MemberOwnCatalogue[];
+  ensure: (calendarId: string, name: string, venueId: string) => CollectiveCatalogPractitioner;
+  offeringCount: number;
+}): ServiceCategoryRef[] {
+  const headings: ServiceCategoryRef[] = [];
+  for (const member of params.members) {
+    const category: ServiceCategoryRef = {
+      id: `venue-only:${member.venueId}`,
+      name: `${member.name} only`,
+      sort_order: VENUE_ONLY_CATEGORY_SORT_BASE + headings.length,
+    };
+    let listed = false;
+    for (const p of member.catalog.practitioners) {
+      for (const s of p.services) {
+        const entry = params.ensure(p.id, p.name, member.venueId);
+        if (entry.services.some((x) => x.source_service_id === s.id)) continue;
+        listed = true;
+        entry.services.push({
+          id: s.id,
+          name: s.name,
+          description: s.description ?? null,
+          duration_minutes: s.duration_minutes,
+          buffer_minutes: s.buffer_minutes,
+          price_pence: s.price_pence,
+          deposit_pence: s.deposit_pence,
+          payment_requirement: s.payment_requirement ?? 'none',
+          sort_order: params.offeringCount + (s.sort_order ?? 0),
+          category,
+          cancellation_notice_hours: s.cancellation_notice_hours,
+          variants: s.variants ?? [],
+          addon_groups: s.addon_groups ?? [],
+          processing_time_blocks: s.processing_time_blocks ?? [],
+          any_available: member.anyAvailable,
+          source_service_id: s.id,
+          venue_only: true,
+          location_type: s.location_type,
+        });
+      }
+    }
+    if (listed) headings.push(category);
+  }
+  return headings;
+}
+
+export type CollectiveAppointmentCatalog = {
+  practitioners: CollectiveCatalogPractitioner[];
+  categories: ServiceCategoryRef[];
+};
+
+/**
+ * Short-lived, per-process memo of the merged catalogue. Every collective
+ * availability, validation and create call rebuilds it (two venues' services,
+ * calendars, variants, add-ons and meta: about two seconds of queries), and the
+ * staff form opens with a burst of month requests, one per service, so without
+ * this a burst is one rebuild per request. Ten seconds keeps a host's catalogue
+ * edit visible almost at once (the catalogue and membership routes also drop the
+ * memo on write), and the in-flight promise is shared so a burst waits on one
+ * build. A serverless instance memoises for itself only.
+ */
+const CATALOG_MEMO_TTL_MS = 10_000;
+const catalogMemo = new Map<string, { at: number; value: Promise<CollectiveAppointmentCatalog> }>();
+
+/** Drop the memoised catalogue of a collective, every option combination. */
+export function invalidateCollectiveCatalogMemo(collectiveId: string): void {
+  for (const key of [...catalogMemo.keys()]) {
+    if (key.startsWith(`${collectiveId}|`)) catalogMemo.delete(key);
+  }
+}
 
 /**
  * Build the merged catalogue in the standard `{ practitioners }` shape, expanded
  * to CONCRETE calendars (a venue-wide provider becomes one practitioner entry per
  * calendar that offers the source service). Each service is an offering; the
  * routing metadata lets the booking create resolve the owning venue + real service.
+ * Memoised for a few seconds per process (see `catalogMemo`); callers must treat
+ * the result as read-only.
  */
 export async function loadCollectiveAppointmentCatalog(
+  admin: SupabaseClient,
+  collectiveId: string,
+  options?: { includeHiddenAddons?: boolean; includeMemberOwnServices?: boolean },
+): Promise<CollectiveAppointmentCatalog> {
+  const key = `${collectiveId}|${options?.includeHiddenAddons ? 1 : 0}|${options?.includeMemberOwnServices ? 1 : 0}`;
+  const now = Date.now();
+  const hit = catalogMemo.get(key);
+  if (hit && now - hit.at < CATALOG_MEMO_TTL_MS) return hit.value;
+  const value = loadCollectiveAppointmentCatalogUncached(admin, collectiveId, options);
+  catalogMemo.set(key, { at: now, value });
+  // A failed build must not be served for the rest of the window.
+  value.catch(() => {
+    if (catalogMemo.get(key)?.value === value) catalogMemo.delete(key);
+  });
+  return value;
+}
+
+async function loadCollectiveAppointmentCatalogUncached(
   admin: SupabaseClient,
   collectiveId: string,
   options?: {
     /** Staff of a member venue see `hidden_from_online` add-on groups, as they do on their own catalogue. */
     includeHiddenAddons?: boolean;
+    /**
+     * Staff of a member venue also see every member's own services on its own
+     * calendars, grouped under a "{Venue} only" heading after the combined
+     * offerings, so nothing a venue could book before joining is lost.
+     */
+    includeMemberOwnServices?: boolean;
   },
 ): Promise<{ practitioners: CollectiveCatalogPractitioner[]; categories: ServiceCategoryRef[] }> {
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
-  if (!catalogue || catalogue.items.length === 0) {
+  if (!catalogue || (catalogue.items.length === 0 && !options?.includeMemberOwnServices)) {
     return { practitioners: [], categories: catalogue?.categories ?? [] };
   }
 
@@ -257,15 +409,11 @@ export async function loadCollectiveAppointmentCatalog(
   }
   const { data: venueModelRows } = await admin
     .from('venues')
-    .select('id, booking_model, feature_flags')
+    .select('id, booking_model')
     .in('id', venueIds);
   const venueIsUnified: Record<string, boolean> = {};
-  const venueCardHoldEnabled: Record<string, boolean> = {};
   for (const v of venueModelRows ?? []) {
     venueIsUnified[v.id as string] = isUnifiedSchedulingVenue((v.booking_model as string) ?? '');
-    venueCardHoldEnabled[v.id as string] = resolveAppointmentsFeatureFlags(
-      parseVenueFeatureFlags((v as { feature_flags?: unknown }).feature_flags),
-    ).card_hold_deposits;
   }
   type VariantMap = Awaited<ReturnType<typeof loadVariantsForServices>>;
   type AddonMap = Awaited<ReturnType<typeof loadAddonGroupsForServices>>;
@@ -365,14 +513,18 @@ export async function loadCollectiveAppointmentCatalog(
         ? [provider.practitionerId]
         : data.serviceCalendars.get(provider.sourceServiceId) ?? [];
       for (const calendarId of calendarIds) {
+        // A provider pinned to something that is not one of the venue's active
+        // appointment calendars (a resource, an inactive or deleted calendar)
+        // is not bookable and must not appear as a person on the page.
+        if (!data.calendars.has(calendarId)) continue;
         const name = data.calendars.get(calendarId)?.name ?? provider.practitionerName ?? 'Staff';
         const entry = ensure(calendarId, name, provider.venueId);
         if (entry.services.some((s) => s.id === item.id)) continue; // calendar already lists this offering
         const meta = metaByVenue[provider.venueId]?.get(provider.sourceServiceId);
         // Mirror the single-venue catalog's card-hold passthrough: 'card_hold'
-        // reaches the guest only when the OWNING venue's flag is on and a positive
-        // fee exists (service or variant level); otherwise it degrades to 'none',
-        // matching what the create route will actually charge.
+        // reaches the guest only when a positive fee exists (service or variant
+        // level); otherwise it degrades to 'none', matching what the create route
+        // will actually charge.
         const rawPayReq = meta?.paymentRequirement ?? 'none';
         const cardHoldFeeConfigured =
           (meta?.deposit ?? 0) > 0 ||
@@ -380,11 +532,7 @@ export async function loadCollectiveAppointmentCatalog(
             (v) => (v.deposit_pence ?? 0) > 0,
           );
         const paymentRequirement: ClassPaymentRequirement =
-          rawPayReq === 'card_hold'
-            ? venueCardHoldEnabled[provider.venueId] && cardHoldFeeConfigured
-              ? 'card_hold'
-              : 'none'
-            : rawPayReq;
+          rawPayReq === 'card_hold' ? (cardHoldFeeConfigured ? 'card_hold' : 'none') : rawPayReq;
         entry.services.push({
           id: item.id,
           name: item.name,
@@ -410,12 +558,66 @@ export async function loadCollectiveAppointmentCatalog(
     }
   }
 
+  // Staff of a member venue book for the collective from every staff entry point,
+  // so their catalogue must also carry what the combined page leaves out: each
+  // member's own services on its own calendars, as plain bookings in the owning
+  // venue. They sit after the offerings under a "{Venue} only" heading; a
+  // service that is already offered on a calendar is not listed twice.
+  const { data: collectiveRow } = await admin
+    .from('venue_collectives')
+    .select('host_venue_id, name')
+    .eq('id', collectiveId)
+    .maybeSingle();
+  const hostVenueId = (collectiveRow as { host_venue_id?: string } | null)?.host_venue_id ?? null;
+
+  const combinedHeadings: ServiceCategoryRef[] = [];
+  const venueOnlyCategories: ServiceCategoryRef[] = [];
+  if (options?.includeMemberOwnServices) {
+    // The combined offerings come first on the staff form. An offering the host
+    // left without a heading would otherwise sort as "Other services", after
+    // every "{Venue} only" group, so it takes the collective's own name.
+    const combinedHeading: ServiceCategoryRef = {
+      id: `collective:${collectiveId}`,
+      name: String((collectiveRow as { name?: string } | null)?.name ?? 'Combined services'),
+      sort_order: VENUE_ONLY_CATEGORY_SORT_BASE - 1,
+    };
+    if (labelUncategorisedOfferings([...byCalendar.values()], combinedHeading)) {
+      combinedHeadings.push(combinedHeading);
+    }
+    const memberIds = await eligibleMemberVenueIds(admin, collectiveId);
+    const { data: memberRows } = await admin.from('venues').select('id, name, feature_flags').in('id', memberIds);
+    const memberById = new Map((memberRows ?? []).map((r) => [r.id as string, r]));
+    // Host first, as the calendars are ordered, then the other members by name.
+    const ordered = [...memberIds].sort((a, b) => {
+      if (a === hostVenueId) return -1;
+      if (b === hostVenueId) return 1;
+      return String(memberById.get(a)?.name ?? '').localeCompare(String(memberById.get(b)?.name ?? ''));
+    });
+    const members: MemberOwnCatalogue[] = [];
+    for (const venueId of ordered) {
+      const row = memberById.get(venueId);
+      const anyAvailable = resolveAppointmentsFeatureFlags(
+        parseVenueFeatureFlags((row as { feature_flags?: unknown } | undefined)?.feature_flags),
+      ).any_available_practitioner;
+      const catalog = await fetchAppointmentCatalog(admin, venueId, {
+        includeHiddenAddons: options.includeHiddenAddons,
+      });
+      members.push({ venueId, name: String(row?.name ?? 'Venue'), anyAvailable, catalog });
+    }
+    venueOnlyCategories.push(
+      ...mergeMemberOwnServices({ members, ensure, offeringCount: catalogue.items.length }),
+    );
+  }
+
   const result = [...byCalendar.values()].filter((p) => p.services.length > 0);
 
   // Every calendar carries its venue's name: the picker shows it under each
   // person, and duplicate names still fold it into the name itself so the
   // downstream summaries and banners stay unambiguous.
-  const { data: venueRows } = await admin.from('venues').select('id, name').in('id', venueIds);
+  // A member with own services but no offering is not in `venueIds`, so name
+  // every venue that actually owns a listed calendar.
+  const ownerIds = [...new Set([...venueIds, ...result.map((p) => p.owning_venue_id)])];
+  const { data: venueRows } = await admin.from('venues').select('id, name').in('id', ownerIds);
   const venueName: Record<string, string> = {};
   for (const v of venueRows ?? []) venueName[v.id as string] = (v.name as string) ?? '';
   for (const p of result) {
@@ -433,17 +635,12 @@ export async function loadCollectiveAppointmentCatalog(
     }
   }
 
-  const { data: collectiveRow } = await admin
-    .from('venue_collectives')
-    .select('host_venue_id')
-    .eq('id', collectiveId)
-    .maybeSingle();
-  sortCollectivePractitioners(
-    result,
-    (collectiveRow as { host_venue_id?: string } | null)?.host_venue_id ?? null,
-  );
+  sortCollectivePractitioners(result, hostVenueId);
 
-  return { practitioners: result, categories: catalogue.categories };
+  return {
+    practitioners: result,
+    categories: [...catalogue.categories, ...combinedHeadings, ...venueOnlyCategories],
+  };
 }
 
 /**

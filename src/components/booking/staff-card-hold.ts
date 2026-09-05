@@ -38,11 +38,9 @@ export interface StaffCardHoldContext {
  * the toggle is the gate). Reads the slot's ALWAYS-populated configured fields,
  * not the threshold-gated `deposit_required` / `deposit_amount` pair.
  *
- * The availability engine has already applied the owner venue's
- * `card_hold_deposits` flag and the zero-fee safety rule: a `card_hold` rule
- * with the flag off or no positive per-person amount reaches the client as
- * `deposit_type: 'charge'`. So `deposit_type === 'card_hold'` on a slot is
- * itself proof the flag is on; no separate client-side flag check is needed.
+ * The availability engine has already applied the zero-fee safety rule: a
+ * `card_hold` rule with no positive per-person amount reaches the client as
+ * `deposit_type: 'charge'`.
  */
 export function resolveStaffTableSlotCardHold(
   slot:
@@ -67,10 +65,9 @@ export function resolveStaffTableSlotCardHold(
 }
 
 /**
- * Appointments, classes, events, resources. Unlike table slots, these entity
- * payloads carry the raw configured `payment_requirement`, flag-independent
- * (the resolver's flag gate lives at the write path), so the owner venue's
- * `card_hold_deposits` flag must be checked client-side here.
+ * Appointments, classes, events, resources. These entity payloads carry the raw
+ * configured `payment_requirement`; a `card_hold` entity takes a hold whenever
+ * its fee is positive.
  *
  * `feePerUnitPence` is the per-unit no-show fee (per person for classes and
  * events, per booking for appointments and resources); `units` multiplies it
@@ -79,10 +76,8 @@ export function resolveStaffTableSlotCardHold(
 export function resolveStaffEntityCardHold(args: {
   paymentRequirement: string | null | undefined;
   feePerUnitPence: number | null | undefined;
-  cardHoldFlagEnabled: boolean;
   units?: number;
 }): StaffCardHoldContext | null {
-  if (!args.cardHoldFlagEnabled) return null;
   if (args.paymentRequirement !== 'card_hold') return null;
   const perUnit = args.feePerUnitPence;
   if (typeof perUnit !== 'number' || !Number.isFinite(perUnit) || perUnit <= 0) return null;

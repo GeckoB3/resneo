@@ -9,7 +9,6 @@ import {
 } from '@/lib/booking/resource-booking-defaults';
 import { resourceDurationCandidatesMinutes } from '@/lib/availability/resource-booking-engine';
 import { useToast } from '@/components/ui/Toast';
-import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { StaffCardHoldToggle } from '@/components/booking/StaffCardHoldToggle';
 import {
   resolveStaffEntityCardHold,
@@ -75,8 +74,6 @@ export function ResourceSlotBookingForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
-  /** Venue's card-hold flag from the dashboard provider (this form renders inside the dashboard). */
-  const cardHoldDepositsEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   /** Card-hold resources only (design doc 7.6): default ON, staff may waive per booking. */
   const [requireCardHold, setRequireCardHold] = useState(true);
 
@@ -141,9 +138,8 @@ export function ResourceSlotBookingForm({
       resolveStaffEntityCardHold({
         paymentRequirement: resource?.payment_requirement,
         feePerUnitPence: resource?.deposit_amount_pence,
-        cardHoldFlagEnabled: cardHoldDepositsEnabled,
       }),
-    [resource?.payment_requirement, resource?.deposit_amount_pence, cardHoldDepositsEnabled],
+    [resource?.payment_requirement, resource?.deposit_amount_pence],
   );
 
   const durationOptions = useMemo(() => {

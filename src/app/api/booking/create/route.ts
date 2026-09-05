@@ -119,7 +119,6 @@ import {
   insertCardHoldRows,
 } from '@/lib/booking/card-hold-capture';
 import { buildCardHoldTermsSnapshot, renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -319,13 +318,6 @@ export async function POST(request: NextRequest) {
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
 
-    // Card-hold flag resolved once per request (design doc §6.1/§7.1): gates the
-    // creation of new holds in every model branch below.
-    const cardHoldEnabled = resolveAppointmentsFeatureFlag(
-      'card_hold_deposits',
-      parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
-    );
-
     // Dispatch to model-specific create handlers (B, C, D, E)
     if (venueMode.bookingModel !== 'table_reservation') {
       const inferredSecondary = inferSecondaryBookingModelFromPayload(parsed.data, venueMode.enabledModels);
@@ -339,7 +331,6 @@ export async function POST(request: NextRequest) {
         phoneE164,
         effectiveModel,
         guestLinkOptions,
-        cardHoldEnabled,
       );
     }
 
@@ -354,7 +345,6 @@ export async function POST(request: NextRequest) {
         phoneE164,
         secondaryModel,
         guestLinkOptions,
-        cardHoldEnabled,
       );
     }
     if (hasNonTableBookingPayload(parsed.data)) {
@@ -457,14 +447,14 @@ export async function POST(request: NextRequest) {
       if (slot.deposit_type === 'card_hold') {
         // Card hold: no money is charged at booking; the card is saved for a
         // possible no-show fee. The engine only sets deposit_required for
-        // card_hold when the venue flag is on and the fee is positive (spec 6.3);
-        // this guard mirrors that flag-off / zero-fee safety.
+        // card_hold when the fee is positive (spec 6.3); this guard mirrors
+        // that zero-fee safety.
         const feePence = Math.round((slot.deposit_amount ?? 0) * 100);
-        if (cardHoldEnabled && feePence > 0) {
+        if (feePence > 0) {
           cardHoldFeePence = feePence;
         } else {
           console.warn(
-            '[booking/create] card_hold table slot degraded to no protection (flag off or fee <= 0)',
+            '[booking/create] card_hold table slot degraded to no protection (fee <= 0)',
             { venue_id, service_id: slot.service_id },
           );
         }
@@ -794,8 +784,6 @@ async function handleNonTableBooking(
   phoneE164: string,
   effectiveModel: BookingModel,
   guestLinkOptions: { silentAuthSignup: boolean },
-  /** Resolved `card_hold_deposits` venue flag; gates creation of new holds (spec 6.1). */
-  cardHoldEnabled: boolean,
 ) {
   const {
     venue_id,
@@ -1030,14 +1018,7 @@ async function handleNonTableBooking(
       if (online != null && online.amountPence > 0) {
         if (online.chargeLabel === 'card_hold') {
           // Card hold (spec 7.1): fixed service fee, no money due at booking.
-          if (cardHoldEnabled) {
-            cardHoldFeePence = online.amountPence;
-          } else {
-            console.warn(
-              '[booking/create] card_hold service item booked while card_hold_deposits flag is off; treating as no charge',
-              { venue_id, service_item_id: sess.service_item_id },
-            );
-          }
+          cardHoldFeePence = online.amountPence;
         } else {
           requiresDeposit = true;
           depositAmountPence = online.amountPence * needSeats;
@@ -1312,15 +1293,8 @@ async function handleNonTableBooking(
       if (online != null && online.amountPence > 0) {
         if (online.chargeLabel === 'card_hold') {
           // Card hold (spec 7.1): fixed fee (variant-adjusted deposit_pence, add-ons
-          // excluded), no money due at booking. Flag off resolves as 'none' (spec 6.3).
-          if (cardHoldEnabled) {
-            cardHoldFeePence = online.amountPence;
-          } else {
-            console.warn(
-              '[booking/create] card_hold service booked while card_hold_deposits flag is off; treating as no charge',
-              { venue_id, appointment_service_id },
-            );
-          }
+          // excluded), no money due at booking.
+          cardHoldFeePence = online.amountPence;
         } else {
           requiresDeposit = true;
           depositAmountPence = online.amountPence;
@@ -1379,14 +1353,7 @@ async function handleNonTableBooking(
       : null;
     if (eventValidation.value.cardHoldFeePence != null) {
       // Card hold (spec 7.1): server-derived per-person fee x tickets, no money due.
-      if (cardHoldEnabled) {
-        cardHoldFeePence = eventValidation.value.cardHoldFeePence;
-      } else {
-        console.warn(
-          '[booking/create] card_hold event booked while card_hold_deposits flag is off; treating as no charge',
-          { venue_id, experience_event_id },
-        );
-      }
+      cardHoldFeePence = eventValidation.value.cardHoldFeePence;
     }
     const ticketTotalDisplay =
       ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
@@ -1433,18 +1400,13 @@ async function handleNonTableBooking(
       requiresDeposit = true;
       depositAmountPence = depPer * party_size;
     }
-    // Card hold (spec 7.1): the engine passes card_hold through only when the venue
-    // flag is on and a positive fee is configured; read the raw class type so this
-    // route's own warnings still fire for flag-off / zero-fee configs (spec 6.3).
+    // Card hold (spec 7.1): the engine passes card_hold through only when a positive
+    // fee is configured; read the raw class type so this route's own warning still
+    // fires for zero-fee configs (spec 6.3).
     const rawClassType = input.classTypes.find((ct) => ct.id === cls.class_type_id);
     if (rawClassType?.payment_requirement === 'card_hold') {
       const holdPerPerson = rawClassType.deposit_amount_pence ?? 0;
-      if (!cardHoldEnabled) {
-        console.warn(
-          '[booking/create] card_hold class booked while card_hold_deposits flag is off; treating as no charge',
-          { venue_id, class_instance_id },
-        );
-      } else if (holdPerPerson > 0) {
+      if (holdPerPerson > 0) {
         cardHoldFeePence = holdPerPerson * party_size;
       } else {
         console.warn(
@@ -1657,13 +1619,13 @@ async function handleNonTableBooking(
     } else if (payReq === 'card_hold') {
       // Card hold (spec 7.1): flat no-show fee, no money due at booking. The
       // `bookings.resource_payment_requirement` snapshot records 'card_hold';
-      // flag-off and zero-fee configs resolve as 'none' with a warning (spec 6.3).
-      if (cardHoldEnabled && depConfigured > 0) {
+      // zero-fee configs resolve as 'none' with a warning (spec 6.3).
+      if (depConfigured > 0) {
         cardHoldFeePence = depConfigured;
       } else {
         resourcePaymentRequirement = 'none';
         console.warn(
-          '[booking/create] card_hold resource degraded to no charge (flag off or fee <= 0)',
+          '[booking/create] card_hold resource degraded to no charge (fee <= 0)',
           { venue_id, resource_id },
         );
       }

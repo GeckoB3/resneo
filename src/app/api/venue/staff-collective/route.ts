@@ -27,7 +27,11 @@ export async function GET(request: NextRequest) {
     if (!scope) {
       return NextResponse.json({ collective: null }, { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } });
     }
-    const { practitioners } = await loadCollectiveAppointmentCatalog(admin, scope.collectiveId);
+    // Every calendar the staff form can book, own services included, so a
+    // column with no combined offering still opens the collective form.
+    const { practitioners } = await loadCollectiveAppointmentCatalog(admin, scope.collectiveId, {
+      includeMemberOwnServices: true,
+    });
     return NextResponse.json(
       {
         collective: {

@@ -451,7 +451,13 @@ export function CombinedPageManager({
 
   const pageAdapter = useMemo<BookingPageEditorAdapter>(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const publicPath = `/book/c/${collective.slug}`;
+    // The address customers actually use: a member venue's own page when the
+    // collective adopted it, otherwise the dedicated combined address.
+    const adoptedSlug =
+      collective.slugStrategy === 'adopt_member' && collective.adoptedVenueId
+        ? (collective.members.find((m) => m.venueId === collective.adoptedVenueId)?.venueSlug ?? null)
+        : null;
+    const publicPath = adoptedSlug ? `/book/${adoptedSlug}` : `/book/c/${collective.slug}`;
     return {
       displayName: collective.name,
       publicUrl: `${origin}${publicPath}`,
@@ -668,6 +674,9 @@ function PageAddressSection({
   onSettings: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
   const adopt = collective.slugStrategy === 'adopt_member';
+  const adoptedSlug = adopt
+    ? (collective.members.find((m) => m.venueId === collective.adoptedVenueId)?.venueSlug ?? null)
+    : null;
   return (
     <section className="space-y-2 rounded-xl border border-slate-200 p-4">
       <p className="text-sm font-bold text-slate-900">Booking page address</p>
@@ -720,6 +729,11 @@ function PageAddressSection({
                 </option>
               ))}
           </select>
+          {adoptedSlug ? (
+            <p className="mt-1 text-xs text-slate-600">
+              Customers reach it at <code className="text-xs">/book/{adoptedSlug}</code>.
+            </p>
+          ) : null}
           <p className="mt-1 text-xs text-amber-600">
             That venue’s own page will show the combined page. It can keep a separate page only under
             a new address.

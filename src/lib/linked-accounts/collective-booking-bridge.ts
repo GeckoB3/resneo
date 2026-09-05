@@ -23,6 +23,11 @@ import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
 import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import {
+  isGuestBookingDateAllowed,
+  isStaffWalkInBookingDateAllowed,
+  loadServiceEntityBookingWindow,
+} from '@/lib/booking/entity-booking-window';
 import type { ServiceChainSegmentParam } from '@/lib/booking/service-chain';
 import {
   loadCollectiveAppointmentCatalog,
@@ -48,6 +53,12 @@ export interface CombinedBookingTarget {
   /** Effective (overridden) price/duration for the offering on this calendar. */
   pricePence: number | null;
   durationMinutes: number | null;
+  /**
+   * True for a combined-page offering (attributed to the collective); false for a
+   * member venue's own service reached through the staff catalogue
+   * (`includeMemberOwnServices`), which books as a plain booking in its venue.
+   */
+  offering: boolean;
 }
 
 /**
@@ -58,9 +69,17 @@ export interface CombinedBookingTarget {
  */
 export async function resolveCombinedBookingTarget(
   admin: SupabaseClient,
-  params: { collectiveId: string; offeringId: string; calendarId: string },
+  params: {
+    collectiveId: string;
+    offeringId: string;
+    calendarId: string;
+    /** Staff of a member: a member venue's own service id resolves too (see `offering`). */
+    includeMemberOwnServices?: boolean;
+  },
 ): Promise<CombinedBookingTarget | null> {
-  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, params.collectiveId);
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, params.collectiveId, {
+    includeMemberOwnServices: params.includeMemberOwnServices,
+  });
   const calendar = practitioners.find((p) => p.id === params.calendarId);
   if (!calendar) return null;
   const service = calendar.services.find((s) => s.id === params.offeringId);
@@ -70,6 +89,7 @@ export async function resolveCombinedBookingTarget(
     sourceServiceId: service.source_service_id,
     pricePence: service.price_pence,
     durationMinutes: service.duration_minutes,
+    offering: !service.venue_only,
   };
 }
 
@@ -179,10 +199,14 @@ export async function loadCollectiveDayAvailability(
     audience?: 'public' | 'staff';
     /** A booking being rescheduled, whose own slot must not count as taken. */
     excludeBookingId?: string | null;
+    /** Staff of a member: member venues' own services are offered too. */
+    includeMemberOwnServices?: boolean;
   },
 ): Promise<{ date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean }> {
   const { collectiveId, offeringId, date } = params;
-  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId);
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId, {
+    includeMemberOwnServices: params.includeMemberOwnServices,
+  });
   const all = calendarsForOffering(practitioners, offeringId);
   const targets =
     params.anyAvailable || !params.calendarId
@@ -221,6 +245,18 @@ export async function loadCollectiveDayAvailability(
       );
       if (dur === null && (params.variantId || (params.addonIds?.length ?? 0) > 0)) return [];
       try {
+        // The source service's own booking window (minimum notice, same-day rule,
+        // advance limit) applies on its calendar exactly as the venue's own day
+        // route and the create routes apply it, so every slot offered here is one
+        // create will accept. The month loader and the visit path already did this.
+        const window = await loadServiceEntityBookingWindow(admin, t.venueId, '', t.sourceServiceId);
+        const tz =
+          typeof clock.timezone === 'string' && clock.timezone.trim() !== '' ? clock.timezone.trim() : 'Europe/London';
+        const dateAllowed =
+          params.audience === 'staff'
+            ? isStaffWalkInBookingDateAllowed(date, window, tz)
+            : isGuestBookingDateAllowed(date, window, tz);
+        if (!dateAllowed) return [];
         const input = await fetchAppointmentInput({
           supabase: admin,
           venueId: t.venueId,
@@ -237,7 +273,7 @@ export async function loadCollectiveDayAvailability(
           const excludeLc = params.excludeBookingId.toLowerCase();
           input.existingBookings = input.existingBookings.filter((b) => b.id.toLowerCase() !== excludeLc);
         }
-        attachVenueClockToAppointmentInput(input, clock, null);
+        attachVenueClockToAppointmentInput(input, clock, window);
         if (params.audience === 'staff') input.skipPastSlotFilter = true;
         const result = computeAppointmentAvailability(input);
         const slots: DaySlot[] = [];
@@ -313,10 +349,14 @@ export async function loadCollectiveMonthAvailableDates(
     audience?: 'public' | 'staff';
     /** A booking being rescheduled, whose own slot must not count as taken. */
     excludeBookingId?: string | null;
+    /** Staff of a member: member venues' own services are offered too. */
+    includeMemberOwnServices?: boolean;
   },
 ): Promise<{ venue_id: string; practitioner_id: string; service_id: string; year: number; month: number; available_dates: string[]; any_available?: boolean }> {
   const { collectiveId, offeringId, year, month } = params;
-  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId);
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId, {
+    includeMemberOwnServices: params.includeMemberOwnServices,
+  });
   const all = calendarsForOffering(practitioners, offeringId);
   const targets =
     params.anyAvailable || !params.calendarId
@@ -374,13 +414,17 @@ export async function loadCollectiveChainDayAvailability(
     anyAvailable: boolean;
     date: string;
     phantoms?: PhantomBooking[];
+    /** Staff of a member: member venues' own services are offered too. */
+    includeMemberOwnServices?: boolean;
   },
 ): Promise<
   | { ok: true; payload: { date: string; venue_id: string; practitioners: Array<{ id: string; name: string; slots: DaySlot[] }>; any_available?: boolean } }
   | { ok: false; error: string; details?: unknown }
 > {
   const { collectiveId, chain, date } = params;
-  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId);
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, collectiveId, {
+    includeMemberOwnServices: params.includeMemberOwnServices,
+  });
   const firstOfferingId = chain[0]!.service_id;
 
   type ChainTarget = {

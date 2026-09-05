@@ -299,11 +299,6 @@ export interface EngineInput {
    * `deposit_type` (rule: restriction.deposit_type ?? deposit_config.type ?? 'charge').
    */
   deposit_legacy_type?: 'charge' | 'card_hold' | null;
-  /**
-   * Resolved `card_hold_deposits` venue flag. When off (or omitted), card-hold config
-   * resolves as no deposit (`deposit_required: false`) with a console.warn.
-   */
-  card_hold_deposits_enabled?: boolean;
   now: Date;
 }
 

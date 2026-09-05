@@ -25,7 +25,6 @@ import {
   buildUpcomingBookingsBlockMessage,
   hasUpcomingActiveBookingsForVenueResource,
 } from '@/lib/venue/entity-delete-booking-guards';
-import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -362,14 +361,6 @@ export async function POST(request: NextRequest) {
     const payReq = parsed.data.payment_requirement ?? 'none';
     const dep = parsed.data.deposit_amount_pence ?? null;
 
-    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
-    if (payReq === 'card_hold') {
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
-    }
-
     if (!parsed.data.display_on_calendar_id) {
       return NextResponse.json(
         { error: 'Choose a calendar column to show this resource on' },
@@ -492,14 +483,6 @@ export async function PATCH(request: NextRequest) {
     const parsed = resourcePatchSchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
-    }
-
-    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
-    if (parsed.data.payment_requirement === 'card_hold') {
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
     }
 
     const { data: existing, error: exErr } = await admin

@@ -12,7 +12,6 @@ const ENV_BY_FLAG: Record<AppointmentsFeatureFlagKey, string> = {
   any_available_practitioner: 'FEATURE_FLAG_ANY_AVAILABLE_PRACTITIONER',
   class_commerce_enabled: 'FEATURE_FLAG_CLASS_COMMERCE_ENABLED',
   compliance_records_enabled: 'FEATURE_FLAG_COMPLIANCE_RECORDS_ENABLED',
-  card_hold_deposits: 'FEATURE_FLAG_CARD_HOLD_DEPOSITS',
   staff_first_booking_flow: 'FEATURE_FLAG_STAFF_FIRST_BOOKING_FLOW',
 };
 
@@ -75,6 +74,33 @@ export function resolveAppointmentsFeatureFlags(
     acc[key] = resolveAppointmentsFeatureFlag(key, parsed);
     return acc;
   }, {} as ResolvedAppointmentsFeatureFlags);
+}
+
+/**
+ * Flags retired from the closed key list that API consumers still read.
+ *
+ * `card_hold_deposits` was retired on 2026-09-05: card holds are a standard payment
+ * option for every venue, so nothing on the web reads the flag any more. The mobile
+ * app (1.1.0) still gates its service, class, event and resource editors and the
+ * staff "Card hold" toggle on `feature_flags.resolved.card_hold_deposits`, and its
+ * booking-settings screen still shows a toggle for it. Staff venue payloads keep
+ * serving the key as `true` so those screens behave as if the venue had it on; a
+ * PATCH that sends the key is stripped by the schema and ignored. Delete this once
+ * the app no longer reads the key.
+ */
+const RETIRED_FLAGS_SERVED_AS_ON = { card_hold_deposits: true } as const;
+
+export type ResolvedAppointmentsFeatureFlagsForApi = ResolvedAppointmentsFeatureFlags &
+  typeof RETIRED_FLAGS_SERVED_AS_ON;
+
+/**
+ * `resolved` as served on staff venue payloads (`GET /api/venue` and
+ * `GET`/`PATCH /api/venue/feature-flags`): the live flags plus the retired keys above.
+ */
+export function resolvedAppointmentsFeatureFlagsForApi(
+  resolved: ResolvedAppointmentsFeatureFlags,
+): ResolvedAppointmentsFeatureFlagsForApi {
+  return { ...resolved, ...RETIRED_FLAGS_SERVED_AS_ON };
 }
 
 /** Normalise PATCH body: only known keys; `true` stored, `false` removes key. */

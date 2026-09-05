@@ -115,9 +115,8 @@ const MESSAGE_CARDS: Array<{
     timing: "hoursBefore",
     timingLabel: "Send hours before",
   },
-  // Card-hold deposits (spec 10.3). This section has no venue feature-flag
-  // access, so the cards show unconditionally; they are harmless while the
-  // card_hold_deposits flag is off (the keys are simply never sent).
+  // Card-hold deposits (spec 10.3). The keys are only sent for bookings that
+  // carry a card hold, so the cards are harmless for venues that never use one.
   {
     key: "card_hold_request",
     label: "Card details request",

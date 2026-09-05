@@ -4,6 +4,7 @@ import {
   mergeVenueFeatureFlagsPatch,
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlags,
+  resolvedAppointmentsFeatureFlagsForApi,
   venueFeatureFlagsForStorage,
 } from '@/lib/feature-flags/resolve';
 import { venueFeatureFlagsSchema } from '@/lib/feature-flags/types';
@@ -88,7 +89,7 @@ export async function GET(request: NextRequest) {
     const calendars = await loadVenueCalendarsForSettings(admin, staff.venue_id, calendarOrder);
     return NextResponse.json({
       raw,
-      resolved: resolveAppointmentsFeatureFlags(raw),
+      resolved: resolvedAppointmentsFeatureFlagsForApi(resolveAppointmentsFeatureFlags(raw)),
       any_available_practitioner_config: parseAnyAvailablePractitionerConfig(raw),
       calendars,
     });
@@ -176,7 +177,7 @@ export async function PATCH(request: NextRequest) {
     const calendars = await loadVenueCalendarsForSettings(admin, staff.venue_id, calendarOrder);
     return NextResponse.json({
       raw: merged,
-      resolved: resolveAppointmentsFeatureFlags(merged),
+      resolved: resolvedAppointmentsFeatureFlagsForApi(resolveAppointmentsFeatureFlags(merged)),
       any_available_practitioner_config: parseAnyAvailablePractitionerConfig(merged),
       calendars,
     });

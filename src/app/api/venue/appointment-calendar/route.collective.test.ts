@@ -58,6 +58,7 @@ describe('GET /api/venue/appointment-calendar for a collective', () => {
         durationMinutes: 45,
         addonIds: ['a1', 'a2'],
         audience: 'staff',
+        includeMemberOwnServices: true,
       }),
     );
     expect(vi.mocked(resolveLinkedStaffCatalogScope)).not.toHaveBeenCalled();

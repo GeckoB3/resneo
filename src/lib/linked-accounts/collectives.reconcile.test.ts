@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { reconcileCollective, loadCollectiveBookingLinksForVenue } from './collectives';
-import { getAcceptedLinkBetween } from './queries';
+import { getAcceptedLinkBetween, getStandingLinkBetween } from './queries';
 
-vi.mock('./queries', () => ({ getAcceptedLinkBetween: vi.fn() }));
+vi.mock('./queries', () => ({ getAcceptedLinkBetween: vi.fn(), getStandingLinkBetween: vi.fn() }));
+const mockGetStandingLink = vi.mocked(getStandingLinkBetween);
 vi.mock('./notifications', () => ({
   notifyCollectiveDissolved: vi.fn(),
   notifyCollectiveHostTransferred: vi.fn(),
@@ -73,7 +74,7 @@ const OTHER = 'venue-other';
 const THIRD = 'venue-third';
 const COL = 'col-1';
 
-function collectiveTables(members: Row[]) {
+function collectiveTables(members: Row[]): Record<string, Row[]> {
   return {
     venue_collectives: [
       {
@@ -94,6 +95,8 @@ describe('reconcileCollective', () => {
   beforeEach(() => {
     mockGetLink.mockReset();
     mockGetLink.mockResolvedValue(fullLink as never);
+    mockGetStandingLink.mockReset();
+    mockGetStandingLink.mockResolvedValue(fullLink as never);
   });
 
   it('keeps a freshly created collective alive while its invitation is still open', async () => {
@@ -153,6 +156,7 @@ describe('reconcileCollective', () => {
     // Two actives whose pairwise link is gone: both removed, zero survivors. An
     // open invitation cannot rescue a collective with no active member left.
     mockGetLink.mockResolvedValue(null as never);
+    mockGetStandingLink.mockResolvedValue(null as never);
     const tables = collectiveTables([
       {
         id: 'm1',
@@ -180,6 +184,40 @@ describe('reconcileCollective', () => {
     expect(result.dissolved).toBe(true);
     expect(result.removedVenueIds.sort()).toEqual([HOST, OTHER].sort());
     expect(tables.venue_collective_members[2].status).toBe('removed');
+  });
+
+  it('keeps a member whose link is only suspended, and its providers active', async () => {
+    // The daily cron suspends a link while a member's subscription has lapsed
+    // (§6.7). That pauses the pair, it does not end it: the member is excluded
+    // from the page by eligibility and must not be removed from the collective,
+    // or restoring the subscription would leave it needing a fresh invitation.
+    mockGetLink.mockResolvedValue(null as never); // no ACCEPTED link right now
+    mockGetStandingLink.mockResolvedValue(fullLink as never); // but a suspended one
+    const tables = collectiveTables([
+      {
+        id: 'm1',
+        collective_id: COL,
+        venue_id: HOST,
+        status: 'active',
+        joined_at: '2026-09-01T00:00:00Z',
+      },
+      {
+        id: 'm2',
+        collective_id: COL,
+        venue_id: OTHER,
+        status: 'active',
+        joined_at: '2026-09-02T00:00:00Z',
+      },
+    ]);
+    tables.collective_service_items = [{ id: 'item-1', collective_id: COL }];
+    tables.collective_service_providers = [
+      { id: 'p-host', item_id: 'item-1', venue_id: HOST, status: 'active' },
+      { id: 'p-other', item_id: 'item-1', venue_id: OTHER, status: 'active' },
+    ];
+    const result = await reconcileCollective(fakeAdmin(tables), COL);
+    expect(result).toEqual({ removedVenueIds: [], dissolved: false, hostTransferredTo: null });
+    expect(tables.venue_collective_members.map((m) => m.status)).toEqual(['active', 'active']);
+    expect(tables.collective_service_providers.map((p) => p.status)).toEqual(['active', 'active']);
   });
 
   it('does not touch a healthy two-member collective', async () => {

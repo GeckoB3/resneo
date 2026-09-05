@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -19,7 +19,6 @@ import {
   resolveAppointmentServiceOnlineCharge,
   type AppointmentServicePaymentFields,
 } from '@/lib/appointments/appointment-service-payment';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 import { settleCardHoldsOnCancellation } from '@/lib/booking/card-hold-cancellation';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
 import {
@@ -65,7 +64,7 @@ export async function PATCH(request: NextRequest) {
     const { data: booking } = await admin
       .from('bookings')
       .select(
-        'id, venue_id, calendar_id, practitioner_id, booking_date, booking_time, booking_end_time',
+        'id, venue_id, calendar_id, practitioner_id, booking_date, booking_time, booking_end_time, service_item_id, appointment_service_id, service_variant_id, processing_time_blocks, resource_id, class_instance_id, experience_event_id, event_session_id',
       )
       .eq('id', parsed.data.bookingId)
       .maybeSingle();
@@ -123,6 +122,58 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // The owner venue's availability rules apply to a partner reschedule, as they
+    // do to a partner create below and to the native staff PATCH. The RPC is a
+    // plain UPDATE, so without this a linked venue could move a booking onto
+    // another appointment, outside working hours or over a break.
+    const changes = parsed.data.changes;
+    const moves =
+      changes.booking_date !== undefined ||
+      changes.booking_time !== undefined ||
+      changes.booking_end_time !== undefined ||
+      (changes.practitioner_id !== undefined && changes.practitioner_id !== null);
+    const serviceId =
+      (booking.service_item_id as string | null) ??
+      (booking.appointment_service_id as string | null) ??
+      null;
+    const isAppointment =
+      !booking.resource_id &&
+      !booking.class_instance_id &&
+      !booking.experience_event_id &&
+      !booking.event_session_id;
+    const columnForCheck = changes.practitioner_id ?? currentColumn;
+    if (moves && isAppointment && serviceId && columnForCheck) {
+      const startHm = (changes.booking_time ?? String(booking.booking_time)).slice(0, 5);
+      const oldStart = timeToMinutes(String(booking.booking_time).slice(0, 5));
+      const oldEnd = booking.booking_end_time
+        ? timeToMinutes(String(booking.booking_end_time).slice(0, 5))
+        : null;
+      // A moved start keeps the booking's length (see normalizeLinkedBookingRpcChanges).
+      const endHm = changes.booking_end_time
+        ? changes.booking_end_time.slice(0, 5)
+        : oldEnd !== null && oldEnd > oldStart
+          ? minutesToTime(timeToMinutes(startHm) + (oldEnd - oldStart))
+          : null;
+      const intervalCheck = await validateAppointmentModificationInterval({
+        admin,
+        venueId: ownerVenueId,
+        bookingId: parsed.data.bookingId,
+        newDate: changes.booking_date ?? (booking.booking_date as string),
+        timeStr: startHm,
+        practId: columnForCheck,
+        svcId: serviceId,
+        bookingEndTime: endHm,
+        bookingServiceVariantId: (booking.service_variant_id as string | null) ?? null,
+        bookingProcessingSnapshot: booking.processing_time_blocks,
+      });
+      if (!intervalCheck.ok) {
+        return NextResponse.json(
+          { error: intervalCheck.reason ?? 'That time is not available on the linked calendar.' },
+          { status: 409 },
+        );
+      }
+    }
+
     const rpcChanges = await normalizeLinkedBookingRpcChanges(
       admin,
       {
@@ -160,15 +211,19 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    // §17.3 — email the owning venue per its preferences.
-    void notifyCrossVenueBookingWrite({
-      admin,
-      owningVenueId: ownerVenueId,
-      actingVenueId: staff.venue_id,
-      actionType: parsed.data.changes.status === 'Cancelled' ? 'cancelled_booking' : 'edited_booking',
-      before: booking as Record<string, unknown>,
-      after: (updated as Record<string, unknown> | null) ?? null,
-    });
+    // §17.3 — email the owning venue per its preferences. Scheduled with
+    // `after()` so the send survives the response on a serverless host, where a
+    // dangling promise can be frozen with the function.
+    after(() =>
+      notifyCrossVenueBookingWrite({
+        admin,
+        owningVenueId: ownerVenueId,
+        actingVenueId: staff.venue_id,
+        actionType: parsed.data.changes.status === 'Cancelled' ? 'cancelled_booking' : 'edited_booking',
+        before: booking as Record<string, unknown>,
+        after: (updated as Record<string, unknown> | null) ?? null,
+      }),
+    );
 
     return NextResponse.json({ booking: updated });
   } catch (err) {
@@ -302,9 +357,8 @@ export async function POST(request: NextRequest) {
 
       // Card-hold services are rejected on this route (spec D6): the RPC below has
       // zero payment logic, so a card-hold booking created here would confirm with
-      // no hold. Gated on the OWNER venue's card_hold_deposits flag; a zero-fee
-      // card_hold config resolves as none and is allowed through, matching the
-      // Phase 1 resolvers.
+      // no hold. A zero-fee card_hold config resolves as none and is allowed
+      // through, matching the Phase 1 resolvers.
       //
       // The message must name the Calendar screen specifically. Staff CAN create a
       // card-hold booking for a linked venue, but only from the linked column on
@@ -316,25 +370,14 @@ export async function POST(request: NextRequest) {
         service as unknown as AppointmentServicePaymentFields,
       );
       if (serviceCharge?.chargeLabel === 'card_hold') {
-        const { data: ownerVenue } = await admin
-          .from('venues')
-          .select('feature_flags')
-          .eq('id', input.ownerVenueId)
-          .maybeSingle();
-        const cardHoldEnabled = resolveAppointmentsFeatureFlag(
-          'card_hold_deposits',
-          parseVenueFeatureFlags(ownerVenue?.feature_flags),
+        return NextResponse.json(
+          {
+            code: 'card_hold_service_unsupported',
+            error:
+              'This service needs a card hold, which this form cannot take. Create it from the Calendar screen instead: find the venue’s linked column and click the time you want.',
+          },
+          { status: 400 },
         );
-        if (cardHoldEnabled) {
-          return NextResponse.json(
-            {
-              code: 'card_hold_service_unsupported',
-              error:
-                'This service needs a card hold, which this form cannot take. Create it from the Calendar screen instead: find the venue’s linked column and click the time you want.',
-            },
-            { status: 400 },
-          );
-        }
       }
     }
 
@@ -411,14 +454,16 @@ export async function POST(request: NextRequest) {
     }
 
     // §17.3 — email the owning venue if it opted in to "new booking" emails.
-    void notifyCrossVenueBookingWrite({
-      admin,
-      owningVenueId: input.ownerVenueId,
-      actingVenueId: staff.venue_id,
-      actionType: 'created_booking',
-      before: null,
-      after: { booking_date: input.bookingDate, booking_time: input.bookingTime },
-    });
+    after(() =>
+      notifyCrossVenueBookingWrite({
+        admin,
+        owningVenueId: input.ownerVenueId,
+        actingVenueId: staff.venue_id,
+        actionType: 'created_booking',
+        before: null,
+        after: { booking_date: input.bookingDate, booking_time: input.bookingTime },
+      }),
+    );
 
     return NextResponse.json({ booking: created });
   } catch (err) {

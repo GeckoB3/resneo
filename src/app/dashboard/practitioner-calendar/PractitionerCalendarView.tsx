@@ -2790,7 +2790,13 @@ export function PractitionerCalendarView({
       cancelled = true;
     };
   }, [venueId]);
-  /** Where a new booking for `calendarId` on `columnVenueId` goes: the collective, or null for the venue itself. */
+  /**
+   * Where a new booking for `calendarId` on `columnVenueId` goes: the collective, or
+   * null for the venue itself. A partner column that answers with the collective
+   * also loses its own "New booking" header button: New, Walk-in and a slot click
+   * already book that calendar through the collective form, so the button would
+   * only duplicate them. A partner outside the collective keeps its button.
+   */
   const collectiveTargetFor = useCallback(
     (columnVenueId: string, calendarId: string | null): { id: string; name: string } | null => {
       if (!staffCollective) return null;
@@ -7279,7 +7285,7 @@ export function PractitionerCalendarView({
                       <span className="mt-0.5 block text-[11px] leading-tight text-slate-600" title={linkedHoursLine}>
                         {linkedHoursLine}
                       </span>
-                      {col.action === 'create_edit_cancel' ? (
+                      {col.action === 'create_edit_cancel' && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -7541,7 +7547,8 @@ export function PractitionerCalendarView({
                         >
                           {linkedHoursLine}
                         </span>
-                        {linkedCol.action === 'create_edit_cancel' ? (
+                        {linkedCol.action === 'create_edit_cancel' &&
+                        !collectiveTargetFor(linkedCol.venueId, linkedCol.practitionerId) ? (
                           <button
                             type="button"
                             onClick={() => {
@@ -7602,7 +7609,7 @@ export function PractitionerCalendarView({
                       >
                         {linkedHoursLine}
                       </span>
-                      {col.action === 'create_edit_cancel' ? (
+                      {col.action === 'create_edit_cancel' && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
                         <button
                           type="button"
                           onClick={() => {

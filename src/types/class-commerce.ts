@@ -112,8 +112,8 @@ export interface ClassCartQuoteLine {
   payment_requirement: ClassPaymentRequirement;
   /**
    * No-show hold fee for this line (per-person class-type fee x party size) when the
-   * class type is `card_hold` and the venue `card_hold_deposits` flag is on; null
-   * otherwise. No money is charged today for hold lines: `online_charge_pence` stays 0.
+   * class type is `card_hold` with a positive fee; null otherwise. No money is charged
+   * today for hold lines: `online_charge_pence` stays 0.
    */
   card_hold_fee_pence: number | null;
   requires_stripe_checkout: boolean;

@@ -21,7 +21,6 @@ import { evaluateEventLeaveConflict, type LeaveWindow } from '@/lib/experience-e
 import { reportAvailabilityReadFailure } from '@/lib/availability/availability-read-failure';
 import { syncEventTicketTypes } from '@/lib/experience-events/sync-event-ticket-types';
 import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
-import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 import { z } from 'zod';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { OpeningHours } from '@/types/availability';
@@ -151,11 +150,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (payment_requirement === 'card_hold') {
-      // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
       if (!deposit_amount_pence || deposit_amount_pence < 100) {
         return NextResponse.json(
           { error: 'No-show fee must be at least £1 per person when payment requirement is card hold.' },
@@ -517,11 +511,6 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (patchPayReq === 'card_hold') {
-      // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
       if (patchDepositPence === undefined || patchDepositPence === null || patchDepositPence < 100) {
         return NextResponse.json(
           { error: 'No-show fee must be at least £1 per person when payment requirement is card hold.' },

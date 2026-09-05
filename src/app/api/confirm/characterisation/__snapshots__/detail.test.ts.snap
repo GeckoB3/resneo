@@ -46,7 +46,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -173,7 +172,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -300,7 +298,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -427,7 +424,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -543,7 +539,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -659,7 +654,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -775,7 +769,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -896,7 +889,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -1029,7 +1021,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,
@@ -1164,7 +1155,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": false,
@@ -1291,7 +1281,6 @@ END:VCALENDAR",
     "feature_flags": {
       "resolved": {
         "any_available_practitioner": false,
-        "card_hold_deposits": false,
         "class_commerce_enabled": false,
         "compliance_records_enabled": false,
         "guest_self_reschedule": true,

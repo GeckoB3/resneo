@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
 
+vi.mock('next/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/server')>()),
+  after: vi.fn(),
+}));
+
 vi.mock('@/lib/supabase/server', () => ({
   createRouteHandlerClientFromHeaders: vi.fn(),
 }));
@@ -63,7 +68,6 @@ const PRACTITIONER_ID = 'f0000000-0000-4000-8000-000000000003';
 
 function mockAdmin(opts: {
   service: Record<string, unknown> | null;
-  ownerVenue?: Record<string, unknown> | null;
 }) {
   const rpc = vi.fn().mockResolvedValue({ data: { id: 'created-1' }, error: null });
   const client = {
@@ -91,16 +95,6 @@ function mockAdmin(opts: {
           maybeSingle: vi
             .fn()
             .mockResolvedValue({ data: { id: PRACTITIONER_ID, venue_id: OWNER_VENUE_ID }, error: null }),
-        };
-      }
-      if (table === 'venues') {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: opts.ownerVenue ?? { feature_flags: { card_hold_deposits: true } },
-            error: null,
-          }),
         };
       }
       throw new Error(`unexpected table ${table}`);
@@ -165,23 +159,6 @@ describe('POST /api/venue/linked-calendar/booking card-hold rejection (spec D6)'
     expect(json.error).toContain('Calendar screen');
     expect(json.error).not.toContain('main booking form');
     expect(rpc).not.toHaveBeenCalled();
-  });
-
-  it('creates normally when the owner venue flag is off (requirement resolves as none)', async () => {
-    const { rpc } = mockAdmin({
-      service: {
-        id: SERVICE_ID,
-        venue_id: OWNER_VENUE_ID,
-        payment_requirement: 'card_hold',
-        deposit_pence: 2500,
-        price_pence: 5000,
-      },
-      ownerVenue: { feature_flags: {} },
-    });
-
-    const res = await POST(postRequest());
-    expect(res.status).toBe(200);
-    expect(rpc).toHaveBeenCalledWith('linked_apply_booking_insert', expect.anything());
   });
 
   it('creates normally for a non-card-hold service', async () => {

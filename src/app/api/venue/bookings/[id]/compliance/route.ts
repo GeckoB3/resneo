@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
-import { requireCompliancePlan } from '@/lib/compliance/auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { requireCompliancePlanForVenue } from '@/lib/compliance/auth';
+import { resolveComplianceReadScope } from '@/lib/compliance/linked-read';
 import {
   bookingDatetime,
   loadAndResolveServiceRequirements,
@@ -41,25 +43,32 @@ function serializeResolved(r: ResolvedRequirement) {
   };
 }
 
-/** GET /api/venue/bookings/[id]/compliance — resolved requirement state + the guest's records. */
+/**
+ * GET /api/venue/bookings/[id]/compliance — resolved requirement state + the guest's records.
+ *
+ * The booking may belong to a linked venue (it opened from that venue's column on the
+ * caller's diary). Its requirements and records are then the OWNER venue's, read through
+ * the link when it shares full details and personal data; see `resolveComplianceReadScope`.
+ * The response says so (`linked: true`) so the panel shows them read-only.
+ */
 export async function GET(request: NextRequest, ctx: RouteCtx) {
   try {
     const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    const gate = await requireCompliancePlan(staff);
-    if (!gate.ok) return gate.response;
 
     const { id } = await Promise.resolve(ctx.params);
-    const { data: booking } = await staff.db
+    // Owner first: the venue filter that used to sit here is what made a linked
+    // booking read as "not found".
+    const { data: booking } = await getSupabaseAdminClient()
       .from('bookings')
-      .select('id, guest_id, booking_date, booking_time, appointment_service_id, service_item_id')
+      .select('id, venue_id, guest_id, booking_date, booking_time, appointment_service_id, service_item_id')
       .eq('id', id)
-      .eq('venue_id', staff.venue_id)
       .maybeSingle();
     if (!booking) return NextResponse.json({ error: 'Booking not found.' }, { status: 404 });
 
     const b = booking as {
+      venue_id: string;
       guest_id: string | null;
       booking_date: string;
       booking_time: string | null;
@@ -67,8 +76,23 @@ export async function GET(request: NextRequest, ctx: RouteCtx) {
       service_item_id: string | null;
     };
 
-    const resolution = await loadAndResolveServiceRequirements(staff.db, {
-      venueId: staff.venue_id,
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const scope = await resolveComplianceReadScope({
+      staff,
+      ownerVenueId: b.venue_id,
+      actingUserId: user?.id ?? null,
+      resourceType: 'booking',
+      resourceId: id,
+    });
+    if (!scope.ok) return scope.response;
+
+    const gate = await requireCompliancePlanForVenue(scope.db, scope.venueId);
+    if (!gate.ok) return gate.response;
+
+    const resolution = await loadAndResolveServiceRequirements(scope.db, {
+      venueId: scope.venueId,
       guestId: b.guest_id,
       appointmentServiceId: b.appointment_service_id,
       serviceItemId: b.service_item_id,
@@ -76,13 +100,14 @@ export async function GET(request: NextRequest, ctx: RouteCtx) {
     });
 
     const records = b.guest_id
-      ? await listComplianceRecords(staff.db, staff.venue_id, { guestId: b.guest_id })
+      ? await listComplianceRecords(scope.db, scope.venueId, { guestId: b.guest_id })
       : [];
 
     return NextResponse.json({
       applicable: resolution.applicable,
       requirements: resolution.resolved.map(serializeResolved),
       records,
+      linked: scope.linked,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id]/compliance failed:', err);

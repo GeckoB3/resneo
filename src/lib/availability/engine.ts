@@ -698,35 +698,21 @@ function generateServiceSlots(
     // `deposit_required`/`deposit_amount` pair, which stays the sole online gate.
     // Staff surfaces read the configured fields unconditionally.
     let depositType = resolveDepositType(slotRestriction, input.deposit_legacy_type);
-    let configuredPerPersonGbp = perPersonGbp != null && perPersonGbp > 0 ? perPersonGbp : null;
+    const configuredPerPersonGbp = perPersonGbp != null && perPersonGbp > 0 ? perPersonGbp : null;
     let depositRequired =
       configuredPerPersonGbp != null && depositThresholdMet(slotRestriction, input.party_size);
-    if (depositType === 'card_hold') {
-      if (!input.card_hold_deposits_enabled) {
-        // Flag-off safety (spec 6.3): card_hold configured while the venue flag is off
-        // resolves as no deposit. Charging instead would take money the guest was never shown.
-        if (!cardHoldSafetyWarned) {
-          console.warn(
-            '[availability-engine] deposit_type card_hold configured but card_hold_deposits flag is off; treating as no deposit',
-            { venue_id: input.venue_id, service_id: service.id },
-          );
-          cardHoldSafetyWarned = true;
-        }
-        depositType = 'charge';
-        configuredPerPersonGbp = null;
-        depositRequired = false;
-      } else if (configuredPerPersonGbp == null) {
-        // Zero-fee safety (spec 6.3): a card hold with fee <= 0 resolves as no deposit.
-        if (!cardHoldSafetyWarned) {
-          console.warn(
-            '[availability-engine] deposit_type card_hold configured with no positive per-person fee; treating as no deposit',
-            { venue_id: input.venue_id, service_id: service.id },
-          );
-          cardHoldSafetyWarned = true;
-        }
-        depositType = 'charge';
-        depositRequired = false;
+    if (depositType === 'card_hold' && configuredPerPersonGbp == null) {
+      // Zero-fee safety (spec 6.3): a card hold with fee <= 0 resolves as no deposit.
+      // Charging instead would take money the guest was never shown.
+      if (!cardHoldSafetyWarned) {
+        console.warn(
+          '[availability-engine] deposit_type card_hold configured with no positive per-person fee; treating as no deposit',
+          { venue_id: input.venue_id, service_id: service.id },
+        );
+        cardHoldSafetyWarned = true;
       }
+      depositType = 'charge';
+      depositRequired = false;
     }
     const onlineRequiresDeposit = depositRequired ? true : (slotRestriction?.online_requires_deposit ?? true);
 

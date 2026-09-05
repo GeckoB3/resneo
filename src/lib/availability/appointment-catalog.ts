@@ -25,7 +25,6 @@ import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
 import type { AppointmentCatalogAddonGroup } from '@/types/booking-models';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 export interface AppointmentCatalogVariant {
   id: string;
@@ -75,31 +74,27 @@ export interface AppointmentCatalogPractitioner {
 
 /**
  * Card-hold passthrough for the guest catalog (spec 6.3), mirroring the table/class
- * engines: 'card_hold' reaches the guest only when the venue flag is on AND a positive
- * fee is configured (service-level deposit_pence, or any active variant's own fee).
- * Otherwise it degrades to 'none' with a deduped warning, matching what the create
- * route will actually do; leaving it raw would show flag-off venues' guests
- * "No-show fee applies" copy for a booking that ends up with no protection.
+ * engines: 'card_hold' reaches the guest only when a positive fee is configured
+ * (service-level deposit_pence, or any active variant's own fee). Otherwise it
+ * degrades to 'none' with a deduped warning, matching what the create route will
+ * actually do; leaving it raw would show guests "No-show fee applies" copy for a
+ * booking that ends up with no protection.
  */
 function resolveCatalogPaymentRequirement(params: {
   service: Pick<AppointmentService, 'id' | 'payment_requirement' | 'deposit_pence'>;
   variants: AppointmentCatalogVariant[];
-  cardHoldDepositsEnabled: boolean;
   warnedServiceIds: Set<string>;
 }): ClassPaymentRequirement | undefined {
-  const { service, variants, cardHoldDepositsEnabled, warnedServiceIds } = params;
+  const { service, variants, warnedServiceIds } = params;
   if (service.payment_requirement !== 'card_hold') return service.payment_requirement;
   const feeConfigured =
     (service.deposit_pence ?? 0) > 0 || variants.some((v) => (v.deposit_pence ?? 0) > 0);
-  if (cardHoldDepositsEnabled && feeConfigured) return 'card_hold';
+  if (feeConfigured) return 'card_hold';
   if (!warnedServiceIds.has(service.id)) {
     warnedServiceIds.add(service.id);
-    console.warn(
-      cardHoldDepositsEnabled
-        ? '[appointment-catalog] card_hold service has no positive fee; treating as none'
-        : '[appointment-catalog] card_hold service configured but card_hold_deposits flag is off; treating as none',
-      { service_id: service.id },
-    );
+    console.warn('[appointment-catalog] card_hold service has no positive fee; treating as none', {
+      service_id: service.id,
+    });
   }
   return 'none';
 }
@@ -177,7 +172,6 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
 async function fetchUnifiedAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
-  cardHoldDepositsEnabled: boolean,
   options?: AppointmentCatalogOptions,
 ): Promise<AppointmentCatalog> {
   const calQuery = supabase
@@ -192,6 +186,13 @@ async function fetchUnifiedAppointmentCatalog(
     console.warn('[fetchUnifiedAppointmentCatalog] unified_calendars:', calErr.message);
   }
   let calendars = (calendarRows ?? []) as Record<string, unknown>[];
+  // People only. Resources and event team calendars share `unified_calendars`
+  // (`calendar_type`) and have no services of their own; they used to drop out
+  // only because of that, so a caller asking for calendars without services
+  // (the combined-page builder) was offered Room 1 and Room 2 as staff.
+  calendars = calendars.filter(
+    (c) => ((c.calendar_type as string | null | undefined) ?? 'practitioner') === 'practitioner',
+  );
   if (options?.practitionerSlug) {
     const slug = options.practitionerSlug.trim().toLowerCase();
     calendars = calendars.filter((c) => ((c.slug as string) ?? '').toLowerCase() === slug);
@@ -281,7 +282,6 @@ async function fetchUnifiedAppointmentCatalog(
           payment_requirement: resolveCatalogPaymentRequirement({
             service: svc,
             variants,
-            cardHoldDepositsEnabled,
             warnedServiceIds: cardHoldWarnedServiceIds,
           }),
           cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
@@ -312,12 +312,8 @@ export async function fetchAppointmentCatalog(
     (venueRow as { enabled_models?: unknown } | null)?.enabled_models,
     primary,
   );
-  const cardHoldDepositsEnabled = resolveAppointmentsFeatureFlag(
-    'card_hold_deposits',
-    parseVenueFeatureFlags((venueRow as { feature_flags?: unknown } | null)?.feature_flags),
-  );
   if (venueUsesUnifiedAppointmentData(primary, enabled)) {
-    return fetchUnifiedAppointmentCatalog(supabase, venueId, cardHoldDepositsEnabled, options);
+    return fetchUnifiedAppointmentCatalog(supabase, venueId, options);
   }
 
   const [practitionersRes, allServicesRes, psRes] = await Promise.all([
@@ -390,7 +386,6 @@ export async function fetchAppointmentCatalog(
           payment_requirement: resolveCatalogPaymentRequirement({
             service: svc,
             variants,
-            cardHoldDepositsEnabled,
             warnedServiceIds: cardHoldWarnedServiceIds,
           }),
           cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,

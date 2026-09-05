@@ -11,6 +11,8 @@ export {
   parseVenueFeatureFlags,
   resolveAppointmentsFeatureFlag,
   resolveAppointmentsFeatureFlags,
+  resolvedAppointmentsFeatureFlagsForApi,
+  type ResolvedAppointmentsFeatureFlagsForApi,
   venueFeatureFlagsForStorage,
 } from '@/lib/feature-flags/resolve';
 export { loadVenueFeatureFlags } from '@/lib/feature-flags/venue';

@@ -3,14 +3,14 @@ import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
+import { GUEST_DOCUMENT_MAX_BYTES, checkGuestDocument } from '@/lib/guests/guest-document-limits';
 
 const BUCKET = 'guest-documents';
-const MAX_BYTES = 50 * 1024 * 1024;
 
 const bodySchema = z.object({
   file_name: z.string().min(1).max(200),
   mime_type: z.string().max(120).optional(),
-  file_size_bytes: z.number().int().positive().max(MAX_BYTES),
+  file_size_bytes: z.number().int().positive().max(GUEST_DOCUMENT_MAX_BYTES),
   category: z.string().max(60).optional(),
 });
 
@@ -21,6 +21,9 @@ function safeFileSegment(name: string): string {
 
 /**
  * POST /api/venue/guests/[guestId]/documents/sign — create DB row + signed upload URL.
+ *
+ * Size and type are checked here with the same rules the picker applies
+ * (`checkGuestDocument`); the bucket enforces them again on the PUT itself.
  */
 export async function POST(
   request: NextRequest,
@@ -36,7 +39,22 @@ export async function POST(
     const { guestId } = await params;
     const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+      const tooLarge = parsed.error.issues.some((i) => i.path[0] === 'file_size_bytes' && i.code === 'too_big');
+      return NextResponse.json(
+        tooLarge
+          ? { error: 'That file is larger than 10 MB. Photos are resized automatically, so this is usually a PDF or scan that needs compressing first.' }
+          : { error: 'Invalid request', details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+
+    const accepted = checkGuestDocument({
+      fileName: parsed.data.file_name,
+      mimeType: parsed.data.mime_type,
+      sizeBytes: parsed.data.file_size_bytes,
+    });
+    if (!accepted.ok) {
+      return NextResponse.json({ error: accepted.message, code: `document_${accepted.reason}` }, { status: 400 });
     }
 
     const { data: guest, error: gErr } = await staff.db
@@ -61,7 +79,7 @@ export async function POST(
         guest_id: guestId,
         storage_path: storagePath,
         file_name: parsed.data.file_name.trim(),
-        mime_type: parsed.data.mime_type?.trim() || null,
+        mime_type: accepted.mimeType,
         file_size_bytes: parsed.data.file_size_bytes,
         category: parsed.data.category?.trim() || null,
         uploaded_by_staff_id: staff.id,
@@ -98,6 +116,8 @@ export async function POST(
       path: storagePath,
       signed_url: signed.data.signedUrl,
       token: signed.data.token ?? null,
+      /** The type the row was recorded with; the client sends it as the PUT's Content-Type. */
+      mime_type: accepted.mimeType,
     });
   } catch (err) {
     console.error('POST /api/venue/guests/[guestId]/documents/sign failed:', err);

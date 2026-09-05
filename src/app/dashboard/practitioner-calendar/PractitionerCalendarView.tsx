@@ -2,6 +2,17 @@
 
 import { effectiveWorkingHoursForDate } from '@/lib/availability/working-hours-rota';
 import {
+  DEFAULT_CALENDAR_FILTERS,
+  calendarFiltersAreDefault,
+  readCalendarFilterPreferences,
+  writeCalendarFilterPreferences,
+  type PractitionerCalendarFilters,
+} from '@/lib/calendar/calendar-filter-preferences';
+import {
+  calendarHasAvailableHoursOnDate,
+  calendarWorksOnDate,
+} from '@/lib/calendar/calendar-works-on-date';
+import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -33,7 +44,6 @@ import {
   pointerWithin,
   rectIntersection,
 } from '@dnd-kit/core';
-import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
 import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
@@ -91,6 +101,8 @@ import type { BookingModel } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { getStaffBookingSurfaceTabs } from '@/lib/booking/staff-booking-modal-options';
+import { warmStaffBookingSurface } from '@/lib/booking/staff-surface-warm';
+import type { StaffCollectiveSummary } from '@/lib/linked-accounts/collective-staff-scope';
 import {
   RESOURCE_BOOKING_CAPACITY_STATUSES,
   type ResourceBooking as EngineResourceBooking,
@@ -106,7 +118,12 @@ import {
   computeResourceAvailabilityMintSlots,
   type ResourceAvailabilityMintSlot,
 } from '@/lib/calendar/resource-availability-mint-slots';
-import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
+import type {
+  ClassPaymentRequirement,
+  Practitioner as VenuePractitioner,
+  VenueResource,
+  WorkingHours,
+} from '@/types/booking-models';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 import {
   addCalendarDays,
@@ -133,7 +150,6 @@ import {
   bookingCalendarBlockPaletteWithOverlay,
   CalendarBookingStatusStripe,
   isArrivedWaitingDisplay,
-  type BookingBlockPalette,
 } from '@/lib/calendar/booking-calendar-block-style';
 import {
   clusterLayoutHorizontalStyle,
@@ -179,6 +195,7 @@ import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
+import { ScheduleEditFollowUpBar, type ScheduleEditFollowUpChange } from './ScheduleEditFollowUpBar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { BookingCard } from './BookingCard';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
@@ -1185,6 +1202,12 @@ const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 1;
 const BOOKING_RESIZE_HOLD_MS = 1000;
 /** Pointer travel (px) during the hold that aborts arming — i.e. the press was really a scroll/scrub, not a deliberate resize. */
 const BOOKING_RESIZE_HOLD_TOLERANCE_PX = 10;
+/**
+ * How far into a press-and-hold the day grid stretches to the whole day for a
+ * move or resize: well before the hold activates the drag, and later than any
+ * click lasts.
+ */
+const GRID_EXTENSION_ARM_MS = 300;
 
 /**
  * Press-and-hold affordance shown over a booking gesture handle while it is arming
@@ -1208,93 +1231,6 @@ function ResizeHoldHint({ label, placement = 'bottom' }: { label: string; placem
         <span className="animate-resize-hold block h-full w-full origin-left rounded-full bg-white" />
       </span>
     </span>
-  );
-}
-
-/**
- * Notify / skip / undo offered on a booking bar straight after a start-time move.
- *
- * One renderer for both bar types. It lived inline in the single-booking branch, so a
- * multi-service visit armed the follow-up on drop and then had nowhere to draw it: the
- * countdown ran invisibly and the guest was notified with no chance to skip or undo.
- * A visit is one booking, so it gets the same prompt a single booking gets.
- */
-function ScheduleEditFollowUpPill({
-  palette,
-  kind,
-  countdownSec,
-  disabled,
-  onNotifyNow,
-  onSkip,
-  onUndo,
-}: {
-  palette: BookingBlockPalette;
-  kind: 'move' | 'resize';
-  countdownSec: number | null;
-  disabled: boolean;
-  onNotifyNow: () => void;
-  onSkip: () => void;
-  onUndo: () => void;
-}) {
-  return (
-    <div
-      // Centred on the bar but never narrower than its own controls: it may
-      // overhang a narrow lane or a short bar, which is the point of drawing it
-      // outside the clipped card.
-      className="pointer-events-auto absolute left-1/2 z-[45] w-max max-w-[calc(100vw-1rem)] -translate-x-1/2"
-      style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
-      data-no-calendar-pan="true"
-    >
-      <div
-        role="group"
-        aria-label={
-          kind === 'resize' ? 'Confirm or undo this duration change' : 'Confirm or undo this move'
-        }
-        className="flex items-center gap-1 rounded-xl border px-2 py-1 shadow-[0_12px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.72)] ring-1 ring-black/[0.05] backdrop-blur-sm"
-        // Near-white frosted surface with a faint status wash (10% of the
-        // saturated hue) - keeps the dark control labels legible while still
-        // nodding to the booking's status colour.
-        style={{
-          backgroundColor: '#FFFFFF',
-          backgroundImage: `linear-gradient(135deg, ${palette.bg}1A 0%, rgba(255,255,255,0.96) 62%)`,
-          borderColor: palette.border,
-          color: '#334155',
-        }}
-      >
-        <span
-          className="mr-0.5 h-3 w-[3px] shrink-0 rounded-full"
-          style={{ backgroundColor: palette.accent }}
-          aria-hidden
-        />
-        <span className="mr-1 max-w-[7.5rem] truncate text-[10px] font-medium leading-tight text-slate-600">
-          {countdownSec != null ? `Notify in ${countdownSec}s` : 'Notify guest'}
-        </span>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onNotifyNow}
-          className="rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold leading-none text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50"
-        >
-          Notify now
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onSkip}
-          className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-        >
-          Skip notify
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onUndo}
-          className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-        >
-          Undo
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -1936,7 +1872,10 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
       className={`absolute left-0 right-0 z-0 [touch-action:pan-x_pan-y] border-t ${gridLineClass} ${slotBandClass} transition-colors ${
         disabled ? 'pointer-events-none cursor-default' : 'cursor-pointer hover:bg-brand-500/5'
       } ${isOver ? 'bg-brand-500/15' : ''}`}
-      style={{ top, height: slotHeightPx }}
+      // The global `button { transition: all }` rule would also animate `top`,
+      // and a slot that is still gliding into place when dnd-kit measures the
+      // drop targets (the grid stretches while a hold arms) is measured wrong.
+      style={{ top, height: slotHeightPx, transitionProperty: 'background-color, border-color' }}
       aria-label={`Empty slot ${tlabel}`}
     />
   );
@@ -2017,11 +1956,14 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   /** Lane, or the host it nests inside; see `layoutOverlapClusters`. */
   layout?: BookingClusterLayout;
   canDrag: boolean;
-  /** Lifts the bar above its neighbours while it carries a prompt that must not be covered. */
+  /**
+   * Outlines and lifts the bar while the screen-bottom notify / skip / undo
+   * bar is about it, so staff can see which booking that prompt refers to.
+   */
   raised?: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: `booking-${booking.id}`,
     disabled: !canDrag,
     data: { booking },
@@ -2037,14 +1979,21 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   const totalHeight = Math.max(BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX, height + heightExtraPx);
   const horizontal = clusterLayoutHorizontalStyle(layout);
   const nested = Boolean(layout.nestedInKey);
+  /**
+   * The bar stays where it was while it is dragged, faded, as the origin
+   * marker; the DragOverlay card and the drop outline are the moving parts.
+   * dnd-kit hands a node only the pointer's viewport delta while an overlay is
+   * mounted (`appliedTranslate`), so translating the bar as well had it drift
+   * by exactly the scroll distance whenever the diary scrolled mid-drag, away
+   * from the outline that marks where the booking will land.
+   */
   const style = {
     top,
     height: totalHeight,
     left: horizontal.left,
     width: horizontal.width,
-    transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : raised ? 48 : horizontal.zIndex,
-    opacity: isDragging ? 0.85 : 1,
+    opacity: isDragging ? 0.4 : 1,
     pointerEvents: isDragging ? 'none' : undefined,
   } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
@@ -2059,7 +2008,7 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
       // animated; both are under the pointer's direct control during a drag.
       className={`absolute motion-safe:transition-[left,width] motion-safe:duration-200 motion-safe:ease-out ${
         nested ? 'rounded-2xl shadow-[-10px_0_16px_-8px_rgba(2,32,71,0.55)]' : ''
-      }`}
+      } ${raised ? 'rounded-2xl ring-2 ring-brand-500 ring-offset-2 ring-offset-white' : ''}`}
       style={style}
     >
       {children(handleProps)}
@@ -2139,18 +2088,18 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
   clickThrough?: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: `block-${block.id}`,
     disabled: !canDrag,
     data: { block },
   });
   const totalHeight = Math.max(slotHeightPx * 0.5, height + heightExtraPx);
+  // Stays put while dragged, as DraggableBookingShell does and for the same reason.
   const style = {
     top,
     height: totalHeight,
-    transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : 15,
-    opacity: isDragging ? 0.85 : 1,
+    opacity: isDragging ? 0.4 : 1,
     pointerEvents: isDragging || clickThrough ? 'none' : undefined,
   } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
@@ -2622,6 +2571,7 @@ export function PractitionerCalendarView({
   enabledModels = [],
   calendarTodayIso,
   linkFeature = false,
+  initialStaffCollective,
 }: {
   venueId: string;
   currency?: string;
@@ -2639,6 +2589,13 @@ export function PractitionerCalendarView({
    * Keeps the toolbar date label and initial navigation state aligned across SSR and hydration.
    */
   calendarTodayIso?: string;
+  /**
+   * The live collective this venue books for, resolved on the server (null when
+   * there is none). When supplied the diary knows before its first paint which
+   * linked columns book through the collective; when omitted it asks the API and
+   * holds back the linked columns' own "New booking" buttons until it hears.
+   */
+  initialStaffCollective?: StaffCollectiveSummary | null;
 }) {
   const { addToast } = useToast();
   const acceptUnpaidGuard = useAcceptUnpaidGuard();
@@ -2726,10 +2683,89 @@ export function PractitionerCalendarView({
     } | null
   >(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  /** Filter menu: in day view, show only the columns with working hours on the selected date. */
+  const [workingHoursOnly, setWorkingHoursOnly] = useState(false);
   const [guestToolbarSearchQuery, setGuestToolbarSearchQuery] = useState('');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
+  /**
+   * The live venue collective this venue books for as one business, or null.
+   * A click on a column that is one of the collective's calendars opens the
+   * staff form for the collective with that calendar preselected; New and
+   * Walk-in open it over the whole collective; a column outside the collective
+   * (a calendar with no combined offering, or a link with no collective) keeps
+   * the per-venue form it has today.
+   */
+  const [staffCollective, setStaffCollective] = useState<{
+    id: string;
+    name: string;
+    memberVenueIds: string[];
+    calendarIds: string[];
+  } | null>(() =>
+    initialStaffCollective
+      ? {
+          id: initialStaffCollective.id,
+          name: initialStaffCollective.name,
+          memberVenueIds: initialStaffCollective.memberVenueIds,
+          calendarIds: initialStaffCollective.calendarIds,
+        }
+      : null,
+  );
+  /**
+   * False until the collective lookup has answered either way. A linked column's
+   * own "New booking" button waits for it: shown and then taken away is worse
+   * than shown a moment late.
+   */
+  const [staffCollectiveResolved, setStaffCollectiveResolved] = useState(initialStaffCollective !== undefined);
+  useEffect(() => {
+    // The server answered already; nothing to ask.
+    if (initialStaffCollective !== undefined) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/staff-collective');
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          collective?: { id: string; name: string; member_venue_ids: string[]; calendar_ids: string[] } | null;
+        };
+        if (cancelled) return;
+        setStaffCollective(
+          json.collective
+            ? {
+                id: json.collective.id,
+                name: json.collective.name,
+                memberVenueIds: json.collective.member_venue_ids,
+                calendarIds: json.collective.calendar_ids,
+              }
+            : null,
+        );
+      } catch {
+        /* the per-venue form is the fallback */
+      } finally {
+        if (!cancelled) setStaffCollectiveResolved(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venueId, initialStaffCollective]);
+  /**
+   * Where a new booking for `calendarId` on `columnVenueId` goes: the collective, or
+   * null for the venue itself. A partner column that answers with the collective
+   * also loses its own "New booking" header button: New, Walk-in and a slot click
+   * already book that calendar through the collective form, so the button would
+   * only duplicate them. A partner outside the collective keeps its button.
+   */
+  const collectiveTargetFor = useCallback(
+    (columnVenueId: string, calendarId: string | null): { id: string; name: string } | null => {
+      if (!staffCollective) return null;
+      if (!staffCollective.memberVenueIds.includes(columnVenueId)) return null;
+      if (calendarId && !staffCollective.calendarIds.includes(calendarId)) return null;
+      return { id: staffCollective.id, name: staffCollective.name };
+    },
+    [staffCollective],
+  );
   const [showResourceBooking, setShowResourceBooking] = useState(false);
   const [resourceBookingResourceId, setResourceBookingResourceId] = useState<string | undefined>();
   const [resourceBookingVenue, setResourceBookingVenue] = useState<VenuePublic | null>(null);
@@ -3127,33 +3163,8 @@ export function PractitionerCalendarView({
     [practitioners, listFromTo.from, listFromTo.to],
   );
 
-  const scheduleClosureBlocks = useMemo((): CalendarBlock[] => {
-    const nativeColumnIds = practitioners
-      .filter((p) => p.is_active && p.calendar_type !== 'resource')
-      .map((p) => p.id);
-    const venueBlocks = buildVenueScheduleClosureBlocks({
-      openingHours,
-      venueWideBlocks,
-      fromDate: listFromTo.from,
-      toDate: listFromTo.to,
-      columnIds: nativeColumnIds,
-      timeZone: venueTimezone,
-    });
-    const practitionerBlocks = buildPractitionerScheduleClosureBlocks({
-      practitioners: practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
-      leavePeriods,
-      fromDate: listFromTo.from,
-      toDate: listFromTo.to,
-      openingHours,
-      timeZone: venueTimezone,
-    });
-    return [...venueBlocks, ...practitionerBlocks] as CalendarBlock[];
-  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone]);
-
-  const displayBlocks = useMemo(
-    () => [...scheduleClosureBlocks, ...blocks, ...practitionerBreakBlocks],
-    [scheduleClosureBlocks, blocks, practitionerBreakBlocks],
-  );
+  // `scheduleClosureBlocks` and `displayBlocks` are built further down, once the
+  // day's drawn bounds are known: the closed stripes cover the drawn range.
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
 
@@ -3323,25 +3334,45 @@ export function PractitionerCalendarView({
     );
     if (remembered.viewMode) setViewMode(remembered.viewMode);
     // Date navigation resets to venue-local today on each visit (see initialIsoDate).
-    if (remembered.visibleCalendarIdsState !== undefined) {
-      setVisibleCalendarIdsState(remembered.visibleCalendarIdsState);
+    //
+    // The Filter menu is kept in a per-venue cookie so it stays until the user
+    // changes it, across tabs, restarts and sign-out. The session copy is only
+    // read when no cookie exists yet, so a tab open from before the cookie was
+    // introduced keeps its filters for the rest of that session.
+    const persistedFilters = readCalendarFilterPreferences(venueId);
+    const filters: Partial<PractitionerCalendarFilters> = persistedFilters ?? {
+      visibleCalendarIdsState: remembered.visibleCalendarIdsState,
+      visibleLinkedColumnIds: remembered.visibleLinkedColumnIds,
+      filterStatus: remembered.filterStatus,
+    };
+    if (filters.visibleCalendarIdsState !== undefined) {
+      setVisibleCalendarIdsState(filters.visibleCalendarIdsState);
     }
-    if (remembered.visibleLinkedColumnIds !== undefined) {
-      setVisibleLinkedColumnIds(remembered.visibleLinkedColumnIds);
+    if (filters.visibleLinkedColumnIds !== undefined) {
+      setVisibleLinkedColumnIds(filters.visibleLinkedColumnIds);
     }
     if (
-      remembered.filterStatus &&
-      CALENDAR_STATUS_FILTERS.some((s) => s.value === remembered.filterStatus)
+      filters.filterStatus &&
+      CALENDAR_STATUS_FILTERS.some((s) => s.value === filters.filterStatus)
     ) {
-      setFilterStatus(remembered.filterStatus);
+      setFilterStatus(filters.filterStatus);
     }
+    if (filters.workingHoursOnly !== undefined) setWorkingHoursOnly(filters.workingHoursOnly);
     if (remembered.startHourOverride !== undefined) setStartHourOverride(remembered.startHourOverride);
     if (remembered.endHourOverride !== undefined) setEndHourOverride(remembered.endHourOverride);
     if (remembered.compactDay !== undefined) setCompactDay(remembered.compactDay);
     setCalendarPrefsHydrated(true);
-  }, [preferencesKey]);
-  const startHour = startHourOverride ?? derivedStartHour;
-  const endHour = endHourOverride ?? derivedEndHour;
+  }, [preferencesKey, venueId]);
+  const baseStartHour = startHourOverride ?? derivedStartHour;
+  const baseEndHour = endHourOverride ?? derivedEndHour;
+  /**
+   * Rows beyond the day's hours while a booking is being moved or resized, so a
+   * bar can be dragged before opening, after close, or into a closed gap. See
+   * `armGridExtension` below for when it is set and cleared.
+   */
+  const [gridExtension, setGridExtension] = useState<{ startHour: number; endHour: number } | null>(null);
+  const startHour = gridExtension ? Math.min(baseStartHour, gridExtension.startHour) : baseStartHour;
+  const endHour = gridExtension ? Math.max(baseEndHour, gridExtension.endHour) : baseEndHour;
   const TOTAL_SLOTS = (() => {
     const n = ((endHour - startHour) * 60) / SLOT_MINUTES;
     return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
@@ -3359,31 +3390,155 @@ export function PractitionerCalendarView({
   /** Resize handles + their reserved strip are hidden in compact (rows are too short to grab precisely). */
   const resizeAffordanceOn = !compactActive;
 
+  /**
+   * Live extension of the day grid for a move or a resize.
+   *
+   * A booking may be dragged before opening, after close, or into a closed gap,
+   * and the grid needs rows there for the bar to land on. The rows are added
+   * part way through the press-and-hold, before dnd-kit activates: adding them
+   * during an active drag would move the bar's own origin and the page under
+   * the pointer at once, and dnd-kit counts that scroll into the drag. The main
+   * pane is scrolled by exactly the height added above the grid, so nothing on
+   * screen appears to move. The extension is cleared when the interaction ends;
+   * a booking that landed outside keeps the grid wide through the derived
+   * bounds, which follow every booking on the day, and the closed stripes
+   * (built below over the drawn range) then cover that time. Compact view keeps
+   * its fit-to-screen rows and is not stretched.
+   */
+  const gridTopHourRef = useRef(startHour);
+  const compensateGridTopShiftRef = useRef(false);
+  useLayoutEffect(() => {
+    const prev = gridTopHourRef.current;
+    gridTopHourRef.current = startHour;
+    const compensate = compensateGridTopShiftRef.current;
+    compensateGridTopShiftRef.current = false;
+    if (!compensate || prev === startHour) return;
+    const main = scrollRef.current?.closest('main');
+    if (!main) return;
+    main.scrollTop += ((prev - startHour) * 60 * slotHeightPx) / SLOT_MINUTES;
+  }, [startHour, gridExtension, slotHeightPx]);
+  const gridExtensionRef = useRef(gridExtension);
+  gridExtensionRef.current = gridExtension;
+  const gridExtensionArmTimerRef = useRef<number | null>(null);
+  /** Set once dnd-kit or a resize has the pointer, so a release does not fold the grid mid-drag. */
+  const dragActivatedRef = useRef(false);
+  const extendGridForInteraction = useCallback(
+    (edges: 'both' | 'bottom') => {
+      if (viewMode !== 'day' || compactActive) return;
+      compensateGridTopShiftRef.current = edges === 'both';
+      setGridExtension({ startHour: edges === 'both' ? 0 : baseStartHour, endHour: 24 });
+    },
+    [viewMode, compactActive, baseStartHour],
+  );
+  const clearGridExtension = useCallback(() => {
+    if (gridExtensionArmTimerRef.current != null) {
+      window.clearTimeout(gridExtensionArmTimerRef.current);
+      gridExtensionArmTimerRef.current = null;
+    }
+    if (!gridExtensionRef.current) return;
+    compensateGridTopShiftRef.current = true;
+    setGridExtension(null);
+  }, []);
+  /**
+   * Called on the pointer-down that begins a hold: stretches the grid once the
+   * hold has lasted longer than a click, and folds it back if the pointer is
+   * released without a drag or resize having taken over.
+   */
+  const armGridExtension = useCallback(
+    (edges: 'both' | 'bottom', pointerId: number) => {
+      if (viewMode !== 'day' || compactActive) return;
+      if (gridExtensionArmTimerRef.current != null) window.clearTimeout(gridExtensionArmTimerRef.current);
+      dragActivatedRef.current = false;
+      gridExtensionArmTimerRef.current = window.setTimeout(() => {
+        gridExtensionArmTimerRef.current = null;
+        extendGridForInteraction(edges);
+      }, GRID_EXTENSION_ARM_MS);
+      const release = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('pointerup', release);
+        window.removeEventListener('pointercancel', release);
+        if (!dragActivatedRef.current) clearGridExtension();
+      };
+      window.addEventListener('pointerup', release);
+      window.addEventListener('pointercancel', release);
+    },
+    [viewMode, compactActive, extendGridForInteraction, clearGridExtension],
+  );
+  const armGridExtensionRef = useRef(armGridExtension);
+  armGridExtensionRef.current = armGridExtension;
+  const clearGridExtensionRef = useRef(clearGridExtension);
+  clearGridExtensionRef.current = clearGridExtension;
+
+  const scheduleClosureBlocks = useMemo((): CalendarBlock[] => {
+    const nativeColumnIds = practitioners
+      .filter((p) => p.is_active && p.calendar_type !== 'resource')
+      .map((p) => p.id);
+    // The day grid may be wider than the venue's hours (a booking outside them,
+    // or a drag stretching the day); the stripes then cover the drawn range so
+    // every minute outside the open windows reads as closed.
+    const gridBounds = viewMode === 'day' ? { start: startHour * 60, end: endHour * 60 } : undefined;
+    const venueBlocks = buildVenueScheduleClosureBlocks({
+      openingHours,
+      venueWideBlocks,
+      fromDate: listFromTo.from,
+      toDate: listFromTo.to,
+      columnIds: nativeColumnIds,
+      timeZone: venueTimezone,
+      gridBounds,
+    });
+    const practitionerBlocks = buildPractitionerScheduleClosureBlocks({
+      practitioners: practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
+      leavePeriods,
+      fromDate: listFromTo.from,
+      toDate: listFromTo.to,
+      openingHours,
+      timeZone: venueTimezone,
+      gridBounds,
+    });
+    return [...venueBlocks, ...practitionerBlocks] as CalendarBlock[];
+  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone, viewMode, startHour, endHour]);
+
+  const displayBlocks = useMemo(
+    () => [...scheduleClosureBlocks, ...blocks, ...practitionerBreakBlocks],
+    [scheduleClosureBlocks, blocks, practitionerBreakBlocks],
+  );
+
   const calendarPrefsSnapshot = useMemo(
     (): PractitionerCalendarPreferences => ({
       viewMode,
-      visibleCalendarIdsState,
-      visibleLinkedColumnIds,
-      filterStatus,
       startHourOverride,
       endHourOverride,
       compactDay,
     }),
-    [
-      viewMode,
-      visibleCalendarIdsState,
-      visibleLinkedColumnIds,
-      filterStatus,
-      startHourOverride,
-      endHourOverride,
-      compactDay,
-    ],
+    [viewMode, startHourOverride, endHourOverride, compactDay],
   );
 
   useEffect(() => {
     if (!calendarPrefsHydrated) return;
     writeSessionPreference<PractitionerCalendarPreferences>(preferencesKey, calendarPrefsSnapshot);
   }, [calendarPrefsHydrated, preferencesKey, calendarPrefsSnapshot]);
+
+  const calendarFilters = useMemo(
+    (): PractitionerCalendarFilters => ({
+      visibleCalendarIdsState,
+      visibleLinkedColumnIds,
+      filterStatus,
+      workingHoursOnly,
+    }),
+    [visibleCalendarIdsState, visibleLinkedColumnIds, filterStatus, workingHoursOnly],
+  );
+
+  useEffect(() => {
+    if (!calendarPrefsHydrated) return;
+    writeCalendarFilterPreferences(venueId, calendarFilters);
+  }, [calendarPrefsHydrated, venueId, calendarFilters]);
+
+  const resetCalendarFilters = useCallback(() => {
+    setVisibleCalendarIdsState(DEFAULT_CALENDAR_FILTERS.visibleCalendarIdsState);
+    setVisibleLinkedColumnIds(DEFAULT_CALENDAR_FILTERS.visibleLinkedColumnIds);
+    setFilterStatus(DEFAULT_CALENDAR_FILTERS.filterStatus);
+    setWorkingHoursOnly(DEFAULT_CALENDAR_FILTERS.workingHoursOnly);
+  }, []);
 
   /**
    * Compact day view: measure how much vertical room the slot canvas has inside the page's
@@ -3793,7 +3948,10 @@ export function PractitionerCalendarView({
     };
     const id = requestAnimationFrame(() => requestAnimationFrame(apply));
     return () => cancelAnimationFrame(id);
-  }, [loading, viewMode, date, startHour, endHour]);
+    // Only a new day or the end of loading: the grid's bounds also change when
+    // it stretches for a drag or follows a booking moved outside hours, and
+    // neither may yank the page to the top.
+  }, [loading, viewMode, date]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -3897,11 +4055,41 @@ export function PractitionerCalendarView({
     return filtered;
   }, [visibleCalendarIdsState, columnPractitioners]);
 
-  const filteredPractitioners = useMemo(() => {
+  const calendarFilteredPractitioners = useMemo(() => {
     if (calendarFilterIds === null) return columnPractitioners;
     const allowed = new Set(calendarFilterIds);
     return columnPractitioners.filter((p) => allowed.has(p.id));
   }, [columnPractitioners, calendarFilterIds]);
+
+  /**
+   * "Only calendars working on the selected day" applies to the day grid alone:
+   * week and month views lay days out, not columns, so every calendar stays.
+   */
+  const workingHoursFilterActive = viewMode === 'day' && workingHoursOnly;
+
+  const filteredPractitioners = useMemo(() => {
+    if (!workingHoursFilterActive) return calendarFilteredPractitioners;
+    // "Working" means the column has bookable hours left on the date: its hours
+    // for that day minus recorded leave and the venue's closures. A calendar on
+    // leave all day, or a day the venue is closed, is off even though its weekly
+    // template has hours.
+    return calendarFilteredPractitioners.filter((p) =>
+      calendarHasAvailableHoursOnDate({
+        practitioner: p as unknown as VenuePractitioner,
+        dateYmd: date,
+        leavePeriods,
+        openingHours,
+        venueWideBlocks,
+      }),
+    );
+  }, [calendarFilteredPractitioners, workingHoursFilterActive, date, leavePeriods, openingHours, venueWideBlocks]);
+
+  /** Columns the working-hours filter is hiding today, so their bookings leave the counts too. */
+  const workingHoursHiddenColumnIds = useMemo(() => {
+    if (!workingHoursFilterActive) return null;
+    const shown = new Set(filteredPractitioners.map((p) => p.id));
+    return new Set(calendarFilteredPractitioners.filter((p) => !shown.has(p.id)).map((p) => p.id));
+  }, [workingHoursFilterActive, calendarFilteredPractitioners, filteredPractitioners]);
 
   /** Every practitioner column exposed by a linked venue (§8.2). */
   const linkedColumns = useMemo<LinkedColumn[]>(() => {
@@ -3928,10 +4116,17 @@ export function PractitionerCalendarView({
 
   /** Linked columns visible on the grid. */
   const visibleLinkedColumns = useMemo(() => {
-    if (visibleLinkedColumnIds === null) return linkedColumns;
-    const allowed = new Set(visibleLinkedColumnIds);
-    return linkedColumns.filter((c) => allowed.has(c.key));
-  }, [linkedColumns, visibleLinkedColumnIds]);
+    const chosen =
+      visibleLinkedColumnIds === null
+        ? linkedColumns
+        : linkedColumns.filter((c) => new Set(visibleLinkedColumnIds).has(c.key));
+    if (!workingHoursFilterActive) return chosen;
+    // A linked column carries its owner's weekly template only (no rota or days
+    // off), read in the owner venue's timezone as its header line is.
+    return chosen.filter((c) =>
+      calendarWorksOnDate({ working_hours: c.workingHours ?? null }, date, c.venueTimezone),
+    );
+  }, [linkedColumns, visibleLinkedColumnIds, workingHoursFilterActive, date]);
 
   /** Read-only linked columns (time_only or view-only full_details). */
   const readOnlyLinkedColumns = useMemo(
@@ -5065,6 +5260,54 @@ export function PractitionerCalendarView({
     ],
   );
 
+  /**
+   * What the screen-bottom notify / skip / undo bar describes: the booking the
+   * deferred notify is armed for as it stands now, against the row saved before
+   * the edit. A visit is keyed on its first service, which `allGridBookings`
+   * also holds. Null once the prompt is answered or times out.
+   */
+  const scheduleFollowUpChange = useMemo<ScheduleEditFollowUpChange | null>(() => {
+    if (!dragMoveConfirmBookingId) return null;
+    const current = allGridBookings.find((b) => b.id === dragMoveConfirmBookingId);
+    if (!current) return null;
+    const undo = lastScheduleEditUndo?.prev.id === current.id ? lastScheduleEditUndo : null;
+    const prev = undo?.prev ?? current;
+    const kind = undo?.kind ?? 'move';
+    const endHm = (row: Booking): string =>
+      row.booking_end_time && row.booking_end_time.trim() !== ''
+        ? row.booking_end_time.slice(0, 5)
+        : minutesToTime(
+            timeToMinutes(row.booking_time.slice(0, 5)) +
+              bookingDurationMinutes(row, serviceMapForBooking(row)),
+          );
+    const prevColumn = resolveBookingColumnId(prev, resourceParentById);
+    const column = resolveBookingColumnId(current, resourceParentById);
+    const staffName =
+      column && prevColumn !== column
+        ? (linkedNativeGridColumnByKey.get(column)?.practitionerName ??
+          filteredPractitioners.find((p) => p.id === column)?.name ??
+          null)
+        : null;
+    return {
+      kind,
+      guestName: current.guest_name,
+      staffName,
+      fromDate: prev.booking_date,
+      fromTime: kind === 'resize' ? endHm(prev) : prev.booking_time.slice(0, 5),
+      toDate: current.booking_date,
+      toTime: kind === 'resize' ? endHm(current) : current.booking_time.slice(0, 5),
+      accent: bookingCalendarBlockPalette(current).accent,
+    };
+  }, [
+    dragMoveConfirmBookingId,
+    allGridBookings,
+    lastScheduleEditUndo,
+    resourceParentById,
+    linkedNativeGridColumnByKey,
+    filteredPractitioners,
+    serviceMapForBooking,
+  ]);
+
   const undoLastScheduleEdit = useCallback(async () => {
     if (!lastScheduleEditUndo || scheduleUndoPending) return;
     const { kind, prev, prevVisitRows } = lastScheduleEditUndo;
@@ -5482,6 +5725,7 @@ export function PractitionerCalendarView({
 
   function handleDragStart(e: DragStartEvent) {
     interactingRef.current = true;
+    dragActivatedRef.current = true;
     // The hold elapsed and the sensor armed: clear the "Hold to move" hint, give the same
     // haptic tick as the duration slider, and suppress native scroll for the drag's
     // duration (the grip's touch-action stays pannable at rest so scrolls pass through).
@@ -5538,8 +5782,9 @@ export function PractitionerCalendarView({
         compactActive && Math.abs(e.delta.y) < COMPACT_DRAG_DEADZONE_PX
           ? 0
           : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
-      const targetStartMins = originalStartMins + deltaMinutes;
       const duration = blockDurationMinutes(bl);
+      // The day ends at midnight: a bar dragged past either end stops there.
+      const targetStartMins = Math.max(0, Math.min(originalStartMins + deltaMinutes, 24 * 60 - duration));
       const endMin = targetStartMins + duration;
       const dayStartMin = startHour * 60;
       const dayEndMin = endHour * 60;
@@ -5588,11 +5833,14 @@ export function PractitionerCalendarView({
       compactActive && Math.abs(e.delta.y) < COMPACT_DRAG_DEADZONE_PX
         ? 0
         : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
-    const targetStartMins = originalStartMins + deltaMinutes;
     const duration = getBookingDuration(b);
+    // The day ends at midnight: a bar dragged past either end stops there.
+    const targetStartMins = Math.max(0, Math.min(originalStartMins + deltaMinutes, 24 * 60 - duration));
     const endMin = targetStartMins + duration;
-    const dayStartMin = startHour * 60;
-    const dayEndMin = endHour * 60;
+    // The day's own bounds, not the stretched grid: landing on the stretched
+    // rows is exactly what "outside hours" means.
+    const dayStartMin = baseStartHour * 60;
+    const dayEndMin = baseEndHour * 60;
     const pracClassBlocks = classBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const pracEventBlocks = eventBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(
@@ -5645,6 +5893,7 @@ export function PractitionerCalendarView({
 
   function handleDragCancel(_e: DragCancelEvent) {
     clearCalendarDragUi();
+    clearGridExtension();
   }
 
   function handleDragEnd(e: DragEndEvent) {
@@ -5653,6 +5902,9 @@ export function PractitionerCalendarView({
     const over = e.over;
     const target = calendarDragTargetRef.current;
     clearCalendarDragUi();
+    // Folded back in the same render as the move below, so a booking that landed
+    // outside hours is drawn on a grid that already reaches it.
+    clearGridExtension();
     if ((!b && !bl) || !over?.data?.current) return;
     // C9 — no resolved target means the pointer never moved, so this was a
     // press-and-hold, not a drag. dnd-kit's delay activation starts a drag on a
@@ -5785,6 +6037,8 @@ export function PractitionerCalendarView({
       const state = { lastY: startY, done: false, holdTimer: 0 };
 
       setResizeArming({ kind, id });
+      // Rows past close appear while the hold arms, so the bar can grow to midnight.
+      armGridExtensionRef.current('bottom', pointerId);
 
       const cleanup = () => {
         window.clearTimeout(state.holdTimer);
@@ -5805,7 +6059,10 @@ export function PractitionerCalendarView({
           } catch {
             /* ignore */
           }
+          dragActivatedRef.current = true;
           startDrag(state.lastY, target, pointerId);
+        } else {
+          clearGridExtensionRef.current();
         }
       };
       function onPreMove(ev: globalThis.PointerEvent) {
@@ -5838,6 +6095,9 @@ export function PractitionerCalendarView({
     (kind: 'booking' | 'block', id: string) => (downEvent: ReactPointerEvent<HTMLButtonElement>) => {
       if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
       const pointerId = downEvent.pointerId;
+      // Stretch the grid to the whole day while the hold arms, so the bar can
+      // be carried before opening or past close.
+      armGridExtensionRef.current('both', pointerId);
       const startX = downEvent.clientX;
       const startY = downEvent.clientY;
       const clear = () => {
@@ -5849,7 +6109,10 @@ export function PractitionerCalendarView({
       };
       const onMove = (ev: globalThis.PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
-        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > BOOKING_RESIZE_HOLD_TOLERANCE_PX) clear();
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > BOOKING_RESIZE_HOLD_TOLERANCE_PX) {
+          clear();
+          clearGridExtensionRef.current();
+        }
       };
       const onEnd = (ev: globalThis.PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
@@ -6019,11 +6282,10 @@ export function PractitionerCalendarView({
         // appointment unresizable on the calendar. A visit floors at every one of
         // its services on that minimum, with its configured gaps still in place.
         const minEnd = startM + (visit ? minimumVisitMinutes(visit) : MIN_APPOINTMENT_CORE_DURATION_MINUTES);
-        // The booking may be extended past the grid's close (staff can run past
-        // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
-        // beyond `gridCloseMin` counts as outside opening hours.
-        const gridCloseMin = endHour * 60;
-        const gridEndMax = Math.min(24 * 60, gridCloseMin + 120);
+        // The grid was stretched to midnight while the hold armed (see
+        // armGridExtension), so the bar may grow that far; the portion past the
+        // day's own close, or over a closed stripe, counts as outside hours.
+        const gridEndMax = 24 * 60;
 
         setResizeVisual({ bookingId: booking.id, deltaYPx: 0 });
         setResizePreviewEnd({ bookingId: booking.id, endHm: minutesToTime(endM0) });
@@ -6087,11 +6349,21 @@ export function PractitionerCalendarView({
           const endStr = minutesToTime(committedEndMin);
           setResizeVisual(null);
           setResizePreviewEnd(null);
+          clearGridExtensionRef.current();
           if (committedEndMin === endM0) return;
-          const extendedOutsideHours = committedEndMin > gridCloseMin;
+          const resizeColumnId = resolveBookingColumnId(booking, resourceParentById);
+          const extendedOutsideHours =
+            committedEndMin > baseEndHour * 60 ||
+            (resizeColumnId != null &&
+              windowCrossesNonWorkingBlock(
+                startM,
+                committedEndMin,
+                resizeColumnId,
+                booking.booking_date,
+                displayBlocks,
+              ));
           // Growing a booking into a break needs the same override a move into
           // one needs, or the PATCH refuses it (SA-H5).
-          const resizeColumnId = resolveBookingColumnId(booking, resourceParentById);
           const extendedOverBreak =
             resizeColumnId != null &&
             windowCrossesBreakBlock(
@@ -6147,7 +6419,7 @@ export function PractitionerCalendarView({
     [
       addToast,
       collidingBookingCount,
-      endHour,
+      baseEndHour,
       patchBookingResize,
       patchVisitResize,
       resourceParentById,
@@ -6234,6 +6506,7 @@ export function PractitionerCalendarView({
           const endStr = minutesToTime(committedEndMin);
           setBlockResizeVisual(null);
           setBlockResizePreviewEnd(null);
+          clearGridExtensionRef.current();
           if (committedEndMin === endM0) return;
           justResizedBlockIdRef.current = block.id;
           window.setTimeout(() => {
@@ -6283,10 +6556,14 @@ export function PractitionerCalendarView({
         const colId = resolveBookingColumnId(b, resourceParentById);
         if (!colId || !calendarFilterIds.includes(colId)) return false;
       }
+      if (workingHoursHiddenColumnIds && workingHoursHiddenColumnIds.size > 0) {
+        const colId = resolveBookingColumnId(b, resourceParentById);
+        if (colId && workingHoursHiddenColumnIds.has(colId)) return false;
+      }
       if (!bookingMatchesCalendarStatusFilter(b, filterStatus)) return false;
       return true;
     });
-  }, [bookings, calendarFilterIds, filterStatus, resourceParentById]);
+  }, [bookings, calendarFilterIds, workingHoursHiddenColumnIds, filterStatus, resourceParentById]);
 
   /** Toolbar + status counts: team-column bookings only (matches day/week grid), scoped to the visible period - not the 6-week fetch padding in month view. */
   const bookingsForToolbarStats = useMemo(() => {
@@ -6311,7 +6588,8 @@ export function PractitionerCalendarView({
   const calendarFilterCount =
     (calendarFilterIds === null ? 0 : 1) +
     (filterStatus !== 'all' ? 1 : 0) +
-    (visibleLinkedColumnIds !== null && linkedColumns.length > 0 ? 1 : 0);
+    (visibleLinkedColumnIds !== null && linkedColumns.length > 0 ? 1 : 0) +
+    (workingHoursOnly ? 1 : 0);
   const calendarControlsLabel = calendarFilterCount > 0 ? `Filter (${calendarFilterCount})` : 'Filter';
   const calendarSummaryContent = (
     <div
@@ -6348,6 +6626,20 @@ export function PractitionerCalendarView({
           onChange={setVisibleCalendarIdsState}
           maxHeightClass="max-h-56"
         />
+        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1.5 text-sm text-slate-800">
+          <input
+            type="checkbox"
+            className="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            checked={workingHoursOnly}
+            onChange={(e) => setWorkingHoursOnly(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Only calendars working on the selected day</span>
+            <span className="block text-xs text-slate-500">
+              In day view, hides columns with no working hours on the date you are viewing.
+            </span>
+          </span>
+        </label>
       </div>
 
       {linkFeature ? (
@@ -6481,19 +6773,14 @@ export function PractitionerCalendarView({
         </div>
       </div>
 
-      {calendarFilterCount > 0 ? (
-        <button
-          type="button"
-          onClick={() => {
-            setVisibleCalendarIdsState(null);
-            setVisibleLinkedColumnIds(null);
-            setFilterStatus('all');
-          }}
-          className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-        >
-          Clear filters
-        </button>
-      ) : null}
+      <button
+        type="button"
+        onClick={resetCalendarFilters}
+        disabled={calendarFiltersAreDefault(calendarFilters)}
+        className="text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline disabled:cursor-default disabled:text-slate-400 disabled:no-underline"
+      >
+        Reset filters
+      </button>
     </div>
   );
 
@@ -6807,6 +7094,9 @@ export function PractitionerCalendarView({
             void fetchData({ refreshCatalog: true });
             void requestLinkedCalendarSync();
           }}
+          onBookingActionsIntent={() =>
+            warmStaffBookingSurface({ venueId, linkedOwnerVenueId: collectiveTargetFor(venueId, null)?.id })
+          }
           onNewBooking={() => {
             setEventBookPrefill(null);
             setPrefillDate(viewMode === 'day' ? date : undefined);
@@ -6864,12 +7154,30 @@ export function PractitionerCalendarView({
         <div className="min-h-[40vh] py-2">
           <DashboardCalendarSkeleton />
         </div>
-      ) : filteredPractitioners.length === 0 ? (
+      ) : calendarFilteredPractitioners.length === 0 ? (
         <div className="flex min-h-[40vh] items-center justify-center px-4">
           <div className="w-full max-w-md">
             <EmptyState
               title="No calendars yet"
               description="Add team calendars in Calendar availability to see appointments on the grid."
+            />
+          </div>
+        </div>
+      ) : workingHoursFilterActive && filteredPractitioners.length === 0 && visibleLinkedColumns.length === 0 ? (
+        <div className="flex min-h-[40vh] items-center justify-center px-4">
+          <div className="w-full max-w-md">
+            <EmptyState
+              title="No calendars working on this day"
+              description="Every calendar is off on this date. Pick another day, or turn off 'Only calendars working on the selected day' in Filter to see them all."
+              action={
+                <button
+                  type="button"
+                  onClick={() => setWorkingHoursOnly(false)}
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                >
+                  Show all calendars
+                </button>
+              }
             />
           </div>
         </div>
@@ -7117,7 +7425,7 @@ export function PractitionerCalendarView({
                       <span className="mt-0.5 block text-[11px] leading-tight text-slate-600" title={linkedHoursLine}>
                         {linkedHoursLine}
                       </span>
-                      {col.action === 'create_edit_cancel' ? (
+                      {col.action === 'create_edit_cancel' && staffCollectiveResolved && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -7379,7 +7687,8 @@ export function PractitionerCalendarView({
                         >
                           {linkedHoursLine}
                         </span>
-                        {linkedCol.action === 'create_edit_cancel' ? (
+                        {linkedCol.action === 'create_edit_cancel' &&
+                        staffCollectiveResolved && !collectiveTargetFor(linkedCol.venueId, linkedCol.practitionerId) ? (
                           <button
                             type="button"
                             onClick={() => {
@@ -7440,7 +7749,7 @@ export function PractitionerCalendarView({
                       >
                         {linkedHoursLine}
                       </span>
-                      {col.action === 'create_edit_cancel' ? (
+                      {col.action === 'create_edit_cancel' && staffCollectiveResolved && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -7906,10 +8215,6 @@ export function PractitionerCalendarView({
                               : minutesToTime(timeToMinutes(b.booking_time) + duration);
                           const blockH = height + resizeExtra;
                           const showInlineScheduleFollowUp = dragMoveConfirmBookingId === b.id;
-                          const scheduleFollowUpKind =
-                            lastScheduleEditUndo?.prev.id === b.id
-                              ? lastScheduleEditUndo.kind
-                              : 'move';
                           const isOverlapLane = layout.laneCount > 1;
                           const reservePx =
                             canDrag && resizeAffordanceOn ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0;
@@ -8217,23 +8522,6 @@ export function PractitionerCalendarView({
                                     </>
                                   ) : null}
                                 </div>
-                                {/*
-                                  Outside the card on purpose. The card clips its overflow, and
-                                  the prompt is taller than a compact bar and wider than an
-                                  overlap lane, so it was cut off exactly when it mattered.
-                                  The shell is not clipped, and is raised while this shows.
-                                */}
-                                {canDrag && showInlineScheduleFollowUp ? (
-                                  <ScheduleEditFollowUpPill
-                                    palette={palette}
-                                    kind={scheduleFollowUpKind}
-                                    countdownSec={modificationNotifyCountdownSec}
-                                    disabled={scheduleUndoPending}
-                                    onNotifyNow={() => void confirmInlineDragMove()}
-                                    onSkip={dismissPendingModificationGuestNotify}
-                                    onUndo={() => void undoLastScheduleEdit()}
-                                  />
-                                ) : null}
                                 </>
                               )}
                             </DraggableBookingShell>
@@ -8322,10 +8610,6 @@ export function PractitionerCalendarView({
                          * service, which is what this bar is keyed on.
                          */
                         const showVisitScheduleFollowUp = dragMoveConfirmBookingId === first.id;
-                        const visitScheduleFollowUpKind =
-                          lastScheduleEditUndo?.prev.id === first.id
-                            ? lastScheduleEditUndo.kind
-                            : 'move';
                         return (
                           <DraggableBookingShell
                             key={`${items.map((x) => `${x.id}:${x.status}:${x.client_arrived_at ?? ''}`).join('|')}`}
@@ -8676,18 +8960,6 @@ export function PractitionerCalendarView({
                                   }}
                                 </BookingGuestActionsRowMeasured>
                               </div>
-                              {/* Outside the clipped card, as on a single booking. */}
-                              {showVisitScheduleFollowUp ? (
-                                <ScheduleEditFollowUpPill
-                                  palette={clusterPalette}
-                                  kind={visitScheduleFollowUpKind}
-                                  countdownSec={modificationNotifyCountdownSec}
-                                  disabled={scheduleUndoPending}
-                                  onNotifyNow={() => void confirmInlineDragMove()}
-                                  onSkip={dismissPendingModificationGuestNotify}
-                                  onUndo={() => void undoLastScheduleEdit()}
-                                />
-                              ) : null}
                               </>
                             )}
                           </DraggableBookingShell>
@@ -8772,6 +9044,17 @@ export function PractitionerCalendarView({
         </DndContext>
         </div>
       )}
+
+      {scheduleFollowUpChange ? (
+        <ScheduleEditFollowUpBar
+          change={scheduleFollowUpChange}
+          countdownSec={modificationNotifyCountdownSec}
+          disabled={scheduleUndoPending}
+          onNotifyNow={() => void confirmInlineDragMove()}
+          onSkip={dismissPendingModificationGuestNotify}
+          onUndo={() => void undoLastScheduleEdit()}
+        />
+      ) : null}
 
       {slotMenu && (() => {
         const linkedHere = slotMenu.linked;
@@ -8962,7 +9245,8 @@ export function PractitionerCalendarView({
         </Dialog>
       ) : null}
 
-      {(
+      {/* Steps aside while the notify / skip / undo bar has the bottom of a phone screen. */}
+      {scheduleFollowUpChange ? null : (
         <button
           type="button"
           onClick={() => {
@@ -9093,39 +9377,56 @@ export function PractitionerCalendarView({
         />
       ) : null}
 
-      {staffBookingModal ? (
-        <CalendarStaffBookingModal
-          open
-          intent={staffBookingModal}
-          onClose={() => {
-            setStaffBookingModal(null);
-            clearStaffBookingPrefill();
-          }}
-          onCreated={() => {
-            setStaffBookingModal(null);
-            clearStaffBookingPrefill();
-            void refetchBookingsList();
-          }}
-          onBookingSubmitted={() => void refetchBookingsList()}
-          venueId={eventBookPrefill?.linkedOwnerVenueId ?? venueId}
-          currency={currency}
-          bookingModel={bookingModel}
-          enabledModels={enabledModels}
-          preselectedDate={prefillDate ?? eventBookPrefill?.date ?? (viewMode === 'day' ? date : undefined)}
-          preselectedPractitionerId={prefillPractitionerId}
-          preselectedTime={prefillTime}
-          preselectedExperienceEventId={eventBookPrefill?.eventId}
-          preselectedEventDate={eventBookPrefill?.date}
-          preselectedEventTime={eventBookPrefill?.time}
-          linkedOwnerVenueId={eventBookPrefill?.linkedOwnerVenueId}
-          linkedVenueName={eventBookPrefill?.linkedVenueName}
-          stackKey={
-            eventBookPrefill
-              ? `event-${eventBookPrefill.eventId}-${eventBookPrefill.date}-${eventBookPrefill.time ?? ''}`
-              : undefined
-          }
-        />
-      ) : null}
+      {staffBookingModal
+        ? (() => {
+            // An own column inside the collective, or the toolbar's New and Walk-in,
+            // book for the collective; an own column outside it books for the venue.
+            const collectiveTarget = eventBookPrefill
+              ? null
+              : collectiveTargetFor(venueId, prefillPractitionerId ?? null);
+            const ownerVenueId = eventBookPrefill?.linkedOwnerVenueId ?? collectiveTarget?.id;
+            return (
+              <CalendarStaffBookingModal
+                open
+                intent={staffBookingModal}
+                onClose={() => {
+                  setStaffBookingModal(null);
+                  clearStaffBookingPrefill();
+                }}
+                onCreated={() => {
+                  setStaffBookingModal(null);
+                  clearStaffBookingPrefill();
+                  void refetchBookingsList();
+                  // A collective booking may have landed on a partner's calendar.
+                  if (collectiveTarget) void loadLinkedData();
+                }}
+                onBookingSubmitted={() => {
+                  void refetchBookingsList();
+                  if (collectiveTarget) void loadLinkedData();
+                }}
+                venueId={ownerVenueId ?? venueId}
+                currency={currency}
+                bookingModel={bookingModel}
+                enabledModels={enabledModels}
+                preselectedDate={prefillDate ?? eventBookPrefill?.date ?? (viewMode === 'day' ? date : undefined)}
+                preselectedPractitionerId={prefillPractitionerId}
+                preselectedTime={prefillTime}
+                preselectedExperienceEventId={eventBookPrefill?.eventId}
+                preselectedEventDate={eventBookPrefill?.date}
+                preselectedEventTime={eventBookPrefill?.time}
+                linkedOwnerVenueId={ownerVenueId}
+                linkedVenueName={eventBookPrefill?.linkedVenueName ?? collectiveTarget?.name}
+                stackKey={
+                  eventBookPrefill
+                    ? `event-${eventBookPrefill.eventId}-${eventBookPrefill.date}-${eventBookPrefill.time ?? ''}`
+                    : collectiveTarget
+                      ? `collective-${collectiveTarget.id}-${prefillPractitionerId ?? 'any'}`
+                      : undefined
+                }
+              />
+            );
+          })()
+        : null}
       {showResourceBooking && resourceBookingResourceId ? (
         <Dialog
           open
@@ -9181,28 +9482,45 @@ export function PractitionerCalendarView({
         />
       ) : null}
 
-      {linkedCreating ? (
-        <CalendarStaffBookingModal
-          open
-          intent={linkedCreating.intent}
-          linkedOwnerVenueId={linkedCreating.venue.venueId}
-          linkedVenueName={linkedCreating.venue.venueName}
-          stackKey={`linked-${linkedCreating.venue.venueId}-${linkedCreating.practitionerId ?? 'any'}`}
-          onClose={() => setLinkedCreating(null)}
-          onCreated={() => {
-            setLinkedCreating(null);
-            void loadLinkedData();
-          }}
-          onBookingSubmitted={() => void loadLinkedData()}
-          venueId={linkedCreating.venue.venueId}
-          currency={currency}
-          bookingModel={bookingModel}
-          enabledModels={enabledModels}
-          preselectedDate={viewMode === 'day' ? date : weekStart}
-          preselectedPractitionerId={linkedCreating.practitionerId}
-          preselectedTime={linkedCreating.time}
-        />
-      ) : null}
+      {linkedCreating
+        ? (() => {
+            // A partner's column inside the collective books for the collective with
+            // that calendar preselected; a partner outside it keeps the single-venue
+            // linked form (its own catalogue, its own grant).
+            const collectiveTarget = collectiveTargetFor(
+              linkedCreating.venue.venueId,
+              linkedCreating.practitionerId ?? null,
+            );
+            const ownerVenueId = collectiveTarget?.id ?? linkedCreating.venue.venueId;
+            return (
+              <CalendarStaffBookingModal
+                open
+                intent={linkedCreating.intent}
+                linkedOwnerVenueId={ownerVenueId}
+                linkedVenueName={collectiveTarget?.name ?? linkedCreating.venue.venueName}
+                stackKey={`linked-${ownerVenueId}-${linkedCreating.practitionerId ?? 'any'}`}
+                onClose={() => setLinkedCreating(null)}
+                onCreated={() => {
+                  setLinkedCreating(null);
+                  void loadLinkedData();
+                  // A collective booking may have landed on one of this venue's own calendars.
+                  if (collectiveTarget) void refetchBookingsList();
+                }}
+                onBookingSubmitted={() => {
+                  void loadLinkedData();
+                  if (collectiveTarget) void refetchBookingsList();
+                }}
+                venueId={ownerVenueId}
+                currency={currency}
+                bookingModel={bookingModel}
+                enabledModels={enabledModels}
+                preselectedDate={viewMode === 'day' ? date : weekStart}
+                preselectedPractitionerId={linkedCreating.practitionerId}
+                preselectedTime={linkedCreating.time}
+              />
+            );
+          })()
+        : null}
       {acceptUnpaidGuard.dialog}
     </div>
   );

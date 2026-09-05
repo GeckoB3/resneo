@@ -179,7 +179,7 @@ function venueRow(overrides?: Record<string, unknown>) {
     venue_opening_exceptions: null,
     email: 'venue@example.com',
     reply_to_email: null,
-    feature_flags: { card_hold_deposits: true },
+    feature_flags: {},
     ...overrides,
   };
 }
@@ -390,22 +390,6 @@ describe('POST /api/venue/bookings card holds, class branch (spec 7.6)', () => {
       deposit_amount_pence: null,
     });
     expect(mockApplyComms.mock.calls[0]![0].cardHoldFeePence).toBe(1000);
-  });
-
-  it('ignores require_card_hold when the venue flag is off (never creates a hold)', async () => {
-    const admin = setupClassScenario({ venue: { feature_flags: {} } });
-    mockApplyComms.mockResolvedValue({ payment_url: undefined });
-
-    const res = await POST(postRequest(classBody({ require_card_hold: true })));
-    expect(res.status).toBe(201);
-    const json = await res.json();
-    expect(json.card_hold_requested).toBeUndefined();
-
-    expect(admin.bookingInserts[0]).toMatchObject({
-      status: 'Booked',
-      deposit_status: 'Not Required',
-    });
-    expect(mockApplyComms.mock.calls[0]![0].cardHoldFeePence).toBeNull();
   });
 
   it('ignores require_card_hold for a deposit-type class (existing behaviour untouched)', async () => {

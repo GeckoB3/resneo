@@ -108,6 +108,31 @@ export async function getAcceptedLinkBetween(
   return (data as unknown as AccountLinkRow | null) ?? null;
 }
 
+/**
+ * The link between two venues that is accepted OR suspended, if any. A suspended
+ * link keeps its grants and resumes by itself once the lapsed venue's subscription
+ * is restored (§6.7), so a decision about collective MEMBERSHIP (the §7.5 cascade)
+ * must read it as still standing: only an ended link (revoked, expired, rejected)
+ * breaks the pair. Access itself stays paused while suspended, which is why
+ * `resolveCallerGrantOverVenue` keeps reading accepted links only.
+ */
+export async function getStandingLinkBetween(
+  admin: SupabaseClient,
+  venueAId: string,
+  venueBId: string,
+): Promise<AccountLinkRow | null> {
+  const { low, high } = orderVenuePair(venueAId, venueBId);
+  const { data, error } = await admin
+    .from('account_links')
+    .select(LINK_COLUMNS)
+    .eq('venue_low_id', low)
+    .eq('venue_high_id', high)
+    .in('status', ['accepted', 'suspended'])
+    .maybeSingle();
+  if (error) throw new Error(`Failed to read account link: ${error.message}`);
+  return (data as unknown as AccountLinkRow | null) ?? null;
+}
+
 /** Whether the venue has at least one accepted link, i.e. is linked to another venue. */
 export async function venueHasAcceptedLink(
   admin: SupabaseClient,

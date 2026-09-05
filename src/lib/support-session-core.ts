@@ -146,23 +146,6 @@ export function describeVenueMutationPath(pathname: string): string {
   return `performed an action (${pathname})`;
 }
 
-export async function listVenueAdminEmails(admin: SupabaseClient, venueId: string): Promise<string[]> {
-  const { data, error } = await admin
-    .from('staff')
-    .select('email')
-    .eq('venue_id', venueId)
-    .eq('role', 'admin');
-
-  if (error) {
-    console.error('[support-session] listVenueAdminEmails failed:', error.message, { venueId });
-    return [];
-  }
-  const emails = (data ?? [])
-    .map((r) => (r as { email?: string | null }).email?.trim().toLowerCase())
-    .filter((e): e is string => Boolean(e));
-  return [...new Set(emails)];
-}
-
 export async function getStaffDisplayName(admin: SupabaseClient, staffId: string): Promise<string | null> {
   const { data, error } = await admin.from('staff').select('name, email').eq('id', staffId).maybeSingle();
   if (error || !data) return null;

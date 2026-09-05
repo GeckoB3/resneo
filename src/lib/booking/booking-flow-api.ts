@@ -27,6 +27,11 @@ export function appointmentCatalogUrl(
   return `/api/booking/appointment-catalog?${qs}`;
 }
 
+/** A linked venue's (or a live collective's) staff booking profile. */
+export function linkedVenueProfileUrl(venueId: string): string {
+  return `/api/venue/linked-calendar/venue-profile?venueId=${encodeURIComponent(venueId)}`;
+}
+
 export function bookingAvailabilityUrl(params: URLSearchParams): string {
   return `/api/booking/availability?${params}`;
 }

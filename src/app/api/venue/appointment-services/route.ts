@@ -40,7 +40,6 @@ import {
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
 import { normalizeBookingStartForStorage } from '@/lib/appointments/booking-interval';
-import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -283,19 +282,6 @@ function normalizeServicePaymentFields(data: {
   // Card hold: deposit_pence stores the no-show fee (>= 100, validated in the zod schemas).
   if (req === 'card_hold') return { payment_requirement: 'card_hold', deposit_pence: data.deposit_pence ?? 0 };
   return { payment_requirement: 'full_payment', deposit_pence: null };
-}
-
-/**
- * Card-hold config acceptance is gated on the `card_hold_deposits` venue flag (design doc
- * §6.2): every write path rejects `'card_hold'` with 403 `feature_disabled` when the flag
- * resolves off. Returns the 403 response, or null when the flag is on.
- */
-async function rejectCardHoldWhenFlagOff(
-  admin: ReturnType<typeof getSupabaseAdminClient>,
-  venueId: string,
-): Promise<NextResponse | null> {
-  const { resolved } = await loadVenueFeatureFlags(admin, venueId);
-  return resolved.card_hold_deposits ? null : featureFlagDisabledResponse('card_hold_deposits');
 }
 
 /**
@@ -860,8 +846,6 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     if (parsed.data.payment_requirement === 'card_hold') {
-      const flagRejection = await rejectCardHoldWhenFlagOff(admin, staff.venue_id);
-      if (flagRejection) return flagRejection;
       const variantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
       if (variantFeeError) {
         return NextResponse.json({ error: variantFeeError }, { status: 400 });
@@ -1229,8 +1213,6 @@ export async function PATCH(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     if (parsed.data.payment_requirement === 'card_hold') {
-      const flagRejection = await rejectCardHoldWhenFlagOff(admin, staff.venue_id);
-      if (flagRejection) return flagRejection;
       const variantFeeError = findInvalidCardHoldVariantFee(parsedVariants);
       if (variantFeeError) {
         return NextResponse.json({ error: variantFeeError }, { status: 400 });

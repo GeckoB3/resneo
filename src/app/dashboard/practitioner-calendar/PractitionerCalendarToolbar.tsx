@@ -26,6 +26,8 @@ export interface PractitionerCalendarToolbarProps {
   onRefresh: () => void;
   onNewBooking: () => void;
   onWalkIn: () => void;
+  /** Pointer over, or focus on, New or Walk-in (see OperationsWorkspaceToolbar). */
+  onBookingActionsIntent?: () => void;
   controlsPanel: ReactNode;
   controlsLabel?: string;
   summaryContent: ReactNode;
@@ -103,6 +105,7 @@ export function PractitionerCalendarToolbar({
   onRefresh,
   onNewBooking,
   onWalkIn,
+  onBookingActionsIntent,
   controlsPanel,
   controlsLabel = 'Filter',
   summaryContent,
@@ -264,6 +267,7 @@ export function PractitionerCalendarToolbar({
       onRefresh={onRefresh}
       onNewBooking={onNewBooking}
       onWalkIn={onWalkIn}
+      onBookingActionsIntent={onBookingActionsIntent}
       datePickerPanel={datePickerPanel}
       controlsPanel={controlsPanel}
       controlsLabel={controlsLabel}

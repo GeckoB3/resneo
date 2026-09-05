@@ -3,6 +3,8 @@ import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveCallerGrantOverVenue } from '@/lib/linked-accounts/queries';
+import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
+import { loadCollectiveVenuePublic } from '@/lib/linked-accounts/collective-venue';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
 
@@ -13,6 +15,12 @@ const UUID_RE =
  * GET /api/venue/linked-calendar/venue-profile?venueId=
  * Staff booking surfaces for a linked venue (full modal parity with own venue).
  * Requires `create_edit_cancel` on the link.
+ *
+ * `venueId` may also be a live venue collective the caller is an active member
+ * of: the answer is then the collective's virtual venue (the same one the
+ * combined public page renders), so the staff form books for the whole
+ * collective as one business. Membership already implies full mutual write
+ * links, so no per-link grant check is needed on that path.
  */
 export async function GET(request: NextRequest) {
   const supabase = await createRouteHandlerClientFromHeaders();
@@ -31,6 +39,23 @@ export async function GET(request: NextRequest) {
 
   try {
     const admin = getSupabaseAdminClient();
+
+    const collective = await resolveStaffCollectiveScope(admin, staff.venue_id, venueId);
+    if (collective) {
+      const venue = await loadCollectiveVenuePublic(admin, collective.collectiveId, { audience: 'staff' });
+      if (!venue) {
+        return NextResponse.json({ error: 'That combined booking page is not available right now.' }, { status: 404 });
+      }
+      return NextResponse.json({
+        venue_name: collective.name,
+        venue,
+        booking_model: 'unified_scheduling',
+        enabled_models: [],
+        currency: venue.currency ?? 'GBP',
+        collective: { id: collective.collectiveId, member_venue_ids: collective.memberVenueIds },
+      });
+    }
+
     const access = await resolveCallerGrantOverVenue(admin, staff.venue_id, venueId);
     if (!access) {
       return NextResponse.json(

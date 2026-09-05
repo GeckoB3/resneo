@@ -1,6 +1,6 @@
 # Card Hold Deposits: Design and Implementation Document
 
-**Status: Implemented (5 July 2026). This document was the implementation spec; the feature shipped on branch docs-review behind the `card_hold_deposits` flag (default off). Retained as the design reference.**
+**Status: Implemented (5 July 2026). This document was the implementation spec; the feature shipped on branch docs-review behind the `card_hold_deposits` flag (default off). On 5 September 2026 the flag was retired: card holds are a standard payment option for every venue, offered next to deposit and full payment in every entity editor, so the flag gates described in §6.1, §6.3, §7.1 and §7.6 no longer exist (the zero-fee safety rule remains). Staff venue payloads keep serving `resolved.card_hold_deposits: true` only for the mobile app; see `Docs/FEATURE_FLAGS.md`, Retired flags. Retained as the design reference.**
 Adversarially reviewed against the codebase on 4 July 2026 in two rounds (six independent verification passes: Stripe mechanics, booking/staff flows, lifecycle/comms, amended-claims verification, implementability walkthrough, fresh-eyes code sweep); all confirmed findings are folded into this text.
 
 **Covers booking models:** appointments (`practitioner_appointment`, `unified_scheduling`), classes (`class_session`, including the class cart), events (`event_ticket`), resources (`resource_booking`), and **table reservations** (`table_reservation`).

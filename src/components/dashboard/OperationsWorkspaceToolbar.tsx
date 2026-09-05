@@ -196,6 +196,11 @@ export interface OperationsWorkspaceToolbarProps {
   onRefresh: () => void;
   onNewBooking: () => void;
   onWalkIn: () => void;
+  /**
+   * Pointer over, or focus on, New or Walk-in: a chance to start loading what
+   * the booking form needs before the click lands.
+   */
+  onBookingActionsIntent?: () => void;
   /** Calendar + time-range filter (shown in date sheet). */
   datePickerPanel: ReactNode;
   /** Secondary controls (filters, export, areas, etc.). */
@@ -266,6 +271,7 @@ export function OperationsWorkspaceToolbar({
   onRefresh,
   onNewBooking,
   onWalkIn,
+  onBookingActionsIntent,
   datePickerPanel,
   controlsPanel,
   controlsLabel = 'Controls',
@@ -668,6 +674,8 @@ export function OperationsWorkspaceToolbar({
           <button
             type="button"
             onClick={onNewBooking}
+            onMouseEnter={onBookingActionsIntent}
+            onFocus={onBookingActionsIntent}
             className={
               compact
                 ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-brand-600 hover:bg-brand-700`
@@ -683,6 +691,8 @@ export function OperationsWorkspaceToolbar({
           <button
             type="button"
             onClick={onWalkIn}
+            onMouseEnter={onBookingActionsIntent}
+            onFocus={onBookingActionsIntent}
             className={
               compact
                 ? `${COMPACT_BOOKING_ACTION_LAYOUT} bg-emerald-600 hover:bg-emerald-700`

@@ -9,32 +9,19 @@ describe('resolveClassCartLineCardHoldFee', () => {
           classTypePaymentRequirement: req,
           perPersonFeePence: 2500,
           partySize: 2,
-          cardHoldDepositsEnabled: true,
         }),
       ).toEqual({ feePence: null, warning: null });
     }
   });
 
-  it('returns per-person fee x party size when card_hold, flag on, fee configured', () => {
+  it('returns per-person fee x party size when card_hold with a fee configured', () => {
     expect(
       resolveClassCartLineCardHoldFee({
         classTypePaymentRequirement: 'card_hold',
         perPersonFeePence: 2500,
         partySize: 3,
-        cardHoldDepositsEnabled: true,
       }),
     ).toEqual({ feePence: 7500, warning: null });
-  });
-
-  it('resolves as no hold with flag_off warning when the venue flag is off (design doc 6.3)', () => {
-    expect(
-      resolveClassCartLineCardHoldFee({
-        classTypePaymentRequirement: 'card_hold',
-        perPersonFeePence: 2500,
-        partySize: 1,
-        cardHoldDepositsEnabled: false,
-      }),
-    ).toEqual({ feePence: null, warning: 'flag_off' });
   });
 
   it('resolves as no hold with zero_fee warning when the per-person fee is missing or zero', () => {
@@ -44,7 +31,6 @@ describe('resolveClassCartLineCardHoldFee', () => {
           classTypePaymentRequirement: 'card_hold',
           perPersonFeePence: fee,
           partySize: 2,
-          cardHoldDepositsEnabled: true,
         }),
       ).toEqual({ feePence: null, warning: 'zero_fee' });
     }
@@ -56,7 +42,6 @@ describe('resolveClassCartLineCardHoldFee', () => {
         classTypePaymentRequirement: 'card_hold',
         perPersonFeePence: -100,
         partySize: 2,
-        cardHoldDepositsEnabled: true,
       }),
     ).toEqual({ feePence: null, warning: 'zero_fee' });
   });

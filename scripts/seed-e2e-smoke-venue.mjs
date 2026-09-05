@@ -312,9 +312,6 @@ async function seedDefaultVenue(admin) {
       waitlist_v2: true,
       guest_self_reschedule: true,
       any_available_practitioner: true,
-      // Required so the card-hold smoke service below is configurable/bookable
-      // (card-hold creation paths are gated on this venue flag).
-      card_hold_deposits: true,
     },
   });
 

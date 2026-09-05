@@ -134,7 +134,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Public appointment booking | ● | `AppointmentBookingFlow`, practitioner slug routes |
 | Staff booking + walk-in | ● | `DashboardStaffBookingModal`, walk-in API |
 | Day / week / month calendar | ● | `PractitionerCalendarView` |
-| Drag-reschedule + duration resize | ● | Calendar grid, undo, deferred guest notify |
+| Drag-reschedule + duration resize | ● | Calendar grid, undo, deferred guest notify. Since 2026-09-05 the day grid stretches to 00:00 to 24:00 while a bar is held, so staff can carry a booking before opening, past close, or into a break; the drop is saved with a warning toast rather than refused, and the minutes now outside hours are drawn as closed stripes (`buildVenueScheduleClosureBlocks` with `gridBounds`). The notify / skip / undo prompt after a move or resize is a bar pinned to the bottom of the screen (`ScheduleEditFollowUpBar`), with the moved bar outlined; it used to sit on the booking bar, where short or overlapped bars clipped it. While a bar is dragged it stays put as a faded origin marker: dnd-kit gives a node only the pointer's viewport delta when a DragOverlay is mounted, so a translated bar drifted by the scroll distance whenever the diary scrolled mid-drag |
 | Processing-time blocks | ● | Per-service and per-booking layout |
 | Multi-service / group appointments | ● | `group_booking_id` clustering |
 | Status workflow (Booked → Confirmed → Started → Completed) | ● | Shared status system + attendance confirm |
@@ -216,7 +216,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Stripe Connect onboarding | ● | Settings → Payments |
 | Deposits + cancellation refunds | ● | Policy snapshot on booking |
 | Deposit reminders (cron) | ● | `deposit-reminder-2h` |
-| Card hold deposits (no-show fee) | ● | Shipped (5 July 2026): card saved at booking, £0 taken; explicit admin **Charge no-show fee** action after a no-show; auto-release 14 days after the booking or on cancel; all five booking models incl. the staff phone/walk-in card-request link; flag `card_hold_deposits` (default off); spec `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` |
+| Card hold deposits (no-show fee) | ● | Shipped (5 July 2026): card saved at booking, £0 taken; explicit admin **Charge no-show fee** action after a no-show; auto-release 14 days after the booking or on cancel; all five booking models incl. the staff phone/walk-in card-request link; standard for every venue since 2026-09-05 (the `card_hold_deposits` flag is retired); spec `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` |
 | Saved cards (guest) | ◐ | SetupIntent endpoint exists; card-hold no-show fees charge off-session, general balance charging not wired |
 | **Checkout at appointment** (balance, tips, receipt) | ● | **Shipped** (Option B): card-present, cash and external payments, refunds, ledger and receipt. Tips alone remain unbuilt. See §7. |
 | Appointment packages (prepaid bundles) | ◐ | Class packs exist; not general appointment packages |

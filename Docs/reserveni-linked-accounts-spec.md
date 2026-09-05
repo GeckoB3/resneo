@@ -691,7 +691,9 @@ linked venue's subscription is heading for lapse:
 - **On lapse** (`plan_status` becomes `'past_due'` or `'cancelled'`): the daily maintenance
   cron sets affected links `status = 'suspended'`. Cross-venue visibility ceases; the audit
   log is preserved; the link still shows in both settings tabs as "Suspended — {venue}'s
-  subscription is inactive".
+  subscription is inactive". A suspended link still holds a collective membership together
+  (§7.5, fixed 2026-09-05): the lapsed member is excluded from the combined page and the
+  staff form by eligibility while it lasts, and rejoins by itself on resume.
 - **Restored within 30 days** (`plan_status` back to `'active'`): the cron transitions the
   link back to `accepted` with its original grants.
 - **Still suspended after 30 days:** the cron sets `status = 'expired'`,
@@ -784,10 +786,17 @@ orphaned by an earlier reconcile.
 
 ### 7.5 Membership changes and link dependencies
 
-If a pairwise link between two collective members ends, or is reduced below full mutual
-visibility:
+If a pairwise link between two collective members ends (revoked, expired, rejected), or is
+reduced below full mutual visibility:
 
-- Both affected venues are auto-removed (`status = 'removed'`).
+- Both affected venues are auto-removed (`status = 'removed'`). **A suspended link is not an
+  ended link (fixed 2026-09-05).** `reconcileCollective` reads accepted *or* suspended links
+  (`getStandingLinkBetween`) for membership and for the provider ladder, so a subscription
+  lapse no longer removes the member (and, in a three-member collective, no longer suspended
+  the healthy members' providers as well). Before the fix the daily cron's suspend pass fed
+  straight into the cascade, so a member whose card failed for a day was removed for good
+  and needed a fresh invitation and its offerings rebuilding. The create, invite and accept
+  gates still require accepted links.
 - Remaining members are notified.
 - If `active` membership drops below 2, the collective is dissolved (`status = 'dissolved'`).
   **Open invitations keep it alive (fixed 2026-09-03).** A collective that has not *yet*
@@ -967,6 +976,146 @@ venue's own `/book/[venue-slug]` page:
 
 ---
 
+### 8.7 Staff booking for a collective (shipped to staging 2026-09-04)
+
+A venue that is an active member of a live collective (`unified_catalog`, at least two
+currently eligible members: the gate the combined public page applies, in
+`src/lib/linked-accounts/collective-staff-scope.ts`) books for the collective as one business
+from every staff entry point:
+
+- `/dashboard/bookings/new` (the sidebar's New Appointment) renders the standard staff flow over
+  the collective's virtual venue: every member's offered calendars, the combined offerings at
+  collective prices, merged availability, and "Any available" per offering.
+- On the diary, New and Walk-in open the same form over the whole collective; a slot on a column
+  that is one of the collective's calendars, own or partner's, opens it with that calendar
+  preselected. A column with no combined offering, or a partner outside any collective, keeps
+  the per-venue form it had.
+- Venues with pairwise links but no collective see no change.
+
+How it is built: the single-partner path (`linkedOwnerVenueId` on `StaffSurfaceBookingStack`)
+carries the collective id. `GET /api/venue/linked-calendar/venue-profile`,
+`GET /api/venue/appointment-calendar`, `GET /api/venue/appointment-availability` and
+`POST /api/venue/bookings` resolve a collective through the bridge (`collective-booking-bridge.ts`)
+before continuing down their existing linked paths, so a booking is written in the OWNING venue
+against the real source service with the collective's override, attributed with
+`bookings.collective_id` and `collective_service_item_id`, and, when the owner is another member,
+recorded in the link audit and notified as a cross-venue create. Visits and groups keep using the
+public create routes, which now record the same audit for a staff actor
+(`collective-staff-audit.ts`). `GET /api/venue/staff-collective` tells the diary which collective,
+members and calendars apply.
+
+What the venue sees afterwards is unchanged: a booking on a partner's calendar shows on the
+diary's linked column and under Linked / All in the bookings list; one on the venue's own
+calendar shows under My venue. The guest record is matched or created in the owning venue,
+exactly as a combined-page booking is.
+
+Review follow-up (2026-09-05):
+
+- **Members' own services.** The combined catalogue is host-curated, so a member could no
+  longer book its own services that are not combined offerings from any staff surface. The
+  staff catalogue now also carries every eligible member's own services on its own calendars,
+  after the offerings under a "{Venue} only" heading (host first), and a calendar with no
+  offering appears too. Offerings the host left without a heading are listed under "Other services" (the
+  customer page's wording) placed ahead of the "{Venue} only" groups, so the combined
+  offerings always list first. Such a service keeps its real id (`venue_only` in
+  `loadCollectiveAppointmentCatalog`, `includeMemberOwnServices`) and books as a plain
+  booking in the owning venue with no `collective_id`; the cross-venue audit and notification
+  still apply. The public combined page is unchanged. The public routes the staff form shares
+  (`GET /api/booking/availability` with `staff=1`, `POST /api/booking/validate-appointment-slot`
+  with `staff: true`, and the visit and group creates with a staff `source`) widen the
+  catalogue only after verifying a member venue's session on the request.
+- **Linked column button.** A partner column that books through the collective no longer
+  shows its own "New booking" header button on `/dashboard/calendar`: New, Walk-in and a slot
+  click already reach it. A partner outside any collective keeps the button. Since the
+  evening of 2026-09-05 the calendar page resolves the collective on the server
+  (`loadStaffCollectiveSummary`, one membership lookup and one calendar query) and hands it
+  to the diary as `initialStaffCollective`, so the button never appears and then vanishes
+  while `/api/venue/staff-collective` answered; a diary mounted without that prop holds the
+  button back until the route replies (`staffCollectiveResolved`).
+- **Booking window.** The bridge's single-service day availability now applies the source
+  service's own booking window (minimum notice, same-day rule, advance limit), as the month
+  loader, the visit path and both create routes already did, so a collective never offers a
+  slot that create then refuses.
+- **Audit reliability.** The cross-venue audit and notification after a create are registered
+  with Next's `after`, so they survive the response on a serverless host.
+
+Combined page manager, same review:
+
+- **Resources are not calendars.** `fetchAppointmentCatalog` now keeps only `calendar_type =
+  'practitioner'` rows of `unified_calendars`. Resources (Room 1, Room 2) and event team
+  calendars share the table and used to drop out only because they have no services, so the
+  manager's "Calendars offering this" (which asks for calendars without services) listed them
+  as people; the combined catalogue also skips a provider pinned to a calendar the venue no
+  longer lists. Nothing in the dev data had a resource ticked.
+- **Address.** The manager's page link and the adopt-a-member option show the address customers
+  actually use (`/book/{member slug}` when adopted); `CollectiveView.members[].venueSlug` carries it.
+- **Settings, Booking page tab.** A venue in a live collective now opens that tab with a notice
+  naming the collective: hosts get a "Manage combined page" button that switches to Linked
+  accounts and opens the manager (`SettingsView` → `LinkedAccountsSection` →
+  `VenueCollectivesPanel.manageCollectiveId`); members are told which venue hosts it and get a
+  button to Linked accounts. When the collective adopted this venue's own address the notice
+  says guests using that address see the combined page.
+
+Linked venue and collective review (2026-09-05, second pass):
+
+- **Suspended links.** See §6.7 and §7.5: a subscription lapse pauses a membership instead
+  of ending it.
+- **Partner reschedules are validated.** `PATCH /api/venue/linked-calendar/booking` (the
+  Linked calendars page's edit modal) went straight to the `linked_apply_booking_update`
+  RPC, a plain UPDATE, so a partner could move a booking onto another appointment, outside
+  hours or over a break. It now runs `validateAppointmentModificationInterval` for an
+  appointment booking whenever the date, time, end or calendar changes, as the native staff
+  PATCH and the partner create already did. A moved start also keeps the booking's length
+  (`normalizeLinkedBookingRpcChanges` shifts `booking_end_time`); before, a 10:00 to 10:30
+  booking moved to 14:00 kept its 10:30 end.
+- **Sends that survive the response.** The linked-calendar routes fired their cross-venue
+  notification and read-audit writes as dangling promises; they are registered with Next's
+  `after()` now, as the collective create paths already were.
+- **Catalogue memo.** Every collective availability, validation and create call rebuilt the
+  merged catalogue (about two seconds of queries), and the staff form opens with a burst of
+  month requests, one per service. `loadCollectiveAppointmentCatalog` memoises per process
+  for ten seconds with a shared in-flight promise; the catalogue and membership routes drop
+  the memo on write. Measured on the dev database: a collective day request went from about
+  2.4s to the per-venue 0.6s once warm.
+- **Small fixes.** The collective name checks use `.limit(1)` before `maybeSingle()` so two
+  dissolved collectives sharing a name no longer skip the 30-day hold; the Linked accounts
+  panel's "View combined booking page" link uses the adopted member address when there is one.
+- **Staff form, hands-on on staging data.** Verified as plus1 (Test Plus, host) with Light 3
+  as the partner: a combined offering on an own calendar (booked with `collective_id` and the
+  offering id, guest in Test Plus, no cross-venue audit); a partner's own-only service on the
+  partner calendar (booked in Light 3 with no `collective_id`, guest created in Light 3,
+  `created_booking` audit row acting Test Plus); a two-service visit and a slot-menu open on
+  the partner column; the combined and per-venue availability answers match slot for slot;
+  planned hours (`schedule_periods`) are honoured because the bridge goes through
+  `fetchAppointmentInput`. Also a walk-in on a partner calendar (source `walk-in`, offering
+  attributed), a partner offering with a staff custom duration (45 min lands as 14:00 to 14:45)
+  with "Require deposit" unticked, and the write paths for a partner booking: the native PATCH
+  cancels and refuses a move onto another booking (409), and the linked route now refuses the
+  same move and shifts the end with an accepted one.
+- **Form open time (2026-09-05, evening).** Between the New click and a usable form the
+  stack fetched the venue profile, mounted the flow, and only then let the flow fetch the
+  catalogue, each twice in development (strict-mode effects): about 6.6 s on the dev server
+  for the collective host. Now both go through one short-lived shared request cache
+  (`src/lib/booking/staff-surface-warm.ts`), started when the diary's New or Walk-in button
+  is hovered or focused and again when the stack mounts, so the two overlap and run once.
+  Server side the staff profile skips the combined catalogue build it never used
+  (`loadCollectiveVenuePublic(..., { audience: 'staff' })`, 1.2 to 1.5 s down to 0.3 s), the
+  diary's staff-collective lookup answers from one calendar query instead of a catalogue
+  build (3.0 s down to 0.34 s), the merged catalogue build reads each member's data once and
+  side by side and starts the members' own catalogues alongside it (cold 2.9 s down to
+  1.3 s; 0.2 s within the ten-second memo), and the waitlist alerts banner on every dashboard
+  page checks its open slots side by side and skips past dates (4.3 s down to 0.5 s). Note
+  that the per-process memo only helps within one route bundle: Next builds each API route
+  separately, so the profile, catalogue and month routes each keep their own. Availability:
+  the staff-first month warm-up is capped at the first eight services of the chosen person
+  (`STAFF_FIRST_MONTH_WARM_LIMIT`; it fired one month computation per service, about 25 for
+  Light 3), and the form keeps day slots for thirty seconds so stepping back to a date
+  already looked at is instant; the server still re-checks the slot on create.
+- **Refused create keeps the typed details.** A partner venue with no Stripe account refuses a
+  staff booking that ticks "Require deposit" ("Venue has not set up payments", correct: the
+  owning venue's account would take it). The refusal used to remount the details step empty;
+  `initialDetails` now falls back to the last submitted details, on both details steps.
+
 ## 9. Notifications
 
 All link-related emails are sent via the existing **SendGrid** integration on the
@@ -990,6 +1139,7 @@ Dashboard banners and in-app notices are shown only to Admins.
 | Removed from venue collective | Email + dashboard notice | Removed member |
 | Venue collective dissolved | Email | All members |
 | Venue collective host reassigned (automatic, §7.4) | Email | New host venue |
+| Member's service added to the combined page | None. Removed 2026-09-05: it sent one email per offering, so building a page swamped members with mail. Joining the collective is the consent | n/a |
 
 **SMS is out of scope for this feature.** Resneo's SMS path is metered per-venue (Twilio,
 `increment_sms_usage`, billed to Stripe) and SMS is customer-facing operational/marketing

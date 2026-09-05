@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 import type { ClassCartLineInput, ClassCartQuoteLine, ClassCartQuoteResult } from '@/types/class-commerce';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { getMembershipDiscountForClassType } from '@/lib/class-commerce/membership-discount';
@@ -27,20 +26,18 @@ function applyDiscount(pence: number, percent: number): { final: number; discoun
 /**
  * Resolve the no-show hold fee for one cart line (design doc §6.3/§7.2).
  *
- * Pure: the fee applies only when the class type is configured `card_hold` AND the
- * venue `card_hold_deposits` flag is on AND a positive per-person fee is configured.
- * Flag-off and zero-fee cases resolve as no hold (`feePence: null`) with a warning
- * code so callers can `console.warn` per §6.3 instead of silently degrading.
+ * Pure: the fee applies only when the class type is configured `card_hold` AND a
+ * positive per-person fee is configured. The zero-fee case resolves as no hold
+ * (`feePence: null`) with a warning code so callers can `console.warn` per §6.3
+ * instead of silently degrading.
  */
 export function resolveClassCartLineCardHoldFee(params: {
   classTypePaymentRequirement: string | null | undefined;
   perPersonFeePence: number | null | undefined;
   partySize: number;
-  cardHoldDepositsEnabled: boolean;
-}): { feePence: number | null; warning: 'flag_off' | 'zero_fee' | null } {
-  const { classTypePaymentRequirement, perPersonFeePence, partySize, cardHoldDepositsEnabled } = params;
+}): { feePence: number | null; warning: 'zero_fee' | null } {
+  const { classTypePaymentRequirement, perPersonFeePence, partySize } = params;
   if (classTypePaymentRequirement !== 'card_hold') return { feePence: null, warning: null };
-  if (!cardHoldDepositsEnabled) return { feePence: null, warning: 'flag_off' };
   const perPerson = perPersonFeePence ?? 0;
   if (perPerson <= 0) return { feePence: null, warning: 'zero_fee' };
   return { feePence: perPerson * partySize, warning: null };
@@ -53,17 +50,6 @@ export async function quoteClassCart(
   const { venueId, lines, userId } = params;
   const out: ClassCartQuoteLine[] = [];
   const discountCacheByType = new Map<string, number>();
-
-  // Resolve the venue's card_hold_deposits flag once for the whole cart (§6.3).
-  const { data: venueFlagsRow } = await admin
-    .from('venues')
-    .select('feature_flags')
-    .eq('id', venueId)
-    .maybeSingle();
-  const cardHoldEnabled = resolveAppointmentsFeatureFlag(
-    'card_hold_deposits',
-    parseVenueFeatureFlags((venueFlagsRow as { feature_flags?: unknown } | null)?.feature_flags),
-  );
 
   async function discountFor(classTypeId: string): Promise<number> {
     if (!userId) return 0;
@@ -195,13 +181,8 @@ export async function quoteClassCart(
       classTypePaymentRequirement: ct.payment_requirement,
       perPersonFeePence: ct.deposit_amount_pence,
       partySize: line.party_size,
-      cardHoldDepositsEnabled: cardHoldEnabled,
     });
-    if (hold.warning === 'flag_off') {
-      console.warn(
-        `[quoteClassCart] class type ${classTypeId} configured card_hold but card_hold_deposits flag is off for venue ${venueId}; treating as no deposit`,
-      );
-    } else if (hold.warning === 'zero_fee') {
+    if (hold.warning === 'zero_fee') {
       console.warn(
         `[quoteClassCart] class type ${classTypeId} configured card_hold with no per-person fee; treating as no deposit`,
       );

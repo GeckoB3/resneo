@@ -56,6 +56,8 @@ import {
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
+import { resolveStaffCollectiveScopeFromRequest } from '@/lib/linked-accounts/collective-staff-request';
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
@@ -78,7 +80,6 @@ import {
   insertCardHoldRows,
 } from '@/lib/booking/card-hold-capture';
 import { buildCardHoldTermsSnapshot, renderCardHoldConsentText } from '@/lib/booking/card-hold-terms';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -207,6 +208,11 @@ export async function POST(request: NextRequest) {
     const collectiveOfferingByPerson = new Map<number, string>();
     if (await isCollectiveId(supabase, venue_id)) {
       collectiveId = venue_id;
+      // A member venue's staff (the staff form uses this route for groups) may
+      // also book the members' own services; the session is verified first.
+      const includeMemberOwnServices =
+        (source === 'phone' || source === 'walk-in') &&
+        Boolean(await resolveStaffCollectiveScopeFromRequest(supabase, request, collectiveId));
       let owningVenueId: string | null = null;
       for (let i = 0; i < people.length; i++) {
         const person = people[i]!;
@@ -214,6 +220,7 @@ export async function POST(request: NextRequest) {
           collectiveId,
           offeringId: person.appointment_service_id,
           calendarId: person.practitioner_id,
+          includeMemberOwnServices,
         });
         if (!target) {
           return NextResponse.json(
@@ -231,7 +238,9 @@ export async function POST(request: NextRequest) {
           );
         }
         owningVenueId = target.venueId;
-        collectiveOfferingByPerson.set(i, person.appointment_service_id);
+        // A member venue's own service (no offering) keeps the venue's own terms
+        // and carries no collective attribution.
+        if (target.offering) collectiveOfferingByPerson.set(i, person.appointment_service_id);
         person.appointment_service_id = target.sourceServiceId;
       }
       if (owningVenueId) venue_id = owningVenueId;
@@ -248,12 +257,6 @@ export async function POST(request: NextRequest) {
     if (venueErr || !venue) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
-
-    // Card-hold flag resolved once per request (design doc §6.1/§7.1).
-    const cardHoldEnabled = resolveAppointmentsFeatureFlag(
-      'card_hold_deposits',
-      parseVenueFeatureFlags((venue as { feature_flags?: unknown }).feature_flags),
-    );
 
     // Bearer-capable, not cookie-only: with createClient() a mobile Bearer
     // caller resolved as signed OUT here, so no app could book at any venue
@@ -551,14 +554,8 @@ export async function POST(request: NextRequest) {
         if (online != null && online.amountPence > 0) {
           if (online.chargeLabel === 'card_hold') {
             // Card hold (spec 7.1): fixed fee, no money due at booking for this row.
-            // Flag off resolves as 'none' (spec 6.3). Staff may waive per booking
-            // (D6), walk-ins included.
-            if (!cardHoldEnabled) {
-              console.warn(
-                '[booking/create-group] card_hold service booked while card_hold_deposits flag is off; treating as no charge',
-                { venue_id, service_id: person.appointment_service_id },
-              );
-            } else if (staffCharges.holdCards) {
+            // Staff may waive per booking (D6), walk-ins included.
+            if (staffCharges.holdCards) {
               personCardHoldFeePence = online.amountPence;
             }
           } else if (staffCharges.chargeDeposits) {
@@ -855,7 +852,7 @@ export async function POST(request: NextRequest) {
         // §7.7 attribution, as on a single combined-page booking. The bridge
         // above only resolves offerings of a collective this venue is an
         // active member of, so the tag cannot be forged onto another venue.
-        ...(collectiveId
+        ...(collectiveId && person.collective_service_item_id
           ? {
               collective_id: collectiveId,
               collective_service_item_id: person.collective_service_item_id,
@@ -1114,6 +1111,15 @@ export async function POST(request: NextRequest) {
           console.error('[after] group confirmation email failed:', err);
         }
       });
+    }
+
+    // A member venue's staff booking for the collective onto a partner's calendar:
+    // record the cross-venue write and tell the owner, as the staff create route does.
+    // Registered with `after` like the emails above: a promise merely left running
+    // when the response goes out may never finish on a serverless host.
+    if (collectiveId) {
+      const owningVenueId = venue_id;
+      after(() => recordStaffCollectiveCrossVenueCreate({ admin: supabase, request, owningVenueId, bookingIds }));
     }
 
     return NextResponse.json(

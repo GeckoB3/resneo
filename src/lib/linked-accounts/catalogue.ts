@@ -610,6 +610,12 @@ export interface PublicCombinedCatalogue {
   items: PublicCatalogueItem[];
   /** Every heading on the page in display order, including empty ones. */
   categories: ServiceCategoryRef[];
+  /**
+   * The per-venue source data the build read (eligible venues only), so the
+   * staff catalogue can expand venue-wide providers without reading it again.
+   */
+  venueData: Record<string, VenueCatalogueData>;
+  hostVenueId: string | null;
 }
 
 /**
@@ -641,7 +647,38 @@ export function sourceDescriptionForProviders(
   return providers.map(describe).find(Boolean) ?? null;
 }
 
+/**
+ * Short-lived, per-process memo of the public combined catalogue. The staff
+ * form's profile route, the catalogue route, the diary's staff-collective
+ * lookup and the public page all rebuild it (about a second of queries) within
+ * the same few seconds of a form opening; sharing one build, and one in-flight
+ * promise, is what makes that opening quick. Ten seconds, cleared by
+ * `invalidatePublicCombinedCatalogueMemo` when the catalogue or membership
+ * changes in this process.
+ */
+const PUBLIC_CATALOGUE_MEMO_TTL_MS = 10_000;
+const publicCatalogueMemo = new Map<string, { at: number; value: Promise<PublicCombinedCatalogue | null> }>();
+
+export function invalidatePublicCombinedCatalogueMemo(collectiveId: string): void {
+  publicCatalogueMemo.delete(collectiveId);
+}
+
 export async function loadPublicCombinedCatalogue(
+  admin: SupabaseClient,
+  collectiveId: string,
+): Promise<PublicCombinedCatalogue | null> {
+  const now = Date.now();
+  const hit = publicCatalogueMemo.get(collectiveId);
+  if (hit && now - hit.at < PUBLIC_CATALOGUE_MEMO_TTL_MS) return hit.value;
+  const value = loadPublicCombinedCatalogueUncached(admin, collectiveId);
+  publicCatalogueMemo.set(collectiveId, { at: now, value });
+  value.catch(() => {
+    if (publicCatalogueMemo.get(collectiveId)?.value === value) publicCatalogueMemo.delete(collectiveId);
+  });
+  return value;
+}
+
+async function loadPublicCombinedCatalogueUncached(
   admin: SupabaseClient,
   collectiveId: string,
 ): Promise<PublicCombinedCatalogue | null> {
@@ -660,7 +697,7 @@ export async function loadPublicCombinedCatalogue(
     .eq('collective_id', collectiveId)
     .eq('status', 'active');
   const memberVenueIds = (memberRows ?? []).map((m) => m.venue_id as string);
-  if (memberVenueIds.length === 0) return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [], categories: [] };
+  if (memberVenueIds.length === 0) return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [], categories: [], venueData: {}, hostVenueId: (collective.host_venue_id as string | null) ?? null };
 
   // Eligible venues (Appointments-family, active plan) + name/slug.
   const { data: venues } = await admin
@@ -686,7 +723,7 @@ export async function loadPublicCombinedCatalogue(
   }
   const eligibleVenueIds = memberVenueIds.filter((id) => venueInfo[id]?.eligible);
   if (eligibleVenueIds.length === 0) {
-    return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [], categories: [] };
+    return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: [], categories: [], venueData: {}, hostVenueId: (collective.host_venue_id as string | null) ?? null };
   }
 
   // Source services + calendars per eligible venue (model-agnostic).
@@ -700,8 +737,15 @@ export async function loadPublicCombinedCatalogue(
     }
   >();
   const practitioner = new Map<string, { name: string }>();
+  // One read per venue, side by side; kept on the result for the staff build.
+  const venueData: Record<string, VenueCatalogueData> = {};
+  await Promise.all(
+    eligibleVenueIds.map(async (venueId) => {
+      venueData[venueId] = await loadVenueCatalogueData(admin, venueId);
+    }),
+  );
   for (const venueId of eligibleVenueIds) {
-    const data = await loadVenueCatalogueData(admin, venueId);
+    const data = venueData[venueId]!;
     for (const [id, s] of data.services) {
       serviceIndex.set(`${venueId}:${id}`, {
         durationMinutes: s.durationMinutes,
@@ -827,5 +871,11 @@ export async function loadPublicCombinedCatalogue(
     ),
   );
 
-  return { serviceGrouping: collective.service_grouping as ServiceGrouping, items: publicItems, categories };
+  return {
+    serviceGrouping: collective.service_grouping as ServiceGrouping,
+    items: publicItems,
+    categories,
+    venueData,
+    hostVenueId: (collective.host_venue_id as string | null) ?? null,
+  };
 }

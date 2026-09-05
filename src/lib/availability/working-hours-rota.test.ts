@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  pruneEndedSchedulePeriods,
   addDaysYmd,
   effectiveWorkingHoursForDate,
   insertSchedulePeriod,
@@ -181,5 +182,28 @@ describe('cycle arithmetic', () => {
     expect(periodCyclesForEnd({ from: START, until: '2026-12-06', weeks: [WEEK_A, WEEK_B] })).toBeNull();
     expect(periodCyclesForEnd({ from: START, until: null, weeks: [WEEK_A] })).toBeNull();
     expect(periodEndForCycles(START, 2, 10_000)).toBe(periodEndForCycles(START, 2, 52));
+  });
+});
+
+describe('pruneEndedSchedulePeriods', () => {
+  const week = (from: string, id: string): SchedulePeriod => ({ id, from, until: addDaysYmd(from, 6), cycle_start: from, weeks: [{}] });
+  const today = '2026-09-04';
+
+  it('leaves a timeline within the cap alone', () => {
+    const schedule: CalendarSchedule = { version: 1, periods: [week('2026-08-03', 'a'), week('2026-09-07', 'b')] };
+    expect(pruneEndedSchedulePeriods(schedule, today, 2)).toEqual({ schedule, removed: [] });
+  });
+
+  it('drops the changes that ended longest ago first, and never a current or upcoming one', () => {
+    const schedule: CalendarSchedule = {
+      version: 1,
+      periods: [week('2026-08-03', 'oldest'), week('2026-08-17', 'older'), week('2026-08-31', 'current'), week('2026-09-14', 'next')],
+    };
+    const out = pruneEndedSchedulePeriods(schedule, today, 3);
+    expect(out.removed.map((p) => p.id)).toEqual(['oldest']);
+    expect(out.schedule.periods.map((p) => p.id)).toEqual(['older', 'current', 'next']);
+    // Only ended changes can go: a cap below the number of live ones is left for the validator.
+    const tight = pruneEndedSchedulePeriods(schedule, today, 1);
+    expect(tight.schedule.periods.map((p) => p.id)).toEqual(['current', 'next']);
   });
 });

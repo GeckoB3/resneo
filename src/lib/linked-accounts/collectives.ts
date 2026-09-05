@@ -1,9 +1,14 @@
 /** Venue collective types and server helpers (Phase 2, §7). */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getAcceptedLinkBetween } from './queries';
+import { getAcceptedLinkBetween, getStandingLinkBetween } from './queries';
 import { evaluateLinkEligibility } from './eligibility';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
+import {
+  inheritCollectivePageConfigFromHost,
+  type CollectiveBookingPageConfig,
+} from '@/lib/linked-accounts/collective-page-config';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -131,7 +136,16 @@ export interface CollectiveView {
   slugStrategy: SlugStrategy;
   adoptedVenueId: string | null;
   timezone: string | null;
-  /** Single-venue-grade public-page config for the combined page (plan §22 / G6). */
+  /**
+   * Single-venue-grade public-page config for the combined page (plan §22 / G6).
+   *
+   * This is the EFFECTIVE config, with the host venue's tabs and About content
+   * filled in wherever the combined page has none of its own, exactly as the
+   * live page resolves it (`inheritCollectivePageConfigFromHost`). The editors
+   * seed their toggles from this and write every tab boolean back on each save,
+   * so seeding them from the raw stored row showed inherited tabs as off and an
+   * unrelated save (a colour change) silently switched them off on the live page.
+   */
   bookingPageConfig: Record<string, unknown> | null;
   isHost: boolean;
   /** The host venue's id (so the UI can identify which member is the host). */
@@ -151,6 +165,8 @@ export interface CollectiveView {
   members: {
     venueId: string;
     venueName: string;
+    /** The venue's own booking-page slug (`/book/{slug}`), the combined page's address when adopted. */
+    venueSlug: string | null;
     status: CollectiveMemberStatus;
     displayOrder: number;
     soloPageBehavior: SoloPageBehavior;
@@ -172,7 +188,10 @@ export async function hasFullMutualLinks(
 ): Promise<boolean> {
   for (const otherId of otherVenueIds) {
     if (otherId === venueId) continue;
-    const link = await getAcceptedLinkBetween(admin, venueId, otherId);
+    // A suspended link still holds the pair together (§6.7): the member is
+    // excluded from the page and the staff form by eligibility while it lasts,
+    // and removed only if the link actually ends.
+    const link = await getStandingLinkBetween(admin, venueId, otherId);
     if (!link) return false;
     if (
       link.low_grants_calendar !== 'full_details' ||
@@ -195,10 +214,20 @@ export async function hasFullMutualWriteLinks(
   admin: SupabaseClient,
   venueId: string,
   otherVenueIds: string[],
+  options?: {
+    /**
+     * Read a suspended link as still holding its grants. The reconcile ladder
+     * passes this so a subscription lapse pauses the collective rather than
+     * suspending every surviving member's providers; the create, invite and
+     * accept gates leave it off, since admitting a venue needs a live link.
+     */
+    includeSuspended?: boolean;
+  },
 ): Promise<boolean> {
+  const readLink = options?.includeSuspended ? getStandingLinkBetween : getAcceptedLinkBetween;
   for (const otherId of otherVenueIds) {
     if (otherId === venueId) continue;
-    const link = await getAcceptedLinkBetween(admin, venueId, otherId);
+    const link = await readLink(admin, venueId, otherId);
     if (!link) return false;
     if (
       link.low_grants_calendar !== 'full_details' ||
@@ -240,6 +269,20 @@ export function planProviderStatuses(
     if (next !== p.status) changes.push({ id: p.id, status: next });
   }
   return changes;
+}
+
+/**
+ * The combined page's config as the live page resolves it: the stored row with
+ * the host venue's tabs and About content filled in until the host saves its own
+ * there. Serving this (rather than the raw row) keeps the editors' toggles in
+ * step with the public page; see `CollectiveView.bookingPageConfig`.
+ */
+function effectiveCollectivePageConfig(
+  stored: CollectiveBookingPageConfig | null,
+  hostConfig: BookingPageConfig | null,
+): Record<string, unknown> | null {
+  if (!hostConfig) return stored as Record<string, unknown> | null;
+  return inheritCollectivePageConfigFromHost(stored ?? {}, hostConfig) as Record<string, unknown>;
 }
 
 /** Load every collective `venueId` hosts or is a member of, as views. */
@@ -284,18 +327,23 @@ export async function loadCollectiveViewsForVenue(
   const venueNames: Record<string, string> = {};
   const venueAnyAvailable: Record<string, boolean> = {};
   const venueStaffFirst: Record<string, boolean> = {};
+  const venueSlugs: Record<string, string | null> = {};
+  const venuePageConfigs: Record<string, BookingPageConfig | null> = {};
   if (venueIdsToLoad.size > 0) {
     const { data: venues } = await admin
       .from('venues')
-      .select('id, name, feature_flags')
+      .select('id, name, slug, feature_flags, booking_page_config')
       .in('id', [...venueIdsToLoad]);
     for (const v of venues ?? []) {
       venueNames[v.id as string] = (v.name as string) ?? 'Venue';
+      venueSlugs[v.id as string] = (v.slug as string | null) ?? null;
       const flags = resolveAppointmentsFeatureFlags(
         parseVenueFeatureFlags((v as { feature_flags?: unknown }).feature_flags),
       );
       venueAnyAvailable[v.id as string] = flags.any_available_practitioner;
       venueStaffFirst[v.id as string] = flags.staff_first_booking_flow;
+      venuePageConfigs[v.id as string] =
+        ((v as { booking_page_config?: unknown }).booking_page_config as BookingPageConfig | null) ?? null;
     }
   }
 
@@ -318,6 +366,7 @@ export async function loadCollectiveViewsForVenue(
       .map((m) => ({
         venueId: m.venue_id as string,
         venueName: venueNames[m.venue_id as string] ?? 'Venue',
+        venueSlug: venueSlugs[m.venue_id as string] ?? null,
         status: m.status as CollectiveMemberStatus,
         displayOrder: (m.display_order as number) ?? 0,
         soloPageBehavior: ((m.solo_page_behavior as SoloPageBehavior) ?? 'keep_live'),
@@ -340,7 +389,10 @@ export async function loadCollectiveViewsForVenue(
       slugStrategy: (row.slug_strategy as SlugStrategy) ?? 'dedicated',
       adoptedVenueId: row.adopted_venue_id ?? null,
       timezone: row.timezone ?? null,
-      bookingPageConfig: (row.booking_page_config as Record<string, unknown> | null) ?? null,
+      bookingPageConfig: effectiveCollectivePageConfig(
+        (row.booking_page_config as CollectiveBookingPageConfig | null) ?? null,
+        venuePageConfigs[row.host_venue_id] ?? null,
+      ),
       isHost: row.host_venue_id === venueId,
       hostVenueId: row.host_venue_id,
       myVenueId: venueId,
@@ -549,7 +601,9 @@ async function suspendOrRemoveCollectiveProviders(
   const writeOkByVenue: Record<string, boolean> = {};
   for (const venueId of survivorVenueIds) {
     const others = survivorVenueIds.filter((v) => v !== venueId);
-    writeOkByVenue[venueId] = await hasFullMutualWriteLinks(admin, venueId, others);
+    writeOkByVenue[venueId] = await hasFullMutualWriteLinks(admin, venueId, others, {
+      includeSuspended: true,
+    });
   }
 
   const changes = planProviderStatuses(providers, removedVenueIds, writeOkByVenue);

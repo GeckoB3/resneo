@@ -13,6 +13,7 @@ import {
 import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
 import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 import { isLinkFeatureVenue } from '@/lib/linked-accounts/eligibility';
+import { loadStaffCollectiveSummary } from '@/lib/linked-accounts/collective-staff-scope';
 
 export default async function CalendarPage() {
   const supabase = await createClient();
@@ -62,10 +63,16 @@ export default async function CalendarPage() {
     booking_model: (venue?.booking_model as string | null) ?? null,
   });
 
-  const linkedPractitionerIds =
+  // Resolved here rather than by the diary after it mounts, so the linked
+  // columns render right first time: a column that books through the collective
+  // never shows its own "New booking" button, not even for a moment. Only a
+  // link-eligible venue can be in a collective, so the others skip the lookup.
+  const [linkedPractitionerIds, initialStaffCollective] = await Promise.all([
     staff.role === 'staff' && staff.id
-      ? await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id)
-      : [];
+      ? getStaffManagedCalendarIds(admin, staff.venue_id, staff.id)
+      : Promise.resolve([] as string[]),
+    linkFeature ? loadStaffCollectiveSummary(admin, staff.venue_id) : Promise.resolve(null),
+  ]);
   const defaultPractitionerFilter: 'all' | string =
     linkedPractitionerIds.length === 1 ? linkedPractitionerIds[0] : 'all';
 
@@ -86,6 +93,7 @@ export default async function CalendarPage() {
             enabledModels={enabledModels}
             calendarTodayIso={calendarTodayIso}
             linkFeature={linkFeature}
+            initialStaffCollective={initialStaffCollective}
           />
         </div>
       </div>

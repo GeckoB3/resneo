@@ -8,10 +8,9 @@ import {
   backfillPerCalendarProviders,
 } from '@/lib/linked-accounts/catalogue';
 import { loadCollectiveAccess } from '@/lib/linked-accounts/collective-access';
+import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { loadCollectiveMemberImportSources } from '@/lib/linked-accounts/collective-page-config';
 import { ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
-import { loadVenueLookup } from '@/lib/linked-accounts/queries';
-import { notifyCombinedProviderProposed } from '@/lib/linked-accounts/notifications';
 import { groupServicesForBulkAdd } from '@/lib/linked-accounts/group-services-for-bulk-add';
 import { resolveCollectiveCategoryId } from '@/lib/linked-accounts/collective-categories';
 import {
@@ -21,36 +20,13 @@ import {
   seedCollectiveCategoriesOnce,
 } from '@/lib/linked-accounts/collective-category-inheritance';
 
-/** Best-effort: notification failures must never fail a catalogue action. */
-async function safeNotify(p: Promise<unknown>): Promise<void> {
-  try {
-    await p;
-  } catch (err) {
-    console.error('[combined-page] notification failed:', err);
-  }
-}
-
-async function collectiveContext(
-  admin: SupabaseClient,
-  collectiveId: string,
-): Promise<{ name: string; hostVenueId: string } | null> {
-  const { data } = await admin
-    .from('venue_collectives')
-    .select('name, host_venue_id')
-    .eq('id', collectiveId)
-    .maybeSingle();
-  if (!data) return null;
-  return { name: (data.name as string) ?? 'a venue collective', hostVenueId: data.host_venue_id as string };
-}
-
-async function offeringName(admin: SupabaseClient, itemId: string): Promise<string> {
-  const { data } = await admin
-    .from('collective_service_items')
-    .select('name')
-    .eq('id', itemId)
-    .maybeSingle();
-  return (data?.name as string) ?? 'an offering';
-}
+/*
+ * No email goes to a member when the host puts one of its services on the
+ * combined page. It used to, one per offering, which buried members in mail
+ * while a page was being built up (removed 2026-09-05). Joining the collective
+ * is the consent, and the member's own Services settings still govern the
+ * price, duration and availability of anything listed there.
+ */
 
 /** GET /api/venue/collectives/[id]/catalogue — the builder dataset (host + members). */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -122,6 +98,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     const result = await applyCatalogueAction(ctx.admin, id, ctx.venueId, ctx.userId, input);
+    // The booking routes memoise the merged catalogue briefly; a host edit must show
+    // on the staff form and the public page at once, not after the window.
+    invalidateCollectiveCatalogMemo(id);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
@@ -363,7 +342,7 @@ async function createOfferingSeeded(
   userId: string | null,
   name: string,
   sources: Array<{ venueId: string; sourceServiceId: string }>,
-): Promise<{ ok: true; seededMemberVenues: Set<string> } | { ok: false }> {
+): Promise<{ ok: boolean }> {
   const { data: item, error } = await admin
     .from('collective_service_items')
     .insert({
@@ -378,9 +357,8 @@ async function createOfferingSeeded(
     .single();
   if (error || !item) return { ok: false };
 
-  const seededMemberVenues = new Set<string>();
   for (const src of sources) {
-    const res = await addProvidersForSource(
+    await addProvidersForSource(
       admin,
       collectiveId,
       item.id as string,
@@ -390,11 +368,10 @@ async function createOfferingSeeded(
       actingVenueId,
       userId,
     );
-    if (res.ok && res.added > 0 && src.venueId !== actingVenueId) seededMemberVenues.add(src.venueId);
   }
   // File the offering under the heading its source services carry at their own venues.
   await inheritCategoryForOffering(admin, collectiveId, item.id as string, sources);
-  return { ok: true, seededMemberVenues };
+  return { ok: true };
 }
 
 async function applyCatalogueAction(
@@ -438,9 +415,8 @@ async function applyCatalogueAction(
       if (error || !item) return { ok: false, error: 'Failed to create the offering.', status: 500 };
       // Optionally seed providers from a set of source services (e.g. the picker
       // or an accepted merge) — expanded to one provider per calendar that offers it.
-      const seededMemberVenues = new Set<string>();
       for (const src of input.sourceServiceIds ?? []) {
-        const res = await addProvidersForSource(
+        await addProvidersForSource(
           admin,
           collectiveId,
           item.id as string,
@@ -450,34 +426,10 @@ async function applyCatalogueAction(
           actingVenueId,
           userId,
         );
-        if (res.ok && res.added > 0 && src.venueId !== actingVenueId) seededMemberVenues.add(src.venueId);
       }
       // No heading chosen: file it under the one its source services carry at home.
       if (!categoryCheck.categoryId) {
         await inheritCategoryForOffering(admin, collectiveId, item.id as string, input.sourceServiceIds ?? []);
-      }
-      // Ask each seeded member to approve the terms for its calendars (plan D6).
-      if (seededMemberVenues.size > 0) {
-        const others = [...seededMemberVenues];
-        const [ctx, lookup] = await Promise.all([
-          collectiveContext(admin, collectiveId),
-          loadVenueLookup(admin, [actingVenueId, ...others]),
-        ]);
-        const host = lookup[actingVenueId]?.name ?? 'The host venue';
-        await Promise.allSettled(
-          others.map((v) =>
-            safeNotify(
-              notifyCombinedProviderProposed(
-                admin,
-                v,
-                ctx?.name ?? 'a venue collective',
-                host,
-                input.name!.trim(),
-                collectiveId,
-              ),
-            ),
-          ),
-        );
       }
       return { ok: true };
     }
@@ -492,7 +444,6 @@ async function applyCatalogueAction(
         return { ok: false, error: 'No services were selected.', status: 400 };
       }
 
-      const proposals: Array<{ venueId: string; name: string }> = [];
       let createdAny = false;
       for (const group of groups) {
         const created = await createOfferingSeeded(
@@ -505,35 +456,9 @@ async function applyCatalogueAction(
         );
         if (!created.ok) continue; // Skip a single failure; keep adding the rest.
         createdAny = true;
-        for (const venueId of created.seededMemberVenues) proposals.push({ venueId, name: group.name });
       }
       if (!createdAny) {
         return { ok: false, error: 'Failed to add the selected services.', status: 500 };
-      }
-
-      // Ask each seeded member to approve the terms for its calendars (plan D6),
-      // one notification per proposed offering (matching the single-add flow).
-      if (proposals.length > 0) {
-        const venueIds = [...new Set(proposals.map((p) => p.venueId))];
-        const [ctx, lookup] = await Promise.all([
-          collectiveContext(admin, collectiveId),
-          loadVenueLookup(admin, [actingVenueId, ...venueIds]),
-        ]);
-        const host = lookup[actingVenueId]?.name ?? 'The host venue';
-        await Promise.allSettled(
-          proposals.map((p) =>
-            safeNotify(
-              notifyCombinedProviderProposed(
-                admin,
-                p.venueId,
-                ctx?.name ?? 'a venue collective',
-                host,
-                p.name,
-                collectiveId,
-              ),
-            ),
-          ),
-        );
       }
       return { ok: true };
     }
@@ -601,24 +526,6 @@ async function applyCatalogueAction(
         userId,
       );
       if (!res.ok) return res;
-      // Ask the member to approve the terms for its calendar (plan D6).
-      if (input.venueId !== actingVenueId && res.added > 0) {
-        const [ctx, name, lookup] = await Promise.all([
-          collectiveContext(admin, collectiveId),
-          offeringName(admin, input.itemId),
-          loadVenueLookup(admin, [actingVenueId, input.venueId]),
-        ]);
-        await safeNotify(
-          notifyCombinedProviderProposed(
-            admin,
-            input.venueId,
-            ctx?.name ?? 'a venue collective',
-            lookup[actingVenueId]?.name ?? 'The host venue',
-            name,
-            collectiveId,
-          ),
-        );
-      }
       return { ok: true };
     }
 
@@ -637,9 +544,6 @@ async function applyCatalogueAction(
       const ops = input.ops ?? [];
       if (ops.length === 0) return { ok: false, error: 'No changes to save.', status: 400 };
 
-      // One approval notification per (member venue, offering), even when several
-      // of that venue's calendars are added to the same offering in this batch.
-      const proposals = new Map<string, { venueId: string; name: string }>();
       let applied = 0;
 
       for (const op of ops) {
@@ -668,40 +572,12 @@ async function applyCatalogueAction(
         );
         if (!res.ok) continue; // Skip a single failure; apply the rest.
         applied += 1;
-        if (op.venueId !== actingVenueId && res.added > 0) {
-          const name = await offeringName(admin, op.itemId);
-          proposals.set(`${op.venueId}:${op.itemId}`, { venueId: op.venueId, name });
-        }
       }
 
       if (applied === 0) {
         return { ok: false, error: 'None of the changes could be applied.', status: 400 };
       }
 
-      // Ask each seeded member to approve the terms for its calendars (plan D6).
-      const proposalList = [...proposals.values()];
-      if (proposalList.length > 0) {
-        const venueIds = [...new Set(proposalList.map((p) => p.venueId))];
-        const [ctx, lookup] = await Promise.all([
-          collectiveContext(admin, collectiveId),
-          loadVenueLookup(admin, [actingVenueId, ...venueIds]),
-        ]);
-        const host = lookup[actingVenueId]?.name ?? 'The host venue';
-        await Promise.allSettled(
-          proposalList.map((p) =>
-            safeNotify(
-              notifyCombinedProviderProposed(
-                admin,
-                p.venueId,
-                ctx?.name ?? 'a venue collective',
-                host,
-                p.name,
-                collectiveId,
-              ),
-            ),
-          ),
-        );
-      }
       return { ok: true };
     }
 

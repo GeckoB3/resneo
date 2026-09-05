@@ -21,4 +21,4 @@ The card-hold feature relies on two SetupIntent events in addition to the existi
 
 Also ensure `charge.refund.updated` is enabled (in addition to `charge.refunded`): the no-show-fee refund path reconciles partial-to-full refunds from this event. `payment_intent.succeeded` and `payment_intent.payment_failed` (already enabled for deposits) also carry the no-show fee PaymentIntents, so no extra config is needed there.
 
-The feature ships behind the per-venue `card_hold_deposits` flag, which defaults **off** (env override `FEATURE_FLAG_CARD_HOLD_DEPOSITS` forces it on for every venue when set, so leave it unset in staging unless you want it globally enabled).
+Card holds are available to every venue: the per-venue `card_hold_deposits` flag was retired on 2026-09-05 (a leftover `FEATURE_FLAG_CARD_HOLD_DEPOSITS` env var is ignored and can be deleted). See `FEATURE_FLAGS.md`, Retired flags, for the compatibility key still served to the mobile app.

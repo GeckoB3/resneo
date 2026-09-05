@@ -950,7 +950,8 @@ export function CreateLinkedBookingModal({
             onChange={(e) => setServiceId(e.target.value)}
           >
             <option value="">No service</option>
-            {venue.services.map((s) => (
+            {/* Archived services stay in the list so existing bars still paint, but a new booking must not pick one. */}
+            {venue.services.filter((s) => s.isActive).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>

@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
       .select('id')
       .ilike('name', trimmedName)
       .eq('status', 'active')
+      .limit(1)
       .maybeSingle();
     if (nameTaken) {
       return NextResponse.json(
@@ -120,6 +121,9 @@ export async function POST(request: NextRequest) {
       .eq('status', 'dissolved')
       .gte('updated_at', cooldownCutoff)
       .neq('host_venue_id', ctx.venueId)
+      // Several dissolved collectives can share a name; more than one row makes
+      // maybeSingle() report an error, not a match, and the hold would be skipped.
+      .limit(1)
       .maybeSingle();
     if (recentlyDissolved) {
       return NextResponse.json(

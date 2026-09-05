@@ -7,6 +7,9 @@ const BUCKET = 'guest-documents';
 
 /**
  * GET /api/venue/guests/[guestId]/documents/[documentId]/download — short-lived read URL.
+ *
+ * `?intent=view` marks the read as an in-app view (the Records viewer) rather than a
+ * download, so the contact's audit trail says which happened.
  */
 export async function GET(
   request: NextRequest,
@@ -20,6 +23,7 @@ export async function GET(
     }
 
     const { guestId, documentId } = await params;
+    const intent = request.nextUrl.searchParams.get('intent') === 'view' ? 'view' : 'download';
 
     const { data: doc, error: fErr } = await staff.db
       .from('guest_documents')
@@ -49,7 +53,7 @@ export async function GET(
       venue_id: staff.venue_id,
       guest_id: guestId,
       actor_staff_id: staff.id,
-      event_type: 'guest_document_download',
+      event_type: intent === 'view' ? 'guest_document_view' : 'guest_document_download',
       metadata: { document_id: documentId },
     });
 

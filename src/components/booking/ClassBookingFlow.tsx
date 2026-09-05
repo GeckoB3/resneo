@@ -224,8 +224,6 @@ export function ClassBookingFlow({
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
   const sym = symForCurrency(currency);
-  /** Owner venue's card-hold flag; staff venue payloads carry it, the public payload does not (design doc 7.6 / D6). */
-  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
   /** Card-hold classes only (design doc 7.6): default ON, staff may waive per booking. */
   const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
 
@@ -411,11 +409,10 @@ export function ClassBookingFlow({
         ? resolveStaffEntityCardHold({
             paymentRequirement: selectedClass.payment_requirement,
             feePerUnitPence: selectedClass.deposit_amount_pence,
-            cardHoldFlagEnabled: cardHoldDepositsEnabled,
             units: spots,
           })
         : null,
-    [isStaff, selectedClass, spots, cardHoldDepositsEnabled],
+    [isStaff, selectedClass, spots],
   );
 
   const classRefundNoticeHours = useMemo(() => {

@@ -13,7 +13,11 @@ import type { BookingModel } from '@/types/booking-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { assertCanDisableBookingModels } from '@/lib/booking/venue-booking-model-disable-guard';
-import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
+import {
+  parseVenueFeatureFlags,
+  resolveAppointmentsFeatureFlags,
+  resolvedAppointmentsFeatureFlagsForApi,
+} from '@/lib/feature-flags';
 import { normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
 import { mergeBookingPageConfigPatch } from '@/lib/booking/booking-page-theme';
 import { GOOGLE_REVIEW_LINK_HELP, normaliseGoogleReviewUrl } from '@/lib/reviews/google-review-link';
@@ -198,7 +202,7 @@ export async function GET(request: NextRequest) {
       current_user_role: staff.role,
       feature_flags: {
         raw: featureFlagsRaw,
-        resolved: resolveAppointmentsFeatureFlags(featureFlagsRaw),
+        resolved: resolvedAppointmentsFeatureFlagsForApi(resolveAppointmentsFeatureFlags(featureFlagsRaw)),
       },
       // In-person payments (§6.6): the per-venue flag plus the v1 readiness
       // derivation. The connection-token 400 stays the authoritative gate for

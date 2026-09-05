@@ -39,9 +39,18 @@ interface ConfirmState {
 export function VenueCollectivesPanel({
   venueName,
   activeLinks,
+  manageCollectiveId = null,
+  onManageCollectiveOpened,
 }: {
   venueName: string;
   activeLinks: AccountLinkView[];
+  /**
+   * A collective to open in Manage combined page as soon as the list is in
+   * (the Booking page tab's pointer). Hosts only; a member's request just lands
+   * on this list. `onManageCollectiveOpened` clears the request either way.
+   */
+  manageCollectiveId?: string | null;
+  onManageCollectiveOpened?: () => void;
 }) {
   const [collectives, setCollectives] = useState<CollectiveView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,6 +96,15 @@ export function VenueCollectivesPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!manageCollectiveId || loading) return;
+    const target = collectives.find(
+      (c) => c.id === manageCollectiveId && c.isHost && c.status !== 'dissolved',
+    );
+    if (target) setManageTarget(target);
+    onManageCollectiveOpened?.();
+  }, [manageCollectiveId, loading, collectives, onManageCollectiveOpened]);
 
   const memberAction = async (
     collectiveId: string,
@@ -266,7 +284,13 @@ function CollectiveRow({
   const dissolved = collective.status === 'dissolved';
   const invited = collective.myMembershipStatus === 'invited';
   const isActiveMember = collective.myMembershipStatus === 'active';
-  const liveUrl = `/book/c/${collective.slug}`;
+  // The address customers actually use: a member venue's own page when the
+  // collective adopted it (the manager shows the same), else the dedicated one.
+  const adoptedSlug =
+    collective.slugStrategy === 'adopt_member' && collective.adoptedVenueId
+      ? (collective.members.find((m) => m.venueId === collective.adoptedVenueId)?.venueSlug ?? null)
+      : null;
+  const liveUrl = adoptedSlug ? `/book/${adoptedSlug}` : `/book/c/${collective.slug}`;
   // Unified colour source: the page config's brand colour, falling back to legacy branding.
   const accent =
     (collective.bookingPageConfig?.brand_primary as string | undefined) ??

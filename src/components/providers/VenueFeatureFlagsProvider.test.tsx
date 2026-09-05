@@ -19,9 +19,9 @@ const flagsWith = (
   ...overrides,
 });
 
-function CardHoldFlagProbe() {
-  const enabled = useAppointmentsFeatureFlag('card_hold_deposits');
-  return <p>card holds: {enabled ? 'on' : 'off'}</p>;
+function StaffFirstFlagProbe() {
+  const enabled = useAppointmentsFeatureFlag('staff_first_booking_flow');
+  return <p>staff first: {enabled ? 'on' : 'off'}</p>;
 }
 
 function UpdaterProbe({ next }: { next: ResolvedAppointmentsFeatureFlags }) {
@@ -36,43 +36,43 @@ function UpdaterProbe({ next }: { next: ResolvedAppointmentsFeatureFlags }) {
 describe('VenueFeatureFlagsProvider', () => {
   it('serves the server-supplied flags', () => {
     render(
-      <VenueFeatureFlagsProvider flags={flagsWith({ card_hold_deposits: true })}>
-        <CardHoldFlagProbe />
+      <VenueFeatureFlagsProvider flags={flagsWith({ staff_first_booking_flow: true })}>
+        <StaffFirstFlagProbe />
       </VenueFeatureFlagsProvider>,
     );
-    expect(screen.getByText('card holds: on')).toBeInTheDocument();
+    expect(screen.getByText('staff first: on')).toBeInTheDocument();
   });
 
   it('reflects an in-session update immediately (settings toggle, no refresh)', () => {
     render(
-      <VenueFeatureFlagsProvider flags={flagsWith({ card_hold_deposits: false })}>
-        <CardHoldFlagProbe />
-        <UpdaterProbe next={flagsWith({ card_hold_deposits: true })} />
+      <VenueFeatureFlagsProvider flags={flagsWith({ staff_first_booking_flow: false })}>
+        <StaffFirstFlagProbe />
+        <UpdaterProbe next={flagsWith({ staff_first_booking_flow: true })} />
       </VenueFeatureFlagsProvider>,
     );
-    expect(screen.getByText('card holds: off')).toBeInTheDocument();
+    expect(screen.getByText('staff first: off')).toBeInTheDocument();
 
     act(() => {
       screen.getByRole('button', { name: 'save flags' }).click();
     });
 
-    expect(screen.getByText('card holds: on')).toBeInTheDocument();
+    expect(screen.getByText('staff first: on')).toBeInTheDocument();
   });
 
   it('adopts fresh server flags on a re-render (router.refresh)', () => {
     const { rerender } = render(
-      <VenueFeatureFlagsProvider flags={flagsWith({ card_hold_deposits: false })}>
-        <CardHoldFlagProbe />
+      <VenueFeatureFlagsProvider flags={flagsWith({ staff_first_booking_flow: false })}>
+        <StaffFirstFlagProbe />
       </VenueFeatureFlagsProvider>,
     );
-    expect(screen.getByText('card holds: off')).toBeInTheDocument();
+    expect(screen.getByText('staff first: off')).toBeInTheDocument();
 
     rerender(
-      <VenueFeatureFlagsProvider flags={flagsWith({ card_hold_deposits: true })}>
-        <CardHoldFlagProbe />
+      <VenueFeatureFlagsProvider flags={flagsWith({ staff_first_booking_flow: true })}>
+        <StaffFirstFlagProbe />
       </VenueFeatureFlagsProvider>,
     );
-    expect(screen.getByText('card holds: on')).toBeInTheDocument();
+    expect(screen.getByText('staff first: on')).toBeInTheDocument();
   });
 
   it('returns null from the updater hook outside the provider', () => {

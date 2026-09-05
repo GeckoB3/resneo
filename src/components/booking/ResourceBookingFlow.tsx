@@ -237,8 +237,6 @@ export function ResourceBookingFlow({
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const terms = venue.terminology ?? { client: 'Booker', booking: 'Booking', staff: 'Manager' };
-  /** Owner venue's card-hold flag; staff venue payloads carry it, the public payload does not (design doc 7.6 / D6). */
-  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
   /** Card-hold resources only (design doc 7.6): default ON, staff may waive per booking. */
   const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
 
@@ -588,10 +586,9 @@ export function ResourceBookingFlow({
         ? resolveStaffEntityCardHold({
             paymentRequirement: priceBasis.payment_requirement,
             feePerUnitPence: priceBasis.deposit_amount_pence,
-            cardHoldFlagEnabled: cardHoldDepositsEnabled,
           })
         : null,
-    [isStaff, priceBasis, cardHoldDepositsEnabled],
+    [isStaff, priceBasis],
   );
 
   const resourceRefundNoticeHours = useMemo(() => {

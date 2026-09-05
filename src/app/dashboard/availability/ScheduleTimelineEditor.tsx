@@ -1,23 +1,29 @@
 'use client';
 
 import { useMemo, useState, type ReactNode } from 'react';
-import type { OpeningHours } from '@/types/availability';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { WorkingHours } from '@/types/booking-models';
 import {
   removeSchedulePeriod,
+  schedulePeriodHasEnded,
   scheduleForRow,
   type CalendarSchedule,
   type SchedulePeriod,
 } from '@/lib/availability/working-hours-rota';
-import { SchedulePeriodForm, describeYmd, describeYmdShort } from './SchedulePeriodForm';
-import { PERIOD_TINTS, ScheduleCalendarPreview, summariseDay, type LeaveRow } from './ScheduleCalendarPreview';
+import { SchedulePeriodForm, describeYmd, describeYmdShort, todayYmdLocal } from './SchedulePeriodForm';
+import { PERIOD_TINTS, ScheduleCalendarPreview, type DaySummary, type LeaveRow } from './ScheduleCalendarPreview';
 
 /**
  * "Plan your hours ahead" on the Availability tab: the timeline of schedule
  * changes for one calendar, the form to add or edit one, and the planning
  * calendar that shows the bookable hours on any date. The parent owns saving;
  * remount this component (change its `key`) when the stored value changes.
- * See Docs/rotating-schedule-plan.md.
+ *
+ * The list shows the changes that still matter: the one running now and any
+ * still to come. Changes that have ended stay in the stored timeline, so the
+ * planning calendar can page back through them, but they sit behind a "past
+ * changes" toggle rather than growing the list for good. See
+ * Docs/rotating-schedule-plan.md.
  */
 
 export interface ScheduleTimelineEditorProps {
@@ -38,7 +44,10 @@ export interface ScheduleTimelineEditorProps {
   onCopyTo?: (calendarIds: string[], schedule: CalendarSchedule) => Promise<void> | void;
   /** Injected for tests; see ScheduleCalendarPreview. */
   loadLeave?: (calendarId: string, from: string, to: string) => Promise<LeaveRow[]>;
+  loadVenueBlocks?: () => Promise<AvailabilityBlock[]>;
   initialMonth?: { year: number; monthIndex: number };
+  /** Today, `YYYY-MM-DD`; defaults to the browser's date. Injected for tests. */
+  todayYmd?: string;
 }
 
 type Mode = { kind: 'idle' } | { kind: 'add'; from: string | null } | { kind: 'edit'; id: string };
@@ -64,25 +73,31 @@ export function ScheduleTimelineEditor({
   copyTargets = [],
   onCopyTo,
   loadLeave,
+  loadVenueBlocks,
   initialMonth,
+  todayYmd,
 }: ScheduleTimelineEditorProps) {
+  const today = todayYmd ?? todayYmdLocal();
   const schedule = useMemo(
     () => scheduleForRow({ schedule_periods: value, working_hours_rota: legacyRota }),
     [value, legacyRota],
   );
   const [mode, setMode] = useState<Mode>({ kind: 'idle' });
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ date: string; summary: DaySummary } | null>(null);
+  const [showPast, setShowPast] = useState(false);
   const [copySelection, setCopySelection] = useState<Set<string>>(() => new Set());
 
   const editing = mode.kind === 'edit' ? schedule?.periods.find((p) => p.id === mode.id) ?? null : null;
 
-  const selectedSummary = useMemo(
-    () =>
-      selectedDate
-        ? summariseDay({ date: selectedDate, baseHours: weeklyHours, schedule, daysOff, venueHours, leave: [] })
-        : null,
-    [selectedDate, weeklyHours, schedule, daysOff, venueHours],
-  );
+  // Tints follow the index in the full timeline, past changes included, so a
+  // change keeps its colour on the calendar whether or not the list shows it.
+  const periods = schedule?.periods ?? [];
+  const tintFor = (p: SchedulePeriod) => PERIOD_TINTS[periods.indexOf(p) % PERIOD_TINTS.length]!.swatch;
+  const pastPeriods = periods.filter((p) => schedulePeriodHasEnded(p, today));
+  const currentPeriods = periods.filter((p) => !schedulePeriodHasEnded(p, today));
+
+  const selectedDate = selected?.date ?? null;
+  const selectedSummary = selected?.summary ?? null;
 
   async function saveSchedule(next: CalendarSchedule | null) {
     await onSave(next);
@@ -90,13 +105,39 @@ export function ScheduleTimelineEditor({
   }
 
   async function remove(period: SchedulePeriod) {
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(`Remove the change from ${describeYmdShort(period.from)}? Those dates go back to the standard weekly hours.`)
-    ) {
+    const ended = schedulePeriodHasEnded(period, today);
+    const question = ended
+      ? `Remove the change from ${describeYmdShort(period.from)}? It has already ended; removing it only changes what the calendar below shows for those past dates.`
+      : `Remove the change from ${describeYmdShort(period.from)}? Those dates go back to the standard weekly hours.`;
+    if (typeof window !== 'undefined' && !window.confirm(question)) {
       return;
     }
     await saveSchedule(removeSchedulePeriod(schedule, period.id));
+  }
+
+  function renderPeriodRow(p: SchedulePeriod, ended: boolean) {
+    return (
+      <li
+        key={p.id}
+        className={`flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm ${ended ? 'bg-slate-50' : ''}`}
+      >
+        <span className={`h-3 w-3 shrink-0 rounded-sm ${tintFor(p)}`} aria-hidden="true" />
+        <span className={`min-w-0 flex-1 ${ended ? 'text-slate-500' : 'text-slate-800'}`}>
+          {describePeriod(p)}
+          {ended ? ' (ended)' : ''}
+        </span>
+        {!readOnly ? (
+          <span className="flex items-center gap-2">
+            <button type="button" onClick={() => setMode({ kind: 'edit', id: p.id })} disabled={saving} className="text-xs font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50">
+              Edit
+            </button>
+            <button type="button" onClick={() => void remove(p)} disabled={saving} className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50">
+              Remove
+            </button>
+          </span>
+        ) : null}
+      </li>
+    );
   }
 
   return (
@@ -127,25 +168,33 @@ export function ScheduleTimelineEditor({
       <ol className="mt-4 space-y-2" aria-label="Schedule timeline">
         <li className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <span className="h-3 w-3 shrink-0 rounded-sm border border-slate-300 bg-white" aria-hidden="true" />
-          <span className="text-slate-700">Standard weekly hours (set above), on every date below does not cover</span>
+          <span className="text-slate-700">Standard weekly hours (set above), on every date the changes below do not cover</span>
         </li>
-        {(schedule?.periods ?? []).map((p, i) => (
-          <li key={p.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm">
-            <span className={`h-3 w-3 shrink-0 rounded-sm ${PERIOD_TINTS[i % PERIOD_TINTS.length]!.swatch}`} aria-hidden="true" />
-            <span className="min-w-0 flex-1 text-slate-800">{describePeriod(p)}</span>
-            {!readOnly ? (
-              <span className="flex items-center gap-2">
-                <button type="button" onClick={() => setMode({ kind: 'edit', id: p.id })} disabled={saving} className="text-xs font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50">
-                  Edit
-                </button>
-                <button type="button" onClick={() => void remove(p)} disabled={saving} className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50">
-                  Remove
-                </button>
-              </span>
-            ) : null}
+        {currentPeriods.map((p) => renderPeriodRow(p, false))}
+        {currentPeriods.length === 0 ? (
+          <li className="rounded-xl border border-dashed border-slate-200 px-3 py-2 text-sm text-slate-500">
+            No changes planned. The standard weekly hours apply from today onwards.
           </li>
-        ))}
+        ) : null}
       </ol>
+
+      {pastPeriods.length > 0 ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setShowPast((v) => !v)}
+            aria-expanded={showPast}
+            className="text-xs font-medium text-slate-600 hover:text-slate-900"
+          >
+            {showPast ? 'Hide past changes' : `Show ${pastPeriods.length} past change${pastPeriods.length === 1 ? '' : 's'}`}
+          </button>
+          {showPast ? (
+            <ol className="mt-2 space-y-2" aria-label="Past schedule changes">
+              {pastPeriods.map((p) => renderPeriodRow(p, true))}
+            </ol>
+          ) : null}
+        </div>
+      ) : null}
 
       {mode.kind !== 'idle' ? (
         <div className="mt-4">
@@ -159,6 +208,7 @@ export function ScheduleTimelineEditor({
             onCancel={() => setMode({ kind: 'idle' })}
             saving={saving}
             renderDayContext={renderDayContext}
+            todayYmd={today}
           />
         </div>
       ) : null}
@@ -166,8 +216,8 @@ export function ScheduleTimelineEditor({
       <div className="mt-5 grid gap-4 lg:grid-cols-[1fr,18rem]">
         <div>
           <p className="mb-2 text-xs text-slate-500">
-            Bookable hours by date: this calendar&apos;s hours inside your business hours, minus days off and leave. Pick a day
-            to see which rule applies.
+            Bookable hours by date: this calendar&apos;s hours inside your business hours and closures, minus days off and
+            leave. Page back to see what the hours were, or ahead to what they will be. Pick a day to see which rule applies.
           </p>
           <ScheduleCalendarPreview
             calendarId={calendarId}
@@ -176,16 +226,21 @@ export function ScheduleTimelineEditor({
             daysOff={daysOff}
             venueHours={venueHours}
             selectedDate={selectedDate}
-            onPickDate={setSelectedDate}
+            onPickDate={(date, summary) => setSelected({ date, summary })}
             loadLeave={loadLeave}
+            loadVenueBlocks={loadVenueBlocks}
             initialMonth={initialMonth}
+            todayYmd={today}
           />
         </div>
         <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm" aria-live="polite">
           {selectedDate && selectedSummary ? (
             <>
               <p className="font-semibold text-slate-900">{describeYmd(selectedDate)}</p>
-              <p className="mt-1 text-slate-800">{selectedSummary.text}</p>
+              <p className="mt-1 text-slate-800">
+                {selectedSummary.text}
+                {selectedSummary.partialLeave ? ` (leave ${selectedSummary.partialLeave})` : ''}
+              </p>
               <p className="mt-2 text-xs text-slate-500">
                 {selectedSummary.source.kind === 'period'
                   ? `Rule: change from ${describeYmdShort(selectedSummary.source.period.from)}${
@@ -193,7 +248,9 @@ export function ScheduleTimelineEditor({
                     }.`
                   : 'Rule: standard weekly hours.'}
                 {selectedSummary.reason === 'day-off' ? ' This is a day off.' : ''}
+                {selectedSummary.reason === 'leave' ? ' This calendar is on leave.' : ''}
                 {selectedSummary.reason === 'venue-closed' ? ' Your venue is closed on this weekday.' : ''}
+                {selectedSummary.reason === 'venue-closure' ? ' Your venue has a closure on this date.' : ''}
               </p>
               {!readOnly && mode.kind === 'idle' ? (
                 <div className="mt-3 flex flex-col gap-1.5">
@@ -218,7 +275,8 @@ export function ScheduleTimelineEditor({
         <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <p className="text-sm font-medium text-slate-800">Copy this schedule to other calendars</p>
           <p className="mt-0.5 text-xs text-slate-500">
-            Copies every change above as saved. Each calendar keeps its own standard weekly hours, breaks and days off.
+            Copies every change above as saved, past changes included. Each calendar keeps its own standard weekly hours,
+            breaks and days off.
           </p>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {copyTargets.map((t) => (

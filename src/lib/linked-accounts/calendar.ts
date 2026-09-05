@@ -109,6 +109,12 @@ export interface LinkedBooking {
 export interface LinkedService {
   id: string;
   name: string;
+  /**
+   * False once the owner venue has archived the service. The list keeps
+   * archived services so an existing booking still has a duration and
+   * processing pattern to paint; a picker for a NEW booking must filter on it.
+   */
+  isActive: boolean;
   durationMinutes?: number;
   bufferMinutes?: number;
   processingTimeBlocks?: import('@/types/booking-models').ProcessingTimeBlock[];

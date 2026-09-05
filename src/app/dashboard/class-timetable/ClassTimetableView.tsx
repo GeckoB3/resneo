@@ -25,7 +25,6 @@ import { Button } from '@/components/ui/primitives/Button';
 import { Input, Textarea } from '@/components/ui/primitives/Input';
 import { FormField } from '@/components/ui/primitives/FormField';
 import { formatYmdInTimezone, addDaysToYmd } from '@/lib/venue/venue-local-clock';
-import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 
 interface PractitionerOption {
   id: string;
@@ -152,8 +151,6 @@ export function ClassTimetableView({
   classCommerceEnabled?: boolean;
 }) {
   const sym = currencySymbolFromCode(currency);
-  /** Card-hold deposits rollout flag, resolved server-side by the dashboard layout (VenueFeatureFlagsProvider). */
-  const cardHoldEnabled = useAppointmentsFeatureFlag('card_hold_deposits');
   /** Single source of truth for "today" across stats, agenda and the calendar — venue-local, never UTC/browser. */
   const venueToday = useMemo(() => formatYmdInTimezone(Date.now(), venueTimeZone), [venueTimeZone]);
   function formatPrice(pence: number): string {
@@ -1390,30 +1387,23 @@ export function ClassTimetableView({
                         />
                         <span>Full payment online (per person)</span>
                       </label>
-                      {(cardHoldEnabled || classTypeForm.payment_requirement === 'card_hold') && (
-                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                          <input
-                            type="radio"
-                            name="payment_requirement_modal"
-                            className="mt-0.5"
-                            checked={classTypeForm.payment_requirement === 'card_hold'}
-                            onChange={() => setClassTypeForm((f) => ({ ...f, payment_requirement: 'card_hold' }))}
-                          />
-                          <span>
-                            Card hold
-                            <span className="mt-0.5 block text-xs font-normal text-slate-500">
-                              No payment is taken when the client books. Their card is stored securely and you can
-                              charge a no-show fee if they do not attend.
-                            </span>
+                      <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="payment_requirement_modal"
+                          className="mt-0.5"
+                          checked={classTypeForm.payment_requirement === 'card_hold'}
+                          onChange={() => setClassTypeForm((f) => ({ ...f, payment_requirement: 'card_hold' }))}
+                        />
+                        <span>
+                          Card hold
+                          <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                            No payment is taken when the client books. Their card is stored securely and you can
+                            charge a no-show fee if they do not attend.
                           </span>
-                        </label>
-                      )}
+                        </span>
+                      </label>
                     </div>
-                    {!cardHoldEnabled && classTypeForm.payment_requirement === 'card_hold' && (
-                      <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                        Card hold is disabled for this venue; this service currently takes no deposit.
-                      </p>
-                    )}
                     {(classTypeForm.payment_requirement === 'deposit' ||
                       classTypeForm.payment_requirement === 'card_hold') && (
                       <div className="mt-3 max-w-xs">

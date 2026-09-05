@@ -153,9 +153,7 @@ describe('resolveAppointmentServiceOnlineChargeWithAddons', () => {
 });
 
 describe('resolveAppointmentPaymentRequirement', () => {
-  it('honours explicit card_hold (resolver is feature-flag independent; the gate lives at write paths)', () => {
-    // No flag/env setup here on purpose: the resolver must return card_hold purely
-    // from the row. Flag gating happens in the config write paths and create routes.
+  it('honours explicit card_hold purely from the row', () => {
     expect(
       resolveAppointmentPaymentRequirement({ payment_requirement: 'card_hold', deposit_pence: 1500 }),
     ).toBe('card_hold');

@@ -77,7 +77,6 @@ describe('deposit_type passthrough (restriction > legacy > default)', () => {
           }),
         ],
         deposit_legacy_type: 'charge',
-        card_hold_deposits_enabled: true,
       }),
     );
     expect(slot.deposit_type).toBe('card_hold');
@@ -97,7 +96,6 @@ describe('deposit_type passthrough (restriction > legacy > default)', () => {
           }),
         ],
         deposit_legacy_type: 'card_hold',
-        card_hold_deposits_enabled: true,
       }),
     );
     expect(slot.deposit_type).toBe('charge');
@@ -111,7 +109,6 @@ describe('deposit_type passthrough (restriction > legacy > default)', () => {
         restrictions: [],
         deposit_legacy_amount_per_person_gbp: 5,
         deposit_legacy_type: 'card_hold',
-        card_hold_deposits_enabled: true,
       }),
     );
     // Legacy-only venues never trigger online deposits (no restriction threshold)...
@@ -123,7 +120,7 @@ describe('deposit_type passthrough (restriction > legacy > default)', () => {
   });
 
   it('defaults to "charge" when neither restriction nor legacy config supplies a type', () => {
-    const slot = firstSlot(input({ restrictions: [restriction()], card_hold_deposits_enabled: true }));
+    const slot = firstSlot(input({ restrictions: [restriction()] }));
     expect(slot.deposit_type).toBe('charge');
     expect(slot.configured_deposit_per_person_gbp).toBeNull();
     expect(slot.deposit_required).toBe(false);
@@ -142,7 +139,6 @@ describe('threshold gating (unchanged behaviour)', () => {
             deposit_type: 'charge',
           }),
         ],
-        card_hold_deposits_enabled: true,
       }),
     );
     expect(slot.deposit_required).toBe(false);
@@ -163,7 +159,6 @@ describe('threshold gating (unchanged behaviour)', () => {
             deposit_type: 'card_hold',
           }),
         ],
-        card_hold_deposits_enabled: true,
       }),
     );
     expect(slot.deposit_required).toBe(false);
@@ -183,7 +178,6 @@ describe('threshold gating (unchanged behaviour)', () => {
             deposit_type: 'card_hold',
           }),
         ],
-        card_hold_deposits_enabled: true,
       }),
     );
     expect(slot.deposit_required).toBe(true);
@@ -192,19 +186,10 @@ describe('threshold gating (unchanged behaviour)', () => {
   });
 });
 
-describe('flag-off and zero-fee safety (spec 6.3)', () => {
-  it('flag off: card_hold resolves as no deposit with a console.warn', () => {
+describe('zero-fee safety (spec 6.3)', () => {
+  it('no positive fee: card_hold resolves as no deposit with a console.warn, warned once per service', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const engineInput = input({
-      restrictions: [
-        restriction({
-          deposit_required_from_party_size: 6,
-          deposit_amount_per_person_gbp: 5,
-          deposit_type: 'card_hold',
-        }),
-      ],
-      card_hold_deposits_enabled: false,
-    });
+    const engineInput = input({ restrictions: [restriction({ deposit_type: 'card_hold' })] });
     const results = computeAvailability(engineInput);
     const slots = results.flatMap((r) => r.slots);
     expect(slots.length).toBeGreaterThan(0);
@@ -216,35 +201,12 @@ describe('flag-off and zero-fee safety (spec 6.3)', () => {
     }
     // Warned once per service, not once per slot.
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain('card_hold_deposits flag is off');
+    expect(String(warn.mock.calls[0]?.[0])).toContain('no positive per-person fee');
   });
 
-  it('flag omitted behaves like flag off', () => {
+  it('no positive fee: a single slot reads as a plain charge rule', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const slot = firstSlot(
-      input({
-        restrictions: [
-          restriction({
-            deposit_required_from_party_size: 6,
-            deposit_amount_per_person_gbp: 5,
-            deposit_type: 'card_hold',
-          }),
-        ],
-      }),
-    );
-    expect(slot.deposit_required).toBe(false);
-    expect(slot.deposit_type).toBe('charge');
-    expect(warn).toHaveBeenCalled();
-  });
-
-  it('flag on but no positive fee: card_hold resolves as no deposit with a console.warn', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const slot = firstSlot(
-      input({
-        restrictions: [restriction({ deposit_type: 'card_hold' })],
-        card_hold_deposits_enabled: true,
-      }),
-    );
+    const slot = firstSlot(input({ restrictions: [restriction({ deposit_type: 'card_hold' })] }));
     expect(slot.deposit_required).toBe(false);
     expect(slot.deposit_type).toBe('charge');
     expect(slot.configured_deposit_per_person_gbp).toBeNull();
@@ -252,7 +214,7 @@ describe('flag-off and zero-fee safety (spec 6.3)', () => {
     expect(String(warn.mock.calls[0]?.[0])).toContain('no positive per-person fee');
   });
 
-  it('flag off does not affect charge deposits', () => {
+  it('the zero-fee rule does not touch charge deposits', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const slot = firstSlot(
       input({
@@ -263,7 +225,6 @@ describe('flag-off and zero-fee safety (spec 6.3)', () => {
             deposit_type: 'charge',
           }),
         ],
-        card_hold_deposits_enabled: false,
       }),
     );
     expect(slot.deposit_required).toBe(true);

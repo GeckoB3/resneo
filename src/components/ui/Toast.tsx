@@ -44,7 +44,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={{ addToast }}>
       {children}
       <div
-        className="pointer-events-none fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom,0px))] z-[100] flex flex-col gap-1.5 sm:left-auto sm:right-3 sm:max-w-xs"
+        className="pointer-events-none fixed inset-x-3 z-[100] flex flex-col gap-1.5 sm:left-auto sm:right-3 sm:max-w-xs"
+        // A screen-bottom prompt (the diary's notify / skip / undo bar) sets the
+        // offset variable while it shows, so toasts stack above it rather than
+        // landing on its buttons.
+        style={{
+          bottom: 'calc(max(0.75rem, env(safe-area-inset-bottom, 0px)) + var(--toast-bottom-offset, 0px))',
+        }}
         aria-live="polite"
         aria-atomic="false"
       >

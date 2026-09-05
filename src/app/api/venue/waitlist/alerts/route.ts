@@ -17,6 +17,7 @@ import {
   type WaitlistSlotOpportunityRow,
 } from '@/lib/booking/waitlist-slot-opportunity-service';
 import { isWaitlistFreedSlotStillUnbooked } from '@/lib/booking/is-waitlist-freed-slot-unbooked';
+import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 
 /** GET /api/venue/waitlist/alerts — open staff waitlist availability alerts */
 export async function GET(request: Request) {
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
 
     const { data: venueRow } = await admin
       .from('venues')
-      .select('feature_flags')
+      .select('feature_flags, timezone')
       .eq('id', staff.venue_id)
       .maybeSingle();
     const flags = parseVenueFeatureFlags(
@@ -48,11 +49,17 @@ export async function GET(request: Request) {
 
     // Opportunity discovery runs on cancel hooks and /api/cron/expire-waitlist-offers (every 5 min).
 
+    // A slot that has already passed cannot be offered, so it is not an alert.
+    const venueToday = formatIsoDateInTimeZone(
+      new Date(),
+      ((venueRow as { timezone?: string | null } | null)?.timezone as string | null) || 'Europe/London',
+    );
     const { data, error } = await admin
       .from('waitlist_slot_opportunities')
       .select('*')
       .eq('venue_id', staff.venue_id)
       .eq('status', 'open')
+      .gte('slot_date', venueToday)
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -63,14 +70,21 @@ export async function GET(request: Request) {
     const rows = (data ?? []) as WaitlistSlotOpportunityRow[];
     const openRows: WaitlistSlotOpportunityRow[] = [];
 
-    for (const row of rows) {
-      const slot = opportunityToFreedSlot(row);
-      const stillUnbooked = await isWaitlistFreedSlotStillUnbooked(admin, slot);
-      if (stillUnbooked) {
-        openRows.push(row);
+    // One check per row, side by side. Checked one after another, a venue with a
+    // dozen open alerts waited several seconds for this banner on every
+    // dashboard page; the marking of filled slots stays in order.
+    const checks = await Promise.all(
+      rows.map(async (row) => {
+        const slot = opportunityToFreedSlot(row);
+        return { row, slot, stillUnbooked: await isWaitlistFreedSlotStillUnbooked(admin, slot) };
+      }),
+    );
+    for (const check of checks) {
+      if (check.stillUnbooked) {
+        openRows.push(check.row);
         continue;
       }
-      await markWaitlistOpportunitiesFilledForSlot(admin, slot);
+      await markWaitlistOpportunitiesFilledForSlot(admin, check.slot);
     }
 
     const alerts = (await enrichWaitlistSlotOpportunities(admin, openRows)).filter(

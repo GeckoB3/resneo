@@ -7,10 +7,12 @@ import {
   ROTA_MAX_CYCLES,
   ROTA_MAX_WEEKS,
   ROTA_MIN_WEEKS,
+  SCHEDULE_MAX_PERIODS,
   insertSchedulePeriod,
   mondayOnOrBefore,
   periodCyclesForEnd,
   periodEndForCycles,
+  pruneEndedSchedulePeriods,
   sundayOnOrAfter,
   validateCalendarSchedule,
   type CalendarSchedule,
@@ -21,7 +23,8 @@ import {
 /**
  * Add or edit one schedule period: the Monday it starts, one to six weekly shapes,
  * and how long it runs. Saving inserts it into the timeline, trimming or splitting
- * whatever it overlaps, and the form says so before the save.
+ * whatever it overlaps, and the form says so before the save. A full timeline makes
+ * room by dropping the change that ended longest ago, and the form says that too.
  * See Docs/rotating-schedule-plan.md.
  */
 
@@ -40,6 +43,8 @@ export interface SchedulePeriodFormProps {
   onCancel: () => void;
   saving: boolean;
   renderDayContext?: (dayKey: string, periods: Array<{ open: string; close: string }> | null) => ReactNode;
+  /** Today, `YYYY-MM-DD`; defaults to the browser's date. Injected for tests. */
+  todayYmd?: string;
 }
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -98,7 +103,7 @@ interface Draft {
   until: string;
 }
 
-function initialDraft(editing: SchedulePeriod | null, initialFrom: string | null | undefined, weeklyHours: WorkingHours): Draft {
+function initialDraft(editing: SchedulePeriod | null, initialFrom: string | null | undefined, weeklyHours: WorkingHours, today: string): Draft {
   if (editing) {
     const cycles = periodCyclesForEnd(editing);
     return {
@@ -110,7 +115,7 @@ function initialDraft(editing: SchedulePeriod | null, initialFrom: string | null
     };
   }
   return {
-    from: mondayOnOrBefore(initialFrom || todayYmdLocal()),
+    from: mondayOnOrBefore(initialFrom || today),
     weeks: [cloneHours(weeklyHours)],
     repeatMode: 'forever',
     cycles: 4,
@@ -130,8 +135,10 @@ export function SchedulePeriodForm({
   onCancel,
   saving,
   renderDayContext,
+  todayYmd,
 }: SchedulePeriodFormProps) {
-  const [draft, setDraft] = useState<Draft>(() => initialDraft(editing, initialFrom, weeklyHours));
+  const today = todayYmd ?? todayYmdLocal();
+  const [draft, setDraft] = useState<Draft>(() => initialDraft(editing, initialFrom, weeklyHours, today));
   const [activeWeek, setActiveWeek] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -153,7 +160,11 @@ export function SchedulePeriodForm({
     [draft, until, editing],
   );
 
-  const preview = useMemo(() => insertSchedulePeriod(schedule, candidate, () => 'preview'), [schedule, candidate]);
+  const preview = useMemo(() => {
+    const inserted = insertSchedulePeriod(schedule, candidate, () => 'preview');
+    const pruned = pruneEndedSchedulePeriods(inserted.schedule, today);
+    return { trims: inserted.trims, dropped: pruned.removed };
+  }, [schedule, candidate, today]);
   const byId = useMemo(() => new Map((schedule?.periods ?? []).map((p) => [p.id, p])), [schedule]);
 
   function setCycleLength(next: number) {
@@ -172,8 +183,8 @@ export function SchedulePeriodForm({
       return;
     }
     const id = editing?.id ?? newPeriodId();
-    const { schedule: next } = insertSchedulePeriod(schedule, { ...candidate, id }, newPeriodId);
-    const checked = validateCalendarSchedule(next);
+    const { schedule: inserted } = insertSchedulePeriod(schedule, { ...candidate, id }, newPeriodId);
+    const checked = validateCalendarSchedule(pruneEndedSchedulePeriods(inserted, today).schedule);
     if (!checked.ok) {
       setError(checked.error);
       return;
@@ -287,12 +298,18 @@ export function SchedulePeriodForm({
         </div>
       </fieldset>
 
-      {preview.trims.length > 0 ? (
+      {preview.trims.length > 0 || preview.dropped.length > 0 ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
           <p className="font-medium">Saving will adjust what it overlaps:</p>
           <ul className="mt-1 list-disc pl-5">
             {preview.trims.map((t, i) => (
               <li key={`${t.id}-${i}`}>{describeTrim(t, byId)}</li>
+            ))}
+            {preview.dropped.map((p) => (
+              <li key={`dropped-${p.id}`}>
+                Drops the past change from {describeYmdShort(p.from)} (ended {describeYmdShort(p.until!)}) to stay within{' '}
+                {SCHEDULE_MAX_PERIODS} changes.
+              </li>
             ))}
           </ul>
         </div>

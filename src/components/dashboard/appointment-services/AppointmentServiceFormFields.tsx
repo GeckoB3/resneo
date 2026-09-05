@@ -57,11 +57,6 @@ export interface AppointmentServiceFormFieldsProps {
   hideStaffMaySection?: boolean;
   staffNotice?: ReactNode;
   /**
-   * Venue has the `card_hold_deposits` flag on: shows the "Card hold" payment option.
-   * Omit (or pass false) to keep the form charge-only, e.g. during onboarding.
-   */
-  cardHoldEnabled?: boolean;
-  /**
    * The venue's service categories, in booking-page order. When present and non-empty,
    * admins get a Category select; omit it for surfaces without categories (onboarding,
    * the import wizard).
@@ -83,7 +78,6 @@ export function AppointmentServiceFormFields({
   calendarsSection,
   hideStaffMaySection = false,
   staffNotice,
-  cardHoldEnabled = false,
   categories = [],
 }: AppointmentServiceFormFieldsProps) {
   const usesVariants = isAdmin && form.variants.length > 0;
@@ -611,30 +605,23 @@ export function AppointmentServiceFormFields({
               />
               <span>Pay full price online at booking</span>
             </label>
-            {cardHoldEnabled && (
-              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                <input
-                  type="radio"
-                  name={paymentName}
-                  className="mt-0.5"
-                  checked={form.payment_requirement === 'card_hold'}
-                  onChange={() => setForm((f) => ({ ...f, payment_requirement: 'card_hold' }))}
-                />
-                <span>
-                  Card hold
-                  <span className="mt-0.5 block text-xs font-normal text-slate-500">
-                    No payment is taken when the client books. Their card is stored securely and you can charge a
-                    no-show fee if they do not attend.
-                  </span>
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                name={paymentName}
+                className="mt-0.5"
+                checked={form.payment_requirement === 'card_hold'}
+                onChange={() => setForm((f) => ({ ...f, payment_requirement: 'card_hold' }))}
+              />
+              <span>
+                Card hold
+                <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                  No payment is taken when the client books. Their card is stored securely and you can charge a
+                  no-show fee if they do not attend.
                 </span>
-              </label>
-            )}
+              </span>
+            </label>
           </div>
-          {!cardHoldEnabled && isCardHold && (
-            <p className="rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950/90">
-              Card hold is disabled for this venue; this service currently takes no deposit.
-            </p>
-          )}
           {(form.payment_requirement === 'deposit' || isCardHold) && (
             <div>
               <label className="mb-1 block text-sm text-slate-600">

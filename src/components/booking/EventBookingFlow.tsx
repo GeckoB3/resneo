@@ -216,8 +216,6 @@ export function EventBookingFlow({
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
   const sym = symForCurrency(currency);
-  /** Owner venue's card-hold flag; staff venue payloads carry it, the public payload does not (design doc 7.6 / D6). */
-  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
   /** Card-hold events only (design doc 7.6): default ON, staff may waive per booking. */
   const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
 
@@ -412,11 +410,10 @@ export function EventBookingFlow({
         ? resolveStaffEntityCardHold({
             paymentRequirement: selectedOccurrence.payment_requirement,
             feePerUnitPence: selectedOccurrence.deposit_amount_pence,
-            cardHoldFlagEnabled: cardHoldDepositsEnabled,
             units: totalTickets,
           })
         : null,
-    [isStaff, selectedOccurrence, totalTickets, cardHoldDepositsEnabled],
+    [isStaff, selectedOccurrence, totalTickets],
   );
 
   const chargePence = paymentSummary?.chargePence ?? 0;

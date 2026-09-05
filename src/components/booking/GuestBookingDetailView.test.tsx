@@ -70,7 +70,6 @@ function baseDetail(overrides: Partial<BookingDetailDto> = {}): BookingDetailDto
         any_available_practitioner: false,
         class_commerce_enabled: false,
         compliance_records_enabled: false,
-        card_hold_deposits: false,
         staff_first_booking_flow: false,
       },
     },

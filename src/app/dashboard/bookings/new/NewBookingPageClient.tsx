@@ -30,6 +30,7 @@ export function NewBookingPageClient({
   bookingModel = 'table_reservation',
   currency = 'GBP',
   enabledModels = [],
+  collective = null,
 }: {
   venueId: string;
   venue: VenuePublic;
@@ -37,6 +38,13 @@ export function NewBookingPageClient({
   bookingModel?: BookingModel;
   currency?: string;
   enabledModels?: BookingModel[];
+  /**
+   * The live venue collective this venue books for as one business. The stack
+   * loads the collective's virtual venue for the appointment surface, so that
+   * form shows every member's calendars and the combined offerings; `venue`
+   * stays the venue's own profile for its other surfaces.
+   */
+  collective?: { id: string; name: string } | null;
 }) {
   const router = useRouter();
   const routerRef = useRef(router);
@@ -153,7 +161,13 @@ export function NewBookingPageClient({
     <div className="p-4 md:p-6 lg:p-8">
       <ToastProvider>
         <div className={`mx-auto ${outerMaxClass}`}>
-          <h1 className="mb-6 text-2xl font-semibold text-slate-900">New Booking</h1>
+          <h1 className={`${collective ? 'mb-1' : 'mb-6'} text-2xl font-semibold text-slate-900`}>New Booking</h1>
+          {collective ? (
+            <p className="mb-6 text-sm text-slate-500">
+              Booking for <span className="font-medium text-slate-700">{collective.name}</span>: every member venue&apos;s
+              calendars and the combined services.
+            </p>
+          ) : null}
           <StaffSurfaceBookingStack
             key={resetKey}
             bookingModel={bookingModel}
@@ -167,6 +181,8 @@ export function NewBookingPageClient({
             onActiveTabChange={handleTabChange}
             bookingIntent="new"
             staffRebookBootstrap={staffRebookBootstrap}
+            linkedOwnerVenueId={collective?.id}
+            linkedVenueName={collective?.name}
           />
         </div>
       </ToastProvider>

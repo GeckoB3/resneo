@@ -360,3 +360,42 @@ export function removeSchedulePeriod(schedule: CalendarSchedule | null, id: stri
   const periods = (schedule?.periods ?? []).filter((p) => p.id !== id);
   return periods.length === 0 ? null : { version: 1, periods };
 }
+
+// ── History ───────────────────────────────────────────────────────────────────
+
+/** True once the period's last day is before `todayYmd`. An open-ended period never ends. */
+export function schedulePeriodHasEnded(period: Pick<SchedulePeriod, 'until'>, todayYmd: string): boolean {
+  return period.until != null && ymdToDayNumber(period.until) < ymdToDayNumber(todayYmd);
+}
+
+/**
+ * Drop the oldest ended periods until the timeline is within `max`.
+ *
+ * Ended periods are kept on purpose: the planning calendar pages back through
+ * them, so a venue can see what its hours were. They only cost anything once
+ * the timeline is full, which a calendar that changes its hours every few
+ * weeks reaches within a couple of years. Rather than refuse the new change,
+ * the change that finished longest ago makes room; nothing current or
+ * upcoming is ever dropped, so if the timeline is full of those the caller
+ * still gets the validator's error.
+ */
+export function pruneEndedSchedulePeriods(
+  schedule: CalendarSchedule,
+  todayYmd: string,
+  max: number = SCHEDULE_MAX_PERIODS,
+): { schedule: CalendarSchedule; removed: SchedulePeriod[] } {
+  if (schedule.periods.length <= max) return { schedule, removed: [] };
+  const ended = schedule.periods
+    .filter((p) => schedulePeriodHasEnded(p, todayYmd))
+    .sort((a, b) => ymdToDayNumber(a.until!) - ymdToDayNumber(b.until!));
+  const dropped = new Set<string>();
+  for (const p of ended) {
+    if (schedule.periods.length - dropped.size <= max) break;
+    dropped.add(p.id);
+  }
+  if (dropped.size === 0) return { schedule, removed: [] };
+  return {
+    schedule: { version: 1, periods: schedule.periods.filter((p) => !dropped.has(p.id)) },
+    removed: schedule.periods.filter((p) => dropped.has(p.id)),
+  };
+}

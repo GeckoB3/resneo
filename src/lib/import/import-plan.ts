@@ -162,6 +162,13 @@ Write a headline and a 3–6 sentence summary of this import plan. Mention what 
 imported, anything that was fixed automatically (header rows skipped, dates repaired,
 names matched), and what — if anything — still needs the user's attention.
 
+What the fields mean:
+- value_repairs: hard-to-read dates or times that were repaired automatically.
+- mappings.mapped / ignored / custom / split: columns mapped to ResNeo fields, left out, kept as custom fields, or split into several fields.
+- references.resolved / skipped / pending: service, staff, class or event names matched to the venue's catalogue, skipped at the user's request, or still waiting for a decision.
+- blocked_rows: rows that cannot import until the user makes a decision.
+- issues: data problems found, with how many the user has already decided on.
+
 Plan data:
 ${JSON.stringify(stats, null, 1)}
 `,

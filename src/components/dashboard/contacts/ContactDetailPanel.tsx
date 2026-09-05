@@ -16,7 +16,7 @@ import {
   formatNextBookingSummary,
   formatRelativeVisitDate,
 } from '@/lib/guests/contact-formatting';
-import { ContactDocumentsSection } from '@/components/dashboard/contacts/ContactDocumentsSection';
+import { GuestRecordsSection } from '@/components/dashboard/contacts/GuestRecordsSection';
 import { ContactMarketingSection } from '@/components/dashboard/contacts/ContactMarketingSection';
 import { ContactHouseholdSection } from '@/components/dashboard/contacts/ContactHouseholdSection';
 import { ContactComplianceSection } from '@/components/dashboard/contacts/ContactComplianceSection';
@@ -188,6 +188,7 @@ export function ContactDetailPanel({
   const { addToast } = useToast();
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
   const [complianceCount, setComplianceCount] = useState<number | null>(null);
+  const [documentsCount, setDocumentsCount] = useState<number | null>(null);
   const [newBookingModal, setNewBookingModal] = useState<StaffRebookBootstrapPayloadV1 | null>(null);
   const [newBookingModalEpoch, setNewBookingModalEpoch] = useState(0);
 
@@ -330,7 +331,13 @@ export function ContactDetailPanel({
   const lastVisitCal = formatCalendarDayShort(g.last_visit_date ?? listRow.last_visit_date);
   const marketingHint =
     g.marketing_opt_out ? 'Opted out' : g.marketing_consent ? 'Subscribed' : 'No consent';
-  const recordSummaryHint = marketingHint;
+  const preferencesSummaryHint = marketingHint;
+  const recordsSummaryHint =
+    documentsCount === null
+      ? 'Documents & photos'
+      : documentsCount === 0
+        ? 'No files yet'
+        : `${documentsCount} file${documentsCount === 1 ? '' : 's'}`;
   const inboxSummaryHint =
     `${detail.communications.length} message${detail.communications.length === 1 ? '' : 's'}`
     + (g.customer_profile_notes?.trim() ? ' · note on file' : '');
@@ -640,9 +647,9 @@ export function ContactDetailPanel({
 
       <details className={bookingExpandAccordionDetailsClass}>
         <summary className={bookingExpandAccordionSummaryClass}>
-          <span>Record &amp; preferences</span>
+          <span>Preferences</span>
           <span className="max-w-[9rem] truncate text-[11px] font-medium text-slate-400 group-open:hidden sm:max-w-[14rem]">
-            {recordSummaryHint}
+            {preferencesSummaryHint}
           </span>
           {accordionChevron}
         </summary>
@@ -654,10 +661,20 @@ export function ContactDetailPanel({
           <SubBlock title="Household" className="border-t border-slate-200/70 pt-4">
             <ContactHouseholdSection guestId={g.id} clientLower={clientLower} onChanged={() => void loadDetail(g.id)} />
           </SubBlock>
+        </div>
+      </details>
 
-          <SubBlock title="Documents" className="border-t border-slate-200/70 pt-4">
-            <ContactDocumentsSection guestId={g.id} onChanged={() => void loadDetail(g.id)} />
-          </SubBlock>
+      {/* The same Records body the booking panel shows: the files belong to the person. */}
+      <details className={bookingExpandAccordionDetailsClass}>
+        <summary className={bookingExpandAccordionSummaryClass}>
+          <span>Records</span>
+          <span className="max-w-[9rem] truncate text-[11px] font-medium text-slate-400 group-open:hidden sm:max-w-[14rem]">
+            {recordsSummaryHint}
+          </span>
+          {accordionChevron}
+        </summary>
+        <div className={`${bookingExpandAccordionBodyClass} space-y-4`}>
+          <GuestRecordsSection guestId={g.id} onChanged={() => void loadDetail(g.id)} onCount={setDocumentsCount} />
         </div>
       </details>
 

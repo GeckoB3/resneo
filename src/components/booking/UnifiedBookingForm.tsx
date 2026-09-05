@@ -67,8 +67,8 @@ interface Slot {
   /**
    * Staff card-hold exposure (design doc 6.3): the engine populates these
    * unconditionally (threshold NOT applied, D5 staff semantics) and has already
-   * resolved the owner venue's `card_hold_deposits` flag and zero-fee safety
-   * into `deposit_type`, so `card_hold` here means the staff toggle applies.
+   * resolved zero-fee safety into `deposit_type`, so `card_hold` here means the
+   * staff toggle applies.
    */
   deposit_type?: 'charge' | 'card_hold';
   configured_deposit_per_person_gbp?: number | null;
@@ -279,8 +279,7 @@ export function UnifiedBookingForm({
 
   /**
    * Card hold applies to the selected slot (design doc 7.6). The engine resolved
-   * the owner venue's `card_hold_deposits` flag server-side, so no client-side
-   * flag check is needed here; threshold is NOT applied (D5 staff semantics).
+   * zero-fee safety server-side; threshold is NOT applied (D5 staff semantics).
    */
   const staffCardHold = useMemo(
     () => (isEdit ? null : resolveStaffTableSlotCardHold(selectedSlot, partySize)),

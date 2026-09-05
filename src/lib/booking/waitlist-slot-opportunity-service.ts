@@ -165,26 +165,26 @@ export async function enrichWaitlistSlotOpportunities(
     })),
   );
 
-  const enriched: EnrichedWaitlistSlotOpportunity[] = [];
-
-  for (const row of rows) {
-    const display = displayByIdSafe(displayByService, row.id);
-    const calendarName = await resolveCalendarName(
-      admin,
-      row.calendar_id ?? row.practitioner_id,
-    );
-    const matches = await loadMatchingWaitingEntries(admin, row);
-
-    enriched.push({
-      id: row.id,
-      slot_date: row.slot_date,
-      slot_time_hm: slotTimeHm(row.slot_time),
-      service_name: display?.service_name ?? null,
-      calendar_name: calendarName,
-      matching_waitlist_count: matches.length,
-      created_at: row.created_at,
-    });
-  }
+  // Each row's lookups run side by side (order is kept): this used to be two
+  // queries per row, one row at a time.
+  const enriched: EnrichedWaitlistSlotOpportunity[] = await Promise.all(
+    rows.map(async (row) => {
+      const display = displayByIdSafe(displayByService, row.id);
+      const [calendarName, matches] = await Promise.all([
+        resolveCalendarName(admin, row.calendar_id ?? row.practitioner_id),
+        loadMatchingWaitingEntries(admin, row),
+      ]);
+      return {
+        id: row.id,
+        slot_date: row.slot_date,
+        slot_time_hm: slotTimeHm(row.slot_time),
+        service_name: display?.service_name ?? null,
+        calendar_name: calendarName,
+        matching_waitlist_count: matches.length,
+        created_at: row.created_at,
+      };
+    }),
+  );
 
   return enriched;
 }

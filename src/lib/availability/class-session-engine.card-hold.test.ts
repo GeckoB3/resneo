@@ -41,24 +41,13 @@ afterEach(() => {
 });
 
 describe('resolveClassPaymentRequirement — card_hold passthrough (spec 6.3)', () => {
-  it('passes card_hold through when the venue flag is on and the fee is positive', () => {
-    expect(
-      resolveClassPaymentRequirement(baseType(), { cardHoldDepositsEnabled: true }),
-    ).toBe('card_hold');
+  it('passes card_hold through when the fee is positive', () => {
+    expect(resolveClassPaymentRequirement(baseType())).toBe('card_hold');
   });
 
-  it('degrades to none with a warning when the flag is off', () => {
-    const warn = vi.fn();
-    expect(
-      resolveClassPaymentRequirement(baseType(), { cardHoldDepositsEnabled: false, warn }),
-    ).toBe('none');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain('card_hold_deposits flag is off');
-  });
-
-  it('degrades to none with a warning when no options are given (flag unknown)', () => {
+  it('warns through console.warn when no warn sink is given', () => {
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(resolveClassPaymentRequirement(baseType())).toBe('none');
+    expect(resolveClassPaymentRequirement(baseType({ deposit_amount_pence: 0 }))).toBe('none');
     expect(consoleWarn).toHaveBeenCalledTimes(1);
   });
 
@@ -66,13 +55,11 @@ describe('resolveClassPaymentRequirement — card_hold passthrough (spec 6.3)', 
     const warn = vi.fn();
     expect(
       resolveClassPaymentRequirement(baseType({ deposit_amount_pence: 0 }), {
-        cardHoldDepositsEnabled: true,
         warn,
       }),
     ).toBe('none');
     expect(
       resolveClassPaymentRequirement(baseType({ deposit_amount_pence: null }), {
-        cardHoldDepositsEnabled: true,
         warn,
       }),
     ).toBe('none');
@@ -82,13 +69,12 @@ describe('resolveClassPaymentRequirement — card_hold passthrough (spec 6.3)', 
 });
 
 describe('computeClassAvailability — card_hold slots', () => {
-  it('emits payment_requirement card_hold with the per-person fee in deposit_amount_pence when the flag is on', () => {
+  it('emits payment_requirement card_hold with the per-person fee in deposit_amount_pence', () => {
     const slots = computeClassAvailability({
       date: '2026-04-10',
       classTypes: [baseType()],
       instances: [baseInstance()],
       bookedByInstance: {},
-      cardHoldDepositsEnabled: true,
     });
     expect(slots).toHaveLength(1);
     expect(slots[0]?.payment_requirement).toBe('card_hold');
@@ -97,14 +83,13 @@ describe('computeClassAvailability — card_hold slots', () => {
     expect(slots[0]?.requires_stripe_checkout).toBe(false);
   });
 
-  it('degrades to none (no fee on the slot) when the flag is off, warning once per class type', () => {
+  it('degrades to none (no fee on the slot) when the fee is zero, warning once per class type', () => {
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const slots = computeClassAvailability({
       date: '2026-04-10',
-      classTypes: [baseType()],
+      classTypes: [baseType({ deposit_amount_pence: 0 })],
       instances: [baseInstance({ id: 'ci-1' }), baseInstance({ id: 'ci-2', start_time: '12:00:00' })],
       bookedByInstance: {},
-      cardHoldDepositsEnabled: false,
     });
     expect(slots).toHaveLength(2);
     for (const slot of slots) {
@@ -112,17 +97,16 @@ describe('computeClassAvailability — card_hold slots', () => {
       expect(slot.deposit_amount_pence).toBeNull();
     }
     expect(consoleWarn).toHaveBeenCalledTimes(1);
-    expect(String(consoleWarn.mock.calls[0]?.[0])).toContain('card_hold_deposits flag is off');
+    expect(String(consoleWarn.mock.calls[0]?.[0])).toContain('no positive per-person fee');
   });
 
-  it('degrades to none when the flag is on but the fee is zero', () => {
+  it('degrades to none when the fee is zero', () => {
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const slots = computeClassAvailability({
       date: '2026-04-10',
       classTypes: [baseType({ deposit_amount_pence: 0 })],
       instances: [baseInstance()],
       bookedByInstance: {},
-      cardHoldDepositsEnabled: true,
     });
     expect(slots).toHaveLength(1);
     expect(slots[0]?.payment_requirement).toBe('none');
@@ -131,13 +115,12 @@ describe('computeClassAvailability — card_hold slots', () => {
     expect(String(consoleWarn.mock.calls[0]?.[0])).toContain('no positive per-person fee');
   });
 
-  it('leaves non-card-hold class types untouched by the flag', () => {
+  it('leaves non-card-hold class types untouched', () => {
     const slots = computeClassAvailability({
       date: '2026-04-10',
       classTypes: [baseType({ payment_requirement: 'deposit', deposit_amount_pence: 250 })],
       instances: [baseInstance()],
       bookedByInstance: {},
-      cardHoldDepositsEnabled: false,
     });
     expect(slots[0]?.payment_requirement).toBe('deposit');
     expect(slots[0]?.deposit_amount_pence).toBe(250);

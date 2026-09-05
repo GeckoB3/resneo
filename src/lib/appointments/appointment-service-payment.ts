@@ -69,9 +69,7 @@ function resolveCardHoldCharge(svc: AppointmentServicePaymentFields): Appointmen
  * Amount to collect online at booking for this service (after venue + practitioner merge).
  *
  * `chargeLabel: 'card_hold'` means no money is due at booking: `amountPence` is the no-show
- * fee to authorise for a later off-session charge. Callers must branch on the label. This
- * resolver is deliberately flag-independent; the `card_hold_deposits` gate lives at the write
- * paths (config acceptance) and the booking create routes.
+ * fee to authorise for a later off-session charge. Callers must branch on the label.
  */
 export function resolveAppointmentServiceOnlineCharge(svc: AppointmentServicePaymentFields): AppointmentOnlineCharge {
   const req = resolveAppointmentPaymentRequirement(svc);

@@ -38,6 +38,8 @@ const ResourceBookingFlow = dynamic(
 );
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
+import { linkedVenueProfileUrl } from '@/lib/booking/booking-flow-api';
+import { fetchJsonShared, warmStaffBookingSurface } from '@/lib/booking/staff-surface-warm';
 import {
   defaultStaffBookingSurfaceTab,
   getStaffBookingSurfaceTabs,
@@ -176,12 +178,21 @@ function StaffSurfaceBookingStackInner({
     enabledModels: BookingModel[];
     currency: string;
   } | null>(null);
+  /**
+   * `linkedOwnerVenueId` named a live venue collective the venue belongs to. Only
+   * the appointment surface books for the collective (over its virtual venue);
+   * classes, events, tables and resources stay the venue's own, with the venue's
+   * own tabs, so nothing a venue could book before is lost.
+   */
+  const [collectiveProfile, setCollectiveProfile] = useState<{ id: string; venue: VenuePublic } | null>(null);
   const [venueError, setVenueError] = useState<string | null>(null);
   const resolvedVenue = venueProp ?? fetchedVenue;
   const effectiveBookingModel = linkedProfile?.bookingModel ?? bookingModel;
   const effectiveEnabledModels = linkedProfile?.enabledModels ?? enabledModels;
   const effectiveCurrency = linkedProfile?.currency ?? currency;
-  const effectiveVenueId = linkedOwnerVenueId ?? venueId;
+  /** The single partner venue the non-appointment surfaces target; none in collective mode. */
+  const partnerOwnerVenueId = collectiveProfile ? undefined : linkedOwnerVenueId;
+  const effectiveVenueId = partnerOwnerVenueId ?? venueId;
 
   const surfaceTabs = useMemo(
     () => getStaffBookingSurfaceTabs(effectiveBookingModel, effectiveEnabledModels),
@@ -228,30 +239,50 @@ function StaffSurfaceBookingStackInner({
   };
 
   useEffect(() => {
+    // Start the catalogue request now rather than when the flow mounts, so the
+    // profile and the catalogue overlap instead of running one after the other.
+    warmStaffBookingSurface({ venueId, linkedOwnerVenueId });
     if (linkedOwnerVenueId) {
       let cancelled = false;
       (async () => {
         try {
-          const res = await fetch(
-            `/api/venue/linked-calendar/venue-profile?venueId=${encodeURIComponent(linkedOwnerVenueId)}`,
-          );
-          const data = (await res.json()) as Record<string, unknown>;
+          const res = await fetchJsonShared(linkedVenueProfileUrl(linkedOwnerVenueId));
+          const data = (res.data ?? {}) as Record<string, unknown>;
           if (!res.ok) {
             if (!cancelled) {
               setVenueError(typeof data.error === 'string' ? data.error : 'Could not load linked venue');
             }
             return;
           }
-          if (!cancelled) {
-            setLinkedProfile({
+          if (cancelled) return;
+          if (data.collective && typeof data.collective === 'object') {
+            // A collective: appointments book for it; every other surface keeps the
+            // venue's own profile, loaded below when the parent did not supply it.
+            setCollectiveProfile({
+              id: (data.collective as { id: string }).id,
               venue: data.venue as VenuePublic,
-              bookingModel: data.booking_model as BookingModel,
-              enabledModels: (data.enabled_models as BookingModel[]) ?? [],
-              currency: (data.currency as string) ?? currency,
             });
-            setFetchedVenue(data.venue as VenuePublic);
             setVenueError(null);
+            if (!venueProp) {
+              const own = await fetchJsonShared('/api/venue');
+              const ownData = (own.data ?? {}) as Record<string, unknown>;
+              if (cancelled) return;
+              if (!own.ok) {
+                setVenueError(typeof ownData.error === 'string' ? ownData.error : 'Could not load venue');
+                return;
+              }
+              setFetchedVenue(mapApiVenueToVenuePublic(ownData));
+            }
+            return;
           }
+          setLinkedProfile({
+            venue: data.venue as VenuePublic,
+            bookingModel: data.booking_model as BookingModel,
+            enabledModels: (data.enabled_models as BookingModel[]) ?? [],
+            currency: (data.currency as string) ?? currency,
+          });
+          setFetchedVenue(data.venue as VenuePublic);
+          setVenueError(null);
         } catch {
           if (!cancelled) setVenueError('Could not load linked venue');
         }
@@ -266,8 +297,8 @@ function StaffSurfaceBookingStackInner({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/venue');
-        const data = (await res.json()) as Record<string, unknown>;
+        const res = await fetchJsonShared('/api/venue');
+        const data = (res.data ?? {}) as Record<string, unknown>;
         if (!res.ok) {
           if (!cancelled) setVenueError(typeof data.error === 'string' ? data.error : 'Could not load venue');
           return;
@@ -283,7 +314,7 @@ function StaffSurfaceBookingStackInner({
     return () => {
       cancelled = true;
     };
-  }, [venueProp, linkedOwnerVenueId, currency]);
+  }, [venueProp, linkedOwnerVenueId, currency, venueId]);
 
   const showTabs = surfaceTabs.length > 1;
   const tabsForBar = showTabs ? surfaceTabs : [];
@@ -297,7 +328,7 @@ function StaffSurfaceBookingStackInner({
       bookingAudience="staff"
       staffBookingSource={staffBookingSource}
       onBookingCreated={onCreated}
-      linkedOwnerVenueId={linkedOwnerVenueId}
+      linkedOwnerVenueId={partnerOwnerVenueId}
       preselectedExperienceEventId={preselectedExperienceEventId}
       preselectedEventDate={preselectedEventDate}
       preselectedEventTime={preselectedEventTime}
@@ -367,9 +398,18 @@ function StaffSurfaceBookingStackInner({
         );
       case 'unified_scheduling':
         if (!surfaceTabs.some((t) => t.id === 'unified_scheduling')) return null;
+        // Until the linked profile answers we do not know whether the target is a
+        // collective, so the flow must not start over the venue's own catalogue.
+        if (linkedOwnerVenueId && !linkedProfile && !collectiveProfile) {
+          return (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            </div>
+          );
+        }
         return (
           <AppointmentBookingFlow
-            venue={v}
+            venue={collectiveProfile?.venue ?? v}
             bookingAudience="staff"
             staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
@@ -378,7 +418,7 @@ function StaffSurfaceBookingStackInner({
             initialTime={initialTime}
             preselectedPractitionerId={preselectedPractitionerId}
             staffRebookBootstrap={displayActiveTab === 'unified_scheduling' ? staffRebookBootstrap : null}
-            linkedOwnerVenueId={linkedOwnerVenueId}
+            linkedOwnerVenueId={collectiveProfile ? collectiveProfile.id : linkedOwnerVenueId}
           />
         );
       case 'event_ticket':
@@ -392,7 +432,7 @@ function StaffSurfaceBookingStackInner({
             bookingAudience="staff"
             staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
-            linkedOwnerVenueId={linkedOwnerVenueId}
+            linkedOwnerVenueId={partnerOwnerVenueId}
           />
         );
       case 'resource_booking':

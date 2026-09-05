@@ -301,3 +301,36 @@ describe('buildPractitionerScheduleClosureBlocks', () => {
     expect(after.size).toBe(before.size + 60);
   });
 });
+
+describe('closure stripes over a grid wider than the hours', () => {
+  const openingHours: OpeningHours = {
+    '1': { periods: [{ open: '09:00', close: '17:00' }] },
+  };
+
+  it('shades every drawn minute outside the open window when the grid is stretched to the whole day', () => {
+    const blocks = buildVenueScheduleClosureBlocks({
+      openingHours,
+      venueWideBlocks: [],
+      fromDate: '2030-06-03',
+      toDate: '2030-06-03',
+      columnIds: ['col-1'],
+      gridBounds: { start: 0, end: 24 * 60 },
+    });
+    const closed = blocks
+      .filter((b) => b.block_type === 'venue_closed')
+      .map((b) => `${b.start_time}-${b.end_time}`)
+      .sort();
+    expect(closed).toEqual(['00:00-09:00', '17:00-24:00']);
+  });
+
+  it('keeps the venue-hours clip when no wider grid is given', () => {
+    const blocks = buildVenueScheduleClosureBlocks({
+      openingHours,
+      venueWideBlocks: [],
+      fromDate: '2030-06-03',
+      toDate: '2030-06-03',
+      columnIds: ['col-1'],
+    });
+    expect(blocks.filter((b) => b.block_type === 'venue_closed')).toEqual([]);
+  });
+});

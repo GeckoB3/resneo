@@ -121,7 +121,12 @@ function ActionError({ message }: { message: string }) {
  * because the settings page doesn't mount one — so success/failure toasts
  * (§19.2) are self-contained to this feature.
  */
-export function LinkedAccountsSection(props: { venueName: string }) {
+export function LinkedAccountsSection(props: {
+  venueName: string;
+  /** Open Manage combined page for this collective as soon as the list is in (from the Booking page tab). */
+  manageCollectiveId?: string | null;
+  onManageCollectiveOpened?: () => void;
+}) {
   return (
     <ToastProvider>
       <LinkedAccountsSectionInner {...props} />
@@ -129,7 +134,15 @@ export function LinkedAccountsSection(props: { venueName: string }) {
   );
 }
 
-function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
+function LinkedAccountsSectionInner({
+  venueName,
+  manageCollectiveId = null,
+  onManageCollectiveOpened,
+}: {
+  venueName: string;
+  manageCollectiveId?: string | null;
+  onManageCollectiveOpened?: () => void;
+}) {
   const { addToast } = useToast();
   const router = useRouter();
   const [data, setData] = useState<ApiData | null>(null);
@@ -630,7 +643,12 @@ function LinkedAccountsSectionInner({ venueName }: { venueName: string }) {
       </SectionCard>
 
       {/* Venue collectives (Phase 2) ----------------------------------- */}
-      <VenueCollectivesPanel venueName={venueName} activeLinks={activeLinks} />
+      <VenueCollectivesPanel
+        venueName={venueName}
+        activeLinks={activeLinks}
+        manageCollectiveId={manageCollectiveId}
+        onManageCollectiveOpened={onManageCollectiveOpened}
+      />
 
       {/* Notification email preferences (§17.4) ------------------------- */}
       <NotificationPrefsCard />

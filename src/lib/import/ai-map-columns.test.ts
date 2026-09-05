@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { maskPiiForPrompt } from '@/lib/import/ai-map-columns';
 
 describe('maskPiiForPrompt', () => {
@@ -42,5 +42,53 @@ describe('maskPiiForPrompt', () => {
   it('returns empty/whitespace values unchanged', () => {
     expect(maskPiiForPrompt('')).toBe('');
     expect(maskPiiForPrompt('   ')).toBe('   ');
+  });
+});
+
+vi.mock('@/lib/import/openai-client', () => ({ runImportAiJson: vi.fn() }));
+
+describe('runAiColumnMapping result clean-up', () => {
+  it('turns unusable AI rows into ignores and keeps one source column per field', async () => {
+    const { runImportAiJson } = await import('@/lib/import/openai-client');
+    const { runAiColumnMapping } = await import('./ai-map-columns');
+    vi.mocked(runImportAiJson).mockResolvedValue({
+      model: 'test-model',
+      data: {
+        mappings: [
+          { source_column: 'Email', action: 'map', target_field: 'email', confidence: 'high', reasoning: '', split_config: null, value_map: null },
+          // Second column claiming a field already taken: dropped to ignore.
+          { source_column: 'Email 2', action: 'map', target_field: 'email', confidence: 'low', reasoning: '', split_config: null, value_map: null },
+          // A field that is not in the target list.
+          { source_column: 'Loyalty', action: 'map', target_field: 'loyalty_points', confidence: 'medium', reasoning: '', split_config: null, value_map: null },
+          // "map" with no target, and a split with nothing to split into.
+          { source_column: 'Notes', action: 'map', target_field: null, confidence: 'low', reasoning: '', split_config: null, value_map: null },
+          { source_column: 'Name', action: 'split', target_field: null, confidence: 'high', reasoning: '', split_config: null, value_map: null },
+          { source_column: 'Full', action: 'split', target_field: null, confidence: 'high', reasoning: '', split_config: { separator: ' ', parts: [{ field: 'first_name' }, { field: 'last_name' }] }, value_map: null },
+        ],
+      },
+    } as never);
+
+    const result = await runAiColumnMapping({
+      headers: ['Email', 'Email 2', 'Loyalty', 'Notes', 'Name', 'Full'],
+      sampleRows: [],
+      fileType: 'clients',
+      targetFields: [
+        { key: 'email', label: 'Email', required: false, type: 'string' },
+        { key: 'first_name', label: 'First name', required: true, type: 'string' },
+        { key: 'last_name', label: 'Surname', required: true, type: 'string' },
+      ] as never,
+    });
+
+    expect(result?.model).toBe('test-model');
+    expect(result?.mappings.map((m) => [m.source_column, m.action, m.target_field])).toEqual([
+      ['Email', 'map', 'email'],
+      ['Email 2', 'ignore', null],
+      ['Loyalty', 'ignore', null],
+      ['Notes', 'ignore', null],
+      ['Name', 'ignore', null],
+      ['Full', 'split', null],
+    ]);
+    expect(result?.mappings[4]?.split_config).toBeNull();
+    expect(result?.mappings[5]?.split_config?.parts.map((p) => p.field)).toEqual(['first_name', 'last_name']);
   });
 });

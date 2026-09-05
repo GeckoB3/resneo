@@ -4,10 +4,9 @@
  * "Card hold" switch shown on the five staff booking surfaces
  * (docs: CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION §7.6, D6).
  *
- * Rendered only when the selected entity resolves to `card_hold` and the owner
- * venue's `card_hold_deposits` flag is on; never shown together with the
- * "Require deposit" toggle; hidden when editing. Default ON: the entity
- * requires the hold and staff may waive it case by case.
+ * Rendered only when the selected entity resolves to `card_hold`; never shown
+ * together with the "Require deposit" toggle; hidden when editing. Default ON:
+ * the entity requires the hold and staff may waive it case by case.
  */
 
 import {

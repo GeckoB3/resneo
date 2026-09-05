@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -76,16 +76,18 @@ export async function GET(request: NextRequest) {
 
     const grant: LinkGrant = access.grant;
 
-    void recordReadAudit({
-      admin,
-      linkId: access.linkId,
-      actingVenueId: staff.venue_id,
-      actingUserId: user?.id ?? null,
-      owningVenueId: ownerVenueId,
-      actionType: 'viewed_calendar',
-      resourceType: 'experience_event',
-      resourceId: eventId,
-    });
+    after(() =>
+      recordReadAudit({
+        admin,
+        linkId: access.linkId,
+        actingVenueId: staff.venue_id,
+        actingUserId: user?.id ?? null,
+        owningVenueId: ownerVenueId,
+        actionType: 'viewed_calendar',
+        resourceType: 'experience_event',
+        resourceId: eventId,
+      }),
+    );
 
     const tzRaw = (venueRow as { timezone?: string | null } | null)?.timezone;
     const venueTimezone =

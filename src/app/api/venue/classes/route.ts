@@ -19,7 +19,6 @@ import {
   hasActiveBookingsForClassInstance,
   hasUpcomingActiveBookingsForClassType,
 } from '@/lib/venue/entity-delete-booking-guards';
-import { featureFlagDisabledResponse, loadVenueFeatureFlags } from '@/lib/feature-flags';
 import { z } from 'zod';
 
 const classPaymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment', 'card_hold']);
@@ -365,14 +364,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
-    if (parsed.data.payment_requirement === 'card_hold') {
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
-    }
-
     const insertRow = {
       venue_id: staff.venue_id,
       ...parsed.data,
@@ -656,14 +647,6 @@ export async function PATCH(request: NextRequest) {
     const patchParsed = classTypePatchSchema.safeParse(rest);
     if (!patchParsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: patchParsed.error.flatten() }, { status: 400 });
-    }
-
-    // Card hold config is only accepted while the venue flag is on (design doc §6.1/§6.2).
-    if (patchParsed.data.payment_requirement === 'card_hold') {
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
     }
 
     const { data: existing, error: fetchErr } = await admin

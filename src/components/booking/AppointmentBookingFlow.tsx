@@ -64,6 +64,7 @@ import {
   bookingCreateGroupUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import { fetchJsonShared } from '@/lib/booking/staff-surface-warm';
 import {
   confirmBookingPaymentWithServer,
   BOOKING_CANCELLED_MESSAGE,
@@ -585,6 +586,15 @@ interface ChainExtra {
 /** Where the flow goes once every extra service has its options. */
 type ChainTarget = 'practitioner' | 'slot' | 'prefill';
 
+/** Staff-first: how many of the chosen person's services get their month warmed while the list is read. */
+const STAFF_FIRST_MONTH_WARM_LIMIT = 8;
+/**
+ * Day slots are kept for a short while so stepping back to a date already looked
+ * at does not fetch it again. The server re-checks the slot on create, so a
+ * colleague booking it in the meantime surfaces there, as it always did.
+ */
+const SLOT_CACHE_TTL_MS = 30_000;
+
 /**
  * Effective duration and buffer of one service as it will be booked: the
  * person's own offer when known, the chosen variant, a staff custom duration,
@@ -850,13 +860,6 @@ export function AppointmentBookingFlow({
     [venue.feature_flags?.any_available_practitioner_config],
   );
   const appointmentWaitlistEnabled = Boolean(venue.feature_flags?.resolved?.waitlist_v2);
-  /**
-   * Owner venue's card-hold flag (design doc 7.6 / D6). Present on staff venue
-   * payloads (GET /api/venue, linked venue-profile, dashboard page bootstrap);
-   * absent (falsy) on the public /api/booking/venue payload, which is fine
-   * because the toggle is staff-audience only.
-   */
-  const cardHoldDepositsEnabled = Boolean(venue.feature_flags?.resolved?.card_hold_deposits);
   const [staffRequireDeposit, setStaffRequireDeposit] = useState(false);
   /** Card-hold services only (design doc 7.6): default ON, staff may waive per booking. */
   const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
@@ -973,6 +976,7 @@ export function AppointmentBookingFlow({
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
+  const slotCacheRef = useRef(new Map<string, { at: number; practitioners: SlotPractitioner[] }>());
   /**
    * The server could not read this venue's schedule and refused to guess (Stage 7).
    * Distinct from "no slots": one means try again, the other means try another day.
@@ -1267,8 +1271,10 @@ export function AppointmentBookingFlow({
   const fetchCatalog = useCallback(async () => {
     setCatalogLoading(true);
     try {
-      const res = await fetch(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug, isStaff));
-      const data = await res.json();
+      // Shared with the staff stack, which starts this request before the flow
+      // mounts, so opening the form does not wait for profile then catalogue.
+      const res = await fetchJsonShared(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug, isStaff));
+      const data = (res.data ?? {}) as { practitioners?: CatalogPractitioner[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Failed to load catalog');
       setCatalogStaff(data.practitioners ?? []);
     } catch {
@@ -1287,6 +1293,11 @@ export function AppointmentBookingFlow({
     if (initialDate) setDate(initialDate);
   }, [initialDate]);
 
+  // A booking just made changes what is free: forget the remembered days.
+  useEffect(() => {
+    if (createResult) slotCacheRef.current.clear();
+  }, [createResult]);
+
   useEffect(() => {
     if (editBooking) return;
     if (!initialTime) return;
@@ -1301,12 +1312,22 @@ export function AppointmentBookingFlow({
     }
   }, [editBooking, preselectedServiceId, catalogStaff]);
 
+  /**
+   * Opened for a particular calendar (a diary column's "New booking", a slot):
+   * that calendar is chosen as if its card had been tapped, so the form lands on
+   * its services rather than asking "who" again. Applied once per mount: a staff
+   * member who then goes back to pick someone else must not be bounced forward.
+   */
+  const preselectedPractitionerAppliedRef = useRef(false);
   useEffect(() => {
     if (editBooking || !preselectedPractitionerId || catalogStaff.length === 0 || lockedPractitioner) return;
-    if (catalogStaff.some((p) => p.id === preselectedPractitionerId)) {
-      setSelectedPractitionerId(preselectedPractitionerId);
+    if (!catalogStaff.some((p) => p.id === preselectedPractitionerId)) return;
+    setSelectedPractitionerId(preselectedPractitionerId);
+    if (!preselectedPractitionerAppliedRef.current && step === 'staff_pick') {
+      preselectedPractitionerAppliedRef.current = true;
+      setStep('service');
     }
-  }, [editBooking, preselectedPractitionerId, catalogStaff, lockedPractitioner]);
+  }, [editBooking, preselectedPractitionerId, catalogStaff, lockedPractitioner, step]);
 
   const fetchAvailability = useCallback(
     async (opts: {
@@ -1342,7 +1363,17 @@ export function AppointmentBookingFlow({
         if (waitlistOfferEntryId) {
           params.set('waitlist_offer', waitlistOfferEntryId);
         }
-        const res = await fetch(bookingAvailabilityUrl(params));
+        // A member venue's staff booking for a collective also see the members' own
+        // services; the route verifies the session before widening anything.
+        if (isStaff) params.set('staff', '1');
+        const url = bookingAvailabilityUrl(params);
+        const remembered = slotCacheRef.current.get(url);
+        if (remembered && Date.now() - remembered.at < SLOT_CACHE_TTL_MS) {
+          setSlotsUnavailable(false);
+          setSlotPractitioners(remembered.practitioners);
+          return;
+        }
+        const res = await fetch(url);
         const data = await res.json();
         /**
          * Stage 7 (decision J). A 503 means the server could not read this venue's schedule
@@ -1357,13 +1388,14 @@ export function AppointmentBookingFlow({
         }
         setSlotsUnavailable(false);
         setSlotPractitioners(data.practitioners ?? []);
+        if (res.ok) slotCacheRef.current.set(url, { at: Date.now(), practitioners: data.practitioners ?? [] });
       } catch {
         setError('Failed to load availability');
       } finally {
         setLoading(false);
       }
     },
-    [venue.id, date, phantomBookings, waitlistOfferEntryId],
+    [venue.id, date, phantomBookings, waitlistOfferEntryId, isStaff],
   );
 
   /** Month grid for the date picker (public or staff calendar API). */
@@ -1706,7 +1738,10 @@ export function AppointmentBookingFlow({
       const chosenId = isLockedPractitionerFlow ? lockedPractitioner?.id : selectedPractitionerId;
       const p = catalogStaff.find((c) => c.id === chosenId);
       if (p) {
-        for (const s of p.services) {
+        // Only the services at the top of the list: warming every one of a
+        // person's twenty-odd services costs a month computation each, and the
+        // service the staff member picks is primed on the pick in any case.
+        for (const s of p.services.slice(0, STAFF_FIRST_MONTH_WARM_LIMIT)) {
           tasks.push({
             practitionerId: p.id,
             serviceId: s.id,
@@ -2854,6 +2889,7 @@ export function AppointmentBookingFlow({
               : {}),
             start_time: seg.startTime,
             phantoms,
+            ...(isStaff ? { staff: true } : {}),
           }),
         });
         const data = (await res.json()) as { ok?: boolean; error?: string };
@@ -2869,7 +2905,7 @@ export function AppointmentBookingFlow({
       }
       return null;
     },
-    [venue.id, date],
+    [venue.id, date, isStaff],
   );
 
   const continueStaffCalendarSlotPrefill = useCallback(
@@ -3336,7 +3372,6 @@ export function AppointmentBookingFlow({
           const staffCardHold = resolveStaffEntityCardHold({
             paymentRequirement: online?.chargeLabel,
             feePerUnitPence: online?.amountPence,
-            cardHoldFlagEnabled: cardHoldDepositsEnabled,
           });
           const res = await fetch(venueBookingsCreateUrl(), {
             method: 'POST',
@@ -3461,7 +3496,6 @@ export function AppointmentBookingFlow({
       isStaff,
       staffRequireDeposit,
       staffRequireCardHold,
-      cardHoldDepositsEnabled,
       staffBookingSource,
       isStaffWalkInAppointment,
       selectedServiceForPractitioner,
@@ -5634,7 +5668,6 @@ export function AppointmentBookingFlow({
                 ? resolveStaffEntityCardHold({
                     paymentRequirement: 'card_hold',
                     feePerUnitPence: holdPence,
-                    cardHoldFlagEnabled: cardHoldDepositsEnabled,
                   })
                 : null;
             if (chargePence <= 0 && !hold) return null;
@@ -5704,6 +5737,9 @@ export function AppointmentBookingFlow({
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
               collectClientAddress={collectClientAddressSingle}
+              // A create the server refused (the owning venue has no payments set up,
+              // a slot taken meanwhile) remounts this step from the submitting panel:
+              // keep what was typed rather than handing back an empty form.
               initialDetails={mergeGuestDetailsPrefill(
                 editBooking
                   ? {
@@ -5712,7 +5748,7 @@ export function AppointmentBookingFlow({
                       email: editBooking.guest_email,
                       phone: editBooking.guest_phone,
                     }
-                  : staffRebookAppointmentInitialDetails(staffRebookBootstrap),
+                  : (guestDetails ?? staffRebookAppointmentInitialDetails(staffRebookBootstrap)),
                 isPublicGuest ? accountGate.guestDetailsPrefill : undefined,
               )}
               emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
@@ -6641,7 +6677,6 @@ export function AppointmentBookingFlow({
                     ? resolveStaffEntityCardHold({
                         paymentRequirement: 'card_hold',
                         feePerUnitPence: groupCardHoldFeePence,
-                        cardHoldFlagEnabled: cardHoldDepositsEnabled,
                       })
                     : null;
                 if (chargePence <= 0 && !hold) return null;
@@ -6686,7 +6721,10 @@ export function AppointmentBookingFlow({
                 phoneDefaultCountry={phoneDefaultCountry}
                 audience={detailsAudience}
                 collectClientAddress={collectClientAddressGroup}
-                initialDetails={isPublicGuest ? accountGate.guestDetailsPrefill : undefined}
+                initialDetails={mergeGuestDetailsPrefill(
+                  guestDetails ?? undefined,
+                  isPublicGuest ? accountGate.guestDetailsPrefill : undefined,
+                )}
                 emailReadOnly={isPublicGuest && accountGate.emailReadOnly}
                 onEmailChange={isPublicGuest ? setPrecheckEmail : undefined}
                 beforeFooter={

@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { featureFlagDisabledResponse } from '@/lib/feature-flags/http';
-import { loadVenueFeatureFlags } from '@/lib/feature-flags/venue';
 import { z } from 'zod';
 
 const restrictionFieldsSchema = z.object({
@@ -117,10 +115,6 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     if (parsed.data.deposit_type === 'card_hold') {
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
       if (!cardHoldFloorInvariant(parsed.data.deposit_type, parsed.data.deposit_amount_per_person_gbp)) {
         return NextResponse.json({ error: CARD_HOLD_FLOOR_ERROR }, { status: 400 });
       }
@@ -170,13 +164,6 @@ export async function PATCH(request: NextRequest) {
     const { id, ...fields } = parsed.data;
 
     const admin = getSupabaseAdminClient();
-
-    if (fields.deposit_type === 'card_hold') {
-      const { resolved } = await loadVenueFeatureFlags(admin, staff.venue_id);
-      if (!resolved.card_hold_deposits) {
-        return featureFlagDisabledResponse('card_hold_deposits');
-      }
-    }
 
     const { data: existingFull } = await admin.from('booking_restrictions').select('*').eq('id', id).maybeSingle();
     if (!existingFull) {

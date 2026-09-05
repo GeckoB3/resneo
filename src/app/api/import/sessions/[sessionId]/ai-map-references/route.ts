@@ -67,7 +67,13 @@ export async function POST(
   if (bm === 'unified_scheduling') {
     const [{ data: sis }, { data: cals }] = await Promise.all([
       admin.from('service_items').select('id, name').eq('venue_id', venueId).eq('is_active', true),
-      admin.from('unified_calendars').select('id, name').eq('venue_id', venueId).eq('is_active', true),
+      // People only: resources share the table and are never a staff match.
+      admin
+        .from('unified_calendars')
+        .select('id, name')
+        .eq('venue_id', venueId)
+        .eq('is_active', true)
+        .eq('calendar_type', 'practitioner'),
     ]);
     for (const s of sis ?? []) {
       candidates.push({ id: (s as { id: string }).id, name: (s as { name: string }).name, kind: 'service_item' });
@@ -238,7 +244,8 @@ export async function POST(
         const entityType = entityTypeForKind(refRow.reference_type, match.kind);
         if (!entityType) continue;
 
-        const label = s.suggested_entity_label ?? match.name ?? '';
+        // Always the catalogue entry's real name, never the model's paraphrase of it.
+        const label = match.name ?? '';
 
         const { error } = await admin
           .from('import_booking_references')

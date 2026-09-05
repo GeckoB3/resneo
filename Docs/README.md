@@ -109,7 +109,7 @@ scheduling audit.
 | `DEVELOPMENT.md` | Cron jobs, Stripe webhook setup, environment notes |
 | `E2E_SMOKE.md` | Playwright smoke specs. The CI job is gated on `vars.RUN_E2E_SMOKE` |
 | `ResNeo-testing.md` | Manual QA plan and one executed pass. §14 describes live dev-database state and is stale |
-| `Resneo_Import_Tool_Current_State_Review_June_2026.md` | The **only** assessment of `src/lib/import` (~9,000 lines). Ten items still open |
+| `Resneo_Import_Tool_Current_State_Review_June_2026.md` | The **only** assessment of `src/lib/import` (~9,000 lines). Ten items still open; AI stages re-checked against `gpt-5.6-luna` on 2026-09-05 (§0a) |
 
 ## Cross-repo correspondence
 

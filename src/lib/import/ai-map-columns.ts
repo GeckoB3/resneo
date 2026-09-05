@@ -276,6 +276,16 @@ function dedupeMappings(rows: AiMappingRow[], targetFields: SchemaField[]): AiMa
       } else {
         used.add(r.target_field);
       }
+    } else if (r.action === 'map') {
+      // A "map" with no target is not a mapping; store it as an ignore.
+      r.action = 'ignore';
+    }
+    if (r.action === 'split' && !r.split_config?.parts?.length) {
+      // A split with nothing to split into would be stored as a split that
+      // never applies; treat it as an ignore so the Map step shows it plainly.
+      r.action = 'ignore';
+      r.target_field = null;
+      r.split_config = null;
     }
     if (r.action === 'split' && r.split_config?.parts) {
       const validParts = r.split_config.parts.filter((p) => p.field && allowed.has(p.field) && !used.has(p.field));

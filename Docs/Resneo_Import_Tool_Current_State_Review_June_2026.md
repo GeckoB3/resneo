@@ -6,6 +6,10 @@
 
 ---
 
+## 0a. AI stages re-checked (5 September 2026)
+
+The live model moved to `gpt-5.6-luna` (Vercel `OPENAI_IMPORT_MODEL`); the code fallbacks in `openai-client.ts` and `.env.example` now say the same, and `OPENAI_IMPORT_RESHAPE_MODEL` remains an optional override for the reshape stage only. All four AI stages were exercised against the real API with that model: the column-mapping eval (`DOTENV_CONFIG_PATH=.env.local npx tsx scripts/eval-import-ai.ts`) scored 42/42, and reference matching, reshape and the plan narrative each returned correct structured output. Fixes from the review: the AI-map route now checks the mappings insert (a failure after the delete used to answer `ok` with no mappings left); an AI row that is a `map` with no target or a `split` with nothing to split into is stored as an ignore; staff candidates for reference matching exclude resource calendars (they share `unified_calendars`); a suggestion's label is always the catalogue entry's real name; and the plan prompt explains its fields so the narrative stops hedging about what was repaired.
+
 ## 0. Implementation status (build pass — 23 Jun 2026)
 
 A build pass implemented the prioritised fixes below. **Verification:** production build passes; `tsc --noEmit` clean; full vitest suite **1569 tests / 223 files pass** (incl. new engine integration tests + helper tests); ESLint + `lint-no-raw-modals` clean. Not yet verified by a live end-to-end browser run (the flow is admin-auth-gated behind upload/session steps) — recommend a manual run-through after applying migrations.

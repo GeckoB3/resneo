@@ -16,19 +16,20 @@ export const IMPORT_AI_TIMEOUT_MS = 45_000;
 export const IMPORT_AI_MAX_RETRIES = 2;
 
 export function importAiModel(): string {
-  return process.env.OPENAI_IMPORT_MODEL?.trim() || 'gpt-5.4-nano';
+  return process.env.OPENAI_IMPORT_MODEL?.trim() || 'gpt-5.6-luna';
 }
 
 /**
  * Model for the reshape stage. Reshaping a messy report into a clean table needs
  * more reasoning than column mapping (forward-filling section headers, inferring
- * a missing first date), so it defaults to a stronger model than the nano mapper.
+ * a missing first date), so it can be pointed at a stronger model than the
+ * mapper with `OPENAI_IMPORT_RESHAPE_MODEL`; otherwise it follows the mapper.
  */
 export function importReshapeModel(): string {
   return (
     process.env.OPENAI_IMPORT_RESHAPE_MODEL?.trim() ||
     process.env.OPENAI_IMPORT_MODEL?.trim() ||
-    'gpt-5.4-mini'
+    'gpt-5.6-luna'
   );
 }
 

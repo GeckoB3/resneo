@@ -97,9 +97,7 @@ export async function POST(
   // field is dropped (a field can only have one source column).
   const aiMappings = ai?.mappings ?? [];
   const merged: AiMappingRow[] = [];
-  const seenColumns = new Set<string>();
   for (const m of aiMappings) {
-    seenColumns.add(m.source_column);
     if (aliasByColumn.has(m.source_column)) continue; // alias added below
     if (m.action === 'map' && m.target_field && aliasFields.has(m.target_field)) {
       merged.push({ ...m, action: 'ignore', target_field: null, split_config: null });
@@ -155,7 +153,13 @@ export async function POST(
     ...merged.map((m) => toRow(m, false)),
   ]);
 
-  await staff.db.from('import_column_mappings').insert(rows);
+  // The old mappings are already gone: a failed insert must not report success
+  // and leave the file with no mappings at all.
+  const { error: insErr } = await staff.db.from('import_column_mappings').insert(rows);
+  if (insErr) {
+    console.error('[ai-map] insert mappings', insErr);
+    return NextResponse.json({ error: 'Could not save the suggested mappings' }, { status: 500 });
+  }
 
   await staff.db
     .from('import_sessions')

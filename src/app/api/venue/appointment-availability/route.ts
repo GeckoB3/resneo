@@ -122,8 +122,6 @@ async function handleStaffAppointmentAvailabilityGet(request: NextRequest) {
         addonIds: searchParams.getAll('addon_ids').filter(Boolean),
         audience: 'staff',
         excludeBookingId: excludeBookingId && UUID_RE.test(excludeBookingId) ? excludeBookingId : null,
-        // Staff also book each member's own services, not only the combined offerings.
-        includeMemberOwnServices: true,
       });
       return NextResponse.json(payload);
     }

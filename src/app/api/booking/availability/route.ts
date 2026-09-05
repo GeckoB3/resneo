@@ -54,7 +54,6 @@ import {
   loadCollectiveChainDayAvailability,
   loadCollectiveDayAvailability,
 } from '@/lib/linked-accounts/collective-booking-bridge';
-import { resolveStaffCollectiveScopeFromRequest } from '@/lib/linked-accounts/collective-staff-request';
 import { parseServiceChainParam } from '@/lib/booking/service-chain';
 import { computeChainAvailabilityForVenue } from '@/lib/availability/appointment-chain-server';
 import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
@@ -372,12 +371,7 @@ async function handleAvailabilityGet(request: NextRequest) {
     // to the appointment handler (which resolves the merged collective availability),
     // mirroring how the month/appointment-calendar route checks isCollectiveId first.
     if (await isCollectiveId(supabase, venueId)) {
-      // `staff=1` is the staff form's hint that a member venue's session is on the
-      // request; verified here, it widens the catalogue to the members' own services.
-      const includeMemberOwnServices =
-        searchParams.get('staff') === '1' &&
-        Boolean(await resolveStaffCollectiveScopeFromRequest(supabase, request, venueId));
-      return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams, { includeMemberOwnServices });
+      return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
     }
 
     const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId, request);
@@ -549,7 +543,6 @@ async function handleAppointmentAvailability(
   venueId: string,
   date: string,
   searchParams: URLSearchParams,
-  collectiveOptions?: { includeMemberOwnServices: boolean },
 ) {
   const practitionerId = searchParams.get('practitioner_id') ?? undefined;
   const serviceId = searchParams.get('service_id') ?? undefined;
@@ -590,7 +583,6 @@ async function handleAppointmentAvailability(
         anyAvailable,
         date,
         phantoms: phantomBookings,
-        includeMemberOwnServices: collectiveOptions?.includeMemberOwnServices,
       });
       if (!chainResult.ok) {
         return NextResponse.json({ error: chainResult.error, details: chainResult.details }, { status: 400 });
@@ -615,7 +607,6 @@ async function handleAppointmentAvailability(
       addonIds: searchParams.getAll('addon_ids').filter(Boolean),
       // A group booking on the combined page sends the people already placed.
       phantoms: phantomBookings,
-      includeMemberOwnServices: collectiveOptions?.includeMemberOwnServices,
     });
     return NextResponse.json(result);
   }

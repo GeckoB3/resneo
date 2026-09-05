@@ -57,7 +57,6 @@ import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-c
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
-import { resolveStaffCollectiveScopeFromRequest } from '@/lib/linked-accounts/collective-staff-request';
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
@@ -208,11 +207,6 @@ export async function POST(request: NextRequest) {
     const collectiveOfferingByPerson = new Map<number, string>();
     if (await isCollectiveId(supabase, venue_id)) {
       collectiveId = venue_id;
-      // A member venue's staff (the staff form uses this route for groups) may
-      // also book the members' own services; the session is verified first.
-      const includeMemberOwnServices =
-        (source === 'phone' || source === 'walk-in') &&
-        Boolean(await resolveStaffCollectiveScopeFromRequest(supabase, request, collectiveId));
       let owningVenueId: string | null = null;
       for (let i = 0; i < people.length; i++) {
         const person = people[i]!;
@@ -220,7 +214,6 @@ export async function POST(request: NextRequest) {
           collectiveId,
           offeringId: person.appointment_service_id,
           calendarId: person.practitioner_id,
-          includeMemberOwnServices,
         });
         if (!target) {
           return NextResponse.json(
@@ -238,9 +231,7 @@ export async function POST(request: NextRequest) {
           );
         }
         owningVenueId = target.venueId;
-        // A member venue's own service (no offering) keeps the venue's own terms
-        // and carries no collective attribution.
-        if (target.offering) collectiveOfferingByPerson.set(i, person.appointment_service_id);
+        collectiveOfferingByPerson.set(i, person.appointment_service_id);
         person.appointment_service_id = target.sourceServiceId;
       }
       if (owningVenueId) venue_id = owningVenueId;

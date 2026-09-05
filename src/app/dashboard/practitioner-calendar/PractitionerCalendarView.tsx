@@ -44,7 +44,6 @@ import {
   pointerWithin,
   rectIntersection,
 } from '@dnd-kit/core';
-import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
 import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
@@ -102,6 +101,8 @@ import type { BookingModel } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { getStaffBookingSurfaceTabs } from '@/lib/booking/staff-booking-modal-options';
+import { warmStaffBookingSurface } from '@/lib/booking/staff-surface-warm';
+import type { StaffCollectiveSummary } from '@/lib/linked-accounts/collective-staff-scope';
 import {
   RESOURCE_BOOKING_CAPACITY_STATUSES,
   type ResourceBooking as EngineResourceBooking,
@@ -149,7 +150,6 @@ import {
   bookingCalendarBlockPaletteWithOverlay,
   CalendarBookingStatusStripe,
   isArrivedWaitingDisplay,
-  type BookingBlockPalette,
 } from '@/lib/calendar/booking-calendar-block-style';
 import {
   clusterLayoutHorizontalStyle,
@@ -195,6 +195,7 @@ import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
+import { ScheduleEditFollowUpBar, type ScheduleEditFollowUpChange } from './ScheduleEditFollowUpBar';
 import { OperationsToolbarGuestSearchPanel } from '@/components/dashboard/OperationsToolbarGuestSearchPanel';
 import { BookingCard } from './BookingCard';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
@@ -1201,6 +1202,12 @@ const BOOKING_RESERVE_ABOVE_RESIZE_PX = BOOKING_RESIZE_HANDLE_HEIGHT_PX + 1;
 const BOOKING_RESIZE_HOLD_MS = 1000;
 /** Pointer travel (px) during the hold that aborts arming — i.e. the press was really a scroll/scrub, not a deliberate resize. */
 const BOOKING_RESIZE_HOLD_TOLERANCE_PX = 10;
+/**
+ * How far into a press-and-hold the day grid stretches to the whole day for a
+ * move or resize: well before the hold activates the drag, and later than any
+ * click lasts.
+ */
+const GRID_EXTENSION_ARM_MS = 300;
 
 /**
  * Press-and-hold affordance shown over a booking gesture handle while it is arming
@@ -1224,93 +1231,6 @@ function ResizeHoldHint({ label, placement = 'bottom' }: { label: string; placem
         <span className="animate-resize-hold block h-full w-full origin-left rounded-full bg-white" />
       </span>
     </span>
-  );
-}
-
-/**
- * Notify / skip / undo offered on a booking bar straight after a start-time move.
- *
- * One renderer for both bar types. It lived inline in the single-booking branch, so a
- * multi-service visit armed the follow-up on drop and then had nowhere to draw it: the
- * countdown ran invisibly and the guest was notified with no chance to skip or undo.
- * A visit is one booking, so it gets the same prompt a single booking gets.
- */
-function ScheduleEditFollowUpPill({
-  palette,
-  kind,
-  countdownSec,
-  disabled,
-  onNotifyNow,
-  onSkip,
-  onUndo,
-}: {
-  palette: BookingBlockPalette;
-  kind: 'move' | 'resize';
-  countdownSec: number | null;
-  disabled: boolean;
-  onNotifyNow: () => void;
-  onSkip: () => void;
-  onUndo: () => void;
-}) {
-  return (
-    <div
-      // Centred on the bar but never narrower than its own controls: it may
-      // overhang a narrow lane or a short bar, which is the point of drawing it
-      // outside the clipped card.
-      className="pointer-events-auto absolute left-1/2 z-[45] w-max max-w-[calc(100vw-1rem)] -translate-x-1/2"
-      style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
-      data-no-calendar-pan="true"
-    >
-      <div
-        role="group"
-        aria-label={
-          kind === 'resize' ? 'Confirm or undo this duration change' : 'Confirm or undo this move'
-        }
-        className="flex items-center gap-1 rounded-xl border px-2 py-1 shadow-[0_12px_28px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.72)] ring-1 ring-black/[0.05] backdrop-blur-sm"
-        // Near-white frosted surface with a faint status wash (10% of the
-        // saturated hue) - keeps the dark control labels legible while still
-        // nodding to the booking's status colour.
-        style={{
-          backgroundColor: '#FFFFFF',
-          backgroundImage: `linear-gradient(135deg, ${palette.bg}1A 0%, rgba(255,255,255,0.96) 62%)`,
-          borderColor: palette.border,
-          color: '#334155',
-        }}
-      >
-        <span
-          className="mr-0.5 h-3 w-[3px] shrink-0 rounded-full"
-          style={{ backgroundColor: palette.accent }}
-          aria-hidden
-        />
-        <span className="mr-1 max-w-[7.5rem] truncate text-[10px] font-medium leading-tight text-slate-600">
-          {countdownSec != null ? `Notify in ${countdownSec}s` : 'Notify guest'}
-        </span>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onNotifyNow}
-          className="rounded-lg bg-brand-600 px-2.5 py-1 text-[10px] font-semibold leading-none text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50"
-        >
-          Notify now
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onSkip}
-          className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-        >
-          Skip notify
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onUndo}
-          className="rounded-lg border border-slate-300/90 bg-white/90 px-2.5 py-1 text-[10px] font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
-        >
-          Undo
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -1952,7 +1872,10 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
       className={`absolute left-0 right-0 z-0 [touch-action:pan-x_pan-y] border-t ${gridLineClass} ${slotBandClass} transition-colors ${
         disabled ? 'pointer-events-none cursor-default' : 'cursor-pointer hover:bg-brand-500/5'
       } ${isOver ? 'bg-brand-500/15' : ''}`}
-      style={{ top, height: slotHeightPx }}
+      // The global `button { transition: all }` rule would also animate `top`,
+      // and a slot that is still gliding into place when dnd-kit measures the
+      // drop targets (the grid stretches while a hold arms) is measured wrong.
+      style={{ top, height: slotHeightPx, transitionProperty: 'background-color, border-color' }}
       aria-label={`Empty slot ${tlabel}`}
     />
   );
@@ -2033,11 +1956,14 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   /** Lane, or the host it nests inside; see `layoutOverlapClusters`. */
   layout?: BookingClusterLayout;
   canDrag: boolean;
-  /** Lifts the bar above its neighbours while it carries a prompt that must not be covered. */
+  /**
+   * Outlines and lifts the bar while the screen-bottom notify / skip / undo
+   * bar is about it, so staff can see which booking that prompt refers to.
+   */
   raised?: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: `booking-${booking.id}`,
     disabled: !canDrag,
     data: { booking },
@@ -2053,14 +1979,21 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   const totalHeight = Math.max(BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX, height + heightExtraPx);
   const horizontal = clusterLayoutHorizontalStyle(layout);
   const nested = Boolean(layout.nestedInKey);
+  /**
+   * The bar stays where it was while it is dragged, faded, as the origin
+   * marker; the DragOverlay card and the drop outline are the moving parts.
+   * dnd-kit hands a node only the pointer's viewport delta while an overlay is
+   * mounted (`appliedTranslate`), so translating the bar as well had it drift
+   * by exactly the scroll distance whenever the diary scrolled mid-drag, away
+   * from the outline that marks where the booking will land.
+   */
   const style = {
     top,
     height: totalHeight,
     left: horizontal.left,
     width: horizontal.width,
-    transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : raised ? 48 : horizontal.zIndex,
-    opacity: isDragging ? 0.85 : 1,
+    opacity: isDragging ? 0.4 : 1,
     pointerEvents: isDragging ? 'none' : undefined,
   } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
@@ -2075,7 +2008,7 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
       // animated; both are under the pointer's direct control during a drag.
       className={`absolute motion-safe:transition-[left,width] motion-safe:duration-200 motion-safe:ease-out ${
         nested ? 'rounded-2xl shadow-[-10px_0_16px_-8px_rgba(2,32,71,0.55)]' : ''
-      }`}
+      } ${raised ? 'rounded-2xl ring-2 ring-brand-500 ring-offset-2 ring-offset-white' : ''}`}
       style={style}
     >
       {children(handleProps)}
@@ -2155,18 +2088,18 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
   clickThrough?: boolean;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: `block-${block.id}`,
     disabled: !canDrag,
     data: { block },
   });
   const totalHeight = Math.max(slotHeightPx * 0.5, height + heightExtraPx);
+  // Stays put while dragged, as DraggableBookingShell does and for the same reason.
   const style = {
     top,
     height: totalHeight,
-    transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : 15,
-    opacity: isDragging ? 0.85 : 1,
+    opacity: isDragging ? 0.4 : 1,
     pointerEvents: isDragging || clickThrough ? 'none' : undefined,
   } as CSSProperties;
   const handleProps: DraggableHandleProps = canDrag
@@ -2638,6 +2571,7 @@ export function PractitionerCalendarView({
   enabledModels = [],
   calendarTodayIso,
   linkFeature = false,
+  initialStaffCollective,
 }: {
   venueId: string;
   currency?: string;
@@ -2655,6 +2589,13 @@ export function PractitionerCalendarView({
    * Keeps the toolbar date label and initial navigation state aligned across SSR and hydration.
    */
   calendarTodayIso?: string;
+  /**
+   * The live collective this venue books for, resolved on the server (null when
+   * there is none). When supplied the diary knows before its first paint which
+   * linked columns book through the collective; when omitted it asks the API and
+   * holds back the linked columns' own "New booking" buttons until it hears.
+   */
+  initialStaffCollective?: StaffCollectiveSummary | null;
 }) {
   const { addToast } = useToast();
   const acceptUnpaidGuard = useAcceptUnpaidGuard();
@@ -2761,8 +2702,25 @@ export function PractitionerCalendarView({
     name: string;
     memberVenueIds: string[];
     calendarIds: string[];
-  } | null>(null);
+  } | null>(() =>
+    initialStaffCollective
+      ? {
+          id: initialStaffCollective.id,
+          name: initialStaffCollective.name,
+          memberVenueIds: initialStaffCollective.memberVenueIds,
+          calendarIds: initialStaffCollective.calendarIds,
+        }
+      : null,
+  );
+  /**
+   * False until the collective lookup has answered either way. A linked column's
+   * own "New booking" button waits for it: shown and then taken away is worse
+   * than shown a moment late.
+   */
+  const [staffCollectiveResolved, setStaffCollectiveResolved] = useState(initialStaffCollective !== undefined);
   useEffect(() => {
+    // The server answered already; nothing to ask.
+    if (initialStaffCollective !== undefined) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -2784,12 +2742,14 @@ export function PractitionerCalendarView({
         );
       } catch {
         /* the per-venue form is the fallback */
+      } finally {
+        if (!cancelled) setStaffCollectiveResolved(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [venueId]);
+  }, [venueId, initialStaffCollective]);
   /**
    * Where a new booking for `calendarId` on `columnVenueId` goes: the collective, or
    * null for the venue itself. A partner column that answers with the collective
@@ -3203,33 +3163,8 @@ export function PractitionerCalendarView({
     [practitioners, listFromTo.from, listFromTo.to],
   );
 
-  const scheduleClosureBlocks = useMemo((): CalendarBlock[] => {
-    const nativeColumnIds = practitioners
-      .filter((p) => p.is_active && p.calendar_type !== 'resource')
-      .map((p) => p.id);
-    const venueBlocks = buildVenueScheduleClosureBlocks({
-      openingHours,
-      venueWideBlocks,
-      fromDate: listFromTo.from,
-      toDate: listFromTo.to,
-      columnIds: nativeColumnIds,
-      timeZone: venueTimezone,
-    });
-    const practitionerBlocks = buildPractitionerScheduleClosureBlocks({
-      practitioners: practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
-      leavePeriods,
-      fromDate: listFromTo.from,
-      toDate: listFromTo.to,
-      openingHours,
-      timeZone: venueTimezone,
-    });
-    return [...venueBlocks, ...practitionerBlocks] as CalendarBlock[];
-  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone]);
-
-  const displayBlocks = useMemo(
-    () => [...scheduleClosureBlocks, ...blocks, ...practitionerBreakBlocks],
-    [scheduleClosureBlocks, blocks, practitionerBreakBlocks],
-  );
+  // `scheduleClosureBlocks` and `displayBlocks` are built further down, once the
+  // day's drawn bounds are known: the closed stripes cover the drawn range.
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
 
@@ -3428,8 +3363,16 @@ export function PractitionerCalendarView({
     if (remembered.compactDay !== undefined) setCompactDay(remembered.compactDay);
     setCalendarPrefsHydrated(true);
   }, [preferencesKey, venueId]);
-  const startHour = startHourOverride ?? derivedStartHour;
-  const endHour = endHourOverride ?? derivedEndHour;
+  const baseStartHour = startHourOverride ?? derivedStartHour;
+  const baseEndHour = endHourOverride ?? derivedEndHour;
+  /**
+   * Rows beyond the day's hours while a booking is being moved or resized, so a
+   * bar can be dragged before opening, after close, or into a closed gap. See
+   * `armGridExtension` below for when it is set and cleared.
+   */
+  const [gridExtension, setGridExtension] = useState<{ startHour: number; endHour: number } | null>(null);
+  const startHour = gridExtension ? Math.min(baseStartHour, gridExtension.startHour) : baseStartHour;
+  const endHour = gridExtension ? Math.max(baseEndHour, gridExtension.endHour) : baseEndHour;
   const TOTAL_SLOTS = (() => {
     const n = ((endHour - startHour) * 60) / SLOT_MINUTES;
     return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
@@ -3446,6 +3389,119 @@ export function PractitionerCalendarView({
     compactDay && measuredSlotHeight != null ? measuredSlotHeight : COMFORTABLE_SLOT_PX;
   /** Resize handles + their reserved strip are hidden in compact (rows are too short to grab precisely). */
   const resizeAffordanceOn = !compactActive;
+
+  /**
+   * Live extension of the day grid for a move or a resize.
+   *
+   * A booking may be dragged before opening, after close, or into a closed gap,
+   * and the grid needs rows there for the bar to land on. The rows are added
+   * part way through the press-and-hold, before dnd-kit activates: adding them
+   * during an active drag would move the bar's own origin and the page under
+   * the pointer at once, and dnd-kit counts that scroll into the drag. The main
+   * pane is scrolled by exactly the height added above the grid, so nothing on
+   * screen appears to move. The extension is cleared when the interaction ends;
+   * a booking that landed outside keeps the grid wide through the derived
+   * bounds, which follow every booking on the day, and the closed stripes
+   * (built below over the drawn range) then cover that time. Compact view keeps
+   * its fit-to-screen rows and is not stretched.
+   */
+  const gridTopHourRef = useRef(startHour);
+  const compensateGridTopShiftRef = useRef(false);
+  useLayoutEffect(() => {
+    const prev = gridTopHourRef.current;
+    gridTopHourRef.current = startHour;
+    const compensate = compensateGridTopShiftRef.current;
+    compensateGridTopShiftRef.current = false;
+    if (!compensate || prev === startHour) return;
+    const main = scrollRef.current?.closest('main');
+    if (!main) return;
+    main.scrollTop += ((prev - startHour) * 60 * slotHeightPx) / SLOT_MINUTES;
+  }, [startHour, gridExtension, slotHeightPx]);
+  const gridExtensionRef = useRef(gridExtension);
+  gridExtensionRef.current = gridExtension;
+  const gridExtensionArmTimerRef = useRef<number | null>(null);
+  /** Set once dnd-kit or a resize has the pointer, so a release does not fold the grid mid-drag. */
+  const dragActivatedRef = useRef(false);
+  const extendGridForInteraction = useCallback(
+    (edges: 'both' | 'bottom') => {
+      if (viewMode !== 'day' || compactActive) return;
+      compensateGridTopShiftRef.current = edges === 'both';
+      setGridExtension({ startHour: edges === 'both' ? 0 : baseStartHour, endHour: 24 });
+    },
+    [viewMode, compactActive, baseStartHour],
+  );
+  const clearGridExtension = useCallback(() => {
+    if (gridExtensionArmTimerRef.current != null) {
+      window.clearTimeout(gridExtensionArmTimerRef.current);
+      gridExtensionArmTimerRef.current = null;
+    }
+    if (!gridExtensionRef.current) return;
+    compensateGridTopShiftRef.current = true;
+    setGridExtension(null);
+  }, []);
+  /**
+   * Called on the pointer-down that begins a hold: stretches the grid once the
+   * hold has lasted longer than a click, and folds it back if the pointer is
+   * released without a drag or resize having taken over.
+   */
+  const armGridExtension = useCallback(
+    (edges: 'both' | 'bottom', pointerId: number) => {
+      if (viewMode !== 'day' || compactActive) return;
+      if (gridExtensionArmTimerRef.current != null) window.clearTimeout(gridExtensionArmTimerRef.current);
+      dragActivatedRef.current = false;
+      gridExtensionArmTimerRef.current = window.setTimeout(() => {
+        gridExtensionArmTimerRef.current = null;
+        extendGridForInteraction(edges);
+      }, GRID_EXTENSION_ARM_MS);
+      const release = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('pointerup', release);
+        window.removeEventListener('pointercancel', release);
+        if (!dragActivatedRef.current) clearGridExtension();
+      };
+      window.addEventListener('pointerup', release);
+      window.addEventListener('pointercancel', release);
+    },
+    [viewMode, compactActive, extendGridForInteraction, clearGridExtension],
+  );
+  const armGridExtensionRef = useRef(armGridExtension);
+  armGridExtensionRef.current = armGridExtension;
+  const clearGridExtensionRef = useRef(clearGridExtension);
+  clearGridExtensionRef.current = clearGridExtension;
+
+  const scheduleClosureBlocks = useMemo((): CalendarBlock[] => {
+    const nativeColumnIds = practitioners
+      .filter((p) => p.is_active && p.calendar_type !== 'resource')
+      .map((p) => p.id);
+    // The day grid may be wider than the venue's hours (a booking outside them,
+    // or a drag stretching the day); the stripes then cover the drawn range so
+    // every minute outside the open windows reads as closed.
+    const gridBounds = viewMode === 'day' ? { start: startHour * 60, end: endHour * 60 } : undefined;
+    const venueBlocks = buildVenueScheduleClosureBlocks({
+      openingHours,
+      venueWideBlocks,
+      fromDate: listFromTo.from,
+      toDate: listFromTo.to,
+      columnIds: nativeColumnIds,
+      timeZone: venueTimezone,
+      gridBounds,
+    });
+    const practitionerBlocks = buildPractitionerScheduleClosureBlocks({
+      practitioners: practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
+      leavePeriods,
+      fromDate: listFromTo.from,
+      toDate: listFromTo.to,
+      openingHours,
+      timeZone: venueTimezone,
+      gridBounds,
+    });
+    return [...venueBlocks, ...practitionerBlocks] as CalendarBlock[];
+  }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone, viewMode, startHour, endHour]);
+
+  const displayBlocks = useMemo(
+    () => [...scheduleClosureBlocks, ...blocks, ...practitionerBreakBlocks],
+    [scheduleClosureBlocks, blocks, practitionerBreakBlocks],
+  );
 
   const calendarPrefsSnapshot = useMemo(
     (): PractitionerCalendarPreferences => ({
@@ -3892,7 +3948,10 @@ export function PractitionerCalendarView({
     };
     const id = requestAnimationFrame(() => requestAnimationFrame(apply));
     return () => cancelAnimationFrame(id);
-  }, [loading, viewMode, date, startHour, endHour]);
+    // Only a new day or the end of loading: the grid's bounds also change when
+    // it stretches for a drag or follows a booking moved outside hours, and
+    // neither may yank the page to the top.
+  }, [loading, viewMode, date]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -5201,6 +5260,54 @@ export function PractitionerCalendarView({
     ],
   );
 
+  /**
+   * What the screen-bottom notify / skip / undo bar describes: the booking the
+   * deferred notify is armed for as it stands now, against the row saved before
+   * the edit. A visit is keyed on its first service, which `allGridBookings`
+   * also holds. Null once the prompt is answered or times out.
+   */
+  const scheduleFollowUpChange = useMemo<ScheduleEditFollowUpChange | null>(() => {
+    if (!dragMoveConfirmBookingId) return null;
+    const current = allGridBookings.find((b) => b.id === dragMoveConfirmBookingId);
+    if (!current) return null;
+    const undo = lastScheduleEditUndo?.prev.id === current.id ? lastScheduleEditUndo : null;
+    const prev = undo?.prev ?? current;
+    const kind = undo?.kind ?? 'move';
+    const endHm = (row: Booking): string =>
+      row.booking_end_time && row.booking_end_time.trim() !== ''
+        ? row.booking_end_time.slice(0, 5)
+        : minutesToTime(
+            timeToMinutes(row.booking_time.slice(0, 5)) +
+              bookingDurationMinutes(row, serviceMapForBooking(row)),
+          );
+    const prevColumn = resolveBookingColumnId(prev, resourceParentById);
+    const column = resolveBookingColumnId(current, resourceParentById);
+    const staffName =
+      column && prevColumn !== column
+        ? (linkedNativeGridColumnByKey.get(column)?.practitionerName ??
+          filteredPractitioners.find((p) => p.id === column)?.name ??
+          null)
+        : null;
+    return {
+      kind,
+      guestName: current.guest_name,
+      staffName,
+      fromDate: prev.booking_date,
+      fromTime: kind === 'resize' ? endHm(prev) : prev.booking_time.slice(0, 5),
+      toDate: current.booking_date,
+      toTime: kind === 'resize' ? endHm(current) : current.booking_time.slice(0, 5),
+      accent: bookingCalendarBlockPalette(current).accent,
+    };
+  }, [
+    dragMoveConfirmBookingId,
+    allGridBookings,
+    lastScheduleEditUndo,
+    resourceParentById,
+    linkedNativeGridColumnByKey,
+    filteredPractitioners,
+    serviceMapForBooking,
+  ]);
+
   const undoLastScheduleEdit = useCallback(async () => {
     if (!lastScheduleEditUndo || scheduleUndoPending) return;
     const { kind, prev, prevVisitRows } = lastScheduleEditUndo;
@@ -5618,6 +5725,7 @@ export function PractitionerCalendarView({
 
   function handleDragStart(e: DragStartEvent) {
     interactingRef.current = true;
+    dragActivatedRef.current = true;
     // The hold elapsed and the sensor armed: clear the "Hold to move" hint, give the same
     // haptic tick as the duration slider, and suppress native scroll for the drag's
     // duration (the grip's touch-action stays pannable at rest so scrolls pass through).
@@ -5674,8 +5782,9 @@ export function PractitionerCalendarView({
         compactActive && Math.abs(e.delta.y) < COMPACT_DRAG_DEADZONE_PX
           ? 0
           : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
-      const targetStartMins = originalStartMins + deltaMinutes;
       const duration = blockDurationMinutes(bl);
+      // The day ends at midnight: a bar dragged past either end stops there.
+      const targetStartMins = Math.max(0, Math.min(originalStartMins + deltaMinutes, 24 * 60 - duration));
       const endMin = targetStartMins + duration;
       const dayStartMin = startHour * 60;
       const dayEndMin = endHour * 60;
@@ -5724,11 +5833,14 @@ export function PractitionerCalendarView({
       compactActive && Math.abs(e.delta.y) < COMPACT_DRAG_DEADZONE_PX
         ? 0
         : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
-    const targetStartMins = originalStartMins + deltaMinutes;
     const duration = getBookingDuration(b);
+    // The day ends at midnight: a bar dragged past either end stops there.
+    const targetStartMins = Math.max(0, Math.min(originalStartMins + deltaMinutes, 24 * 60 - duration));
     const endMin = targetStartMins + duration;
-    const dayStartMin = startHour * 60;
-    const dayEndMin = endHour * 60;
+    // The day's own bounds, not the stretched grid: landing on the stretched
+    // rows is exactly what "outside hours" means.
+    const dayStartMin = baseStartHour * 60;
+    const dayEndMin = baseEndHour * 60;
     const pracClassBlocks = classBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const pracEventBlocks = eventBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(
@@ -5781,6 +5893,7 @@ export function PractitionerCalendarView({
 
   function handleDragCancel(_e: DragCancelEvent) {
     clearCalendarDragUi();
+    clearGridExtension();
   }
 
   function handleDragEnd(e: DragEndEvent) {
@@ -5789,6 +5902,9 @@ export function PractitionerCalendarView({
     const over = e.over;
     const target = calendarDragTargetRef.current;
     clearCalendarDragUi();
+    // Folded back in the same render as the move below, so a booking that landed
+    // outside hours is drawn on a grid that already reaches it.
+    clearGridExtension();
     if ((!b && !bl) || !over?.data?.current) return;
     // C9 — no resolved target means the pointer never moved, so this was a
     // press-and-hold, not a drag. dnd-kit's delay activation starts a drag on a
@@ -5921,6 +6037,8 @@ export function PractitionerCalendarView({
       const state = { lastY: startY, done: false, holdTimer: 0 };
 
       setResizeArming({ kind, id });
+      // Rows past close appear while the hold arms, so the bar can grow to midnight.
+      armGridExtensionRef.current('bottom', pointerId);
 
       const cleanup = () => {
         window.clearTimeout(state.holdTimer);
@@ -5941,7 +6059,10 @@ export function PractitionerCalendarView({
           } catch {
             /* ignore */
           }
+          dragActivatedRef.current = true;
           startDrag(state.lastY, target, pointerId);
+        } else {
+          clearGridExtensionRef.current();
         }
       };
       function onPreMove(ev: globalThis.PointerEvent) {
@@ -5974,6 +6095,9 @@ export function PractitionerCalendarView({
     (kind: 'booking' | 'block', id: string) => (downEvent: ReactPointerEvent<HTMLButtonElement>) => {
       if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
       const pointerId = downEvent.pointerId;
+      // Stretch the grid to the whole day while the hold arms, so the bar can
+      // be carried before opening or past close.
+      armGridExtensionRef.current('both', pointerId);
       const startX = downEvent.clientX;
       const startY = downEvent.clientY;
       const clear = () => {
@@ -5985,7 +6109,10 @@ export function PractitionerCalendarView({
       };
       const onMove = (ev: globalThis.PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
-        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > BOOKING_RESIZE_HOLD_TOLERANCE_PX) clear();
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > BOOKING_RESIZE_HOLD_TOLERANCE_PX) {
+          clear();
+          clearGridExtensionRef.current();
+        }
       };
       const onEnd = (ev: globalThis.PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
@@ -6155,11 +6282,10 @@ export function PractitionerCalendarView({
         // appointment unresizable on the calendar. A visit floors at every one of
         // its services on that minimum, with its configured gaps still in place.
         const minEnd = startM + (visit ? minimumVisitMinutes(visit) : MIN_APPOINTMENT_CORE_DURATION_MINUTES);
-        // The booking may be extended past the grid's close (staff can run past
-        // opening hours) — allow up to ~2h beyond, capped at midnight. The portion
-        // beyond `gridCloseMin` counts as outside opening hours.
-        const gridCloseMin = endHour * 60;
-        const gridEndMax = Math.min(24 * 60, gridCloseMin + 120);
+        // The grid was stretched to midnight while the hold armed (see
+        // armGridExtension), so the bar may grow that far; the portion past the
+        // day's own close, or over a closed stripe, counts as outside hours.
+        const gridEndMax = 24 * 60;
 
         setResizeVisual({ bookingId: booking.id, deltaYPx: 0 });
         setResizePreviewEnd({ bookingId: booking.id, endHm: minutesToTime(endM0) });
@@ -6223,11 +6349,21 @@ export function PractitionerCalendarView({
           const endStr = minutesToTime(committedEndMin);
           setResizeVisual(null);
           setResizePreviewEnd(null);
+          clearGridExtensionRef.current();
           if (committedEndMin === endM0) return;
-          const extendedOutsideHours = committedEndMin > gridCloseMin;
+          const resizeColumnId = resolveBookingColumnId(booking, resourceParentById);
+          const extendedOutsideHours =
+            committedEndMin > baseEndHour * 60 ||
+            (resizeColumnId != null &&
+              windowCrossesNonWorkingBlock(
+                startM,
+                committedEndMin,
+                resizeColumnId,
+                booking.booking_date,
+                displayBlocks,
+              ));
           // Growing a booking into a break needs the same override a move into
           // one needs, or the PATCH refuses it (SA-H5).
-          const resizeColumnId = resolveBookingColumnId(booking, resourceParentById);
           const extendedOverBreak =
             resizeColumnId != null &&
             windowCrossesBreakBlock(
@@ -6283,7 +6419,7 @@ export function PractitionerCalendarView({
     [
       addToast,
       collidingBookingCount,
-      endHour,
+      baseEndHour,
       patchBookingResize,
       patchVisitResize,
       resourceParentById,
@@ -6370,6 +6506,7 @@ export function PractitionerCalendarView({
           const endStr = minutesToTime(committedEndMin);
           setBlockResizeVisual(null);
           setBlockResizePreviewEnd(null);
+          clearGridExtensionRef.current();
           if (committedEndMin === endM0) return;
           justResizedBlockIdRef.current = block.id;
           window.setTimeout(() => {
@@ -6957,6 +7094,9 @@ export function PractitionerCalendarView({
             void fetchData({ refreshCatalog: true });
             void requestLinkedCalendarSync();
           }}
+          onBookingActionsIntent={() =>
+            warmStaffBookingSurface({ venueId, linkedOwnerVenueId: collectiveTargetFor(venueId, null)?.id })
+          }
           onNewBooking={() => {
             setEventBookPrefill(null);
             setPrefillDate(viewMode === 'day' ? date : undefined);
@@ -7285,7 +7425,7 @@ export function PractitionerCalendarView({
                       <span className="mt-0.5 block text-[11px] leading-tight text-slate-600" title={linkedHoursLine}>
                         {linkedHoursLine}
                       </span>
-                      {col.action === 'create_edit_cancel' && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
+                      {col.action === 'create_edit_cancel' && staffCollectiveResolved && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -7548,7 +7688,7 @@ export function PractitionerCalendarView({
                           {linkedHoursLine}
                         </span>
                         {linkedCol.action === 'create_edit_cancel' &&
-                        !collectiveTargetFor(linkedCol.venueId, linkedCol.practitionerId) ? (
+                        staffCollectiveResolved && !collectiveTargetFor(linkedCol.venueId, linkedCol.practitionerId) ? (
                           <button
                             type="button"
                             onClick={() => {
@@ -7609,7 +7749,7 @@ export function PractitionerCalendarView({
                       >
                         {linkedHoursLine}
                       </span>
-                      {col.action === 'create_edit_cancel' && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
+                      {col.action === 'create_edit_cancel' && staffCollectiveResolved && !collectiveTargetFor(col.venueId, col.practitionerId) ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -8075,10 +8215,6 @@ export function PractitionerCalendarView({
                               : minutesToTime(timeToMinutes(b.booking_time) + duration);
                           const blockH = height + resizeExtra;
                           const showInlineScheduleFollowUp = dragMoveConfirmBookingId === b.id;
-                          const scheduleFollowUpKind =
-                            lastScheduleEditUndo?.prev.id === b.id
-                              ? lastScheduleEditUndo.kind
-                              : 'move';
                           const isOverlapLane = layout.laneCount > 1;
                           const reservePx =
                             canDrag && resizeAffordanceOn ? BOOKING_RESERVE_ABOVE_RESIZE_PX : 0;
@@ -8386,23 +8522,6 @@ export function PractitionerCalendarView({
                                     </>
                                   ) : null}
                                 </div>
-                                {/*
-                                  Outside the card on purpose. The card clips its overflow, and
-                                  the prompt is taller than a compact bar and wider than an
-                                  overlap lane, so it was cut off exactly when it mattered.
-                                  The shell is not clipped, and is raised while this shows.
-                                */}
-                                {canDrag && showInlineScheduleFollowUp ? (
-                                  <ScheduleEditFollowUpPill
-                                    palette={palette}
-                                    kind={scheduleFollowUpKind}
-                                    countdownSec={modificationNotifyCountdownSec}
-                                    disabled={scheduleUndoPending}
-                                    onNotifyNow={() => void confirmInlineDragMove()}
-                                    onSkip={dismissPendingModificationGuestNotify}
-                                    onUndo={() => void undoLastScheduleEdit()}
-                                  />
-                                ) : null}
                                 </>
                               )}
                             </DraggableBookingShell>
@@ -8491,10 +8610,6 @@ export function PractitionerCalendarView({
                          * service, which is what this bar is keyed on.
                          */
                         const showVisitScheduleFollowUp = dragMoveConfirmBookingId === first.id;
-                        const visitScheduleFollowUpKind =
-                          lastScheduleEditUndo?.prev.id === first.id
-                            ? lastScheduleEditUndo.kind
-                            : 'move';
                         return (
                           <DraggableBookingShell
                             key={`${items.map((x) => `${x.id}:${x.status}:${x.client_arrived_at ?? ''}`).join('|')}`}
@@ -8845,18 +8960,6 @@ export function PractitionerCalendarView({
                                   }}
                                 </BookingGuestActionsRowMeasured>
                               </div>
-                              {/* Outside the clipped card, as on a single booking. */}
-                              {showVisitScheduleFollowUp ? (
-                                <ScheduleEditFollowUpPill
-                                  palette={clusterPalette}
-                                  kind={visitScheduleFollowUpKind}
-                                  countdownSec={modificationNotifyCountdownSec}
-                                  disabled={scheduleUndoPending}
-                                  onNotifyNow={() => void confirmInlineDragMove()}
-                                  onSkip={dismissPendingModificationGuestNotify}
-                                  onUndo={() => void undoLastScheduleEdit()}
-                                />
-                              ) : null}
                               </>
                             )}
                           </DraggableBookingShell>
@@ -8941,6 +9044,17 @@ export function PractitionerCalendarView({
         </DndContext>
         </div>
       )}
+
+      {scheduleFollowUpChange ? (
+        <ScheduleEditFollowUpBar
+          change={scheduleFollowUpChange}
+          countdownSec={modificationNotifyCountdownSec}
+          disabled={scheduleUndoPending}
+          onNotifyNow={() => void confirmInlineDragMove()}
+          onSkip={dismissPendingModificationGuestNotify}
+          onUndo={() => void undoLastScheduleEdit()}
+        />
+      ) : null}
 
       {slotMenu && (() => {
         const linkedHere = slotMenu.linked;
@@ -9131,7 +9245,8 @@ export function PractitionerCalendarView({
         </Dialog>
       ) : null}
 
-      {(
+      {/* Steps aside while the notify / skip / undo bar has the bottom of a phone screen. */}
+      {scheduleFollowUpChange ? null : (
         <button
           type="button"
           onClick={() => {

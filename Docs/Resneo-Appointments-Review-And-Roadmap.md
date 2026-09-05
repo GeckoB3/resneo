@@ -134,7 +134,7 @@ Maturity key: **● Complete** · **◐ Partial** · **○ Missing** · **⚑ Co
 | Public appointment booking | ● | `AppointmentBookingFlow`, practitioner slug routes |
 | Staff booking + walk-in | ● | `DashboardStaffBookingModal`, walk-in API |
 | Day / week / month calendar | ● | `PractitionerCalendarView` |
-| Drag-reschedule + duration resize | ● | Calendar grid, undo, deferred guest notify |
+| Drag-reschedule + duration resize | ● | Calendar grid, undo, deferred guest notify. Since 2026-09-05 the day grid stretches to 00:00 to 24:00 while a bar is held, so staff can carry a booking before opening, past close, or into a break; the drop is saved with a warning toast rather than refused, and the minutes now outside hours are drawn as closed stripes (`buildVenueScheduleClosureBlocks` with `gridBounds`). The notify / skip / undo prompt after a move or resize is a bar pinned to the bottom of the screen (`ScheduleEditFollowUpBar`), with the moved bar outlined; it used to sit on the booking bar, where short or overlapped bars clipped it. While a bar is dragged it stays put as a faded origin marker: dnd-kit gives a node only the pointer's viewport delta when a DragOverlay is mounted, so a translated bar drifted by the scroll distance whenever the diary scrolled mid-drag |
 | Processing-time blocks | ● | Per-service and per-booking layout |
 | Multi-service / group appointments | ● | `group_booking_id` clustering |
 | Status workflow (Booked → Confirmed → Started → Completed) | ● | Shared status system + attendance confirm |

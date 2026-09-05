@@ -244,13 +244,20 @@ export function buildVenueScheduleClosureBlocks(params: {
   toDate: string;
   columnIds: string[];
   timeZone?: string | null;
+  /**
+   * The minutes the grid actually draws, when wider than the venue's own hours
+   * (a booking outside them, or a drag stretching the day to let one land
+   * there). The stripes are clipped to these instead, so every drawn minute
+   * outside the open windows reads as closed.
+   */
+  gridBounds?: { start: number; end: number };
 }): ScheduleClosureCalendarBlock[] {
-  const { openingHours, venueWideBlocks, fromDate, toDate, columnIds, timeZone } = params;
+  const { openingHours, venueWideBlocks, fromDate, toDate, columnIds, timeZone, gridBounds } = params;
   if (columnIds.length === 0) return [];
 
   const out: ScheduleClosureCalendarBlock[] = [];
   for (const dateStr of enumerateDatesInclusive(fromDate, toDate)) {
-    const bounds = gridMinuteBounds(dateStr, openingHours, timeZone, venueWideBlocks);
+    const bounds = gridBounds ?? gridMinuteBounds(dateStr, openingHours, timeZone, venueWideBlocks);
     const resolution = resolveVenueWideAllowedMinuteRanges(openingHours, dateStr, venueWideBlocks);
     const dayBlocks = blocksForDate(venueWideBlocks, dateStr);
     const amendedUnion = unionAmendedPeriodsForDate(dayBlocks);
@@ -355,8 +362,10 @@ export function buildPractitionerScheduleClosureBlocks(params: {
   toDate: string;
   openingHours: OpeningHours | null | undefined;
   timeZone?: string | null;
+  /** As on {@link buildVenueScheduleClosureBlocks}: the drawn range, when wider than the hours. */
+  gridBounds?: { start: number; end: number };
 }): ScheduleClosureCalendarBlock[] {
-  const { practitioners, leavePeriods, fromDate, toDate, openingHours, timeZone } = params;
+  const { practitioners, leavePeriods, fromDate, toDate, openingHours, timeZone, gridBounds } = params;
   const out: ScheduleClosureCalendarBlock[] = [];
 
   for (const prac of practitioners) {
@@ -364,7 +373,7 @@ export function buildPractitionerScheduleClosureBlocks(params: {
     const asPractitioner = prac as Practitioner;
 
     for (const dateStr of enumerateDatesInclusive(fromDate, toDate)) {
-      const bounds = gridMinuteBounds(dateStr, openingHours, timeZone);
+      const bounds = gridBounds ?? gridMinuteBounds(dateStr, openingHours, timeZone);
       const leave = leaveForPractitionerOnDate(prac.id, dateStr, leavePeriods);
       const working = getWorkingRanges(asPractitioner, dateStr);
 

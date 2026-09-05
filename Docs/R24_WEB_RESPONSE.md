@@ -34,12 +34,11 @@ output, and the `CalendarGridBooking` interface), with tests in
 `src/lib/unified-availability.calendar-grid.test.ts` ("processing snapshot columns") and a
 section in `Docs/MOBILE_API.md` ("Processing snapshot on calendar-grid rows").
 
-Commit: see the `staging` history for the commit titled "Calendar grid: serve the service ids
-and processing snapshot on booking rows"; it is the first commit after `e9e0bb8c` that touches
-`src/lib/unified-availability.ts`.
+Commit: `e116f8d8` on `staging` ("Calendar grid: serve the service ids and processing snapshot
+on booking rows"), the first commit after `cff80edb`, where the app repo's mirror stands.
 
-Related, in case the port of `booking-cluster-layout.ts` starts from the mirror: `e9e0bb8c`
-(#177 follow-up, 2026-09-05) changed the nesting rule so a booking that starts inside a gap and
+Related, in case the port of `booking-cluster-layout.ts` starts from the mirror: `cff80edb`
+(#177, 2026-09-05, already in the mirror) changed the nesting rule so a booking that starts inside a gap and
 stays inside it for as long as the host lasts nests even when it finishes after the host, and
 the host's lane stays reserved until the nested booking ends. The tests in
 `src/lib/calendar/booking-cluster-layout.test.ts` cover both.

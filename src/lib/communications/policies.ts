@@ -111,9 +111,12 @@ function buildDefaultLanePolicies(): LaneCommunicationPolicies {
       hoursBefore: null,
       hoursAfter: null,
     },
+    // Email only by default for new venues (2026-09-05). SMS stays in ALLOWED_CHANNELS_BY_MESSAGE
+    // so a venue can switch it on. The column default in supabase/migrations/
+    // 20270206120000_confirm_or_cancel_prompt_default_email_only.sql must agree (policies.defaults.test.ts).
     confirm_or_cancel_prompt: {
       enabled: true,
-      channels: ['email', 'sms'],
+      channels: ['email'],
       emailCustomMessage: null,
       smsCustomMessage: null,
       hoursBefore: 24,

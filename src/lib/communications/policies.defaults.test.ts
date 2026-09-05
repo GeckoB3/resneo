@@ -61,6 +61,29 @@ describe('deposit message defaults for a new venue', () => {
   }
 });
 
+describe('confirm or cancel prompt defaults for a new venue', () => {
+  const code = defaultCommunicationPolicies();
+  const column = latestColumnDefault();
+
+  for (const lane of ['table', 'appointments_other'] as const) {
+    it(`${lane}: the prompt is on, email only, 24 hours before, in code and in the column default`, () => {
+      const inCode = code[lane].confirm_or_cancel_prompt;
+      expect(inCode.enabled).toBe(true);
+      expect(inCode.channels).toEqual(['email']);
+      expect(inCode.hoursBefore).toBe(24);
+
+      const stored = column[lane].confirm_or_cancel_prompt as {
+        enabled: boolean;
+        channels: string[];
+        hoursBefore: number | null;
+      };
+      expect(stored.enabled).toBe(true);
+      expect(stored.channels).toEqual(['email']);
+      expect(stored.hoursBefore).toBe(24);
+    });
+  }
+});
+
 describe('the column default and the code default agree', () => {
   const code = defaultCommunicationPolicies();
   const column = latestColumnDefault();

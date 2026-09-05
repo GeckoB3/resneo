@@ -3,11 +3,13 @@
  *
  * Two mechanisms, in order of preference:
  *
- * 1. NESTING. A booking that sits entirely inside another booking's processing
- *    gap (the client is under the colour and the chair is free) is drawn INSIDE
- *    the host bar, indented from the left, so only the left edge of the host's
- *    processing band stays visible. Staff see at a glance that the slot was
- *    used, and neither bar loses half the column.
+ * 1. NESTING. A booking that starts inside another booking's processing gap
+ *    (the client is under the colour and the chair is free) and keeps to that
+ *    gap for as long as the host lasts is drawn INSIDE the host bar, indented
+ *    from the left, so only the left edge of the host's processing band stays
+ *    visible. It may run on past the host's end when the gap reaches the end
+ *    too. Staff see at a glance that the slot was used, and neither bar loses
+ *    half the column.
  *
  * 2. LANES. Anything that still overlaps is split into side-by-side lanes, the
  *    same interval-colouring the grid always did.
@@ -25,8 +27,8 @@ export interface ClusterLayoutItem extends MinuteRange {
   key: string;
   /**
    * Wall-clock minute ranges inside this item during which its column is free
-   * (processing time). Another item that fits entirely inside one of these can
-   * nest in this one.
+   * (processing time). Another item that starts inside one of these, and stays
+   * inside it until this item ends, can nest in this one.
    */
   gaps?: MinuteRange[];
 }
@@ -116,18 +118,29 @@ export function rangesOverlap(a: MinuteRange, b: MinuteRange): boolean {
   return a.start < b.end && b.start < a.end;
 }
 
-function rangeContains(outer: MinuteRange, inner: MinuteRange): boolean {
-  return outer.start <= inner.start && inner.end <= outer.end;
+/**
+ * Can `item` ride inside `host`? It must start inside one of the host's gaps
+ * and stay inside that gap for as long as the host lasts. It may run on past
+ * the host's end when the gap reaches the end too: a cut booked into the tail
+ * of a colour's processing time is a proper nesting even though the cut
+ * finishes after the colour does. It may not run into a part of the host where
+ * the chair is busy again.
+ */
+function startsInGapAndStaysFree(host: ClusterLayoutItem, item: MinuteRange): boolean {
+  const overlapEnd = Math.min(item.end, host.end);
+  return (host.gaps ?? []).some(
+    (gap) => gap.start <= item.start && item.start < gap.end && overlapEnd <= gap.end,
+  );
 }
 
 /**
  * Chooses, for every item, the host it nests in (if any).
  *
- * Longer items are considered as hosts first, so a booking never nests inside a
- * shorter one. An item that already hosts cannot itself nest, and an item that
- * nests cannot host, so nesting is one level deep. Two nested items may share a
- * host only if they do not overlap each other; a third that would overlap them
- * falls back to a lane.
+ * Longer items are considered as hosts first, so a booking prefers the longest
+ * host it could ride in. An item that already hosts cannot itself nest, and an
+ * item that nests cannot host, so nesting is one level deep. Two nested items
+ * may share a host only if they do not overlap each other; a third that would
+ * overlap them falls back to a lane.
  */
 function assignNesting(items: ClusterLayoutItem[]): Map<string, string> {
   const nestedIn = new Map<string, string>();
@@ -142,9 +155,7 @@ function assignNesting(items: ClusterLayoutItem[]): Map<string, string> {
     for (const host of hostCandidates) {
       if (host.key === item.key) continue;
       if (nestedIn.has(host.key)) continue;
-      if (host.end - host.start < item.end - item.start) break;
-      const gaps = host.gaps ?? [];
-      if (!gaps.some((gap) => rangeContains(gap, item))) continue;
+      if (!startsInGapAndStaysFree(host, item)) continue;
       const already = hosted.get(host.key) ?? [];
       if (already.some((r) => rangesOverlap(r, item))) continue;
       nestedIn.set(item.key, host.key);
@@ -170,16 +181,26 @@ export function layoutOverlapClusters(items: ClusterLayoutItem[]): Map<string, B
   const flush = () => {
     if (run.length === 0) return;
     const nestedIn = assignNesting(run);
+    // A host's lane stays taken until the last bar nested in it ends, which is
+    // after the host itself when a nested bar runs out of a tail gap.
+    const laneReach = new Map<string, number>();
+    for (const item of run) laneReach.set(item.key, item.end);
+    for (const item of run) {
+      const hostKey = nestedIn.get(item.key);
+      if (hostKey === undefined) continue;
+      laneReach.set(hostKey, Math.max(laneReach.get(hostKey) ?? item.end, item.end));
+    }
     const laneEnds: number[] = [];
     const laneOf = new Map<string, number>();
     for (const item of run) {
       if (nestedIn.has(item.key)) continue;
+      const reach = laneReach.get(item.key) ?? item.end;
       let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= item.start);
       if (laneIndex === -1) {
-        laneEnds.push(item.end);
+        laneEnds.push(reach);
         laneIndex = laneEnds.length - 1;
       } else {
-        laneEnds[laneIndex] = item.end;
+        laneEnds[laneIndex] = reach;
       }
       laneOf.set(item.key, laneIndex);
     }

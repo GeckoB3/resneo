@@ -25,7 +25,6 @@ import {
   isCollectiveId,
   resolveCombinedBookingTarget,
 } from '@/lib/linked-accounts/collective-booking-bridge';
-import { resolveStaffCollectiveScopeFromRequest } from '@/lib/linked-accounts/collective-staff-request';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -47,8 +46,9 @@ const bodySchema = z.object({
   /** Optional add-ons that extend the appointment duration. */
   addons: bookingAddonSelectionArraySchema.optional(),
   /**
-   * The staff form's hint that a member venue's session is on the request; verified
-   * server-side, it lets a collective resolve a member venue's own service too.
+   * Accepted for the clients that send it; nothing reads it since 2026-09-05,
+   * when the staff catalogue for a collective went back to the combined page's
+   * offerings only (a member venue's own services no longer resolve here).
    */
   staff: z.boolean().optional(),
 });
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid request' }, { status: 400 });
     }
 
-    const { booking_date, practitioner_id, variant_id, start_time, phantoms, waitlist_offer_id, addons, staff } = parsed.data;
+    const { booking_date, practitioner_id, variant_id, start_time, phantoms, waitlist_offer_id, addons } = parsed.data;
     let { venue_id, service_id } = parsed.data;
     const supabase = getSupabaseAdminClient();
 
@@ -82,13 +82,10 @@ export async function POST(request: NextRequest) {
      */
     let collectiveDurationOverride: number | null = null;
     if (await isCollectiveId(supabase, venue_id)) {
-      const includeMemberOwnServices =
-        staff === true && Boolean(await resolveStaffCollectiveScopeFromRequest(supabase, request, venue_id));
       const target = await resolveCombinedBookingTarget(supabase, {
         collectiveId: venue_id,
         offeringId: service_id,
         calendarId: practitioner_id,
-        includeMemberOwnServices,
       });
       if (!target) {
         return NextResponse.json(

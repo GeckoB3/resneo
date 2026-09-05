@@ -26,7 +26,6 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
-import { resolveStaffCollectiveScopeFromRequest } from '@/lib/linked-accounts/collective-staff-request';
 import { MAX_SERVICES_PER_VISIT } from '@/lib/booking/service-chain';
 import {
   createAppointmentSlotRecheck,
@@ -225,11 +224,6 @@ export async function POST(request: NextRequest) {
     }));
     let collectiveIdFromVenue: string | null = null;
     if (await isCollectiveId(supabase, requestedVenueId)) {
-      // A member venue's staff (the staff form uses this route for visits) may
-      // also book the members' own services; the session is verified first.
-      const includeMemberOwnServices =
-        (source === 'phone' || source === 'walk-in') &&
-        Boolean(await resolveStaffCollectiveScopeFromRequest(supabase, request, requestedVenueId));
       const resolved: SegmentEntry[] = [];
       let owningVenueId: string | null = null;
       for (const s of rawServices) {
@@ -237,7 +231,6 @@ export async function POST(request: NextRequest) {
           collectiveId: requestedVenueId,
           offeringId: s.service_id,
           calendarId: s.practitioner_id,
-          includeMemberOwnServices,
         });
         if (!target || (owningVenueId && target.venueId !== owningVenueId)) {
           return NextResponse.json(
@@ -246,13 +239,11 @@ export async function POST(request: NextRequest) {
           );
         }
         owningVenueId = target.venueId;
-        // A member venue's own service (no offering) books at the venue's own terms
-        // with no collective attribution.
         resolved.push({
           ...s,
           service_id: target.sourceServiceId,
-          collective_service_item_id: target.offering ? s.service_id : null,
-          collective_duration_override: target.offering ? target.durationMinutes : null,
+          collective_service_item_id: s.service_id,
+          collective_duration_override: target.durationMinutes,
         });
       }
       services = resolved;

@@ -134,3 +134,39 @@ describe('getCalendarGrid visit grouping columns', () => {
     expect(bookings.map((b) => b.group_booking_id)).toEqual(['grp-1', 'grp-1']);
   });
 });
+
+describe('getCalendarGrid processing snapshot columns', () => {
+  const BLOCK = { id: '11111111-1111-4111-8111-111111111111', start_minute: 30, duration_minutes: 30 };
+
+  it('carries the service, variant and processing snapshot through so a client can nest bookings', async () => {
+    const bookings = await gridFor([
+      bookingRow({
+        appointment_service_id: 'svc-legacy',
+        service_item_id: 'svc-1',
+        service_variant_id: 'var-1',
+        processing_time_blocks: [BLOCK],
+      }),
+    ]);
+    expect(bookings[0]).toMatchObject({
+      appointment_service_id: 'svc-legacy',
+      service_item_id: 'svc-1',
+      service_variant_id: 'var-1',
+      processing_time_blocks: [BLOCK],
+    });
+  });
+
+  it('serves null for a row with no snapshot, and an empty array for a recorded booking with no gaps', async () => {
+    const bookings = await gridFor([
+      bookingRow({ id: 'b1', processing_time_blocks: null }),
+      bookingRow({ id: 'b2', booking_time: '12:00:00', processing_time_blocks: [] }),
+    ]);
+    expect(bookings[0]!.processing_time_blocks).toBeNull();
+    expect(bookings[0]!.service_variant_id).toBeNull();
+    expect(bookings[1]!.processing_time_blocks).toEqual([]);
+  });
+
+  it('drops a malformed snapshot to an empty array rather than failing the grid', async () => {
+    const bookings = await gridFor([bookingRow({ processing_time_blocks: [{ start_minute: -5 }] })]);
+    expect(bookings[0]!.processing_time_blocks).toEqual([]);
+  });
+});

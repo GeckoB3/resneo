@@ -34,12 +34,11 @@ const COL = 'col-1';
 const OWNER = 'venue-owner';
 const WINDOW = { max_advance_booking_days: 30, min_booking_notice_hours: 4, cancellation_notice_hours: 24, allow_same_day_booking: false };
 
-function catalogue(opts?: { includeMemberOwnServices?: boolean }) {
+function catalogue() {
   const offering = { id: 'offering-1', source_service_id: 'src-1', price_pence: 2500, duration_minutes: 30 };
-  const own = { id: 'src-own', source_service_id: 'src-own', price_pence: 1500, duration_minutes: 20, venue_only: true };
   return {
     practitioners: [
-      { id: 'cal-1', name: 'Andrew', owning_venue_id: OWNER, owning_venue_name: 'Owner', services: opts?.includeMemberOwnServices ? [offering, own] : [offering] },
+      { id: 'cal-1', name: 'Andrew', owning_venue_id: OWNER, owning_venue_name: 'Owner', services: [offering] },
     ],
     categories: [],
   };
@@ -57,28 +56,21 @@ function admin() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(loadCollectiveAppointmentCatalog).mockImplementation(async (_admin, _id, options) => catalogue(options) as never);
+  vi.mocked(loadCollectiveAppointmentCatalog).mockImplementation(async () => catalogue() as never);
   vi.mocked(loadServiceEntityBookingWindow).mockResolvedValue(WINDOW);
   vi.mocked(isGuestBookingDateAllowed).mockReturnValue(true);
   vi.mocked(isStaffWalkInBookingDateAllowed).mockReturnValue(true);
 });
 
 describe('resolveCombinedBookingTarget', () => {
-  it('routes an offering to its owning venue and marks it as an offering', async () => {
+  it('routes an offering to its owning venue and real source service', async () => {
     const target = await resolveCombinedBookingTarget(admin(), { collectiveId: COL, offeringId: 'offering-1', calendarId: 'cal-1' });
-    expect(target).toEqual({ venueId: OWNER, sourceServiceId: 'src-1', pricePence: 2500, durationMinutes: 30, offering: true });
+    expect(target).toEqual({ venueId: OWNER, sourceServiceId: 'src-1', pricePence: 2500, durationMinutes: 30 });
   });
 
-  it("resolves a member venue's own service only for a member's staff, and never as an offering", async () => {
+  it("does not resolve a member venue's own service that is not a combined-page offering, staff or not", async () => {
     expect(await resolveCombinedBookingTarget(admin(), { collectiveId: COL, offeringId: 'src-own', calendarId: 'cal-1' })).toBeNull();
-    const target = await resolveCombinedBookingTarget(admin(), {
-      collectiveId: COL,
-      offeringId: 'src-own',
-      calendarId: 'cal-1',
-      includeMemberOwnServices: true,
-    });
-    expect(target).toMatchObject({ venueId: OWNER, sourceServiceId: 'src-own', offering: false });
-    expect(vi.mocked(loadCollectiveAppointmentCatalog)).toHaveBeenLastCalledWith(expect.anything(), COL, { includeMemberOwnServices: true });
+    expect(vi.mocked(loadCollectiveAppointmentCatalog)).toHaveBeenLastCalledWith(expect.anything(), COL);
   });
 });
 

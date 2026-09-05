@@ -38,7 +38,7 @@ describe('GET /api/venue/appointment-availability for a collective', () => {
     expect(one.status).toBe(200);
     expect(vi.mocked(loadCollectiveDayAvailability)).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ collectiveId: COLLECTIVE, offeringId: OFFERING, calendarId: CAL, anyAvailable: false, date: '2026-09-07', audience: 'staff', includeMemberOwnServices: true }),
+      expect.objectContaining({ collectiveId: COLLECTIVE, offeringId: OFFERING, calendarId: CAL, anyAvailable: false, date: '2026-09-07', audience: 'staff' }),
     );
 
     const pooled = await GET(new NextRequest(`https://resneo.test/api/venue/appointment-availability?date=2026-09-07&practitioner_id=${ANY_AVAILABLE_PRACTITIONER_ID}&service_id=${OFFERING}&owner_venue_id=${COLLECTIVE}`));

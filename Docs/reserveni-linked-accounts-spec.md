@@ -1011,19 +1011,15 @@ exactly as a combined-page booking is.
 
 Review follow-up (2026-09-05):
 
-- **Members' own services.** The combined catalogue is host-curated, so a member could no
-  longer book its own services that are not combined offerings from any staff surface. The
-  staff catalogue now also carries every eligible member's own services on its own calendars,
-  after the offerings under a "{Venue} only" heading (host first), and a calendar with no
-  offering appears too. Offerings the host left without a heading are listed under "Other services" (the
-  customer page's wording) placed ahead of the "{Venue} only" groups, so the combined
-  offerings always list first. Such a service keeps its real id (`venue_only` in
-  `loadCollectiveAppointmentCatalog`, `includeMemberOwnServices`) and books as a plain
-  booking in the owning venue with no `collective_id`; the cross-venue audit and notification
-  still apply. The public combined page is unchanged. The public routes the staff form shares
-  (`GET /api/booking/availability` with `staff=1`, `POST /api/booking/validate-appointment-slot`
-  with `staff: true`, and the visit and group creates with a staff `source`) widen the
-  catalogue only after verifying a member venue's session on the request.
+- **Members' own services (added, then withdrawn the same day).** The combined catalogue is
+  host-curated, so a member cannot book its own services that are not combined offerings from
+  the collective's staff form. For a few hours on 2026-09-05 the staff catalogue carried every
+  member's own services under a "{Venue} only" heading (`venue_only`,
+  `includeMemberOwnServices`); the owner then asked for the combined page's offerings only,
+  exactly as the customer page shows them, and that merge, the flag and the `offering` marker
+  on `resolveCombinedBookingTarget` were removed. A member books its own other services
+  through its own venue booking page or link. The shared public routes still accept the staff
+  hints (`staff=1`, `staff: true`, a staff `source`) but nothing reads them for this.
 - **Linked column button.** A partner column that books through the collective no longer
   shows its own "New booking" header button on `/dashboard/calendar`: New, Walk-in and a slot
   click already reach it. A partner outside any collective keeps the button. Since the

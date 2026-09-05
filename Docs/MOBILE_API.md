@@ -310,14 +310,29 @@ additive.
 - Visits and groups keep using `POST /api/booking/create-multi-service` and `create-group` with
   `venue_id = <collective id>`; when a member's staff session is on the request and the bookings
   land in another member's venue, the same audit and notification are now recorded.
-- Since 2026-09-05 the staff catalogue (`GET /api/booking/appointment-catalog?venue_id=<collective
-  id>&include_hidden=true` with a member's session) also lists every member's own services on its
-  own calendars, after the offerings, each flagged `venue_only: true` with `id` equal to
-  `source_service_id`, under a `"{Venue} only"` category; a calendar with no offering appears
-  too, and an offering with no category carries one named after the collective so the
-  offerings sort first. Booking one writes a plain booking in the owning venue (no `collective_id`). The staff
-  routes resolve these by themselves; the shared public routes do so only on a verified member
-  session and only when asked: `GET /api/booking/availability` takes `staff=1`,
-  `POST /api/booking/validate-appointment-slot` takes `staff: true`, and the visit and group
-  creates key off a staff `source`. All additive; a client that never sends them sees the
-  offerings-only catalogue it saw before.
+- The staff catalogue (`GET /api/booking/appointment-catalog?venue_id=<collective
+  id>&include_hidden=true` with a member's session) lists the combined page's offerings only,
+  exactly as the customer catalogue does (an offering with no category falls under "Other
+  services"), plus the hidden add-on groups staff see on their own catalogue. For a few hours on
+  2026-09-05 it also listed each member's own services flagged `venue_only: true` under a
+  `"{Venue} only"` category; that was withdrawn the same day, the flag no longer appears, and a
+  member books its own other services through its own venue id. The staff hints on the shared
+  public routes (`staff=1` on `GET /api/booking/availability`, `staff: true` on
+  `POST /api/booking/validate-appointment-slot`, a staff `source` on the visit and group creates)
+  are still accepted but nothing reads them for this.
+
+## Processing snapshot on calendar-grid rows (2026-09-05)
+
+`GET /api/venue/calendar-grid` booking rows also carry, additively:
+
+- `appointment_service_id`, `service_item_id` and `service_variant_id`: what the booking is for
+  (the legacy service, the unified catalogue item, the chosen variant), each null when absent.
+- `processing_time_blocks`: the processing gaps recorded for the booking when it was made, as
+  `[{ id, start_minute, duration_minutes }]` in minutes from the booking's start. Null when the
+  row has no snapshot (derive the gaps from the service's or variant's own
+  `processing_time_blocks` instead); an empty array is a real snapshot of a booking with no gaps.
+
+That is the precedence the web diary uses: the snapshot first, else the pattern. A booking taken
+inside another's gap can then be drawn nested in it the way
+`src/lib/calendar/booking-cluster-layout.ts` does, including one that starts in a gap running to
+the host's end and finishes after the host.

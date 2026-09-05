@@ -250,7 +250,6 @@ export async function POST(request: NextRequest) {
           collectiveId: collective.collectiveId,
           offeringId: parsed.data.appointment_service_id,
           calendarId: parsed.data.practitioner_id,
-          includeMemberOwnServices: true,
         });
         if (!target) {
           return NextResponse.json(
@@ -258,9 +257,10 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
-        collectiveAttribution = target.offering
-          ? { collectiveId: collective.collectiveId, offeringId: parsed.data.appointment_service_id }
-          : null;
+        collectiveAttribution = {
+          collectiveId: collective.collectiveId,
+          offeringId: parsed.data.appointment_service_id,
+        };
         parsed.data.owner_venue_id = target.venueId;
         parsed.data.appointment_service_id = target.sourceServiceId;
       }

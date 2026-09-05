@@ -23,6 +23,8 @@ import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import type { AvailabilityBlock } from '@/types/availability';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
 import type { OpeningHours } from '@/types/availability';
 import {
@@ -80,6 +82,23 @@ export interface CalendarGridBooking {
    * people (each labelled), which must not be merged into a single bar.
    */
   person_label?: string | null;
+  /**
+   * What the booking is for, so a client can find the service's (or the
+   * variant's) processing pattern in its own catalogue: the legacy appointment
+   * service, the unified catalogue item and the chosen variant, when any.
+   */
+  appointment_service_id?: string | null;
+  service_item_id?: string | null;
+  service_variant_id?: string | null;
+  /**
+   * The processing gaps recorded for this booking when it was made, in minutes
+   * from its start, which the web diary reads before falling back to the
+   * service or variant pattern. Null when the row has no snapshot; an empty
+   * array is a real snapshot of a booking with no gaps. Sent so a client can
+   * nest a booking taken inside one of these gaps the way
+   * `booking-cluster-layout.ts` does.
+   */
+  processing_time_blocks?: ProcessingTimeBlock[] | null;
 }
 
 export interface CalendarGridDay {
@@ -546,7 +565,7 @@ export async function getCalendarGrid(params: {
         // must be selected alongside the ids: this grid is the mobile calendar's
         // only source, so without it a deleted service leaves those bars saying
         // "Service" while every other surface still names it (20270103125000).
-        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id, service_name_snapshot, group_booking_id, person_label, client_arrived_at, staff_attendance_confirmed_at, guest_attendance_confirmed_at, payment_state',
+        'id, calendar_id, booking_date, booking_time, booking_end_time, status, guest_id, appointment_service_id, service_item_id, service_variant_id, processing_time_blocks, service_name_snapshot, group_booking_id, person_label, client_arrived_at, staff_attendance_confirmed_at, guest_attendance_confirmed_at, payment_state',
       )
       .eq('venue_id', venueId)
       .in('calendar_id', calendarIds)
@@ -691,6 +710,8 @@ export async function getCalendarGrid(params: {
       guest_id: string;
       service_item_id?: string | null;
       appointment_service_id?: string | null;
+      service_variant_id?: string | null;
+      processing_time_blocks?: unknown;
       service_name_snapshot?: string | null;
       group_booking_id?: string | null;
       person_label?: string | null;
@@ -721,6 +742,16 @@ export async function getCalendarGrid(params: {
       staff_attendance_confirmed_at: row.staff_attendance_confirmed_at ?? null,
       guest_attendance_confirmed_at: row.guest_attendance_confirmed_at ?? null,
       payment_state: row.payment_state ?? null,
+      appointment_service_id: row.appointment_service_id ?? null,
+      service_item_id: row.service_item_id ?? null,
+      service_variant_id: row.service_variant_id ?? null,
+      // Resolved as the web diary resolves it (`bookingProcessingBlocksForLayout`):
+      // a stored snapshot wins even when empty or malformed, and only a missing
+      // one is served as null so the client falls back to the pattern.
+      processing_time_blocks:
+        row.processing_time_blocks != null
+          ? parseProcessingTimeBlocksFromDb(row.processing_time_blocks)
+          : null,
     });
     bookingsByCalDate.set(key, list);
   }

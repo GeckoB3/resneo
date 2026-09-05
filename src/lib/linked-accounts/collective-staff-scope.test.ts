@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { findStaffCollectiveForVenue, resolveStaffCollectiveScope } from './collective-staff-scope';
+import {
+  findStaffCollectiveForVenue,
+  loadStaffCollectiveSummary,
+  resolveStaffCollectiveScope,
+} from './collective-staff-scope';
 
 type Row = Record<string, unknown>;
 
@@ -19,6 +23,14 @@ function fakeAdmin(tables: Record<string, Row[]>) {
     };
     builder.in = (col: string, vs: unknown[]) => {
       filters.push((r) => vs.includes(r[col]));
+      return builder;
+    };
+    // PostgREST `or('col.eq.v,col.is.null')`, enough for the calendar-type filter.
+    builder.or = (expr: string) => {
+      const clauses = expr.split(',').map((c) => c.split('.'));
+      filters.push((r) =>
+        clauses.some(([col, op, val]) => (op === 'is' ? (val === 'null' ? r[col!] == null : false) : r[col!] === val)),
+      );
       return builder;
     };
     builder.maybeSingle = () => Promise.resolve({ data: exec()[0] ?? null, error: null });
@@ -85,5 +97,29 @@ describe('findStaffCollectiveForVenue', () => {
   it('finds the live collective a venue is in, and nothing for a venue with links only', async () => {
     expect((await findStaffCollectiveForVenue(fakeAdmin(tables()), A))?.collectiveId).toBe(COL);
     expect(await findStaffCollectiveForVenue(fakeAdmin(tables()), C)).toBeNull();
+  });
+});
+
+describe('loadStaffCollectiveSummary', () => {
+  it("lists the members' active people calendars for the diary, resources and inactive ones left out", async () => {
+    const t: Record<string, Row[]> = tables();
+    t.unified_calendars = [
+      { id: 'cal-a', venue_id: A, is_active: true, calendar_type: 'practitioner' },
+      { id: 'cal-b', venue_id: B, is_active: true, calendar_type: null },
+      { id: 'room', venue_id: A, is_active: true, calendar_type: 'resource' },
+      { id: 'old', venue_id: B, is_active: false, calendar_type: 'practitioner' },
+      { id: 'elsewhere', venue_id: C, is_active: true, calendar_type: 'practitioner' },
+    ];
+    await expect(loadStaffCollectiveSummary(fakeAdmin(t), A)).resolves.toEqual({
+      id: COL,
+      name: 'Plus Light',
+      hostVenueId: A,
+      memberVenueIds: [A, B],
+      calendarIds: ['cal-a', 'cal-b'],
+    });
+  });
+
+  it('is null for a venue with no live collective', async () => {
+    await expect(loadStaffCollectiveSummary(fakeAdmin(tables()), C)).resolves.toBeNull();
   });
 });

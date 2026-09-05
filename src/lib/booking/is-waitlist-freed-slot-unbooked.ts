@@ -5,7 +5,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { slotTimeForDb } from '@/lib/booking/waitlist-freed-slot';
 import type { WaitlistFreedSlotContext } from '@/lib/booking/waitlist-freed-slot';
 
-const ACTIVE_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Arrived'];
+/**
+ * Statuses that still hold the slot. `Arrived` was listed here for a long time
+ * but is not a value of the `booking_status` enum (arrival is the
+ * `client_arrived_at` timestamp), so PostgREST refused every check with a bare
+ * 400 that the HEAD request hid, and every alert was kept as "still open".
+ */
+const ACTIVE_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
 export async function isWaitlistFreedSlotStillUnbooked(
   admin: SupabaseClient,

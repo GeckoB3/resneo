@@ -113,7 +113,7 @@ describe('mergeMemberOwnServices', () => {
     const andrew = byCalendar.get('cal-andrew')!;
     // The host left this offering without a heading.
     andrew.services.push({ ...andrew.services[0]!, id: 'offering-tint', source_service_id: 'src-tint', category: null });
-    const heading = { id: 'collective:col-1', name: 'Plus 1 Staging', sort_order: 99_999 };
+    const heading = { id: 'collective:col-1', name: 'Other services', sort_order: 99_999 };
 
     expect(labelUncategorisedOfferings([...byCalendar.values()], heading)).toBe(true);
     const [ownOnly] = mergeMemberOwnServices({
@@ -122,7 +122,7 @@ describe('mergeMemberOwnServices', () => {
       offeringCount: 2,
     });
 
-    expect(andrew.services.map((s) => s.category?.name)).toEqual(['Styling', 'Plus 1 Staging', 'Test Plus only']);
+    expect(andrew.services.map((s) => s.category?.name)).toEqual(['Styling', 'Other services', 'Test Plus only']);
     // The categorised offering keeps its own heading; the venue-only group sorts last.
     expect(andrew.services[0]!.category!.sort_order).toBeLessThan(heading.sort_order);
     expect(heading.sort_order).toBeLessThan(ownOnly!.sort_order);

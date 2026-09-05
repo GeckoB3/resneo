@@ -12,13 +12,17 @@
  * row into the correct owning venue with the override applied.
  */
 
-import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { UNCATEGORISED_GROUP_LABEL, type ServiceCategoryRef } from '@/lib/booking/service-categories';
 import { inheritCollectivePageConfigFromHost } from '@/lib/linked-accounts/collective-page-config';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
-import { loadPublicCombinedCatalogue, loadVenueCatalogueData } from './catalogue';
+import {
+  invalidatePublicCombinedCatalogueMemo,
+  loadPublicCombinedCatalogue,
+  loadVenueCatalogueData,
+} from './catalogue';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -67,8 +71,21 @@ async function loadCollectiveRow(admin: SupabaseClient, collectiveId: string): P
 export async function loadCollectiveVenuePublic(
   admin: SupabaseClient,
   collectiveId: string,
+  options?: {
+    /**
+     * `staff`: the staff booking form's profile. It never shows the paused
+     * state, the account-login gate or team bios, so the merged catalogue (the
+     * expensive part, about a second of queries) is not built for it.
+     */
+    audience?: 'public' | 'staff';
+  },
 ): Promise<VenuePublic | null> {
-  const col = await loadCollectiveRow(admin, collectiveId);
+  const forStaff = options?.audience === 'staff';
+  // The catalogue does not depend on the row, so the two loads overlap.
+  const [col, catalogue] = await Promise.all([
+    loadCollectiveRow(admin, collectiveId),
+    forStaff ? Promise.resolve(null) : loadPublicCombinedCatalogue(admin, collectiveId),
+  ]);
   if (!col || col.status !== 'active') return null;
 
   // Inherit commercial/display defaults from the host venue. The combined page is
@@ -92,8 +109,7 @@ export async function loadCollectiveVenuePublic(
   const hostConfig = (col.booking_page_config ?? {}) as BookingPageConfig & { cover_photo_url?: string | null };
 
   // The page is bookable only when the merged catalogue has at least one offering.
-  const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
-  const bookable = (catalogue?.items.length ?? 0) > 0;
+  const bookable = forStaff || (catalogue?.items.length ?? 0) > 0;
 
   // Inherit staff bios/photos from each member venue's own team_profiles (keyed
   // by calendar id), then overlay the host's collective-level overrides (D-V2).
@@ -339,6 +355,43 @@ export function invalidateCollectiveCatalogMemo(collectiveId: string): void {
   for (const key of [...catalogMemo.keys()]) {
     if (key.startsWith(`${collectiveId}|`)) catalogMemo.delete(key);
   }
+  invalidatePublicCombinedCatalogueMemo(collectiveId);
+}
+
+/**
+ * Each eligible member's own catalogue for the staff form, host first then the
+ * others by name (the order the calendars are listed in). One read per member,
+ * side by side; independent of the combined catalogue, so the staff build
+ * starts it before awaiting that.
+ */
+async function loadMemberOwnCatalogues(
+  admin: SupabaseClient,
+  collectiveId: string,
+  includeHiddenAddons: boolean | undefined,
+): Promise<MemberOwnCatalogue[]> {
+  const [{ data: collectiveRow }, memberIds] = await Promise.all([
+    admin.from('venue_collectives').select('host_venue_id').eq('id', collectiveId).maybeSingle(),
+    eligibleMemberVenueIds(admin, collectiveId),
+  ]);
+  const hostVenueId = (collectiveRow as { host_venue_id?: string } | null)?.host_venue_id ?? null;
+  if (memberIds.length === 0) return [];
+  const { data: memberRows } = await admin.from('venues').select('id, name, feature_flags').in('id', memberIds);
+  const memberById = new Map((memberRows ?? []).map((r) => [r.id as string, r]));
+  const ordered = [...memberIds].sort((a, b) => {
+    if (a === hostVenueId) return -1;
+    if (b === hostVenueId) return 1;
+    return String(memberById.get(a)?.name ?? '').localeCompare(String(memberById.get(b)?.name ?? ''));
+  });
+  return Promise.all(
+    ordered.map(async (venueId) => {
+      const row = memberById.get(venueId);
+      const anyAvailable = resolveAppointmentsFeatureFlags(
+        parseVenueFeatureFlags((row as { feature_flags?: unknown } | undefined)?.feature_flags),
+      ).any_available_practitioner;
+      const catalog = await fetchAppointmentCatalog(admin, venueId, { includeHiddenAddons });
+      return { venueId, name: String(row?.name ?? 'Venue'), anyAvailable, catalog };
+    }),
+  );
 }
 
 /**
@@ -381,6 +434,12 @@ async function loadCollectiveAppointmentCatalogUncached(
     includeMemberOwnServices?: boolean;
   },
 ): Promise<{ practitioners: CollectiveCatalogPractitioner[]; categories: ServiceCategoryRef[] }> {
+  // The members' own catalogues do not depend on the combined one, so they load
+  // alongside it rather than after it.
+  const ownCataloguesPromise = options?.includeMemberOwnServices
+    ? loadMemberOwnCatalogues(admin, collectiveId, options.includeHiddenAddons)
+    : null;
+  ownCataloguesPromise?.catch(() => undefined);
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
   if (!catalogue || (catalogue.items.length === 0 && !options?.includeMemberOwnServices)) {
     return { practitioners: [], categories: catalogue?.categories ?? [] };
@@ -390,11 +449,17 @@ async function loadCollectiveAppointmentCatalogUncached(
   const venueIds = [
     ...new Set(catalogue.items.flatMap((i) => i.providers.map((p) => p.venueId))),
   ];
-  const venueData: Record<string, Awaited<ReturnType<typeof loadVenueCatalogueData>>> = {};
+  // The public build already read every eligible venue's calendars and
+  // services; reuse that rather than reading it a second time.
+  const venueData: Record<string, Awaited<ReturnType<typeof loadVenueCatalogueData>>> = {
+    ...catalogue.venueData,
+  };
   await Promise.all(
-    venueIds.map(async (venueId) => {
-      venueData[venueId] = await loadVenueCatalogueData(admin, venueId);
-    }),
+    venueIds
+      .filter((venueId) => !venueData[venueId])
+      .map(async (venueId) => {
+        venueData[venueId] = await loadVenueCatalogueData(admin, venueId);
+      }),
   );
 
   // Each member venue keeps its OWN source-service settings. Load every involved source
@@ -563,47 +628,23 @@ async function loadCollectiveAppointmentCatalogUncached(
   // member's own services on its own calendars, as plain bookings in the owning
   // venue. They sit after the offerings under a "{Venue} only" heading; a
   // service that is already offered on a calendar is not listed twice.
-  const { data: collectiveRow } = await admin
-    .from('venue_collectives')
-    .select('host_venue_id, name')
-    .eq('id', collectiveId)
-    .maybeSingle();
-  const hostVenueId = (collectiveRow as { host_venue_id?: string } | null)?.host_venue_id ?? null;
-
   const combinedHeadings: ServiceCategoryRef[] = [];
   const venueOnlyCategories: ServiceCategoryRef[] = [];
-  if (options?.includeMemberOwnServices) {
+  if (ownCataloguesPromise) {
     // The combined offerings come first on the staff form. An offering the host
-    // left without a heading would otherwise sort as "Other services", after
-    // every "{Venue} only" group, so it takes the collective's own name.
+    // left without a heading would otherwise fall into the generic "Other
+    // services" group, which sorts after every "{Venue} only" group, so it gets
+    // an explicit heading with the same name as the customer page shows and a
+    // sort key just ahead of the venue-only groups.
     const combinedHeading: ServiceCategoryRef = {
       id: `collective:${collectiveId}`,
-      name: String((collectiveRow as { name?: string } | null)?.name ?? 'Combined services'),
+      name: UNCATEGORISED_GROUP_LABEL,
       sort_order: VENUE_ONLY_CATEGORY_SORT_BASE - 1,
     };
     if (labelUncategorisedOfferings([...byCalendar.values()], combinedHeading)) {
       combinedHeadings.push(combinedHeading);
     }
-    const memberIds = await eligibleMemberVenueIds(admin, collectiveId);
-    const { data: memberRows } = await admin.from('venues').select('id, name, feature_flags').in('id', memberIds);
-    const memberById = new Map((memberRows ?? []).map((r) => [r.id as string, r]));
-    // Host first, as the calendars are ordered, then the other members by name.
-    const ordered = [...memberIds].sort((a, b) => {
-      if (a === hostVenueId) return -1;
-      if (b === hostVenueId) return 1;
-      return String(memberById.get(a)?.name ?? '').localeCompare(String(memberById.get(b)?.name ?? ''));
-    });
-    const members: MemberOwnCatalogue[] = [];
-    for (const venueId of ordered) {
-      const row = memberById.get(venueId);
-      const anyAvailable = resolveAppointmentsFeatureFlags(
-        parseVenueFeatureFlags((row as { feature_flags?: unknown } | undefined)?.feature_flags),
-      ).any_available_practitioner;
-      const catalog = await fetchAppointmentCatalog(admin, venueId, {
-        includeHiddenAddons: options.includeHiddenAddons,
-      });
-      members.push({ venueId, name: String(row?.name ?? 'Venue'), anyAvailable, catalog });
-    }
+    const members = await ownCataloguesPromise;
     venueOnlyCategories.push(
       ...mergeMemberOwnServices({ members, ensure, offeringCount: catalogue.items.length }),
     );
@@ -635,7 +676,7 @@ async function loadCollectiveAppointmentCatalogUncached(
     }
   }
 
-  sortCollectivePractitioners(result, hostVenueId);
+  sortCollectivePractitioners(result, catalogue.hostVenueId);
 
   return {
     practitioners: result,

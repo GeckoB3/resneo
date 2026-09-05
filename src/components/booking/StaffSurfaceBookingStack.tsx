@@ -38,6 +38,8 @@ const ResourceBookingFlow = dynamic(
 );
 import type { VenuePublic } from '@/components/booking/types';
 import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
+import { linkedVenueProfileUrl } from '@/lib/booking/booking-flow-api';
+import { fetchJsonShared, warmStaffBookingSurface } from '@/lib/booking/staff-surface-warm';
 import {
   defaultStaffBookingSurfaceTab,
   getStaffBookingSurfaceTabs,
@@ -237,14 +239,15 @@ function StaffSurfaceBookingStackInner({
   };
 
   useEffect(() => {
+    // Start the catalogue request now rather than when the flow mounts, so the
+    // profile and the catalogue overlap instead of running one after the other.
+    warmStaffBookingSurface({ venueId, linkedOwnerVenueId });
     if (linkedOwnerVenueId) {
       let cancelled = false;
       (async () => {
         try {
-          const res = await fetch(
-            `/api/venue/linked-calendar/venue-profile?venueId=${encodeURIComponent(linkedOwnerVenueId)}`,
-          );
-          const data = (await res.json()) as Record<string, unknown>;
+          const res = await fetchJsonShared(linkedVenueProfileUrl(linkedOwnerVenueId));
+          const data = (res.data ?? {}) as Record<string, unknown>;
           if (!res.ok) {
             if (!cancelled) {
               setVenueError(typeof data.error === 'string' ? data.error : 'Could not load linked venue');
@@ -261,8 +264,8 @@ function StaffSurfaceBookingStackInner({
             });
             setVenueError(null);
             if (!venueProp) {
-              const own = await fetch('/api/venue');
-              const ownData = (await own.json()) as Record<string, unknown>;
+              const own = await fetchJsonShared('/api/venue');
+              const ownData = (own.data ?? {}) as Record<string, unknown>;
               if (cancelled) return;
               if (!own.ok) {
                 setVenueError(typeof ownData.error === 'string' ? ownData.error : 'Could not load venue');
@@ -294,8 +297,8 @@ function StaffSurfaceBookingStackInner({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/venue');
-        const data = (await res.json()) as Record<string, unknown>;
+        const res = await fetchJsonShared('/api/venue');
+        const data = (res.data ?? {}) as Record<string, unknown>;
         if (!res.ok) {
           if (!cancelled) setVenueError(typeof data.error === 'string' ? data.error : 'Could not load venue');
           return;
@@ -311,7 +314,7 @@ function StaffSurfaceBookingStackInner({
     return () => {
       cancelled = true;
     };
-  }, [venueProp, linkedOwnerVenueId, currency]);
+  }, [venueProp, linkedOwnerVenueId, currency, venueId]);
 
   const showTabs = surfaceTabs.length > 1;
   const tabsForBar = showTabs ? surfaceTabs : [];

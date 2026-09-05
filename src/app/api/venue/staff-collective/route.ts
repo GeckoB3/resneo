@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { findStaffCollectiveForVenue } from '@/lib/linked-accounts/collective-staff-scope';
-import { loadCollectiveAppointmentCatalog } from '@/lib/linked-accounts/collective-venue';
+import { loadStaffCollectiveSummary } from '@/lib/linked-accounts/collective-staff-scope';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 
 /**
@@ -23,23 +22,20 @@ export async function GET(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const admin = getSupabaseAdminClient();
-    const scope = await findStaffCollectiveForVenue(admin, staff.venue_id);
-    if (!scope) {
+    // The calendar page resolves the same answer on the server before its first
+    // paint; this route serves any surface that mounts without it.
+    const summary = await loadStaffCollectiveSummary(admin, staff.venue_id);
+    if (!summary) {
       return NextResponse.json({ collective: null }, { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } });
     }
-    // Every calendar the staff form can book, own services included, so a
-    // column with no combined offering still opens the collective form.
-    const { practitioners } = await loadCollectiveAppointmentCatalog(admin, scope.collectiveId, {
-      includeMemberOwnServices: true,
-    });
     return NextResponse.json(
       {
         collective: {
-          id: scope.collectiveId,
-          name: scope.name,
-          host_venue_id: scope.hostVenueId,
-          member_venue_ids: scope.memberVenueIds,
-          calendar_ids: [...new Set(practitioners.map((p) => p.id))],
+          id: summary.id,
+          name: summary.name,
+          host_venue_id: summary.hostVenueId,
+          member_venue_ids: summary.memberVenueIds,
+          calendar_ids: summary.calendarIds,
         },
       },
       { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } },

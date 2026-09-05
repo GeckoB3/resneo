@@ -12,6 +12,8 @@ vi.mock('@/lib/linked-accounts/catalogue', () => ({
   loadCatalogueForManagement: vi.fn(),
   loadVenueCatalogueData: vi.fn(),
   backfillPerCalendarProviders: vi.fn(async () => {}),
+  // The route drops the memoised catalogue after a write; a no-op here.
+  invalidatePublicCombinedCatalogueMemo: vi.fn(),
 }));
 vi.mock('@/lib/linked-accounts/collective-page-config', () => ({
   loadCollectiveMemberImportSources: vi.fn(async () => []),
@@ -19,12 +21,6 @@ vi.mock('@/lib/linked-accounts/collective-page-config', () => ({
 vi.mock('@/lib/linked-accounts/service-duplication', () => ({
   ensureServiceForCalendar: vi.fn(),
   loadOfferingTemplate: vi.fn(),
-}));
-vi.mock('@/lib/linked-accounts/queries', () => ({
-  loadVenueLookup: vi.fn(async () => ({})),
-}));
-vi.mock('@/lib/linked-accounts/notifications', () => ({
-  notifyCombinedProviderProposed: vi.fn(async () => {}),
 }));
 vi.mock('@/lib/linked-accounts/collective-categories', () => ({
   resolveCollectiveCategoryId: vi.fn(),

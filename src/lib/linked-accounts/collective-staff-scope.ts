@@ -112,3 +112,45 @@ export async function findStaffCollectiveForVenue(
   }
   return null;
 }
+
+/** What the diary needs to route a New booking: the collective, its members and its calendars. */
+export interface StaffCollectiveSummary {
+  id: string;
+  name: string;
+  hostVenueId: string;
+  memberVenueIds: string[];
+  /** Every active people calendar of the eligible members: any of them books through the collective. */
+  calendarIds: string[];
+}
+
+/**
+ * The live collective `venueId` books for, with the calendars its staff form
+ * can book: one membership lookup and one calendar query, cheap enough to run
+ * while the calendar page renders on the server, so the diary knows the answer
+ * before its first paint and never shows a linked column's own "New booking"
+ * button only to take it away.
+ */
+export async function loadStaffCollectiveSummary(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<StaffCollectiveSummary | null> {
+  const scope = await findStaffCollectiveForVenue(admin, venueId);
+  if (!scope) return null;
+  const memberIds = await eligibleMemberVenueIds(admin, scope.collectiveId);
+  const { data: calendarRows } =
+    memberIds.length > 0
+      ? await admin
+          .from('unified_calendars')
+          .select('id')
+          .in('venue_id', memberIds)
+          .eq('is_active', true)
+          .or('calendar_type.eq.practitioner,calendar_type.is.null')
+      : { data: [] as Array<{ id: string }> };
+  return {
+    id: scope.collectiveId,
+    name: scope.name,
+    hostVenueId: scope.hostVenueId,
+    memberVenueIds: scope.memberVenueIds,
+    calendarIds: [...new Set((calendarRows ?? []).map((r) => r.id as string))],
+  };
+}

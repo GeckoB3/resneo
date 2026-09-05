@@ -64,6 +64,7 @@ import {
   bookingCreateGroupUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import { fetchJsonShared } from '@/lib/booking/staff-surface-warm';
 import {
   confirmBookingPaymentWithServer,
   BOOKING_CANCELLED_MESSAGE,
@@ -585,6 +586,15 @@ interface ChainExtra {
 /** Where the flow goes once every extra service has its options. */
 type ChainTarget = 'practitioner' | 'slot' | 'prefill';
 
+/** Staff-first: how many of the chosen person's services get their month warmed while the list is read. */
+const STAFF_FIRST_MONTH_WARM_LIMIT = 8;
+/**
+ * Day slots are kept for a short while so stepping back to a date already looked
+ * at does not fetch it again. The server re-checks the slot on create, so a
+ * colleague booking it in the meantime surfaces there, as it always did.
+ */
+const SLOT_CACHE_TTL_MS = 30_000;
+
 /**
  * Effective duration and buffer of one service as it will be booked: the
  * person's own offer when known, the chosen variant, a staff custom duration,
@@ -966,6 +976,7 @@ export function AppointmentBookingFlow({
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
+  const slotCacheRef = useRef(new Map<string, { at: number; practitioners: SlotPractitioner[] }>());
   /**
    * The server could not read this venue's schedule and refused to guess (Stage 7).
    * Distinct from "no slots": one means try again, the other means try another day.
@@ -1260,8 +1271,10 @@ export function AppointmentBookingFlow({
   const fetchCatalog = useCallback(async () => {
     setCatalogLoading(true);
     try {
-      const res = await fetch(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug, isStaff));
-      const data = await res.json();
+      // Shared with the staff stack, which starts this request before the flow
+      // mounts, so opening the form does not wait for profile then catalogue.
+      const res = await fetchJsonShared(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug, isStaff));
+      const data = (res.data ?? {}) as { practitioners?: CatalogPractitioner[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Failed to load catalog');
       setCatalogStaff(data.practitioners ?? []);
     } catch {
@@ -1279,6 +1292,11 @@ export function AppointmentBookingFlow({
   useEffect(() => {
     if (initialDate) setDate(initialDate);
   }, [initialDate]);
+
+  // A booking just made changes what is free: forget the remembered days.
+  useEffect(() => {
+    if (createResult) slotCacheRef.current.clear();
+  }, [createResult]);
 
   useEffect(() => {
     if (editBooking) return;
@@ -1348,7 +1366,14 @@ export function AppointmentBookingFlow({
         // A member venue's staff booking for a collective also see the members' own
         // services; the route verifies the session before widening anything.
         if (isStaff) params.set('staff', '1');
-        const res = await fetch(bookingAvailabilityUrl(params));
+        const url = bookingAvailabilityUrl(params);
+        const remembered = slotCacheRef.current.get(url);
+        if (remembered && Date.now() - remembered.at < SLOT_CACHE_TTL_MS) {
+          setSlotsUnavailable(false);
+          setSlotPractitioners(remembered.practitioners);
+          return;
+        }
+        const res = await fetch(url);
         const data = await res.json();
         /**
          * Stage 7 (decision J). A 503 means the server could not read this venue's schedule
@@ -1363,6 +1388,7 @@ export function AppointmentBookingFlow({
         }
         setSlotsUnavailable(false);
         setSlotPractitioners(data.practitioners ?? []);
+        if (res.ok) slotCacheRef.current.set(url, { at: Date.now(), practitioners: data.practitioners ?? [] });
       } catch {
         setError('Failed to load availability');
       } finally {
@@ -1712,7 +1738,10 @@ export function AppointmentBookingFlow({
       const chosenId = isLockedPractitionerFlow ? lockedPractitioner?.id : selectedPractitionerId;
       const p = catalogStaff.find((c) => c.id === chosenId);
       if (p) {
-        for (const s of p.services) {
+        // Only the services at the top of the list: warming every one of a
+        // person's twenty-odd services costs a month computation each, and the
+        // service the staff member picks is primed on the pick in any case.
+        for (const s of p.services.slice(0, STAFF_FIRST_MONTH_WARM_LIMIT)) {
           tasks.push({
             practitionerId: p.id,
             serviceId: s.id,

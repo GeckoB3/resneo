@@ -1015,8 +1015,9 @@ Review follow-up (2026-09-05):
   longer book its own services that are not combined offerings from any staff surface. The
   staff catalogue now also carries every eligible member's own services on its own calendars,
   after the offerings under a "{Venue} only" heading (host first), and a calendar with no
-  offering appears too. Offerings the host left without a heading take the collective's own
-  name as theirs on the staff form, so the combined offerings always list first. Such a service keeps its real id (`venue_only` in
+  offering appears too. Offerings the host left without a heading are listed under "Other services" (the
+  customer page's wording) placed ahead of the "{Venue} only" groups, so the combined
+  offerings always list first. Such a service keeps its real id (`venue_only` in
   `loadCollectiveAppointmentCatalog`, `includeMemberOwnServices`) and books as a plain
   booking in the owning venue with no `collective_id`; the cross-venue audit and notification
   still apply. The public combined page is unchanged. The public routes the staff form shares
@@ -1025,7 +1026,12 @@ Review follow-up (2026-09-05):
   catalogue only after verifying a member venue's session on the request.
 - **Linked column button.** A partner column that books through the collective no longer
   shows its own "New booking" header button on `/dashboard/calendar`: New, Walk-in and a slot
-  click already reach it. A partner outside any collective keeps the button.
+  click already reach it. A partner outside any collective keeps the button. Since the
+  evening of 2026-09-05 the calendar page resolves the collective on the server
+  (`loadStaffCollectiveSummary`, one membership lookup and one calendar query) and hands it
+  to the diary as `initialStaffCollective`, so the button never appears and then vanishes
+  while `/api/venue/staff-collective` answered; a diary mounted without that prop holds the
+  button back until the route replies (`staffCollectiveResolved`).
 - **Booking window.** The bridge's single-service day availability now applies the source
   service's own booking window (minimum notice, same-day rule, advance limit), as the month
   loader, the visit path and both create routes already did, so a collective never offers a
@@ -1086,6 +1092,25 @@ Linked venue and collective review (2026-09-05, second pass):
   with "Require deposit" unticked, and the write paths for a partner booking: the native PATCH
   cancels and refuses a move onto another booking (409), and the linked route now refuses the
   same move and shifts the end with an accepted one.
+- **Form open time (2026-09-05, evening).** Between the New click and a usable form the
+  stack fetched the venue profile, mounted the flow, and only then let the flow fetch the
+  catalogue, each twice in development (strict-mode effects): about 6.6 s on the dev server
+  for the collective host. Now both go through one short-lived shared request cache
+  (`src/lib/booking/staff-surface-warm.ts`), started when the diary's New or Walk-in button
+  is hovered or focused and again when the stack mounts, so the two overlap and run once.
+  Server side the staff profile skips the combined catalogue build it never used
+  (`loadCollectiveVenuePublic(..., { audience: 'staff' })`, 1.2 to 1.5 s down to 0.3 s), the
+  diary's staff-collective lookup answers from one calendar query instead of a catalogue
+  build (3.0 s down to 0.34 s), the merged catalogue build reads each member's data once and
+  side by side and starts the members' own catalogues alongside it (cold 2.9 s down to
+  1.3 s; 0.2 s within the ten-second memo), and the waitlist alerts banner on every dashboard
+  page checks its open slots side by side and skips past dates (4.3 s down to 0.5 s). Note
+  that the per-process memo only helps within one route bundle: Next builds each API route
+  separately, so the profile, catalogue and month routes each keep their own. Availability:
+  the staff-first month warm-up is capped at the first eight services of the chosen person
+  (`STAFF_FIRST_MONTH_WARM_LIMIT`; it fired one month computation per service, about 25 for
+  Light 3), and the form keeps day slots for thirty seconds so stepping back to a date
+  already looked at is instant; the server still re-checks the slot on create.
 - **Refused create keeps the typed details.** A partner venue with no Stripe account refuses a
   staff booking that ticks "Require deposit" ("Venue has not set up payments", correct: the
   owning venue's account would take it). The refusal used to remount the details step empty;
@@ -1114,6 +1139,7 @@ Dashboard banners and in-app notices are shown only to Admins.
 | Removed from venue collective | Email + dashboard notice | Removed member |
 | Venue collective dissolved | Email | All members |
 | Venue collective host reassigned (automatic, §7.4) | Email | New host venue |
+| Member's service added to the combined page | None. Removed 2026-09-05: it sent one email per offering, so building a page swamped members with mail. Joining the collective is the consent | n/a |
 
 **SMS is out of scope for this feature.** Resneo's SMS path is metered per-venue (Twilio,
 `increment_sms_usage`, billed to Stripe) and SMS is customer-facing operational/marketing

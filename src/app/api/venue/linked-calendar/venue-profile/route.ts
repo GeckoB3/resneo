@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 
     const collective = await resolveStaffCollectiveScope(admin, staff.venue_id, venueId);
     if (collective) {
-      const venue = await loadCollectiveVenuePublic(admin, collective.collectiveId);
+      const venue = await loadCollectiveVenuePublic(admin, collective.collectiveId, { audience: 'staff' });
       if (!venue) {
         return NextResponse.json({ error: 'That combined booking page is not available right now.' }, { status: 404 });
       }

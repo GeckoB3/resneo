@@ -476,37 +476,6 @@ export async function notifyCollectiveDissolved(
 }
 
 /**
- * Combined booking page (plan §7) — the host added one of a member's calendars
- * to the shared catalogue, so that service is now live on the combined page at
- * the member's own price/duration. Informational; sent to the member for
- * transparency (no approval step — joining the collective is the consent).
- */
-export async function notifyCombinedProviderProposed(
-  admin: SupabaseClient,
-  memberVenueId: string,
-  collectiveName: string,
-  hostVenueName: string,
-  offeringName: string,
-  collectiveId?: string,
-): Promise<void> {
-  await notifyVenue(
-    admin,
-    memberVenueId,
-    `“${offeringName}” is now on the ${collectiveName} combined page`,
-    {
-      heading: 'Added to the combined booking page',
-      paragraphs: [
-        `${hostVenueName} added your “${offeringName}” to the “${collectiveName}” combined booking page. It’s now bookable there at your own service’s price and duration.`,
-        'Manage that service (including its price, duration and availability) from your own Services settings.',
-      ],
-      ctaLabel: 'Open settings',
-      ctaUrl: settingsUrl(),
-    },
-    { type: 'combined_provider_proposed', category: 'lifecycle', collectiveId },
-  );
-}
-
-/**
  * Combined booking page — the host switched the collective to a combined
  * catalogue. Sent to each active member so they know to curate their listing.
  */

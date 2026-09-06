@@ -121,7 +121,7 @@ A cancelled booking also has a **Remove from diary** panel, which deletes it and
 - **Accept was refused.** The deposit is unpaid. Choose **Send payment link** or **Accept without payment** in the panel that appears.
 - **Tag did nothing.** Tags attach to contacts. If the bookings you picked have no saved contact behind them, there is nothing to tag.
 - **A message did not send.** Check the guest has the email address or mobile number for the channel you chose, and check your SMS balance on the web under **Settings → Plan**.
-- **Everything is read-only.** Either you are viewing a linked venue that has given you look-but-do-not-touch access, or the venue's subscription is past due. An admin can sort the plan out on the web.
+- **Everything is read-only.** Either you are viewing a linked venue that has given you **View only** access, or the venue's subscription is past due. A link set to **Edit existing** or **Full management** lets you change their bookings from here. An admin can sort the plan out on the web.
 
 ## Next steps
 

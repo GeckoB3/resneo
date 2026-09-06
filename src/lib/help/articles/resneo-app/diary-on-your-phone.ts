@@ -95,6 +95,8 @@ After you move a booking to a new time, a panel appears headed **Booking moved**
 
 If you only changed the length, the panel reads **Duration updated** instead. There is no notify button, because the start time has not moved and the guest has not been told anything. You still get **Undo change** and **Done**.
 
+You get the same panel when you move a booking on a venue you are linked with, as long as the link lets you edit their bookings. The message goes out from that venue, in their name, not yours.
+
 **Undo change** is the app's only undo for a drag, so use it there and then if the move was a mistake.
 
 ## Step 8: The Today overview

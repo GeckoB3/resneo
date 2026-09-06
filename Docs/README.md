@@ -119,6 +119,11 @@ releasing a deferred guest email on a linked booking, and a partner’s guest’
 implemented; the response records one deliberate difference, that deleting a partner’s file needs
 their full management grant rather than an edit grant.
 
+`R27_WEB_RESPONSE.md` answers `R27_WEB_HANDOVER.md` (2026-09-06), which reported that Ask
+ResNeo now has an app client and asked for a way to tell whether the assistant is switched on.
+Both forms are provided: `assistant_enabled` on the venue bootstrap, and a new
+`GET /api/venue/assistant`.
+
 `R20-1_WEB_RESPONSE.md`, `R20-1_WEB_RESPONSE_2.md`, `R20-1_WEB_RESPONSE_3.md` and
 `R20-1_WEB_RESPONSE_4.md` are four rounds of a concluded exchange with the
 `resneo-app` team about fail-closed scheduling reads. **`R20-1_WEB_RESPONSE_4.md`

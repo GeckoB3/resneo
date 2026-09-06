@@ -391,3 +391,22 @@ not belong to the resolved venue answers 404 `Guest not found`. Success shapes a
 The storage path and `guest_documents.venue_id` stay the OWNER venue's; the contact audit
 event is written against the owner venue with `acting_venue_id` and `link_id` in its
 metadata.
+
+## Is Ask ResNeo switched on? (R27, 2026-09-06)
+
+A client that draws an Ask ResNeo entry point can ask first, so it hides the row instead of
+leading someone to the unavailable message. The same boolean, two places:
+
+```
+GET /api/venue           ->  { ..., "assistant_enabled": true }   (no extra request)
+GET /api/venue/assistant ->  { "enabled": true }
+```
+
+Both run `assistantEnabledFor(staff.venue_id)`, the same check `POST /api/venue/assistant`
+runs, so the flag and the behaviour cannot disagree. The GET answers **200 with
+`enabled: false`** when the assistant is off, not 404: the POST 404s because the feature does
+not exist for that caller, while the GET is a question whose answer is "no". It sends
+`Cache-Control: no-store`, because the flag flips with an environment variable and with the
+beta allowlist. Bare `{ "error": "Unauthorised" }` 401 with no staff row.
+
+`assistant_enabled` on the venue bootstrap is additive; nothing else in that payload changed.

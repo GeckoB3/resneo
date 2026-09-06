@@ -42,6 +42,26 @@ function sse(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+/**
+ * GET /api/venue/assistant: is the assistant switched on for this venue? (R27)
+ *
+ * A client that shows an Ask ResNeo entry point needs to know before it draws one, or the
+ * person walks into the unavailable message. Answers { enabled } for a staff session, running
+ * the same assistantEnabledFor the POST runs so the two cannot disagree. Deliberately NOT a
+ * 404 when the assistant is off: "off" is the answer the caller asked for.
+ *
+ * The same boolean also rides on GET /api/venue as `assistant_enabled`, which costs a client
+ * no extra request; this route is for anything that does not load the venue bootstrap.
+ */
+export async function GET(request: NextRequest): Promise<Response> {
+  const supabase = await createVenueRouteClient(request);
+  const staff = await getVenueStaff(supabase);
+  if (!staff) {
+    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+  }
+  return NextResponse.json({ enabled: assistantEnabledFor(staff.venue_id) }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
   const supabase = await createVenueRouteClient(request);
   const staff = await getVenueStaff(supabase);

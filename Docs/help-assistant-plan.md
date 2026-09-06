@@ -631,6 +631,11 @@ where a.role = 'assistant'
 order by a.created_at desc;
 ```
 
+Read the `client` column, not just the question. A row from the ResNeo app is usually someone
+at the counter with a person in front of them, and a row from the web is usually someone at a
+desk with time to read. The same unanswered question means different things in the two places:
+the first wants a shorter answer or a fix to the app, the second wants an article. (R27.)
+
 Every row is either an article to write, an article to fix, or a prompt problem. Write the
 article, not a longer prompt. The unanswered rate and the thumbs-down rate are the two numbers
 to watch (targets in section 8, Phase 5).

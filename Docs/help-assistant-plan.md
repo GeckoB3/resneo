@@ -1246,9 +1246,27 @@ Reviewers verify against the code, so they found live defects. Fixed in this pas
 
 ### 11.4 What is owed before this ships
 
-1. **The migration.** `supabase/migrations/20270207120000_assistant_conversations.sql` is
-   written but applied to neither environment. It follows the standing ritual: staging code,
-   staging push, test, production push, merge, reset staging.
+1. **The migration. DONE on 2026-09-06,** applied by hand to staging and production in the
+   standing order. Verified against staging afterwards rather than assumed:
+
+   - Both tables exist and are being written to. A question asked from the web and one asked
+     from the ResNeo app are both logged, with the context block, the citations, token usage,
+     latency and the `reply_to` threading all populated, and the gap-review query in section
+     4.4 runs against them.
+   - The access posture matches `support_sessions`, the table this migration copied. An `anon`
+     caller’s `SELECT` succeeds but returns nothing, even asked for a row that exists by id,
+     and `INSERT` is refused outright. That is the hosted environment granting `anon` and
+     `authenticated` outside the migration history while RLS with no policies denies every
+     row, so the empty result is the design working, not a leak. Worth knowing that the
+     grant, not the migration, is what makes the difference between an error and an empty
+     set here, and only the live database can tell you which you have.
+
+   One measurement worth recording: `cached_input_tokens` is coming back 0. Mode B made the
+   cacheable prefix the instructions alone, roughly 1,200 tokens, which is around the size
+   below which prompt caching does not engage. That is a good trade rather than a regression:
+   about 5,000 uncached tokens a question beats 163,000 tokens at a cached discount. If
+   volume ever makes it worth chasing, the lever is to move something large and identical
+   back into the prefix, not to undo Mode B.
 2. **The policy update (D4). DONE on 2026-09-06.** OpenAI is now named as a sub-processor in
    `src/app/terms/data-processing/page.tsx` (section 8, with a note saying what it does and does
    not receive and the 30-day retention), in the processing description (section 3), and in the

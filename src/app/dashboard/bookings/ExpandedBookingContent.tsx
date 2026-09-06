@@ -2143,9 +2143,13 @@ export function ExpandedBookingContent({
 
       {/* Records: the guest's documents and photos, identical to the contact panel's
           Records section. They belong to the person, not this booking, so every
-          booking for the guest shows the same files. A linked venue's guest keeps
-          its files on that venue's dashboard. */}
-      {(activeDetail?.guest?.id ?? booking.guest_id) && !linkedBookingContext ? (
+          booking for the guest shows the same files.
+
+          On a linked venue's booking (R26) the files stay the OWNER venue's: the card reads
+          them through `owner_venue_id`, the link decides whether they are shared at all
+          (full_details plus PII, else the routes answer 403 and the card says so), an edit
+          grant is needed to add one, and only a full management grant may remove one. */}
+      {(activeDetail?.guest?.id ?? booking.guest_id) ? (
         <details className={bookingExpandAccordionDetailsClass}>
           <summary className={bookingExpandAccordionSummaryClass}>
             <span>Records</span>
@@ -2157,7 +2161,12 @@ export function ExpandedBookingContent({
             </svg>
           </summary>
           <div className={bookingExpandAccordionBodyClass}>
-            <GuestRecordsSection guestId={(activeDetail?.guest?.id ?? booking.guest_id)!} onChanged={() => {}} onCount={setRecordsCount} />
+            <GuestRecordsSection
+              guestId={(activeDetail?.guest?.id ?? booking.guest_id)!}
+              ownerVenueId={linkedBookingContext ? venueId : undefined}
+              canUpload={!linkedBookingContext || linkedAct === 'edit_existing' || linkedAct === 'create_edit_cancel'}
+              canRemove={!linkedBookingContext || linkedAct === 'create_edit_cancel'}
+              onChanged={() => {}} onCount={setRecordsCount} />
           </div>
         </details>
       ) : null}

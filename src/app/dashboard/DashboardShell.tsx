@@ -1,5 +1,8 @@
 'use client';
 
+import { AssistantProvider } from '@/components/assistant/AssistantProvider';
+import { AssistantSheet } from '@/components/assistant/AssistantSheet';
+
 import {
   createContext,
   useCallback,
@@ -64,6 +67,7 @@ export function DashboardShell({
   initialAppointmentWaitlistEnabled = false,
   sidebarRest,
   supportSessionToolbar,
+  assistantEnabled = false,
   children,
 }: {
   venueId?: string;
@@ -72,6 +76,8 @@ export function DashboardShell({
   sidebarRest: DashboardShellSidebarRest;
   /** Shown above main content when a platform superuser has an active venue support session. */
   supportSessionToolbar?: ReactNode;
+  /** Server-side assistantEnabledFor(venueId): renders the Ask ResNeo launcher and drawer when true. */
+  assistantEnabled?: boolean;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -216,6 +222,7 @@ export function DashboardShell({
   return (
     <DashboardTransitionContext.Provider value={transitionCtx}>
       <DashboardNavSyncContext.Provider value={ctx}>
+        <AssistantProvider enabled={assistantEnabled}>
         <DashboardTransitionIndicator label={transitionLabel} />
         <DashboardSidebar
           {...sidebarRestWithoutBookingNav}
@@ -229,6 +236,8 @@ export function DashboardShell({
           {supportSessionToolbar}
           {children}
         </div>
+        <AssistantSheet />
+        </AssistantProvider>
       </DashboardNavSyncContext.Provider>
     </DashboardTransitionContext.Provider>
   );

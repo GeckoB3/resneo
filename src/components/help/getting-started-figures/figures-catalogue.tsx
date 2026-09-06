@@ -10,7 +10,7 @@ function ServicesEditorSvg() {
       viewBox="0 0 560 720"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Add Service dialog: a modal with Name (required), Description, Duration and Buffer in minutes, Price in pounds, an Online payment when booking section with three radio options, a Calendars that offer this service checklist, a Colour swatch row, an Active toggle, and Cancel and Create Service buttons."
+      aria-label="The Add Service dialog: a modal with Name (required), Description, Duration and Buffer in minutes, Price in pounds, an Online payment when booking section with four radio options, a Calendars that offer this service checklist with an Add calendar button, a Colour swatch row, an Active toggle, and Cancel and Create Service buttons."
     >
       {/* Modal card */}
       <rect x="10" y="10" width="540" height="700" rx="14" fill="#ffffff" stroke="#e2e8f0" />
@@ -30,8 +30,7 @@ function ServicesEditorSvg() {
       {/* Description */}
       <text x="30" y="146" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">DESCRIPTION</text>
       <rect x="30" y="154" width="500" height="52" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="44" y="174" fill="#64748b" fontSize="11">Shown to clients when they choose</text>
-      <text x="44" y="190" fill="#64748b" fontSize="11">this service at booking.</text>
+      <text x="44" y="174" fill="#94a3b8" fontSize="11">Brief description of the service</text>
 
       {/* Duration + Buffer row */}
       <text x="30" y="228" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">DURATION (MINS)</text>
@@ -50,20 +49,23 @@ function ServicesEditorSvg() {
       <text x="46" y="318" textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">£</text>
       <text x="76" y="318" fill="#0f172a" fontSize="11" fontWeight="500">65.00</text>
 
-      {/* Online payment section */}
-      <rect x="30" y="350" width="500" height="120" rx="12" fill="#f8fafc" stroke="#e2e8f0" />
+      {/* Online payment section - four options, Card hold included */}
+      <rect x="30" y="350" width="500" height="130" rx="12" fill="#f8fafc" stroke="#e2e8f0" />
       <text x="46" y="374" fill="#0f172a" fontSize="12" fontWeight="700">Online payment when booking</text>
 
       {/* radio 1 */}
       <circle cx="56" cy="396" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
       <text x="72" y="400" fill="#0f172a" fontSize="11" fontWeight="500">No online payment</text>
       {/* radio 2 selected */}
-      <circle cx="56" cy="422" r="6" fill="#ffffff" stroke="#00305C" strokeWidth="1.5" />
-      <circle cx="56" cy="422" r="3" fill="#00305C" />
-      <text x="72" y="426" fill="#0f172a" fontSize="11" fontWeight="600">Custom deposit</text>
+      <circle cx="56" cy="418" r="6" fill="#ffffff" stroke="#00305C" strokeWidth="1.5" />
+      <circle cx="56" cy="418" r="3" fill="#00305C" />
+      <text x="72" y="422" fill="#0f172a" fontSize="11" fontWeight="600">Custom deposit</text>
       {/* radio 3 */}
-      <circle cx="56" cy="448" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
-      <text x="72" y="452" fill="#0f172a" fontSize="11" fontWeight="500">Pay full price online at booking</text>
+      <circle cx="56" cy="440" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+      <text x="72" y="444" fill="#0f172a" fontSize="11" fontWeight="500">Pay full price online at booking</text>
+      {/* radio 4 */}
+      <circle cx="56" cy="462" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+      <text x="72" y="466" fill="#0f172a" fontSize="11" fontWeight="500">Card hold</text>
 
       {/* Calendars section */}
       <text x="30" y="500" fill="#0f172a" fontSize="12" fontWeight="700">Calendars that offer this service</text>
@@ -84,7 +86,7 @@ function ServicesEditorSvg() {
 
       {/* Add calendar button */}
       <rect x="430" y="510" width="100" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="480" y="527" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="600">+ Add calendar</text>
+      <text x="480" y="527" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="600">Add calendar</text>
 
       {/* Colour swatches */}
       <text x="30" y="606" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">COLOUR</text>
@@ -192,7 +194,7 @@ function ServicesFlowSvg() {
 
 function ClassesTypeSvg() {
   return (
-    <svg viewBox="0 0 560 384" className="mx-auto h-auto w-full max-w-[560px]" role="img" aria-label="The New class type form with fields for Name, Duration in minutes, Capacity in spots, Calendar, Price and an optional Instructor label, and a Save class type button.">
+    <svg viewBox="0 0 560 384" className="mx-auto h-auto w-full max-w-[560px]" role="img" aria-label="The New class type form with fields for Name, Duration in minutes, Capacity in spots, Calendar column, Price and an optional Instructor label, and a Save class type button.">
       <rect x="10" y="10" width="540" height="364" rx="14" fill="#ffffff" stroke="#e2e8f0" />
       <text x="32" y="40" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">CLASSES</text>
       <text x="32" y="60" fill="#0f172a" fontSize="15" fontWeight="700">New class type</text>
@@ -206,7 +208,7 @@ function ClassesTypeSvg() {
       <text x="288" y="160" fill="#64748b" fontSize="10" fontWeight="600">Capacity (spots)</text>
       <rect x="288" y="166" width="240" height="28" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
       <text x="300" y="184" fill="#0f172a" fontSize="11">12</text>
-      <text x="32" y="216" fill="#64748b" fontSize="10" fontWeight="600">Calendar</text>
+      <text x="32" y="216" fill="#64748b" fontSize="10" fontWeight="600">Calendar column *</text>
       <rect x="32" y="222" width="240" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
       <text x="44" y="240" fill="#0f172a" fontSize="11">Studio A</text>
       <text x="258" y="240" fill="#64748b" fontSize="11">&#9662;</text>
@@ -224,32 +226,51 @@ function ClassesTypeSvg() {
 
 function ClassesScheduleSvg() {
   return (
-    <svg viewBox="0 0 560 312" className="mx-auto h-auto w-full max-w-[560px]" role="img" aria-label="The Schedule classes panel with a repeat selector of One date, Weekly and Custom dates, plus class type, start date, start time and repeat until fields, and an Add sessions button.">
-      <rect x="10" y="10" width="540" height="292" rx="14" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="32" y="44" fill="#0f172a" fontSize="15" fontWeight="700">Schedule classes</text>
-      <text x="32" y="62" fill="#64748b" fontSize="10">Put a class type onto real dates.</text>
-      <rect x="32" y="78" width="496" height="36" rx="10" fill="#f1f5f9" />
-      <rect x="37" y="83" width="162" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="118" y="100" textAnchor="middle" fill="#64748b" fontSize="11">One date</text>
-      <rect x="199" y="83" width="162" height="26" rx="8" fill="#00305C" />
-      <text x="280" y="100" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="700">Weekly</text>
-      <rect x="361" y="83" width="162" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="442" y="100" textAnchor="middle" fill="#64748b" fontSize="11">Custom dates</text>
-      <text x="32" y="140" fill="#64748b" fontSize="10" fontWeight="600">Class type</text>
-      <rect x="32" y="146" width="240" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="44" y="164" fill="#0f172a" fontSize="11">Beginner Yoga</text>
-      <text x="258" y="164" fill="#64748b" fontSize="11">&#9662;</text>
-      <text x="288" y="140" fill="#64748b" fontSize="10" fontWeight="600">Starts</text>
-      <rect x="288" y="146" width="240" height="28" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="300" y="164" fill="#0f172a" fontSize="11">Mon 6 Jul</text>
-      <text x="32" y="194" fill="#64748b" fontSize="10" fontWeight="600">Start time</text>
-      <rect x="32" y="200" width="150" height="28" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="44" y="218" fill="#0f172a" fontSize="11">18:00</text>
-      <text x="200" y="194" fill="#64748b" fontSize="10" fontWeight="600">Repeat until</text>
-      <rect x="200" y="200" width="180" height="28" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="212" y="218" fill="#0f172a" fontSize="11">31 Aug</text>
-      <rect x="388" y="250" width="140" height="32" rx="9" fill="#003B6F" />
-      <text x="458" y="270" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Add sessions</text>
+    <svg viewBox="0 0 560 360" className="mx-auto h-auto w-full max-w-[560px]" role="img" aria-label="The Schedule classes sheet showing which class it is adding to, three modes of One-off session, Weekly repeat and Every few days, then Start time, Every N weeks and How far to schedule fields, and a Schedule classes button.">
+      <rect x="10" y="10" width="540" height="340" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="32" y="42" fill="#0f172a" fontSize="15" fontWeight="700">Schedule classes</text>
+      <text x="32" y="60" fill="#64748b" fontSize="10">Pick a day on the calendar, then choose how it repeats.</text>
+
+      {/* Adding to */}
+      <rect x="32" y="72" width="200" height="40" rx="10" fill="#ffffff" stroke="#e2e8f0" />
+      <rect x="42" y="80" width="5" height="24" rx="2.5" fill="#00C2C7" />
+      <text x="56" y="89" fill="#94a3b8" fontSize="8" fontWeight="700" letterSpacing="0.06em">ADDING TO</text>
+      <text x="56" y="105" fill="#0f172a" fontSize="11" fontWeight="700">Beginner Yoga</text>
+
+      {/* Mode tabs */}
+      <rect x="32" y="124" width="496" height="44" rx="10" fill="#f1f5f9" />
+      <rect x="37" y="129" width="160" height="34" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="117" y="145" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">One-off session</text>
+      <text x="117" y="157" textAnchor="middle" fill="#94a3b8" fontSize="8">Single date</text>
+      <rect x="201" y="129" width="160" height="34" rx="8" fill="#ffffff" stroke="#00305C" strokeWidth="1.5" />
+      <text x="281" y="145" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="700">Weekly repeat</text>
+      <text x="281" y="157" textAnchor="middle" fill="#64748b" fontSize="8">Same weekday</text>
+      <rect x="365" y="129" width="160" height="34" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="445" y="145" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">Every few days</text>
+      <text x="445" y="157" textAnchor="middle" fill="#94a3b8" fontSize="8">Spaced dates</text>
+
+      {/* Fields */}
+      <text x="32" y="190" fill="#64748b" fontSize="10" fontWeight="600">Start time</text>
+      <rect x="32" y="196" width="240" height="28" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
+      <text x="44" y="214" fill="#0f172a" fontSize="11">18:00</text>
+      <text x="288" y="190" fill="#64748b" fontSize="10" fontWeight="600">Every N weeks</text>
+      <rect x="288" y="196" width="240" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="300" y="214" fill="#0f172a" fontSize="11">Every week</text>
+      <text x="514" y="214" fill="#64748b" fontSize="11">&#9662;</text>
+
+      {/* How far to schedule */}
+      <text x="32" y="250" fill="#64748b" fontSize="10" fontWeight="600">How far to schedule</text>
+      <circle cx="40" cy="268" r="6" fill="#ffffff" stroke="#00305C" strokeWidth="1.5" />
+      <circle cx="40" cy="268" r="3" fill="#00305C" />
+      <text x="54" y="272" fill="#0f172a" fontSize="11">For the next</text>
+      <rect x="124" y="258" width="34" height="20" rx="6" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="141" y="272" textAnchor="middle" fill="#0f172a" fontSize="11">8</text>
+      <text x="166" y="272" fill="#64748b" fontSize="11">weeks</text>
+      <circle cx="40" cy="296" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+      <text x="54" y="300" fill="#64748b" fontSize="11">Between dates</text>
+
+      <rect x="388" y="304" width="140" height="32" rx="9" fill="#003B6F" />
+      <text x="458" y="324" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Schedule classes</text>
     </svg>
   );
 }
@@ -268,7 +289,7 @@ function ClassesTimetableSvg() {
       <text x="44" y="132" fill="#0f172a" fontSize="11" fontWeight="600">Wed 8 Jul, 18:00</text>
       <text x="44" y="148" fill="#64748b" fontSize="10">Beginner Yoga</text>
       <rect x="412" y="122" width="104" height="24" rx="12" fill="#fef3c7" />
-      <text x="464" y="138" textAnchor="middle" fill="#d97706" fontSize="10" fontWeight="700">12 / 12 full</text>
+      <text x="464" y="138" textAnchor="middle" fill="#d97706" fontSize="10" fontWeight="700">12 / 12 booked</text>
       <rect x="28" y="166" width="504" height="48" rx="10" fill="#f8fafc" stroke="#e2e8f0" />
       <text x="44" y="188" fill="#0f172a" fontSize="11" fontWeight="600">Mon 13 Jul, 18:00</text>
       <text x="44" y="204" fill="#64748b" fontSize="10">Beginner Yoga</text>
@@ -418,7 +439,7 @@ function EventsAttendeesSvg() {
       aria-label="An event detail card with a Sales and capacity panel of four stat tiles and a capacity bar, then an Attendees list with status pills and Arrived check-in buttons, plus an Export CSV button."
     >
       {/* Sales & capacity panel */}
-      <rect x="10" y="10" width="580" height="180" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+      <rect x="10" y="10" width="580" height="172" rx="14" fill="#ffffff" stroke="#e2e8f0" />
       <text x="30" y="36" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">EVENT</text>
       <text x="30" y="58" fill="#0f172a" fontSize="16" fontWeight="700">Sales &amp; capacity</text>
 
@@ -442,8 +463,6 @@ function EventsAttendeesSvg() {
       {/* Capacity progress bar */}
       <rect x="30" y="150" width="536" height="10" rx="5" fill="#f1f5f9" />
       <rect x="30" y="150" width="456" height="10" rx="5" fill="#00305C" />
-      <text x="30" y="180" fill="#64748b" fontSize="9">Capacity used</text>
-      <text x="566" y="180" textAnchor="end" fill="#64748b" fontSize="9">128 of 150 seats</text>
 
       {/* Attendees header + Export CSV */}
       <text x="14" y="218" fill="#0f172a" fontSize="15" fontWeight="700">Attendees</text>
@@ -507,7 +526,7 @@ function ResourcesEditorSvg() {
       viewBox="0 0 560 760"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Add a bookable resource form in four numbered sections: Basics with a Resource name and Type field, Team calendar with a Show on calendar dropdown, Booking rules with start times, longest and shortest booking inputs, and Pricing and payment with a price field and three payment cards, ending in a Create resource button."
+      aria-label="The Add a bookable resource form in four numbered sections: Basics with a Resource name and Type field, Team calendar with a Show on calendar dropdown, Booking rules with start times, longest and shortest booking inputs, and Pricing and payment with a price field and four payment cards (Pay at venue, Deposit online, Pay in full and Card hold), ending in a Create resource button."
     >
       <text x="10" y="26" fill="#0f172a" fontSize="17" fontWeight="700">Add a bookable resource</text>
 
@@ -571,15 +590,18 @@ function ResourcesEditorSvg() {
       <rect x="30" y="596" width="180" height="30" rx="8" fill="#ffffff" stroke="#e2e8f0" />
       <text x="44" y="615" fill="#0f172a" fontSize="11" fontWeight="500">£12.00</text>
 
-      {/* three payment cards */}
-      <rect x="30" y="636" width="160" height="36" rx="9" fill="#E8EFF6" stroke="#00305C" strokeWidth="1.5" />
-      <text x="110" y="658" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="700">Pay at venue</text>
+      {/* four payment cards */}
+      <rect x="30" y="636" width="118" height="36" rx="9" fill="#E8EFF6" stroke="#00305C" strokeWidth="1.5" />
+      <text x="89" y="658" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="700">Pay at venue</text>
 
-      <rect x="200" y="636" width="160" height="36" rx="9" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="280" y="658" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="500">Deposit online</text>
+      <rect x="156" y="636" width="118" height="36" rx="9" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="215" y="658" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="500">Deposit online</text>
 
-      <rect x="370" y="636" width="160" height="36" rx="9" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="450" y="658" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="500">Pay in full</text>
+      <rect x="282" y="636" width="118" height="36" rx="9" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="341" y="658" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="500">Pay in full</text>
+
+      <rect x="408" y="636" width="118" height="36" rx="9" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="467" y="658" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="500">Card hold</text>
 
       <rect x="30" y="684" width="16" height="16" rx="4" fill="#00A0A4" />
       <path d="M33 692 l3 3 l5 -6" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -721,8 +743,8 @@ function ServiceBookingModeSvg() {
 
 function ServiceVariantsSvg() {
   const cols = [
-    { x: 40, label: 'Duration *', value: '60' },
-    { x: 162, label: 'Buffer', value: '10' },
+    { x: 40, label: 'Duration (mins) *', value: '60' },
+    { x: 162, label: 'Buffer (mins)', value: '10' },
     { x: 284, label: 'Price (£)', value: '65.00' },
     { x: 406, label: 'Deposit (£)', value: '10.00' },
   ];
@@ -785,8 +807,8 @@ function ServiceVariantsSvg() {
       <rect x="40" y="362" width="478" height="30" rx="8" fill="#ffffff" stroke="#e2e8f0" />
       <text x="54" y="381" fill="#0f172a" fontSize="11" fontWeight="500">90 minutes</text>
       {[
-        { x: 40, label: 'Duration *', value: '90', empty: false },
-        { x: 162, label: 'Buffer', value: '10', empty: false },
+        { x: 40, label: 'Duration (mins) *', value: '90', empty: false },
+        { x: 162, label: 'Buffer (mins)', value: '10', empty: false },
         { x: 284, label: 'Price (£)', value: '', empty: true },
         { x: 406, label: 'Deposit (£)', value: '', empty: false },
       ].map((c) => (
@@ -966,8 +988,8 @@ export const CATALOGUE_FIGURES: Record<string, { title: string; caption: string;
   "service-variants": { title: "Bookable options", caption: "Build each option in turn (name, duration, buffer, price), then add the next. Add another unlocks once the current option is complete.", node: <ServiceVariantsSvg /> },
   "service-addons": { title: "Add-ons", caption: "Optional extras grouped by question. Each group can be pick one or pick multiple, required or optional, with its own price and extra time.", node: <ServiceAddonsSvg /> },
   "addon-group-editor": { title: "Add an add-on group", caption: "Name the group, ask the client a prompt, choose how many they can pick, then list each option with an extra price and extra minutes.", node: <AddonGroupEditorSvg /> },
-  "classes-type": { title: "New class type", caption: "Create the template guests book: name, duration, capacity, calendar, and price.", node: <ClassesTypeSvg /> },
-  "classes-schedule": { title: "Schedule classes", caption: "Put a class type onto real dates: one date, weekly, or custom dates.", node: <ClassesScheduleSvg /> },
+  "classes-type": { title: "New class type", caption: "Create the template guests book: name, duration, capacity, calendar column, and price.", node: <ClassesTypeSvg /> },
+  "classes-schedule": { title: "Schedule classes", caption: "Put a class type onto real dates: a one-off session, a weekly repeat, or every few days. The button label follows the mode you pick.", node: <ClassesScheduleSvg /> },
   "classes-timetable": { title: "Upcoming sessions", caption: "Each scheduled session shows a booked-of-capacity count so you can see how full it is.", node: <ClassesTimetableSvg /> },
   "events-editor": { title: "Create event form", caption: "The Create event form with schedule mode, capacity, ticket types, and the Add ticket type button.", node: <EventsEditorSvg /> },
   "events-attendees": { title: "Event detail: attendees", caption: "An event's attendee list with the Arrived check-in action and an Export CSV button.", node: <EventsAttendeesSvg /> },

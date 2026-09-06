@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
+import { resolveGuestDocumentScope } from '@/lib/guests/linked-guest-access';
 
 /**
  * POST /api/venue/guests/[guestId]/documents/[documentId]/complete — mark upload finished.
+ *
+ * Accepts `owner_venue_id` for a linked venue's guest (R26), on the same edit grant as sign.
  */
 export async function POST(
   request: NextRequest,
@@ -19,12 +22,18 @@ export async function POST(
 
     const { guestId, documentId } = await params;
 
+    const scoped = await resolveGuestDocumentScope(staff, request, guestId, 'write');
+    if (!scoped.ok) {
+      return NextResponse.json({ error: scoped.error }, { status: scoped.status });
+    }
+    const { venueId: scopeVenueId, auditMetadata } = scoped.scope;
+
     const { data: doc, error: fErr } = await staff.db
       .from('guest_documents')
       .select('id, uploaded_at')
       .eq('id', documentId)
       .eq('guest_id', guestId)
-      .eq('venue_id', staff.venue_id)
+      .eq('venue_id', scopeVenueId)
       .is('deleted_at', null)
       .maybeSingle();
 
@@ -40,7 +49,7 @@ export async function POST(
       .from('guest_documents')
       .update({ uploaded_at: new Date().toISOString() })
       .eq('id', documentId)
-      .eq('venue_id', staff.venue_id);
+      .eq('venue_id', scopeVenueId);
 
     if (uErr) {
       console.error('complete document failed:', uErr);
@@ -48,11 +57,11 @@ export async function POST(
     }
 
     await insertContactAuditEvent(staff.db, {
-      venue_id: staff.venue_id,
+      venue_id: scopeVenueId,
       guest_id: guestId,
       actor_staff_id: staff.id,
       event_type: 'guest_document_uploaded',
-      metadata: { document_id: documentId },
+      metadata: { document_id: documentId, ...auditMetadata },
     });
 
     return NextResponse.json({ success: true });

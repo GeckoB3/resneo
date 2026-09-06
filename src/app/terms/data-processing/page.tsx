@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'Data Processing Agreement governing how JAR 26 LTD trading as ResNeo processes personal data on behalf of business customers under UK GDPR.',
 };
 
-const LAST_UPDATED = '03 May 2026';
+const LAST_UPDATED = '06 September 2026';
 
 export default function DataProcessingPage() {
   return (
@@ -58,7 +58,7 @@ export default function DataProcessingPage() {
                   to time.
                 </li>
                 <li className="mt-2">
-                  <strong>&ldquo;Personal Data&rdquo;</strong> has the meaning given in Data Protection Law —
+                  <strong>&ldquo;Personal Data&rdquo;</strong> has the meaning given in Data Protection Law:
                   broadly, any information relating to an identified or identifiable living individual.
                 </li>
                 <li className="mt-2">
@@ -86,11 +86,11 @@ export default function DataProcessingPage() {
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>
-                  the <strong>Customer is the data controller</strong> — you determine the purposes and means of
+                  the <strong>Customer is the data controller</strong>. You determine the purposes and means of
                   collecting and using personal data about your guests, clients, and staff through the platform;
                 </li>
                 <li>
-                  <strong>ResNeo is the data processor</strong> — we process that personal data only on your
+                  <strong>ResNeo is the data processor</strong>. We process that personal data only on your
                   behalf, in accordance with your instructions and this DPA.
                 </li>
               </ul>
@@ -113,7 +113,14 @@ export default function DataProcessingPage() {
                 <li>processing payments and deposits through Stripe on your behalf;</li>
                 <li>providing you with reporting and analytics on your bookings;</li>
                 <li>enabling you and your staff to access and manage guest and booking data through the dashboard;</li>
-                <li>maintaining audit logs and records necessary to operate the platform.</li>
+                <li>maintaining audit logs and records necessary to operate the platform;</li>
+                <li>
+                  providing AI-assisted features: an in-dashboard help assistant that answers your
+                  team&rsquo;s questions about how to use ResNeo, and column mapping suggestions when you
+                  import data from another system. These features send the text your staff enter, and
+                  the data in the files they upload, to our AI sub-processor. They assist your team and
+                  do not make decisions about any individual.
+                </li>
               </ul>
             </section>
 
@@ -133,7 +140,7 @@ export default function DataProcessingPage() {
                 <li>email addresses;</li>
                 <li>phone numbers (including mobile numbers for SMS communications);</li>
                 <li>booking details (dates, times, party size, service type, notes);</li>
-                <li>payment references (Stripe payment intent IDs — not card numbers, which are held by Stripe);</li>
+                <li>payment references (Stripe payment intent IDs, not card numbers, which are held by Stripe);</li>
                 <li>deposit and transaction records;</li>
                 <li>communications history (email and SMS confirmation and reminder records);</li>
                 <li>
@@ -283,9 +290,24 @@ export default function DataProcessingPage() {
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">USA / EU</td>
                     </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 font-medium text-slate-700">OpenAI</td>
+                      <td className="px-4 py-2.5 text-slate-600">
+                        AI-assisted features: the in-dashboard help assistant and data import column
+                        mapping
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600">USA</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+              <p className="mt-3">
+                Our AI sub-processor receives only what is needed for the feature in use: for the help
+                assistant, the question your staff type and a summary of your venue&rsquo;s plan and
+                settings; for data import, the contents of the file you upload. It does not receive your
+                booking database, and API data is not used to train its models. Help assistant
+                conversations are kept for 30 days so we can improve our help articles, then deleted.
+              </p>
             </section>
 
             <section>

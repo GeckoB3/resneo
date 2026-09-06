@@ -22,17 +22,17 @@ export const WAITLIST_MODE_LABELS: Record<
   staff_choose: {
     title: 'Staff choose',
     description:
-      'When a slot opens, staff see a banner and choose who to offer it to — or use Offer appointment for the first matching guest.',
+      'When a slot opens, staff see a banner and choose who to offer it to, or use Offer appointment for the first matching guest.',
   },
   notify_in_order: {
-    title: 'First in line — notify in order',
+    title: 'First in line, notify in order',
     description:
       'The first matching guest is notified by email and SMS. If they do not book within 30 minutes, the next guest is notified. The slot stays open on your booking page throughout.',
   },
   notify_all: {
     title: 'Offer to all',
     description:
-      'Every matching guest is notified at once. The slot stays open — whoever books first gets it.',
+      'Every matching guest is notified at once. The slot stays open, and whoever books first gets it.',
   },
 };
 

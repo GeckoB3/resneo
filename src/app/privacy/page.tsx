@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'How JAR 26 LTD trading as ResNeo collects, uses, and protects personal data when you use our website, platform and booking features.',
 };
 
-const LAST_UPDATED = '01 May 2026';
+const LAST_UPDATED = '06 September 2026';
 
 export default function PrivacyPage() {
   return (
@@ -345,13 +345,18 @@ export default function PrivacyPage() {
                 <li>email and SMS providers;</li>
                 <li>customer support and CRM tools;</li>
                 <li>analytics providers, where enabled;</li>
+                <li>AI providers, for the AI-assisted features described in section 18;</li>
                 <li>professional advisers, such as accountants, lawyers and insurers;</li>
                 <li>regulators, public authorities, courts or law enforcement where required by law.</li>
               </ul>
               <p className="mt-3">
                 Examples of providers we may use include Stripe for payments, Supabase for database/authentication,
-                Vercel for hosting, and email/SMS providers for transactional communications. This list should be kept
-                accurate and updated to reflect the providers actually used.
+                Vercel for hosting, OpenAI for AI-assisted features, and email/SMS providers for transactional
+                communications. The full list of sub-processors we use to deliver the platform to venues is in our{' '}
+                <Link href="/terms/data-processing" className="font-medium text-brand-700 underline">
+                  Data Processing Agreement
+                </Link>
+                .
               </p>
               <p className="mt-3">We do not sell personal data to advertisers.</p>
             </section>
@@ -393,6 +398,10 @@ export default function PrivacyPage() {
                 </li>
                 <li>billing, invoice and accounting records are usually kept for up to 6 years;</li>
                 <li>support records are usually kept for up to 3 years after the matter is closed;</li>
+                <li>
+                  help assistant conversations are kept for 30 days so we can find gaps in our help articles, then
+                  deleted;
+                </li>
                 <li>
                   technical, audit and security logs are usually kept for a shorter period unless needed to investigate
                   misuse, fraud, security incidents or legal issues;
@@ -470,6 +479,13 @@ export default function PrivacyPage() {
               <p>
                 We do not currently use personal data collected through the public website to make decisions based solely
                 on automated processing that produce legal or similarly significant effects on individuals.
+              </p>
+              <p className="mt-3">
+                ResNeo does include AI-assisted features for venue staff: an in-dashboard help assistant that answers
+                questions about how to use ResNeo, and column mapping suggestions when a venue imports data from
+                another booking system. These features send the text staff enter, and the contents of files they
+                upload, to our AI provider, OpenAI. They suggest and explain; they do not make decisions about any
+                individual, and they cannot change a venue&apos;s data on their own.
               </p>
               <p className="mt-3">
                 If this changes, we will update this policy and provide any information required by law.

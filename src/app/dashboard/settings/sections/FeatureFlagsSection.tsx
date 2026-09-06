@@ -143,7 +143,7 @@ export function FeatureFlagsSection({
         router.refresh();
         if (options?.expectedOff && savedResolved[options.expectedOff]) {
           setError(
-            'This feature is turned on for your account by Reserve NI and cannot be switched off in settings. Contact support if you need it changed.',
+            'This feature is turned on for your account by ResNeo and cannot be switched off in settings. Contact support if you need it changed.',
           );
           return;
         }

@@ -75,11 +75,23 @@ export function ContactDocumentsSection({
   guestId,
   onChanged,
   onCount,
+  ownerVenueId,
+  canUpload = true,
+  canRemove = true,
 }: {
   guestId: string;
   onChanged: () => void;
   /** Reports the number of files once loaded, for a parent accordion's summary. */
   onCount?: (count: number | null) => void;
+  /**
+   * Set when the guest belongs to a LINKED venue (R26): every call carries it, and the
+   * routes serve the owner venue's files when the link shares personal data.
+   */
+  ownerVenueId?: string;
+  /** A linked partner without an edit grant reads only. */
+  canUpload?: boolean;
+  /** Removing a file the owner venue holds needs their full management grant. */
+  canRemove?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<GuestDocumentRow[]>([]);
@@ -88,10 +100,14 @@ export function ContactDocumentsSection({
   const [err, setErr] = useState<string | null>(null);
   const [viewing, setViewing] = useState<{ doc: GuestDocumentRow; url: string | null; loading: boolean } | null>(null);
 
+  /** `?owner_venue_id=...` for a linked venue's guest, `''` for our own. */
+  const scopeQuery = ownerVenueId ? `?owner_venue_id=${encodeURIComponent(ownerVenueId)}` : '';
+  const scopeParam = ownerVenueId ? `&owner_venue_id=${encodeURIComponent(ownerVenueId)}` : '';
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/venue/guests/${guestId}/documents`);
+      const res = await fetch(`/api/venue/guests/${guestId}/documents${scopeQuery}`);
       const j = (await res.json()) as { documents?: GuestDocumentRow[]; error?: string };
       if (!res.ok) throw new Error(typeof j.error === 'string' ? j.error : 'Failed to load');
       setDocs(j.documents ?? []);
@@ -101,7 +117,7 @@ export function ContactDocumentsSection({
     } finally {
       setLoading(false);
     }
-  }, [guestId, onCount]);
+  }, [guestId, onCount, scopeQuery]);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -121,7 +137,7 @@ export function ContactDocumentsSection({
     const accepted = checkGuestDocument({ fileName: file.name, mimeType: file.type || resolvedMime, sizeBytes: file.size });
     if (!accepted.ok) throw new Error(accepted.message);
 
-    const sign = await fetch(`/api/venue/guests/${guestId}/documents/sign`, {
+    const sign = await fetch(`/api/venue/guests/${guestId}/documents/sign${scopeQuery}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -141,7 +157,7 @@ export function ContactDocumentsSection({
     });
     if (!put.ok) throw new Error('Upload failed');
 
-    const done = await fetch(`/api/venue/guests/${guestId}/documents/${sj.document_id}/complete`, { method: 'POST' });
+    const done = await fetch(`/api/venue/guests/${guestId}/documents/${sj.document_id}/complete${scopeQuery}`, { method: 'POST' });
     if (!done.ok) {
       const dj = (await done.json().catch(() => ({}))) as { error?: string };
       throw new Error(typeof dj.error === 'string' ? dj.error : 'Complete failed');
@@ -168,7 +184,9 @@ export function ContactDocumentsSection({
   };
 
   async function freshUrl(docId: string, intent: 'view' | 'download'): Promise<string | null> {
-    const res = await fetch(`/api/venue/guests/${guestId}/documents/${docId}/download${intent === 'view' ? '?intent=view' : ''}`);
+    const res = await fetch(
+      `/api/venue/guests/${guestId}/documents/${docId}/download${intent === 'view' ? `?intent=view${scopeParam}` : scopeQuery}`,
+    );
     const j = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
     if (!res.ok || !j.url) {
       setErr(typeof j.error === 'string' ? j.error : 'Could not open the file');
@@ -195,7 +213,7 @@ export function ContactDocumentsSection({
 
   const remove = async (docId: string) => {
     if (!window.confirm('Remove this file? This cannot be undone.')) return;
-    const res = await fetch(`/api/venue/guests/${guestId}/documents/${docId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/venue/guests/${guestId}/documents/${docId}${scopeQuery}`, { method: 'DELETE' });
     if (!res.ok) {
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       setErr(typeof j.error === 'string' ? j.error : 'Delete failed');
@@ -210,6 +228,7 @@ export function ContactDocumentsSection({
   return (
     <div className="rounded-xl border border-slate-200 p-4">
       {err ? <p className="mb-2 text-sm text-red-600">{err}</p> : null}
+      {canUpload ? (
       <div>
         <input
           ref={fileInputRef}
@@ -246,6 +265,7 @@ export function ContactDocumentsSection({
           PDFs open here for viewing; other files download.
         </p>
       </div>
+      ) : null}
       {loading ? (
         <p className="mt-3 text-sm text-slate-500">Loading files…</p>
       ) : docs.length === 0 ? (
@@ -286,9 +306,11 @@ export function ContactDocumentsSection({
                     <button type="button" className="text-brand-700 hover:underline" onClick={() => void download(d.id)}>
                       Download
                     </button>
-                    <button type="button" className="text-red-600 hover:underline" onClick={() => void remove(d.id)}>
-                      Remove
-                    </button>
+                    {canRemove ? (
+                      <button type="button" className="text-red-600 hover:underline" onClick={() => void remove(d.id)}>
+                        Remove
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </li>

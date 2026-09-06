@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
+import { resolveGuestDocumentScope } from '@/lib/guests/linked-guest-access';
 
 const BUCKET = 'guest-documents';
 
 /**
  * GET /api/venue/guests/[guestId]/documents/[documentId]/download — short-lived read URL.
+ *
+ * Accepts `owner_venue_id` for a linked venue's guest (R26), on the same full_details plus
+ * PII gate as the list.
  *
  * `?intent=view` marks the read as an in-app view (the Records viewer) rather than a
  * download, so the contact's audit trail says which happened.
@@ -25,12 +29,18 @@ export async function GET(
     const { guestId, documentId } = await params;
     const intent = request.nextUrl.searchParams.get('intent') === 'view' ? 'view' : 'download';
 
+    const scoped = await resolveGuestDocumentScope(staff, request, guestId, 'read');
+    if (!scoped.ok) {
+      return NextResponse.json({ error: scoped.error }, { status: scoped.status });
+    }
+    const { venueId: scopeVenueId, auditMetadata } = scoped.scope;
+
     const { data: doc, error: fErr } = await staff.db
       .from('guest_documents')
       .select('id, storage_path, uploaded_at, deleted_at')
       .eq('id', documentId)
       .eq('guest_id', guestId)
-      .eq('venue_id', staff.venue_id)
+      .eq('venue_id', scopeVenueId)
       .maybeSingle();
 
     if (fErr || !doc) {
@@ -50,11 +60,11 @@ export async function GET(
     }
 
     await insertContactAuditEvent(staff.db, {
-      venue_id: staff.venue_id,
+      venue_id: scopeVenueId,
       guest_id: guestId,
       actor_staff_id: staff.id,
       event_type: intent === 'view' ? 'guest_document_view' : 'guest_document_download',
-      metadata: { document_id: documentId },
+      metadata: { document_id: documentId, ...auditMetadata },
     });
 
     return NextResponse.json({ url: signed.data.signedUrl, expires_in: 120 });

@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { collectCalendarColumnConflicts } from '@/lib/calendar/column-assignment-conflicts';
@@ -7,10 +7,11 @@ import { collectCalendarColumnConflicts } from '@/lib/calendar/column-assignment
 /**
  * GET /api/venue/calendar-column-conflicts
  * Lists scheduling-column conflicts (e.g. bookable resource + classes/events on the same team column).
+ * Bearer (mobile app) or cookie session (dashboard), like every other venue route.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createVenueRouteClient(request);
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 

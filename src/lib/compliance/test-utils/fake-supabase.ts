@@ -57,11 +57,14 @@ type Filter = {
 
 class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   private filters: Filter[] = [];
-  private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
+  private op: 'select' | 'insert' | 'upsert' | 'update' | 'delete' = 'select';
   private payload: Row | Row[] | null = null;
   private orderBy: { col: string; asc: boolean } | null = null;
   private limitN: number | null = null;
   private returnRows = false;
+  /** `upsert` options: the conflict key columns and whether a clash is skipped or merged. */
+  private conflictCols: string[] = [];
+  private ignoreDuplicates = false;
 
   constructor(private db: FakeSupabase, private table: string) {}
 
@@ -73,6 +76,17 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   insert(payload: Row | Row[]): this {
     this.op = 'insert';
     this.payload = payload;
+    return this;
+  }
+  /**
+   * Insert, or on a clash of the `onConflict` columns either skip the row
+   * (`ignoreDuplicates`) or merge the payload into the existing row.
+   */
+  upsert(payload: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }): this {
+    this.op = 'upsert';
+    this.payload = payload;
+    this.conflictCols = (opts?.onConflict ?? 'id').split(',').map((c) => c.trim());
+    this.ignoreDuplicates = opts?.ignoreDuplicates ?? false;
     return this;
   }
   update(payload: Row): this {
@@ -191,6 +205,25 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
         return row;
       });
       return { data: this.returnRows ? inserted : null, error: null };
+    }
+    if (this.op === 'upsert') {
+      const failure = this.db.consumeInsertFailure(this.table);
+      if (failure) return { data: null, error: failure };
+      const arr = (store[this.table] = store[this.table] ?? []);
+      const items = Array.isArray(this.payload) ? this.payload : [this.payload ?? {}];
+      const written: Row[] = [];
+      for (const it of items) {
+        const clash = arr.find((r) => this.conflictCols.every((c) => r[c] === it[c]));
+        if (clash) {
+          if (!this.ignoreDuplicates) Object.assign(clash, it);
+          written.push(clash);
+          continue;
+        }
+        const row: Row = { id: nextId(), ...it };
+        arr.push(row);
+        written.push(row);
+      }
+      return { data: this.returnRows ? written : null, error: null };
     }
     if (this.op === 'update') {
       const matched = (store[this.table] ?? []).filter((r) => this.match(r));

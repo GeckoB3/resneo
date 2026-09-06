@@ -15,7 +15,13 @@ import type { ComplianceCategory, ComplianceCaptureMethod } from '@/lib/complian
 
 export interface CreateTypeParams {
   venueId: string;
-  staffId: string;
+  /**
+   * The staff member creating the type, recorded on the first version and the audit
+   * events. `null` when no person at this venue is acting: a combined booking page
+   * copying a partner venue's service, and with it the compliance types that service
+   * requires, into this venue (`service-duplication.ts`). Those events are `system`.
+   */
+  staffId: string | null;
   name: string;
   category: ComplianceCategory;
   resultType: ComplianceResultType;
@@ -143,10 +149,11 @@ export async function createComplianceType(
     return { ok: false, error: 'Failed to finalise compliance type.', status: 500 };
   }
 
+  const actorType = params.staffId ? 'staff' : 'system';
   await writeComplianceAuditEvent(admin, {
     venueId: params.venueId,
     eventType: 'type.created',
-    actorType: 'staff',
+    actorType,
     actorStaffId: params.staffId,
     complianceTypeId: typeId,
     metadata: { name: params.name, library_template_slug: params.libraryTemplateSlug ?? null },
@@ -154,7 +161,7 @@ export async function createComplianceType(
   await writeComplianceAuditEvent(admin, {
     venueId: params.venueId,
     eventType: 'version.created',
-    actorType: 'staff',
+    actorType,
     actorStaffId: params.staffId,
     complianceTypeId: typeId,
     metadata: { version_number: 1 },

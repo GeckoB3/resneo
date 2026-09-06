@@ -86,7 +86,6 @@ function SidebarNavSvg() {
     'Events',
     'Resources',
     'Calendar Availability',
-    'Reports',
     'Settings',
   ];
   return (
@@ -150,8 +149,9 @@ function CalendarAvailabilitySvg() {
         Calendars
       </text>
       <rect x="460" y="130" width="120" height="26" rx="8" fill={brand} />
-      <text x="520" y="147" textAnchor="middle" fill="white" fontSize="9" fontWeight="700">
-        + Add calendar
+      <path d="M486 137.5v12M480 143.5h12" stroke="white" strokeWidth="2" strokeLinecap="round" />
+      <text x="498" y="147" fill="white" fontSize="9" fontWeight="700">
+        Add calendar
       </text>
       <text x="44" y="168" fill={slate} fontSize="9">
         Each column is a bookable schedule…
@@ -196,9 +196,9 @@ function AppointmentCalendarSvg() {
           </text>
         </g>
       ))}
-      <rect x="380" y="50" width="88" height="22" rx="8" fill={brand} />
-      <text x="424" y="65" textAnchor="middle" fill="white" fontSize="8" fontWeight="700">
-        + New Booking
+      <rect x="396" y="50" width="72" height="22" rx="8" fill={brand} />
+      <text x="432" y="65" textAnchor="middle" fill="white" fontSize="8" fontWeight="700">
+        + New
       </text>
       <rect x="478" y="50" width="72" height="22" rx="8" fill="#22c55e" />
       <text x="514" y="65" textAnchor="middle" fill="white" fontSize="8" fontWeight="700">
@@ -231,7 +231,7 @@ function AppointmentCalendarSvg() {
 
 function ServicesCatalogSvg() {
   return (
-    <svg viewBox="0 0 620 200" className="h-auto w-full" aria-hidden>
+    <svg viewBox="0 0 620 232" className="h-auto w-full" aria-hidden>
       <text x="20" y="26" fill={slate} fontSize="9" fontWeight="600" letterSpacing="0.08em">
         APPOINTMENTS
       </text>
@@ -245,26 +245,53 @@ function ServicesCatalogSvg() {
       <text x="550" y="53" textAnchor="middle" fill="white" fontSize="9" fontWeight="700">
         + Add service
       </text>
-      <rect x="20" y="88" width="580" height="92" rx="12" fill={white} stroke={border} />
-      <circle cx="44" cy="118" r="8" fill="#c4b5fd" stroke={border} />
-      <text x="64" y="114" fill={slateDark} fontSize="12" fontWeight="700">
+      {[
+        { label: 'Services', x: 20, w: 72 },
+        { label: 'Categories', x: 100, w: 80 },
+        { label: 'Add-ons', x: 188, w: 72 },
+      ].map(({ label, x, w }) => (
+        <g key={label}>
+          <rect
+            x={x}
+            y="84"
+            width={w}
+            height="24"
+            rx="8"
+            fill={label === 'Services' ? brand : '#f1f5f9'}
+            stroke={border}
+          />
+          <text
+            x={x + w / 2}
+            y="100"
+            textAnchor="middle"
+            fill={label === 'Services' ? white : slateDark}
+            fontSize="9"
+            fontWeight="700"
+          >
+            {label}
+          </text>
+        </g>
+      ))}
+      <rect x="20" y="120" width="580" height="92" rx="12" fill={white} stroke={border} />
+      <circle cx="44" cy="150" r="8" fill="#c4b5fd" stroke={border} />
+      <text x="64" y="146" fill={slateDark} fontSize="12" fontWeight="700">
         Example service
       </text>
-      <text x="64" y="130" fill={slate} fontSize="9">
+      <text x="64" y="162" fill={slate} fontSize="9">
         No online payment · duration pill · calendar pills
       </text>
-      <rect x="420" y="102" width="48" height="18" rx="7" fill="#f1f5f9" stroke={border} />
-      <text x="444" y="114" textAnchor="middle" fill={slateDark} fontSize="8" fontWeight="700">
+      <rect x="420" y="134" width="48" height="18" rx="7" fill="#f1f5f9" stroke={border} />
+      <text x="444" y="146" textAnchor="middle" fill={slateDark} fontSize="8" fontWeight="700">
         30m
       </text>
-      <rect x="64" y="142" width="72" height="16" rx="7" fill="#f1f5f9" stroke={border} />
-      <text x="100" y="153" textAnchor="middle" fill={slate} fontSize="7" fontWeight="600">
+      <rect x="64" y="174" width="72" height="16" rx="7" fill="#f1f5f9" stroke={border} />
+      <text x="100" y="185" textAnchor="middle" fill={slate} fontSize="7" fontWeight="600">
         Calendar 1
       </text>
-      <text x="480" y="154" fill={brand} fontSize="8" fontWeight="600">
+      <text x="480" y="186" fill={brand} fontSize="8" fontWeight="600">
         Edit
       </text>
-      <text x="530" y="154" fill="#dc2626" fontSize="8" fontWeight="600">
+      <text x="530" y="186" fill="#dc2626" fontSize="8" fontWeight="600">
         Delete
       </text>
     </svg>
@@ -286,14 +313,13 @@ function BookingsListSvg() {
       <text x="132" y="65" textAnchor="middle" fill={slateDark} fontSize="7" fontWeight="600">
         Date
       </text>
-      {['Filter', 'Search', 'Export'].map((l, i) => (
-        <g key={l}>
-          <rect x={200 + i * 68} y="54" width="58" height="16" rx="6" fill="white" stroke={border} />
-          <text x={229 + i * 68} y="65" textAnchor="middle" fill={slateDark} fontSize="7" fontWeight="600">
-            {l}
-          </text>
-        </g>
-      ))}
+      <rect x="200" y="54" width="58" height="16" rx="6" fill="white" stroke={border} />
+      <text x="229" y="65" textAnchor="middle" fill={slateDark} fontSize="7" fontWeight="600">
+        Filter
+      </text>
+      <rect x="266" y="54" width="16" height="16" rx="5" fill="white" stroke={border} />
+      <circle cx="272.5" cy="60.5" r="3" fill="none" stroke={slate} strokeWidth="1.2" />
+      <path d="M274.9 62.9 L277.6 65.6" stroke={slate} strokeWidth="1.2" strokeLinecap="round" />
       <rect x="420" y="52" width="72" height="20" rx="8" fill={brand} />
       <text x="456" y="66" textAnchor="middle" fill="white" fontSize="8" fontWeight="700">
         + New
@@ -461,7 +487,7 @@ function WidgetEmbedQrSvg() {
         QR
       </text>
       <text x="460" y="174" textAnchor="middle" fill={slate} fontSize="8">
-        Download QR
+        Download QR code
       </text>
     </svg>
   );
@@ -477,7 +503,7 @@ function BookingModelsSettingsSvg() {
         Booking models
       </text>
       <text x="20" y="64" fill={slate} fontSize="8">
-        Settings → Profile · choose what appears on your public page
+        Settings → Booking Settings · choose what appears on your public page
       </text>
       {[
         'Appointments & services',
@@ -506,7 +532,7 @@ function StaffTeamSvg() {
       <text x="20" y="28" fill={slateDark} fontSize="15" fontWeight="700">
         Settings
       </text>
-      {['Profile', 'Communications', 'Staff', 'Data import'].map((t, i) => (
+      {['Profile', 'Communications', 'Staff', 'Reports'].map((t, i) => (
         <g key={t}>
           <rect x={20 + i * 108} y="40" width="100" height="26" rx="8" fill={t === 'Staff' ? white : '#f1f5f9'} stroke={border} />
           <text x={70 + i * 108} y="57" textAnchor="middle" fill={t === 'Staff' ? brand : slateDark} fontSize="8" fontWeight="700">
@@ -528,8 +554,8 @@ function StaffTeamSvg() {
       <text x="36" y="148" fill={slateDark} fontSize="10" fontWeight="700">
         Team member
       </text>
-      <rect x="36" y="156" width="44" height="14" rx="6" fill="#ede9fe" stroke="#c4b5fd" />
-      <text x="58" y="166" textAnchor="middle" fill="#5b21b6" fontSize="7" fontWeight="700">
+      <rect x="36" y="156" width="44" height="14" rx="7" fill="#f1f5f9" stroke={border} />
+      <text x="58" y="166" textAnchor="middle" fill="#475569" fontSize="7" fontWeight="700">
         STAFF
       </text>
       <text x="36" y="182" fill={slate} fontSize="8">
@@ -646,9 +672,9 @@ function ImportStepsSvg() {
 
 function ScheduleModelsSvg() {
   const rows = [
-    ['Class type', 'Weekly timetable', 'Instances', 'Roster'],
+    ['Class type', 'Schedule classes', 'Sessions', 'Roster'],
     ['Event', 'Ticket types', 'Dates', 'Attendees'],
-    ['Resource', 'Durations', 'Timeline', 'Public slots'],
+    ['Resource', 'Booking rules', 'Timeline', 'Weekly hours'],
   ] as const;
   return (
     <svg viewBox="0 0 620 190" className="h-auto w-full" aria-hidden>
@@ -682,11 +708,11 @@ function PaymentsFlowSvg() {
     <svg viewBox="0 0 620 180" className="h-auto w-full" aria-hidden>
       <rect x="8" y="12" width="604" height="150" rx="18" fill="#f8fafc" stroke="#e2e8f0" />
       {[
-        ['Stripe Connect', 'Settings → Payments'],
-        ['Catalogue rule', 'Deposit or full payment'],
-        ['Guest checkout', 'Stripe-hosted card fields'],
-        ['Confirmation', 'Email / SMS receipt'],
-      ].map(([title, sub], i) => (
+        ['Stripe Connect', 'Settings → Payments', ''],
+        ['Catalogue rule', 'Deposit, full payment,', 'or card hold'],
+        ['Guest checkout', 'Stripe-hosted card fields', ''],
+        ['Confirmation', 'Email / SMS receipt', ''],
+      ].map(([title, sub, sub2], i) => (
         <g key={title}>
           <rect x={28 + i * 146} y="50" width="120" height="58" rx="14" fill="white" stroke="#e2e8f0" />
           <circle cx={48 + i * 146} cy="70" r="10" fill={i === 0 ? brand : brandLight} />
@@ -699,6 +725,11 @@ function PaymentsFlowSvg() {
           <text x={88 + i * 146} y="88" textAnchor="middle" fill={slate} fontSize="8">
             {sub}
           </text>
+          {sub2 ? (
+            <text x={88 + i * 146} y="99" textAnchor="middle" fill={slate} fontSize="8">
+              {sub2}
+            </text>
+          ) : null}
           {i < 3 ? <path d={`M ${150 + i * 146} 79 H ${170 + i * 146}`} stroke="#cbd5e1" strokeWidth="2" /> : null}
         </g>
       ))}
@@ -803,12 +834,13 @@ const FIGURE_COPY: Record<string, { title: string; caption?: string; node: React
   },
   'service-row': {
     title: 'Services catalogue',
-    caption: 'Cards show duration, payment rule, linked calendars, and edit/delete actions.',
+    caption:
+      'Three tabs: Services, Categories, and Add-ons. Cards show duration, payment rule, linked calendars, and edit or delete actions.',
     node: <ServicesCatalogSvg />,
   },
   'list-toolbar': {
     title: 'Bookings list',
-    caption: 'Filter and search at the top; export, confirm, and walk-in actions stay within reach.',
+    caption: 'Filter and search at the top; new booking, walk-in, and confirm actions stay within reach.',
     node: <BookingsListSvg />,
   },
   'comms-lanes': {
@@ -832,7 +864,7 @@ const FIGURE_COPY: Record<string, { title: string; caption?: string; node: React
     node: <PublicBookingPageSvg />,
   },
   'booking-models': {
-    title: 'Booking models (Settings → Profile)',
+    title: 'Booking models (Settings → Booking Settings)',
     caption: 'Turn models on or off; only active ones appear in the sidebar and on your public page.',
     node: <BookingModelsSettingsSvg />,
   },
@@ -863,7 +895,8 @@ const FIGURE_COPY: Record<string, { title: string; caption?: string; node: React
   },
   'widget-settings': {
     title: 'Widget, embed & QR',
-    caption: 'Profile holds the iframe snippet, optional accent colour, and QR download.',
+    caption:
+      'Settings → Booking Page → Website widget & QR code: the iframe snippet, optional accent colour, and QR download.',
     node: <WidgetEmbedQrSvg />,
   },
 };

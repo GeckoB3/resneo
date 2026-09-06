@@ -1,3 +1,4 @@
+import { assistantEnabledFor } from '@/lib/assistant/enabled';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { requireDashboardIdentity } from '@/lib/auth/dashboard-session';
@@ -204,6 +205,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-100">
       <DashboardShell
         venueId={venueId}
+        assistantEnabled={assistantEnabledFor(venueId)}
         initialTableManagementEnabled={tableManagementEnabled}
         initialAppointmentWaitlistEnabled={appointmentsFeatureFlags.waitlist_v2}
         supportSessionToolbar={

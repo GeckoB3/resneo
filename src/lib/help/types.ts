@@ -27,6 +27,8 @@ export interface HelpArticle {
   markdownAppointments?: string;
   tags?: string[];
   helpSection?: HelpArticleSectionKey;
+  /** ISO date the article was last checked against the live screens (Docs/help-assistant-plan.md, 6.2). */
+  verified?: string;
 }
 
 export interface HelpCategory {

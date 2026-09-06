@@ -111,21 +111,23 @@ function HoursStackSvg() {
    2. Settings → Business hours - weekly opening hours + closures card.
    ───────────────────────────────────────────────────────────────────────── */
 function BusinessHoursScreenSvg() {
+  // The live editor lists the week Sunday first (OpeningHoursControl DAYS), with a
+  // tick box beside each day name and open/close time inputs on the ticked days.
   const days = [
-    { d: 'Monday', t: '09:00 – 18:00', open: true },
-    { d: 'Tuesday', t: '09:00 – 18:00', open: true },
-    { d: 'Wednesday', t: '09:00 – 18:00', open: true },
-    { d: 'Thursday', t: '09:00 – 18:00', open: true },
-    { d: 'Friday', t: '09:00 – 18:00', open: true },
-    { d: 'Saturday', t: '10:00 – 16:00', open: true },
-    { d: 'Sunday', t: 'Closed', open: false },
+    { d: 'Sunday', open: null, close: null },
+    { d: 'Monday', open: '09:00', close: '18:00' },
+    { d: 'Tuesday', open: '09:00', close: '18:00' },
+    { d: 'Wednesday', open: '09:00', close: '18:00' },
+    { d: 'Thursday', open: '09:00', close: '18:00' },
+    { d: 'Friday', open: '09:00', close: '18:00' },
+    { d: 'Saturday', open: '10:00', close: '16:00' },
   ];
   return (
     <svg
       viewBox="0 0 560 470"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Settings, Business hours screen: a Weekly opening hours card with a row for each day and a Save opening hours button, above a Closures and special days card."
+      aria-label="The Settings, Business hours screen: a Weekly opening hours card with a row for each day, each with a tick box beside the day name and open and close time boxes on the ticked days, and a Save opening hours button, above a Closures and special days card."
     >
       {/* Card 1 - weekly opening hours */}
       <rect x="10" y="10" width="540" height="276" rx="14" fill={white} stroke={border} />
@@ -133,15 +135,33 @@ function BusinessHoursScreenSvg() {
       <text x="30" y="58" fill={slateDark} fontSize="16" fontWeight="700">Weekly opening hours</text>
       {days.map((row, i) => {
         const y = 80 + i * 24;
+        const isOpen = row.open !== null;
         return (
           <g key={row.d}>
-            <text x="30" y={y + 13} fill={slateDark} fontSize="11" fontWeight="500">{row.d}</text>
-            {/* toggle */}
-            <rect x="150" y={y + 2} width="34" height="16" rx="8" fill={row.open ? accent : '#cbd5e1'} />
-            <circle cx={row.open ? 176 : 158} cy={y + 10} r="6" fill={white} />
-            <text x="210" y={y + 13} fill={row.open ? slateDark : slate} fontSize="11" fontWeight={row.open ? '600' : '400'}>
-              {row.t}
-            </text>
+            {/* tick box beside the day name */}
+            <rect
+              x="30"
+              y={y + 3}
+              width="12"
+              height="12"
+              rx="3"
+              fill={isOpen ? accent : white}
+              stroke={isOpen ? accent : '#cbd5e1'}
+              strokeWidth="1.2"
+            />
+            {isOpen && (
+              <path d="M33 9 l2.4 2.4 l4 -4.6" transform={`translate(0 ${y})`} fill="none" stroke={white} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            )}
+            <text x="52" y={y + 13} fill={isOpen ? slateDark : slate} fontSize="11" fontWeight={isOpen ? '500' : '400'}>{row.d}</text>
+            {isOpen && (
+              <g>
+                <rect x="150" y={y + 2} width="62" height="17" rx="6" fill={white} stroke={border} />
+                <text x="160" y={y + 14} fill={slateDark} fontSize="10" fontWeight="500">{row.open}</text>
+                <text x="218" y={y + 14} fill={slate} fontSize="10">–</text>
+                <rect x="228" y={y + 2} width="62" height="17" rx="6" fill={white} stroke={border} />
+                <text x="238" y={y + 14} fill={slateDark} fontSize="10" fontWeight="500">{row.close}</text>
+              </g>
+            )}
           </g>
         );
       })}
@@ -234,14 +254,15 @@ function AvailabilityTabsSvg() {
    4. Closures & special days - month calendar + the New Block form.
    ───────────────────────────────────────────────────────────────────────── */
 function ClosuresFormSvg() {
-  // Schematic December grid; Dec 1 sits on a Tuesday (col index 2).
-  const offset = 2;
+  // December 2026 grid. ResourceExceptionsCalendar runs Monday to Sunday
+  // (leading = (first.getDay() + 6) % 7), so Tuesday 1 December sits at col index 1.
+  const offset = 1;
   const cells = Array.from({ length: 31 }, (_, i) => i + 1);
   const cellW = 38;
   const cellH = 30;
   const gridX = 26;
   const gridY = 92;
-  const dow = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   return (
     <svg
       viewBox="0 0 600 360"

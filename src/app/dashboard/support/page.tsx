@@ -1,7 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+import { useAssistant } from '@/components/assistant/AssistantProvider';
+import { noHandoff, readHandoffOnce, subscribeToNothing } from '@/components/assistant/handoff';
+import { ASSISTANT_COPY } from '@/lib/assistant/copy';
 
 const CATEGORIES = [
   { value: 'general', label: 'General question' },
@@ -10,10 +13,22 @@ const CATEGORIES = [
   { value: 'feature_request', label: 'Feature request' },
 ] as const;
 
+/**
+ * The Support form. When Ask ResNeo hands a conversation over (the "Send this to support"
+ * link in the drawer), the transcript arrives through sessionStorage and prefills the form.
+ * The handoff is read through useSyncExternalStore so the server render stays blank and the
+ * client remounts the form with the prefilled values, with no state set inside an effect.
+ */
 export default function SupportPage() {
+  const handoff = useSyncExternalStore(subscribeToNothing, readHandoffOnce, noHandoff);
+  return <SupportForm key={handoff ? 'handoff' : 'blank'} initialSubject={handoff?.subject ?? ''} initialMessage={handoff?.message ?? ''} />;
+}
+
+function SupportForm({ initialSubject, initialMessage }: { initialSubject: string; initialMessage: string }) {
+  const assistant = useAssistant();
   const [category, setCategory] = useState('general');
-  const [subject, setSubject] = useState('');
-  const [message, setMessage] = useState('');
+  const [subject, setSubject] = useState(initialSubject);
+  const [message, setMessage] = useState(initialMessage);
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -89,6 +104,28 @@ export default function SupportPage() {
         <p className="mb-6 text-sm text-slate-500">
           Need help? Send us a message and we&apos;ll get back to you as soon as we can.
         </p>
+
+        {assistant.enabled ? (
+          <button
+            type="button"
+            onClick={() => assistant.setOpen(true)}
+            data-testid="support-ask-resneo-card"
+            className="mb-4 flex w-full items-start gap-3 rounded-2xl border border-brand-100 bg-brand-50/70 p-4 text-left shadow-sm transition-colors hover:border-brand-200 hover:bg-brand-50"
+          >
+            <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-brand-700 shadow-sm ring-1 ring-brand-100">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+              </svg>
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-slate-900">{ASSISTANT_COPY.supportCardTitle}</span>
+              <span className="mt-0.5 block text-xs leading-5 text-slate-600">{ASSISTANT_COPY.supportCardBody}</span>
+            </span>
+            <svg className="mt-1 h-4 w-4 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        ) : null}
 
         <Link
           href="/help"

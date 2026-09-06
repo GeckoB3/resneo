@@ -10,7 +10,7 @@ function CommsLanesSvg() {
       viewBox="0 0 560 470"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Communications settings screen as a vertical stack of message cards. Booking confirmation and Pre-visit reminder are toggled on with Email and SMS channel checkboxes; the reminder also has a send-hours-before field set to 24. Deposit payment request is off. Post-visit thank you is off and offers only an Email channel. A Saved indicator sits at the top right."
+      aria-label="The Communications settings screen as a vertical stack of message cards. Booking confirmation and Pre-visit reminder are switched on with Email and SMS channel checkboxes; the reminder also has a Send hours before field set to 24. Deposit payment request is switched off, so it shows no channel row at all. Post-visit thank you is on, offers Email only, and has a Send hours after field set to 4. A Saved indicator sits at the top right."
     >
       {/* panel header */}
       <text x="20" y="22" fill="#64748b" fontSize="11" fontWeight="700" letterSpacing="0.08em">COMMUNICATIONS</text>
@@ -22,7 +22,7 @@ function CommsLanesSvg() {
       {/* Card 1: Booking confirmation (ON) */}
       <rect x="20" y="38" width="520" height="92" rx="13" fill="#ffffff" stroke="#e2e8f0" />
       <text x="36" y="62" fill="#0f172a" fontSize="13" fontWeight="700">Booking confirmation</text>
-      <text x="36" y="80" fill="#64748b" fontSize="11">Sent as soon as a guest books.</text>
+      <text x="36" y="80" fill="#64748b" fontSize="11">Sent as soon as the booking is confirmed.</text>
       {/* toggle ON */}
       <rect x="478" y="50" width="46" height="24" rx="12" fill="#00A0A4" />
       <circle cx="512" cy="62" r="9" fill="#ffffff" />
@@ -37,7 +37,7 @@ function CommsLanesSvg() {
       {/* Card 2: Pre-visit reminder (ON) */}
       <rect x="20" y="140" width="520" height="92" rx="13" fill="#ffffff" stroke="#e2e8f0" />
       <text x="36" y="164" fill="#0f172a" fontSize="13" fontWeight="700">Pre-visit reminder</text>
-      <text x="36" y="182" fill="#64748b" fontSize="11">A nudge before the appointment.</text>
+      <text x="36" y="182" fill="#64748b" fontSize="11">Reminder shortly before the booking starts.</text>
       {/* toggle ON */}
       <rect x="478" y="152" width="46" height="24" rx="12" fill="#00A0A4" />
       <circle cx="512" cy="164" r="9" fill="#ffffff" />
@@ -48,35 +48,42 @@ function CommsLanesSvg() {
       <rect x="108" y="198" width="14" height="14" rx="3.5" fill="#00305C" />
       <path d="M111 205 l3 3 l5 -6" stroke="#ffffff" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
       <text x="128" y="209" fill="#0f172a" fontSize="11">SMS</text>
-      {/* send hours before field */}
-      <text x="300" y="192" fill="#64748b" fontSize="10" fontWeight="600" letterSpacing="0.04em">SEND HOURS BEFORE</text>
-      <rect x="300" y="198" width="60" height="22" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="312" y="213" fill="#0f172a" fontSize="12" fontWeight="700">24</text>
-      <line x1="345" y1="201" x2="345" y2="217" stroke="#e2e8f0" strokeWidth="1" />
-      <path d="M350 206 l4 -4 l4 4" stroke="#64748b" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M350 213 l4 4 l4 -4" stroke="#64748b" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      {/* timing sits inline on the channel row: label, then the number box */}
+      <text x="250" y="209" fill="#64748b" fontSize="11">Send hours before</text>
+      <rect x="348" y="197" width="56" height="22" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+      <text x="358" y="212" fill="#0f172a" fontSize="12" fontWeight="700">24</text>
+      <line x1="386" y1="200" x2="386" y2="216" stroke="#e2e8f0" strokeWidth="1" />
+      <path d="M391 205 l4 -4 l4 4" stroke="#64748b" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M391 212 l4 4 l4 -4" stroke="#64748b" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
 
       {/* Card 3: Deposit payment request (OFF) */}
       <rect x="20" y="242" width="520" height="64" rx="13" fill="#ffffff" stroke="#e2e8f0" />
       <text x="36" y="270" fill="#0f172a" fontSize="13" fontWeight="700">Deposit payment request</text>
-      <text x="36" y="288" fill="#64748b" fontSize="11">Asks for a deposit to hold the slot.</text>
+      <text x="36" y="288" fill="#64748b" fontSize="11">Used when a booking needs a separate deposit payment link.</text>
       {/* toggle OFF */}
       <rect x="478" y="262" width="46" height="24" rx="12" fill="#e2e8f0" />
       <circle cx="490" cy="274" r="9" fill="#ffffff" />
 
-      {/* Card 4: Post-visit thank you (OFF, Email only) */}
+      {/* Card 4: Post-visit thank you (ON by default, Email only, timed after) */}
       <rect x="20" y="316" width="520" height="92" rx="13" fill="#ffffff" stroke="#e2e8f0" />
       <text x="36" y="340" fill="#0f172a" fontSize="13" fontWeight="700">Post-visit thank you</text>
-      <text x="36" y="358" fill="#64748b" fontSize="11">A follow-up after they leave.</text>
-      {/* toggle OFF */}
-      <rect x="478" y="328" width="46" height="24" rx="12" fill="#e2e8f0" />
-      <circle cx="490" cy="340" r="9" fill="#ffffff" />
-      {/* Email only checkbox (unchecked, since card is off) */}
-      <rect x="36" y="374" width="14" height="14" rx="3.5" fill="#f1f5f9" stroke="#e2e8f0" />
-      <text x="56" y="385" fill="#64748b" fontSize="11">Email</text>
+      <text x="36" y="358" fill="#64748b" fontSize="11">Follow-up after the booking has taken place.</text>
+      {/* toggle ON */}
+      <rect x="478" y="328" width="46" height="24" rx="12" fill="#00A0A4" />
+      <circle cx="512" cy="340" r="9" fill="#ffffff" />
+      {/* Email is the only channel this message offers */}
+      <rect x="36" y="374" width="14" height="14" rx="3.5" fill="#00305C" />
+      <path d="M39 381 l3 3 l5 -6" stroke="#ffffff" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      <text x="56" y="385" fill="#0f172a" fontSize="11">Email</text>
+      <text x="250" y="385" fill="#64748b" fontSize="11">Send hours after</text>
+      <rect x="348" y="373" width="56" height="22" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+      <text x="358" y="388" fill="#0f172a" fontSize="12" fontWeight="700">4</text>
+      <line x1="386" y1="376" x2="386" y2="392" stroke="#e2e8f0" strokeWidth="1" />
+      <path d="M391 381 l4 -4 l4 4" stroke="#64748b" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M391 388 l4 4 l4 -4" stroke="#64748b" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
 
       {/* footer hint */}
-      <text x="20" y="438" fill="#64748b" fontSize="10">Toggle a message on to choose its channels and timing.</text>
+      <text x="20" y="438" fill="#64748b" fontSize="10">A message switched off hides its channel row until you switch it back on.</text>
     </svg>
   );
 }
@@ -92,20 +99,18 @@ function CommsEditorSvg() {
       {/* Card */}
       <rect x="12" y="12" width="616" height="362" rx="14" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
 
-      {/* Card header */}
-      <text x="34" y="42" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="1">AUTOMATIC MESSAGE</text>
-      <text x="34" y="64" fill="#0f172a" fontSize="16" fontWeight="700">Booking confirmation</text>
+      {/* Card header: the card carries only its name, its description and the switch */}
+      <text x="34" y="48" fill="#0f172a" fontSize="16" fontWeight="700">Booking confirmation</text>
+      <text x="34" y="68" fill="#64748b" fontSize="11">Sent as soon as the booking is confirmed.</text>
 
-      {/* On toggle */}
-      <rect x="546" y="44" width="48" height="24" rx="12" fill="#00A0A4" />
-      <circle cx="582" cy="56" r="9" fill="#ffffff" />
-      <text x="540" y="60" textAnchor="end" fill="#059669" fontSize="11" fontWeight="700">On</text>
+      {/* Switch */}
+      <rect x="546" y="40" width="48" height="24" rx="12" fill="#00A0A4" />
+      <circle cx="582" cy="52" r="9" fill="#ffffff" />
 
       {/* Divider */}
-      <line x1="34" y1="82" x2="606" y2="82" stroke="#e2e8f0" strokeWidth="1" />
+      <line x1="34" y1="86" x2="606" y2="86" stroke="#e2e8f0" strokeWidth="1" />
 
       {/* Channel checkbox row */}
-      <text x="34" y="108" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="1">SEND VIA</text>
       {/* Email check */}
       <rect x="34" y="118" width="16" height="16" rx="4" fill="#00305C" />
       <path d="M38 126 l3 3 l5 -6" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -191,7 +196,7 @@ function ReportsDashboardSvg() {
 
       {/* Stat tiles */}
       <rect x="30" y="222" width="158" height="64" rx="11" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="44" y="244" fill="#64748b" fontSize="9" fontWeight="600">Bookings created</text>
+      <text x="44" y="244" fill="#64748b" fontSize="9" fontWeight="600">Appointments created</text>
       <text x="44" y="272" fill="#0f172a" fontSize="20" fontWeight="700">128</text>
 
       <rect x="201" y="222" width="158" height="64" rx="11" fill="#f8fafc" stroke="#e2e8f0" />
@@ -392,7 +397,7 @@ function ReferFlowSvg() {
       <text x="40" y="115" fill="#0f172a" fontSize="13" fontWeight="700">or link</text>
       {/* code chip + copy icon */}
       <rect x="40" y="134" width="118" height="30" rx="9" fill="#f1f5f9" stroke="#e2e8f0" />
-      <text x="54" y="153" fill="#00305C" fontSize="12" fontWeight="700" letterSpacing="0.04em">RESNEO-7K2</text>
+      <text x="54" y="153" fill="#00305C" fontSize="12" fontWeight="700" letterSpacing="0.04em">RIVERSIDE-X4F2</text>
       <rect x="166" y="134" width="30" height="30" rx="9" fill="#E8EFF6" stroke="#bcd2e6" />
       <rect x="174" y="141" width="11" height="13" rx="2" fill="#ffffff" stroke="#00305C" />
       <rect x="178" y="145" width="11" height="13" rx="2" fill="#E8EFF6" stroke="#00305C" />
@@ -447,7 +452,7 @@ function ReferTrackingSvg() {
 
       {/* Card 2 - Credit on next invoice */}
       <rect x="220" y="10" width="200" height="96" rx="13" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="238" y="36" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">NEXT INVOICE</text>
+      <text x="238" y="36" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">CREDIT ON NEXT INVOICE</text>
       <text x="238" y="70" fill="#00305C" fontSize="26" fontWeight="700">&pound;30</text>
       <text x="238" y="92" fill="#64748b" fontSize="10">Applied by Stripe</text>
 

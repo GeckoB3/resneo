@@ -2,6 +2,7 @@ import type { HelpArticle, HelpCategory, HelpPlanFilter, HelpSearchDoc } from '.
 import { stripHelpFigureMarkers } from './split-markdown-figures';
 import { gettingStartedCategory } from './articles/getting-started';
 import { appointmentsCategory } from './articles/appointments';
+import { resneoAppCategory } from './articles/resneo-app';
 import { settingsCategory } from './articles/settings';
 import { troubleshootingCategory } from './articles/troubleshooting';
 
@@ -13,6 +14,7 @@ import { troubleshootingCategory } from './articles/troubleshooting';
 export const HELP_CATEGORIES: HelpCategory[] = [
   gettingStartedCategory,
   appointmentsCategory,
+  resneoAppCategory,
   settingsCategory,
   troubleshootingCategory,
 ];

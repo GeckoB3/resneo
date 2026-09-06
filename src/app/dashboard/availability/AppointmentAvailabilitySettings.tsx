@@ -1376,7 +1376,7 @@ export function AppointmentAvailabilitySettings({
                       {canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && (
                         <p className="mb-4 text-sm text-slate-600">
                           Breaks are short windows on a day when this calendar stays closed to bookings (for example a
-                          lunch break), using the working-hours window you set on the Working hours tab. Guests cannot book
+                          lunch break), using the working-hours window you set on the Availability tab. Guests cannot book
                           during a break.
                         </p>
                       )}

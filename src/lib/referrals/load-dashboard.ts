@@ -42,7 +42,7 @@ export interface ReferralsDashboardData {
 
 const STATUS_LABEL: Record<ReferralDashboardStatus, string> = {
   pending: 'Pending',
-  referee_signed_up: 'Signed up — trialling',
+  referee_signed_up: 'Signed up, trialling',
   credited: 'Credited',
   failed: 'Did not convert',
   void: 'Void',

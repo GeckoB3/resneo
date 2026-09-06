@@ -93,7 +93,7 @@ export function InPersonPaymentsSection({ venue, onUpdate, isAdmin }: Props) {
 
         {!stripeConnected ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            Connect Stripe first (Plan &amp; payments). Card payments are paid into your own Stripe
+            Connect Stripe first (Settings → Payments). Card payments are paid into your own Stripe
             account, so this setting has no effect until that is set up.
           </div>
         ) : null}

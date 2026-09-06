@@ -984,3 +984,15 @@ button, a, input, select, textarea {
 .home-warm h3 {
   font-weight: 800;
 }
+
+/* Ask ResNeo answers (src/components/assistant/AssistantMarkdown.tsx) */
+.assistant-prose p { margin: 0 0 0.6rem; }
+.assistant-prose p:last-child { margin-bottom: 0; }
+.assistant-prose ol, .assistant-prose ul { margin: 0 0 0.6rem 1.25rem; padding: 0; }
+.assistant-prose ol { list-style: decimal; }
+.assistant-prose ul { list-style: disc; }
+.assistant-prose li { margin: 0.2rem 0; }
+.assistant-prose li p { margin: 0; }
+.assistant-prose a { color: var(--brand-700, #003b6f); text-decoration: underline; text-underline-offset: 2px; }
+.assistant-prose strong { font-weight: 600; color: #0f172a; }
+.assistant-prose code { font-size: 0.85em; background: #f1f5f9; padding: 0.1em 0.35em; border-radius: 0.3rem; }

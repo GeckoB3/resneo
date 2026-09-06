@@ -9,6 +9,7 @@ import { useDismissibleLayer } from '@/lib/ui/use-dismissible-layer';
 import { dispatchNavReselect } from '@/lib/ui/nav-reselect';
 import { FullscreenToggleButton } from '@/components/ui/FullscreenToggleButton';
 import { NotificationBell } from '@/components/linked-accounts/NotificationBell';
+import { AssistantLauncher } from '@/components/assistant/AssistantLauncher';
 
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
@@ -600,6 +601,7 @@ export function DashboardSidebar({
               </div>
             </div>
           </div>
+          <AssistantLauncher onNavigate={closeMobile} />
           <div className="flex items-stretch gap-2">
             <div className="min-w-0 flex-1">
               <NavLinkItem

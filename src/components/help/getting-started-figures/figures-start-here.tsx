@@ -120,7 +120,7 @@ function DashboardSidebarSvg() {
       viewBox="0 0 320 620"
       className="mx-auto h-auto w-full max-w-[360px]"
       role="img"
-      aria-label="The dashboard left sidebar: navigation rows for Home (active), Appointments, Appointment Calendar, New Appointment, Contacts, Services, Calendar Availability, and Settings, then an external Your Booking Page link, and a footer card with the venue, staff name, email, a Support row, and a Sign out button."
+      aria-label="The dashboard left sidebar: navigation rows for Home (active), Appointments, Appointment Calendar, New Appointment, Contacts, Services, Calendar Availability, and Settings, then an external Your Booking Page link, and a footer card with the venue, staff name, email, a Support row with an Enter Full Screen button beside it, and a Sign out button."
     >
       <rect x="10" y="10" width="300" height="600" rx="16" fill="#ffffff" stroke="#e2e8f0" />
 
@@ -169,6 +169,15 @@ function DashboardSidebarSvg() {
       <circle cx="42" cy="556" r="7" fill="none" stroke="#64748b" strokeWidth="1.3" />
       <text x="42" y="560" textAnchor="middle" fill="#64748b" fontSize="9" fontWeight="700">?</text>
       <text x="58" y="560" fill="#64748b" fontSize="11" fontWeight="500">Support</text>
+
+      {/* Enter Full Screen sits beside Support, an icon button with a tooltip */}
+      <rect x="250" y="544" width="32" height="24" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <g fill="none" stroke="#64748b" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M260 554 v-4 h4" />
+        <path d="M272 554 v-4 h-4" />
+        <path d="M260 558 v4 h4" />
+        <path d="M272 558 v4 h-4" />
+      </g>
 
       <rect x="38" y="572" width="244" height="26" rx="9" fill="#00305C" />
       <text x="160" y="589" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Sign out</text>
@@ -255,19 +264,21 @@ function DashboardRolesSvg() {
  * button text here must track that branch, not the pre-onboarding one.
  */
 function ChecklistCardSvg() {
+  // `optional` steps (payments, a test booking) are the two that carry "Not now"
+  // in SetupChecklist: they are the only keys marked optional in getSteps().
   const rows = [
-    { title: 'Business profile', desc: 'Review logo, contact details & venue settings', btn: 'Venue settings', w: 112 },
-    { title: 'Services & calendars', desc: 'Adjust services per calendar, or add more', btn: 'Appointment services', w: 142 },
-    { title: 'Create services', desc: 'At least one service for your booking page', btn: 'Add services', w: 100 },
-    { title: 'Stripe payments', desc: 'Take deposits & card payments', btn: 'Connect Stripe', w: 118 },
-    { title: 'First test booking', desc: 'Try the flow end to end', btn: 'Create booking', w: 118 },
+    { title: 'Business profile', desc: 'Review logo, contact details, and venue settings.', btn: 'Venue settings', w: 112, optional: false },
+    { title: 'Services & calendars', desc: 'Adjust which services are offered on each calendar.', btn: 'Appointment services', w: 142, optional: false },
+    { title: 'Create services', desc: 'Create at least one service for your public booking page.', btn: 'Add services', w: 100, optional: false },
+    { title: 'Stripe payments', desc: 'Connect Stripe to take deposits and card payments.', btn: 'Connect Stripe', w: 118, optional: true },
+    { title: 'First test booking', desc: 'Try the guest flow once to check bookings and emails.', btn: 'Create booking', w: 118, optional: true },
   ];
   return (
     <svg
       viewBox="0 0 560 414"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Home What's next setup card showing a 38 percent progress pill, a progress bar, and the five outstanding task rows, each with a dashed status marker, a title, a description, and a brand action button."
+      aria-label="The Home What's next setup card showing a 38 percent progress pill, a progress bar, and the five outstanding task rows, each with a dashed status marker, a title, a description, and a brand action button. The Stripe payments and First test booking rows also carry a Not now button."
     >
       {/* Card */}
       <rect x="10" y="10" width="540" height="394" rx="14" fill="#ffffff" stroke="#e2e8f0" />
@@ -300,6 +311,11 @@ function ChecklistCardSvg() {
             {/* title + description */}
             <text x="70" y={y + 17} fill="#0f172a" fontSize="13" fontWeight="700">{row.title}</text>
             <text x="70" y={y + 33} fill="#64748b" fontSize="10">{row.desc}</text>
+
+            {/* optional steps offer a quiet "Not now" beside the action */}
+            {row.optional && (
+              <text x={530 - row.w - 12} y={y + 25} textAnchor="end" fill="#64748b" fontSize="11" fontWeight="500">Not now</text>
+            )}
 
             {/* action button (right-aligned to x=530) */}
             <rect x={530 - row.w} y={y + 7} width={row.w} height="28" rx="9" fill="#003B6F" />

@@ -7,10 +7,10 @@ import type { ReactNode } from 'react';
 function ProfileFormSvg() {
   return (
     <svg
-      viewBox="0 0 560 560"
+      viewBox="0 0 560 620"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Settings Profile tab: a horizontal tab bar with Profile active above a Business profile card containing Name, an Address group, Phone and Email side by side, Business website and Timezone fields, with a green Venue profile saved banner and a note that edits save automatically."
+      aria-label="The Settings Profile tab: a horizontal tab bar with Profile active above a Business profile card containing Name, an Address group, Phone and Email side by side, Business website, a No-show grace period in minutes, and a Timezone drop-down, with a green Venue profile saved banner and a note that edits save automatically."
     >
       {/* tab bar */}
       <rect x="10" y="10" width="540" height="38" rx="10" fill="#f1f5f9" />
@@ -35,7 +35,7 @@ function ProfileFormSvg() {
       <text x="42" y="81" fill="#059669" fontSize="11" fontWeight="600">Venue profile saved</text>
 
       {/* Business profile card */}
-      <rect x="10" y="104" width="540" height="396" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+      <rect x="10" y="104" width="540" height="474" rx="14" fill="#ffffff" stroke="#e2e8f0" />
       <text x="30" y="130" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">VENUE</text>
       <text x="30" y="152" fill="#0f172a" fontSize="16" fontWeight="700">Business profile</text>
 
@@ -68,13 +68,19 @@ function ProfileFormSvg() {
       <rect x="30" y="418" width="500" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
       <text x="44" y="436" fill="#0f172a" fontSize="11">riverside-wellness.co</text>
 
-      {/* Timezone (plain text input) */}
-      <text x="30" y="468" fill="#64748b" fontSize="9" fontWeight="600">Timezone</text>
+      {/* No-show grace period */}
+      <text x="30" y="468" fill="#64748b" fontSize="9" fontWeight="600">No-show grace period (minutes)</text>
       <rect x="30" y="474" width="500" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="44" y="492" fill="#0f172a" fontSize="11" fontWeight="500">Europe/London</text>
+      <text x="44" y="492" fill="#0f172a" fontSize="11" fontWeight="500">15</text>
+
+      {/* Timezone (a drop-down, not free text) */}
+      <text x="30" y="524" fill="#64748b" fontSize="9" fontWeight="600">Timezone</text>
+      <rect x="30" y="530" width="500" height="28" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="44" y="548" fill="#0f172a" fontSize="11" fontWeight="500">Europe/London</text>
+      <text x="512" y="548" fill="#64748b" fontSize="11">▾</text>
 
       {/* helper note */}
-      <text x="30" y="528" fill="#64748b" fontSize="10">Edits save automatically after you pause typing.</text>
+      <text x="30" y="602" fill="#64748b" fontSize="10">Edits save automatically after you pause typing.</text>
     </svg>
   );
 }
@@ -325,7 +331,7 @@ function StripeStepsSvg() {
       viewBox="0 0 600 320"
       className="mx-auto h-auto w-full max-w-[600px]"
       role="img"
-      aria-label="A two-step Stripe setup stepper: Step 1 Business and bank details with a green check, Step 2 Identity verification with a green check, and a final green status pill reading Stripe connected, charges enabled."
+      aria-label="A two-step Stripe setup stepper: Step 1 Business and bank details marked Completed, Step 2 Identity verification marked Completed, and a final green status pill reading Stripe connected, charges enabled."
     >
       {/* Card */}
       <rect x="10" y="10" width="580" height="300" rx="14" fill="#ffffff" stroke="#e2e8f0" />
@@ -342,7 +348,7 @@ function StripeStepsSvg() {
       <text x="86" y="122" fill="#64748b" fontSize="11">Provide your business information and</text>
       <text x="86" y="137" fill="#64748b" fontSize="11">bank account details.</text>
       <rect x="490" y="96" width="84" height="22" rx="11" fill="#d1fae5" />
-      <text x="532" y="111" textAnchor="middle" fill="#059669" fontSize="10" fontWeight="700">Complete</text>
+      <text x="532" y="111" textAnchor="middle" fill="#059669" fontSize="10" fontWeight="700">Completed</text>
 
       {/* Step 2 circle */}
       <circle cx="54" cy="208" r="16" fill="#059669" />
@@ -351,7 +357,7 @@ function StripeStepsSvg() {
       <text x="86" y="222" fill="#64748b" fontSize="11">Verify the identity of the account</text>
       <text x="86" y="237" fill="#64748b" fontSize="11">representative.</text>
       <rect x="490" y="196" width="84" height="22" rx="11" fill="#d1fae5" />
-      <text x="532" y="211" textAnchor="middle" fill="#059669" fontSize="10" fontWeight="700">Complete</text>
+      <text x="532" y="211" textAnchor="middle" fill="#059669" fontSize="10" fontWeight="700">Completed</text>
 
       {/* Final status pill */}
       <rect x="30" y="264" width="540" height="34" rx="10" fill="#d1fae5" stroke="#059669" />
@@ -368,7 +374,7 @@ function PublicSurfacesSvg() {
       viewBox="0 0 700 360"
       className="h-auto w-full"
       role="img"
-      aria-label="Three browser windows side by side showing the three public booking surfaces: a hosted booking page at slash book slash your-slug, an embedded booking widget inside your own website at slash embed slash your-slug, and a single practitioner page at slash book slash your-slug slash practitioner-slug. All share the same teal booking branding."
+      aria-label="Three browser windows side by side showing the three public booking surfaces: a hosted booking page at slash book slash your-slug, an embedded booking widget inside your own website at slash embed slash your-slug, and a single practitioner page at slash book slash your-slug slash practitioner-slug that opens with a Booking with Sarah Chen banner. All three run the same booking flow and end in the same Continue button."
     >
       {/* Panel 1: Hosted booking page */}
       <text x="18" y="22" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">HOSTED PAGE</text>
@@ -457,14 +463,14 @@ function PublicSurfacesSvg() {
       <circle cx="514" cy="47" r="3.5" fill="#059669" />
       <rect x="528" y="40" width="146" height="16" rx="8" fill="#ffffff" stroke="#e2e8f0" />
       <text x="536" y="51" fill="#64748b" fontSize="8">/book/{'{slug}'}/{'{practitioner}'}</text>
-      <rect x="486" y="76" width="184" height="46" rx="10" fill="#E8EFF6" stroke="#bcd2e6" />
-      <circle cx="510" cy="99" r="13" fill="#00A0A4" />
-      <text x="510" y="103" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="700">SC</text>
-      <text x="532" y="94" fill="#0f172a" fontSize="11" fontWeight="700">Sarah Chen</text>
-      <text x="532" y="107" fill="#64748b" fontSize="8.5">Physiotherapist</text>
-      <rect x="486" y="132" width="120" height="18" rx="9" fill="#C2F4F5" />
-      <text x="546" y="145" textAnchor="middle" fill="#00305C" fontSize="9" fontWeight="700">Locked to one person</text>
-      <text x="486" y="172" fill="#64748b" fontSize="8.5" fontWeight="700" letterSpacing="0.05em">SARAH&apos;S TIMES</text>
+      {/* The locked-practitioner page opens with the "Booking with {name}" banner. */}
+      <rect x="486" y="76" width="184" height="62" rx="10" fill="#E8EFF6" stroke="#bcd2e6" />
+      <circle cx="506" cy="97" r="12" fill="#00A0A4" />
+      <text x="506" y="101" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="700">S</text>
+      <text x="524" y="94" fill="#0f172a" fontSize="9.5" fontWeight="700">Booking with Sarah Chen</text>
+      <text x="524" y="108" fill="#64748b" fontSize="7">You will only see services and</text>
+      <text x="524" y="118" fill="#64748b" fontSize="7">times for this practitioner.</text>
+      <text x="486" y="172" fill="#64748b" fontSize="8.5" fontWeight="700" letterSpacing="0.05em">PICK A TIME</text>
       {[0, 1, 2, 3, 4, 5].map((i) => {
         const col = i % 3;
         const row = Math.floor(i / 3);
@@ -480,7 +486,7 @@ function PublicSurfacesSvg() {
         );
       })}
       <rect x="486" y="290" width="184" height="28" rx="9" fill="#00305C" />
-      <text x="578" y="308" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="600">Book with Sarah</text>
+      <text x="578" y="308" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="600">Continue</text>
     </svg>
   );
 }
@@ -488,39 +494,45 @@ function PublicSurfacesSvg() {
 function PublicEmbedSvg() {
   return (
     <svg
-      viewBox="0 0 560 560"
+      viewBox="0 0 560 626"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="Booking Page settings screen with an Embed code card showing an accent colour picker, a monospace code box with iframe and script lines and a Copy code button, and a QR code card with a downloadable QR image."
+      aria-label="The Booking widget and QR code card on the Booking Page tab: an Embed code section with an accent colour picker, a monospace code box with iframe and script lines and a Copy code button, above a QR code section with a downloadable QR image and a Download QR code button."
     >
-      {/* Top card: Embed code */}
-      <rect x="16" y="16" width="528" height="282" rx="14" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
-      <text x="40" y="46" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="1.2">EMBED CODE</text>
-      <text x="40" y="68" fill="#0f172a" fontSize="15" fontWeight="700">Add the booking widget to your site</text>
+      {/* Card name */}
+      <text x="24" y="28" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="1.2">EMBEDS</text>
+      <text x="24" y="52" fill="#0f172a" fontSize="16" fontWeight="700">Booking widget &amp; QR code</text>
+
+      {/* Top section: Embed code */}
+      <rect x="16" y="66" width="528" height="282" rx="14" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
+      <text x="40" y="96" fill="#0f172a" fontSize="14" fontWeight="700">Embed code</text>
+      <text x="40" y="114" fill="#64748b" fontSize="11.5">Add this to your website to show the booking form in an</text>
+      <text x="40" y="128" fill="#64748b" fontSize="11.5">iframe. The widget will resize to fit the content.</text>
 
       {/* Accent colour row */}
-      <text x="40" y="100" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="0.6">ACCENT COLOUR (OPTIONAL)</text>
-      <rect x="40" y="110" width="34" height="34" rx="8" fill="#4F46E5" stroke="#e2e8f0" strokeWidth="1.5" />
-      <rect x="82" y="110" width="150" height="34" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1.5" />
-      <text x="98" y="132" fill="#0f172a" fontSize="13" fontFamily="monospace">#4F46E5</text>
-      <text x="250" y="132" fill="#64748b" fontSize="12" fontWeight="600">Reset</text>
+      <text x="40" y="150" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="0.6">ACCENT COLOUR (OPTIONAL)</text>
+      <rect x="40" y="158" width="34" height="34" rx="8" fill="#4F46E5" stroke="#e2e8f0" strokeWidth="1.5" />
+      <rect x="82" y="158" width="150" height="34" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1.5" />
+      <text x="98" y="180" fill="#0f172a" fontSize="13" fontFamily="monospace">#4F46E5</text>
+      <text x="250" y="180" fill="#64748b" fontSize="12" fontWeight="600">Reset</text>
 
       {/* Code box */}
-      <rect x="40" y="160" width="480" height="72" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1.5" />
-      <text x="56" y="190" fill="#0f172a" fontSize="11.5" fontFamily="monospace">&lt;iframe src=&quot;.../embed/your-slug&quot;&gt;&lt;/iframe&gt;</text>
-      <text x="56" y="214" fill="#0f172a" fontSize="11.5" fontFamily="monospace">&lt;script src=&quot;.../embed/resize.js&quot;&gt;&lt;/script&gt;</text>
+      <rect x="40" y="208" width="480" height="72" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1.5" />
+      <text x="56" y="238" fill="#0f172a" fontSize="11.5" fontFamily="monospace">&lt;iframe src=&quot;.../embed/your-slug&quot;&gt;&lt;/iframe&gt;</text>
+      <text x="56" y="262" fill="#0f172a" fontSize="11.5" fontFamily="monospace">&lt;script src=&quot;.../embed/resize.js&quot;&gt;&lt;/script&gt;</text>
 
       {/* Copy code button */}
-      <rect x="40" y="248" width="124" height="34" rx="9" fill="#00305C" />
-      <text x="102" y="270" textAnchor="middle" fill="#ffffff" fontSize="12.5" fontWeight="700">Copy code</text>
+      <rect x="40" y="296" width="124" height="34" rx="9" fill="#00305C" />
+      <text x="102" y="318" textAnchor="middle" fill="#ffffff" fontSize="12.5" fontWeight="700">Copy code</text>
 
-      {/* Bottom card: QR code */}
-      <rect x="16" y="314" width="528" height="230" rx="14" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
-      <text x="40" y="344" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="1.2">QR CODE</text>
-      <text x="40" y="366" fill="#0f172a" fontSize="15" fontWeight="700">Print or share a scannable code</text>
+      {/* Bottom section: QR code */}
+      <rect x="16" y="364" width="528" height="246" rx="14" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
+      <text x="40" y="394" fill="#0f172a" fontSize="14" fontWeight="700">QR code</text>
+      <text x="40" y="412" fill="#64748b" fontSize="11.5">Link to your booking page. Suitable for table cards,</text>
+      <text x="40" y="426" fill="#64748b" fontSize="11.5">menus, or window stickers.</text>
 
       {/* QR image group */}
-      <g transform="translate(40,384)">
+      <g transform="translate(40,442)">
         <rect x="0" y="0" width="120" height="120" rx="8" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
         <rect x="12" y="12" width="28" height="28" fill="#0f172a" />
         <rect x="18" y="18" width="16" height="16" fill="#ffffff" />
@@ -554,10 +566,10 @@ function PublicEmbedSvg() {
       </g>
 
       {/* Download QR button */}
-      <rect x="200" y="406" width="172" height="36" rx="9" fill="#00305C" />
-      <text x="286" y="429" textAnchor="middle" fill="#ffffff" fontSize="12.5" fontWeight="700">Download QR code</text>
-      <text x="200" y="468" fill="#64748b" fontSize="11.5">Great for flyers, windows</text>
-      <text x="200" y="486" fill="#64748b" fontSize="11.5">and reception desks.</text>
+      <rect x="200" y="470" width="172" height="36" rx="9" fill="#00305C" />
+      <text x="286" y="493" textAnchor="middle" fill="#ffffff" fontSize="12.5" fontWeight="700">Download QR code</text>
+      <text x="200" y="532" fill="#64748b" fontSize="11.5">Great for flyers, windows</text>
+      <text x="200" y="550" fill="#64748b" fontSize="11.5">and reception desks.</text>
     </svg>
   );
 }
@@ -877,7 +889,7 @@ export const SET_UP_FIGURES: Record<string, { title: string; caption: string; no
   "stripe-plan-vs-pay": { title: "Settings, Plan vs Settings, Payments", caption: "Two separate Settings tabs: Plan is what you pay ResNeo, Payments is guest card money flowing to your own account.", node: <StripePlanVsPaySvg /> },
   "stripe-steps": { title: "Stripe setup: two steps to ready", caption: "A two-step stepper moving from business and bank details, through identity verification, to a connected state.", node: <StripeStepsSvg /> },
   "public-surfaces": { title: "Three ways guests can book", caption: "The hosted page, an embed inside your website, and a direct practitioner link all share the same booking flow.", node: <PublicSurfacesSvg /> },
-  "public-embed": { title: "Booking Page tab: Embed code and QR code", caption: "The Embed code card holds the snippet and accent picker; the QR code card has a downloadable code.", node: <PublicEmbedSvg /> },
+  "public-embed": { title: "Booking Page tab: Booking widget & QR code", caption: "The Embed code section holds the snippet and accent picker; the QR code section below it has a downloadable code.", node: <PublicEmbedSvg /> },
   "staff-list": { title: "Settings, Staff tab", caption: "The Staff members list with each person's role and assigned calendars, plus the Add User button, above a Security settings card with the Auto-Logout Timer.", node: <StaffListSvg /> },
   "staff-roles": { title: "Admin vs Staff", caption: "What an Admin can do compared with a Staff member, side by side.", node: <StaffRolesSvg /> },
 };

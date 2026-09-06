@@ -10,39 +10,45 @@ function CalendarGridSvg() {
       viewBox="0 0 640 430"
       className="h-auto w-full"
       role="img"
-      aria-label="The calendar Day view: a toolbar with a View Day selector, date navigation arrows, a Compact button, a Walk-in button and a New button, above a time grid with hour labels and two calendar columns (Sarah and Room 1) holding coloured booking cards at different times."
+      aria-label="The calendar Day view: a toolbar running left to right with a back arrow, the date, a forward arrow, Today, a Day view selector, a Compact button, then New and Walk-in, above a time grid with hour labels and two calendar columns (Sarah and Room 1) holding coloured booking cards at different times."
     >
-      {/* Toolbar */}
+      {/* Toolbar. Order mirrors OperationsWorkspaceToolbar: date navigation and
+          Today first, then the leading tools (view selector, Compact), then the
+          New and Walk-in booking actions on the right. */}
       <rect x="10" y="10" width="620" height="46" rx="12" fill="#ffffff" stroke="#e2e8f0" />
 
-      {/* View selector */}
-      <rect x="22" y="22" width="74" height="22" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="34" y="37" fill="#0f172a" fontSize="11" fontWeight="600">Day</text>
-      <text x="84" y="37" fill="#64748b" fontSize="11">▾</text>
-
       {/* back arrow */}
-      <rect x="106" y="22" width="24" height="22" rx="8" fill="#f1f5f9" stroke="#e2e8f0" />
-      <text x="118" y="38" textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">‹</text>
+      <rect x="22" y="22" width="24" height="22" rx="8" fill="#f1f5f9" stroke="#e2e8f0" />
+      <text x="34" y="38" textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">‹</text>
 
       {/* date label */}
-      <rect x="134" y="22" width="172" height="22" rx="8" fill="#E8EFF6" />
-      <text x="220" y="37" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="600">Monday 28 June 2026</text>
+      <rect x="50" y="22" width="172" height="22" rx="8" fill="#E8EFF6" />
+      <text x="136" y="37" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="600">Monday 28 June 2026</text>
 
       {/* forward arrow */}
-      <rect x="310" y="22" width="24" height="22" rx="8" fill="#f1f5f9" stroke="#e2e8f0" />
-      <text x="322" y="38" textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">›</text>
+      <rect x="226" y="22" width="24" height="22" rx="8" fill="#f1f5f9" stroke="#e2e8f0" />
+      <text x="238" y="38" textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">›</text>
+
+      {/* Today button */}
+      <rect x="258" y="22" width="52" height="22" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="284" y="37" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Today</text>
+
+      {/* View selector */}
+      <rect x="318" y="22" width="68" height="22" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="330" y="37" fill="#0f172a" fontSize="11" fontWeight="600">Day</text>
+      <text x="372" y="37" fill="#64748b" fontSize="11">▾</text>
 
       {/* Compact button */}
-      <rect x="408" y="22" width="76" height="22" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="446" y="37" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Compact</text>
-
-      {/* Walk-in button (green) */}
-      <rect x="498" y="21" width="60" height="24" rx="9" fill="#059669" />
-      <text x="528" y="37" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="600">Walk-in</text>
+      <rect x="394" y="22" width="76" height="22" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="432" y="37" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Compact</text>
 
       {/* New (primary brand) */}
-      <rect x="564" y="21" width="56" height="24" rx="9" fill="#00305C" />
-      <text x="592" y="37" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="600">New</text>
+      <rect x="496" y="21" width="56" height="24" rx="9" fill="#00305C" />
+      <text x="524" y="37" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="600">New</text>
+
+      {/* Walk-in button (green) */}
+      <rect x="558" y="21" width="62" height="24" rx="9" fill="#059669" />
+      <text x="589" y="37" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="600">Walk-in</text>
 
       {/* Grid frame */}
       <rect x="10" y="66" width="620" height="354" rx="12" fill="#ffffff" stroke="#e2e8f0" />
@@ -107,7 +113,7 @@ function CalendarCardSvg() {
       viewBox="0 0 640 360"
       className="h-auto w-full"
       role="img"
-      aria-label="An enlarged booking card showing the guest name, service, phone number, time range and a status pill, with a drag grip on the left edge, a resize handle along the bottom, and Arrived, Start and Complete action buttons, each labelled by a callout."
+      aria-label="An enlarged Booked booking card showing the guest name, service, phone number, time range and a status pill, with a drag grip on the left edge, a resize handle along the bottom, and the Arrived and Start action buttons a Booked card offers, each labelled by a callout."
     >
       {/* The booking card */}
       <rect x="150" y="40" width="340" height="240" rx="14" fill="#E8EFF6" stroke="#00305C" strokeWidth="1.5" />
@@ -134,13 +140,12 @@ function CalendarCardSvg() {
       <circle cx="200" cy="174" r="3.5" fill="#00A0A4" />
       <text x="210" y="178" fill="#0f172a" fontSize="11" fontWeight="600">Booked</text>
 
-      {/* Action buttons (bottom-right) */}
-      <rect x="293" y="226" width="58" height="26" rx="13" fill="#FEF3C7" stroke="#D97706" strokeWidth="1" />
-      <text x="322" y="243" textAnchor="middle" fill="#78350F" fontSize="11" fontWeight="600">Arrived</text>
-      <rect x="357" y="226" width="50" height="26" rx="13" fill="#00A0A4" />
-      <text x="382" y="243" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Start</text>
-      <rect x="413" y="226" width="64" height="26" rx="13" fill="#00305C" />
-      <text x="445" y="243" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Complete</text>
+      {/* Action buttons (bottom-right). A Booked card offers Arrived and Start;
+          Complete only appears once the booking has been started. */}
+      <rect x="363" y="226" width="58" height="26" rx="13" fill="#FEF3C7" stroke="#D97706" strokeWidth="1" />
+      <text x="392" y="243" textAnchor="middle" fill="#78350F" fontSize="11" fontWeight="600">Arrived</text>
+      <rect x="427" y="226" width="50" height="26" rx="13" fill="#00A0A4" />
+      <text x="452" y="243" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Start</text>
 
       {/* Callouts */}
 
@@ -178,29 +183,32 @@ function CalendarCardSvg() {
 }
 
 function CalendarStatusSvg() {
+  // Confirmed sits between Booked and Started: confirming attendance moves a
+  // Booked row there, and it is one of the calendar's Status filter values.
   const steps = [
     { label: 'Pending', fill: '#fef3c7', stroke: '#d97706', text: '#78350F' },
     { label: 'Booked', fill: '#E8EFF6', stroke: '#003B6F', text: '#00305C' },
+    { label: 'Confirmed', fill: '#cfe0ee', stroke: '#003B6F', text: '#00305C' },
     { label: 'Started', fill: '#C2F4F5', stroke: '#00A0A4', text: '#00305C' },
     { label: 'Completed', fill: '#059669', stroke: '#059669', text: '#ffffff' },
   ];
-  const arrows = ['Confirm', 'Start', 'Complete'];
-  const boxW = 104;
+  const arrows: string[][] = [['Confirm'], ['Confirm', 'attendance'], ['Start'], ['Complete']];
+  const boxW = 100;
   const boxH = 40;
-  const gap = 56;
-  const startX = 28;
+  const gap = 59;
+  const startX = 22;
   const rowY = 86;
   const x = (i: number) => startX + i * (boxW + gap);
   const cx = (i: number) => x(i) + boxW / 2;
   return (
     <svg
-      viewBox="0 0 620 320"
+      viewBox="0 0 780 320"
       className="h-auto w-full"
       role="img"
-      aria-label="A left-to-right flow of booking statuses: Pending leads to Booked via Confirm, Booked to Started via Start, Started to Completed via Complete. A faint dashed back-arrow shows Undo start from Started, and Reopen from Completed. Off to the side, Cancelled and No Show are shown in grey: Cancelled is final, while a No Show can be put back."
+      aria-label="A left-to-right flow of booking statuses: Pending leads to Booked via Confirm, Booked to Confirmed once attendance is confirmed, Confirmed to Started via Start, and Started to Completed via Complete. A faint dashed back-arrow shows Undo start returning a Started booking to Booked, and Reopen returning a Completed one to Started. Off to the side, Cancelled and No Show are shown in grey: Cancelled is final, while a No Show can be put back."
     >
-      <text x="28" y="34" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">BOOKING LIFECYCLE</text>
-      <text x="28" y="56" fill="#0f172a" fontSize="16" fontWeight="700">The status flow</text>
+      <text x="22" y="34" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">BOOKING LIFECYCLE</text>
+      <text x="22" y="56" fill="#0f172a" fontSize="16" fontWeight="700">The status flow</text>
 
       {/* main forward chain */}
       {steps.map((s, i) => (
@@ -210,42 +218,51 @@ function CalendarStatusSvg() {
         </g>
       ))}
 
-      {/* forward arrows + button labels */}
-      {arrows.map((a, i) => {
+      {/* forward arrows + transition labels */}
+      {arrows.map((lines, i) => {
         const x1 = x(i) + boxW;
         const x2 = x(i + 1);
         const ay = rowY + boxH / 2;
+        const pillW = 56;
+        const pillX = x1 + (gap - pillW) / 2;
         return (
-          <g key={a}>
+          <g key={lines.join(' ')}>
             <line x1={x1 + 2} y1={ay} x2={x2 - 8} y2={ay} stroke="#00305C" strokeWidth="2" />
             <path d={`M ${x2 - 8} ${ay - 4} L ${x2 - 1} ${ay} L ${x2 - 8} ${ay + 4} Z`} fill="#00305C" />
-            <rect x={x1 + (gap - 52) / 2} y={ay - 30} width="52" height="18" rx="9" fill="#00305C" />
-            <text x={x1 + gap / 2} y={ay - 17} textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="600">{a}</text>
+            <rect x={pillX} y={ay - 32} width={pillW} height="24" rx="10" fill="#00305C" />
+            {lines.length === 1 ? (
+              <text x={x1 + gap / 2} y={ay - 16} textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="600">{lines[0]}</text>
+            ) : (
+              <g>
+                <text x={x1 + gap / 2} y={ay - 22} textAnchor="middle" fill="#ffffff" fontSize="8" fontWeight="600">{lines[0]}</text>
+                <text x={x1 + gap / 2} y={ay - 12} textAnchor="middle" fill="#ffffff" fontSize="8" fontWeight="600">{lines[1]}</text>
+              </g>
+            )}
           </g>
         );
       })}
 
       {/* dashed back-arrow: Undo start (Started -> Booked) */}
-      <path d={`M ${cx(2)} ${rowY + boxH + 4} C ${cx(2)} ${rowY + boxH + 30}, ${cx(1)} ${rowY + boxH + 30}, ${cx(1)} ${rowY + boxH + 6}`} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 4" />
+      <path d={`M ${cx(3)} ${rowY + boxH + 4} C ${cx(3)} ${rowY + boxH + 30}, ${cx(1)} ${rowY + boxH + 30}, ${cx(1)} ${rowY + boxH + 6}`} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 4" />
       <path d={`M ${cx(1) - 4} ${rowY + boxH + 12} L ${cx(1)} ${rowY + boxH + 4} L ${cx(1) + 4} ${rowY + boxH + 12} Z`} fill="#94a3b8" />
-      <text x={(cx(1) + cx(2)) / 2} y={rowY + boxH + 46} textAnchor="middle" fill="#64748b" fontSize="9" fontWeight="600">Undo start</text>
+      <text x={cx(2)} y={rowY + boxH + 46} textAnchor="middle" fill="#64748b" fontSize="9" fontWeight="600">Undo start</text>
 
       {/* dashed back-arrow: Reopen (Completed -> Started) */}
-      <path d={`M ${cx(3)} ${rowY + boxH + 4} C ${cx(3)} ${rowY + boxH + 64}, ${cx(2)} ${rowY + boxH + 64}, ${cx(2)} ${rowY + boxH + 6}`} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 4" />
-      <path d={`M ${cx(2) - 4} ${rowY + boxH + 12} L ${cx(2)} ${rowY + boxH + 4} L ${cx(2) + 4} ${rowY + boxH + 12} Z`} fill="#94a3b8" />
-      <text x={(cx(2) + cx(3)) / 2} y={rowY + boxH + 78} textAnchor="middle" fill="#64748b" fontSize="9" fontWeight="600">Reopen</text>
+      <path d={`M ${cx(4)} ${rowY + boxH + 4} C ${cx(4)} ${rowY + boxH + 64}, ${cx(3)} ${rowY + boxH + 64}, ${cx(3)} ${rowY + boxH + 6}`} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 4" />
+      <path d={`M ${cx(3) - 4} ${rowY + boxH + 12} L ${cx(3)} ${rowY + boxH + 4} L ${cx(3) + 4} ${rowY + boxH + 12} Z`} fill="#94a3b8" />
+      <text x={(cx(3) + cx(4)) / 2} y={rowY + boxH + 78} textAnchor="middle" fill="#64748b" fontSize="9" fontWeight="600">Reopen</text>
 
       {/* terminal end states */}
-      <text x="28" y={236} fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">END STATES</text>
-      <line x1="28" y1={246} x2="592" y2={246} stroke="#e2e8f0" strokeWidth="1" />
+      <text x="22" y={236} fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">END STATES</text>
+      <line x1="22" y1={246} x2="758" y2={246} stroke="#e2e8f0" strokeWidth="1" />
 
-      <rect x="28" y={262} width={boxW} height={boxH} rx="12" fill="#f1f5f9" stroke="#cbd5e1" />
-      <text x={28 + boxW / 2} y={262 + boxH / 2 + 4} textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">Cancelled</text>
+      <rect x="22" y={262} width={boxW} height={boxH} rx="12" fill="#f1f5f9" stroke="#cbd5e1" />
+      <text x={22 + boxW / 2} y={262 + boxH / 2 + 4} textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">Cancelled</text>
 
-      <rect x={28 + boxW + 40} y={262} width={boxW} height={boxH} rx="12" fill="#f1f5f9" stroke="#cbd5e1" />
-      <text x={28 + boxW + 40 + boxW / 2} y={262 + boxH / 2 + 4} textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">No Show</text>
+      <rect x={22 + boxW + 40} y={262} width={boxW} height={boxH} rx="12" fill="#f1f5f9" stroke="#cbd5e1" />
+      <text x={22 + boxW + 40 + boxW / 2} y={262 + boxH / 2 + 4} textAnchor="middle" fill="#64748b" fontSize="12" fontWeight="700">No Show</text>
 
-      <text x={28 + 2 * boxW + 92} y={262 + boxH / 2 + 4} fill="#64748b" fontSize="10">Cancelled is final. A No Show can be put back with Undo No-Show.</text>
+      <text x={22 + 2 * boxW + 92} y={262 + boxH / 2 + 4} fill="#64748b" fontSize="10">Cancelled is final. A No Show can be put back with Undo No-Show.</text>
     </svg>
   );
 }
@@ -635,7 +652,7 @@ function ContactsRowSvg() {
       viewBox="0 0 620 150"
       className="h-auto w-full"
       role="img"
-      aria-label="A single contact row in the Directory list for Jane Smith, showing a checkbox, a blue avatar with initials, name, phone and email, visit count and tag badges, a next booking pill, and an expand chevron."
+      aria-label="A single contact row in the Directory list for Jane Smith, showing a checkbox, a blue avatar with initials, name, phone and email, a visits pill that carries the no-show count in red, a last-visit pill, a next booking pill, two tag badges, and an expand chevron."
     >
       <text x="16" y="20" fill="#64748b" fontSize="10" fontWeight="700" letterSpacing="1">DIRECTORY</text>
 
@@ -660,26 +677,23 @@ function ContactsRowSvg() {
       </g>
       <text x="250" y="84" fill="#64748b" fontSize="11">jane@email.com</text>
 
-      <rect x="122" y="100" width="64" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1" />
-      <text x="154" y="113" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="600">12 visits</text>
+      {/* The no-show count sits inside the visits pill, not in a pill of its own. */}
+      <rect x="122" y="100" width="96" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1" />
+      <text x="134" y="113" fill="#0f172a" fontSize="10" fontWeight="600">12 visits <tspan fill="#dc2626" fontWeight="700">1 NS</tspan></text>
 
-      <rect x="190" y="100" width="38" height="20" rx="10" fill="#fee2e2" stroke="#fecaca" strokeWidth="1" />
-      <text x="209" y="113" textAnchor="middle" fill="#dc2626" fontSize="10" fontWeight="700">1 NS</text>
+      <rect x="226" y="100" width="80" height="20" rx="10" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1" />
+      <text x="266" y="113" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">3 weeks ago</text>
 
-      <rect x="232" y="100" width="80" height="20" rx="10" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1" />
-      <text x="272" y="113" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">3 weeks ago</text>
+      <rect x="314" y="100" width="124" height="20" rx="10" fill="#E8EFF6" stroke="#00305C" strokeWidth="1" />
+      <circle cx="326" cy="110" r="2.4" fill="#00305C" />
+      <text x="376" y="113" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="700">Tue 2 Jul, 10:00</text>
 
-      <rect x="316" y="100" width="124" height="20" rx="10" fill="#E8EFF6" stroke="#00305C" strokeWidth="1" />
-      <circle cx="328" cy="110" r="2.4" fill="#00305C" />
-      <text x="378" y="113" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="700">Tue 2 Jul, 10:00</text>
+      {/* Rows show up to three tags before an overflow counter appears. */}
+      <rect x="446" y="100" width="40" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1" />
+      <text x="466" y="113" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">VIP</text>
 
-      <rect x="444" y="100" width="40" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1" />
-      <text x="464" y="113" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">VIP</text>
-
-      <rect x="488" y="100" width="56" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1" />
-      <text x="516" y="113" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">Regular</text>
-
-      <text x="550" y="113" fill="#64748b" fontSize="10" fontWeight="700">+1</text>
+      <rect x="490" y="100" width="56" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="1" />
+      <text x="518" y="113" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">Regular</text>
 
       <path d="M576 76l7 7 7-7" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -689,12 +703,12 @@ function ContactsRowSvg() {
 function ContactsDetailSvg() {
   return (
     <svg
-      viewBox="0 0 600 720"
+      viewBox="0 0 600 830"
       className="mx-auto h-auto w-full max-w-[600px]"
       role="img"
-      aria-label="The expanded contact detail panel beneath a contact row: three stat blocks for Visits, Last visit and Next visit; name, email and phone fields with an Edit button; a Tags editor with pills and an add input; a row with New booking, Merge and Erase data actions; a Guest bookings history list; and a Messages and privacy section with a Send via selector, message box and Send button."
+      aria-label="The expanded contact detail panel beneath a contact row: a flat set of tiles for First name, Surname, Email, Phone, Address, Last visit and Next visit, with an Edit button below them; a Tags editor with pills and an add input; a Customer info notes block; a row with New booking, Merge and Erase data actions; a Guest bookings history list; and a Messages and privacy section with a Send via selector, message box and Send button."
     >
-      <rect x="10" y="10" width="580" height="700" rx="14" fill="#f8fafc" stroke="#e2e8f0" />
+      <rect x="10" y="10" width="580" height="810" rx="14" fill="#f8fafc" stroke="#e2e8f0" />
 
       <rect x="10" y="10" width="580" height="40" rx="14" fill="#ffffff" stroke="#e2e8f0" />
       <circle cx="40" cy="30" r="12" fill="#E8EFF6" stroke="#00305C" />
@@ -702,83 +716,86 @@ function ContactsDetailSvg() {
       <text x="62" y="34" fill="#0f172a" fontSize="12" fontWeight="700">Sarah Mitchell</text>
       <text x="570" y="34" textAnchor="end" fill="#64748b" fontSize="13">▾</text>
 
-      <rect x="26" y="66" width="174" height="60" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="42" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">FIRST NAME</text>
-      <text x="42" y="114" fill="#0f172a" fontSize="15" fontWeight="700">Dara</text>
+      {/* A flat set of tiles, not a Contact details card: First name, Surname,
+          Email, Phone, Address, Last visit and Next visit, then an Edit button. */}
+      {[
+        { label: 'FIRST NAME', value: 'Sarah', size: 15, col: 0, row: 0 },
+        { label: 'SURNAME', value: 'Mitchell', size: 15, col: 1, row: 0 },
+        { label: 'EMAIL', value: 'sarah.mitchell@example.com', size: 9.5, col: 2, row: 0 },
+        { label: 'PHONE', value: '07700 900123', size: 13, col: 0, row: 1 },
+        { label: 'ADDRESS', value: '12 Oak Lane, Bristol', size: 11, col: 1, row: 1 },
+        { label: 'LAST VISIT', value: '14 Jun', size: 15, col: 2, row: 1 },
+        { label: 'NEXT VISIT', value: 'Tue 2 Jul, 10:00', size: 13, col: 0, row: 2 },
+      ].map((tile) => {
+        const tx = 26 + tile.col * 187;
+        const ty = 66 + tile.row * 66;
+        const next = tile.label === 'NEXT VISIT';
+        return (
+          <g key={tile.label}>
+            <rect x={tx} y={ty} width="174" height="58" rx="12" fill={next ? '#f0f9ff' : '#ffffff'} stroke={next ? '#bae6fd' : '#e2e8f0'} />
+            <text x={tx + 16} y={ty + 20} fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">{tile.label}</text>
+            <text x={tx + 16} y={ty + 44} fill={next ? '#0c4a6e' : '#0f172a'} fontSize={tile.size} fontWeight="700">{tile.value}</text>
+          </g>
+        );
+      })}
 
-      <rect x="213" y="66" width="174" height="60" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="229" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">SURNAME</text>
-      <text x="229" y="114" fill="#0f172a" fontSize="15" fontWeight="700">Mulligan</text>
+      <rect x="26" y="264" width="76" height="26" rx="8" fill="#ffffff" stroke="#cbd5e1" />
+      <text x="64" y="281" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Edit</text>
 
-      <rect x="400" y="66" width="174" height="60" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="416" y="88" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">LAST VISIT</text>
-      <text x="416" y="113" fill="#0f172a" fontSize="15" fontWeight="700">14 Jun</text>
+      <rect x="26" y="302" width="548" height="70" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="42" y="324" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">TAGS</text>
+      <rect x="42" y="336" width="78" height="22" rx="11" fill="#C2F4F5" />
+      <text x="81" y="351" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="600">VIP  x</text>
+      <rect x="128" y="336" width="100" height="22" rx="11" fill="#E8EFF6" />
+      <text x="178" y="351" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="600">Regular  x</text>
+      <rect x="238" y="336" width="150" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="252" y="351" fill="#64748b" fontSize="10">+ Add a tag…</text>
 
-      <rect x="26" y="142" width="548" height="120" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="42" y="164" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">CONTACT DETAILS</text>
-      <rect x="470" y="150" width="88" height="24" rx="8" fill="#ffffff" stroke="#cbd5e1" />
-      <text x="514" y="166" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Edit</text>
+      {/* Customer info is always on the panel, under the tags */}
+      <rect x="26" y="386" width="548" height="72" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="42" y="408" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">CUSTOMER INFO</text>
+      <rect x="42" y="418" width="516" height="28" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
+      <text x="54" y="436" fill="#64748b" fontSize="10">Notes your team keeps on this client.</text>
 
-      <text x="42" y="190" fill="#64748b" fontSize="9" fontWeight="600">Name</text>
-      <rect x="42" y="196" width="240" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="54" y="213" fill="#0f172a" fontSize="11" fontWeight="500">Sarah Mitchell</text>
+      <rect x="42" y="474" width="148" height="34" rx="9" fill="#003B6F" />
+      <text x="64" y="496" fill="#ffffff" fontSize="14" fontWeight="700">+</text>
+      <text x="78" y="495" fill="#ffffff" fontSize="11" fontWeight="600">New booking</text>
 
-      <text x="318" y="190" fill="#64748b" fontSize="9" fontWeight="600">Phone</text>
-      <rect x="318" y="196" width="240" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="330" y="213" fill="#0f172a" fontSize="11" fontWeight="500">07700 900123</text>
+      <rect x="200" y="474" width="92" height="34" rx="9" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="246" y="495" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Merge…</text>
 
-      <text x="42" y="240" fill="#64748b" fontSize="9" fontWeight="600">Email</text>
-      <rect x="42" y="246" width="516" height="24" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="54" y="262" fill="#0f172a" fontSize="11" fontWeight="500">sarah.mitchell@example.com</text>
+      <text x="492" y="493" textAnchor="middle" fill="#dc2626" fontSize="11" fontWeight="600">Erase data</text>
+      <text x="492" y="506" textAnchor="middle" fill="#64748b" fontSize="8">admin only</text>
 
-      <rect x="26" y="278" width="548" height="70" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="42" y="300" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">TAGS</text>
-      <rect x="42" y="312" width="78" height="22" rx="11" fill="#C2F4F5" />
-      <text x="81" y="327" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="600">VIP  x</text>
-      <rect x="128" y="312" width="100" height="22" rx="11" fill="#E8EFF6" />
-      <text x="178" y="327" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="600">Regular  x</text>
-      <rect x="238" y="312" width="150" height="22" rx="11" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="252" y="327" fill="#64748b" fontSize="10">+ Add a tag…</text>
+      <rect x="26" y="524" width="548" height="116" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="42" y="547" fill="#0f172a" fontSize="12" fontWeight="700">Guest bookings</text>
+      <text x="558" y="547" textAnchor="end" fill="#64748b" fontSize="13">▾</text>
 
-      <rect x="42" y="364" width="148" height="34" rx="9" fill="#003B6F" />
-      <text x="64" y="386" fill="#ffffff" fontSize="14" fontWeight="700">+</text>
-      <text x="78" y="385" fill="#ffffff" fontSize="11" fontWeight="600">New booking</text>
+      <line x1="42" y1="560" x2="558" y2="560" stroke="#f1f5f9" strokeWidth="1" />
+      <circle cx="52" cy="578" r="4" fill="#059669" />
+      <text x="66" y="582" fill="#0f172a" fontSize="11" fontWeight="500">14 Jun, Deep tissue massage</text>
+      <text x="558" y="582" textAnchor="end" fill="#059669" fontSize="10" fontWeight="600">Completed</text>
 
-      <rect x="200" y="364" width="92" height="34" rx="9" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="246" y="385" textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="600">Merge…</text>
+      <line x1="42" y1="596" x2="558" y2="596" stroke="#f1f5f9" strokeWidth="1" />
+      <circle cx="52" cy="614" r="4" fill="#059669" />
+      <text x="66" y="618" fill="#0f172a" fontSize="11" fontWeight="500">02 May, Facial treatment</text>
+      <text x="558" y="618" textAnchor="end" fill="#059669" fontSize="10" fontWeight="600">Completed</text>
 
-      <text x="492" y="383" textAnchor="middle" fill="#dc2626" fontSize="11" fontWeight="600">Erase data</text>
-      <text x="492" y="396" textAnchor="middle" fill="#64748b" fontSize="8">admin only</text>
+      <line x1="42" y1="624" x2="558" y2="624" stroke="#f1f5f9" strokeWidth="1" />
 
-      <rect x="26" y="414" width="548" height="116" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="42" y="437" fill="#0f172a" fontSize="12" fontWeight="700">Guest bookings</text>
-      <text x="558" y="437" textAnchor="end" fill="#64748b" fontSize="13">▾</text>
+      <rect x="26" y="656" width="548" height="148" rx="12" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="42" y="678" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">MESSAGES &amp; PRIVACY</text>
 
-      <line x1="42" y1="450" x2="558" y2="450" stroke="#f1f5f9" strokeWidth="1" />
-      <circle cx="52" cy="468" r="4" fill="#059669" />
-      <text x="66" y="472" fill="#0f172a" fontSize="11" fontWeight="500">14 Jun, Deep tissue massage</text>
-      <text x="558" y="472" textAnchor="end" fill="#059669" fontSize="10" fontWeight="600">Completed</text>
+      <text x="42" y="698" fill="#64748b" fontSize="9" fontWeight="600">Send via</text>
+      <rect x="42" y="704" width="200" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="54" y="721" fill="#0f172a" fontSize="10" fontWeight="500">Email &amp; SMS (if available)</text>
+      <text x="228" y="721" fill="#64748b" fontSize="11">▾</text>
 
-      <line x1="42" y1="486" x2="558" y2="486" stroke="#f1f5f9" strokeWidth="1" />
-      <circle cx="52" cy="504" r="4" fill="#059669" />
-      <text x="66" y="508" fill="#0f172a" fontSize="11" fontWeight="500">02 May, Facial treatment</text>
-      <text x="558" y="508" textAnchor="end" fill="#059669" fontSize="10" fontWeight="600">Completed</text>
+      <rect x="42" y="738" width="516" height="40" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
+      <text x="54" y="755" fill="#64748b" fontSize="10">SMS / email to Sarah…</text>
 
-      <line x1="42" y1="514" x2="558" y2="514" stroke="#f1f5f9" strokeWidth="1" />
-
-      <rect x="26" y="546" width="548" height="148" rx="12" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="42" y="568" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.07em">MESSAGES &amp; PRIVACY</text>
-
-      <text x="42" y="588" fill="#64748b" fontSize="9" fontWeight="600">Send via</text>
-      <rect x="42" y="594" width="200" height="26" rx="8" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="54" y="611" fill="#0f172a" fontSize="10" fontWeight="500">Email &amp; SMS (if available)</text>
-      <text x="228" y="611" fill="#64748b" fontSize="11">▾</text>
-
-      <rect x="42" y="628" width="516" height="40" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="54" y="645" fill="#64748b" fontSize="10">SMS / email to Sarah…</text>
-
-      <rect x="478" y="664" width="80" height="22" rx="9" fill="#0f172a" />
-      <text x="518" y="679" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Send</text>
+      <rect x="478" y="774" width="80" height="22" rx="9" fill="#0f172a" />
+      <text x="518" y="789" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="600">Send</text>
     </svg>
   );
 }
@@ -846,7 +863,7 @@ function WaitlistListSvg() {
       viewBox="0 0 640 360"
       className="h-auto w-full"
       role="img"
-      aria-label="The dashboard Waitlist page: an Operations header titled Waitlist with a Live pill and Active and All tabs, above an Active requests card listing three appointment rows with Waiting, Offered, and Complete status pills, an Offer spot button, a Cancel button, and an Expires note."
+      aria-label="The dashboard Waitlist page: an Operations header titled Waitlist with a Live pill and Active and All tabs, with All selected, above an All entries card listing three appointment rows with Waiting, Complete, and Expired status pills, an Offer spot button, a Cancel button, and an Expires note on the Complete row."
     >
       <text x="20" y="28" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">OPERATIONS</text>
       <text x="20" y="52" fill="#0f172a" fontSize="20" fontWeight="700">Waitlist</text>
@@ -855,13 +872,14 @@ function WaitlistListSvg() {
       <text x="133" y="50" fill="#059669" fontSize="10" fontWeight="700">Live</text>
 
       <rect x="470" y="30" width="150" height="32" rx="9" fill="#f1f5f9" />
-      <rect x="475" y="35" width="70" height="22" rx="7" fill="#ffffff" stroke="#e2e8f0" />
-      <text x="510" y="50" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="700">Active</text>
-      <text x="585" y="50" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">All</text>
+      <text x="510" y="50" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="500">Active</text>
+      <rect x="550" y="35" width="66" height="22" rx="7" fill="#ffffff" stroke="#e2e8f0" />
+      <text x="583" y="50" textAnchor="middle" fill="#00305C" fontSize="11" fontWeight="700">All</text>
 
+      {/* Complete and Expired entries drop out of Active, so this is the All tab. */}
       <rect x="14" y="76" width="612" height="268" rx="14" fill="#ffffff" stroke="#e2e8f0" />
       <text x="34" y="102" fill="#94a3b8" fontSize="9" fontWeight="700" letterSpacing="0.08em">QUEUE</text>
-      <text x="34" y="120" fill="#0f172a" fontSize="14" fontWeight="700">Active requests</text>
+      <text x="34" y="120" fill="#0f172a" fontSize="14" fontWeight="700">All entries</text>
       <text x="606" y="120" textAnchor="end" fill="#64748b" fontSize="10" fontWeight="600">3 entries</text>
 
       <rect x="34" y="134" width="572" height="60" rx="12" fill="#f8fafc" stroke="#e2e8f0" />
@@ -877,21 +895,23 @@ function WaitlistListSvg() {
       <text x="555" y="164" textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">Cancel</text>
 
       <rect x="34" y="204" width="572" height="60" rx="12" fill="#f8fafc" stroke="#e2e8f0" />
-      <rect x="34" y="204" width="5" height="60" rx="2.5" fill="#00305C" />
+      <rect x="34" y="204" width="5" height="60" rx="2.5" fill="#10b981" />
       <text x="56" y="230" fill="#0f172a" fontSize="11" fontWeight="700">10:30</text>
       <text x="120" y="226" fill="#0f172a" fontSize="12" fontWeight="700">James Okafor</text>
       <text x="120" y="244" fill="#64748b" fontSize="9">Sports Massage &middot; Sarah Lewis &middot; Tue 8 Jul &middot; +44 7700 900123</text>
-      <rect x="396" y="216" width="62" height="20" rx="10" fill="#E8EFF6" />
-      <text x="427" y="230" textAnchor="middle" fill="#00305C" fontSize="10" fontWeight="700">Offered</text>
-      <text x="466" y="245" fill="#b45309" fontSize="9.5" fontWeight="600">Expires 14:30</text>
+      {/* An appointment entry goes Waiting to Complete as soon as the invite is
+          sent; Expires only shows in First in line mode. */}
+      <rect x="396" y="216" width="72" height="20" rx="10" fill="#d1fae5" />
+      <text x="432" y="230" textAnchor="middle" fill="#047857" fontSize="10" fontWeight="700">Complete</text>
+      <text x="480" y="230" fill="#b45309" fontSize="9.5" fontWeight="600">Expires 14:30</text>
 
       <rect x="34" y="274" width="572" height="60" rx="12" fill="#f8fafc" stroke="#e2e8f0" />
-      <rect x="34" y="274" width="5" height="60" rx="2.5" fill="#10b981" />
+      <rect x="34" y="274" width="5" height="60" rx="2.5" fill="#94a3b8" />
       <text x="56" y="300" fill="#0f172a" fontSize="11" fontWeight="700">16:15</text>
       <text x="120" y="296" fill="#0f172a" fontSize="12" fontWeight="700">Priya Shah</text>
       <text x="120" y="314" fill="#64748b" fontSize="9">Sports Massage &middot; Tom Reed &middot; Wed 9 Jul &middot; priya.s@mail.com</text>
-      <rect x="480" y="286" width="72" height="20" rx="10" fill="#d1fae5" />
-      <text x="516" y="300" textAnchor="middle" fill="#047857" fontSize="10" fontWeight="700">Complete</text>
+      <rect x="486" y="286" width="66" height="20" rx="10" fill="#fee2e2" />
+      <text x="519" y="300" textAnchor="middle" fill="#b91c1c" fontSize="10" fontWeight="700">Expired</text>
     </svg>
   );
 }
@@ -902,7 +922,7 @@ function ComplianceConceptsSvg() {
       viewBox="0 0 700 300"
       className="h-auto w-full"
       role="img"
-      aria-label="A left-to-right flow: a compliance type is attached to a service as a requirement, the guest completes it to create a record, and the record stays valid for a year before expiring."
+      aria-label="A left-to-right flow: a compliance type becomes a requirement, either on one service or on All bookings across the venue, the guest completes it to create a record, and the record stays valid for a year before expiring."
     >
       {/* Box 1 - Compliance type */}
       <rect x="14" y="40" width="190" height="92" rx="13" fill="#E8EFF6" stroke="#00305C" strokeWidth="1.5" />
@@ -911,17 +931,18 @@ function ComplianceConceptsSvg() {
       <text x="30" y="110" fill="#64748b" fontSize="10">the kind of record</text>
 
       {/* Arrow 1 */}
-      <text x="251" y="74" textAnchor="middle" fill="#00305C" fontSize="9" fontWeight="700">attached to</text>
-      <text x="251" y="86" textAnchor="middle" fill="#00305C" fontSize="9" fontWeight="700">a service</text>
+      <text x="251" y="74" textAnchor="middle" fill="#00305C" fontSize="9" fontWeight="700">added as a</text>
+      <text x="251" y="86" textAnchor="middle" fill="#00305C" fontSize="9" fontWeight="700">requirement</text>
       <line x1="208" y1="96" x2="290" y2="96" stroke="#00305C" strokeWidth="2" />
       <path d="M290 96 l-9 -5 v10 z" fill="#00305C" />
 
-      {/* Box 2 - Service requirement */}
+      {/* Box 2 - Requirement. A requirement sits on one service, or on the
+          venue-wide "All bookings" row that covers every appointment. */}
       <rect x="298" y="40" width="190" height="92" rx="13" fill="#E8EFF6" stroke="#00305C" strokeWidth="1.5" />
-      <text x="314" y="62" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.5">SERVICE REQUIREMENT</text>
-      <text x="314" y="88" fill="#0f172a" fontSize="15" fontWeight="700">Service asks</text>
-      <text x="314" y="106" fill="#64748b" fontSize="10">for it, with an</text>
-      <text x="314" y="120" fill="#64748b" fontSize="10">enforcement level</text>
+      <text x="314" y="62" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.5">REQUIREMENT</text>
+      <text x="314" y="84" fill="#0f172a" fontSize="14" fontWeight="700">One service, or</text>
+      <text x="314" y="102" fill="#0f172a" fontSize="14" fontWeight="700">All bookings</text>
+      <text x="314" y="120" fill="#64748b" fontSize="10">with an enforcement level</text>
 
       {/* Arrow 2 */}
       <text x="535" y="74" textAnchor="middle" fill="#00305C" fontSize="9" fontWeight="700">guest</text>
@@ -968,8 +989,9 @@ function ComplianceConceptsSvg() {
 function ComplianceEnforceSvg() {
   const rungs = [
     {
+      // ENFORCEMENT_OPTIONS: block_all still lets staff book from the dashboard.
       label: 'Block all bookings',
-      sub: 'Nobody can book until a valid record exists',
+      sub: 'No online booking; staff can still book, with a red reminder',
       fill: '#dc2626',
       tint: '#fee2e2',
       stroke: '#dc2626',
@@ -1014,7 +1036,7 @@ function ComplianceEnforceSvg() {
       viewBox="0 0 660 360"
       className="h-auto w-full"
       role="img"
-      aria-label="A four-rung ladder of When unmet enforcement levels, from Warn staff at the bottom in amber up to Block all bookings at the top in red, getting stricter towards the top."
+      aria-label="A four-rung ladder of When unmet enforcement levels, from Warn staff at the bottom in amber up to Block all bookings at the top in red, getting stricter towards the top. Even the strictest rung only blocks online booking: your team can still book from the dashboard."
     >
       {/* eyebrow */}
       <text x="96" y="26" fill="#64748b" fontSize="11" fontWeight="700" letterSpacing="1.2">WHEN UNMET</text>
@@ -1157,10 +1179,10 @@ export const RUN_FIGURES: Record<string, { title: string; caption: string; node:
   "newbooking-form": { title: "New Booking, Appointment tab", caption: "A combined illustration of the Appointment booking steps: the booking-type tabs, the Select a service list, choosing a staff member, then the Date and time step with a month picker and grouped time slots.", node: <NewbookingFormSvg /> },
   "newbooking-guest": { title: "Client details with saved-contact search", caption: "Typing into the client fields searches your saved contacts and shows matches in a dropdown.", node: <NewbookingGuestSvg /> },
   "contacts-row": { title: "A contact row in the Directory", caption: "One row in the Contacts directory showing avatar, name, contact details, visit count and tags.", node: <ContactsRowSvg /> },
-  "contacts-detail": { title: "The expanded contact detail panel", caption: "The contact detail panel with visit stats, tags, Guest bookings history and the New booking and Send actions.", node: <ContactsDetailSvg /> },
+  "contacts-detail": { title: "The expanded contact detail panel", caption: "The contact detail panel with its detail tiles, tags, Customer info notes, Guest bookings history and the New booking and Send actions.", node: <ContactsDetailSvg /> },
   "waitlist-lifecycle": { title: "Waitlist entry lifecycle", caption: "How a waitlist entry moves from waiting to offered to complete, with expired and cancelled as side outcomes.", node: <WaitlistLifecycleSvg /> },
   "waitlist-list": { title: "Waitlist screen", caption: "The Waitlist screen showing appointment entries with status pills and the offer action.", node: <WaitlistListSvg /> },
-  "compliance-concepts": { title: "Type, requirement, record", caption: "How a compliance type becomes a service requirement and then a dated record on a guest&apos;s file.", node: <ComplianceConceptsSvg /> },
+  "compliance-concepts": { title: "Type, requirement, record", caption: "How a compliance type becomes a requirement, on one service or on All bookings, and then a dated record on a guest&apos;s file.", node: <ComplianceConceptsSvg /> },
   "compliance-enforce": { title: "When unmet: enforcement levels", caption: "The four enforcement levels run from a quiet staff warning up to blocking every booking.", node: <ComplianceEnforceSvg /> },
   "compliance-dashboard": { title: "Compliance dashboard panels", caption: "The compliance page stacks four panels so you can clear missing, expiring and pending records in one pass.", node: <ComplianceDashboardSvg /> },
 };

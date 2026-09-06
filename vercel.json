@@ -95,6 +95,10 @@
     {
       "path": "/api/cron/schedule-health",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/assistant-retention",
+      "schedule": "15 4 * * *"
     }
   ]
 }

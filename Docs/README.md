@@ -76,6 +76,7 @@ scheduling audit.
 | `CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` | Card-hold deposits and no-show fees | Shipped; standard for every venue since 2026-09-05 (the `card_hold_deposits` flag is retired) |
 | `TAP_TO_PAY_DESIGN_AND_IMPLEMENTATION.md` | In-person payments, Tap to Pay, receipts | Shipped both sides. Tips not built |
 | `Resneo_Lean_Onboarding_Plan.md` | Lean onboarding | All phases shipped. As-built record |
+| `help-assistant-plan.md` | Ask ResNeo, the in-dashboard help assistant, and the help-centre review it required | Built 2026-09-06 on the working tree, not yet deployed. Its §11 is the as-built record: the assistant answers in two calls (a selector over a contents list, then the answer over the chosen articles) because the corpus outgrew one prompt; all 68 help articles are verified against the code; the migration, the sub-processor update and `ASSISTANT_ENABLED` are owed |
 
 ## Plans not yet built
 
@@ -112,6 +113,11 @@ scheduling audit.
 | `Resneo_Import_Tool_Current_State_Review_June_2026.md` | The **only** assessment of `src/lib/import` (~9,000 lines). Ten items still open; AI stages re-checked against `gpt-5.6-luna` on 2026-09-05 (§0a) |
 
 ## Cross-repo correspondence
+
+`R26_WEB_RESPONSE.md` answers the two asks in the app repo’s `R26_WEB_HANDOVER.md` (2026-09-06):
+releasing a deferred guest email on a linked booking, and a partner’s guest’s Records. Both are
+implemented; the response records one deliberate difference, that deleting a partner’s file needs
+their full management grant rather than an edit grant.
 
 `R20-1_WEB_RESPONSE.md`, `R20-1_WEB_RESPONSE_2.md`, `R20-1_WEB_RESPONSE_3.md` and
 `R20-1_WEB_RESPONSE_4.md` are four rounds of a concluded exchange with the

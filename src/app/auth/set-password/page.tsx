@@ -243,10 +243,10 @@ function SetPasswordContent() {
           <h1 className="mt-4 text-center text-lg font-bold text-slate-900">Create your password</h1>
           <p className="mt-2 text-center text-sm text-slate-500">
             Use this page after you open the invitation or sign-in link from your email. Choose a password for your
-            Reserve NI account — then you can sign in with email and password from the login page, or continue using magic
+            ResNeo account. You can then sign in with email and password from the login page, or carry on using magic
             links. You can change your password anytime under{' '}
-            <Link href="/account/security#password" className="font-medium text-brand-700 hover:underline">
-              My account → Security
+            <Link href="/account/profile#password" className="font-medium text-brand-700 hover:underline">
+              My account, Password and account
             </Link>
             .
           </p>

@@ -94,6 +94,7 @@ Under the **More details** heading sit the rest of the client's record, each one
 - **Custom fields**, if your venue has any. Fill them in and tap **Save custom fields**.
 - **Household**, for linking family members or a carer. Tap **Link member**, search by at least two characters, and tap **Link**. Tap anyone in the household to jump to their record.
 - **Records**, which holds their documents and photos. **Add photos** takes them from your photo library and **Add files** from your files. Photos, PDFs, Word and Excel files are accepted, up to 10 MB each. Photos are resized as they upload. Photos and PDFs open in the app; anything else downloads.
+- **Records on a linked venue's client.** When you open a booking that sits on a venue you are linked with, their client's **Records** appear too, as long as that venue shares client details through the link. What you can do with them follows the link: with **Edit existing** you can add a file, and only with **Full management** can you remove one. The files stay that venue's, so they show on their dashboard, not yours.
 - **Compliance**, when compliance records are switched on for your venue. It lists any forms awaiting the client, every record on file with its result and expiry date, and an audit trail. See [Compliance in the app](/help/resneo-app/compliance-in-the-app).
 - **Message history**, listing everything sent to this person and whether it arrived.
 - **Activity**, a timeline of what has happened on their record.

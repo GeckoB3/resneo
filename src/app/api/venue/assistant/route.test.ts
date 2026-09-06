@@ -42,7 +42,7 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { streamAssistantCompletion } from '@/lib/assistant/openai-stream';
 import { selectAssistantArticles } from '@/lib/assistant/select-articles';
 import { conversationBelongsToVenue, countUserMessagesToday, createConversation, insertMessage } from '@/lib/assistant/log';
-import { POST } from './route';
+import { GET, POST } from './route';
 
 const VENUE = '22222222-2222-4222-8222-222222222222';
 const CONVERSATION = '33333333-3333-4333-8333-333333333333';
@@ -101,6 +101,39 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+/** R27: a client asks whether to draw its Ask ResNeo entry point at all. */
+describe('GET /api/venue/assistant', () => {
+  function get(headers: Record<string, string> = {}) {
+    return GET(new NextRequest('https://resneo.test/api/venue/assistant', { headers }));
+  }
+
+  it('says enabled for a venue the assistant is on for', async () => {
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ enabled: true });
+    expect(res.headers.get('Cache-Control')).toContain('no-store');
+  });
+
+  it('says disabled rather than 404 when the kill switch is off, so a client can hide its row', async () => {
+    vi.stubEnv('ASSISTANT_ENABLED', 'false');
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ enabled: false });
+  });
+
+  it('says disabled for a venue outside the beta allowlist', async () => {
+    vi.stubEnv('ASSISTANT_VENUE_ALLOWLIST', '99999999-9999-4999-8999-999999999999');
+    expect(await (await get()).json()).toEqual({ enabled: false });
+  });
+
+  it('answers the bare 401 with no staff, like every other venue route', async () => {
+    vi.mocked(getVenueStaff).mockResolvedValue(null as never);
+    const res = await get();
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorised' });
+  });
 });
 
 /** Docs/help-assistant-plan.md, 5.2. */

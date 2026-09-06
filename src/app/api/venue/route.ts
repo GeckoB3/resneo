@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { assistantEnabledFor } from '@/lib/assistant/enabled';
 import { z } from 'zod';
 import { isValidIanaTimeZone } from '@/lib/time/iana-time-zone';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -210,6 +211,10 @@ export async function GET(request: NextRequest) {
       in_person_payments_enabled: Boolean(v.in_person_payments_enabled),
       card_present_ready:
         Boolean(v.in_person_payments_enabled) && Boolean(v.stripe_connected_account_id),
+      // Ask ResNeo (R27): whether the help assistant is switched on for THIS venue, so a client
+      // can hide its entry point instead of leading someone to the unavailable message. Runs the
+      // same check as the assistant route, so the two cannot disagree.
+      assistant_enabled: assistantEnabledFor(staff.venue_id),
     });
   } catch (err) {
     console.error('GET /api/venue failed:', err);

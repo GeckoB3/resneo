@@ -1244,10 +1244,14 @@ Reviewers verify against the code, so they found live defects. Fixed in this pas
 1. **The migration.** `supabase/migrations/20270207120000_assistant_conversations.sql` is
    written but applied to neither environment. It follows the standing ritual: staging code,
    staging push, test, production push, merge, reset staging.
-2. **The policy update (D4).** OpenAI is not yet on the sub-processor list at
-   `src/app/terms/data-processing/page.tsx` (which names Stripe, Supabase, Twilio, Twilio
-   SendGrid and Vercel) or in the privacy policy. This is the gate before any real venue uses
-   the assistant.
+2. **The policy update (D4). DONE on 2026-09-06.** OpenAI is now named as a sub-processor in
+   `src/app/terms/data-processing/page.tsx` (section 8, with a note saying what it does and does
+   not receive and the 30-day retention), in the processing description (section 3), and in the
+   privacy policy (sections 12, 14 and 18). Two things still need a person, not a code change:
+   confirm the exact OpenAI contracting entity and processing location against your own OpenAI
+   account’s DPA, and honour the 14 days’ notice by email that section 8 of the DPA promises
+   customers before a new sub-processor is used.
+
 3. **`ASSISTANT_ENABLED`.** Unset in production, so the route 404s and no launcher renders.
    Set it, with `ASSISTANT_VENUE_ALLOWLIST`, when the beta starts.
 4. **A second follow-up pass on the figures.** The hand-built SVGs were checked against the

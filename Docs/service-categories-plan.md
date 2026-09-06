@@ -94,7 +94,10 @@ New `ServiceCategoryList` component used by every list site:
 - Search box when the menu has six or more services; matches name and description; results show
   flat with a small category label.
 - Sections: sticky horizontal category chips (venue-accent pills) that scroll to the section and
-  track the visible section; headed sections with counts.
+  track the visible section; headed sections with counts. When the chips outgrow the row it
+  scrolls sideways: each end with more chips past it fades out and carries an arrow button from
+  `sm` up (phones swipe), and the current chip is kept in view as the tracker or a click moves it
+  (added 2026-09-06, after the staff modal cut off the right-hand chips with no way to reach them).
 - Accordion: category headers with counts and chevrons, smooth height animation, every category
   closed when the customer arrives (owner decision, 2026-09-02), several may be open at once; a
   carried or preselected service opens its category so it never hides.

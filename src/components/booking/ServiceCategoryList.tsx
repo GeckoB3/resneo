@@ -9,6 +9,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import type { ServicesLayout } from '@/lib/booking/booking-page-theme';
 import {
@@ -96,6 +97,184 @@ function SearchIcon() {
     <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0Z" />
     </svg>
+  );
+}
+
+function ChevronSideIcon({ direction }: { direction: 'left' | 'right' }) {
+  return (
+    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.25} stroke="currentColor" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d={direction === 'left' ? 'M15.75 19.5 8.25 12l7.5-7.5' : 'm8.25 4.5 7.5 7.5-7.5 7.5'}
+      />
+    </svg>
+  );
+}
+
+/** Room kept clear at each end of the chip row so the current chip never sits under a fade. */
+const CHIP_ROW_EDGE_PX = 56;
+
+/**
+ * Which ends of a horizontal scroller have more content past them. Re-measured on
+ * scroll, on any resize of the scroller or its content (chips come and go with the
+ * catalogue), and on window resize for browsers without ResizeObserver.
+ */
+function useScrollEdges(
+  scrollerRef: RefObject<HTMLElement | null>,
+  contentRef: RefObject<HTMLElement | null>,
+  contentKey: string,
+): { left: boolean; right: boolean } {
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const left = el.scrollLeft > 1;
+      const right = el.scrollLeft < maxScroll - 1;
+      setEdges((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+    };
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    let observer: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(measure);
+      observer.observe(el);
+      if (contentRef.current) observer.observe(contentRef.current);
+    }
+    return () => {
+      el.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+    // contentKey stands in for the chips themselves: a new set of groups re-measures.
+  }, [scrollerRef, contentRef, contentKey]);
+  return edges;
+}
+
+function scrollRowTo(el: HTMLElement, left: number, reducedMotion: boolean) {
+  if (typeof el.scrollTo === 'function') {
+    el.scrollTo({ left, behavior: reducedMotion ? 'auto' : 'smooth' });
+  } else {
+    el.scrollLeft = left;
+  }
+}
+
+/**
+ * The category menu: one row of chips that scrolls sideways when the categories
+ * outgrow it. The native scrollbar is hidden for the pill look, so the row shows
+ * where the rest is instead: a fade at each end that has more chips past it, with
+ * an arrow button on top of the fade from `sm` up (phones swipe). The current chip
+ * is kept in view as the section tracker or a click moves it, so the menu never
+ * points at a chip the customer cannot see.
+ */
+function CategoryChipNav<T>({
+  groups,
+  currentId,
+  onJump,
+  embed,
+  navRef,
+  reducedMotion,
+}: {
+  groups: readonly ServiceCategoryGroup<T>[];
+  currentId: string | null | undefined;
+  onJump: (id: string | null) => void;
+  embed: boolean;
+  navRef: RefObject<HTMLElement | null>;
+  reducedMotion: boolean;
+}) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const contentKey = groups.map((g) => `${g.id ?? 'other'}:${g.services.length}`).join('|');
+  const edges = useScrollEdges(scrollerRef, contentRef, contentKey);
+  const chipKey = (id: string | null) => id ?? 'other';
+
+  // Keep the current chip inside the visible part of the row, clear of the fades.
+  // Measured against the scroller (the chips' offset parent) rather than with
+  // scrollIntoView, which would also scroll the page and fight the sticky menu.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content || currentId === undefined) return;
+    const chip = Array.from(content.children).find(
+      (el) => (el as HTMLElement).dataset.chip === chipKey(currentId),
+    ) as HTMLElement | undefined;
+    if (!chip) return;
+    const maxScroll = scroller.scrollWidth - scroller.clientWidth;
+    if (maxScroll <= 0) return;
+    const chipLeft = chip.offsetLeft;
+    const chipRight = chipLeft + chip.offsetWidth;
+    const viewLeft = scroller.scrollLeft;
+    const viewRight = viewLeft + scroller.clientWidth;
+    let target: number | null = null;
+    if (chipLeft < viewLeft + CHIP_ROW_EDGE_PX) target = chipLeft - CHIP_ROW_EDGE_PX;
+    else if (chipRight > viewRight - CHIP_ROW_EDGE_PX) target = chipRight + CHIP_ROW_EDGE_PX - scroller.clientWidth;
+    if (target === null) return;
+    scrollRowTo(scroller, Math.max(0, Math.min(maxScroll, target)), reducedMotion);
+  }, [currentId, reducedMotion]);
+
+  const page = (direction: -1 | 1) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const step = Math.max(160, Math.round(scroller.clientWidth * 0.7));
+    scrollRowTo(scroller, scroller.scrollLeft + direction * step, reducedMotion);
+  };
+
+  const edge = (side: 'left' | 'right') => (
+    <div
+      className={`pointer-events-none absolute inset-y-0 flex w-14 items-center ${
+        side === 'left' ? 'left-0 justify-start pl-0.5' : 'right-0 justify-end pr-0.5'
+      }`}
+      style={{
+        background: `linear-gradient(to ${side === 'left' ? 'right' : 'left'}, #ffffff 40%, rgba(255, 255, 255, 0) 100%)`,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => page(side === 'left' ? -1 : 1)}
+        aria-label={`Scroll categories ${side}`}
+        className="pointer-events-auto hidden h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 sm:flex"
+      >
+        <ChevronSideIcon direction={side} />
+      </button>
+    </div>
+  );
+
+  return (
+    <nav
+      ref={navRef}
+      aria-label="Service categories"
+      className={`ap-cat-nav relative -mx-1 mb-4 px-1 ${embed ? '' : 'sticky z-[5]'}`}
+      style={embed ? undefined : { top: 'var(--ap-sticky-top, 0px)' }}
+    >
+      <div
+        ref={scrollerRef}
+        className="ap-cat-nav-inner relative overflow-x-auto py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <div ref={contentRef} className="flex w-max gap-2">
+          {groups.map((group) => {
+            const active = currentId === group.id;
+            return (
+              <button
+                key={chipKey(group.id)}
+                type="button"
+                data-chip={chipKey(group.id)}
+                onClick={() => onJump(group.id)}
+                aria-current={active ? 'true' : undefined}
+                className={`${CHIP_BASE} ${active ? CHIP_ACTIVE : CHIP_INACTIVE}`}
+              >
+                {group.name}
+                <span className={`text-xs ${active ? 'text-white/80' : 'text-brand-500'}`}>{group.services.length}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {edges.left ? edge('left') : null}
+      {edges.right ? edge('right') : null}
+    </nav>
   );
 }
 
@@ -371,30 +550,14 @@ export function ServiceCategoryList<T extends ServiceCategoryListItem>({
   return (
     <div>
       {searchBox}
-      <nav
-        ref={navRef}
-        aria-label="Service categories"
-        className={`ap-cat-nav -mx-1 mb-4 px-1 ${embed ? '' : 'sticky z-[5]'}`}
-        style={embed ? undefined : { top: 'var(--ap-sticky-top, 0px)' }}
-      >
-        <div className="ap-cat-nav-inner flex gap-2 overflow-x-auto py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {groups.map((group) => {
-            const active = currentId === group.id;
-            return (
-              <button
-                key={group.id ?? 'other'}
-                type="button"
-                onClick={() => jumpTo(group.id)}
-                aria-current={active ? 'true' : undefined}
-                className={`${CHIP_BASE} ${active ? CHIP_ACTIVE : CHIP_INACTIVE}`}
-              >
-                {group.name}
-                <span className={`text-xs ${active ? 'text-white/80' : 'text-brand-500'}`}>{group.services.length}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      <CategoryChipNav
+        groups={groups}
+        currentId={currentId}
+        onJump={jumpTo}
+        embed={embed}
+        navRef={navRef}
+        reducedMotion={reducedMotion}
+      />
       <div className="space-y-7">
         {groups.map((group) => {
           const sectionId = serviceCategoryDomId(prefix, group.id);

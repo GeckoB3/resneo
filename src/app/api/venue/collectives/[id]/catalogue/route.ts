@@ -212,6 +212,9 @@ async function addProvidersForSource(
  * Add a calendar to an offering (the "tick a calendar" path). If the calendar's venue does
  * not already offer the service, it is DUPLICATED into that venue (a real, same-named service
  * linked to the calendar) so both venues can book it — replacing the old carrier mechanism.
+ * The copy is exact: every setting of the origin service plus its variants, add-ons, heading
+ * and compliance requirements (see the fidelity rule in service-duplication.ts). A copy that
+ * cannot be completed is removed again and the tick is refused with the step that failed.
  */
 async function addCalendarToOffering(
   admin: SupabaseClient,

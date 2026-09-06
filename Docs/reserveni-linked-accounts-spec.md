@@ -869,6 +869,36 @@ Phase 2 build).
   account-login gate when any bookable member requires it, uses the editor's About text as its
   meta description, and the editor states which settings follow the host venue.
 
+### 7.7.2 Cross-venue service copies are exact (shipped 2026-09-06)
+
+When the host ticks a calendar in a venue that does not offer an offering's service, the
+service is duplicated into that venue (`service-duplication.ts`). The copy used to carry
+twelve hand-listed columns and hard-coded the rest, so a service with processing time arrived
+at the member venue with no processing gaps, no variants, no add-ons, no heading and no
+compliance requirements; the member's calendar then booked a plain service the combined page
+had promised as the real one (each venue's own service settings are what the page uses once a
+calendar is chosen, §7.7.1).
+
+The rule now:
+
+- **Origin.** The host venue's own service when the host provides the offering, otherwise the
+  earliest provider's (the same preference the page gives descriptions and headings).
+- **The row.** Every `service_items` column is copied through a denylist (`select('*')`), so a
+  column added later is copied without anyone remembering the file. Recomputed for the new
+  venue: id, venue, display position (appended), `is_active` (true), author (none), category
+  and the offering's canonical name. Duration and price follow the offering's defaults when
+  the host set them, else the origin's; processing gaps that no longer fit a shorter default
+  are dropped, otherwise the stored JSON is copied verbatim.
+- **Children.** Variants (active and inactive, with their own processing gaps), add-on groups
+  with their unarchived options, and compliance requirements. The heading, each add-on group
+  (same name, selection type and option names) and each compliance type (same library
+  template, else same name) are reused when the member venue already has them and created
+  there otherwise; a created compliance type carries the origin's current form and its audit
+  events are `system`.
+- **All or nothing.** A copy that cannot be completed is removed again (with any add-on groups
+  created on the way) and the tick is refused with the step that failed, so a half-configured
+  service never appears in a member's catalogue.
+
 ### 7.8 Branding scope
 
 Collective branding applies only to `/book/c/{slug}` and to confirmation communications for

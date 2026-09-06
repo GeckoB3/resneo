@@ -336,3 +336,11 @@ That is the precedence the web diary uses: the snapshot first, else the pattern.
 inside another's gap can then be drawn nested in it the way
 `src/lib/calendar/booking-cluster-layout.ts` does, including one that starts in a gap running to
 the host's end and finishes after the host.
+
+## Calendar availability parity: two more routes take the Bearer (2026-09-06)
+
+`GET /api/venue/calendar-entitlement` (the plan pill, the "Add calendar" gate and the tier limit
+copy) and `GET /api/venue/calendar-column-conflicts` (the "Conflict" pill and the resource
+overlap box) built their client from cookies alone and answered a Bearer token with 401. Both
+now use `createVenueRouteClient(request)` like the rest of `/api/venue/*`. The response shapes
+are unchanged; the dashboard's cookie session keeps working through the fallback.

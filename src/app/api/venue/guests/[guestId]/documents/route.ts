@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { resolveGuestDocumentScope } from '@/lib/guests/linked-guest-access';
 
 const BUCKET = 'guest-documents';
 /** How long a thumbnail link lasts; the list is fetched afresh whenever the section opens. */
@@ -14,6 +15,9 @@ export function isPreviewableDocument(mimeType: string | null | undefined): bool
 
 /**
  * GET /api/venue/guests/[guestId]/documents — list completed uploads for guest.
+ *
+ * Accepts `owner_venue_id` so the Records card also works on a linked venue's booking
+ * (R26): a full_details link that shares PII may read the owner venue's files.
  *
  * Photos and PDFs carry a short-lived `preview_url` so the Records section can
  * show a thumbnail and open the file in place; other files get `null` and are
@@ -32,21 +36,16 @@ export async function GET(
 
     const { guestId } = await params;
 
-    const { data: guest, error: gErr } = await staff.db
-      .from('guests')
-      .select('id')
-      .eq('id', guestId)
-      .eq('venue_id', staff.venue_id)
-      .maybeSingle();
-
-    if (gErr || !guest) {
-      return NextResponse.json({ error: 'Guest not found' }, { status: 404 });
+    const scoped = await resolveGuestDocumentScope(staff, request, guestId, 'read');
+    if (!scoped.ok) {
+      return NextResponse.json({ error: scoped.error }, { status: scoped.status });
     }
+    const scopeVenueId = scoped.scope.venueId;
 
     const { data, error } = await staff.db
       .from('guest_documents')
       .select('id, file_name, mime_type, file_size_bytes, category, created_at, uploaded_at, storage_path')
-      .eq('venue_id', staff.venue_id)
+      .eq('venue_id', scopeVenueId)
       .eq('guest_id', guestId)
       .is('deleted_at', null)
       .not('uploaded_at', 'is', null)

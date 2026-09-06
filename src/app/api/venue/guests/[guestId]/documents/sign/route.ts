@@ -4,6 +4,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { insertContactAuditEvent } from '@/lib/guests/contact-audit';
 import { GUEST_DOCUMENT_MAX_BYTES, checkGuestDocument } from '@/lib/guests/guest-document-limits';
+import { resolveGuestDocumentScope } from '@/lib/guests/linked-guest-access';
 
 const BUCKET = 'guest-documents';
 
@@ -21,6 +22,10 @@ function safeFileSegment(name: string): string {
 
 /**
  * POST /api/venue/guests/[guestId]/documents/sign — create DB row + signed upload URL.
+ *
+ * Accepts `owner_venue_id` for a linked venue's guest (R26) when the link also carries an
+ * edit grant. The row and the storage path are then the OWNER venue's, so the file lands in
+ * their Records exactly as one of their own.
  *
  * Size and type are checked here with the same rules the picker applies
  * (`checkGuestDocument`); the bucket enforces them again on the PUT itself.
@@ -57,25 +62,20 @@ export async function POST(
       return NextResponse.json({ error: accepted.message, code: `document_${accepted.reason}` }, { status: 400 });
     }
 
-    const { data: guest, error: gErr } = await staff.db
-      .from('guests')
-      .select('id')
-      .eq('id', guestId)
-      .eq('venue_id', staff.venue_id)
-      .maybeSingle();
-
-    if (gErr || !guest) {
-      return NextResponse.json({ error: 'Guest not found' }, { status: 404 });
+    const scoped = await resolveGuestDocumentScope(staff, request, guestId, 'write');
+    if (!scoped.ok) {
+      return NextResponse.json({ error: scoped.error }, { status: scoped.status });
     }
+    const { venueId: scopeVenueId, auditMetadata } = scoped.scope;
 
     const docId = crypto.randomUUID();
     const safeName = safeFileSegment(parsed.data.file_name);
-    const storagePath = `${staff.venue_id}/${guestId}/${docId}/${safeName}`;
+    const storagePath = `${scopeVenueId}/${guestId}/${docId}/${safeName}`;
 
     const { data: row, error: insErr } = await staff.db
       .from('guest_documents')
       .insert({
-        venue_id: staff.venue_id,
+        venue_id: scopeVenueId,
         guest_id: guestId,
         storage_path: storagePath,
         file_name: parsed.data.file_name.trim(),
@@ -104,11 +104,11 @@ export async function POST(
     }
 
     await insertContactAuditEvent(staff.db, {
-      venue_id: staff.venue_id,
+      venue_id: scopeVenueId,
       guest_id: guestId,
       actor_staff_id: staff.id,
       event_type: 'guest_document_upload_sign',
-      metadata: { document_id: documentId, path: storagePath },
+      metadata: { document_id: documentId, path: storagePath, ...auditMetadata },
     });
 
     return NextResponse.json({

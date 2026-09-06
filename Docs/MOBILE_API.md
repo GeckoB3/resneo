@@ -344,3 +344,50 @@ copy) and `GET /api/venue/calendar-column-conflicts` (the "Conflict" pill and th
 overlap box) built their client from cookies alone and answered a Bearer token with 401. Both
 now use `createVenueRouteClient(request)` like the rest of `/api/venue/*`. The response shapes
 are unchanged; the dashboard's cookie session keeps working through the fallback.
+
+## Deferred guest notification for a linked booking (R26, 2026-09-06)
+
+`POST /api/venue/bookings/[id]/guest-modification-notify` now loads the booking through
+`loadStaffAccessibleBooking` and refuses with 403 unless `linkedGrantAllowsMutation` passes,
+the same gate as the `PATCH` that deferred the message. The message is sent as the OWNER
+venue (the booking's `venue_id`), never the caller's. Before this the route filtered on the
+caller's venue and answered 404 for a partner's booking, so a linked move never emailed the
+guest.
+
+Statuses: bare `{ "error": "Unauthorised" }` 401 with no staff row; 404 `Booking not found`;
+403 `You do not have access to this booking.` (no link), `This link does not include that
+calendar.` (link scoped to other calendars), or `This link does not allow messaging guests on
+the other venue’s bookings.` (view-only link). The 200 body is unchanged:
+`{ ok: true, emailSent, smsSent, skipped, skippedReason? }`.
+
+App side: a partner's move may now send `defer_modification_guest_notification: true` and
+offer Notify, exactly as for an own booking; `skip_booking_modification_guest_notification`
+keeps working. No request field changed.
+
+## Guest documents for a linked venue (R26 second ask, 2026-09-06)
+
+The five guest-document routes accept `owner_venue_id=<uuid>` so a partner's guest's
+Records can be read and added to across a link:
+
+```
+GET    /api/venue/guests/[guestId]/documents
+GET    /api/venue/guests/[guestId]/documents/[documentId]/download
+POST   /api/venue/guests/[guestId]/documents/sign
+POST   /api/venue/guests/[guestId]/documents/[documentId]/complete
+DELETE /api/venue/guests/[guestId]/documents/[documentId]
+```
+
+Gates, all in `src/lib/guests/linked-guest-access.ts`: an accepted link whose grant is
+`full_details` AND shares PII for every one of them; plus an edit grant for sign and
+complete; plus the FULL MANAGEMENT grant for delete (destroying a file the owner venue holds
+follows booking cancel and booking delete, not booking edit). `PATCH` on a document is
+own-venue only.
+
+403 bodies: `You do not have access to that venue’s client records.`,
+`This link does not allow changing the other venue’s client records.`,
+`This link does not allow deleting the other venue’s client records.`. A guest that does
+not belong to the resolved venue answers 404 `Guest not found`. Success shapes are unchanged.
+
+The storage path and `guest_documents.venue_id` stay the OWNER venue's; the contact audit
+event is written against the owner venue with `acting_venue_id` and `link_id` in its
+metadata.

@@ -490,8 +490,8 @@ export function WalkInModal({
             </div>
           )}
           {/* Date, time + party size */}
-          <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(4.5rem,0.55fr)] gap-2 sm:gap-3">
-            <div className="min-w-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(4.5rem,0.6fr)] gap-2 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(4.5rem,0.55fr)] sm:gap-3">
+            <div className="col-span-2 min-w-0 sm:col-span-1">
               <label htmlFor="walkin-date" className="mb-1.5 block text-sm font-medium text-slate-700">
                 Date
               </label>

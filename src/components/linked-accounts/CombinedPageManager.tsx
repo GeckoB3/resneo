@@ -554,12 +554,30 @@ export function CombinedPageManager({
           ? 'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.'
           : 'This combined page is managed by the host venue.'
       }
+      footer={
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {pendingCount > 0 ? (
+            <span className="text-xs text-amber-600">
+              {pendingCount} unsaved calendar change{pendingCount === 1 ? '' : 's'}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className={`${pendingCount > 0 ? btnPrimary : btnSecondary} w-full sm:w-auto`}
+            onClick={() => (pendingCount > 0 ? void saveAndClose() : requestClose())}
+            disabled={busy}
+          >
+            {savingProviders ? <ButtonSpinner /> : null}
+            {pendingCount > 0 ? 'Save and close' : 'Done'}
+          </button>
+        </div>
+      }
     >
       {tabs.length > 1 ? (
         <div
           role="tablist"
           aria-label="Combined page settings"
-          className="mb-4 flex gap-1 border-b border-slate-200"
+          className="-mx-6 mb-4 flex gap-1 overflow-x-auto border-b border-slate-200 px-6 sm:mx-0 sm:px-0"
         >
           {tabs.map((t) => (
             <button
@@ -569,7 +587,7 @@ export function CombinedPageManager({
               aria-selected={tab === t.key}
               disabled={busy}
               onClick={() => setTab(t.key)}
-              className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+              className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2 py-2.5 text-sm font-medium transition sm:px-3 sm:py-2 ${
                 tab === t.key
                   ? 'border-brand-600 text-brand-700'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -581,7 +599,7 @@ export function CombinedPageManager({
         </div>
       ) : null}
 
-      <div className="max-h-[min(68vh,calc(100dvh-11rem))] space-y-5 overflow-y-auto pr-1">
+      <div className="space-y-5">
         {error ? (
           <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
             {error}
@@ -638,23 +656,6 @@ export function CombinedPageManager({
             are offered. To stop taking part, leave the collective from the Venue collectives list.
           </p>
         ) : null}
-      </div>
-
-      <div className="mt-5 flex items-center justify-end gap-3">
-        {pendingCount > 0 ? (
-          <span className="text-xs text-amber-600">
-            {pendingCount} unsaved calendar change{pendingCount === 1 ? '' : 's'}
-          </span>
-        ) : null}
-        <button
-          type="button"
-          className={pendingCount > 0 ? btnPrimary : btnSecondary}
-          onClick={() => (pendingCount > 0 ? void saveAndClose() : requestClose())}
-          disabled={busy}
-        >
-          {savingProviders ? <ButtonSpinner /> : null}
-          {pendingCount > 0 ? 'Save and close' : 'Done'}
-        </button>
       </div>
     </Modal>
   );
@@ -874,7 +875,7 @@ function MembersSection({
       {pending ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
           <p className="text-sm text-slate-800">{pending.message}</p>
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2 flex flex-wrap gap-2">
             <button
               type="button"
               className={pending.danger ? btnDanger : btnPrimary}
@@ -912,7 +913,7 @@ function MembersSection({
                 {m.status === 'active' && !isHostMember ? (
                   <button
                     type="button"
-                    className="text-xs font-medium text-slate-500 hover:text-brand-700 disabled:opacity-50"
+                    className="min-h-9 px-1 text-xs font-medium text-slate-500 hover:text-brand-700 disabled:opacity-50"
                     disabled={busy}
                     onClick={() =>
                       setPending({
@@ -928,7 +929,7 @@ function MembersSection({
                 {!isHostMember ? (
                   <button
                     type="button"
-                    className="text-xs font-medium text-rose-500 hover:text-rose-700 disabled:opacity-50"
+                    className="min-h-9 px-1 text-xs font-medium text-rose-500 hover:text-rose-700 disabled:opacity-50"
                     disabled={busy}
                     onClick={() =>
                       setPending({
@@ -955,7 +956,7 @@ function MembersSection({
             No further venues with full create/edit/cancel links both ways are available to invite.
           </p>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <select
               className={inputCls}
               value={inviteId}
@@ -971,7 +972,7 @@ function MembersSection({
             </select>
             <button
               type="button"
-              className={btnSecondary}
+              className={`${btnSecondary} shrink-0`}
               disabled={busy || !inviteId}
               onClick={() => {
                 void onMember({ action: 'invite', venueId: inviteId });
@@ -1113,7 +1114,7 @@ function HostCatalogue({
             </div>
           ))
         )}
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <input
             className={inputCls}
             placeholder="Custom offering name (e.g. 60-min Deep Tissue Massage)"
@@ -1123,7 +1124,7 @@ function HostCatalogue({
           />
           <button
             type="button"
-            className={btnSecondary}
+            className={`${btnSecondary} shrink-0`}
             disabled={busy || newItemName.trim().length === 0}
             onClick={async () => {
               const ok = await action({ action: 'create_item', name: newItemName.trim() });
@@ -1340,7 +1341,7 @@ function VenueServicesPicker({
             );
           })}
           {addable.length > 0 ? (
-            <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
               <span className="text-xs text-slate-500">
                 {selectedCount > 0 ? `${selectedCount} selected` : 'None selected'}
               </span>

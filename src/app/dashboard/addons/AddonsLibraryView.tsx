@@ -31,6 +31,7 @@ interface LibraryPayload {
 interface ServiceRow {
   id: string;
   name: string;
+  category: string | null;
 }
 
 function selectionRuleLabel(group: AddonGroup): string {
@@ -50,10 +51,13 @@ export function AddonsLibraryView({
    * as the body of a tab inside another page (e.g. /dashboard/appointment-services).
    */
   embedded = false,
+  onServiceLinksChanged,
 }: {
   isAdmin: boolean;
   currencySymbol: string;
   embedded?: boolean;
+  /** Called after a save changed which services a group is linked to, so the Services tab can refresh. */
+  onServiceLinksChanged?: () => void;
 }) {
   const [library, setLibrary] = useState<LibraryPayload | null>(null);
   const [services, setServices] = useState<ServiceRow[]>([]);
@@ -86,7 +90,11 @@ export function AddonsLibraryView({
       }
       const libPayload = (await libRes.json()) as LibraryPayload;
       const svcPayload = (await svcRes.json()) as { services?: AppointmentService[] };
-      const svcRows = (svcPayload.services ?? []).map((s) => ({ id: s.id, name: s.name }));
+      const svcRows = (svcPayload.services ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        category: (s as { category?: { name?: string } | null }).category?.name ?? null,
+      }));
       setLibrary(libPayload);
       setServices(svcRows);
     } catch (err) {
@@ -132,7 +140,10 @@ export function AddonsLibraryView({
     const isNew = !value.id;
     const url = isNew ? '/api/venue/addon-groups' : `/api/venue/addon-groups/${value.id}`;
     const method = isNew ? 'POST' : 'PATCH';
+    // The route picks the column for the venue's schema; the same ids go in both.
+    const serviceIds = value.service_ids ?? [];
     const body = JSON.stringify({
+      service_links: { service_item_ids: serviceIds, appointment_service_ids: serviceIds },
       group: {
         ...(value.id ? { id: value.id } : {}),
         name: value.name,
@@ -166,6 +177,7 @@ export function AddonsLibraryView({
       throw new Error((data as { error?: string }).error ?? 'Failed to save group');
     }
     await loadLibrary();
+    onServiceLinksChanged?.();
   }
 
   async function deleteOrArchive(groupId: string) {
@@ -195,7 +207,10 @@ export function AddonsLibraryView({
 
   const editingGroup = editingGroupId ? groups.find((g) => g.id === editingGroupId) : null;
   const editingValue: AddonGroupEditorValue | undefined = editingGroup
-    ? addonGroupValueFromRecords(editingGroup, addonsByGroup[editingGroup.id] ?? [])
+    ? {
+        ...addonGroupValueFromRecords(editingGroup, addonsByGroup[editingGroup.id] ?? []),
+        service_ids: usedByForGroup(editingGroup.id).map((s) => s.id),
+      }
     : undefined;
 
   return (
@@ -259,7 +274,7 @@ export function AddonsLibraryView({
           Show archived groups
         </label>
         <p className="text-xs text-slate-500">
-          Groups are venue-wide. Linking them to a service is done from the service edit form.
+          Groups are venue-wide. Choose which services offer a group under Linked services when you edit it, or from the service edit form.
         </p>
       </div>
 
@@ -448,7 +463,8 @@ export function AddonsLibraryView({
         open={creatingNew}
         title="New add-on group"
         currencySymbol={currencySymbol}
-        initialValue={emptyAddonGroupValue()}
+        initialValue={{ ...emptyAddonGroupValue(), service_ids: [] }}
+        linkableServices={services}
         onClose={() => setCreatingNew(false)}
         onSubmit={async (value) => {
           await saveGroupEdit(value);
@@ -462,6 +478,7 @@ export function AddonsLibraryView({
         title="Edit add-on group"
         currencySymbol={currencySymbol}
         initialValue={editingValue}
+        linkableServices={services}
         onClose={() => setEditingGroupId(null)}
         onSubmit={async (value) => {
           await saveGroupEdit(value);

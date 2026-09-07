@@ -73,7 +73,7 @@ export function ImportFromMember({
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg"
+          className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg sm:left-auto sm:right-0"
         >
           {sources.map((s) => (
             <button

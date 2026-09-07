@@ -9,7 +9,10 @@
  *    from the left, so only the left edge of the host's processing band stays
  *    visible. It may run on past the host's end when the gap reaches the end
  *    too. Staff see at a glance that the slot was used, and neither bar loses
- *    half the column.
+ *    half the column. Nesting chains: a bar nested in a gap can host a third
+ *    bar in a gap of its own (a trim booked into the processing time of a cut
+ *    that was itself booked into a colour's), each level indented a little
+ *    further, so consecutive processing periods read as one line of bookings.
  *
  * 2. LANES. Anything that still overlaps is split into side-by-side lanes, the
  *    same interval-colouring the grid always did.
@@ -39,7 +42,14 @@ export interface BookingClusterLayout {
   /** Key of the host this item is drawn inside, when it nests in a processing gap. */
   nestedInKey?: string;
   /**
-   * Wall-clock ranges of the items nested inside this one, when it hosts any.
+   * How many hosts this item sits inside: 1 when nested directly in a lane's
+   * bar, 2 when nested in a bar that is itself nested, and so on. Each level
+   * is indented by {@link NESTED_BOOKING_INSET_PX} more than its host.
+   */
+  nestDepth?: number;
+  /**
+   * Wall-clock ranges of the items nested inside this one, when it hosts any,
+   * including items nested deeper down the chain (they cover this bar too).
    * The host lays its text and buttons out around these.
    */
   nestedRanges?: MinuteRange[];
@@ -133,14 +143,27 @@ function startsInGapAndStaysFree(host: ClusterLayoutItem, item: MinuteRange): bo
   );
 }
 
+/** The chain of hosts above an item, nearest first; empty for a lane's own bar. */
+function hostChain(nestedIn: Map<string, string>, key: string): string[] {
+  const chain: string[] = [];
+  let cur = nestedIn.get(key);
+  while (cur !== undefined && !chain.includes(cur)) {
+    chain.push(cur);
+    cur = nestedIn.get(cur);
+  }
+  return chain;
+}
+
 /**
  * Chooses, for every item, the host it nests in (if any).
  *
  * Longer items are considered as hosts first, so a booking prefers the longest
- * host it could ride in. An item that already hosts cannot itself nest, and an
- * item that nests cannot host, so nesting is one level deep. Two nested items
- * may share a host only if they do not overlap each other; a third that would
- * overlap them falls back to a lane.
+ * host it could ride in. A host may itself be nested, so chains form: a third
+ * booking rides in the gap of the second, which rides in the gap of the first.
+ * Items are placed in start order, so a bar is always settled before anything
+ * that could nest in it is considered. Two items may share a host's gap only if
+ * they do not overlap each other; an item that would overlap them tries the
+ * next host and otherwise falls back to a lane.
  */
 function assignNesting(items: ClusterLayoutItem[]): Map<string, string> {
   const nestedIn = new Map<string, string>();
@@ -154,7 +177,8 @@ function assignNesting(items: ClusterLayoutItem[]): Map<string, string> {
     if (hosted.has(item.key)) continue;
     for (const host of hostCandidates) {
       if (host.key === item.key) continue;
-      if (nestedIn.has(host.key)) continue;
+      // Never nest in something that sits inside this item.
+      if (hostChain(nestedIn, host.key).includes(item.key)) continue;
       if (!startsInGapAndStaysFree(host, item)) continue;
       const already = hosted.get(host.key) ?? [];
       if (already.some((r) => rangesOverlap(r, item))) continue;
@@ -181,14 +205,19 @@ export function layoutOverlapClusters(items: ClusterLayoutItem[]): Map<string, B
   const flush = () => {
     if (run.length === 0) return;
     const nestedIn = assignNesting(run);
-    // A host's lane stays taken until the last bar nested in it ends, which is
-    // after the host itself when a nested bar runs out of a tail gap.
+    // The lane's own bar is the top of each item's host chain.
+    const laneOwnerOf = (key: string): string => {
+      const chain = hostChain(nestedIn, key);
+      return chain.length > 0 ? chain[chain.length - 1]! : key;
+    };
+    // A lane stays taken until the last bar nested anywhere in its chain ends,
+    // which is after the host itself when a nested bar runs out of a tail gap.
     const laneReach = new Map<string, number>();
     for (const item of run) laneReach.set(item.key, item.end);
     for (const item of run) {
-      const hostKey = nestedIn.get(item.key);
-      if (hostKey === undefined) continue;
-      laneReach.set(hostKey, Math.max(laneReach.get(hostKey) ?? item.end, item.end));
+      if (!nestedIn.has(item.key)) continue;
+      const owner = laneOwnerOf(item.key);
+      laneReach.set(owner, Math.max(laneReach.get(owner) ?? item.end, item.end));
     }
     const laneEnds: number[] = [];
     const laneOf = new Map<string, number>();
@@ -205,21 +234,25 @@ export function layoutOverlapClusters(items: ClusterLayoutItem[]): Map<string, B
       laneOf.set(item.key, laneIndex);
     }
     const laneCount = Math.max(1, laneEnds.length);
+    // Every host up the chain is covered by the nested bar, so each gets the range.
     const rangesByHost = new Map<string, MinuteRange[]>();
     for (const item of run) {
-      const hostKey = nestedIn.get(item.key);
-      if (hostKey === undefined) continue;
-      const list = rangesByHost.get(hostKey) ?? [];
-      list.push({ start: item.start, end: item.end });
-      rangesByHost.set(hostKey, list);
+      for (const hostKey of hostChain(nestedIn, item.key)) {
+        const list = rangesByHost.get(hostKey) ?? [];
+        list.push({ start: item.start, end: item.end });
+        rangesByHost.set(hostKey, list);
+      }
     }
     for (const item of run) {
       const hostKey = nestedIn.get(item.key);
       if (hostKey !== undefined) {
+        const nestedRanges = rangesByHost.get(item.key);
         layouts.set(item.key, {
-          laneIndex: laneOf.get(hostKey) ?? 0,
+          laneIndex: laneOf.get(laneOwnerOf(item.key)) ?? 0,
           laneCount,
           nestedInKey: hostKey,
+          nestDepth: hostChain(nestedIn, item.key).length,
+          ...(nestedRanges ? { nestedRanges } : {}),
         });
       } else {
         const nestedRanges = rangesByHost.get(item.key);
@@ -258,11 +291,16 @@ export function clusterLayoutHorizontalStyle(
   const laneLeft = `${layout.laneIndex * widthPct}% + ${gutter}rem`;
   const laneWidth = `${widthPct}% - ${gutter * 2}rem`;
   if (layout.nestedInKey) {
+    const depth = Math.max(1, layout.nestDepth ?? 1);
+    const inset = NESTED_BOOKING_INSET_PX * depth;
     return {
-      left: `calc(${laneLeft} + ${NESTED_BOOKING_INSET_PX}px)`,
-      width: `calc(${laneWidth} - ${NESTED_BOOKING_INSET_PX}px)`,
-      // Above every lane's host (hosts sit at baseZ + laneIndex, lanes are few).
-      zIndex: baseZ + 10 + layout.laneIndex,
+      left: `calc(${laneLeft} + ${inset}px)`,
+      width: `calc(${laneWidth} - ${inset}px)`,
+      // Above every lane's host (hosts sit at baseZ + laneIndex, lanes are few),
+      // and each deeper level above the one it rides in. Kept under baseZ + 10
+      // whatever the depth: the dashboard's mobile top bar and sidebar drawer
+      // sit at z-30 and z-40, and a bar at that height showed through them.
+      zIndex: Math.min(baseZ + 9, baseZ + 4 + 2 * depth + layout.laneIndex),
     };
   }
   return {

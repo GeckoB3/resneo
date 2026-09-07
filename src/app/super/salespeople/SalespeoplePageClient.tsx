@@ -642,12 +642,12 @@ export function SalespeoplePageClient() {
                         </p>
                         <div className="space-y-2">
                           {editTiers.map((tier, i) => (
-                            <div key={i} className="flex items-center gap-2">
+                            <div key={i} className="flex flex-wrap items-center gap-2">
                               <input
                                 type="number"
                                 min="1"
                                 placeholder="Subscribers"
-                                className={`${inputClass} max-w-[140px]`}
+                                className={`${inputClass} min-w-0 max-w-[140px]`}
                                 value={tier.threshold}
                                 onChange={(e) => updateTierDraft(i, { threshold: e.target.value })}
                               />
@@ -657,7 +657,7 @@ export function SalespeoplePageClient() {
                                 step="0.01"
                                 min="0"
                                 placeholder="Bonus"
-                                className={`${inputClass} max-w-[140px]`}
+                                className={`${inputClass} min-w-0 max-w-[140px]`}
                                 value={tier.amountPounds}
                                 onChange={(e) => updateTierDraft(i, { amountPounds: e.target.value })}
                               />
@@ -766,7 +766,7 @@ function TrialDaysInput({ value, onChange }: { value: string; onChange: (v: stri
           </button>
         ))}
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <input
           type="number"
           min={MIN_SALES_TRIAL_DAYS}

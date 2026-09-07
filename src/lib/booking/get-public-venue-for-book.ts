@@ -12,11 +12,18 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   const { data, error } = await supabase
     .from('venues')
     .select(
-      'id, name, slug, cover_photo_url, logo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, feature_flags, require_account_login_for_bookings, booking_page_config',
+      'id, name, slug, cover_photo_url, logo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status, subscription_current_period_end, billing_access_source, feature_flags, require_account_login_for_bookings, booking_page_config, google_review_url',
     )
     .eq('slug', slug)
     .single();
   if (error || !data) return null;
+
+  // A saved Google review link means the venue has a Business Profile, so the About tab's map
+  // can look the listing up by name and show its rating. Without one, a name query would only
+  // replace Google's address card with a bare pin, so the map searches the address alone.
+  const googleReviewUrl = (data as { google_review_url?: string | null }).google_review_url;
+  (data as VenuePublic).map_place_name = googleReviewUrl?.trim() ? (data.name as string) : null;
+  delete (data as { google_review_url?: string | null }).google_review_url;
 
   if (
     isPublicOnlineBookingBlocked({

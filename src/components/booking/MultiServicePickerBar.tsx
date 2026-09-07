@@ -57,7 +57,8 @@ export function MultiServicePickerBar({
 
   return (
     <div className={shell} data-testid="service-picker-bar" aria-live="polite">
-      <div className="flex items-center justify-between gap-3">
+      {/* Phones: summary on top, buttons in a full-width row below. Wider: one row, buttons on the right. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-900">
             {count} {count === 1 ? 'service' : 'services'}
@@ -81,11 +82,11 @@ export function MultiServicePickerBar({
           <button
             type="button"
             onClick={onClear}
-            className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            className="min-h-[44px] rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 sm:min-h-0 sm:px-2"
           >
             Clear
           </button>
-          <button type="button" onClick={onContinue} className={continueClass}>
+          <button type="button" onClick={onContinue} className={`${continueClass} flex-1 sm:flex-none`}>
             Continue
           </button>
         </div>

@@ -235,7 +235,7 @@ export function CommsPageClient() {
                   No delivery failures in this window.
                 </p>
               ) : (
-                <div className="max-h-[480px] overflow-y-auto">
+                <div className="max-h-[480px] overflow-auto">
                   <table className="w-full text-left text-xs">
                     <thead className="sticky top-0 bg-slate-50 uppercase tracking-wide text-slate-500">
                       <tr>

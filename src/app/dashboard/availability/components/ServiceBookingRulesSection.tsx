@@ -153,7 +153,7 @@ export function ServiceBookingRulesSection({ serviceId, restriction, showToast, 
       <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="text-base font-bold text-slate-900">Booking rules</h3>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
               Min advance (minutes) <HelpTooltip content={helpContent.bookingRules.minAdvance} />
@@ -212,7 +212,7 @@ export function ServiceBookingRulesSection({ serviceId, restriction, showToast, 
             </span>
           </label>
           {draft.large_party_threshold != null && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Redirect from party size</label>
                 <NumericInput min={2} value={draft.large_party_threshold} onChange={(v) => setDraft({ ...draft, large_party_threshold: v })} className={FIELD_CLASS} />

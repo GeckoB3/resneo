@@ -18,11 +18,23 @@ export function buildGoogleMapsDirectionsUrl(address: string | null | undefined)
   return `https://www.google.com/maps/search/?${params.toString()}`;
 }
 
-/** Embed URL for an iframe map preview (no API key; query is the venue address). */
-export function buildGoogleMapsEmbedUrl(address: string | null | undefined): string | null {
+/**
+ * Embed URL for an iframe map preview (no API key).
+ *
+ * The query is the business name followed by the address. When Google can match that to a
+ * Business Profile the embed's card shows the name, address and star rating; when it cannot,
+ * it falls back to a pin at the address exactly as an address-only query does. The keyless
+ * embed ignores Place IDs, so the name is the only way to reach the listing's rating.
+ */
+export function buildGoogleMapsEmbedUrl(
+  address: string | null | undefined,
+  placeName?: string | null,
+): string | null {
   const a = (address ?? '').trim();
   if (!a) return null;
-  return `https://www.google.com/maps?q=${encodeURIComponent(a)}&output=embed`;
+  const name = (placeName ?? '').trim();
+  const query = name ? `${name}, ${a}` : a;
+  return `https://www.google.com/maps?q=${encodeURIComponent(query)}&output=embed`;
 }
 
 /**

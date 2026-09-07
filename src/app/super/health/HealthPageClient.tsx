@@ -97,7 +97,7 @@ export function HealthPageClient() {
 
       {/* Band summary (clickable filters) */}
       {data ? (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
           {(['at_risk', 'watch', 'healthy'] as Band[]).map((band) => {
             const meta = BAND_META[band];
             const count = data.summary[band];

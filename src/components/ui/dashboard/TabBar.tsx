@@ -11,7 +11,7 @@ export function TabBar<T extends string>({
   value,
   pendingValue,
   onChange,
-  mobileNote = 'Scroll sideways to see all settings tabs',
+  mobileNote = null,
   density = 'default',
   mobileLayout = 'single-row-scroll',
 }: {
@@ -19,6 +19,7 @@ export function TabBar<T extends string>({
   value: T;
   pendingValue?: T | null;
   onChange: (id: T) => void;
+  /** Optional short hint shown above the tabs on mobile only. Off by default. */
   mobileNote?: string | null;
   density?: 'default' | 'compact';
   /** Mobile (&lt; sm): one scrollable row, or two rows with a single horizontal scroll. */
@@ -78,7 +79,7 @@ export function TabBar<T extends string>({
           {mobileNote}
         </p>
       ) : null}
-      <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] pb-0.5 sm:overflow-visible sm:pb-0">
+      <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] sm:overflow-visible">
         {useTwoRowMobile ? (
           <>
             <div

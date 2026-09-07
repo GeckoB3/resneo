@@ -417,7 +417,7 @@ export function TableCombinationsPage({
           </div>
         )}
 
-        <div className="lg:hidden sticky top-0 z-20 mx-auto w-full max-w-[40vw] py-2">
+        <div className="lg:hidden sticky top-0 z-20 mx-auto w-full max-w-[60vw] py-2 sm:max-w-[40vw]">
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
           <div className="rounded-xl border border-slate-200 bg-slate-50/95 shadow-sm ring-1 ring-slate-200/80 backdrop-blur-sm supports-[backdrop-filter]:bg-slate-50/90">
             <MiniFloorPlanPicker
@@ -1008,7 +1008,7 @@ function CustomComboModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
         <h3 className="text-base font-semibold text-slate-900">{combo ? 'Edit custom combination' : 'New custom combination'}</h3>
         {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
         <div className="mt-3">

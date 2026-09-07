@@ -38,6 +38,7 @@ export function Modal({
   children,
   busy = false,
   maxWidth = 'max-w-lg',
+  footer,
 }: {
   open: boolean;
   onClose: () => void;
@@ -46,6 +47,8 @@ export function Modal({
   children: ReactNode;
   busy?: boolean;
   maxWidth?: string;
+  /** Pinned below the scrolling body, so primary actions stay reachable on small screens. */
+  footer?: ReactNode;
 }) {
   return (
     <Dialog
@@ -56,6 +59,7 @@ export function Modal({
       title={title}
       description={description}
       contentClassName={maxWidth}
+      footer={footer}
     >
       {children}
     </Dialog>

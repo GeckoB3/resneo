@@ -18,6 +18,13 @@ export interface VenuePublic {
   phone: string | null;
   /** Business website; shown in booking header when set. */
   website_url?: string | null;
+  /**
+   * Business name to pair with the address in the About tab's map query, so Google matches
+   * the Business Profile and its card shows the address and star rating. Set only when the
+   * venue has a Google review link (a sign it has a listing); a combined page uses its host
+   * venue's name. Null or absent means the map searches the address alone.
+   */
+  map_place_name?: string | null;
   /** Booking Site Studio branding/content (brand colours, about, announcement, socials). */
   booking_page_config?: BookingPageConfig | null;
   deposit_config: DepositConfigPublic | null;

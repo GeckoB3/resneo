@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { BOOKING_TAB_PANEL_CLASS, BOOKING_TAB_PANEL_INSET_CLASS } from '@/components/booking/appointment-public-ui';
 import { BookOpeningHours } from '@/components/booking/BookOpeningHours';
+import { BookingPageMapEmbed } from '@/components/booking/BookingPageMapEmbed';
 import { BookingPageSocialLinks } from '@/components/booking/BookingPageSocialLinks';
 import { BookVenueTitle } from '@/components/booking/BookVenueTitle';
 import type { VenuePublic } from '@/components/booking/types';
@@ -81,7 +82,7 @@ export function BookingPageAboutPanel({
   gallery,
 }: BookingPageAboutPanelProps) {
   const websiteHref = normalizeWebsiteUrlForLink(venue.website_url);
-  const mapsEmbedUrl = buildGoogleMapsEmbedUrl(venue.address);
+  const mapsEmbedUrl = buildGoogleMapsEmbedUrl(venue.address, venue.map_place_name);
   const mapsDirectionsUrl = buildGoogleMapsDirectionsUrl(venue.address);
   const hasContact =
     Boolean(venue.address?.trim()) ||
@@ -157,16 +158,7 @@ export function BookingPageAboutPanel({
 
         {mapsEmbedUrl ? (
           <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
-            <div className="relative aspect-[16/10] w-full bg-slate-100">
-              <iframe
-                title={`Map showing location of ${venue.name}`}
-                src={mapsEmbedUrl}
-                className="absolute inset-0 h-full w-full border-0"
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                allowFullScreen
-              />
-            </div>
+            <BookingPageMapEmbed src={mapsEmbedUrl} title={`Map showing location of ${venue.name}`} />
             {mapsDirectionsUrl ? (
               <p className="border-t border-slate-100 px-4 py-3 text-center text-sm">
                 <a

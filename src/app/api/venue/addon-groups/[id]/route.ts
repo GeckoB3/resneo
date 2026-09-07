@@ -4,9 +4,27 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { addonGroupInputSchema } from '@/lib/addons/zod-schemas';
-import { upsertAddonGroup, addonGroupHasBookings } from '@/lib/venue/addon-groups';
+import {
+  upsertAddonGroup,
+  addonGroupHasBookings,
+  replaceAddonGroupServiceLinks,
+} from '@/lib/venue/addon-groups';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
-const patchBodySchema = z.object({ group: addonGroupInputSchema });
+const patchBodySchema = z.object({
+  group: addonGroupInputSchema,
+  /**
+   * When present, the full set of services this group should be linked to (the
+   * library's "Linked services" picker). Omitted by the service form, which
+   * manages links from the service side and must not disturb other services.
+   */
+  service_links: z
+    .object({
+      service_item_ids: z.array(z.string().uuid()).optional(),
+      appointment_service_ids: z.array(z.string().uuid()).optional(),
+    })
+    .optional(),
+});
 
 interface RouteCtx {
   params: { id: string } | Promise<{ id: string }>;
@@ -56,6 +74,21 @@ export async function PATCH(request: NextRequest, ctx: RouteCtx) {
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 500 });
+    }
+
+    const links = parsed.data.service_links;
+    if (links) {
+      const useUnified = await venueUsesUnifiedAppointmentServiceData(admin, staff.venue_id);
+      const linkRes = await replaceAddonGroupServiceLinks({
+        admin,
+        venueId: staff.venue_id,
+        groupId: id,
+        parentSchema: useUnified ? 'service_item' : 'appointment_service',
+        serviceIds: useUnified ? links.service_item_ids ?? [] : links.appointment_service_ids ?? [],
+      });
+      if (!linkRes.ok) {
+        return NextResponse.json({ error: linkRes.error }, { status: 500 });
+      }
     }
     return NextResponse.json({ group: result.group, addons: result.addons });
   } catch (err) {

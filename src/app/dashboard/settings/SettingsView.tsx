@@ -1406,14 +1406,13 @@ function SettingsViewInner({
           subtitle="Manage your venue profile, hours, billing, payments, communications, and team. Simple fields save automatically; hours, staff invites, and Stripe actions use explicit saves."
         />
       </header>
-      <div className="sticky top-0 z-30 -mx-4 border-b border-slate-200/90 bg-slate-100/95 py-2 backdrop-blur-sm supports-[backdrop-filter]:bg-slate-100/85 sm:-mx-6 sm:px-0 lg:-mx-8">
+      <div className="sticky top-0 z-30 -mx-4 border-b border-slate-200/90 bg-slate-100/95 pt-1.5 pb-1 backdrop-blur-sm supports-[backdrop-filter]:bg-slate-100/85 sm:-mx-6 sm:px-0 sm:py-2 lg:-mx-8">
         <div className="px-4 sm:px-6 lg:px-8">
           <TabBar
             tabs={tabBarTabs}
             value={selectedTab}
             onChange={(id) => replaceWithTab(id)}
             mobileLayout="two-row-scroll"
-            mobileNote="Scroll sideways to see all settings tabs"
           />
         </div>
       </div>

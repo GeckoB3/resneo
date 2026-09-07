@@ -228,7 +228,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
           collectiveBookingLinks,
         }}
       >
-      <main className="dashboard-coarse-inputs min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
+      <main
+        className={`dashboard-coarse-inputs min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-slate-100/80 lg:pt-0 ${
+          supportSession ? 'pt-0' : 'pt-[calc(3.5rem+env(safe-area-inset-top,0px))]'
+        }`}
+      >
         {isAdmin ? null : (
           <div className="sr-only" aria-hidden>
             Staff users do not have plan-management access.

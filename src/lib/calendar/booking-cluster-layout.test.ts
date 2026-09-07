@@ -47,7 +47,7 @@ describe('layoutOverlapClusters', () => {
       laneCount: 1,
       nestedRanges: [{ start: t(11, 30), end: t(12) }],
     });
-    expect(layouts.get('cut')).toEqual({ laneIndex: 0, laneCount: 1, nestedInKey: 'tint' });
+    expect(layouts.get('cut')).toEqual({ laneIndex: 0, laneCount: 1, nestDepth: 1, nestedInKey: 'tint' });
   });
 
   it('nests a shorter booking that fills only part of the gap', () => {
@@ -92,17 +92,42 @@ describe('layoutOverlapClusters', () => {
     expect(layouts.get('a')?.laneIndex).toBe(layouts.get('host')?.laneIndex);
   });
 
-  it('never nests more than one level deep', () => {
-    // The nested cut has a gap of its own that a trim would fit in.
+  it('nests a third booking in the gap of a booking that is itself nested', () => {
+    // The nested cut has a gap of its own that a trim fits in.
     const layouts = layoutOverlapClusters([
       tint('tint', t(11)),
       { key: 'cut', start: t(11, 30), end: t(12), gaps: [{ start: t(11, 40), end: t(11, 50) }] },
       { key: 'trim', start: t(11, 40), end: t(11, 50) },
     ]);
-    expect(layouts.get('cut')?.nestedInKey).toBe('tint');
+    expect(layouts.get('cut')).toMatchObject({
+      nestedInKey: 'tint',
+      nestDepth: 1,
+      nestedRanges: [{ start: t(11, 40), end: t(11, 50) }],
+    });
     // trim also fits the tint's gap directly but overlaps the already nested cut,
-    // so it takes a lane rather than nesting two deep.
-    expect(layouts.get('trim')?.nestedInKey).toBeUndefined();
+    // so it rides in the cut instead, one level deeper, still in the tint's lane.
+    expect(layouts.get('trim')).toMatchObject({ nestedInKey: 'cut', nestDepth: 2, laneIndex: 0, laneCount: 1 });
+    // The tint is covered by both bars, so it lays its text out around both.
+    expect(layouts.get('tint')?.nestedRanges).toEqual([
+      { start: t(11, 30), end: t(12) },
+      { start: t(11, 40), end: t(11, 50) },
+    ]);
+    for (const key of ['tint', 'cut', 'trim']) expect(layouts.get(key)?.laneCount).toBe(1);
+  });
+
+  it('keeps the lane taken until a bar nested two deep runs out of a tail gap', () => {
+    // Colour 11:00-12:30 with a tail gap from 11:30; a cut 11:30-12:30 nested in it
+    // with its own tail gap from 12:00; a trim 12:00-12:45 rides out of the cut's
+    // gap, past both hosts. A booking at 12:40 must still take a second lane.
+    const layouts = layoutOverlapClusters([
+      { key: 'colour', start: t(11), end: t(12, 30), gaps: [{ start: t(11, 30), end: t(12, 30) }] },
+      { key: 'cut', start: t(11, 30), end: t(12, 30), gaps: [{ start: t(12), end: t(12, 30) }] },
+      { key: 'trim', start: t(12), end: t(12, 45) },
+      { key: 'late', start: t(12, 40), end: t(13) },
+    ]);
+    expect(layouts.get('cut')?.nestedInKey).toBe('colour');
+    expect(layouts.get('trim')).toMatchObject({ nestedInKey: 'cut', nestDepth: 2, laneIndex: 0 });
+    expect(layouts.get('late')).toMatchObject({ laneIndex: 1, laneCount: 2 });
   });
 
   it('nests inside the host even when the host is itself in a lane', () => {
@@ -117,7 +142,7 @@ describe('layoutOverlapClusters', () => {
     expect(layouts.get('cut')).toEqual({
       laneIndex: tintLayout.laneIndex,
       laneCount: 2,
-      nestedInKey: 'tint',
+      nestDepth: 1, nestedInKey: 'tint',
     });
   });
 
@@ -131,7 +156,7 @@ describe('layoutOverlapClusters', () => {
       balayage('colour', t(13, 30)),
       { key: 'cut', start: t(16), end: t(17) },
     ]);
-    expect(layouts.get('cut')).toEqual({ laneIndex: 0, laneCount: 1, nestedInKey: 'colour' });
+    expect(layouts.get('cut')).toEqual({ laneIndex: 0, laneCount: 1, nestDepth: 1, nestedInKey: 'colour' });
     expect(layouts.get('colour')).toEqual({
       laneIndex: 0,
       laneCount: 1,
@@ -188,6 +213,14 @@ describe('clusterLayoutHorizontalStyle', () => {
     expect(nested.left).toBe(`calc(0% + 0.25rem + ${NESTED_BOOKING_INSET_PX}px)`);
     expect(nested.width).toBe(`calc(100% - 0.5rem - ${NESTED_BOOKING_INSET_PX}px)`);
     expect(nested.zIndex).toBeGreaterThan(host.zIndex);
+  });
+
+  it('indents a bar nested two deep twice as far, above the bar it rides in', () => {
+    const one = clusterLayoutHorizontalStyle({ laneIndex: 0, laneCount: 1, nestedInKey: 'h', nestDepth: 1 });
+    const two = clusterLayoutHorizontalStyle({ laneIndex: 0, laneCount: 1, nestedInKey: 'n', nestDepth: 2 });
+    expect(two.left).toBe(`calc(0% + 0.25rem + ${NESTED_BOOKING_INSET_PX * 2}px)`);
+    expect(two.width).toBe(`calc(100% - 0.5rem - ${NESTED_BOOKING_INSET_PX * 2}px)`);
+    expect(two.zIndex).toBeGreaterThan(one.zIndex);
   });
 
   it('splits lanes evenly', () => {

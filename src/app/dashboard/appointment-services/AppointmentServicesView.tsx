@@ -931,7 +931,12 @@ export function AppointmentServicesView({
       />
 
       {activeTab === 'addons' ? (
-        <AddonsLibraryView isAdmin={isAdmin} currencySymbol={sym} embedded />
+        <AddonsLibraryView
+          isAdmin={isAdmin}
+          currencySymbol={sym}
+          embedded
+          onServiceLinksChanged={() => void fetchAll()}
+        />
       ) : activeTab === 'categories' ? (
         <ServiceCategoriesManager
           categories={categories}
@@ -1067,9 +1072,6 @@ export function AppointmentServicesView({
                         style={{ backgroundColor: display.colour }}
                         aria-hidden
                       />
-                      <Pill variant="neutral" size="sm">
-                        {formatDuration(display.duration_minutes)}
-                      </Pill>
                       {(svc.variants?.filter((v) => v.is_active).length ?? 0) > 0 ? (
                         <Pill variant="brand" size="sm">
                           {svc.variants!.filter((v) => v.is_active).length} variant
@@ -1096,14 +1098,25 @@ export function AppointmentServicesView({
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1 space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                    <Pill variant="brand" size="sm">
+                      {formatPrice(display.price_pence)}
+                    </Pill>
+                    {/* Price first, then duration, then buffer and payment terms. */}
+                    <Pill variant="neutral" size="sm">
+                      <span className="inline-flex items-center gap-1">
+                        <svg className="h-3.5 w-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span className="sr-only">Duration </span>
+                        {formatDuration(display.duration_minutes)}
+                      </span>
+                    </Pill>
                     {display.buffer_minutes > 0 ? (
                       <Pill variant="neutral" size="sm">
                         +{display.buffer_minutes}min buffer
                       </Pill>
                     ) : null}
-                    <Pill variant="brand" size="sm">
-                      {formatPrice(display.price_pence)}
-                    </Pill>
                     {(() => {
                       const pr = paymentRequirement;
                       if (pr === 'full_payment') {

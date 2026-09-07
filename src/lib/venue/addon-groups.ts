@@ -178,6 +178,80 @@ export async function replaceServiceAddonGroupLinks(params: {
   return { ok: true, links: saved };
 }
 
+/**
+ * Make one add-on group's links match a chosen set of services (the Add-ons
+ * library's "Linked services" picker). Links to services not in the set are
+ * removed; missing ones are appended after the service's existing groups, so
+ * the order a service already shows its groups in is kept. Links in the other
+ * parent column (the schema the venue does not use) are left alone.
+ */
+export async function replaceAddonGroupServiceLinks(params: {
+  admin: SupabaseClient;
+  venueId: string;
+  groupId: string;
+  parentSchema: AppointmentParentSchema;
+  serviceIds: string[];
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { admin, venueId, groupId, parentSchema, serviceIds } = params;
+  const column = parentSchema === 'service_item' ? 'service_item_id' : 'appointment_service_id';
+  const wanted = new Set(serviceIds);
+
+  const existingRes = await admin
+    .from('service_addon_groups')
+    .select('id, ' + column)
+    .eq('venue_id', venueId)
+    .eq('addon_group_id', groupId)
+    .not(column, 'is', null);
+  if (existingRes.error) {
+    console.error('replaceAddonGroupServiceLinks load failed:', existingRes.error);
+    return { ok: false, error: 'Failed to load existing add-on links' };
+  }
+  const existing = (existingRes.data ?? []) as unknown as Array<Record<string, string>>;
+  const current = new Set(existing.map((r) => r[column]!));
+
+  const toRemove = existing.filter((r) => !wanted.has(r[column]!)).map((r) => r.id);
+  if (toRemove.length > 0) {
+    const delRes = await admin.from('service_addon_groups').delete().in('id', toRemove);
+    if (delRes.error) {
+      console.error('replaceAddonGroupServiceLinks delete failed:', delRes.error);
+      return { ok: false, error: 'Failed to remove add-on links' };
+    }
+  }
+
+  const toAdd = [...wanted].filter((id) => !current.has(id));
+  if (toAdd.length === 0) return { ok: true };
+
+  // Append each new link after the service's existing groups.
+  const orderRes = await admin
+    .from('service_addon_groups')
+    .select(column + ', sort_order')
+    .eq('venue_id', venueId)
+    .in(column, toAdd);
+  if (orderRes.error) {
+    console.error('replaceAddonGroupServiceLinks order lookup failed:', orderRes.error);
+    return { ok: false, error: 'Failed to read add-on link order' };
+  }
+  const nextOrder = new Map<string, number>();
+  for (const row of (orderRes.data ?? []) as unknown as Array<Record<string, unknown>>) {
+    const sid = row[column] as string;
+    const so = Number(row.sort_order ?? 0);
+    nextOrder.set(sid, Math.max(nextOrder.get(sid) ?? 0, so + 1));
+  }
+  const rows = toAdd.map((sid) => ({
+    venue_id: venueId,
+    service_item_id: parentSchema === 'service_item' ? sid : null,
+    appointment_service_id: parentSchema === 'service_item' ? null : sid,
+    addon_group_id: groupId,
+    sort_order: nextOrder.get(sid) ?? 0,
+  }));
+  const insRes = await admin.from('service_addon_groups').insert(rows);
+  if (insRes.error) {
+    console.error('replaceAddonGroupServiceLinks insert failed:', insRes.error);
+    return { ok: false, error: 'Failed to add add-on links' };
+  }
+  return { ok: true };
+}
+
 /** Load every addon group + its options for a venue (admin/library page). */
 export async function loadAddonLibraryForVenue(params: {
   admin: SupabaseClient;

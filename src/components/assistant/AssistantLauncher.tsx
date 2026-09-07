@@ -24,6 +24,11 @@ export function AssistantLauncher({ onNavigate, className }: { onNavigate?: () =
         open ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
       } ${className ?? ''}`}
     >
+      {/* Same leading dot as the sidebar's NavLinkItem so the icon and label line up with the other links. */}
+      <span
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${open ? 'bg-brand-600' : 'bg-slate-300 opacity-0 transition-opacity group-hover:opacity-100'}`}
+        aria-hidden
+      />
       <SparkIcon className={`h-5 w-5 flex-shrink-0 ${open ? 'text-brand-600' : 'text-slate-400 group-hover:text-brand-600'}`} />
       <span className="min-w-0 flex-1 leading-snug">{ASSISTANT_COPY.launcher}</span>
     </button>

@@ -98,12 +98,13 @@ function BookingPageSettingsGroup({
 }) {
   return (
     <section className="space-y-4 border-t border-slate-100 pt-6">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
+      {/* Phones: heading and description take the full width, controls sit on their own row below. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-x-4">
+        <div className="min-w-0 sm:flex-1">
           <h3 className={BOOKING_PAGE_SECTION_HEADING_CLASS}>{title}</h3>
           {description ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p> : null}
         </div>
-        <div className="flex shrink-0 items-center gap-3 pt-0.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:shrink-0 sm:gap-3 sm:pt-0.5">
           {headerAction}
           {tabToggle && 'kind' in tabToggle ? (
             <span className="text-xs font-medium text-slate-500">Always shown</span>

@@ -88,7 +88,7 @@ export async function loadCollectiveVenuePublic(
   const { data: host } = await admin
     .from('venues')
     .select(
-      'currency, deposit_config, booking_rules, terminology, address, phone, website_url, feature_flags, opening_hours, booking_page_config',
+      'name, google_review_url, currency, deposit_config, booking_rules, terminology, address, phone, website_url, feature_flags, opening_hours, booking_page_config',
     )
     .eq('id', col.host_venue_id)
     .maybeSingle();
@@ -151,6 +151,9 @@ export async function loadCollectiveVenuePublic(
     address: (host?.address as string | null) ?? null,
     phone: (host?.phone as string | null) ?? null,
     website_url: (host?.website_url as string | null) ?? null,
+    // The About tab's map looks up the host's real business listing (never the collective's
+    // display name), and only when the host has a Google review link, i.e. a Business Profile.
+    map_place_name: (host?.google_review_url as string | null)?.trim() ? ((host?.name as string | null) ?? null) : null,
     booking_page_config: config,
     deposit_config: (host?.deposit_config as VenuePublic['deposit_config']) ?? null,
     booking_rules: (host?.booking_rules as VenuePublic['booking_rules']) ?? null,

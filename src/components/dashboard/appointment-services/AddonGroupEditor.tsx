@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { Button } from '@/components/ui/primitives/Button';
 import { NumericInput } from '@/components/ui/NumericInput';
@@ -33,6 +33,12 @@ export interface AddonGroupEditorValue {
   hidden_from_online: boolean;
   is_active: boolean;
   sort_order: number;
+  /**
+   * Services this group is linked to. Only present when the editor was given a
+   * `linkableServices` list (the Add-ons library); the service form leaves it
+   * out and manages links from the service side.
+   */
+  service_ids?: string[];
   addons: Array<{
     id?: string;
     name: string;
@@ -106,6 +112,18 @@ export interface AddonGroupEditorProps {
   saveLabel?: string;
   /** Currency symbol for the price inputs (defaults to £). */
   currencySymbol?: string;
+  /**
+   * When given, the editor shows a "Linked services" picker listing these
+   * services with a checkbox each, and the submitted value carries the chosen
+   * ids in `service_ids`.
+   */
+  linkableServices?: LinkableService[];
+}
+
+export interface LinkableService {
+  id: string;
+  name: string;
+  category?: string | null;
 }
 
 /**
@@ -120,11 +138,40 @@ export function AddonGroupEditor({
   onSubmit,
   saveLabel = 'Save',
   currencySymbol = '£',
+  linkableServices,
 }: AddonGroupEditorProps) {
   const [value, setValue] = useState<AddonGroupEditorValue>(() => initialValue ?? emptyAddonGroupValue());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
+  const [serviceQuery, setServiceQuery] = useState('');
   const wasOpen = useRef(false);
+
+  const sortedServices = useMemo(
+    () =>
+      [...(linkableServices ?? [])].sort(
+        (a, b) =>
+          (a.category ?? '').localeCompare(b.category ?? '') || a.name.localeCompare(b.name),
+      ),
+    [linkableServices],
+  );
+  const visibleServices = useMemo(() => {
+    const q = serviceQuery.trim().toLowerCase();
+    if (!q) return sortedServices;
+    return sortedServices.filter(
+      (s) => s.name.toLowerCase().includes(q) || (s.category ?? '').toLowerCase().includes(q),
+    );
+  }, [sortedServices, serviceQuery]);
+  const selectedServiceIds = useMemo(() => new Set(value.service_ids ?? []), [value.service_ids]);
+
+  function setServiceLinked(id: string, linked: boolean) {
+    setValue((v) => {
+      const next = new Set(v.service_ids ?? []);
+      if (linked) next.add(id);
+      else next.delete(id);
+      return { ...v, service_ids: [...next] };
+    });
+  }
 
   // Seed the form only on the closed→open transition. `initialValue` is a fresh
   // object on every parent render, so resetting on its identity would wipe
@@ -134,6 +181,8 @@ export function AddonGroupEditor({
       setValue(initialValue ?? emptyAddonGroupValue());
       setError(null);
       setBusy(false);
+      setServicesOpen(false);
+      setServiceQuery('');
     }
     wasOpen.current = open;
   }, [open, initialValue]);
@@ -345,6 +394,104 @@ export function AddonGroupEditor({
           />
           Hide from online booking page (staff-only)
         </label>
+
+        {linkableServices ? (
+          <div className="border-t border-slate-100 pt-4">
+            <p className="text-sm font-medium text-slate-700">Linked services</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Tick the services that should offer this group. Changes apply to every ticked service when you save.
+            </p>
+            <button
+              type="button"
+              onClick={() => setServicesOpen((o) => !o)}
+              aria-expanded={servicesOpen}
+              aria-controls="addon-group-linked-services"
+              className="mt-2 flex w-full items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
+            >
+              <span>
+                {sortedServices.length === 0
+                  ? 'No services yet'
+                  : selectedServiceIds.size === 0
+                    ? 'Not linked to any services'
+                    : selectedServiceIds.size === sortedServices.length
+                      ? `All ${sortedServices.length} services`
+                      : `${selectedServiceIds.size} of ${sortedServices.length} services`}
+              </span>
+              <svg
+                className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${servicesOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+            {servicesOpen ? (
+              <div
+                id="addon-group-linked-services"
+                className="mt-1 rounded-lg border border-slate-200 bg-white shadow-sm"
+              >
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-2">
+                  <input
+                    type="search"
+                    value={serviceQuery}
+                    onChange={(e) => setServiceQuery(e.target.value)}
+                    placeholder="Search services"
+                    aria-label="Search services"
+                    className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setValue((v) => ({
+                        ...v,
+                        service_ids: [...new Set([...(v.service_ids ?? []), ...visibleServices.map((s) => s.id)])],
+                      }))
+                    }
+                    disabled={visibleServices.length === 0}
+                    className="text-xs font-semibold text-brand-600 hover:text-brand-800 disabled:opacity-50"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const hide = new Set(visibleServices.map((s) => s.id));
+                      setValue((v) => ({ ...v, service_ids: (v.service_ids ?? []).filter((id) => !hide.has(id)) }));
+                    }}
+                    disabled={visibleServices.length === 0}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <ul className="max-h-56 overflow-y-auto p-1" role="group" aria-label="Services">
+                  {visibleServices.length === 0 ? (
+                    <li className="px-2 py-2 text-xs text-slate-500">No services match.</li>
+                  ) : (
+                    visibleServices.map((s) => (
+                      <li key={s.id}>
+                        <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-50">
+                          <input
+                            type="checkbox"
+                            checked={selectedServiceIds.has(s.id)}
+                            onChange={(e) => setServiceLinked(s.id, e.target.checked)}
+                          />
+                          <span className="min-w-0 flex-1 truncate text-slate-800">{s.name}</span>
+                          {s.category ? (
+                            <span className="shrink-0 text-[11px] text-slate-400">{s.category}</span>
+                          ) : null}
+                        </label>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="border-t border-slate-100 pt-4">
           <div className="mb-2 flex items-center justify-between">

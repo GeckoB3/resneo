@@ -234,6 +234,7 @@ export function RevenuePageClient() {
             No invoices recorded yet — entries appear as venues are billed after this feature deploys.
           </p>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -265,6 +266,7 @@ export function RevenuePageClient() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

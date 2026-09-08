@@ -115,6 +115,10 @@ function buildPatchPayload(params: {
     booking_time: params.bookingTime.length === 5 ? `${params.bookingTime}:00` : params.bookingTime,
     practitioner_id: params.practitionerId,
     duration_minutes: params.durationMinutes,
+    // Staff may put a booking outside the calendar's hours from this form as
+    // from the diary; the dry run reports it and the form says so. Leave,
+    // blocks, breaks and overlaps are still refused.
+    allow_outside_hours: true,
   };
   if (params.processingTimeBlocks) {
     body.processing_time_blocks = params.processingTimeBlocks;
@@ -189,6 +193,7 @@ interface VisitPlanResponse {
   end_time?: string;
   total_minutes?: number;
   changed?: boolean;
+  outside_hours?: boolean;
   services?: VisitPlannedService[];
 }
 
@@ -345,6 +350,12 @@ export function StaffAppointmentModifyForm({
 
   const [validationState, setValidationState] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle');
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
+  /**
+   * The checked time sits outside the calendar's hours. Allowed, since staff
+   * choose to open early or run late, but said: a 19:00 typed for 09:00 would
+   * otherwise save without a word.
+   */
+  const [outsideHours, setOutsideHours] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   /**
@@ -686,6 +697,7 @@ export function StaffAppointmentModifyForm({
       booking_date: bookingDate,
       booking_time: bookingTime,
       practitioner_id: practitionerId,
+      allow_outside_hours: true,
     }),
     [serviceLines, baselineServiceLines, bookingDate, bookingTime, practitionerId],
   );
@@ -775,6 +787,7 @@ export function StaffAppointmentModifyForm({
     if (durationMinutes == null) return;
     setValidationState('loading');
     setValidationMessage(null);
+    setOutsideHours(false);
 
     /**
      * A visit is checked as a visit: the endpoint plans every service and checks
@@ -802,6 +815,7 @@ export function StaffAppointmentModifyForm({
                   booking_time: bookingTime,
                   practitioner_id: practitionerId,
                   total_duration_minutes: durationMinutes,
+                  allow_outside_hours: true,
                 },
           ),
         });
@@ -818,6 +832,7 @@ export function StaffAppointmentModifyForm({
         if (useServices && typeof data.total_minutes === 'number') {
           setDurationMinutes(data.total_minutes);
         }
+        setOutsideHours(data.outside_hours === true);
         setValidationState('valid');
       } catch (e) {
         console.error('Staff visit validate failed:', e);
@@ -837,18 +852,24 @@ export function StaffAppointmentModifyForm({
           practitioner_id: practitionerId,
           ...(usesServiceItem ? { service_item_id: serviceId } : { appointment_service_id: serviceId }),
           duration_minutes: durationMinutes,
+          allow_outside_hours: true,
           service_variant_id: requiresVariant ? variantId : null,
           // The same fitted blocks the save will send, so this dry run judges
           // exactly what the PATCH will persist.
           ...(processingBlocksToSend ? { processing_time_blocks: processingBlocksToSend } : {}),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        outside_hours?: boolean;
+      };
       if (!res.ok || !data.ok) {
         setValidationState('invalid');
         setValidationMessage(data.error ?? 'This slot is not valid.');
         return;
       }
+      setOutsideHours(data.outside_hours === true);
       setValidationState('valid');
     } catch (e) {
       console.error('Staff appointment validate failed:', e);
@@ -1050,6 +1071,7 @@ export function StaffAppointmentModifyForm({
               booking_time: bookingTime,
               practitioner_id: practitionerId,
               total_duration_minutes: durationMinutes,
+              allow_outside_hours: true,
             };
         // Start moved: defer the guest notification so the follow-up panel can
         // offer notify / skip / undo, exactly as the single-booking save does.
@@ -1169,6 +1191,7 @@ export function StaffAppointmentModifyForm({
             booking_time: baselineTime,
             practitioner_id: initialPractitionerId,
             total_duration_minutes: revertDuration,
+            allow_outside_hours: true,
             skip_booking_modification_guest_notification: true,
           }),
         });
@@ -1290,6 +1313,15 @@ export function StaffAppointmentModifyForm({
       {isVisit && validationState === 'invalid' && validationMessage ? (
         <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
           {validationMessage}
+        </p>
+      ) : null}
+
+      {validationState === 'valid' && outsideHours ? (
+        <p
+          role="status"
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900"
+        >
+          This time is outside the working hours for this calendar. You can still save it.
         </p>
       ) : null}
 

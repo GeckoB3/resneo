@@ -138,7 +138,9 @@ export async function POST(
       return NextResponse.json({ ok: false, error: result.reason });
     }
 
-    return NextResponse.json({ ok: true });
+    // Reported, not refused: the modify form always sends the hours override
+    // and shows a note when this is true.
+    return NextResponse.json({ ok: true, outside_hours: result.outsideHours });
   } catch (err) {
     console.error('POST validate-appointment-modification failed:', err);
     return NextResponse.json({ ok: false, error: 'Server error' }, { status: 500 });

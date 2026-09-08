@@ -110,7 +110,20 @@ export interface ValidateAppointmentModificationIntervalParams {
  */
 export async function validateAppointmentModificationInterval(
   params: ValidateAppointmentModificationIntervalParams,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<
+  | {
+      ok: true;
+      /**
+       * The hours override is what let this through: the time sits outside the
+       * calendar's working or opening hours, a service's own availability
+       * window, or on a venue closure. Always false without `allowOutsideHours`.
+       * Callers that always send the override (the diary, the modify form) use
+       * it to say so rather than to refuse.
+       */
+      outsideHours: boolean;
+    }
+  | { ok: false; reason: string }
+> {
   const {
     admin,
     venueId,
@@ -230,5 +243,26 @@ export async function validateAppointmentModificationInterval(
     return { ok: false, reason: intervalCheck.reason ?? 'Selected time is not available for this practitioner' };
   }
 
-  return { ok: true };
+  /**
+   * Whether the hours override was what let this through.
+   *
+   * The engine answers the hours question in one gate (working hours, opening
+   * hours, a service's own availability window, a venue closure), and every
+   * other check runs the same way with or without the override. So if the
+   * strict run fails once the relaxed run has passed, the hours gate is the
+   * only thing that can have failed. Pure and in memory: nothing is re-fetched.
+   */
+  const outsideHours =
+    intervalOpts.allowOutsideHours === true &&
+    !validateAppointmentCustomInterval(
+      apptInput,
+      practId,
+      svcId,
+      timeStr,
+      resolvedEnd.endCoreHHmm,
+      bookingId,
+      { ...intervalOpts, allowOutsideHours: false },
+    ).ok;
+
+  return { ok: true, outsideHours };
 }

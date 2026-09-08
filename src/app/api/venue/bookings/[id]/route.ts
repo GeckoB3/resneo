@@ -2312,7 +2312,8 @@ export async function PATCH(
           body.service_item_id !== undefined
         );
       // Staff moving/extending a booking past opening hours from the calendar
-      // (the UI shows an amber "outside opening hours" warning first).
+      // or the modify form. Both send it on every edit; the diary's amber
+      // "outside opening hours" note and the form's note are informational.
       const allowOutsideHoursCalendar = isAppointment && body.allow_outside_hours === true;
       // Staff moving/extending a booking over a break from the calendar. A
       // separate flag from the one above because the engine's break gate is

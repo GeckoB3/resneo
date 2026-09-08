@@ -43,7 +43,8 @@ import {
   type AppointmentSlotRecheck,
 } from '@/lib/booking/revalidate-appointment-slot';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import {
+  serviceWithDurationMinutes, snapshotProcessingTimeBlocksForBooking } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import {
@@ -1170,11 +1171,10 @@ async function handleNonTableBooking(
         if (chosenAddonTotalsBuilt.total_duration_minutes > 0) {
           const idx = input.services.findIndex((s) => s.id === appointment_service_id);
           if (idx >= 0) {
-            input.services[idx] = {
-              ...input.services[idx]!,
-              duration_minutes:
-                input.services[idx]!.duration_minutes + chosenAddonTotalsBuilt.total_duration_minutes,
-            };
+            input.services[idx] = serviceWithDurationMinutes(
+              input.services[idx]!,
+              input.services[idx]!.duration_minutes + chosenAddonTotalsBuilt.total_duration_minutes,
+            );
           }
         }
       }
@@ -1302,9 +1302,18 @@ async function handleNonTableBooking(
       }
     }
     if (mergedSvc && svc) {
-      appointmentProcessingSnapshot = snapshotProcessingTimeBlocksFromCatalog({
-        service: mergedSvc,
-        variant: chosenVariant,
+      /**
+       * `svc` already carries the pattern at its own length: the engine row's
+       * (re-fitted to the add-on minutes folded in above) or, with a variant,
+       * the variant's own pattern at the variant's length. Fit from there to
+       * the length actually reserved.
+       */
+      appointmentProcessingSnapshot = snapshotProcessingTimeBlocksForBooking({
+        service: svc,
+        variant: null,
+        templateDurationMinutes: svc.duration_minutes,
+        // The length the engine reserved (see `reservedDurationMinutes` above).
+        bookingDurationMinutes: baseSvc?.duration_minutes ?? svc.duration_minutes,
       });
     }
   } else if (effectiveModel === 'event_ticket') {

@@ -19,6 +19,7 @@ import { validateAppointmentModificationInterval } from '@/lib/booking/validate-
 import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 import { resolveBookingTotalPenceFromRow } from '@/lib/booking/payment-summary';
 import {
+  processingTailMinutes,
   fitProcessingBlocksToDuration,
   parseProcessingTimeBlocksFromDb,
   processingBlocksForDurationChange,
@@ -341,13 +342,26 @@ export async function PATCH(
         durationMinutes:
           customDurationByService.get(id) ?? Number(svc.duration_minutes ?? 30),
         bufferMinutes: Math.max(0, Number(svc.buffer_minutes ?? 0)),
+        // The wait after the service (processing past its end), which the next
+        // service in the visit stands behind along with the buffer. A variant
+        // with its own pattern has its own wait; otherwise the parent's applies.
+        processingTailMinutes: processingTailMinutes(
+          parseProcessingTimeBlocksFromDb(svc.processing_time_blocks),
+          Number(svc.duration_minutes ?? 30),
+        ),
         variants: variantRows
           .filter((v) => String(v[parentCol] ?? '') === id)
-          .map((v) => ({
-            id: String(v.id),
-            durationMinutes: Number(v.duration_minutes ?? 0),
-            isActive: v.is_active !== false,
-          })),
+          .map((v) => {
+            const ownBlocks = parseProcessingTimeBlocksFromDb(v.processing_time_blocks);
+            return {
+              id: String(v.id),
+              durationMinutes: Number(v.duration_minutes ?? 0),
+              isActive: v.is_active !== false,
+              ...(ownBlocks.length > 0
+                ? { processingTailMinutes: processingTailMinutes(ownBlocks, Number(v.duration_minutes ?? 0)) }
+                : {}),
+            };
+          }),
       });
     }
 
@@ -463,14 +477,22 @@ export async function PATCH(
           ? parseProcessingTimeBlocksFromDb(variantRow.processing_time_blocks)
           : null,
       });
+      const templateDuration = variantRow
+        ? Number(variantRow.duration_minutes ?? svcRow?.duration_minutes ?? entry.durationMinutes)
+        : Number(svcRow?.duration_minutes ?? entry.durationMinutes);
       if (entry.kind === 'keep' && row) {
         return processingBlocksForDurationChange({
           snapshot: row.processing_time_blocks,
+          currentDurationMinutes: entry.previous?.durationMinutes ?? entry.durationMinutes,
           templateBlocks: template,
+          templateDurationMinutes: templateDuration,
           durationMinutes: entry.durationMinutes,
         });
       }
-      return fitProcessingBlocksToDuration(template, entry.durationMinutes).blocks;
+      return fitProcessingBlocksToDuration(template, {
+        fromDurationMinutes: templateDuration,
+        toDurationMinutes: entry.durationMinutes,
+      }).blocks;
     };
 
     const checks = await Promise.all(

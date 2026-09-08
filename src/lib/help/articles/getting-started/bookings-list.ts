@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Using the bookings list",
   description: "Your one place to find every booking, open the details, update statuses, and message or tag several guests at once.",
   tags: ["bookings","appointments","list","filter","search","status","bulk actions","tags"],
-  verified: '2026-09-06',
+  verified: '2026-09-08',
   content: `# Using the bookings list
 
 The bookings list is where you find any booking, open it for the detail, change its status, and message or tag several clients at once. It is called **Appointments** in the sidebar, or **Bookings** once you also sell classes, events, or resources.
@@ -126,14 +126,14 @@ Open the row, expand **SMS / email guest**, and write your message. Choose **Sen
 
 ## Processing time on a booking
 
-Processing time is a gap inside one appointment where the client stays but you are free to see someone else, such as a colour developing. You set it per booking on the booking's detail card, which opens when you click the appointment on the calendar or the day sheet.
+Processing time is a wait where the client stays but you are free to see someone else, such as a colour developing. You set it per booking on the booking's detail card, which opens when you click the appointment on the calendar or the day sheet.
 
 1. Find **Processing time** on the card.
-2. Click **+ Add processing period**.
-3. Set **Start (min)** and **Length (min)**, counted from the start of the appointment. **Remove** takes a period back out.
+2. Click **+ Add processing period**. The new period starts at the end of the appointment and runs on after it.
+3. Set **Length (min)**, and for a wait in the middle of the appointment set **Start (min)**, counted from the start. **Remove** takes a period back out.
 4. Click **Save processing time**.
 
-The client still sees the full service length.
+The client still sees the service length. Time after the appointment is free on the calendar, and a later service in the same visit starts once it is over.
 
 ## Message or tag several clients at once
 

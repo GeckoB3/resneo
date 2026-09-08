@@ -28,6 +28,8 @@ import {
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { getVenueLocalDateTimeForBooking } from '@/lib/venue/venue-local-clock';
+import { fitProcessingBlocksToDuration, processingTailMinutes } from '@/lib/appointments/processing-time';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 import { MultiServicePickerBar, type PickerServiceLine } from './MultiServicePickerBar';
@@ -147,6 +149,8 @@ interface CatalogVariant {
   price_pence: number | null;
   deposit_pence: number | null;
   sort_order: number;
+  /** The option's own processing pattern; empty means the parent's applies. */
+  processing_time_blocks?: ProcessingTimeBlock[];
 }
 
 /** The earliest slot in a group, so lock periods are judged against the first appointment. */
@@ -325,7 +329,44 @@ function catalogOfferWithVariant(
     buffer_minutes: variant.buffer_minutes,
     price_pence: variant.price_pence,
     deposit_pence: variant.deposit_pence ?? offer.deposit_pence ?? null,
+    processing_time_blocks: offerProcessingBlocks(offer, variant),
   };
+}
+
+/**
+ * The pattern an offer carries at its own length: the option's own when it has
+ * one, otherwise the parent's re-fitted to the option's length (the way the
+ * server resolves a variant).
+ */
+function offerProcessingBlocks(offer: CatalogServiceOffer, variant: CatalogVariant | null): ProcessingTimeBlock[] {
+  if (variant?.processing_time_blocks && variant.processing_time_blocks.length > 0) {
+    return variant.processing_time_blocks;
+  }
+  const parent = offer.processing_time_blocks ?? [];
+  if (!variant || variant.duration_minutes === offer.duration_minutes) return parent;
+  return fitProcessingBlocksToDuration(parent, {
+    fromDurationMinutes: offer.duration_minutes,
+    toDurationMinutes: variant.duration_minutes,
+  }).blocks;
+}
+
+/**
+ * The segment's pattern and the wait after it, at the length the segment is
+ * actually booked for (custom or add-on minutes included), so the chain math,
+ * the phantoms sent to validate-slot and the server's consecutive check agree.
+ */
+function segmentProcessing(
+  offer: CatalogServiceOffer,
+  segmentDurationMinutes: number,
+): { processingTimeBlocks: ProcessingTimeBlock[]; processingTailMinutes: number } {
+  const blocks =
+    segmentDurationMinutes === offer.duration_minutes
+      ? (offer.processing_time_blocks ?? [])
+      : fitProcessingBlocksToDuration(offer.processing_time_blocks ?? [], {
+          fromDurationMinutes: offer.duration_minutes,
+          toDurationMinutes: segmentDurationMinutes,
+        }).blocks;
+  return { processingTimeBlocks: blocks, processingTailMinutes: processingTailMinutes(blocks, segmentDurationMinutes) };
 }
 
 /**
@@ -479,6 +520,11 @@ interface CatalogPractitioner {
     any_available?: boolean;
     /** Where the service is delivered; 'client_address' makes the details step collect an address. */
     location_type?: import('@/types/booking-models').ServiceLocationType;
+    /**
+     * Processing gaps, in minutes from the start. One that runs past the end of
+     * the service is a wait the next service of a visit stands behind.
+     */
+    processing_time_blocks?: ProcessingTimeBlock[];
   }>;
 }
 
@@ -556,6 +602,10 @@ export interface MultiServiceSegment {
   /** Includes add-on minutes so chain start times line up with the server's consecutive check. */
   durationMinutes: number;
   bufferMinutes: number;
+  /** Processing that runs past this segment's end; the next segment starts after it and the buffer. */
+  processingTailMinutes?: number;
+  /** This segment's pattern at `durationMinutes`, sent as the phantom's while later segments are checked. */
+  processingTimeBlocks?: ProcessingTimeBlock[];
   /** Service+variant price only (add-on price is tracked separately in `addonTotalPence`). */
   pricePence: number | null;
   depositPence: number;
@@ -605,19 +655,21 @@ function effectiveSegmentTiming(
   sel: { serviceId: string; variantId: string | null; addonIds: string[] },
   practitionerId: string | null,
   staffDurationOverrides: Record<string, number>,
-): { durationMinutes: number; bufferMinutes: number } {
+): { durationMinutes: number; bufferMinutes: number; processingTailMinutes: number } {
   const scopedPrac = practitionerId && !isAnyAvailablePractitionerId(practitionerId) ? practitionerId : null;
   const base =
     (scopedPrac
       ? catalogStaff.find((p) => p.id === scopedPrac)?.services.find((s) => s.id === sel.serviceId)
       : undefined) ?? catalogStaff.flatMap((p) => p.services).find((s) => s.id === sel.serviceId);
-  if (!base) return { durationMinutes: 30, bufferMinutes: 0 };
+  if (!base) return { durationMinutes: 30, bufferMinutes: 0, processingTailMinutes: 0 };
   const offer = catalogOfferWithVariant(base, sel.variantId) ?? base;
   const custom = staffDurationOverrides[staffDurationOverrideKey(sel.serviceId, sel.variantId)];
   const addons = addonSelectionDetails(catalogStaff, sel.serviceId, sel.addonIds, scopedPrac);
+  const durationMinutes = (custom ?? offer.duration_minutes) + addons.totalMinutes;
   return {
-    durationMinutes: (custom ?? offer.duration_minutes) + addons.totalMinutes,
+    durationMinutes,
     bufferMinutes: offer.buffer_minutes ?? 0,
+    processingTailMinutes: segmentProcessing(offer, durationMinutes).processingTailMinutes,
   };
 }
 
@@ -643,7 +695,9 @@ function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart:
   let m = timeToMinutes(firstStart);
   return segments.map((seg) => {
     const row = { ...seg, startTime: minutesToTime(m) };
-    m += seg.durationMinutes + seg.bufferMinutes;
+    // The next service waits behind any processing that runs past this one's
+    // end (the client sits while it develops) and then the buffer.
+    m += seg.durationMinutes + (seg.processingTailMinutes ?? 0) + seg.bufferMinutes;
     return row;
   });
 }
@@ -2705,6 +2759,7 @@ export function AppointmentBookingFlow({
         startTime: time,
         durationMinutes: (offer.duration_minutes ?? 30) + addonTotalMinutes,
         bufferMinutes: offer.buffer_minutes ?? 0,
+        ...segmentProcessing(offer, (offer.duration_minutes ?? 30) + addonTotalMinutes),
         pricePence: offer.price_pence ?? null,
         depositPence: depositWithAddons,
         onlineChargeLabel: firstOnline?.chargeLabel,
@@ -2839,6 +2894,7 @@ export function AppointmentBookingFlow({
           startTime: '00:00',
           durationMinutes: (custom ?? offer.duration_minutes) + addonInfo.totalMinutes,
           bufferMinutes: offer.buffer_minutes ?? 0,
+          ...segmentProcessing(offer, (custom ?? offer.duration_minutes) + addonInfo.totalMinutes),
           pricePence: offer.price_pence,
           depositPence: depositWithAddons,
           onlineChargeLabel: online?.chargeLabel,
@@ -2873,6 +2929,7 @@ export function AppointmentBookingFlow({
         start_time: string;
         duration_minutes: number;
         buffer_minutes: number;
+        processing_time_blocks?: ProcessingTimeBlock[];
       }> = [];
       for (const seg of chain) {
         const res = await fetch(validateAppointmentSlotUrl(), {
@@ -2901,6 +2958,9 @@ export function AppointmentBookingFlow({
           start_time: seg.startTime,
           duration_minutes: seg.durationMinutes,
           buffer_minutes: seg.bufferMinutes,
+          // So the earlier segment's gaps, and any wait after it, count as free
+          // while this one is checked, the way the server treats them.
+          processing_time_blocks: seg.processingTimeBlocks ?? [],
         });
       }
       return null;

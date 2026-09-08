@@ -51,7 +51,8 @@ import {
   isResourceBookingStartInPast,
 } from '@/lib/availability/resource-booking-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import {
+  serviceWithDurationMinutes, snapshotProcessingTimeBlocksForBooking } from '@/lib/appointments/processing-time';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import type { BookingModel } from '@/types/booking-models';
@@ -1125,12 +1126,10 @@ export async function POST(request: NextRequest) {
         if (chosenAddonTotals.total_duration_minutes > 0) {
           const idx = appointmentInput.services.findIndex((s) => s.id === appointment_service_id);
           if (idx >= 0) {
-            appointmentInput.services[idx] = {
-              ...appointmentInput.services[idx]!,
-              duration_minutes:
-                appointmentInput.services[idx]!.duration_minutes +
-                chosenAddonTotals.total_duration_minutes,
-            };
+            appointmentInput.services[idx] = serviceWithDurationMinutes(
+              appointmentInput.services[idx]!,
+              appointmentInput.services[idx]!.duration_minutes + chosenAddonTotals.total_duration_minutes,
+            );
           }
         }
       }
@@ -1390,8 +1389,18 @@ export async function POST(request: NextRequest) {
         apptInsert.appointment_service_id = appointment_service_id;
       }
 
+      // `svc` is the engine row, whose pattern already follows the add-on
+      // minutes; a staff-set duration is re-fitted from there.
       apptInsert.processing_time_blocks = svc
-        ? snapshotProcessingTimeBlocksFromCatalog({ service: svc, variant: chosenVariant })
+        ? snapshotProcessingTimeBlocksForBooking({
+            service: svc,
+            variant: chosenVariant,
+            templateDurationMinutes:
+              (chosenVariant?.processing_time_blocks?.length ?? 0) > 0
+                ? chosenVariant!.duration_minutes
+                : svc.duration_minutes,
+            bookingDurationMinutes: durationMins,
+          })
         : [];
 
       // Service delivery location snapshot. Staff bookings collect the address in the

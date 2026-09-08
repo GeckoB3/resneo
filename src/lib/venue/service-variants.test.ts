@@ -187,7 +187,10 @@ describe('replaceServiceVariants', () => {
         id: 'var-b',
         name: 'Full head',
         duration_minutes: 60,
-        processing_time_blocks: [{ start_minute: 40, duration_minutes: 50 }],
+        // Starts after the option has ended: nothing for it to be processing.
+        // (A block that merely runs PAST the end is the wait after the service
+        // and is valid, so the fixture starts beyond it.)
+        processing_time_blocks: [{ start_minute: 70, duration_minutes: 20 }],
       } as Partial<VariantInput>),
     ]);
 

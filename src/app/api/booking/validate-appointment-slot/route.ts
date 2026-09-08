@@ -14,6 +14,7 @@ import { validateAddonSelections } from '@/lib/addons/addon-selection-validation
 import { bookingAddonSelectionArraySchema } from '@/lib/addons/zod-schemas';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { z } from 'zod';
+import { processingTimeBlocksSchema } from '@/lib/appointments/processing-time';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { publicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
@@ -31,6 +32,12 @@ const phantomSchema = z.object({
   start_time: z.string(),
   duration_minutes: z.number().int().min(1),
   buffer_minutes: z.number().int().min(0),
+  /**
+   * The earlier segment's processing pattern, so its gaps (and any wait after
+   * it) are free rather than held busy while this segment is checked. Optional
+   * and additive; a phantom without it is treated as busy throughout.
+   */
+  processing_time_blocks: processingTimeBlocksSchema.optional(),
 });
 
 const bodySchema = z.object({

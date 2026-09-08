@@ -20,7 +20,7 @@ export const article: HelpArticle = {
     'overrides',
     'categories',
   ],
-  verified: '2026-09-06',
+  verified: '2026-09-08',
   content: `
 # Appointment services
 
@@ -113,9 +113,13 @@ The **Add-ons** tab is the library behind all of this, headed **Add-on library**
 
 ## Processing time
 
-Processing time is the gap in the middle of an appointment where the client stays put but you are free: colour developing, a mask setting, a treatment resting. Marking it lets ResNeo book someone else into that window.
+Processing time is a wait where the client stays put but you are free: colour developing, a mask setting, a treatment resting. Marking it lets ResNeo book someone else into that window.
 
-Click **+ Add processing period** and set **Start (min)**, how far into the appointment the gap begins, and **Length (min)**, at least 5. The bar above shows **Active with client** in blue, **Processing (you are free)** in amber and **Buffer / turnover** in grey, with the **Total span** alongside. Buffer time after the service cannot be used as processing time.
+Click **+ Add processing period**. The new period starts at the end of the service and runs on after it, which is the usual shape: you finish applying, the client waits, and the chair is free. Set **Length (min)** to how long the wait lasts, at least 5. That time is not part of the service length clients see, but in a visit with more than one service the next service waits until it has finished, so a 60 minute colour with 30 minutes of processing booked at 2:30pm shows as 2:30pm to 3:30pm and the cut booked with it starts at 4:00pm.
+
+For a wait in the middle of the service, set **Start (min)** to how far into the appointment it begins. A period that runs to the end of the service keeps its end there: making it longer moves its start earlier.
+
+The bar above shows **Active with client** in blue, **Processing (you are free)** in amber and **Buffer / turnover** in grey, with the service length, any time after the service and the **Total span** alongside. Buffer time comes after all of the processing.
 
 On a service with options, each option card has its own **Processing time** section instead of one for the service. Turning options on carries your existing periods onto the first option, and saving then clears the service-level ones, so set processing per option from that point on.
 

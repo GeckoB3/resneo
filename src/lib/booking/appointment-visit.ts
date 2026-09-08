@@ -37,6 +37,12 @@ export interface VisitServiceRow {
    * which case the observed gap is preserved rather than guessed at.
    */
   buffer_minutes?: number | null;
+  /**
+   * Processing that runs past this service's end (the client waits, the
+   * practitioner is free), which the next service also waits behind. Unknown
+   * when undefined, in which case only the buffer is expected.
+   */
+  processing_tail_minutes?: number | null;
 }
 
 export interface VisitService {
@@ -137,15 +143,18 @@ export function resolveAppointmentVisit(
     const gapAfterMinutes = next ? spanMinutes(endHm, toHm(next.booking_time)) : 0;
     /**
      * A gap and a hole look identical in the rows: both are dead time between
-     * two services. The catalogue buffer is what separates them. Without it the
+     * two services. The catalogue buffer (plus any processing that runs past the
+     * service's end) is what separates them. Without it the
      * observed gap is treated as intentional, so a missing lookup can never
      * silently delete a buffer a service genuinely needs.
      */
     const buffer = row.buffer_minutes;
+    const tail = row.processing_tail_minutes;
     const expectedGapAfterMinutes = !next
       ? 0
       : typeof buffer === 'number' && Number.isFinite(buffer)
-        ? Math.max(0, Math.round(buffer))
+        ? Math.max(0, Math.round(buffer)) +
+          (typeof tail === 'number' && Number.isFinite(tail) ? Math.max(0, Math.round(tail)) : 0)
         : gapAfterMinutes;
     return {
       id: row.id,

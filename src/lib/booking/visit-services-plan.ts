@@ -43,7 +43,9 @@ export interface CatalogueServiceForVisit {
   name: string;
   durationMinutes: number;
   bufferMinutes: number;
-  variants?: Array<{ id: string; durationMinutes: number; isActive: boolean }>;
+  /** Processing that runs past the service's end; the next service waits behind it and the buffer. */
+  processingTailMinutes?: number;
+  variants?: Array<{ id: string; durationMinutes: number; isActive: boolean; processingTailMinutes?: number }>;
 }
 
 export interface PlannedVisitServiceEntry {
@@ -165,7 +167,11 @@ export function planVisitServices(params: {
     const durationMinutes = durationForEntry({ keepingSameService, row, service, variantId });
     const start = cursor;
     const end = start + durationMinutes;
-    cursor = end + Math.max(0, service.bufferMinutes);
+    const chosenVariant = variantId
+      ? (service.variants ?? []).find((v) => v.id === variantId) ?? null
+      : null;
+    const tail = Math.max(0, chosenVariant?.processingTailMinutes ?? service.processingTailMinutes ?? 0);
+    cursor = end + tail + Math.max(0, service.bufferMinutes);
 
     const startHmForEntry = minutesToHm(start);
     const endHmForEntry = minutesToHm(end);

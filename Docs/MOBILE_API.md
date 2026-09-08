@@ -410,3 +410,35 @@ not exist for that caller, while the GET is a question whose answer is "no". It 
 beta allowlist. Bare `{ "error": "Unauthorised" }` 401 with no staff row.
 
 `assistant_enabled` on the venue bootstrap is additive; nothing else in that payload changed.
+
+## Processing time may run past the end of a service (2026-09-08)
+
+`processing_time_blocks` (on services, variants, calendar-grid booking rows and the public
+catalogue) may now include a block that starts at the service's end and runs on, or one that
+starts inside the service and finishes after it. `start_minute` is still minutes from the
+booking's start and must be within `0..duration_minutes` inclusive; `start_minute +
+duration_minutes` may exceed the duration by up to 480 minutes. The stored `booking_end_time`
+and `duration_minutes` are unchanged: the tail is not part of the service length.
+
+What the tail means:
+
+- The practitioner is FREE for it (another booking may be taken there), and the buffer follows
+  it rather than the service end. `GET /api/booking/availability` and
+  `POST /api/booking/validate-appointment-slot` already apply this.
+- In a multi-service visit the next service starts at `previous start + previous duration +
+  previous tail + previous buffer`. `POST /api/booking/create-multi-service` enforces exactly
+  that (its error text is now "each start = previous end + processing time + buffer" and
+  `expected_start` says where). The `services` chain param on the availability route returns
+  starts spaced the same way, and `duration_minutes` on those slots carries the whole span.
+- `validate-appointment-slot` phantoms accept an optional `processing_time_blocks` array so an
+  earlier segment's gaps count as free while a later one is checked. Omit it and the phantom is
+  treated as busy throughout, which is still safe for a consecutive chain.
+- A pattern is re-fitted when a booking's length differs from the catalogue's: a block that
+  reaches the end of the service keeps its distance from the end (a 60 minute colour with a 30
+  minute tail booked with a 15 minute add-on snapshots the tail at minute 75), while a block in
+  the middle stays put and is trimmed only if the booking is shortened past it.
+
+The web diary paints a tail as empty space (the card stops where the practitioner's last busy
+stretch ends), paints a middle gap as a pale band, and draws a booking taken in either at full
+lane width with no inset; the app's grid may keep its own treatment, but it should not clamp a
+block to the row's duration, and should place the next service of a visit after the tail.

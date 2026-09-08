@@ -59,17 +59,18 @@ export function serialiseServiceChainParam(chain: ServiceChainSegmentParam[]): s
 }
 
 /**
- * Minutes from the first start to the last end, counting the buffer between
- * services but not the buffer after the last one. This is the block the
- * month view asks about, since the month route only knows one length.
+ * Minutes from the first start to the last end, counting the gap between
+ * services (a wait after the service, then its buffer) but not the gap after
+ * the last one. This is the block the month view asks about, since the month
+ * route only knows one length.
  */
 export function chainSpanMinutes(
-  segments: ReadonlyArray<{ durationMinutes: number; bufferMinutes: number }>,
+  segments: ReadonlyArray<{ durationMinutes: number; bufferMinutes: number; processingTailMinutes?: number }>,
 ): number {
   let total = 0;
   segments.forEach((seg, i) => {
     total += seg.durationMinutes;
-    if (i < segments.length - 1) total += seg.bufferMinutes;
+    if (i < segments.length - 1) total += Math.max(0, seg.processingTailMinutes ?? 0) + seg.bufferMinutes;
   });
   return total;
 }

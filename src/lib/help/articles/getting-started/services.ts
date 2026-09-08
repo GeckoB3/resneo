@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Set up your services",
   description: "Create the services clients can book: set one fixed length and price or offer several bookable options, add optional extras with add-ons, decide how clients pay, and link them to a calendar.",
   tags: ["services","appointments","duration","deposit","payments","calendar","catalogue","booking","one fixed offering","multiple bookable options","options","variants","add-ons","extras","upsell","card hold","no-show fee","processing time","categories","booking interval","start times","location","online"],
-  verified: '2026-09-06',
+  verified: '2026-09-08',
   content: `# Set up your services
 
 A service is anything a client can book with you: a consultation, a treatment, a session. Get one set up here and it will show on your booking page, ready for clients to choose a time.
@@ -92,16 +92,16 @@ Groups are shared across your whole business. The **Add-ons** tab on the Service
 
 ## Step 6: Free up your chair during processing time (optional)
 
-Some services have a gap in the middle where the client stays put but you are not needed, such as waiting for colour to develop. Processing time marks that gap so ResNeo can book someone else into it. Only admins can set it.
+Some services have a wait where the client stays put but you are not needed, such as colour developing. Processing time marks that wait so ResNeo can book someone else into it. Only admins can set it.
 
 Find the **Processing time** card and click **+ Add processing period**. On a service with several options, each option card has its own **Processing time** section instead.
 
-1. **Start (min)** is how many minutes into the appointment the gap begins.
-2. **Length (min)** is how long it lasts, at least 5 minutes.
+1. The new period starts at the end of the service and runs on after it. Set **Length (min)** to how long the wait lasts, at least 5 minutes.
+2. For a wait in the middle of the service, set **Start (min)** to how many minutes into the appointment it begins.
 
-The bar above the rows shows time with the client in blue, processing time in amber and the buffer in grey. Buffer time after the service cannot be used as processing time. Click **Remove** to delete a period.
+Time after the service is not counted in the service length clients see, but when the client books a second service in the same visit, that service starts once the wait is over. The bar above the rows shows time with the client in blue, processing time in amber and the buffer in grey. Click **Remove** to delete a period.
 
-> **Example:** a 90 minute colour where you apply for 20 minutes, the client develops for 40, and you finish in the last 30. Set **Start (min)** to 20 and **Length (min)** to 40. ResNeo can now fit a 30 minute cut inside that window.
+> **Example:** a colour where you apply for 60 minutes and the client then develops for 30. Set the duration to 60 and add a processing period of 30. On the calendar the colour shows as one hour, the next half hour is free to book someone else into, and a cut and finish booked in the same visit starts after it.
 
 ## Step 7: Set your booking window and start times
 

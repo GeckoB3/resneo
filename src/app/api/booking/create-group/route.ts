@@ -39,7 +39,8 @@ import {
   resolveBookableServiceWithVariant,
 } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
-import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import {
+  serviceWithDurationMinutes, snapshotProcessingTimeBlocksForBooking } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
@@ -439,7 +440,7 @@ export async function POST(request: NextRequest) {
       if (personAddonTotals.total_duration_minutes > 0) {
         const idx = input.services.findIndex((s) => s.id === person.appointment_service_id);
         if (idx >= 0) {
-          input.services[idx] = { ...input.services[idx]!, duration_minutes: durationMins };
+          input.services[idx] = serviceWithDurationMinutes(input.services[idx]!, durationMins);
         }
       }
 
@@ -557,9 +558,16 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // `svc` carries the pattern at the catalogue length (variant applied,
+      // add-ons not yet), which is the length it was drawn against.
       const processingSnap =
         mergedSvc && svc
-          ? snapshotProcessingTimeBlocksFromCatalog({ service: mergedSvc, variant: chosenVariant })
+          ? snapshotProcessingTimeBlocksForBooking({
+              service: svc,
+              variant: null,
+              templateDurationMinutes: resolvedBaseDuration,
+              bookingDurationMinutes: durationMins,
+            })
           : [];
 
       validatedPeople.push({

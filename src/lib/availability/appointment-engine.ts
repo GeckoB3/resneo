@@ -13,6 +13,7 @@ import type {
   ProcessingTimeBlock,
 } from '@/types/booking-models';
 import {
+  serviceSpanMinutes,
   effectiveProcessingBlocksForTemplate,
   fitProcessingBlocksToDuration,
   parseProcessingTimeBlocksFromDb,
@@ -297,11 +298,21 @@ function wallBusyIntervalsForPhantom(p: PhantomBooking): Array<{ start: number; 
   return offsets.map((o) => ({ start: wallStart + o.start, end: wallStart + o.end }));
 }
 
-/** Scheduling span for breaks / venue clip: core + buffer + legacy tail when no salon blocks. */
+/**
+ * Scheduling span for breaks / venue clip: core, any processing that runs past
+ * the end of the service (the client is still on the premises), the buffer, and
+ * the legacy tail when there are no salon blocks.
+ */
 function serviceSchedulingSpanMinutes(svc: AppointmentService): number {
   const blocks = svc.processing_time_blocks ?? [];
   const legacy = blocks.length > 0 ? 0 : (svc.processing_time_minutes ?? 0);
-  return svc.duration_minutes + svc.buffer_minutes + legacy;
+  return (
+    serviceSpanMinutes({
+      durationMinutes: svc.duration_minutes,
+      bufferMinutes: svc.buffer_minutes,
+      processingBlocks: blocks,
+    }) + legacy
+  );
 }
 
 function wallBusyIntervalsForServiceSlot(
@@ -930,7 +941,10 @@ export function validateAppointmentCustomInterval(
      * a given pattern is a separate question, still answered strictly on the
      * write path.
      */
-    useBlocks = fitProcessingBlocksToDuration(svc.processing_time_blocks ?? [], coreDuration).blocks;
+    useBlocks = fitProcessingBlocksToDuration(svc.processing_time_blocks ?? [], {
+      fromDurationMinutes: svc.duration_minutes,
+      toDurationMinutes: coreDuration,
+    }).blocks;
   }
   const legacyTail = useBlocks.length > 0 ? 0 : (svc.processing_time_minutes ?? 0);
   const busyOffsets = practitionerBusyMinuteOffsets({
@@ -940,7 +954,8 @@ export function validateAppointmentCustomInterval(
     legacyProcessingTailMinutes: legacyTail,
   });
   const busyWall = busyOffsets.map((o) => ({ start: t + o.start, end: t + o.end }));
-  const customerEnd = t + coreDuration + buffer;
+  const customerEnd =
+    t + serviceSpanMinutes({ durationMinutes: coreDuration, bufferMinutes: buffer, processingBlocks: useBlocks });
   const practMaxEnd = busyWall.length > 0 ? Math.max(...busyWall.map((i) => i.end)) : t;
   const busyEnd = Math.max(customerEnd, practMaxEnd);
 
@@ -1037,14 +1052,32 @@ export function resolveEngineBookingProcessingBlocks(params: {
   snapshotRaw: unknown;
   mergedService: AppointmentService | null;
   variantBlocks: ProcessingTimeBlock[] | undefined;
+  /**
+   * The booking's own length. A row with no snapshot takes the catalogue pattern,
+   * re-fitted from the service's length so a wait after the service still
+   * follows the booking's real end. Omitted: the pattern is used as it is.
+   */
+  bookingDurationMinutes?: number;
 }): ProcessingTimeBlock[] {
   if (params.snapshotRaw !== null && params.snapshotRaw !== undefined) {
     return parseProcessingTimeBlocksFromDb(params.snapshotRaw);
   }
-  return effectiveProcessingBlocksForTemplate({
+  const template = effectiveProcessingBlocksForTemplate({
     parentBlocks: params.mergedService?.processing_time_blocks ?? [],
     variantBlocks: params.variantBlocks,
   });
+  const templateDuration = params.mergedService?.duration_minutes;
+  if (
+    params.bookingDurationMinutes == null ||
+    templateDuration == null ||
+    templateDuration === params.bookingDurationMinutes
+  ) {
+    return template;
+  }
+  return fitProcessingBlocksToDuration(template, {
+    fromDurationMinutes: templateDuration,
+    toDurationMinutes: params.bookingDurationMinutes,
+  }).blocks;
 }
 
 /** The booking columns both fetchers select, before any engine interpretation. */
@@ -1130,6 +1163,7 @@ export function mapRowToAppointmentBooking(params: {
       snapshotRaw: row.processing_time_blocks,
       mergedService: merged,
       variantBlocks: row.service_variant_id ? variantBlocksById.get(row.service_variant_id) : undefined,
+      bookingDurationMinutes: coreDuration,
     }),
     status: row.status,
   };
@@ -1550,10 +1584,10 @@ export async function fetchCalendarAppointmentInput(params: {
      * capacity the venue had deliberately configured. Trimming keeps as much of
      * the gap as still fits.
      */
-    const fittedBlocks = fitProcessingBlocksToDuration(
-      parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
-      effectiveDuration,
-    ).blocks;
+    const fittedBlocks = fitProcessingBlocksToDuration(parseProcessingTimeBlocksFromDb(s.processing_time_blocks), {
+      fromDurationMinutes: s.duration_minutes as number,
+      toDurationMinutes: effectiveDuration,
+    }).blocks;
     return {
       id: s.id as string,
       venue_id: venueId,

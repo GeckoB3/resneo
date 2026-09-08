@@ -60,6 +60,11 @@ export interface BookingClusterLayout {
  * the host (its status stripe and a sliver of the hatched processing band), so
  * the nested booking keeps almost the full column width.
  */
+/**
+ * Historical: nested bars were once indented by this much per level so a
+ * sliver of the host showed on the left. They now take the full lane; the
+ * constant remains only for anything still reading it.
+ */
 export const NESTED_BOOKING_INSET_PX = 5;
 
 /**
@@ -278,8 +283,9 @@ export function layoutOverlapClusters(items: ClusterLayoutItem[]): Map<string, B
 
 /**
  * Inline position for a bar in its column, from its layout. Lanes share the
- * column width; a nested bar takes its host's lane minus the left inset, and
- * sits above the host so it covers the processing band it was booked into.
+ * column width; a nested bar takes its host's whole lane and sits above the
+ * host, so it covers the processing band it was booked into and reads as an
+ * ordinary booking rather than something tucked inside another.
  */
 export function clusterLayoutHorizontalStyle(
   layout: BookingClusterLayout,
@@ -292,10 +298,12 @@ export function clusterLayoutHorizontalStyle(
   const laneWidth = `${widthPct}% - ${gutter * 2}rem`;
   if (layout.nestedInKey) {
     const depth = Math.max(1, layout.nestDepth ?? 1);
-    const inset = NESTED_BOOKING_INSET_PX * depth;
     return {
-      left: `calc(${laneLeft} + ${inset}px)`,
-      width: `calc(${laneWidth} - ${inset}px)`,
+      // The full lane: a booking taken in another's processing gap looks like
+      // any other booking. It sits above its host so it covers the free band it
+      // was booked into (which the host paints pale, or not at all).
+      left: `calc(${laneLeft})`,
+      width: `calc(${laneWidth})`,
       // Above every lane's host (hosts sit at baseZ + laneIndex, lanes are few),
       // and each deeper level above the one it rides in. Kept under baseZ + 10
       // whatever the depth: the dashboard's mobile top bar and sidebar drawer

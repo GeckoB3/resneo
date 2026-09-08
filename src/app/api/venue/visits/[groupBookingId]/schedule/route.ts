@@ -360,10 +360,14 @@ export async function PATCH(
      * save would do: the same per-service times, the same total, the same
      * `changed`.
      */
+    // Set once every service has been checked: true when the hours override is
+    // what lets the visit sit here, so a dry run can say so.
+    let outsideHours = false;
     const describePlan = (changed: boolean) => ({
       ok: true as const,
       group_booking_id: groupBookingId,
       booking_date: newDate,
+      outside_hours: outsideHours,
       start_time: plan.startHm,
       end_time: plan.endHm,
       total_minutes: plan.totalMinutes,
@@ -456,6 +460,7 @@ export async function PATCH(
         { status: 409 },
       );
     }
+    outsideHours = checks.some((c) => c.result.ok && c.result.outsideHours);
 
     if (visitStartChanged) {
       for (const t of targets) {

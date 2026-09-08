@@ -532,6 +532,9 @@ export async function PATCH(
         { status: 409 },
       );
     }
+    // True when the hours override is what lets the visit sit here, so a dry
+    // run can say so.
+    const outsideHours = checks.some((c) => c.result.ok && c.result.outsideHours);
 
     // A service being added or swapped in may carry its own compliance
     // requirement for this guest, the same gate the create and modify paths run.
@@ -562,6 +565,7 @@ export async function PATCH(
       ok: true as const,
       group_booking_id: groupBookingId,
       booking_date: bookingDate,
+      outside_hours: outsideHours,
       start_time: plan.startHm,
       end_time: plan.endHm,
       total_minutes: plan.totalMinutes,

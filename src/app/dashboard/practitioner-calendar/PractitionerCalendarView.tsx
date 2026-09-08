@@ -5112,7 +5112,7 @@ export function PractitionerCalendarView({
     newDate: string,
     newTime: string,
     newPracId: string,
-    opts?: { allowOutsideHours?: boolean; allowDuringBreaks?: boolean },
+    opts?: { allowDuringBreaks?: boolean },
   ) {
     const visit = resolveAppointmentVisit(rows.map(visitRowFor));
     if (!visit) return;
@@ -5150,7 +5150,7 @@ export function PractitionerCalendarView({
                 allow_manual_overlap: true,
                 // The dry run has to be asked the same question the PATCH will
                 // be asked, or the visit is refused before it is attempted.
-                allow_outside_hours: opts?.allowOutsideHours === true,
+                allow_outside_hours: true,
                 allow_during_breaks: opts?.allowDuringBreaks === true,
               }),
             },
@@ -5208,7 +5208,6 @@ export function PractitionerCalendarView({
       const row = byId.get(sv.id);
       if (!row) continue;
       const { savePromise } = await patchBookingMove(row, newDate, sv.startHm, newPracId, {
-        allowOutsideHours: opts?.allowOutsideHours,
         allowDuringBreaks: opts?.allowDuringBreaks,
         partOfVisitMove: true,
       });
@@ -5246,7 +5245,7 @@ export function PractitionerCalendarView({
     newDate: string,
     newTime: string,
     newPracId: string,
-    opts?: { allowOutsideHours?: boolean; allowDuringBreaks?: boolean; partOfVisitMove?: boolean },
+    opts?: { allowDuringBreaks?: boolean; partOfVisitMove?: boolean },
   ): Promise<{ savePromise: Promise<'ok' | 'failed'> }> {
     const prev = { ...booking };
     const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
@@ -5308,7 +5307,18 @@ export function PractitionerCalendarView({
             practitioner_id: realPracId,
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
-            allow_outside_hours: opts?.allowOutsideHours === true,
+            // Always on for a diary edit: staff may put a booking anywhere on
+            // the day, before open, after close or on a day the calendar does
+            // not work. This used to follow the diary's own reading of the
+            // closed stripes, which cannot see everything the server counts as
+            // hours (a buffer or processing tail past close, a service's own
+            // availability window, a stripe off the drawn grid), so a drag the
+            // diary judged in-hours came back 409 "Outside working hours", and
+            // a booking already sitting outside hours could not be resized at
+            // all. The stripes still drive the amber note; they no longer
+            // decide the permission. Leave, blocks and breaks are separate
+            // gates and are not relaxed here.
+            allow_outside_hours: true,
             allow_during_breaks: opts?.allowDuringBreaks === true,
             defer_modification_guest_notification: true,
           }),
@@ -5375,7 +5385,7 @@ export function PractitionerCalendarView({
     async (
       booking: Booking,
       newEndHm: string,
-      opts?: { allowOutsideHours?: boolean; allowDuringBreaks?: boolean },
+      opts?: { allowDuringBreaks?: boolean },
     ) => {
       const prev = { ...booking };
       const linkedOwnerVenueId = booking._linkedOwnerVenueId;
@@ -5457,7 +5467,8 @@ export function PractitionerCalendarView({
               booking_end_time: bookingEndForStore,
               ...(resizeBlocks ? { processing_time_blocks: resizeBlocks } : {}),
               allow_manual_overlap: true,
-              allow_outside_hours: opts?.allowOutsideHours === true,
+              // Always on, as on the move: see patchBookingMove.
+              allow_outside_hours: true,
               allow_during_breaks: opts?.allowDuringBreaks === true,
               skip_booking_modification_guest_notification: true,
             }),
@@ -5549,6 +5560,9 @@ export function PractitionerCalendarView({
                     practitioner_id: resolveLinkedGridPractitionerIdForPatch(t.colId!),
                     booking_end_time: t.endForStore,
                     allow_manual_overlap: true,
+                    // The visit may be going back to a slot outside hours,
+                    // which is where the diary let it sit (see patchBookingMove).
+                    allow_outside_hours: true,
                   }),
                 },
               );
@@ -5629,6 +5643,7 @@ export function PractitionerCalendarView({
                   practitioner_id: resolveLinkedGridPractitionerIdForPatch(t.colId!),
                   booking_end_time: t.endForStore,
                   allow_manual_overlap: true,
+                  allow_outside_hours: true,
                   ...(notifyPending || i > 0
                     ? { skip_booking_modification_guest_notification: true }
                     : {}),
@@ -5802,6 +5817,10 @@ export function PractitionerCalendarView({
             booking_end_time: bookingEndForStore,
             ...(undoBlocks ? { processing_time_blocks: undoBlocks } : {}),
             allow_manual_overlap: true,
+            // The booking may be going back to a slot outside hours, which is
+            // where the diary let it sit (see patchBookingMove). Without this
+            // an undo could be refused with "Outside working hours".
+            allow_outside_hours: true,
             ...(skipBookingModificationGuestNotification
               ? { skip_booking_modification_guest_notification: true }
               : {}),
@@ -5824,6 +5843,7 @@ export function PractitionerCalendarView({
             practitioner_id: undoPracId,
             booking_end_time: bookingEndForStore,
             allow_manual_overlap: true,
+            allow_outside_hours: true,
             ...(skipBookingModificationGuestNotification
               ? { skip_booking_modification_guest_notification: true }
               : {}),
@@ -6403,6 +6423,8 @@ export function PractitionerCalendarView({
       addToast('A booking can only be moved within the same venue.', 'error');
       return;
     }
+    // The stripes only decide what to SAY. The save is always allowed outside
+    // hours (see patchBookingMove); the break flag still has to be sent.
     const movedOutsideHours = target?.outsideHours === true;
     const movedOverBreak = target?.overBreak === true;
     if (movedOverBreak) {
@@ -6432,13 +6454,11 @@ export function PractitionerCalendarView({
         );
       }
       void patchVisitMove(moveVisitRows, dateStr, newTime, pracId, {
-        allowOutsideHours: movedOutsideHours,
         allowDuringBreaks: movedOverBreak,
       });
       return;
     }
     void patchBookingMove(b, dateStr, newTime, pracId, {
-      allowOutsideHours: movedOutsideHours,
       allowDuringBreaks: movedOverBreak,
     });
   }
@@ -6840,6 +6860,9 @@ export function PractitionerCalendarView({
           clearGridExtensionRef.current();
           if (committedEndMin === endM0) return;
           const resizeColumnId = resolveBookingColumnId(booking, resourceParentById);
+          // For the note only: the save is always allowed outside hours (see
+          // patchBookingMove), so a booking that already sits before open or
+          // after close can be made longer or shorter like any other.
           const extendedOutsideHours =
             committedEndMin > baseEndHour * 60 ||
             (resizeColumnId != null &&
@@ -6891,7 +6914,6 @@ export function PractitionerCalendarView({
             void patchVisitResize(visitRows, committedEndMin);
           } else {
             void patchBookingResize(booking, endStr, {
-              allowOutsideHours: extendedOutsideHours,
               allowDuringBreaks: extendedOverBreak,
             });
           }

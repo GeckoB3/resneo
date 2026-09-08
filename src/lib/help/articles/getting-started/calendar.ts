@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Using the calendar",
   description: "Read your day at a glance, add and reschedule bookings with a click or drag, and keep each one on track.",
   tags: ["calendar","bookings","scheduling","drag","reschedule","status","appointments"],
-  verified: '2026-09-06',
+  verified: '2026-09-08',
   content: `# Using the calendar
 
 The **Appointment Calendar** is your day as a grid, one column per person or room. It is where you see what is happening now, move things, and block out time.
@@ -77,7 +77,9 @@ The **Undo** button in the toolbar reverses your most recent move or length chan
 1. Turn **Compact** off if it is on.
 2. Press and hold the thin handle along the bottom edge of the card. **Hold to adjust** appears.
 3. Drag down to make the appointment longer, or up to make it shorter. The new end time shows as you go, for example **Until 11:45**.
-4. Let go. The same bar appears at the bottom of the screen, for example **Sam Jones now ends at 11:45 (was 11:30)**, with the same **Notify now**, **Skip notify**, and **Undo** choices.
+4. Let go. The new length saves straight away. There is no countdown and the client is not told, because the start time has not moved. **Undo** in the toolbar puts it back.
+
+> **Good to know:** you can make a booking run past your closing time, or change the length of one that already sits outside your hours. You will see a note reading **Extended outside opening hours.** rather than a refusal.
 
 ## Move a booking to an exact time
 
@@ -86,6 +88,8 @@ Dragging is fiddly on a tablet. When a client is on the phone, use the form.
 1. Click the booking, then click **Modify**. The **Modify appointment** window opens.
 2. Change the **Service**, the **Staff / calendar**, the date, the time, or the duration. The **Quick durations** buttons are the fastest way to set a length.
 3. Click **Save changes**. It stays greyed out until ResNeo has checked that the new slot is free.
+
+A time outside your opening hours is allowed here too. The window shows a note saying so, and **Save changes** still works. It still refuses a time that clashes with another booking, a break, a block, or leave.
 
 If you changed the date or time, the window then shows **Time changed and saved** with the same 60-second countdown and three choices: **Notify now**, **Skip notify**, or **Undo change**. Closing the window without choosing sends the update. Other changes, such as a different service or a longer duration, save straight away.
 

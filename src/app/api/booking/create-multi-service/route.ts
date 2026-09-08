@@ -44,7 +44,9 @@ import {
   resolveBookableServiceWithVariant,
 } from '@/lib/appointments/service-variant';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
-import { snapshotProcessingTimeBlocksFromCatalog } from '@/lib/appointments/processing-time';
+import {
+  processingTailMinutes,
+  serviceWithDurationMinutes, snapshotProcessingTimeBlocksForBooking } from '@/lib/appointments/processing-time';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
@@ -446,7 +448,7 @@ export async function POST(request: NextRequest) {
       if (segAddonTotals.total_duration_minutes > 0 || staffCustomDuration != null) {
         const idx = input.services.findIndex((s) => s.id === seg.service_id);
         if (idx >= 0) {
-          input.services[idx] = { ...input.services[idx]!, duration_minutes: durationMins };
+          input.services[idx] = serviceWithDurationMinutes(input.services[idx]!, durationMins);
         }
         if (staffCustomDuration != null) {
           // The engine re-applies the practitioner's own duration when it
@@ -532,13 +534,18 @@ export async function POST(request: NextRequest) {
 
       if (i > 0) {
         const prev = validated[i - 1]!;
+        // The next service waits behind any processing that runs past the
+        // previous one's end (the client sits while it develops) and its buffer.
         const expectedStartM =
-          timeToMinutes(prev.booking_time) + prev.duration_minutes + prev.buffer_minutes;
+          timeToMinutes(prev.booking_time) +
+          prev.duration_minutes +
+          processingTailMinutes(prev.processing_time_blocks, prev.duration_minutes) +
+          prev.buffer_minutes;
         const actualM = timeToMinutes(timeStr);
         if (expectedStartM !== actualM) {
           return NextResponse.json(
             {
-              error: 'Services must be consecutive (each start = previous end + buffer)',
+              error: 'Services must be consecutive (each start = previous end + processing time + buffer)',
               expected_start: minutesToTime(expectedStartM),
             },
             { status: 400 },
@@ -581,9 +588,17 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // `svc` carries the pattern at the catalogue length (variant applied,
+      // add-ons and staff minutes not yet), which is the length it was drawn
+      // against; a wait after the service follows the whole segment.
       const processingSnap =
         mergedSvc && svc
-          ? snapshotProcessingTimeBlocksFromCatalog({ service: mergedSvc, variant: chosenVariant })
+          ? snapshotProcessingTimeBlocksForBooking({
+              service: svc,
+              variant: null,
+              templateDurationMinutes: svc.duration_minutes,
+              bookingDurationMinutes: durationMins,
+            })
           : [];
 
       validated.push({
@@ -613,7 +628,7 @@ export async function POST(request: NextRequest) {
         duration_minutes: durationMins,
         buffer_minutes: bufferMins,
         processing_time_minutes: svc?.processing_time_minutes ?? 0,
-        processing_time_blocks: svc?.processing_time_blocks ?? [],
+        processing_time_blocks: processingSnap,
       });
     }
 

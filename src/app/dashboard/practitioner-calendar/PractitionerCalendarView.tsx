@@ -13,6 +13,7 @@ import {
   calendarWorksOnDate,
 } from '@/lib/calendar/calendar-works-on-date';
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -143,7 +144,9 @@ import { isNonWorkingBlock, isOccupyingBlock } from '@/lib/calendar/occupying-bl
 import { type PractitionerLeavePeriodInput } from '@/lib/calendar/schedule-closure-blocks';
 import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
+import { bookingMoveFootprintMinutes } from '@/lib/calendar/booking-move-footprint';
 import {
+  type BookingBlockPalette,
   bookingCalendarBlockCardStyle,
   bookingCalendarBlockPalette,
   bookingCalendarBlockPaletteForDisplayRow,
@@ -213,6 +216,9 @@ import { scheduleWaitlistAlertsRefresh } from '@/lib/booking/waitlist-alerts-eve
 import { formatIsoDateInTimeZone } from '@/lib/date/format-iso-date-in-timezone';
 import { readSessionPreference, writeSessionPreference } from '@/lib/ui/session-preferences';
 import {
+  processingActiveEndMinutes,
+  processingTailMinutes,
+  fitProcessingBlocksToDuration,
   customerOccupyMinutes,
   effectiveProcessingBlocksForTemplate,
   parseProcessingTimeBlocksFromDb,
@@ -255,6 +261,7 @@ interface Practitioner {
 interface CalendarVariantRow {
   id: string;
   name?: string;
+  duration_minutes?: number;
   processing_time_blocks?: ProcessingTimeBlock[];
 }
 
@@ -846,10 +853,37 @@ function bookingTemplateProcessingBlocks(
   const vid = b.service_variant_id;
   const variant =
     typeof vid === 'string' && vid.trim().length > 0 ? svc.variants?.find((v) => v.id === vid) : undefined;
-  return effectiveProcessingBlocksForTemplate({
+  const template = effectiveProcessingBlocksForTemplate({
     parentBlocks: svc.processing_time_blocks ?? [],
     variantBlocks: variant?.processing_time_blocks,
   });
+  // The pattern belongs to the catalogue length it was drawn against; a booking
+  // of another length (add-ons, a staff duration) has the wait after the service
+  // moved to follow its own end, the way the server resolves it.
+  const templateDuration = bookingTemplateDurationMinutes(b, serviceMap);
+  const bookingDuration = bookingCoreDurationForProcessing(b, serviceMap);
+  if (templateDuration == null || templateDuration === bookingDuration) return template;
+  return fitProcessingBlocksToDuration(template, {
+    fromDurationMinutes: templateDuration,
+    toDurationMinutes: bookingDuration,
+  }).blocks;
+}
+
+/** The catalogue length this booking's pattern was drawn against: the option's when it has its own pattern, else the service's. */
+function bookingTemplateDurationMinutes(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): number | null {
+  const sid = serviceIdForBooking(b);
+  const svc = sid ? serviceMap.get(sid) : undefined;
+  if (!svc) return null;
+  const vid = b.service_variant_id;
+  const variant =
+    typeof vid === 'string' && vid.trim().length > 0 ? svc.variants?.find((v) => v.id === vid) : undefined;
+  if (variant && (variant.processing_time_blocks?.length ?? 0) > 0) {
+    return variant.duration_minutes ?? svc.duration_minutes;
+  }
+  return svc.duration_minutes;
 }
 
 /**
@@ -884,7 +918,10 @@ function bookingProcessingBlocksForPatch(
 ): ProcessingTimeBlock[] | null {
   return processingBlocksForDurationChange({
     snapshot: b.processing_time_blocks,
+    currentDurationMinutes: bookingCoreDurationForProcessing(b, serviceMap),
+    // Already fitted to the booking's current length above, so re-fit from there.
     templateBlocks: bookingTemplateProcessingBlocks(b, serviceMap),
+    templateDurationMinutes: bookingCoreDurationForProcessing(b, serviceMap),
     durationMinutes,
   });
 }
@@ -935,9 +972,9 @@ function practitionerWallBusyIntervalsForCandidateAtSlot(
 }
 
 /**
- * Wall-clock ranges inside this booking when its column is free: the processing
- * blocks the strip paints, clamped to the core duration the way the strip is.
- * These are the ranges another booking may nest into.
+ * Wall-clock ranges this booking leaves its column free: its processing blocks,
+ * including any that run past its end (the wait before the next service of a
+ * visit). These are the ranges another booking may share a lane with it in.
  */
 function bookingProcessingWallGaps(
   b: Booking,
@@ -945,13 +982,24 @@ function bookingProcessingWallGaps(
 ): MinuteRange[] {
   const wall0 = timeToMinutes(b.booking_time.slice(0, 5));
   if (!Number.isFinite(wall0)) return [];
-  const core = bookingCoreDurationForProcessing(b, serviceMap);
   return bookingProcessingBlocksForLayout(b, serviceMap)
     .map((blk) => ({
       start: wall0 + blk.start_minute,
-      end: wall0 + Math.min(core, blk.start_minute + blk.duration_minutes),
+      end: wall0 + blk.start_minute + blk.duration_minutes,
     }))
     .filter((g) => g.end > g.start);
+}
+
+/**
+ * The wait after this booking: processing that runs past its end, in minutes.
+ * The next service of a visit stands behind it, so the visit planner needs it
+ * alongside the buffer.
+ */
+function bookingProcessingTailMinutes(b: Booking, serviceMap: Map<string, AppointmentService>): number {
+  return processingTailMinutes(
+    bookingProcessingBlocksForLayout(b, serviceMap),
+    bookingCoreDurationForProcessing(b, serviceMap),
+  );
 }
 
 /**
@@ -971,6 +1019,13 @@ function hostRegionsPx(
   hostStartMin: number,
   blockHeightPx: number,
   slotHeightPx: number,
+  /**
+   * The bar's own free bands (processing in the middle of the appointment),
+   * wall-clock. The card's text and tray keep off them exactly as they keep off
+   * a nested bar: nothing about the booking is written on time the practitioner
+   * is free for.
+   */
+  freeBands: MinuteRange[] = [],
 ): HostRegionsPx {
   const whole: HostRegionsPx = {
     textTopPx: 0,
@@ -979,8 +1034,8 @@ function hostRegionsPx(
     trayBottomPx: blockHeightPx,
     traySharesText: true,
   };
-  const nested = layout.nestedRanges;
-  if (!nested || nested.length === 0 || blockHeightPx <= 0) return whole;
+  const nested = [...(layout.nestedRanges ?? []), ...freeBands];
+  if (nested.length === 0 || blockHeightPx <= 0) return whole;
   const pxPerMin = slotHeightPx / SLOT_MINUTES;
   const hostEndMin = hostStartMin + blockHeightPx / pxPerMin;
   // A tray needs at least its smallest button plus a pixel each side.
@@ -997,53 +1052,355 @@ function hostRegionsPx(
   };
 }
 
-function BookingProcessingStrip({
+/**
+ * The booking's processing bands in wall-clock minutes, split the way the grid
+ * treats them: `middle` bands sit before the practitioner's last busy stretch
+ * and are painted pale on the card; `trailing` is the stretch from that last
+ * busy minute to the booking's end, which the card does not paint at all (the
+ * practitioner is free for good from there), and `tail` runs on past the
+ * booking's end.
+ */
+function bookingFreeRegions(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): { core: number; activeEnd: number; middle: MinuteRange[]; wall0: number } {
+  const wall0 = timeToMinutes(b.booking_time.slice(0, 5));
+  const core = bookingCoreDurationForProcessing(b, serviceMap);
+  const blocks = bookingProcessingBlocksForLayout(b, serviceMap);
+  const activeEnd = processingActiveEndMinutes(blocks, core);
+  const middle = blocks
+    .map((blk) => ({
+      start: wall0 + blk.start_minute,
+      end: wall0 + Math.min(activeEnd, blk.start_minute + blk.duration_minutes),
+    }))
+    .filter((g) => g.end > g.start && g.start < wall0 + activeEnd);
+  return { core, activeEnd, middle, wall0 };
+}
+
+/**
+ * The stretches of a bar that are painted, once its free time (the holes) is
+ * taken out, in minutes from the bar's top. Each comes out as its own lozenge.
+ */
+function paintedPiecesMinutes(totalMinutes: number, holes: MinuteRange[]): MinuteRange[] {
+  const total = Math.max(0, totalMinutes);
+  const sorted = [...holes].filter((h) => h.end > h.start).sort((a, b) => a.start - b.start);
+  const pieces: MinuteRange[] = [];
+  let cursor = 0;
+  for (const h of sorted) {
+    const start = Math.max(0, Math.min(total, h.start));
+    const end = Math.max(0, Math.min(total, h.end));
+    if (start > cursor) pieces.push({ start: cursor, end: start });
+    cursor = Math.max(cursor, end);
+  }
+  if (cursor < total) pieces.push({ start: cursor, end: total });
+  return pieces;
+}
+
+/**
+ * A bar's paint: one rounded lozenge per stretch the practitioner is busy,
+ * each with the full card finish (fill, gloss, border, hairline, shadow) and
+ * its own glass edge on the left. Processing time in the middle of the
+ * appointment is a hole between two lozenges, so the boundary either side of
+ * it looks exactly like the end of any booking bar, and the grid shows through
+ * to say the time is bookable. The bar's box itself paints nothing.
+ */
+function BookingBarPieces({
+  pieces,
+  totalMinutes,
+  palette,
+  flash,
+  guestName,
+  labelledStarts = [0],
+  labelLeftPx = 14,
+  totalHeightPx,
+}: {
+  pieces: MinuteRange[];
+  totalMinutes: number;
+  palette: BookingBlockPalette;
+  flash?: boolean;
+  /**
+   * Written on any lozenge that does not begin where a card's text does, so a
+   * stretch cut off by a processing period still says whose it is.
+   */
+  guestName?: string | null;
+  /** Bar minutes at which a card already carries its text (the top of the bar, each visit segment). */
+  labelledStarts?: number[];
+  /** Where the card's text starts from the left, so the name lines up with it. */
+  labelLeftPx?: number;
+  /** The bar's height, to skip the name on a piece too short to hold a line. */
+  totalHeightPx?: number;
+}) {
+  const total = Math.max(1, totalMinutes);
+  return (
+    <>
+      {pieces.map((piece) => {
+        const heightPx =
+          totalHeightPx != null ? (totalHeightPx * (piece.end - piece.start)) / total : Number.POSITIVE_INFINITY;
+        const showName =
+          Boolean(guestName) && !labelledStarts.includes(piece.start) && heightPx >= 20;
+        return (
+        <div
+          key={`${piece.start}-${piece.end}`}
+          className="pointer-events-none absolute inset-x-0 z-0 overflow-hidden rounded-2xl"
+          style={{
+            top: `${(piece.start / total) * 100}%`,
+            height: `${((piece.end - piece.start) / total) * 100}%`,
+            ...bookingCalendarBlockCardStyle(palette, { flash }),
+          }}
+          aria-hidden
+        >
+          {showName ? (
+            <div
+              className="absolute right-2 top-0 truncate pt-1 text-[12px] font-extrabold leading-tight tracking-tight"
+              style={{ left: labelLeftPx }}
+            >
+              {guestName}
+            </div>
+          ) : null}
+          <div
+            className="absolute inset-y-0 left-0 rounded-l-[15px]"
+            style={{
+              width: 4,
+              backgroundColor: 'rgba(255,255,255,0.22)',
+              backgroundImage:
+                'linear-gradient(180deg, rgba(255,255,255,0.70) 0%, rgba(255,255,255,0.30) 45%, rgba(255,255,255,0.08) 100%)',
+              boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.30), 1px 0 0 rgba(0,0,0,0.06)',
+            }}
+          />
+        </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** Holds the 4px the glass edge used to take in the row, so the grip and text keep their place. */
+function BookingBarEdgeSpacer() {
+  return <div className="shrink-0 self-stretch" style={{ width: 4, minWidth: 4 }} aria-hidden />;
+}
+
+/** Snap a clicked minute down to the diary's five minute grain, never before the band's start. */
+function snapFreeClickMinute(bandStartMin: number, minuteAt: number): number {
+  return Math.max(bandStartMin, Math.floor(minuteAt / 5) * 5);
+}
+
+/**
+ * The bands over processing time in the MIDDLE of the appointment. The bar
+ * paints nothing there (see `BookingBarPieces`), so the grid's own shading
+ * shows through a faint tint, nothing about the booking is written on them,
+ * and, when `onFreeClick` is given, they take the click themselves so it opens
+ * the empty-slot menu for that minute rather than the booking's detail sheet.
+ *
+ * Processing that runs to the booking's end, or past it, is not a band: the
+ * card simply stops where the practitioner's last busy stretch ends (see the
+ * bar renderers), so that time reads as the empty grid it effectively is.
+ */
+function ProcessingFreeBands({
   b,
   serviceMap,
   wallPaintMinutes,
+  onFreeClick,
 }: {
   b: Booking;
   serviceMap: Map<string, AppointmentService>;
   /** When embedded in a multi-service segment, pass that segment's vertical span in minutes. */
   wallPaintMinutes?: number;
+  /** Receives the wall-clock minute clicked (snapped to five minutes) and the event. */
+  onFreeClick?: (wallMinute: number, e: MouseEvent) => void;
 }) {
   const display = wallPaintMinutes ?? bookingCalendarDisplaySpanMinutes(b, serviceMap);
+  const { middle, wall0 } = bookingFreeRegions(b, serviceMap);
+  if (display <= 0 || middle.length === 0) return null;
+  return (
+    <>
+      {middle.map((band) => {
+        const topPct = ((band.start - wall0) / display) * 100;
+        const heightPct = ((band.end - band.start) / display) * 100;
+        const label = `Free from ${minutesToTime(band.start)} to ${minutesToTime(band.end)}: click to book`;
+        return onFreeClick ? (
+          <button
+            key={`${band.start}-${band.end}`}
+            type="button"
+            className="pointer-events-auto absolute inset-x-0 z-[3] cursor-pointer bg-slate-900/[0.06] transition-colors hover:bg-brand-500/10 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300"
+            style={{ top: `${topPct}%`, height: `${heightPct}%` }}
+            aria-label={label}
+            title="Processing time: click to book someone else in"
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const frac = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+              const minuteAt = band.start + frac * (band.end - band.start);
+              onFreeClick(snapFreeClickMinute(band.start, minuteAt), e);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <div
+            key={`${band.start}-${band.end}`}
+            className="pointer-events-none absolute inset-x-0 z-[3] bg-slate-900/[0.06]"
+            style={{ top: `${topPct}%`, height: `${heightPct}%` }}
+            aria-hidden
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * The invisible stretch at the foot of a card: processing that runs to the
+ * booking's end. Nothing is painted there (the grid shows through), and a click
+ * opens the empty-slot menu for that minute, so staff can book someone else in
+ * exactly as they would on empty grid.
+ */
+function ProcessingFreeTail({
+  heightPx,
+  startWallMin,
+  endWallMin,
+  onFreeClick,
+}: {
+  heightPx: number;
+  startWallMin: number;
+  endWallMin: number;
+  onFreeClick?: (wallMinute: number, e: MouseEvent) => void;
+}) {
+  if (heightPx <= 0) return null;
+  const label = `Free from ${minutesToTime(startWallMin)} to ${minutesToTime(endWallMin)}: click to book`;
+  return (
+    <button
+      type="button"
+      className={`absolute inset-x-0 bottom-0 z-[3] ${
+        onFreeClick ? 'cursor-pointer hover:bg-brand-500/5' : 'cursor-default'
+      } focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300`}
+      style={{ height: heightPx }}
+      aria-label={label}
+      title={onFreeClick ? 'Processing time: click to book someone else in' : undefined}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!onFreeClick) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const frac = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+        onFreeClick(snapFreeClickMinute(startWallMin, startWallMin + frac * (endWallMin - startWallMin)), e);
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+/**
+ * Where a booking's turnover sits: it starts once the practitioner's time with
+ * the client, and any processing that runs on past it, has ended. Null when
+ * the service has no buffer.
+ */
+function bookingBufferBandMinutes(
+  b: Booking,
+  serviceMap: Map<string, AppointmentService>,
+): { startWallMin: number; minutes: number } | null {
+  const minutes = bookingBufferMinutes(b, serviceMap);
+  if (minutes <= 0) return null;
+  const wall0 = timeToMinutes(b.booking_time.slice(0, 5));
+  if (!Number.isFinite(wall0)) return null;
   const core = bookingCoreDurationForProcessing(b, serviceMap);
-  if (display <= 0 || core <= 0) return null;
-  const blocks = bookingProcessingBlocksForLayout(b, serviceMap);
-  if (blocks.length === 0) return null;
-  const corePct = Math.min(100, (core / display) * 100);
+  const tail = processingTailMinutes(bookingProcessingBlocksForLayout(b, serviceMap), core);
+  return { startWallMin: wall0 + core + tail, minutes };
+}
+
+/**
+ * A booking's buffer, drawn as blocked time directly under its bar (after any
+ * processing that runs on past the service). Nothing can be booked into it,
+ * and that was invisible: the slots were simply dead to the mouse, so staff
+ * saw empty grid they could not use. Hatched like a block, with no card text,
+ * so it reads as turnover rather than as another appointment. It takes no
+ * clicks; the slot under it is disabled anyway.
+ */
+function BookingBufferBand({
+  topPx,
+  heightPx,
+  left,
+  width,
+}: {
+  topPx: number;
+  heightPx: number;
+  left: string;
+  width: string;
+}) {
+  if (heightPx <= 0) return null;
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 top-0 z-0 rounded-t-2xl"
-      style={{ height: `${corePct}%` }}
+      className="pointer-events-none absolute z-[12] overflow-hidden rounded-b-lg border-t border-dashed border-slate-400/80 bg-slate-300/40"
+      style={{
+        top: topPx,
+        height: heightPx,
+        left,
+        width,
+        backgroundImage:
+          'repeating-linear-gradient(-45deg, transparent 0 4px, rgba(15,23,42,0.10) 4px 8px)',
+      }}
       aria-hidden
     >
-      {blocks.map((blk) => (
-        <div
-          key={blk.id}
-          className="absolute inset-x-0 bg-sky-400/25"
-          style={{
-            top: `${(blk.start_minute / core) * 100}%`,
-            height: `${(blk.duration_minutes / core) * 100}%`,
-            backgroundImage:
-              'repeating-linear-gradient(-45deg, transparent, transparent 5px, rgba(15,23,42,0.08) 5px 10px)',
-          }}
-        />
-      ))}
+      {heightPx >= 14 ? (
+        <span className="absolute left-2 top-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-600">
+          Buffer
+        </span>
+      ) : null}
     </div>
   );
 }
 
-function calendarGridLineClass(minutes: number): string {
-  if (minutes % 60 === 0) return 'border-t-slate-400';
-  if (minutes % 30 === 0) return 'border-t-slate-300';
-  return 'border-t-slate-100';
+/**
+ * A hole in a multi-service visit's bar: the wait after one service before the
+ * next (processing that runs past its end, then the buffer), or processing that
+ * runs to a segment's end. The bar is masked transparent there so the grid shows
+ * through, and this catches the click so it books someone else in rather than
+ * opening the visit.
+ */
+function ProcessingFreeHole({
+  topPct,
+  heightPct,
+  startWallMin,
+  endWallMin,
+  onFreeClick,
+}: {
+  topPct: number;
+  heightPct: number;
+  startWallMin: number;
+  endWallMin: number;
+  onFreeClick: (wallMinute: number, e: MouseEvent) => void;
+}) {
+  if (heightPct <= 0) return null;
+  return (
+    <button
+      type="button"
+      className="pointer-events-auto absolute inset-x-0 z-[3] cursor-pointer hover:bg-brand-500/5 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300"
+      style={{ top: `${topPct}%`, height: `${heightPct}%` }}
+      aria-label={`Free from ${minutesToTime(startWallMin)} to ${minutesToTime(endWallMin)}: click to book`}
+      title="Processing time: click to book someone else in"
+      onClick={(e) => {
+        e.stopPropagation();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const frac = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+        onFreeClick(snapFreeClickMinute(startWallMin, startWallMin + frac * (endWallMin - startWallMin)), e);
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    />
+  );
 }
 
+/**
+ * Grid lines, one step darker per weight than they were: the hour line reads
+ * as a rule, the half hour as a clear division, and the quarter hour is
+ * visible rather than a hint (staff asked for a grid they could see).
+ */
+function calendarGridLineClass(minutes: number): string {
+  if (minutes % 60 === 0) return 'border-t-slate-500';
+  if (minutes % 30 === 0) return 'border-t-slate-400';
+  return 'border-t-slate-200';
+}
+
+/** Alternate 15 minute slots carry a tint strong enough to count by. */
 function calendarSlotBandClass(minutes: number): string {
   const slotIndex = Math.max(0, Math.floor(minutes / SLOT_MINUTES));
-  return slotIndex % 2 === 1 ? 'bg-slate-50/55' : 'bg-white';
+  return slotIndex % 2 === 1 ? 'bg-slate-100/80' : 'bg-white';
 }
 
 /** Human-readable length for a same-day block (start → end). */
@@ -1978,7 +2335,6 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
    */
   const totalHeight = Math.max(BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX, height + heightExtraPx);
   const horizontal = clusterLayoutHorizontalStyle(layout);
-  const nested = Boolean(layout.nestedInKey);
   /**
    * The bar stays where it was while it is dragged, faded, as the origin
    * marker; the DragOverlay card and the drop outline are the moving parts.
@@ -2007,8 +2363,8 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
       // lands one in a gap tucks it in. Top and height are deliberately NOT
       // animated; both are under the pointer's direct control during a drag.
       className={`absolute motion-safe:transition-[left,width] motion-safe:duration-200 motion-safe:ease-out ${
-        nested ? 'rounded-2xl shadow-[-10px_0_16px_-8px_rgba(2,32,71,0.55)]' : ''
-      } ${raised ? 'rounded-2xl ring-2 ring-brand-500 ring-offset-2 ring-offset-white' : ''}`}
+        raised ? 'rounded-2xl ring-2 ring-brand-500 ring-offset-2 ring-offset-white' : ''
+      }`}
       style={style}
     >
       {children(handleProps)}
@@ -2247,20 +2603,41 @@ const LinkedBookingCalendarBar = memo(function LinkedBookingCalendarBar({
    * showed none, so a colour service on a linked column looked like one solid
    * block of time while the same booking on its own venue showed the gap.
    */
+  const linkedGrid =
+    venueId && columnKey ? (linkedBookingToGridBooking(booking, venueId, columnKey) as Booking) : null;
+  const linkedFree = linkedGrid && serviceMap ? bookingFreeRegions(linkedGrid, serviceMap) : null;
+  // The bar's own span, less the foot the column leaves unpainted (see the column below).
+  const paintMinutes =
+    linkedGrid && serviceMap && linkedFree
+      ? Math.max(1, bookingCalendarDisplaySpanMinutes(linkedGrid, serviceMap) - (linkedFree.core - linkedFree.activeEnd))
+      : undefined;
   const processingStrip =
     venueId && columnKey && serviceMap && visibility === 'full_details' ? (
-      <BookingProcessingStrip
+      <ProcessingFreeBands
         b={linkedBookingToGridBooking(booking, venueId, columnKey) as Booking}
         serviceMap={serviceMap}
+        wallPaintMinutes={paintMinutes}
       />
     ) : null;
 
+  const linkedPaintMinutes = paintMinutes ?? 1;
   return (
     <div
       className="group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl"
-      style={bookingCalendarBlockCardStyle(palette)}
+      style={{ color: palette.text }}
     >
-      <CalendarBookingStatusStripe palette={palette} />
+      <BookingBarPieces
+        pieces={paintedPiecesMinutes(
+          linkedPaintMinutes,
+          linkedFree ? linkedFree.middle.map((m) => ({ start: m.start - linkedFree.wall0, end: m.end - linkedFree.wall0 })) : [],
+        )}
+        totalMinutes={linkedPaintMinutes}
+        palette={palette}
+        guestName={content.name}
+        labelLeftPx={14}
+        totalHeightPx={blockHeightPx}
+      />
+      <BookingBarEdgeSpacer />
       {processingStrip}
       <div
         className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-2.5 text-left ${
@@ -2518,12 +2895,18 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
           const height = linkedBlockHeight(b.bookingTime, b.bookingEndTime, slotHeightPx);
           const layout = layouts.get(b.id) ?? SINGLE_LANE_LAYOUT;
           const horizontal = clusterLayoutHorizontalStyle(layout, { baseZIndex: 15 });
+          // Processing that runs to the booking's end is free time: the card stops
+          // there, and a click on that foot does not open the booking.
+          const linkedFree = serviceMap
+            ? bookingFreeRegions(linkedBookingToGridBooking(b, column.venueId, column.key) as Booking, serviceMap)
+            : null;
+          const trailingFreePx = linkedFree
+            ? Math.max(0, Math.min(height, ((linkedFree.core - linkedFree.activeEnd) / SLOT_MINUTES) * slotHeightPx))
+            : 0;
           return (
             <div
               key={b.id}
-              className={`absolute motion-safe:transition-[left,width] motion-safe:duration-200 motion-safe:ease-out ${
-                layout.nestedInKey ? 'rounded-2xl shadow-[-10px_0_16px_-8px_rgba(2,32,71,0.55)]' : ''
-              }`}
+              className="absolute motion-safe:transition-[left,width] motion-safe:duration-200 motion-safe:ease-out"
               style={{ top, height, left: horizontal.left, width: horizontal.width, zIndex: horizontal.zIndex }}
             >
               <button
@@ -2531,7 +2914,8 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
                 onClick={(e) =>
                   onBookingClick(b, { x: e.clientX, y: e.clientY })
                 }
-                className="block h-full w-full text-left"
+                className="block w-full text-left"
+                style={{ height: height - trailingFreePx }}
                 title={
                   linkedBookingIsClickable(column, b)
                     ? linkedBookingUsesExpandedDetail(column)
@@ -2550,12 +2934,39 @@ const LinkedDayColumn = memo(function LinkedDayColumn({
                   columnKey={column.key}
                   serviceMap={serviceMap}
                   variant="day-grid"
-                  blockHeightPx={height}
+                  blockHeightPx={height - trailingFreePx}
                   rowOverlay={bookingRowOverlayForId?.(b.id) ?? {}}
                 />
               </button>
+              {trailingFreePx > 0 && linkedFree ? (
+                <ProcessingFreeTail
+                  heightPx={trailingFreePx}
+                  startWallMin={linkedFree.wall0 + linkedFree.activeEnd}
+                  endWallMin={linkedFree.wall0 + linkedFree.core}
+                />
+              ) : null}
             </div>
           );
+        })}
+        {bookings.flatMap((b) => {
+          if (!serviceMap || b.status === 'Cancelled') return [];
+          const band = bookingBufferBandMinutes(
+            linkedBookingToGridBooking(b, column.venueId, column.key) as Booking,
+            serviceMap,
+          );
+          if (!band) return [];
+          const horizontal = clusterLayoutHorizontalStyle(layouts.get(b.id) ?? SINGLE_LANE_LAYOUT, {
+            baseZIndex: 15,
+          });
+          return [
+            <BookingBufferBand
+              key={`buffer-${b.id}`}
+              topPx={linkedSlotTop(minutesToTime(band.startWallMin), startHour, slotHeightPx)}
+              heightPx={(band.minutes / SLOT_MINUTES) * slotHeightPx}
+              left={horizontal.left}
+              width={horizontal.width}
+            />,
+          ];
         })}
       </div>
     </div>
@@ -5833,7 +6244,32 @@ export function PractitionerCalendarView({
       compactActive && Math.abs(e.delta.y) < COMPACT_DRAG_DEADZONE_PX
         ? 0
         : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
-    const duration = getBookingDuration(b);
+    /**
+     * The footprint the drop outline mirrors and the checks judge. A visit moves
+     * as one, so every service is carried by the same delta and the outline
+     * spans them all, gaps included; and for any booking the reach runs to the
+     * end of the buffer band drawn under its bar, not just the bar itself.
+     * Dragging a visit used to size the outline, and check for conflicts, from
+     * its first service alone, so the green box stopped where the first service
+     * did and a later service could land on a break unnoticed.
+     */
+    const movedRows = serviceVisitRowsFor(b) ?? [b];
+    const rowOffset = (row: Booking) => timeToMinutes(row.booking_time.slice(0, 5)) - originalStartMins;
+    const duration = Math.max(
+      getBookingDuration(b),
+      bookingMoveFootprintMinutes(
+        movedRows.map((row) => {
+          const map = serviceMapForBooking(row);
+          return {
+            offsetMinutes: rowOffset(row),
+            displayMinutes: getBookingDuration(row),
+            coreMinutes: bookingCoreDurationForProcessing(row, map),
+            tailMinutes: bookingProcessingTailMinutes(row, map),
+            bufferMinutes: bookingBufferMinutes(row, map),
+          };
+        }),
+      ),
+    );
     // The day ends at midnight: a bar dragged past either end stops there.
     const targetStartMins = Math.max(0, Math.min(originalStartMins + deltaMinutes, 24 * 60 - duration));
     const endMin = targetStartMins + duration;
@@ -5843,10 +6279,12 @@ export function PractitionerCalendarView({
     const dayEndMin = baseEndHour * 60;
     const pracClassBlocks = classBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
     const pracEventBlocks = eventBlocksForGrid.filter((bl) => bl.calendar_id === pracId && bl.date === dateStr);
-    const candBusy = practitionerWallBusyIntervalsForCandidateAtSlot(
-      b,
-      targetStartMins,
-      serviceMapForBooking(b),
+    const candBusy = movedRows.flatMap((row) =>
+      practitionerWallBusyIntervalsForCandidateAtSlot(
+        row,
+        targetStartMins + rowOffset(row),
+        serviceMapForBooking(row),
+      ),
     );
     // Landing before open / after close is allowed (staff can book past opening
     // hours), surfaced as an amber warning rather than blocked. Only a genuine
@@ -6128,15 +6566,65 @@ export function PractitionerCalendarView({
   );
 
   /**
+   * The empty-slot menu for a click on the grid. Shared by the slot buttons
+   * and by the free bands a card paints over its processing time, so booking
+   * someone else into a colour's developing time is the same gesture as
+   * booking them into empty grid.
+   */
+  const openSlotMenuForEmptyClick = useCallback(
+    (ev: MouseEvent, pid: string, dstr: string, t: string) => {
+      const linkedCol = linkedNativeGridColumnByKey.get(pid);
+      if (linkedCol) {
+        // A linked column must never fall through to the own-venue
+        // slot menu (it would create a booking on the wrong venue,
+        // and offer Block time on a diary that is not ours). It gets
+        // its own two-option menu instead.
+        if (linkedCol.action === 'create_edit_cancel') {
+          const v = linkedVenueById.get(linkedCol.venueId);
+          if (v) {
+            setSlotMenu({
+              pracId: pid,
+              dateStr: dstr,
+              time: t,
+              x: Math.max(8, Math.min(ev.clientX - 72, window.innerWidth - 200)),
+              y: Math.max(8, Math.min(ev.clientY - 8, window.innerHeight - 160)),
+              linked: { venue: v, practitionerId: linkedCol.practitionerId },
+            });
+          }
+        } else {
+          addToast(
+            `${linkedCol.venueName} hasn’t granted permission to create bookings on this calendar.`,
+            'info',
+          );
+        }
+        return;
+      }
+      setSlotMenu({
+        pracId: pid,
+        dateStr: dstr,
+        time: t,
+        x: Math.max(8, Math.min(ev.clientX - 72, window.innerWidth - 200)),
+        y: Math.max(8, Math.min(ev.clientY - 8, window.innerHeight - 160)),
+      });
+    },
+    [linkedNativeGridColumnByKey, linkedVenueById, addToast],
+  );
+
+  /**
    * A booking as the visit resolver sees it, with the service's catalogue buffer
-   * attached. Without the buffer the resolver cannot tell a gap a service is
-   * entitled to from dead time an edit left behind, and preserves both.
+   * and the wait after it (processing that runs past its end) attached. Without
+   * them the resolver cannot tell a gap a service is entitled to from dead time
+   * an edit left behind, and preserves both.
    */
   const visitRowFor = useCallback(
     (b: Booking) => {
       const sid = serviceIdForBooking(b);
       const svc = sid ? serviceMapForBooking(b).get(sid) : null;
-      return { ...b, buffer_minutes: svc?.buffer_minutes ?? null };
+      return {
+        ...b,
+        buffer_minutes: svc?.buffer_minutes ?? null,
+        processing_tail_minutes: svc ? bookingProcessingTailMinutes(b, serviceMapForBooking(b)) : null,
+      };
     },
     [serviceMapForBooking],
   );
@@ -7849,41 +8337,7 @@ export function PractitionerCalendarView({
                             top={i * slotHeightPx}
                             slotHeightPx={slotHeightPx}
                             disabled={occ}
-                            onEmptyClick={(ev, pid, dstr, t) => {
-                              const linkedCol = linkedNativeGridColumnByKey.get(pid);
-                              if (linkedCol) {
-                                // A linked column must never fall through to the own-venue
-                                // slot menu (it would create a booking on the wrong venue,
-                                // and offer Block time on a diary that is not ours). It gets
-                                // its own two-option menu instead.
-                                if (linkedCol.action === 'create_edit_cancel') {
-                                  const v = linkedVenueById.get(linkedCol.venueId);
-                                  if (v) {
-                                    setSlotMenu({
-                                      pracId: pid,
-                                      dateStr: dstr,
-                                      time: t,
-                                      x: Math.max(8, Math.min(ev.clientX - 72, window.innerWidth - 200)),
-                                      y: Math.max(8, Math.min(ev.clientY - 8, window.innerHeight - 160)),
-                                      linked: { venue: v, practitionerId: linkedCol.practitionerId },
-                                    });
-                                  }
-                                } else {
-                                  addToast(
-                                    `${linkedCol.venueName} hasn’t granted permission to create bookings on this calendar.`,
-                                    'info',
-                                  );
-                                }
-                                return;
-                              }
-                              setSlotMenu({
-                                pracId: pid,
-                                dateStr: dstr,
-                                time: t,
-                                x: Math.max(8, Math.min(ev.clientX - 72, window.innerWidth - 200)),
-                                y: Math.max(8, Math.min(ev.clientY - 8, window.innerHeight - 160)),
-                              });
-                            }}
+                            onEmptyClick={openSlotMenuForEmptyClick}
                           />
                         );
                       })}
@@ -8189,7 +8643,7 @@ export function PractitionerCalendarView({
                           durationForLayout,
                           (b) => bookingProcessingWallGaps(b, serviceMapForBooking(b)),
                         );
-                        return bookingClusters.map((cluster) => {
+                        const bars = bookingClusters.map((cluster) => {
                           const layout = clusterLayouts.get(clusterKey(cluster)) ?? { laneIndex: 0, laneCount: 1 };
                         if (cluster.kind === 'single') {
                           const b = cluster.booking;
@@ -8213,7 +8667,25 @@ export function PractitionerCalendarView({
                             resizePreviewEnd?.bookingId === b.id
                               ? resizePreviewEnd.endHm
                               : minutesToTime(timeToMinutes(b.booking_time) + duration);
-                          const blockH = height + resizeExtra;
+                          /**
+                           * Processing that runs to the booking's end (or past it) is
+                           * free time, so the card stops where the practitioner's last
+                           * busy stretch ends and the foot of the shell stays unpainted:
+                           * it reads as the empty grid it effectively is, and a click
+                           * there books someone else in. Processing in the middle stays
+                           * inside the card as a pale band. The shell keeps the full
+                           * length, so drag and drop still see the whole booking.
+                           */
+                          const freeRegions = bookingFreeRegions(b, serviceMapForBooking(b));
+                          const trailingFreeMins = Math.max(0, freeRegions.core - freeRegions.activeEnd);
+                          const trailingFreePx = Math.max(
+                            0,
+                            Math.min(height + resizeExtra, (trailingFreeMins / SLOT_MINUTES) * slotHeightPx),
+                          );
+                          const blockH = height + resizeExtra - trailingFreePx;
+                          const cardPaintMinutes = Math.max(1, duration - trailingFreeMins);
+                          const openFreeSlot = (wallMinute: number, e: MouseEvent) =>
+                            openSlotMenuForEmptyClick(e, pracId, date, minutesToTime(wallMinute));
                           const showInlineScheduleFollowUp = dragMoveConfirmBookingId === b.id;
                           const isOverlapLane = layout.laneCount > 1;
                           const reservePx =
@@ -8231,7 +8703,13 @@ export function PractitionerCalendarView({
                            * lowest, or moves up beside the text when a nested bar runs to the
                            * bottom edge. A bar with nothing nested keeps the whole box.
                            */
-                          const hostRegions = hostRegionsPx(layout, timeToMinutes(b.booking_time), blockH, slotHeightPx);
+                          const hostRegions = hostRegionsPx(
+                            layout,
+                            timeToMinutes(b.booking_time),
+                            blockH,
+                            slotHeightPx,
+                            freeRegions.middle,
+                          );
                           const trayBottomOffsetPx = blockH - hostRegions.trayBottomPx;
                           const traySpanPx = hostRegions.trayBottomPx - hostRegions.trayTopPx;
                           const actionBlockHeight = Math.max(
@@ -8285,17 +8763,48 @@ export function PractitionerCalendarView({
                                   className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
                                     flash ? 'motion-safe:animate-pulse' : ''
                                   }`}
-                                  style={bookingCalendarBlockCardStyle(palette, {
-                                    // Ring must ride the inline shadow; a `ring-*`
-                                    // class here loses to this very style object.
-                                    flash,
-                                  })}
+                                  style={{
+                                    color: palette.text,
+                                    // Stops short of the shell when processing runs to the end.
+                                    ...(trailingFreePx > 0 ? { height: blockH } : {}),
+                                  }}
                                 >
-                                  <CalendarBookingStatusStripe palette={palette} />
+                                  {/* The paint, one lozenge per busy stretch; the box itself is clear. */}
+                                  <BookingBarPieces
+                                    pieces={paintedPiecesMinutes(
+                                      cardPaintMinutes,
+                                      freeRegions.middle.map((m) => ({
+                                        start: m.start - freeRegions.wall0,
+                                        end: m.end - freeRegions.wall0,
+                                      })),
+                                    )}
+                                    totalMinutes={cardPaintMinutes}
+                                    palette={palette}
+                                    flash={flash}
+                                    guestName={b.guest_name}
+                                    labelLeftPx={
+                                      4 +
+                                      (canDrag && handle.listeners && handle.attributes
+                                        ? isOverlapLane
+                                          ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
+                                          : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX
+                                        : resName && !isOverlapLane
+                                          ? BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX
+                                          : 0) +
+                                      (isOverlapLane ? 6 : 10)
+                                    }
+                                    totalHeightPx={blockH}
+                                  />
+                                  <BookingBarEdgeSpacer />
                                   {/* The source venue is shown in the column header ("Linked · {venue}"),
                                       so no per-card venue chip here — it overlapped the action buttons
                                       on short bars. The dashed/hatch treatment still marks it as linked. */}
-                                  <BookingProcessingStrip b={b} serviceMap={serviceMapForBooking(b)} />
+                                  <ProcessingFreeBands
+                                    b={b}
+                                    serviceMap={serviceMapForBooking(b)}
+                                    wallPaintMinutes={cardPaintMinutes}
+                                    onFreeClick={openFreeSlot}
+                                  />
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
                                       ref={handle.setActivatorNodeRef}
@@ -8522,6 +9031,14 @@ export function PractitionerCalendarView({
                                     </>
                                   ) : null}
                                 </div>
+                                {trailingFreePx > 0 ? (
+                                  <ProcessingFreeTail
+                                    heightPx={trailingFreePx}
+                                    startWallMin={freeRegions.wall0 + freeRegions.activeEnd}
+                                    endWallMin={freeRegions.wall0 + freeRegions.core}
+                                    onFreeClick={openFreeSlot}
+                                  />
+                                ) : null}
                                 </>
                               )}
                             </DraggableBookingShell>
@@ -8580,6 +9097,80 @@ export function PractitionerCalendarView({
                         const segmentSpanMins = visitPreview?.spanMins ?? spanMins;
                         const segmentDurationOf = (b: Booking) =>
                           visitPreview?.durations.get(b.id) ?? getBookingDuration(b);
+                        /**
+                         * Where each service sits in the bar, in minutes from the visit's
+                         * start, with the gap after it (a wait while colour develops, then
+                         * the buffer) and the stretch at its own foot where processing runs
+                         * to its end. Gaps are the observed ones at rest, so a hole an
+                         * earlier edit left behind is drawn as it is; under a resize
+                         * preview they are the configured ones the resolver will lay out.
+                         */
+                        const visitTimeline = (() => {
+                          const previewVisit = visitPreview
+                            ? resolveAppointmentVisit(items.map(visitRowFor))
+                            : null;
+                          let pos = 0;
+                          return items.map((seg, i) => {
+                            const dur = segmentDurationOf(seg);
+                            const start = pos;
+                            const next = items[i + 1];
+                            const gapAfter = !next
+                              ? 0
+                              : previewVisit
+                                ? (previewVisit.services.find((sv) => sv.id === seg.id)?.expectedGapAfterMinutes ?? 0)
+                                : Math.max(
+                                    0,
+                                    timeToMinutes(next.booking_time) -
+                                      (timeToMinutes(seg.booking_time) + getBookingDuration(seg)),
+                                  );
+                            pos = start + dur + gapAfter;
+                            const free = bookingFreeRegions(seg, serviceMapForBooking(seg));
+                            const trailingFree = Math.max(0, Math.min(dur, free.core - free.activeEnd));
+                            return { seg, start, dur, gapAfter, trailingFree, free };
+                          });
+                        })();
+                        const timelineTotal = Math.max(
+                          1,
+                          visitTimeline.reduce((m, t) => Math.max(m, t.start + t.dur), 0),
+                        );
+                        const visitWall0 = timeToMinutes(first.booking_time);
+                        /**
+                         * [start, end) minute ranges of the bar left unpainted, in timeline
+                         * minutes. `clickEnd` is where the bookable part of each ends: a
+                         * gap between services is the wait (free) and then the buffer
+                         * (turnover, not bookable), so the catcher covers only the wait.
+                         */
+                        const visitHoles = visitTimeline.flatMap((t) => {
+                          const segEnd = t.start + t.dur;
+                          const tail = bookingProcessingTailMinutes(t.seg, serviceMapForBooking(t.seg));
+                          return [
+                            ...(t.trailingFree > 0
+                              ? [{ start: segEnd - t.trailingFree, end: segEnd, clickEnd: segEnd }]
+                              : []),
+                            ...(t.gapAfter > 0
+                              ? [{ start: segEnd, end: segEnd + t.gapAfter, clickEnd: segEnd + Math.min(t.gapAfter, tail) }]
+                              : []),
+                          ];
+                        });
+                        /**
+                         * The lozenges the visit paints: every busy stretch, with the
+                         * waits between services, each service's trailing free stretch
+                         * and its middle gaps all left as holes. The grid shows through
+                         * them and the visit reads as separate bars with space between.
+                         */
+                        const visitPieces = paintedPiecesMinutes(timelineTotal, [
+                          ...visitHoles,
+                          ...visitTimeline.flatMap((t) =>
+                            t.free.middle.map((m) => ({ start: m.start - visitWall0, end: m.end - visitWall0 })),
+                          ),
+                        ]);
+                        /** A service after a hole starts a new lozenge, so it carries the guest's name again. */
+                        const segmentStartsNewPiece = (segIdx: number): boolean => {
+                          const prev = visitTimeline[segIdx - 1];
+                          return !prev || prev.trailingFree > 0 || prev.gapAfter > 0;
+                        };
+                        const openVisitFreeSlot = (wallMinute: number, e: MouseEvent) =>
+                          openSlotMenuForEmptyClick(e, pracId, date, minutesToTime(wallMinute));
                         const flash = items.some((x) => flashIds.has(x.id));
                         const qBusy = items.some((x) => quickActionId === x.id);
                         const isOverlapLane = layout.laneCount > 1;
@@ -8625,16 +9216,32 @@ export function PractitionerCalendarView({
                             {(handle) => (
                               <>
                               <div
-                                className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl shadow-sm ring-1 ring-white/70 transition-shadow hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
+                                className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
                                   flash ? 'motion-safe:animate-pulse' : ''
                                 }`}
-                                style={bookingCalendarBlockCardStyle(clusterPalette, {
-                                  flash,
-                                })}
+                                style={{ color: clusterPalette.text }}
                                 title={serviceTitle || undefined}
                                 {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
                               >
-                                <CalendarBookingStatusStripe palette={clusterPalette} />
+                                <BookingBarPieces
+                                  pieces={visitPieces}
+                                  totalMinutes={timelineTotal}
+                                  palette={clusterPalette}
+                                  flash={flash}
+                                  guestName={first.guest_name}
+                                  labelledStarts={visitTimeline.map((t) => t.start)}
+                                  labelLeftPx={
+                                    4 +
+                                    (visitResizable && handle.listeners && handle.attributes
+                                      ? isOverlapLane
+                                        ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
+                                        : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX
+                                      : 0) +
+                                    (isOverlapLane ? 6 : 10)
+                                  }
+                                  totalHeightPx={visitBlockH}
+                                />
+                                <BookingBarEdgeSpacer />
                                 {/*
                                   Processing strips for every segment, painted at bar level
                                   the way a single booking's is. They used to live inside
@@ -8645,31 +9252,34 @@ export function PractitionerCalendarView({
                                   is placed by the same `flex: dur` proportions the segments
                                   are laid out by, so it lines up with its segment exactly.
                                 */}
-                                <div className="pointer-events-none absolute inset-0 z-0" aria-hidden>
-                                  {(() => {
-                                    const durs = items.map(segmentDurationOf);
-                                    const total = durs.reduce((a, d) => a + d, 0);
-                                    if (total <= 0) return null;
-                                    let before = 0;
-                                    return items.map((b, segIdx) => {
-                                      const dur = durs[segIdx]!;
-                                      const topPct = (before / total) * 100;
-                                      before += dur;
-                                      return (
-                                        <div
-                                          key={b.id}
-                                          className="absolute inset-x-0"
-                                          style={{ top: `${topPct}%`, height: `${(dur / total) * 100}%` }}
-                                        >
-                                          <BookingProcessingStrip
-                                            b={b}
-                                            serviceMap={serviceMapForBooking(b)}
-                                            wallPaintMinutes={dur}
-                                          />
-                                        </div>
-                                      );
-                                    });
-                                  })()}
+                                <div className="pointer-events-none absolute inset-0 z-[3]">
+                                  {visitTimeline.map((t) => (
+                                    <div
+                                      key={t.seg.id}
+                                      className="pointer-events-none absolute inset-x-0"
+                                      style={{
+                                        top: `${(t.start / timelineTotal) * 100}%`,
+                                        height: `${(t.dur / timelineTotal) * 100}%`,
+                                      }}
+                                    >
+                                      <ProcessingFreeBands
+                                        b={t.seg}
+                                        serviceMap={serviceMapForBooking(t.seg)}
+                                        wallPaintMinutes={t.dur}
+                                        onFreeClick={openVisitFreeSlot}
+                                      />
+                                    </div>
+                                  ))}
+                                  {visitHoles.map((hole) => (
+                                    <ProcessingFreeHole
+                                      key={`${hole.start}-${hole.end}`}
+                                      topPct={(hole.start / timelineTotal) * 100}
+                                      heightPct={((hole.clickEnd - hole.start) / timelineTotal) * 100}
+                                      startWallMin={visitWall0 + hole.start}
+                                      endWallMin={visitWall0 + hole.clickEnd}
+                                      onFreeClick={openVisitFreeSlot}
+                                    />
+                                  ))}
                                 </div>
                                 {/*
                                   The visit's move grip. This branch used to
@@ -8758,6 +9368,12 @@ export function PractitionerCalendarView({
                                           const sid = serviceIdForBooking(b);
                                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
                                           const segmentApproxPx = segmentApproxHeights[segIdx]!;
+                                          const segmentTimeline = visitTimeline[segIdx]!;
+                                          // The foot of this segment where processing runs to its
+                                          // end: masked out of the bar, so nothing is written there.
+                                          const segmentTrailingFreePx =
+                                            visitBlockH * (segmentTimeline.trailingFree / timelineTotal);
+                                          const gapAfter = segmentTimeline.gapAfter;
                                           /**
                                            * Clearance for the tray, per segment.
                                            *
@@ -8808,7 +9424,8 @@ export function PractitionerCalendarView({
                                             0,
                                             segmentApproxPx -
                                               BOOKING_CARD_PADDING_SEGMENT_PX -
-                                              segmentTrayReservePx,
+                                              segmentTrayReservePx -
+                                              segmentTrailingFreePx,
                                           );
                                           const showSegPills =
                                             !isOverlapLane && segmentInnerPx >= 88 && bookingHasBlockPills(b);
@@ -8819,8 +9436,8 @@ export function PractitionerCalendarView({
                                           const resSeg = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                                           const segServiceLabel = calendarBookingServiceLabel(b, svc, resSeg ?? null);
                                           return (
+                                            <Fragment key={b.id}>
                                             <div
-                                              key={b.id}
                                               className="relative flex min-h-0 flex-col overflow-hidden"
                                               /**
                                                * No fill of its own. The card underneath already
@@ -8846,7 +9463,7 @@ export function PractitionerCalendarView({
                                                 // asks for one.
                                                 style={{
                                                   paddingRight: segmentGutterPx || undefined,
-                                                  paddingBottom: segmentTrayReservePx || undefined,
+                                                  paddingBottom: segmentTrayReservePx + segmentTrailingFreePx || undefined,
                                                 }}
                                                 aria-label={`Open booking details for ${b.guest_name}`}
                                               >
@@ -8857,7 +9474,10 @@ export function PractitionerCalendarView({
                                                       <ComplianceBarIcon flag={complianceFlags[b.id]!} />
                                                     ) : undefined
                                                   }
-                                                  hideName={segIdx > 0}
+                                                  // Once a service sits in its own lozenge (a wait
+                                                  // or gap before it), the guest's name goes on it
+                                                  // again; back to back, it reads once at the top.
+                                                  hideName={segIdx > 0 && !segmentStartsNewPiece(segIdx)}
                                                   service={segServiceLabel}
                                                   /**
                                                    * Every segment of a visit is the same guest, so
@@ -8891,6 +9511,9 @@ export function PractitionerCalendarView({
                                                 <div className="min-h-0 min-w-0 flex-1" aria-hidden />
                                               </button>
                                             </div>
+                                            {/* The wait before the next service: masked out of the bar above. */}
+                                            {gapAfter > 0 ? <div style={{ flex: gapAfter }} aria-hidden /> : null}
+                                            </Fragment>
                                           );
                                         })}
                                       </div>
@@ -8965,6 +9588,36 @@ export function PractitionerCalendarView({
                           </DraggableBookingShell>
                         );
                         });
+                        /**
+                         * Each booking's buffer, under its bar in its own lane. Drawn
+                         * after the bars so a visit's inter-service turnover sits in the
+                         * gap between two lozenges, below them in the stacking order.
+                         */
+                        const bufferBands = bookingClusters.flatMap((cluster) => {
+                          const layout = clusterLayouts.get(clusterKey(cluster)) ?? SINGLE_LANE_LAYOUT;
+                          const horizontal = clusterLayoutHorizontalStyle(layout);
+                          const members = cluster.kind === 'single' ? [cluster.booking] : cluster.items;
+                          return members.flatMap((b) => {
+                            if (['Cancelled', 'No-Show'].includes(b.status)) return [];
+                            const band = bookingBufferBandMinutes(b, serviceMapForBooking(b));
+                            if (!band) return [];
+                            return [
+                              <BookingBufferBand
+                                key={`buffer-${b.id}`}
+                                topPx={((band.startWallMin - startHour * 60) / SLOT_MINUTES) * slotHeightPx}
+                                heightPx={(band.minutes / SLOT_MINUTES) * slotHeightPx}
+                                left={horizontal.left}
+                                width={horizontal.width}
+                              />,
+                            ];
+                          });
+                        });
+                        return (
+                          <>
+                            {bars}
+                            {bufferBands}
+                          </>
+                        );
                       })()}
                     </div>
                   </div>

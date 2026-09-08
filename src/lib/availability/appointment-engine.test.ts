@@ -497,7 +497,13 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
     expect(bad.ok).toBe(false);
   });
 
-  it('rejects candidate processing blocks that extend past the core duration', () => {
+  /**
+   * A candidate block may start at the end of the interval and run on: that is
+   * the wait after the service (colour developing before the cut), which the
+   * practitioner is free for. One that STARTS after the interval has ended is
+   * still a contradiction.
+   */
+  it('accepts candidate processing that runs past the core duration, rejects one that starts after it', () => {
     const date = '2030-06-02';
     const dk = workingHoursDayKey(date);
     const input: AppointmentEngineInput = {
@@ -528,10 +534,14 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
       ],
       existingBookings: [],
     };
-    const invalid = validateAppointmentCustomInterval(input, 'p1', 's45', '10:00', '10:45', undefined, {
+    const runsOn = validateAppointmentCustomInterval(input, 'p1', 's45', '10:00', '10:45', undefined, {
       processingTimeBlocks: [{ id: 'x', start_minute: 40, duration_minutes: 10 }],
     });
-    expect(invalid.ok).toBe(false);
+    expect(runsOn.ok).toBe(true);
+    const startsAfter = validateAppointmentCustomInterval(input, 'p1', 's45', '10:00', '10:45', undefined, {
+      processingTimeBlocks: [{ id: 'y', start_minute: 46, duration_minutes: 10 }],
+    });
+    expect(startsAfter.ok).toBe(false);
   });
 
   /**
@@ -784,14 +794,13 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
   });
 
   /**
-   * The asymmetry is deliberate, so pin it. Fitting the template (above) only
-   * ever affects the interval being ASKED about, and erring there costs nothing
-   * worse than an offered slot. An EXISTING booking whose stored snapshot
-   * overruns its own duration is a corrupt row, and inferring a gap from it would
-   * free time the practitioner is actually working. That direction stays
-   * conservative: hold the whole span busy.
+   * A stored snapshot that runs past the booking's own end is the wait after
+   * the service (the client sits while colour develops, the practitioner is
+   * free), not a corrupt row: the practitioner is free from where it starts to
+   * where it ends, and busy before it. A block that starts AFTER the booking
+   * has ended is still nonsense, and that row stays fully busy.
    */
-  it('holds an existing booking fully busy when its own snapshot overruns its duration', () => {
+  it('frees an existing booking from where its snapshot runs past its end, and holds a nonsense snapshot busy', () => {
     const existing: AppointmentBooking[] = [
       {
         id: 'long',
@@ -800,21 +809,31 @@ describe('validateAppointmentCustomInterval (salon processing)', () => {
         duration_minutes: 60,
         buffer_minutes: 0,
         status: 'Confirmed',
-        // Runs to minute 75, past the end of a 60 minute booking.
+        // Free from minute 20 to 75, past the end of a 60 minute booking.
         processing_time_blocks: [{ id: 'g', start_minute: 20, duration_minutes: 55 }],
       },
     ];
     const input = processingInput(existing);
-    for (const [start, end] of [
-      ['10:25', '10:40'],
-      ['10:05', '10:20'],
-    ] as const) {
-      expect(
-        validateAppointmentCustomInterval(input, 'p1', 's15', start, end, undefined, {
-          processingTimeBlocks: [],
-        }).ok,
-      ).toBe(false);
-    }
+    const inGap = validateAppointmentCustomInterval(input, 'p1', 's15', '10:25', '10:40', undefined, {
+      processingTimeBlocks: [],
+    });
+    expect(inGap.ok).toBe(true);
+    const afterEnd = validateAppointmentCustomInterval(input, 'p1', 's15', '11:00', '11:15', undefined, {
+      processingTimeBlocks: [],
+    });
+    expect(afterEnd.ok).toBe(true);
+    const beforeGap = validateAppointmentCustomInterval(input, 'p1', 's15', '10:05', '10:20', undefined, {
+      processingTimeBlocks: [],
+    });
+    expect(beforeGap.ok).toBe(false);
+
+    const nonsense: AppointmentBooking[] = [
+      { ...existing[0]!, processing_time_blocks: [{ id: 'n', start_minute: 65, duration_minutes: 10 }] },
+    ];
+    const strict = validateAppointmentCustomInterval(processingInput(nonsense), 'p1', 's15', '10:25', '10:40', undefined, {
+      processingTimeBlocks: [],
+    });
+    expect(strict.ok).toBe(false);
   });
 
   it('opens the gap for an existing booking whose snapshot does fit', () => {

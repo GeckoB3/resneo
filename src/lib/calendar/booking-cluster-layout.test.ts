@@ -3,7 +3,6 @@ import {
   clusterLayoutHorizontalStyle,
   hostRegionsAroundNested,
   layoutOverlapClusters,
-  NESTED_BOOKING_INSET_PX,
   type ClusterLayoutItem,
 } from './booking-cluster-layout';
 
@@ -205,21 +204,26 @@ describe('layoutOverlapClusters', () => {
 });
 
 describe('clusterLayoutHorizontalStyle', () => {
-  it('gives a nested bar its host lane minus the left inset, above the host', () => {
+  /**
+   * A booking taken in another's processing gap is an ordinary booking: it
+   * gets the host's whole lane (no indent), drawn above the host so it covers
+   * the free band it was booked into.
+   */
+  it('gives a nested bar its host lane in full, above the host', () => {
     const host = clusterLayoutHorizontalStyle({ laneIndex: 0, laneCount: 1 });
     const nested = clusterLayoutHorizontalStyle({ laneIndex: 0, laneCount: 1, nestedInKey: 'h' });
     expect(host.left).toBe('calc(0% + 0.25rem)');
     expect(host.width).toBe('calc(100% - 0.5rem)');
-    expect(nested.left).toBe(`calc(0% + 0.25rem + ${NESTED_BOOKING_INSET_PX}px)`);
-    expect(nested.width).toBe(`calc(100% - 0.5rem - ${NESTED_BOOKING_INSET_PX}px)`);
+    expect(nested.left).toBe(host.left);
+    expect(nested.width).toBe(host.width);
     expect(nested.zIndex).toBeGreaterThan(host.zIndex);
   });
 
-  it('indents a bar nested two deep twice as far, above the bar it rides in', () => {
+  it('stacks a bar nested two deep above the bar it rides in, still at full width', () => {
     const one = clusterLayoutHorizontalStyle({ laneIndex: 0, laneCount: 1, nestedInKey: 'h', nestDepth: 1 });
     const two = clusterLayoutHorizontalStyle({ laneIndex: 0, laneCount: 1, nestedInKey: 'n', nestDepth: 2 });
-    expect(two.left).toBe(`calc(0% + 0.25rem + ${NESTED_BOOKING_INSET_PX * 2}px)`);
-    expect(two.width).toBe(`calc(100% - 0.5rem - ${NESTED_BOOKING_INSET_PX * 2}px)`);
+    expect(two.left).toBe(one.left);
+    expect(two.width).toBe(one.width);
     expect(two.zIndex).toBeGreaterThan(one.zIndex);
   });
 

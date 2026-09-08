@@ -408,14 +408,31 @@ export function StaffAppointmentModifyForm({
   }, [processingServiceChanged, bookingProcessingBlocks, selectedService, activeVariant]);
 
   /**
-   * The blocks this form will actually send, clamped to the chosen duration.
-   * Without this the server rejects any shortening below the last block's end
+   * The blocks this form will actually send, fitted to the chosen duration.
+   * Without this the server rejected any shortening below the last block's end
    * ("Processing blocks must lie within the service duration"), which staff had
-   * no way to resolve from this form.
+   * no way to resolve from this form. A wait after the service now moves with
+   * the end instead of being trimmed.
    */
+  /**
+   * Each pattern is re-fitted from the length it was drawn against: the
+   * booking's own snapshot from the length it opened with, a newly chosen
+   * service's template from that service's (or option's) catalogue length.
+   */
+  const sourceProcessingDuration = useMemo(() => {
+    if (!processingServiceChanged) return resolveBookingCoreDurationMinutes(booking) ?? (durationMinutes ?? 0);
+    const catalogueDuration = activeVariant?.duration_minutes ?? selectedService?.duration_minutes;
+    return typeof catalogueDuration === 'number' && Number.isFinite(catalogueDuration)
+      ? catalogueDuration
+      : (durationMinutes ?? 0);
+  }, [processingServiceChanged, booking, activeVariant, selectedService, durationMinutes]);
   const processingFit = useMemo(
-    () => fitProcessingBlocksToDuration(sourceProcessingBlocks, durationMinutes ?? 0),
-    [sourceProcessingBlocks, durationMinutes],
+    () =>
+      fitProcessingBlocksToDuration(sourceProcessingBlocks, {
+        fromDurationMinutes: sourceProcessingDuration,
+        toDurationMinutes: durationMinutes ?? 0,
+      }),
+    [sourceProcessingBlocks, sourceProcessingDuration, durationMinutes],
   );
 
   /** What to send, or null to leave the row's snapshot alone. */

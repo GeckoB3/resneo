@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Using the Appointment Calendar',
   description: 'Every control on the grid: Day, Week and Month, the Filter panel, the slot menu, drag rules, and the four detail sheets.',
   tags: ['calendar', 'grid', 'drag', 'filters'],
-  verified: '2026-09-06',
+  verified: '2026-09-08',
   content: `
 # The Appointment Calendar in practice
 
@@ -61,6 +61,10 @@ Click an empty slot and a short menu opens:
 - **New appointment** and **Walk-in**, with that calendar, date, and time already filled in.
 - **Resources**, when a room or a chair sits on that column, listing **Book** and the resource's name. That opens the **Book resource** dialog.
 - **Block time**, which opens a dialog with **Start time**, **End time**, a **Duration** that updates as you go, and **Reason (optional)**. Click a block later and the same dialog reopens as **Edit block**.
+
+Processing time (a wait where the client stays but you are free, such as colour developing) is free space on the grid. A wait in the middle of an appointment shows as a pale band on its card, and a wait at the end of a service, or after it, is not drawn at all: the card stops where you stop. Click either and the same menu opens, so you can book someone else into that time. The card's details never sit on the wait, and clicking it does not open the appointment it belongs to. A booking taken in that time looks like any other booking. In a visit with more than one service, a wait after the first service leaves a visible gap before the next one.
+
+Buffer time is the opposite: turnover after a service that nobody can be booked into. It is drawn as a grey hatched band marked **Buffer** directly under the card (after any processing that runs on past the service), so you can see why those slots will not take a booking.
 
 Press and hold a card to move it, or its bottom edge to change its length. Whether a card can be dragged depends on the booking, not on your role: **Pending**, **Booked**, **Confirmed**, and **Started** bookings move, while **Completed**, **Cancelled**, **No Show**, and resource bookings stay put. A visit with several services moves as one. Every move and every length change offers to tell the client afterwards, so read the follow-up steps in [Using the calendar](/help/getting-started/calendar) before you rearrange a busy day.
 

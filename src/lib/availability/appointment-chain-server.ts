@@ -13,6 +13,7 @@ import {
 } from '@/lib/availability/appointment-chain';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveBookableServiceWithVariant } from '@/lib/appointments/service-variant';
+import { processingTailMinutes, serviceWithDurationMinutes } from '@/lib/appointments/processing-time';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import { loadAddonsForBooking } from '@/lib/addons/addon-resolution';
 import { validateAddonSelections } from '@/lib/addons/addon-selection-validation';
@@ -92,8 +93,14 @@ export async function prepareChainSegments(params: {
     if (!baseSvc || !baseSvc.is_active || !link) return { ok: false, kind: 'not_offered' };
 
     let svc = mergeAppointmentServiceWithPractitionerLink(baseSvc, link);
+    /**
+     * Every length change below re-fits the pattern from the length it was drawn
+     * against, so a wait after the service keeps following the whole segment
+     * (add-ons included) rather than starting where the catalogue service ends.
+     */
+    const withDuration = (s: typeof svc, duration: number) => serviceWithDurationMinutes(s, duration);
     if (seg.durationOverrideMinutes != null) {
-      svc = { ...svc, duration_minutes: seg.durationOverrideMinutes };
+      svc = withDuration(svc, seg.durationOverrideMinutes);
     }
     if (seg.variantId) {
       const variant = await loadActiveVariantForService({
@@ -106,7 +113,7 @@ export async function prepareChainSegments(params: {
       svc = resolveBookableServiceWithVariant(svc, variant);
     }
     if (seg.customDurationMinutes != null) {
-      svc = { ...svc, duration_minutes: seg.customDurationMinutes };
+      svc = withDuration(svc, seg.customDurationMinutes);
     }
     if (seg.addonIds && seg.addonIds.length > 0 && addonSchema) {
       const { groups } = await loadAddonsForBooking({
@@ -126,7 +133,7 @@ export async function prepareChainSegments(params: {
       }
       let delta = 0;
       for (const a of validation.resolvedAddons) delta += a.additional_duration_minutes;
-      if (delta > 0) svc = { ...svc, duration_minutes: svc.duration_minutes + delta };
+      if (delta > 0) svc = withDuration(svc, svc.duration_minutes + delta);
     }
 
     const window = params.bookingModel
@@ -152,6 +159,8 @@ export async function prepareChainSegments(params: {
       serviceId: seg.serviceId,
       durationMinutes: svc.duration_minutes,
       bufferMinutes: svc.buffer_minutes ?? 0,
+      processingTailMinutes: processingTailMinutes(svc.processing_time_blocks ?? [], svc.duration_minutes),
+      processingTimeBlocks: svc.processing_time_blocks ?? [],
     });
   }
   return { ok: true, segments: prepared };

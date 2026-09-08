@@ -1,5 +1,5 @@
 import type { AppointmentService, ServiceVariant } from '@/types/booking-models';
-import { effectiveProcessingBlocksForTemplate } from '@/lib/appointments/processing-time';
+import { fitProcessingBlocksToDuration } from '@/lib/appointments/processing-time';
 
 /**
  * Returns true when the service has at least one active variant; the booking flow
@@ -45,10 +45,16 @@ export function applyVariantToService(
     name: `${service.name} - ${variant.name}`,
     duration_minutes: variant.duration_minutes,
     buffer_minutes: variant.buffer_minutes,
-    processing_time_blocks: effectiveProcessingBlocksForTemplate({
-      parentBlocks: service.processing_time_blocks ?? [],
-      variantBlocks: variant.processing_time_blocks,
-    }),
+    // The variant's own pattern belongs to its length. A parent pattern
+    // inherited by a variant of another length is re-fitted, so a wait after
+    // the service still starts where this variant ends.
+    processing_time_blocks:
+      variant.processing_time_blocks && variant.processing_time_blocks.length > 0
+        ? variant.processing_time_blocks
+        : fitProcessingBlocksToDuration(service.processing_time_blocks ?? [], {
+            fromDurationMinutes: service.duration_minutes,
+            toDurationMinutes: variant.duration_minutes,
+          }).blocks,
     price_pence: variant.price_pence,
     deposit_pence: variant.deposit_pence ?? service.deposit_pence ?? null,
   };

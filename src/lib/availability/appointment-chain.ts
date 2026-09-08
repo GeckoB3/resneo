@@ -7,6 +7,7 @@ import {
   type PractitionerSlot,
 } from '@/lib/availability/appointment-engine';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
 
 /**
  * Chain availability: the starts at which several services fit back to back
@@ -15,8 +16,8 @@ import { minutesToTime, timeToMinutes } from '@/lib/availability';
  * The guest ticks every service before seeing any times, so the day view has
  * to answer "when can the whole visit start?" rather than "when can the first
  * service start?". The first segment's candidates come from the ordinary slot
- * generator; each later segment is then checked at the previous end plus
- * buffer with `validateExactAppointmentStart`, carrying the earlier segments
+ * generator; each later segment is then checked at the previous end plus its
+ * processing tail and buffer with `validateExactAppointmentStart`, carrying the earlier segments
  * as phantom bookings. A start survives only when every segment fits.
  *
  * This is the same walk `create-multi-service` performs when it writes the
@@ -37,6 +38,13 @@ export interface ChainSegmentEngineInput {
   durationMinutes: number;
   /** Buffer after this segment; the next one starts once it has elapsed. */
   bufferMinutes: number;
+  /**
+   * Processing that runs past this segment's end (the client waits, the
+   * practitioner is free). The next segment starts after it AND the buffer.
+   */
+  processingTailMinutes?: number;
+  /** This segment's pattern, so the phantom it leaves behind frees its gaps. */
+  processingTimeBlocks?: ProcessingTimeBlock[];
 }
 
 export interface ChainStart {
@@ -53,14 +61,22 @@ export interface ChainAvailabilityForPractitioner {
   starts: ChainStart[];
 }
 
-/** Minutes from the first start to the last end, inner buffers included. */
+/** The gap between one segment's end and the next one's start: its processing tail, then its buffer. */
+export function chainSegmentGapMinutes(seg: {
+  bufferMinutes: number;
+  processingTailMinutes?: number;
+}): number {
+  return Math.max(0, seg.processingTailMinutes ?? 0) + Math.max(0, seg.bufferMinutes);
+}
+
+/** Minutes from the first start to the last end, inner gaps (processing tails and buffers) included. */
 export function chainSegmentsSpanMinutes(
-  segments: ReadonlyArray<{ durationMinutes: number; bufferMinutes: number }>,
+  segments: ReadonlyArray<{ durationMinutes: number; bufferMinutes: number; processingTailMinutes?: number }>,
 ): number {
   let total = 0;
   segments.forEach((seg, i) => {
     total += seg.durationMinutes;
-    if (i < segments.length - 1) total += seg.bufferMinutes;
+    if (i < segments.length - 1) total += chainSegmentGapMinutes(seg);
   });
   return total;
 }
@@ -110,9 +126,10 @@ function chainFitsFrom(
       start_time: minutesToTime(startMinutes),
       duration_minutes: first.durationMinutes,
       buffer_minutes: first.bufferMinutes,
+      processing_time_blocks: first.processingTimeBlocks ?? [],
     },
   ];
-  let t = startMinutes + first.durationMinutes + first.bufferMinutes;
+  let t = startMinutes + first.durationMinutes + chainSegmentGapMinutes(first);
 
   for (let i = 1; i < segments.length; i += 1) {
     const seg = segments[i]!;
@@ -128,8 +145,9 @@ function chainFitsFrom(
       start_time: minutesToTime(t),
       duration_minutes: seg.durationMinutes,
       buffer_minutes: seg.bufferMinutes,
+      processing_time_blocks: seg.processingTimeBlocks ?? [],
     });
-    t += seg.durationMinutes + seg.bufferMinutes;
+    t += seg.durationMinutes + chainSegmentGapMinutes(seg);
   }
   return true;
 }

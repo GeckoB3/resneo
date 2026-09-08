@@ -11,6 +11,8 @@ import {
 } from '@/lib/booking/staff-booking-access';
 import { planVisitSchedule } from '@/lib/booking/visit-schedule-plan';
 import type { VisitServiceRow } from '@/lib/booking/appointment-visit';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
+import { timeToMinutes } from '@/lib/availability';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
 import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 import {
@@ -18,6 +20,7 @@ import {
   visitCancellationFields,
 } from '@/lib/booking/visit-write-shared';
 import {
+  processingTailMinutes,
   parseProcessingTimeBlocksFromDb,
   processingBlocksForDurationChange,
 } from '@/lib/appointments/processing-time';
@@ -269,26 +272,51 @@ export async function PATCH(
       serviceItemIds.length > 0
         ? admin
             .from('service_items')
-            .select('id, name, buffer_minutes, processing_time_blocks')
+            .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks')
             .in('id', serviceItemIds)
         : Promise.resolve({ data: [] as Record<string, unknown>[] }),
       legacyServiceIds.length > 0
         ? admin
             .from('appointment_services')
-            .select('id, name, buffer_minutes, processing_time_blocks')
+            .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks')
             .in('id', legacyServiceIds)
         : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     ]);
-    const catalogue = new Map<string, { buffer_minutes: number; processing_time_blocks: unknown }>();
+    const catalogue = new Map<
+      string,
+      { duration_minutes: number; buffer_minutes: number; processing_time_blocks: unknown }
+    >();
     for (const svc of [...(itemsRes.data ?? []), ...(legacyRes.data ?? [])] as Record<
       string,
       unknown
     >[]) {
       catalogue.set(svc.id as string, {
+        duration_minutes: Math.max(0, (svc.duration_minutes as number | null) ?? 30),
         buffer_minutes: Math.max(0, (svc.buffer_minutes as number | null) ?? 0),
         processing_time_blocks: svc.processing_time_blocks,
       });
     }
+
+    /** The row's own length, which its snapshot was drawn against. */
+    const rowDurationMinutes = (r: (typeof rows)[number]): number => {
+      const start = timeToMinutes(String(r.booking_time).slice(0, 5));
+      const end = r.booking_end_time ? timeToMinutes(String(r.booking_end_time).slice(0, 5)) : NaN;
+      return Number.isFinite(end) && end > start ? end - start : 0;
+    };
+    /** The pattern this row carries: its snapshot, else the catalogue's re-fitted to its length. */
+    const rowBlocks = (r: (typeof rows)[number]): ProcessingTimeBlock[] => {
+      const svcId = serviceIdOf(r);
+      const cat = svcId ? catalogue.get(svcId) : undefined;
+      return (
+        processingBlocksForDurationChange({
+          snapshot: r.processing_time_blocks ?? null,
+          currentDurationMinutes: rowDurationMinutes(r),
+          templateBlocks: parseProcessingTimeBlocksFromDb(cat?.processing_time_blocks),
+          templateDurationMinutes: cat?.duration_minutes ?? rowDurationMinutes(r),
+          durationMinutes: rowDurationMinutes(r),
+        }) ?? []
+      );
+    };
 
     const visitRows: VisitServiceRow[] = rows.map((r) => {
       const svcId = serviceIdOf(r);
@@ -304,6 +332,8 @@ export async function PATCH(
           null,
         addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
         buffer_minutes: svcId ? (catalogue.get(svcId)?.buffer_minutes ?? null) : null,
+        // The wait after this service, which the next one also stands behind.
+        processing_tail_minutes: svcId ? processingTailMinutes(rowBlocks(r), rowDurationMinutes(r)) : null,
       };
     });
 
@@ -372,9 +402,11 @@ export async function PATCH(
       const svcId = serviceIdOf(row);
       const blocks = processingBlocksForDurationChange({
         snapshot: row.processing_time_blocks,
+        currentDurationMinutes: rowDurationMinutes(row),
         templateBlocks: parseProcessingTimeBlocksFromDb(
           svcId ? catalogue.get(svcId)?.processing_time_blocks : null,
         ),
+        templateDurationMinutes: svcId ? (catalogue.get(svcId)?.duration_minutes ?? rowDurationMinutes(row)) : rowDurationMinutes(row),
         durationMinutes: s.durationMinutes,
       });
       return { schedule: s, row, svcId, blocks };

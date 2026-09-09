@@ -3,7 +3,7 @@
  *
  * Services of a visit are independent rows (Docs/visit-services-independent-plan.md):
  * each has its own bar, grip, handle and tray. What still says "these belong together"
- * is identity rather than geometry: a chip on every bar ("Visit 1/2"), the earliest
+ * is identity rather than geometry: a chip on every bar ("1/2"), the earliest
  * service's colour shared by all of them, and siblings lit together on hover. This
  * module is the pure part: which rows form a visit, their order, and whether a moved
  * service now overlaps one of its own siblings.
@@ -67,7 +67,7 @@ export function visitSiblingIndex(rows: readonly VisitSiblingRow[]): Map<string,
 }
 
 export function visitChipLabel(position: VisitPosition): string {
-  return `Visit ${position.index + 1}/${position.count}`;
+  return `${position.index + 1}/${position.count}`;
 }
 
 /**

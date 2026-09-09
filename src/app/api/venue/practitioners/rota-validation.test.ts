@@ -55,7 +55,7 @@ describe('schedule_periods validation', () => {
     // The narrowing-hours confirmation compares effective hours, periods included, and
     // writing the timeline retires the older rota column.
     expect(source).toContain("Object.prototype.hasOwnProperty.call(rest, 'schedule_periods')");
-    expect(source).toContain("select('working_hours, schedule_periods, working_hours_rota, name')");
+    expect(source).toContain("select('working_hours, schedule_periods, working_hours_rota, days_off, availability_exceptions, name')");
     expect(source).toContain('ucPayload.working_hours_rota = null');
     // The older field is no longer writable.
     expect(source).not.toContain('working_hours_rota: workingHoursRotaSchema');

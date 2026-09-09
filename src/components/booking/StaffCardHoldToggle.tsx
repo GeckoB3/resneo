@@ -5,26 +5,25 @@
  * (docs: CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION §7.6, D6).
  *
  * Rendered only when the selected entity resolves to `card_hold`; never shown
- * together with the "Require deposit" toggle; hidden when editing. Default ON:
- * the entity requires the hold and staff may waive it case by case.
+ * together with the "Require deposit" toggle; hidden when editing. Default OFF
+ * since 2026-09-09: staff booking for a guest more often waive the hold than
+ * ask for it, and the sublabel says what each position does.
  */
 
 import {
   STAFF_CARD_HOLD_TOGGLE_LABEL,
-  STAFF_CARD_HOLD_TOGGLE_SUBLABEL,
-  staffCardHoldFeeLine,
+  staffCardHoldToggleSublabel,
 } from '@/components/booking/staff-card-hold';
 
 export function StaffCardHoldToggle({
   checked,
   onChange,
-  feePence,
   className,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
-  /** No-show fee for the whole booking; shown under the toggle while it is on. */
-  feePence: number;
+  /** No-show fee for the whole booking. Accepted from every surface; no longer shown here. */
+  feePence?: number;
   className?: string;
 }) {
   return (
@@ -35,12 +34,7 @@ export function StaffCardHoldToggle({
         <p className="text-xs font-medium text-slate-700 sm:text-sm">
           {STAFF_CARD_HOLD_TOGGLE_LABEL}
         </p>
-        <p className="text-[11px] text-slate-500 sm:text-xs">{STAFF_CARD_HOLD_TOGGLE_SUBLABEL}</p>
-        {checked && feePence > 0 ? (
-          <p className="mt-0.5 text-[11px] font-medium text-slate-600 sm:text-xs">
-            {staffCardHoldFeeLine(feePence)}
-          </p>
-        ) : null}
+        <p className="text-[11px] text-slate-500 sm:text-xs">{staffCardHoldToggleSublabel(checked)}</p>
       </div>
       <button
         type="button"

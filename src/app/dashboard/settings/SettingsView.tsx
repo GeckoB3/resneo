@@ -16,7 +16,12 @@ import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
 import { BookingPageSection } from './sections/BookingPageSection';
-import { CombinedPageNotice, type SettingsCollectiveNote } from './sections/CombinedPageNotice';
+import {
+  CombinedPageScopeSwitch,
+  type BookingPageScope,
+  type SettingsCollectiveNote,
+} from './sections/CombinedPageNotice';
+import { CombinedPageScopeContent } from './sections/CombinedPageScopeContent';
 import {
   BOOKING_PAGE_EYEBROW_CLASS,
   BOOKING_PAGE_SECTION_HEADING_CLASS,
@@ -96,8 +101,10 @@ interface SettingsViewProps {
   referralsProgrammeAvailable?: boolean;
   /** Trial-window breakdown for the Plan tab (free-trial countdown + source). */
   trialBreakdown?: VenueTrialBreakdown | null;
-  /** The live venue collective this venue belongs to, for the Booking page tab's pointer. */
+    /** The live venue collective this venue belongs to: the Booking page tab then manages its combined page. */
   collective?: SettingsCollectiveNote | null;
+  /** Booking page tab: which page to open on (`?scope=own`); the combined page by default. */
+  initialBookingPageScope?: BookingPageScope;
 }
 
 const TABS = [
@@ -329,11 +336,22 @@ function scrollNearestScrollParentToTop(from: HTMLElement | null) {
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 }
 
-/** Update ?tab= without Next.js navigation (avoids re-running the settings server page). */
-function replaceSettingsTabInBrowserUrl(pathname: string, tab: TabKey, currentSearch: string): void {
+/**
+ * Update ?tab= (and the Booking page tab's ?scope=) without Next.js navigation
+ * (avoids re-running the settings server page). `scope=own` is the only value
+ * written: the combined page is the default and needs no parameter.
+ */
+export function replaceSettingsTabInBrowserUrl(
+  pathname: string,
+  tab: TabKey,
+  currentSearch: string,
+  scope: BookingPageScope = 'combined',
+): void {
   if (typeof window === 'undefined') return;
   const p = new URLSearchParams(currentSearch);
   p.set('tab', tab);
+  if (tab === 'booking-page' && scope === 'own') p.set('scope', 'own');
+  else p.delete('scope');
   const qs = p.toString();
   const href = qs ? `${pathname}?${qs}` : `${pathname}?tab=${tab}`;
   window.history.replaceState(window.history.state, '', href);
@@ -1127,15 +1145,36 @@ function SettingsViewInner({
   referralsDashboard = null,
   referralsProgrammeAvailable = false,
   trialBreakdown = null,
-  collective = null,
+    collective = null,
+  initialBookingPageScope = 'combined',
 }: SettingsViewProps) {
   const router = useRouter();
   /**
-   * Set by the Booking page tab's "Manage combined page" button: the Linked
-   * accounts tab opens the manager for this collective once its list is in,
-   * then clears the request.
+   * Booking page tab: the combined page (default, when the venue is in a live
+   * collective) or this venue's own page. Carried in the URL as `?scope=own`.
    */
-  const [manageCollectiveId, setManageCollectiveId] = useState<string | null>(null);
+  const [bookingPageScope, setBookingPageScope] = useState<BookingPageScope>(() =>
+    collective ? initialBookingPageScope : 'own',
+  );
+  /** Staged calendar changes in the inline combined-page manager, so leaving warns first. */
+  const combinedPendingRef = useRef(0);
+  const setCombinedPending = useCallback((count: number) => {
+    combinedPendingRef.current = count;
+  }, []);
+  const confirmLeavingCombinedPage = useCallback((): boolean => {
+    if (combinedPendingRef.current === 0) return true;
+    return window.confirm('You have unsaved calendar changes on the combined page. Discard them?');
+  }, []);
+    useEffect(() => {
+    // A reload or a link away would drop staged combined-page calendar changes.
+    const warn = (e: BeforeUnloadEvent) => {
+      if (combinedPendingRef.current === 0) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, []);
   const pathname = usePathname() ?? '/dashboard/settings';
   const searchParams = useSearchParams();
   // Pushes freshly-saved feature flags into the dashboard-wide provider so a
@@ -1194,14 +1233,25 @@ function SettingsViewInner({
     });
   }, []);
 
-  const replaceWithTab = useCallback(
+    const replaceWithTab = useCallback(
     (tab: TabKey) => {
       if (tab === selectedTab) return;
+      if (selectedTab === 'booking-page' && !confirmLeavingCombinedPage()) return;
       setSelectedTab(tab);
       markTabVisited(tab);
-      replaceSettingsTabInBrowserUrl(pathname, tab, searchParams.toString());
+      replaceSettingsTabInBrowserUrl(pathname, tab, searchParams.toString(), bookingPageScope);
     },
-    [selectedTab, pathname, searchParams, markTabVisited],
+    [selectedTab, pathname, searchParams, markTabVisited, bookingPageScope, confirmLeavingCombinedPage],
+  );
+
+  const changeBookingPageScope = useCallback(
+    (scope: BookingPageScope) => {
+      if (scope === bookingPageScope) return;
+      if (!confirmLeavingCombinedPage()) return;
+      setBookingPageScope(scope);
+      replaceSettingsTabInBrowserUrl(pathname, 'booking-page', searchParams.toString(), scope);
+    },
+    [bookingPageScope, pathname, searchParams, confirmLeavingCombinedPage],
   );
 
   /**
@@ -1578,15 +1628,22 @@ function SettingsViewInner({
 
         {visitedTabs.has('booking-page') && selectedTab === 'booking-page' ? (
         <div className="space-y-10">
-          {collective ? (
-            <CombinedPageNotice
+                    {collective ? (
+            <CombinedPageScopeSwitch
               collective={collective}
-              onManage={() => {
-                setManageCollectiveId(collective.id);
-                replaceWithTab('linked-accounts');
-              }}
-              onOpenLinkedAccounts={() => replaceWithTab('linked-accounts')}
+              scope={bookingPageScope}
+              onScopeChange={changeBookingPageScope}
             />
+          ) : null}
+          {collective && bookingPageScope === 'combined' ? (
+            <CombinedPageScopeContent collective={collective} onPendingChange={setCombinedPending} />
+          ) : (
+          <>
+          {collective ? (
+            <p className="text-sm text-slate-600" data-testid="own-page-scope-note">
+              These settings shape this venue’s own booking page at /book/{venue.slug}. Guests in the
+              collective do not use this page unless they are sent its address.
+            </p>
           ) : null}
           <SettingsProfileGroup
             brandHeadings
@@ -1618,7 +1675,7 @@ function SettingsViewInner({
                 description="Copy the iframe snippet for your site and download a QR code that opens your public booking page."
               />
               <SectionCard.Body className="pt-0">
-                <WidgetSection
+                                <WidgetSection
                   venueName={venue.name ?? 'Venue'}
                   venueSlug={venue.slug}
                   baseUrl={publicBaseUrl}
@@ -1627,6 +1684,8 @@ function SettingsViewInner({
               </SectionCard.Body>
             </SectionCard>
           </SettingsProfileGroup>
+          </>
+          )}
         </div>
         ) : null}
 
@@ -1710,11 +1769,7 @@ function SettingsViewInner({
         ) : null}
 
         {linkedAccountsAvailable && visitedTabs.has('linked-accounts') && selectedTab === 'linked-accounts' ? (
-              <LinkedAccountsSection
-                venueName={venue.name ?? 'Your venue'}
-                manageCollectiveId={manageCollectiveId}
-                onManageCollectiveOpened={() => setManageCollectiveId(null)}
-              />
+                            <LinkedAccountsSection venueName={venue.name ?? 'Your venue'} />
         ) : null}
       </div>
       </div>

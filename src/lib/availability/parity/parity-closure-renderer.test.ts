@@ -79,26 +79,27 @@ describe('closure renderer / basics', () => {
 
 describe('closure renderer / amended hours', () => {
   /**
-   * The grid follows the RESOLVED hours, so on an amended day it is the amended window --
-   * there is no band outside it left to grey. Before Stage 4 the grid stayed at the weekly
-   * 09:00-17:00 and the renderer greyed 09:00-10:00 and 14:00-17:00 around the stripe;
-   * both halves now agree that the day is 10:00-14:00, which is the point of the change.
+   * An amended day draws NO stripe of its own. The grid follows the RESOLVED hours, so on
+   * a day amended to 10:00-14:00 the grid IS that window and nothing inside it is painted:
+   * the day looks like any other working day. A sky-blue "Amended hours" band used to sit
+   * over the open window; the owner asked for it to go, because the grid already showed
+   * the amended hours and the band made the day look unlike every other day.
    */
-  it('draws the amended window, and greys nothing because the grid IS that window', () => {
+  it('draws nothing on a single amended window, because the grid IS that window', () => {
     const out = shape(
       render(NINE_TO_FIVE, [
         blk({ block_type: 'amended_hours', override_periods: [{ open: '10:00', close: '14:00' }] }),
       ]),
     );
 
-    expect(out).toEqual(['venue_amended_hours 10:00-14:00']);
+    expect(out).toEqual([]);
   });
 
   /**
    * A split amended day still greys the gap between the two windows, because that gap IS
    * inside the resolved grid. This is the case the staging venue carries on 16 Sep 2026.
    */
-  it('greys the gap between two amended windows', () => {
+  it('greys only the gap between two amended windows', () => {
     const out = shape(
       render(NINE_TO_FIVE, [
         blk({
@@ -111,39 +112,56 @@ describe('closure renderer / amended hours', () => {
       ]),
     );
 
-    expect(out).toContain('venue_amended_hours 09:00-11:00');
-    expect(out).toContain('venue_amended_hours 15:00-17:00');
-    expect(out).toContain('venue_closed 11:00-15:00');
+    expect(out).toEqual(['venue_closed 11:00-15:00']);
   });
 
   /**
    * THE CASE STAGE 4 NAMED AS BREAKAGE 1, and the reason this fixture exists.
    *
    * Weekly hours end at 17:00; the owner amends the day to run until 20:00. Stage 4 made
-   * the visible GRID follow the resolved hours, so it now runs to 20:00 -- but the renderer
-   * derives its own bounds and must follow the same hours, or it clips the 17:00-20:00
-   * stripe away and the owner sees an empty band where the hours they just entered should be.
+   * the visible GRID follow the resolved hours, so it runs to 20:00 -- and the renderer
+   * derives its own bounds from the same hours, so it must not grey 17:00-20:00 as if the
+   * weekly close still applied.
    */
-  it('draws an amended window that runs past the weekly close', () => {
+  it('greys nothing on an amended window that runs past the weekly close', () => {
     const out = shape(
       render(NINE_TO_FIVE, [
         blk({ block_type: 'amended_hours', override_periods: [{ open: '09:00', close: '20:00' }] }),
       ]),
     );
 
-    expect(out).toContain('venue_amended_hours 09:00-20:00');
-    // Nothing is greyed: the amended window covers the whole resolved grid.
-    expect(out.filter((s) => s.startsWith('venue_closed'))).toEqual([]);
+    expect(out).toEqual([]);
   });
 
-  it('draws an amended window on a weekday the venue does not normally trade', () => {
+  /**
+   * The grid is wider than the amended window here (a booking outside it, or a drag
+   * stretching the day), so the minutes outside the window are greyed as on any other day.
+   */
+  it('greys the drawn minutes outside the amended window when the grid is wider', () => {
+    const out = shape(
+      buildVenueScheduleClosureBlocks({
+        openingHours: NINE_TO_FIVE,
+        venueWideBlocks: [
+          blk({ block_type: 'amended_hours', override_periods: [{ open: '10:00', close: '14:00' }] }),
+        ],
+        fromDate: DATE,
+        toDate: DATE,
+        columnIds: [COL],
+        gridBounds: { start: 8 * 60, end: 18 * 60 },
+      }),
+    );
+
+    expect(out).toEqual(['venue_closed 08:00-10:00', 'venue_closed 14:00-18:00']);
+  });
+
+  it('draws nothing on a weekday the venue does not normally trade but has amended open', () => {
     const out = shape(
       render(CLOSED_THIS_WEEKDAY, [
         blk({ block_type: 'amended_hours', override_periods: [{ open: '10:00', close: '14:00' }] }),
       ]),
     );
 
-    expect(out).toContain('venue_amended_hours 10:00-14:00');
+    expect(out).toEqual([]);
   });
 
   it('greys the whole day when a closure overlaps an amended window', () => {
@@ -154,8 +172,8 @@ describe('closure renderer / amended hours', () => {
       ]),
     );
 
-    expect(out.some((s) => s.startsWith('venue_closed'))).toBe(true);
-    expect(out.some((s) => s.startsWith('venue_amended_hours'))).toBe(false);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((s) => s.startsWith('venue_closed'))).toBe(true);
   });
 
   it('ignores an amended row with no valid periods rather than greying the day', () => {

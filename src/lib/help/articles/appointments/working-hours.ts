@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   helpSection: 'setup',
   title: 'Working hours, breaks, and closures',
   description:
-    'The Availability, Breaks and Closures tabs in detail: weekly hours per calendar, recurring breaks, one-off closures, planned hours and rotas, and how they sit inside your business hours.',
+    'The Availability, Breaks and Closures & amended hours tabs in detail: weekly hours per calendar, recurring breaks, one-off closures, planned hours and rotas, and how they sit inside your business hours.',
   tags: ['hours', 'breaks', 'closures', 'rota', 'availability', 'venue'],
   verified: '2026-09-06',
   content: `
@@ -15,7 +15,7 @@ Hours are set **per calendar**, so each person or room can be different. This ar
 
 **Who can do this:** admins can change every calendar. Team members can change only the calendars linked to their own login, and can look at the rest.
 
-**What this covers:** the **Availability**, **Breaks** and **Closures** tabs, planned hours and rotas, and how all of it sits inside **Settings → Business hours**.
+**What this covers:** the **Availability**, **Breaks** and **Closures & amended hours** tabs, planned hours and rotas, and how all of it sits inside **Settings → Business hours**.
 
 :::help-figure availability-tabs
 
@@ -26,14 +26,14 @@ A time is offered to a guest only when every layer agrees:
 1. **Your business hours** are the outer boundary, set once for the whole venue under **Settings → Business hours**.
 2. **The calendar's own working hours** sit inside them. Hours you set wider than your business hours are simply not bookable, and days your venue is closed stay closed here too. If you have not set business hours at all, the calendar hours apply on their own.
 3. **Breaks** take regular gaps out of a working day, such as lunch.
-4. **Closures** take out one-off dates, either for one calendar or for the whole venue.
+4. **Closures & amended hours** take out one-off dates, or give one calendar different hours on them. Whole-venue closures live under Settings.
 5. **The service's own rules** then decide which of the remaining slots a guest actually sees, through **Min booking notice (hours)** and **Max advance (days)** on the service. See [Services](/help/appointments/services).
 
 You will see this spelled out on screen too: the **Availability** tab opens with a note headed **How calendar hours and business hours work together**.
 
 ## The Calendar picker
 
-**Availability**, **Breaks** and **Closures** all work on one calendar at a time. Pick it from the **Calendar** dropdown at the top of the tab. Admins see every calendar, including resources on the hours tabs. A team member who opens a calendar that is not theirs sees "View only" instead of the save button.
+**Availability**, **Breaks** and **Closures & amended hours** all work on one calendar at a time. Pick it from the **Calendar** dropdown at the top of the tab. Admins see every calendar, including resources on the hours tabs. A team member who opens a calendar that is not theirs sees "View only" instead of the save button.
 
 If a tab says "Add calendars first to set their schedule", you have no calendars yet. See [Creating and assigning bookable calendars](/help/appointments/calendar-setup).
 
@@ -78,17 +78,26 @@ A break is a regular gap inside a working day when this calendar takes no bookin
 
 If you look after more than one calendar, **Save to all calendars** appears beside it. It asks you to confirm first, because it replaces the breaks on every other calendar you manage with these ones.
 
-## The Closures tab: time off for one calendar
+## The Closures & amended hours tab: time off, or different hours, for one calendar
 
-Use this when one person is away or one room is out of use, and the rest of the venue carries on as normal. The panel is headed **Calendar closures**.
+Use this when one person is away or one room is out of use, and the rest of the venue carries on as normal. The same panel also gives one calendar different hours on a date or a range: a longer day, a shorter day, or a day it does not normally work. The panel is headed **Calendar closures and amended hours**.
 
-1. Click the first day on the calendar and then the last to select a range, or type the **Start date** and **End date** in the **New block** form.
-2. Leave **Start time (optional)** and **End time (optional)** blank to block the whole day. Fill both in to block just that window on every date in the range.
-3. Choose a **Label (optional)**: **Closed**, **Unavailable** or **Other**, and add a **Notes (optional)** line such as "Annual leave".
-4. Admins can tick **Apply to all active calendars** to put the same dates and times on every active column at once.
-5. Click **Add to calendar**.
+1. Click the first day on the calendar and then the last to select a range, or type the **Start date** and **End date** in the **New entry** form.
+2. Choose **Closed** or **Working different hours** at the top of the form.
+3. For **Closed**: leave **Start time (optional)** and **End time (optional)** blank to block the whole day, or fill both in to block just that window on every date in the range. Choose a **Label (optional)**: **Closed**, **Unavailable** or **Other**.
+4. For **Working different hours**: enter the **Open** and **Close** times. These replace the calendar's usual hours on every date in the range, so they also open a day the calendar does not normally work. Use **Add another period** for a gap in the middle of the day. Breaks still apply.
+5. Add a **Notes (optional)** line such as "Annual leave" or "Late opening for the fair".
+6. Admins can tick **Apply to all active calendars** to put the same dates on every active column at once.
+7. Click **Add to calendar**.
 
-Saved blocks appear under **Upcoming**, marked **All day** or **Part day**. Click one, or its date on the calendar, to open it as **Edit block**, then **Save changes** or **Delete**.
+Saved entries appear under **Upcoming**, marked **All day**, **Part day** or **Amended hours**. Click one, or its date on the calendar, to edit it, then **Save changes** or **Delete**.
+
+Two rules to know about amended hours:
+
+- **A closure wins.** If the calendar is closed all day on any date in the range, the amended hours will not save; the message names the date. Remove the closure first, or shorten the range. A part-day closure inside the range stays blocked, and the form says so.
+- **Your business hours still decide what guests see.** If the amended hours fall outside your venue's hours for that date, or your venue is closed that day, the form tells you. Staff can still book, but guests cannot until you also amend the venue's hours under **Settings → Business hours**.
+
+If the new hours are shorter than the old ones and an upcoming booking would fall outside them, ResNeo lists the bookings and asks before saving. They stay in your diary either way.
 
 > **Warning:** a calendar closure will not save on top of an existing booking. You get a message naming the calendar and the date, ending "Move or cancel it before marking the calendar unavailable." Sort the booking out on your **Calendar** first, then add the closure. This is stricter than a venue closure, which saves and leaves the bookings where they are.
 
@@ -107,7 +116,7 @@ A room or piece of equipment added as a **resource** is a calendar too, and you 
 - **Breaks.** The tab explains this and points you at the hours instead. To keep a room free at the same time each day, add the break to the staff calendar the room appears on.
 - **Plan your hours ahead.** A resource has weekly hours only.
 
-Resources also do not appear on the **Closures** tab. See [Resources](/help/appointments/resources).
+Resources also do not appear on the **Closures & amended hours** tab. See [Resources](/help/appointments/resources).
 
 ## Who can change what
 
@@ -134,6 +143,8 @@ Resources also do not appear on the **Closures** tab. See [Resources](/help/appo
 | My new hours start on the wrong day | Planned changes always start on a Monday | Check the date written under **New hours from**: it is the Monday of the week you picked |
 | An old change disappeared when I saved a new one | The new change overlapped it | The form warns under "Saving will adjust what it overlaps:" before you save. Use **Edit** on a change instead of adding another |
 | A day is blocked and I cannot see why | A day off, a calendar closure or a venue closure | Pick that day on the planning calendar under **Plan your hours ahead**. It names the reason |
+| Amended hours will not save | The calendar is closed all day on a date in the range | Remove that closure on the **Closures & amended hours** tab first, or shorten the range |
+| I amended a calendar's hours but guests cannot book them | The venue's business hours do not cover those hours, or the venue is closed that day | Amend the venue's hours for that date too, under **Settings → Business hours** |
 | A team member cannot edit their own hours | Their login is not linked to that calendar | An admin links it under **Settings → Staff**, under **Calendars they manage** |
 | Hours look an hour out | The venue timezone is wrong | Check **Timezone** under **Settings → Profile** |
 

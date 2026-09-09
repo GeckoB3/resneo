@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Using the bookings list",
   description: "Your one place to find every booking, open the details, update statuses, and message or tag several guests at once.",
   tags: ["bookings","appointments","list","filter","search","status","bulk actions","tags"],
-  verified: '2026-09-08',
+  verified: '2026-09-09',
   content: `# Using the bookings list
 
 The bookings list is where you find any booking, open it for the detail, change its status, and message or tag several clients at once. It is called **Appointments** in the sidebar, or **Bookings** once you also sell classes, events, or resources.
@@ -62,7 +62,7 @@ Click any row to open it in place. Click again to close. Inside you will find:
 - **Guest bookings**: everything else they have booked, past and upcoming, each with **Rebook**.
 - **Timeline**: when the booking was created, confirmed, changed, or cancelled.
 
-If a client booked several services back to back, the row opens with a **Services in this visit** card listing each one with its own start time.
+If a client booked several services back to back, the row opens with a **Services in this visit** card listing each one with its own start time. When one of those services has been moved to another day, that day's list shows it as its own row marked **Part of a visit**.
 
 The small labels on a row tell you the rest at a glance: the status, **Deposit pending**, **Confirmed**, the price and its deposit status, **+1 extra**, the number of people, **Online** or **Client address**, **Linked** for a partner venue's booking, and a compliance label such as **2 forms due**.
 
@@ -87,7 +87,14 @@ Which moves are allowed depends on where the booking is:
 
 ## Move a booking
 
-Open the row and click **Modify**. The dialog is called **Modify appointment**, or **Modify visit** when the booking has several services in it. Change the **Service**, the **Variant**, the **Staff / calendar**, the **Date and time**, or the **Duration (minutes)**, then click **Save changes**.
+Open the row and click **Modify**. The dialog is called **Modify appointment**, or **Modify visit** when the booking has several services in it. For a single appointment, change the **Service**, the **Variant**, the **Staff / calendar**, the **Date and time**, or the **Duration (minutes)**, then click **Save changes**.
+
+A visit is edited in one of two ways in the same dialog:
+
+- **Visit start** moves the whole visit. Pick a new **Date and time** or a **Staff / calendar for the whole visit**, and every service moves by the same amount, keeping the gaps between them.
+- Each service in the **services in this visit** list has its own **Date**, **Start**, **Calendar** and **Length**. Change one and only that service moves; the others stay where they are, even if that leaves a gap or an overlap.
+
+While you are moving the visit start, the per-service fields are locked, and while you are changing one service, the visit start is locked, so each save does one thing. A service can go to another calendar or another day and still belong to the visit.
 
 If you changed the date, the time, or the length, ResNeo does not message the client straight away. A short follow-up appears saying **Time changed and saved**, with a countdown before the client is told. You can:
 

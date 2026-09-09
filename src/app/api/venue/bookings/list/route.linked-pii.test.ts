@@ -152,3 +152,27 @@ describe('GET /api/venue/bookings/list — linked-venue PII (H36)', () => {
     expect(row?.guest_first_name).toBe('Ann');
   });
 });
+
+describe('GET /api/venue/bookings/list — a linked visit’s rows', () => {
+  const GROUP = '00000000-0000-4000-8000-0000000000e1';
+  const VISIT_QS = `owner_venue_id=${OWNER_VENUE}&group_booking_id=${GROUP}`;
+
+  it('serves a visit’s sibling rows from the owner venue under a full_details link', async () => {
+    // The booking panel reads a linked booking's siblings this way; the own-venue
+    // query would find none and the "Services in this visit" card would not show.
+    grant = { calendar: 'full_details', pii: false, act: 'none' };
+    const { status, row } = await fetchRow(VISIT_QS);
+    expect(status).toBe(200);
+    expect(row).toBeDefined();
+    expect(row?.booking_time).toBe('11:00:00');
+    // Still redacted like every other linked read.
+    expect(row?.guest_first_name).toBeNull();
+    expect(row?.special_requests).toBeNull();
+  });
+
+  it('refuses a time_only link', async () => {
+    grant = { calendar: 'time_only', pii: false, act: 'none' };
+    const { status } = await fetchRow(VISIT_QS);
+    expect(status).toBe(403);
+  });
+});

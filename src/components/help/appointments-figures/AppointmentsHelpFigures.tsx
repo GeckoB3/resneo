@@ -136,14 +136,28 @@ function CalendarAvailabilitySvg() {
       <text x="24" y="56" fill={slateDark} fontSize="18" fontWeight="700">
         Availability Settings
       </text>
-      {['Calendars', 'Availability', 'Breaks', 'Closures'].map((t, i) => (
-        <g key={t}>
-          <rect x={24 + i * 118} y="72" width="108" height="30" rx="10" fill={i === 0 ? brand : '#f1f5f9'} stroke={border} />
-          <text x={78 + i * 118} y="92" textAnchor="middle" fill={i === 0 ? white : slateDark} fontSize="10" fontWeight="700">
-            {t}
-          </text>
-        </g>
-      ))}
+      {(() => {
+        // Tab widths follow the label: the last tab is the long one.
+        const tabs = [
+          { t: 'Calendars', w: 96 },
+          { t: 'Availability', w: 100 },
+          { t: 'Breaks', w: 80 },
+          { t: 'Closures & amended hours', w: 156 },
+        ];
+        let x = 24;
+        return tabs.map(({ t, w }, i) => {
+          const tx = x;
+          x += w + 10;
+          return (
+            <g key={t}>
+              <rect x={tx} y="72" width={w} height="30" rx="10" fill={i === 0 ? brand : '#f1f5f9'} stroke={border} />
+              <text x={tx + w / 2} y="92" textAnchor="middle" fill={i === 0 ? white : slateDark} fontSize="10" fontWeight="700">
+                {t}
+              </text>
+            </g>
+          );
+        });
+      })()}
       <rect x="24" y="118" width="592" height="120" rx="14" fill={white} stroke={border} />
       <text x="44" y="146" fill={slateDark} fontSize="12" fontWeight="700">
         Calendars

@@ -1,6 +1,5 @@
 'use client';
 
-import { effectiveWorkingHoursForDate } from '@/lib/availability/working-hours-rota';
 import {
   DEFAULT_CALENDAR_FILTERS,
   calendarFiltersAreDefault,
@@ -8,6 +7,12 @@ import {
   writeCalendarFilterPreferences,
   type PractitionerCalendarFilters,
 } from '@/lib/calendar/calendar-filter-preferences';
+import {
+  ownSiblingOverlapCount,
+  visitChipLabel,
+  visitSiblingIndex,
+  visitTouchingEdges,
+} from '@/lib/calendar/visit-siblings';
 import {
   calendarHasAvailableHoursOnDate,
   calendarWorksOnDate,
@@ -91,7 +96,6 @@ import {
 } from '@/lib/booking/group-visit-bookings';
 import {
   calendarBookingServiceDisplayLine,
-  calendarMultiServiceDisplayTitle,
 } from '@/lib/booking/calendar-booking-service-label';
 import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -109,12 +113,6 @@ import {
   type ResourceBooking as EngineResourceBooking,
 } from '@/lib/availability/resource-booking-engine';
 import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appointment-engine';
-import {
-  distributeVisitDuration,
-  minimumVisitMinutes,
-  resequenceVisit,
-  resolveAppointmentVisit,
-} from '@/lib/booking/appointment-visit';
 import {
   computeResourceAvailabilityMintSlots,
   type ResourceAvailabilityMintSlot,
@@ -142,7 +140,8 @@ import {
 } from '@/lib/calendar/schedule-closure-blocks';
 import { isNonWorkingBlock, isOccupyingBlock } from '@/lib/calendar/occupying-blocks';
 import { type PractitionerLeavePeriodInput } from '@/lib/calendar/schedule-closure-blocks';
-import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
+import { formatResolvedHoursLineForDate, formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
+import { calendarHours } from '@/lib/availability/calendar-hours';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import { bookingMoveFootprintMinutes } from '@/lib/calendar/booking-move-footprint';
 import {
@@ -343,6 +342,8 @@ interface Booking {
   deposit_amount_pence: number | null;
   deposit_status: string;
   group_booking_id?: string | null;
+  /** Set on a party's rows, which share a group id but are not a visit. */
+  person_label?: string | null;
   experience_event_id?: string | null;
   class_instance_id?: string | null;
   resource_id?: string | null;
@@ -529,9 +530,6 @@ function calendarBlockShellClass(bl: CalendarBlock): string {
   if (isBreakCalendarBlock(bl)) {
     return 'border-amber-200 bg-amber-50/95 hover:bg-amber-50';
   }
-  if (bl.block_type === 'venue_amended_hours') {
-    return 'border-sky-200 bg-sky-50/95';
-  }
   if (bl.block_type === 'venue_closed') {
     return 'border-slate-300 bg-slate-100/95';
   }
@@ -546,7 +544,6 @@ function calendarBlockShellClass(bl: CalendarBlock): string {
 
 function calendarBlockAccentColor(bl: CalendarBlock): string {
   if (isBreakCalendarBlock(bl)) return '#d97706';
-  if (bl.block_type === 'venue_amended_hours') return '#0284c7';
   if (bl.block_type === 'venue_closed') return '#64748b';
   if (bl.block_type === 'practitioner_leave') return '#7c3aed';
   if (bl.block_type === 'practitioner_closed' || bl.block_type === 'linked_venue_closed') {
@@ -620,9 +617,7 @@ const BOOKING_BLOCK_MIN_RENDER_HEIGHT_PX = BOOKING_CORNER_BUTTON_FLOOR_HEIGHT_PX
  */
 const BOOKING_CARD_PADDING_TALL_PX = 16;
 const BOOKING_CARD_PADDING_SHORT_PX = 12;
-const BOOKING_CARD_PADDING_SEGMENT_PX = 8;
 const BOOKING_PILLS_ROW_PX = 32;
-const BOOKING_SEGMENT_PILLS_ROW_PX = 28;
 /**
  * One line of card text. A segment never gives up so much room to the action
  * tray that it cannot show even this: the tray is bottom-RIGHT and the stack
@@ -1175,6 +1170,18 @@ function BookingBarPieces({
 }
 
 /** Holds the 4px the glass edge used to take in the row, so the grip and text keep their place. */
+/** "Visit 1/2": one service of a multi-service visit, drawn as its own bar. */
+function VisitChip({ label }: { label: string }) {
+  return (
+    <span
+      className="mr-1 inline-flex shrink-0 items-center rounded-full bg-white/25 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide leading-tight"
+      title="One service of a multi-service visit. Move, resize, start and complete it on its own; the visit's other services have their own bars."
+    >
+      {label}
+    </span>
+  );
+}
+
 function BookingBarEdgeSpacer() {
   return <div className="shrink-0 self-stretch" style={{ width: 4, minWidth: 4 }} aria-hidden />;
 }
@@ -1347,44 +1354,6 @@ function BookingBufferBand({
   );
 }
 
-/**
- * A hole in a multi-service visit's bar: the wait after one service before the
- * next (processing that runs past its end, then the buffer), or processing that
- * runs to a segment's end. The bar is masked transparent there so the grid shows
- * through, and this catches the click so it books someone else in rather than
- * opening the visit.
- */
-function ProcessingFreeHole({
-  topPct,
-  heightPct,
-  startWallMin,
-  endWallMin,
-  onFreeClick,
-}: {
-  topPct: number;
-  heightPct: number;
-  startWallMin: number;
-  endWallMin: number;
-  onFreeClick: (wallMinute: number, e: MouseEvent) => void;
-}) {
-  if (heightPct <= 0) return null;
-  return (
-    <button
-      type="button"
-      className="pointer-events-auto absolute inset-x-0 z-[3] cursor-pointer hover:bg-brand-500/5 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300"
-      style={{ top: `${topPct}%`, height: `${heightPct}%` }}
-      aria-label={`Free from ${minutesToTime(startWallMin)} to ${minutesToTime(endWallMin)}: click to book`}
-      title="Processing time: click to book someone else in"
-      onClick={(e) => {
-        e.stopPropagation();
-        const rect = e.currentTarget.getBoundingClientRect();
-        const frac = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
-        onFreeClick(snapFreeClickMinute(startWallMin, startWallMin + frac * (endWallMin - startWallMin)), e);
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-    />
-  );
-}
 
 /**
  * Grid lines, one step darker per weight than they were: the hour line reads
@@ -1425,55 +1394,28 @@ function overlapsRange(a0: number, a1: number, b0: number, b1: number): boolean 
   return a0 < b1 && b0 < a1;
 }
 
-type BookingCluster = { kind: 'single'; booking: Booking } | { kind: 'group'; items: Booking[] };
+type BookingCluster = { kind: 'single'; booking: Booking };
 
-/** Merge consecutive multi-service rows (same group_booking_id) into one visual stack. */
+/**
+ * One bar per booking row, in time order.
+ *
+ * Rows of a multi-service visit used to be merged into one bar here; they are now drawn
+ * as independent bars (Docs/visit-services-independent-plan.md), each with its own grip,
+ * handle and tray, and the visit shows as identity (chip, shared colour, hover) instead.
+ */
 function clusterMultiServiceBookings(bookings: Booking[]): BookingCluster[] {
-  const sorted = [...bookings].sort((a, b) => timeToMinutes(a.booking_time) - timeToMinutes(b.booking_time));
-  const byGroup = new Map<string, Booking[]>();
-  for (const b of bookings) {
-    if (b.group_booking_id) {
-      const g = byGroup.get(b.group_booking_id) ?? [];
-      g.push(b);
-      byGroup.set(b.group_booking_id, g);
-    }
-  }
-  for (const [, arr] of byGroup) {
-    arr.sort((a, b) => timeToMinutes(a.booking_time) - timeToMinutes(b.booking_time));
-  }
-  const seen = new Set<string>();
-  const out: BookingCluster[] = [];
-  for (const b of sorted) {
-    if (!b.group_booking_id) {
-      out.push({ kind: 'single', booking: b });
-      continue;
-    }
-    if (seen.has(b.group_booking_id)) continue;
-    seen.add(b.group_booking_id);
-    const items = byGroup.get(b.group_booking_id) ?? [b];
-    if (items.length <= 1) {
-      out.push({ kind: 'single', booking: items[0]! });
-    } else {
-      out.push({ kind: 'group', items });
-    }
-  }
-  return out;
+  return [...bookings]
+    .sort((a, b) => timeToMinutes(a.booking_time) - timeToMinutes(b.booking_time))
+    .map((booking) => ({ kind: 'single' as const, booking }));
 }
 
 function clusterKey(cluster: BookingCluster): string {
-  return cluster.kind === 'single' ? cluster.booking.id : cluster.items[0]!.id;
+  return cluster.booking.id;
 }
 
 function clusterTimeRange(cluster: BookingCluster, getDuration: (booking: Booking) => number): { start: number; end: number } {
-  if (cluster.kind === 'single') {
-    const start = timeToMinutes(cluster.booking.booking_time);
-    return { start, end: start + getDuration(cluster.booking) };
-  }
-
-  const start = timeToMinutes(cluster.items[0]!.booking_time);
-  const last = cluster.items[cluster.items.length - 1]!;
-  const end = timeToMinutes(last.booking_time) + getDuration(last);
-  return { start, end };
+  const start = timeToMinutes(cluster.booking.booking_time);
+  return { start, end: start + getDuration(cluster.booking) };
 }
 
 /**
@@ -1490,7 +1432,7 @@ function computeBookingClusterLayouts(
 ): Map<string, BookingClusterLayout> {
   return layoutOverlapClusters(
     clusters.map((cluster) => {
-      const members = cluster.kind === 'single' ? [cluster.booking] : cluster.items;
+      const members = [cluster.booking];
       return {
         key: clusterKey(cluster),
         ...clusterTimeRange(cluster, getDuration),
@@ -2292,6 +2234,14 @@ function DragBookingPreview({
 
 const SINGLE_LANE_LAYOUT: BookingClusterLayout = { laneIndex: 0, laneCount: 1 };
 
+/** Lights (or clears) every bar of a visit; see `.calendar-visit-hover` in globals.css. */
+function setVisitHover(groupId: string, on: boolean): void {
+  if (typeof document === 'undefined') return;
+  for (const el of document.querySelectorAll<HTMLElement>(`[data-visit="${CSS.escape(groupId)}"]`)) {
+    el.classList.toggle('calendar-visit-hover', on);
+  }
+}
+
 const DraggableBookingShell = memo(function DraggableBookingShell({
   booking,
   top,
@@ -2301,6 +2251,9 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
   layout = SINGLE_LANE_LAYOUT,
   canDrag,
   raised = false,
+  visitGroupId = null,
+  spineTop = null,
+  spineBottom = null,
   children,
 }: {
   booking: Booking;
@@ -2318,6 +2271,17 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
    * bar is about it, so staff can see which booking that prompt refers to.
    */
   raised?: boolean;
+  /**
+   * The visit this bar is one service of. Hovering any bar of a visit lights every
+   * bar of it, so siblings that have drifted apart still read as one booking.
+   */
+  visitGroupId?: string | null;
+  /**
+   * Colour of a short spine drawn at the top / bottom edge where this bar touches a
+   * sibling of the same visit in the same column; null draws none.
+   */
+  spineTop?: string | null;
+  spineBottom?: string | null;
   children: (handle: DraggableHandleProps) => ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
@@ -2366,8 +2330,26 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
         raised ? 'rounded-2xl ring-2 ring-brand-500 ring-offset-2 ring-offset-white' : ''
       }`}
       style={style}
+      data-visit={visitGroupId ?? undefined}
+      // Plain DOM class toggling on purpose: hover must not re-render the grid.
+      onMouseEnter={visitGroupId ? () => setVisitHover(visitGroupId, true) : undefined}
+      onMouseLeave={visitGroupId ? () => setVisitHover(visitGroupId, false) : undefined}
     >
       {children(handleProps)}
+      {spineTop ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-1/2 top-0 z-[4] h-1.5 w-1.5 -translate-x-1/2 rounded-b-full"
+          style={{ backgroundColor: spineTop }}
+        />
+      ) : null}
+      {spineBottom ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute bottom-0 left-1/2 z-[4] h-1.5 w-1.5 -translate-x-1/2 rounded-t-full"
+          style={{ backgroundColor: spineBottom }}
+        />
+      ) : null}
     </div>
   );
 });
@@ -2432,10 +2414,10 @@ const DraggableBlockShell = memo(function DraggableBlockShell({
    * The shell is an overlay at z-index 15 and the slot buttons sit at z-0, so
    * whatever the availability rules say, a block physically covers the slots it
    * spans: its inner button is `disabled` for closures and breaks, which
-   * swallows the click rather than passing it down. Making
-   * `venue_amended_hours` non-occupying therefore fixed the rule and changed
-   * nothing a receptionist could do, because on an amended day every minute is
-   * covered by a block and the whole column was dead to the mouse (SA-H3).
+   * swallows the click rather than passing it down. Making a closure block
+   * non-occupying therefore fixed the rule and changed nothing a receptionist
+   * could do, because every minute under it was covered by the block and dead
+   * to the mouse (SA-H3, first found on the since-retired amended-hours band).
    *
    * Drag and drop never had the problem: dnd-kit resolves a drop by pointer
    * collision against registered droppable rects, which ignores z-order, so the
@@ -3263,17 +3245,8 @@ export function PractitionerCalendarView({
   /** Single-step undo for drag-move and duration resize on the day/week grid. */
   const [lastScheduleEditUndo, setLastScheduleEditUndo] = useState<{
     kind: 'move' | 'resize';
-    /** The row the toolbar and the bar's pill are keyed on: a visit's FIRST service. */
+    /** The row the toolbar and the bar's pill are keyed on. */
     prev: Booking;
-    /**
-     * Every row of a moved visit as it stood before the drag, earliest first.
-     * Absent when a single booking was edited.
-     *
-     * The move used to record one entry per row, so this held whichever service
-     * was written last and undo restored only that one: the visit came apart on
-     * the way back, which is the tear commit 281d1d8d closed on the way out.
-     */
-    prevVisitRows?: Booking[];
   } | null>(null);
   const [scheduleUndoPending, setScheduleUndoPending] = useState(false);
   /** In-flight PATCH for drag-move / resize; undo awaits this to avoid racing the save. */
@@ -3818,15 +3791,30 @@ export function PractitionerCalendarView({
    */
   const gridTopHourRef = useRef(startHour);
   const compensateGridTopShiftRef = useRef(false);
+  /**
+   * The pane's scroll position as it was BEFORE the rows changed, taken when the
+   * stretch or fold is requested. The layout effect cannot read it itself: by
+   * then the rows above the grid are gone, the pane is shorter, and the browser
+   * has already clamped `scrollTop` to the new maximum. Subtracting the removed
+   * height from that clamped value overshot, and every drop landed the page near
+   * the top of the diary.
+   */
+  const scrollTopBeforeGridShiftRef = useRef<number | null>(null);
+  const noteScrollTopBeforeGridShift = useCallback(() => {
+    const main = scrollRef.current?.closest('main');
+    scrollTopBeforeGridShiftRef.current = main ? main.scrollTop : null;
+  }, []);
   useLayoutEffect(() => {
     const prev = gridTopHourRef.current;
     gridTopHourRef.current = startHour;
     const compensate = compensateGridTopShiftRef.current;
     compensateGridTopShiftRef.current = false;
+    const before = scrollTopBeforeGridShiftRef.current;
+    scrollTopBeforeGridShiftRef.current = null;
     if (!compensate || prev === startHour) return;
     const main = scrollRef.current?.closest('main');
     if (!main) return;
-    main.scrollTop += ((prev - startHour) * 60 * slotHeightPx) / SLOT_MINUTES;
+    main.scrollTop = (before ?? main.scrollTop) + ((prev - startHour) * 60 * slotHeightPx) / SLOT_MINUTES;
   }, [startHour, gridExtension, slotHeightPx]);
   const gridExtensionRef = useRef(gridExtension);
   gridExtensionRef.current = gridExtension;
@@ -3837,9 +3825,10 @@ export function PractitionerCalendarView({
     (edges: 'both' | 'bottom') => {
       if (viewMode !== 'day' || compactActive) return;
       compensateGridTopShiftRef.current = edges === 'both';
+      if (edges === 'both') noteScrollTopBeforeGridShift();
       setGridExtension({ startHour: edges === 'both' ? 0 : baseStartHour, endHour: 24 });
     },
-    [viewMode, compactActive, baseStartHour],
+    [viewMode, compactActive, baseStartHour, noteScrollTopBeforeGridShift],
   );
   const clearGridExtension = useCallback(() => {
     if (gridExtensionArmTimerRef.current != null) {
@@ -3848,8 +3837,9 @@ export function PractitionerCalendarView({
     }
     if (!gridExtensionRef.current) return;
     compensateGridTopShiftRef.current = true;
+    noteScrollTopBeforeGridShift();
     setGridExtension(null);
-  }, []);
+  }, [noteScrollTopBeforeGridShift]);
   /**
    * Called on the pointer-down that begins a hold: stretches the grid once the
    * hold has lasted longer than a click, and folds it back if the pointer is
@@ -4592,6 +4582,8 @@ export function PractitionerCalendarView({
     () => [...bookings, ...linkedNativeBookings],
     [bookings, linkedNativeBookings],
   );
+  /** Each live service of a visit on the grid: its place in the visit, for the chip and the shared colour. */
+  const visitPositions = useMemo(() => visitSiblingIndex(allGridBookings), [allGridBookings]);
 
   const linkedVenueById = useMemo(() => {
     const m = new Map<string, LinkedVenueCalendar>();
@@ -5083,169 +5075,25 @@ export function PractitionerCalendarView({
     }
   }
 
-  /**
-   * A failed save takes its undo entry with it: there is nothing to put back.
-   *
-   * A VISIT entry stays, because it still holds every row's old slot and can put
-   * back the services whose saves did land. Dropping it when one row of a visit
-   * fails is what would leave a half-moved visit with no way home.
-   */
+  /** A failed save takes its undo entry with it: there is nothing to put back. */
   function forgetUndoForFailedSave(bookingId: string) {
     setLastScheduleEditUndo((undo) => {
       if (!undo) return undo;
-      if (undo.prevVisitRows) return undo;
       return undo.prev.id === bookingId ? null : undo;
     });
   }
 
   /**
-   * Move a whole multi-service visit, keeping its shape.
-   *
-   * The services are re-laid from the new start through the shared resolver, so
-   * each keeps its duration and the gap it is entitled to, and any dead time an
-   * earlier edit left behind is closed on the way. Each row then goes through the
-   * normal move so linked-venue handling and validation are not duplicated; the
-   * notify follow-up is armed once for the visit rather than once per service.
-   */
-  async function patchVisitMove(
-    rows: Booking[],
-    newDate: string,
-    newTime: string,
-    newPracId: string,
-    opts?: { allowDuringBreaks?: boolean },
-  ) {
-    const visit = resolveAppointmentVisit(rows.map(visitRowFor));
-    if (!visit) return;
-    const laid = resequenceVisit(
-      visit,
-      new Map(visit.services.map((sv) => [sv.id, sv.durationMinutes])),
-      newTime.slice(0, 5),
-    );
-    const byId = new Map(rows.map((r) => [r.id, r]));
-
-    /**
-     * Ask the server about every service BEFORE moving any of them.
-     *
-     * Each row was previously moved in turn and validated on its own, so a visit
-     * whose middle service landed on a block moved the services that fitted and
-     * left the rest behind: a 10:00 to 12:15 visit ended up running 10:11 to
-     * 18:16, torn in two. A visit is one booking, so it moves whole or not at
-     * all.
-     */
-    const dryRun = await Promise.all(
-      laid.map(async (sv) => {
-        const row = byId.get(sv.id);
-        if (!row) return { sv, ok: true, error: null as string | null };
-        try {
-          const res = await fetch(
-            `/api/venue/bookings/${sv.id}/validate-appointment-modification`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                booking_date: newDate,
-                booking_time: `${sv.startHm}:00`,
-                practitioner_id: resolveLinkedGridPractitionerIdForPatch(newPracId),
-                booking_end_time: `${sv.endHm}:00`,
-                allow_manual_overlap: true,
-                // The dry run has to be asked the same question the PATCH will
-                // be asked, or the visit is refused before it is attempted.
-                allow_outside_hours: true,
-                allow_during_breaks: opts?.allowDuringBreaks === true,
-              }),
-            },
-          );
-          const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; reason?: string };
-          if (res.ok && j.ok !== false) return { sv, ok: true, error: null };
-          return { sv, ok: false, error: j.reason ?? j.error ?? 'Not available' };
-        } catch {
-          return { sv, ok: false, error: 'Could not check availability' };
-        }
-      }),
-    );
-
-    const blocked = dryRun.find((d) => !d.ok);
-    if (blocked) {
-      const name = visit.services.find((sv) => sv.id === blocked.sv.id)?.name ?? 'A service';
-      addToast(
-        `${name} cannot move to ${blocked.sv.startHm}: ${blocked.error}. The visit was not moved.`,
-        'error',
-      );
-      void refetchBookingsList();
-      return;
-    }
-
-    /**
-     * Armed against the visit's FIRST service, which is what the group bar is keyed on.
-     * `rows` arrives in whatever order the bookings list held, so `rows[0]` was only
-     * sometimes the earliest service, and the pill only sometimes had a bar to appear on.
-     * The resolver orders by start time, so `visit.services[0]` always matches.
-     */
-    beginScheduleEditFollowUp(visit.services[0]!.id);
-
-    /**
-     * ONE undo entry for the whole visit, holding every row as it stands now.
-     *
-     * `patchBookingMove` records its own entry per row, which left undo holding
-     * only the last service written: pressing it put that one service back and
-     * left the rest at the new time. A visit moves whole, so it comes back
-     * whole (see {@link undoVisitMove}).
-     */
-    const prevVisitRows = laid
-      .map((sv) => byId.get(sv.id))
-      .filter((row): row is Booking => Boolean(row))
-      .map((row) => ({ ...row }));
-    if (prevVisitRows.length > 0) {
-      setLastScheduleEditUndo({
-        kind: 'move',
-        prev: prevVisitRows[0]!,
-        prevVisitRows,
-      });
-    }
-
-    const saves: Promise<'ok' | 'failed'>[] = [];
-    for (const sv of laid) {
-      const row = byId.get(sv.id);
-      if (!row) continue;
-      const { savePromise } = await patchBookingMove(row, newDate, sv.startHm, newPracId, {
-        allowDuringBreaks: opts?.allowDuringBreaks,
-        partOfVisitMove: true,
-      });
-      saves.push(savePromise);
-    }
-
-    /**
-     * Tracked against the first service, which is the row undo looks up. Each
-     * row's own save is deliberately not tracked (see `partOfVisitMove`), so
-     * undo waits for the LAST of the visit's writes rather than for whichever
-     * one happened to claim the slot.
-     */
-    const visitSave = Promise.all(saves).then((results) =>
-      results.every((r) => r === 'ok') ? ('ok' as const) : ('failed' as const),
-    );
-    const visitSaveKeyId = prevVisitRows[0]?.id;
-    if (visitSaveKeyId) {
-      scheduleEditSaveRef.current = { bookingId: visitSaveKeyId, promise: visitSave };
-      void visitSave.finally(() => {
-        if (scheduleEditSaveRef.current?.bookingId === visitSaveKeyId) {
-          scheduleEditSaveRef.current = null;
-        }
-      });
-    }
-  }
-
-  /**
-   * `partOfVisitMove` marks a row being carried by {@link patchVisitMove}. The
-   * visit owns the three things that must be visit-level or they end up holding
-   * the last service instead of the booking: the notify follow-up, the undo
-   * entry, and the in-flight save undo waits on.
+   * Move one booking row. A service of a multi-service visit moves on its own
+   * (Docs/visit-services-independent-plan.md); the whole visit moves from the
+   * booking's Modify form.
    */
   async function patchBookingMove(
     booking: Booking,
     newDate: string,
     newTime: string,
     newPracId: string,
-    opts?: { allowDuringBreaks?: boolean; partOfVisitMove?: boolean },
+    opts?: { allowDuringBreaks?: boolean },
   ): Promise<{ savePromise: Promise<'ok' | 'failed'> }> {
     const prev = { ...booking };
     const realPracId = resolveLinkedGridPractitionerIdForPatch(newPracId);
@@ -5256,7 +5104,7 @@ export function PractitionerCalendarView({
     const endHm = minutesToTime(timeToMinutes(timeHm) + dur);
     const bookingEndForStore = `${endHm}:00`;
     const estimatedEndForStore = estimatedEndIsoFromSchedule(newDate, timeHm, endHm);
-    if (!opts?.partOfVisitMove) setLastScheduleEditUndo({ kind: 'move', prev });
+    setLastScheduleEditUndo({ kind: 'move', prev });
     if (linkedOwnerVenueId) {
       setLinkedVenues((venues) =>
         venues.map((v) => {
@@ -5294,7 +5142,7 @@ export function PractitionerCalendarView({
         ),
       );
     }
-    if (!opts?.partOfVisitMove) beginScheduleEditFollowUp(booking.id);
+    beginScheduleEditFollowUp(booking.id);
 
     const savePromise = (async (): Promise<'ok' | 'failed'> => {
       try {
@@ -5370,7 +5218,7 @@ export function PractitionerCalendarView({
       }
     })();
 
-    if (!opts?.partOfVisitMove) {
+    {
       scheduleEditSaveRef.current = { bookingId: booking.id, promise: savePromise };
       void savePromise.finally(() => {
         if (scheduleEditSaveRef.current?.bookingId === booking.id) {
@@ -5512,181 +5360,6 @@ export function PractitionerCalendarView({
   );
 
   /**
-   * Put every service of a moved visit back where it was.
-   *
-   * Undo restored a single row, so a three service visit came back one service
-   * at a time and the other two stayed at the new time: the visit was torn by
-   * the way back rather than by the way out. The rows carry their exact old
-   * slots, so this restores what was there rather than re-laying the visit,
-   * which would close any gap the shape legitimately had.
-   *
-   * Every service is checked at its old slot before anything is written, the
-   * same all-or-nothing rule the move itself follows.
-   */
-  const undoVisitMove = useCallback(
-    async (prevRows: Booking[]) => {
-      const targets = prevRows.map((prev) => {
-        const startHm = prev.booking_time.slice(0, 5);
-        return {
-          prev,
-          startHm,
-          colId: resolveBookingColumnId(prev, resourceParentById),
-          timeForStore: bookingTimeToStore(prev.booking_time),
-          endForStore:
-            prev.booking_end_time && prev.booking_end_time.trim() !== ''
-              ? bookingTimeToStore(prev.booking_end_time)
-              : `${minutesToTime(timeToMinutes(startHm) + bookingDurationMinutes(prev, serviceMapForBooking(prev)))}:00`,
-        };
-      });
-
-      if (targets.some((t) => !t.colId)) {
-        addToast('Cannot undo: calendar column is no longer available', 'error');
-        return;
-      }
-
-      setScheduleUndoPending(true);
-      try {
-        const checks = await Promise.all(
-          targets.map(async (t) => {
-            try {
-              const res = await fetch(
-                `/api/venue/bookings/${t.prev.id}/validate-appointment-modification`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    booking_date: t.prev.booking_date,
-                    booking_time: t.timeForStore,
-                    practitioner_id: resolveLinkedGridPractitionerIdForPatch(t.colId!),
-                    booking_end_time: t.endForStore,
-                    allow_manual_overlap: true,
-                    // The visit may be going back to a slot outside hours,
-                    // which is where the diary let it sit (see patchBookingMove).
-                    allow_outside_hours: true,
-                  }),
-                },
-              );
-              const j = (await res.json().catch(() => ({}))) as {
-                ok?: boolean;
-                error?: string;
-                reason?: string;
-              };
-              if (res.ok && j.ok !== false) return { t, ok: true, error: null as string | null };
-              return { t, ok: false, error: j.reason ?? j.error ?? 'Not available' };
-            } catch {
-              return { t, ok: false, error: 'Could not check availability' };
-            }
-          }),
-        );
-
-        const blocked = checks.find((c) => !c.ok);
-        if (blocked) {
-          const name = blocked.t.prev.booking_item_name ?? 'A service';
-          addToast(
-            `${name} cannot go back to ${blocked.t.startHm}: ${blocked.error}. Nothing was changed.`,
-            'error',
-          );
-          void refetchBookingsList();
-          return;
-        }
-
-        const linkedOwnerVenueId = prevRows[0]?._linkedOwnerVenueId;
-        const targetById = new Map(targets.map((t) => [t.prev.id, t]));
-        if (linkedOwnerVenueId) {
-          setLinkedVenues((venues) =>
-            venues.map((v) => {
-              if (v.venueId !== linkedOwnerVenueId) return v;
-              return {
-                ...v,
-                bookings: v.bookings.map((lb) => {
-                  const t = targetById.get(lb.id);
-                  if (!t) return lb;
-                  return {
-                    ...lb,
-                    bookingDate: t.prev.booking_date,
-                    bookingTime: t.startHm,
-                    bookingEndTime: t.prev.booking_end_time?.slice(0, 5) ?? null,
-                    practitionerId: resolveLinkedGridPractitionerIdForPatch(t.colId!),
-                    estimatedEndTime: t.prev.estimated_end_time,
-                  };
-                }),
-              };
-            }),
-          );
-        } else {
-          setBookings((rows) =>
-            rows.map((b) => {
-              const t = targetById.get(b.id);
-              return t ? { ...t.prev } : b;
-            }),
-          );
-        }
-
-        /**
-         * At most one guest email for the undo, matching the move: the move
-         * deferred every row's notification and fired one against the first
-         * service, so letting all three rows notify here would tell the guest
-         * three times that their visit had changed.
-         */
-        const notifyPending = prevRows.some(
-          (r) => pendingDeferredModificationNotifyBookingIdRef.current === r.id,
-        );
-        const results = await Promise.all(
-          targets.map(async (t, i) => {
-            try {
-              const res = await fetch(`/api/venue/bookings/${t.prev.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  booking_date: t.prev.booking_date,
-                  booking_time: t.timeForStore,
-                  practitioner_id: resolveLinkedGridPractitionerIdForPatch(t.colId!),
-                  booking_end_time: t.endForStore,
-                  allow_manual_overlap: true,
-                  allow_outside_hours: true,
-                  ...(notifyPending || i > 0
-                    ? { skip_booking_modification_guest_notification: true }
-                    : {}),
-                }),
-              });
-              return res.ok;
-            } catch {
-              return false;
-            }
-          }),
-        );
-
-        if (results.some((ok) => !ok)) {
-          addToast('Could not undo the move', 'error');
-          void refetchBookingsList();
-          if (linkedOwnerVenueId) void requestLinkedCalendarSync();
-          return;
-        }
-
-        cancelPendingDeferredModificationGuestNotify();
-        setLastScheduleEditUndo(null);
-        setDragMoveConfirmBookingId(null);
-        addToast('Change undone', 'success');
-        void refetchBookingsList();
-        if (linkedOwnerVenueId) void requestLinkedCalendarSync();
-      } catch {
-        addToast('Could not undo the move', 'error');
-        void refetchBookingsList();
-      } finally {
-        setScheduleUndoPending(false);
-      }
-    },
-    [
-      addToast,
-      cancelPendingDeferredModificationGuestNotify,
-      refetchBookingsList,
-      requestLinkedCalendarSync,
-      resourceParentById,
-      serviceMapForBooking,
-    ],
-  );
-
-  /**
    * What the screen-bottom notify / skip / undo bar describes: the booking the
    * deferred notify is armed for as it stands now, against the row saved before
    * the edit. A visit is keyed on its first service, which `allGridBookings`
@@ -5736,23 +5409,13 @@ export function PractitionerCalendarView({
 
   const undoLastScheduleEdit = useCallback(async () => {
     if (!lastScheduleEditUndo || scheduleUndoPending) return;
-    const { kind, prev, prevVisitRows } = lastScheduleEditUndo;
+    const { kind, prev } = lastScheduleEditUndo;
     const bookingId = prev.id;
-
     const inflight = scheduleEditSaveRef.current;
     if (inflight?.bookingId === bookingId) {
       const saveResult = await inflight.promise;
-      /**
-       * A visit goes on. Its save reports 'failed' when ANY row failed, and the
-       * rows that did land are exactly what has to come back; only a single
-       * booking has nothing left to undo, having already been rolled back.
-       */
-      if (saveResult === 'failed' && !prevVisitRows) return;
-    }
-
-    if (kind === 'move' && prevVisitRows && prevVisitRows.length > 1) {
-      await undoVisitMove(prevVisitRows);
-      return;
+      // A failed save has already been rolled back; there is nothing left to undo.
+      if (saveResult === 'failed') return;
     }
 
     const colId = resolveBookingColumnId(prev, resourceParentById);
@@ -5877,7 +5540,6 @@ export function PractitionerCalendarView({
     cancelPendingDeferredModificationGuestNotify,
     refetchBookingsList,
     requestLinkedCalendarSync,
-    undoVisitMove,
   ]);
 
   function applyCalendarBookingQuickPatch(b: Booking, body: Record<string, unknown>): Booking {
@@ -6060,63 +5722,6 @@ export function PractitionerCalendarView({
     }
   }
 
-  /**
-   * Status / arrived changes for a multi-service visit: optimistic overlay on every
-   * segment, one PATCH (server syncs siblings via `group_booking_id`), then refetch.
-   */
-  async function quickPatchBookingCluster(items: Booking[], body: Record<string, unknown>): Promise<boolean> {
-    if (items.length === 0) return true;
-
-    const targets = items.filter((item) => {
-      if (typeof body.status === 'string') return item.status !== body.status;
-      if (body.client_arrived !== undefined) {
-        return Boolean(item.client_arrived_at) !== Boolean(body.client_arrived);
-      }
-      return true;
-    });
-    if (targets.length === 0) return true;
-
-    setCalendarBookingOverlays((prev) => {
-      const next = { ...prev };
-      for (const item of targets) {
-        const optimistic =
-          typeof body.status === 'string'
-            ? overlayFromStatusTransition(
-                item.status as BookingStatus,
-                body.status as BookingStatus,
-                isTableReservationBooking(item),
-              )
-            : body.client_arrived !== undefined
-              ? overlayFromClientArrivedPatch(Boolean(body.client_arrived))
-              : {};
-        if (Object.keys(optimistic).length > 0) {
-          next[item.id] = mergeBookingRowOverlay(next[item.id] ?? {}, optimistic);
-        }
-      }
-      return next;
-    });
-
-    const lead = targets[0]!;
-    const ok = await quickPatchBooking(lead.id, body, { skipRefetch: true });
-    if (ok) {
-      setBookings((rows) =>
-        rows.map((row) => {
-          const inCluster = items.some((item) => item.id === row.id);
-          if (!inCluster) return row;
-          if (typeof body.status === 'string' && row.status !== body.status) {
-            return applyCalendarBookingQuickPatch(row, body);
-          }
-          if (body.client_arrived !== undefined) {
-            return applyCalendarBookingQuickPatch(row, body);
-          }
-          return row;
-        }),
-      );
-      void refetchBookingsList();
-    }
-    return ok;
-  }
-
   function clearCalendarDragUi() {
     interactingRef.current = false;
     setDragBooking(null);
@@ -6265,18 +5870,16 @@ export function PractitionerCalendarView({
         ? 0
         : snapCalendarMoveMinutes((e.delta.y / slotHeightPx) * SLOT_MINUTES);
     /**
-     * The footprint the drop outline mirrors and the checks judge. A visit moves
-     * as one, so every service is carried by the same delta and the outline
-     * spans them all, gaps included; and for any booking the reach runs to the
-     * end of the buffer band drawn under its bar, not just the bar itself.
-     * Dragging a visit used to size the outline, and check for conflicts, from
-     * its first service alone, so the green box stopped where the first service
-     * did and a later service could land on a break unnoticed.
+     * The footprint the drop outline mirrors and the checks judge: the row's
+     * card as it is painted (cut at the last busy minute, so processing that
+     * runs into or past the end of the service is left out) and the buffer
+     * band when it sits directly under the card. A service of a visit moves on
+     * its own.
      */
-    const movedRows = serviceVisitRowsFor(b) ?? [b];
+    const movedRows = [b];
     const rowOffset = (row: Booking) => timeToMinutes(row.booking_time.slice(0, 5)) - originalStartMins;
     const duration = Math.max(
-      getBookingDuration(b),
+      MIN_APPOINTMENT_CORE_DURATION_MINUTES,
       bookingMoveFootprintMinutes(
         movedRows.map((row) => {
           const map = serviceMapForBooking(row);
@@ -6284,6 +5887,7 @@ export function PractitionerCalendarView({
             offsetMinutes: rowOffset(row),
             displayMinutes: getBookingDuration(row),
             coreMinutes: bookingCoreDurationForProcessing(row, map),
+            activeMinutes: bookingFreeRegions(row, map).activeEnd,
             tailMinutes: bookingProcessingTailMinutes(row, map),
             bufferMinutes: bookingBufferMinutes(row, map),
           };
@@ -6432,31 +6036,22 @@ export function PractitionerCalendarView({
     } else if (movedOutsideHours) {
       addToast('Moved outside opening hours.', 'info');
     }
-    // A multi-service visit moves as one booking: dragging the bar used to carry
-    // only the row the shell held and leave the other services behind.
-    const moveVisitRows = serviceVisitRowsFor(b);
-    if (moveVisitRows) {
-      const visit = resolveAppointmentVisit(moveVisitRows.map(visitRowFor));
+    // A service of a visit moves alone; landing on one of its own siblings is
+    // allowed, as any overlap is, but never silent.
+    {
       const startMin = timeToMinutes(newTime.slice(0, 5));
-      const clash = collidingBookingCount({
+      const ownClash = ownSiblingOverlapCount({
+        moved: b,
         startMin,
-        endMin: startMin + (visit?.totalMinutes ?? 0),
+        endMin: startMin + getBookingDuration(b),
         columnId: pracId,
         dateStr,
-        excludeIds: new Set(moveVisitRows.map((r) => r.id)),
+        rows: allGridBookings,
+        columnIdOf: (row) => resolveBookingColumnId(row as Booking, resourceParentById),
+        spanMinutesOf: (row) => getBookingDuration(row as Booking),
+        toMinutes: timeToMinutes,
       });
-      if (clash > 0) {
-        addToast(
-          clash === 1
-            ? 'This now overlaps another booking.'
-            : `This now overlaps ${clash} other bookings.`,
-          'info',
-        );
-      }
-      void patchVisitMove(moveVisitRows, dateStr, newTime, pracId, {
-        allowDuringBreaks: movedOverBreak,
-      });
-      return;
+      if (ownClash > 0) addToast('This now overlaps another service of the same visit.', 'info');
     }
     void patchBookingMove(b, dateStr, newTime, pracId, {
       allowDuringBreaks: movedOverBreak,
@@ -6630,42 +6225,6 @@ export function PractitionerCalendarView({
     [linkedNativeGridColumnByKey, linkedVenueById, addToast],
   );
 
-  /**
-   * A booking as the visit resolver sees it, with the service's catalogue buffer
-   * and the wait after it (processing that runs past its end) attached. Without
-   * them the resolver cannot tell a gap a service is entitled to from dead time
-   * an edit left behind, and preserves both.
-   */
-  const visitRowFor = useCallback(
-    (b: Booking) => {
-      const sid = serviceIdForBooking(b);
-      const svc = sid ? serviceMapForBooking(b).get(sid) : null;
-      return {
-        ...b,
-        buffer_minutes: svc?.buffer_minutes ?? null,
-        processing_tail_minutes: svc ? bookingProcessingTailMinutes(b, serviceMapForBooking(b)) : null,
-      };
-    },
-    [serviceMapForBooking],
-  );
-
-  /**
-   * The other rows of this booking's multi-service visit, or null when it stands
-   * alone. Returns null for a multi-PERSON party, which shares the same
-   * `group_booking_id` and must never be resized as one appointment.
-   */
-  const serviceVisitRowsFor = useCallback(
-    (booking: Booking): Booking[] | null => {
-      const gid = booking.group_booking_id?.trim();
-      if (!gid) return null;
-      const rows = bookings.filter(
-        (b) => b.group_booking_id?.trim() === gid && b.booking_date === booking.booking_date,
-      );
-      if (rows.length <= 1) return null;
-      return resolveAppointmentVisit(rows.map(visitRowFor)) ? rows : null;
-    },
-    [bookings, visitRowFor],
-  );
 
   /**
    * Bookings this window would land on, ignoring the visit's own rows.
@@ -6698,71 +6257,6 @@ export function PractitionerCalendarView({
     [bookings, resourceParentById, serviceMapForBooking],
   );
 
-  /**
-   * Resize a whole multi-service visit to a new wall-clock end.
-   *
-   * The services are re-laid through the shared resolver, so growth extends the
-   * tail, shrinkage comes off the tail and then cascades backwards, and the gaps
-   * a service's own buffer or processing settings create are carried along
-   * untouched. Re-laying every row is also what stops a hole being left behind
-   * when a service changes length.
-   */
-  const patchVisitResize = useCallback(
-    async (rows: Booking[], newEndMin: number) => {
-      const visit = resolveAppointmentVisit(rows.map(visitRowFor));
-      if (!visit) return;
-      const prevRows = rows.map((r) => ({ ...r }));
-      const durations = distributeVisitDuration(
-        visit,
-        newEndMin - timeToMinutes(visit.startHm),
-      );
-      const laid = resequenceVisit(visit, durations);
-      const byId = new Map(laid.map((s) => [s.id, s]));
-
-      setBookings((all) =>
-        all.map((b) => {
-          const s = byId.get(b.id);
-          if (!s) return b;
-          return {
-            ...b,
-            booking_time: `${s.startHm}:00`,
-            booking_end_time: `${s.endHm}:00`,
-            estimated_end_time: estimatedEndIsoFromSchedule(b.booking_date, s.startHm, s.endHm),
-          };
-        }),
-      );
-
-      const results = await Promise.all(
-        laid.map(async (s) => {
-          try {
-            const res = await fetch(`/api/venue/bookings/${s.id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                booking_time: `${s.startHm}:00`,
-                booking_end_time: `${s.endHm}:00`,
-                allow_manual_overlap: true,
-                allow_outside_hours: true,
-                skip_booking_modification_guest_notification: true,
-              }),
-            });
-            return res.ok;
-          } catch {
-            return false;
-          }
-        }),
-      );
-
-      if (results.some((ok) => !ok)) {
-        // Any row failing leaves the visit half-moved, so the whole thing goes
-        // back rather than being left in a shape nobody chose.
-        addToast('Could not update the visit duration', 'error');
-        setBookings((all) => all.map((b) => prevRows.find((p) => p.id === b.id) ?? b));
-      }
-      void refetchBookingsList();
-    },
-    [addToast, refetchBookingsList, visitRowFor],
-  );
 
   const beginAppointmentResize = useCallback(
     (booking: Booking) => {
@@ -6771,25 +6265,16 @@ export function PractitionerCalendarView({
 
       /** The actual height-drag, run only after the press-and-hold gate arms (see {@link withResizeHold}). */
       const startDrag = (startY: number, target: HTMLElement, pointerId: number) => {
-        /**
-         * A multi-service visit resizes as ONE booking: the handle drags the
-         * whole visit's wall-clock end, not the last service's.
-         */
-        const visitRows = serviceVisitRowsFor(booking);
-        const visit = visitRows ? resolveAppointmentVisit(visitRows.map(visitRowFor)) : null;
-        const startM = timeToMinutes(
-          (visit ? visit.startHm : booking.booking_time.slice(0, 5)),
-        );
-        const dur0 = visit
-          ? visit.totalMinutes
-          : bookingDurationMinutes(booking, serviceMapForBooking(booking));
+        // A service of a visit resizes on its own (Docs/visit-services-independent-plan.md).
+        const startM = timeToMinutes(booking.booking_time.slice(0, 5));
+        const dur0 = bookingDurationMinutes(booking, serviceMapForBooking(booking));
         const endM0 = startM + dur0;
         // The grid draws in 15 minute slots but a booking is not obliged to be one.
         // The engine has allowed 5 minutes since services were allowed to be that
         // short; flooring the drag at a slot was the only thing making a 10 minute
         // appointment unresizable on the calendar. A visit floors at every one of
         // its services on that minimum, with its configured gaps still in place.
-        const minEnd = startM + (visit ? minimumVisitMinutes(visit) : MIN_APPOINTMENT_CORE_DURATION_MINUTES);
+        const minEnd = startM + MIN_APPOINTMENT_CORE_DURATION_MINUTES;
         // The grid was stretched to midnight while the hold armed (see
         // armGridExtension), so the bar may grow that far; the portion past the
         // day's own close, or over a closed stripe, counts as outside hours.
@@ -6896,7 +6381,7 @@ export function PractitionerCalendarView({
             endMin: committedEndMin,
             columnId: resolveBookingColumnId(booking, resourceParentById),
             dateStr: booking.booking_date,
-            excludeIds: new Set((visitRows ?? [booking]).map((r) => r.id)),
+            excludeIds: new Set([booking.id]),
           });
           if (clash > 0) {
             addToast(
@@ -6910,13 +6395,9 @@ export function PractitionerCalendarView({
           window.setTimeout(() => {
             if (justResizedBookingIdRef.current === booking.id) justResizedBookingIdRef.current = null;
           }, 220);
-          if (visitRows) {
-            void patchVisitResize(visitRows, committedEndMin);
-          } else {
-            void patchBookingResize(booking, endStr, {
-              allowDuringBreaks: extendedOverBreak,
-            });
-          }
+          void patchBookingResize(booking, endStr, {
+            allowDuringBreaks: extendedOverBreak,
+          });
         };
 
         window.addEventListener('pointermove', onMove, { passive: false });
@@ -6931,11 +6412,8 @@ export function PractitionerCalendarView({
       collidingBookingCount,
       baseEndHour,
       patchBookingResize,
-      patchVisitResize,
       resourceParentById,
       serviceMapForBooking,
-      serviceVisitRowsFor,
-      visitRowFor,
       withResizeHold,
       slotHeightPx,
       displayBlocks,
@@ -8139,10 +7617,11 @@ export function PractitionerCalendarView({
                 >
                   {dayGridColumns.map((col) => {
                     if (col.kind === 'native') {
-                      const hoursLine = formatWorkingHoursLineForDate(
-                        effectiveWorkingHoursForDate(col.practitioner, date),
-                        date,
-                        venueTimezone,
+                      // Resolved hours (per-date override, day off, schedule period, weekly),
+                      // the same function the grid's closure stripes use, so on an amended
+                      // day the header and the grid beside it read the same hours.
+                      const hoursLine = formatResolvedHoursLineForDate(
+                        calendarHours(col.practitioner, date),
                         // Native columns only. Linked columns belong to another venue with
                         // its own opening hours; constraining them by this venue's would be
                         // wrong, so they keep the unconstrained line.
@@ -8476,11 +7955,9 @@ export function PractitionerCalendarView({
                                     className={`truncate text-[13px] font-extrabold tracking-tight ${
                                       breakBlock
                                         ? 'text-amber-950'
-                                        : bl.block_type === 'venue_amended_hours'
-                                          ? 'text-sky-950'
-                                          : bl.block_type === 'practitioner_leave'
-                                            ? 'text-violet-950'
-                                            : 'text-slate-900'
+                                        : bl.block_type === 'practitioner_leave'
+                                          ? 'text-violet-950'
+                                          : 'text-slate-900'
                                     }`}
                                   >
                                     {calendarBlockHeading(bl)}
@@ -8638,22 +8115,7 @@ export function PractitionerCalendarView({
 
                       {(() => {
                         const bookingClusters = clusterMultiServiceBookings(pracBookings);
-                        /**
-                         * A visit's resize is keyed on the service its handle sits on (the
-                         * first), but the minutes land on the LAST one, and a cluster's end
-                         * is measured from its last service. Growing the first left the lane
-                         * layout blind to a visit growing under the pointer, so overlapping
-                         * bars only re-flowed once the drag was released.
-                         */
-                        const resizeTailBookingId = (() => {
-                          if (!resizeVisual) return null;
-                          const cluster = bookingClusters.find(
-                            (c) => c.kind === 'group' && c.items[0]?.id === resizeVisual.bookingId,
-                          );
-                          return cluster && cluster.kind === 'group'
-                            ? cluster.items[cluster.items.length - 1]!.id
-                            : resizeVisual.bookingId;
-                        })();
+                        const resizeTailBookingId = resizeVisual?.bookingId ?? null;
                         const durationForLayout = (booking: Booking) => {
                           const baseDuration = getBookingDuration(booking);
                           if (!resizeVisual || booking.id !== resizeTailBookingId) return baseDuration;
@@ -8667,9 +8129,22 @@ export function PractitionerCalendarView({
                         );
                         const bars = bookingClusters.map((cluster) => {
                           const layout = clusterLayouts.get(clusterKey(cluster)) ?? { laneIndex: 0, laneCount: 1 };
-                        if (cluster.kind === 'single') {
+                        {
                           const b = cluster.booking;
-                          const palette = calendarBlockPaletteForBooking(b);
+                          // A visit's services share the earliest service's colour.
+                          const visitPos = visitPositions.get(b.id) ?? null;
+                          const visitAnchor = visitPos ? allGridBookings.find((x) => x.id === visitPos.anchorId) ?? b : b;
+                          const palette = calendarBlockPaletteForBooking(visitAnchor);
+                          // A short spine where this service meets a sibling in the same column.
+                          const visitEdges = visitPos
+                            ? visitTouchingEdges({
+                                row: b,
+                                rows: allGridBookings,
+                                columnIdOf: (r) => resolveBookingColumnId(r as Booking, resourceParentById),
+                                spanMinutesOf: (r) => getBookingDuration(r as Booking),
+                                toMinutes: timeToMinutes,
+                              })
+                            : null;
                           const duration = getBookingDuration(b);
                           const sid = serviceIdForBooking(b);
                           const svc = sid ? serviceMapForBooking(b).get(sid) : null;
@@ -8778,6 +8253,9 @@ export function PractitionerCalendarView({
                               layout={layout}
                               canDrag={canDrag}
                               raised={showInlineScheduleFollowUp}
+                              visitGroupId={visitPos?.groupId ?? null}
+                              spineTop={visitEdges?.top ? palette.accent : null}
+                              spineBottom={visitEdges?.bottom ? palette.accent : null}
                             >
                               {(handle) => (
                                 <>
@@ -8961,8 +8439,13 @@ export function PractitionerCalendarView({
                                               <BookingCard
                                                 name={b.guest_name}
                                                 nameAccessory={
-                                                  complianceFlags[b.id] ? (
-                                                    <ComplianceBarIcon flag={complianceFlags[b.id]!} />
+                                                  visitPos || complianceFlags[b.id] ? (
+                                                    <>
+                                                      {visitPos ? <VisitChip label={visitChipLabel(visitPos)} /> : null}
+                                                      {complianceFlags[b.id] ? (
+                                                        <ComplianceBarIcon flag={complianceFlags[b.id]!} />
+                                                      ) : null}
+                                                    </>
                                                   ) : undefined
                                                 }
                                                 service={calendarBookingServiceLabel(b, svc, resName ?? null)}
@@ -9067,548 +8550,6 @@ export function PractitionerCalendarView({
                           );
                         }
 
-                        const items = cluster.items;
-                        const first = items[0]!;
-                        const last = items[items.length - 1]!;
-                        const clusterPalette = calendarBlockPaletteForBooking(first);
-                        const spanMins =
-                          timeToMinutes(last.booking_time) +
-                          getBookingDuration(last) -
-                          timeToMinutes(first.booking_time);
-                        const top = slotTop(first.booking_time);
-                        const height = slotHeightFromDuration(spanMins);
-                        /**
-                         * The live preview, which this branch simply did not read: the
-                         * handle set `resizeVisual` against the visit's first service and
-                         * nothing here used it, so a multi-service bar sat still under the
-                         * drag and only jumped once the save came back.
-                         *
-                         * The bar follows the pointer exactly as a single booking's does,
-                         * and the LAST service absorbs the change, because that is what
-                         * `distributeVisitDuration` will do when the drag is released. A
-                         * preview that stretched every service equally would be showing a
-                         * shape the save was never going to write.
-                         */
-                        const visitResizeExtra =
-                          resizeVisual?.bookingId === first.id ? resizeVisual.deltaYPx : 0;
-                        const visitBlockH = height + visitResizeExtra;
-                        // Bars nested in this visit's processing gaps; the tray moves off
-                        // the bottom edge when one of them covers it. Segment text is not
-                        // re-flowed around them (each segment keeps its own box).
-                        const visitRegions = hostRegionsPx(layout, timeToMinutes(first.booking_time), visitBlockH, slotHeightPx);
-                        const visitTrayBottomOffsetPx = visitBlockH - visitRegions.trayBottomPx;
-                        const visitTrayHeightPx = Math.max(0, visitRegions.trayBottomPx - visitRegions.trayTopPx);
-                        const visitPreview = (() => {
-                          if (visitResizeExtra === 0) return null;
-                          const visit = resolveAppointmentVisit(items.map(visitRowFor));
-                          if (!visit) return null;
-                          const requested = Math.round(
-                            spanMins + (visitResizeExtra / slotHeightPx) * SLOT_MINUTES,
-                          );
-                          const durations = distributeVisitDuration(
-                            visit,
-                            Math.max(minimumVisitMinutes(visit), requested),
-                          );
-                          const gaps = visit.services.reduce(
-                            (sum, s) => sum + s.expectedGapAfterMinutes,
-                            0,
-                          );
-                          const serviceMinutes = [...durations.values()].reduce((a, b) => a + b, 0);
-                          return { durations, spanMins: serviceMinutes + gaps };
-                        })();
-                        const segmentSpanMins = visitPreview?.spanMins ?? spanMins;
-                        const segmentDurationOf = (b: Booking) =>
-                          visitPreview?.durations.get(b.id) ?? getBookingDuration(b);
-                        /**
-                         * Where each service sits in the bar, in minutes from the visit's
-                         * start, with the gap after it (a wait while colour develops, then
-                         * the buffer) and the stretch at its own foot where processing runs
-                         * to its end. Gaps are the observed ones at rest, so a hole an
-                         * earlier edit left behind is drawn as it is; under a resize
-                         * preview they are the configured ones the resolver will lay out.
-                         */
-                        const visitTimeline = (() => {
-                          const previewVisit = visitPreview
-                            ? resolveAppointmentVisit(items.map(visitRowFor))
-                            : null;
-                          let pos = 0;
-                          return items.map((seg, i) => {
-                            const dur = segmentDurationOf(seg);
-                            const start = pos;
-                            const next = items[i + 1];
-                            const gapAfter = !next
-                              ? 0
-                              : previewVisit
-                                ? (previewVisit.services.find((sv) => sv.id === seg.id)?.expectedGapAfterMinutes ?? 0)
-                                : Math.max(
-                                    0,
-                                    timeToMinutes(next.booking_time) -
-                                      (timeToMinutes(seg.booking_time) + getBookingDuration(seg)),
-                                  );
-                            pos = start + dur + gapAfter;
-                            const free = bookingFreeRegions(seg, serviceMapForBooking(seg));
-                            const trailingFree = Math.max(0, Math.min(dur, free.core - free.activeEnd));
-                            return { seg, start, dur, gapAfter, trailingFree, free };
-                          });
-                        })();
-                        const timelineTotal = Math.max(
-                          1,
-                          visitTimeline.reduce((m, t) => Math.max(m, t.start + t.dur), 0),
-                        );
-                        const visitWall0 = timeToMinutes(first.booking_time);
-                        /**
-                         * [start, end) minute ranges of the bar left unpainted, in timeline
-                         * minutes. `clickEnd` is where the bookable part of each ends: a
-                         * gap between services is the wait (free) and then the buffer
-                         * (turnover, not bookable), so the catcher covers only the wait.
-                         */
-                        const visitHoles = visitTimeline.flatMap((t) => {
-                          const segEnd = t.start + t.dur;
-                          const tail = bookingProcessingTailMinutes(t.seg, serviceMapForBooking(t.seg));
-                          return [
-                            ...(t.trailingFree > 0
-                              ? [{ start: segEnd - t.trailingFree, end: segEnd, clickEnd: segEnd }]
-                              : []),
-                            ...(t.gapAfter > 0
-                              ? [{ start: segEnd, end: segEnd + t.gapAfter, clickEnd: segEnd + Math.min(t.gapAfter, tail) }]
-                              : []),
-                          ];
-                        });
-                        /**
-                         * The lozenges the visit paints: every busy stretch, with the
-                         * waits between services, each service's trailing free stretch
-                         * and its middle gaps all left as holes. The grid shows through
-                         * them and the visit reads as separate bars with space between.
-                         */
-                        const visitPieces = paintedPiecesMinutes(timelineTotal, [
-                          ...visitHoles,
-                          ...visitTimeline.flatMap((t) =>
-                            t.free.middle.map((m) => ({ start: m.start - visitWall0, end: m.end - visitWall0 })),
-                          ),
-                        ]);
-                        /** A service after a hole starts a new lozenge, so it carries the guest's name again. */
-                        const segmentStartsNewPiece = (segIdx: number): boolean => {
-                          const prev = visitTimeline[segIdx - 1];
-                          return !prev || prev.trailingFree > 0 || prev.gapAfter > 0;
-                        };
-                        const openVisitFreeSlot = (wallMinute: number, e: MouseEvent) =>
-                          openSlotMenuForEmptyClick(e, pracId, date, minutesToTime(wallMinute));
-                        const flash = items.some((x) => flashIds.has(x.id));
-                        const qBusy = items.some((x) => quickActionId === x.id);
-                        const isOverlapLane = layout.laneCount > 1;
-                        const serviceTitle = calendarMultiServiceDisplayTitle(
-                          items.map((x) => {
-                            const sid = serviceIdForBooking(x);
-                            return {
-                              booking: x,
-                              catalogService: sid ? serviceMapForBooking(x).get(sid) : null,
-                            };
-                          }),
-                        );
-                        /**
-                         * Both controls are live: the move cascades through
-                         * `patchVisitMove` and the resize through
-                         * `patchVisitResize`, so neither can leave a service
-                         * behind.
-                         */
-                        const visitResizable =
-                          !first.resource_id &&
-                          ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(first.status);
-                        const visitResizeArming =
-                          resizeArming?.kind === 'booking' && resizeArming.id === first.id;
-                        const visitMoveArming =
-                          moveArming?.kind === 'booking' && moveArming.id === first.id;
-                        /**
-                         * `patchVisitMove` arms the follow-up against the visit's first
-                         * service, which is what this bar is keyed on.
-                         */
-                        const showVisitScheduleFollowUp = dragMoveConfirmBookingId === first.id;
-                        return (
-                          <DraggableBookingShell
-                            key={`${items.map((x) => `${x.id}:${x.status}:${x.client_arrived_at ?? ''}`).join('|')}`}
-                            booking={first}
-                            top={top}
-                            height={height}
-                            slotHeightPx={slotHeightPx}
-                            heightExtraPx={visitResizeExtra}
-                            layout={layout}
-                            canDrag={visitResizable}
-                            raised={showVisitScheduleFollowUp}
-                          >
-                            {(handle) => (
-                              <>
-                              <div
-                                className={`group relative flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl ${
-                                  flash ? 'motion-safe:animate-pulse' : ''
-                                }`}
-                                style={{ color: clusterPalette.text }}
-                                title={serviceTitle || undefined}
-                                {...bindDetailPrefetchHandlers(first.id, prefetchBookingDetail)}
-                              >
-                                <BookingBarPieces
-                                  pieces={visitPieces}
-                                  totalMinutes={timelineTotal}
-                                  palette={clusterPalette}
-                                  flash={flash}
-                                  guestName={first.guest_name}
-                                  labelledStarts={visitTimeline.map((t) => t.start)}
-                                  labelLeftPx={
-                                    4 +
-                                    (visitResizable && handle.listeners && handle.attributes
-                                      ? isOverlapLane
-                                        ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
-                                        : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX
-                                      : 0) +
-                                    (isOverlapLane ? 6 : 10)
-                                  }
-                                  totalHeightPx={visitBlockH}
-                                />
-                                <BookingBarEdgeSpacer />
-                                {/*
-                                  Processing strips for every segment, painted at bar level
-                                  the way a single booking's is. They used to live inside
-                                  each segment, and the segment stack sits to the RIGHT of
-                                  the move grip, so every strip started where the grip
-                                  ended and its left edge looked cut off. Here they span the
-                                  full bar and show through the transparent grip. Each one
-                                  is placed by the same `flex: dur` proportions the segments
-                                  are laid out by, so it lines up with its segment exactly.
-                                */}
-                                <div className="pointer-events-none absolute inset-0 z-[3]">
-                                  {visitTimeline.map((t) => (
-                                    <div
-                                      key={t.seg.id}
-                                      className="pointer-events-none absolute inset-x-0"
-                                      style={{
-                                        top: `${(t.start / timelineTotal) * 100}%`,
-                                        height: `${(t.dur / timelineTotal) * 100}%`,
-                                      }}
-                                    >
-                                      <ProcessingFreeBands
-                                        b={t.seg}
-                                        serviceMap={serviceMapForBooking(t.seg)}
-                                        wallPaintMinutes={t.dur}
-                                        onFreeClick={openVisitFreeSlot}
-                                      />
-                                    </div>
-                                  ))}
-                                  {visitHoles.map((hole) => (
-                                    <ProcessingFreeHole
-                                      key={`${hole.start}-${hole.end}`}
-                                      topPct={(hole.start / timelineTotal) * 100}
-                                      heightPct={((hole.clickEnd - hole.start) / timelineTotal) * 100}
-                                      startWallMin={visitWall0 + hole.start}
-                                      endWallMin={visitWall0 + hole.clickEnd}
-                                      onFreeClick={openVisitFreeSlot}
-                                    />
-                                  ))}
-                                </div>
-                                {/*
-                                  The visit's move grip. This branch used to
-                                  discard the shell's drag handle, so a
-                                  multi-service booking had nothing to grab: no
-                                  grip, and `canDrag` off besides.
-                                */}
-                                {visitResizable && handle.listeners && handle.attributes ? (
-                                  <button
-                                    ref={handle.setActivatorNodeRef}
-                                    type="button"
-                                    data-no-calendar-pan="true"
-                                    className={`group/grip relative z-[2] flex shrink-0 cursor-grab [touch-action:pan-x_pan-y] items-center justify-center transition-colors duration-150 active:cursor-grabbing ${
-                                      visitMoveArming ? 'bg-black/[0.12]' : 'bg-black/0 hover:bg-black/[0.06]'
-                                    }`}
-                                    style={{
-                                      width: isOverlapLane
-                                        ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
-                                        : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
-                                      minWidth: isOverlapLane
-                                        ? BOOKING_DRAG_HANDLE_WIDTH_OVERLAP_PX
-                                        : BOOKING_DRAG_HANDLE_WIDTH_DEFAULT_PX,
-                                    }}
-                                    aria-label="Press and hold, then drag to reschedule the whole visit"
-                                    {...handle.listeners}
-                                    {...handle.attributes}
-                                    onPointerDown={(e) => {
-                                      handle.listeners?.onPointerDown?.(e);
-                                      beginMoveHoldHint('booking', first.id)(e);
-                                    }}
-                                  >
-                                    {!isOverlapLane && (
-                                      <svg
-                                        viewBox="0 0 10 18"
-                                        className="h-3.5 w-2 opacity-50 transition-opacity duration-150 group-hover:opacity-90 group-hover/grip:opacity-100"
-                                        fill="currentColor"
-                                        aria-hidden
-                                      >
-                                        <circle cx="3" cy="4" r="1.1" />
-                                        <circle cx="7" cy="4" r="1.1" />
-                                        <circle cx="3" cy="9" r="1.1" />
-                                        <circle cx="7" cy="9" r="1.1" />
-                                        <circle cx="3" cy="14" r="1.1" />
-                                        <circle cx="7" cy="14" r="1.1" />
-                                      </svg>
-                                    )}
-                                  </button>
-                                ) : null}
-                                {visitMoveArming ? <ResizeHoldHint label="Hold to move" placement="center" /> : null}
-                                <BookingGuestActionsRowMeasured className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                                  {(shellRowWidthPx) => {
-                                    const actionInset = computeBookingActionCornerInset(
-                                      first,
-                                      visitTrayHeightPx,
-                                      shellRowWidthPx,
-                                      BOOKING_CARD_PADDING_SEGMENT_PX,
-                                    );
-                                    // The tray's band, measured up from the bar's bottom edge.
-                                    const trayBottomFromBottomPx = visitTrayBottomOffsetPx;
-                                    const trayTopFromBottomPx =
-                                      visitTrayBottomOffsetPx + (actionInset.hasActions ? actionInset.bottom : 0);
-                                    // Each segment's distance from the bar's bottom edge, so a
-                                    // tray stacked BELOW the text can be charged to exactly the
-                                    // segments it overlaps rather than to the last one alone.
-                                    const segmentApproxHeights = items.map(
-                                      (seg) =>
-                                        visitBlockH * (segmentDurationOf(seg) / Math.max(segmentSpanMins, 1)),
-                                    );
-                                    return (
-                                    <>
-                                      {/*
-                                        No `paddingRight` on this stack. The action gutter used
-                                        to be reserved here, which kept the text clear of the
-                                        tray but also narrowed every segment's box by the same
-                                        amount, and each segment paints its own processing strip
-                                        inside that box. The strips therefore stopped 76px short
-                                        of the right edge for the whole height of the bar, while
-                                        the buttons only ever occupy a corner of it. A single
-                                        booking's strip spans the full bar because its gutter is
-                                        on the text button alone; each segment button below now
-                                        does the same.
-                                      */}
-                                      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                                        {items.map((b, segIdx) => {
-                                          const dur = segmentDurationOf(b);
-                                          const sid = serviceIdForBooking(b);
-                                          const svc = sid ? serviceMapForBooking(b).get(sid) : null;
-                                          const segmentApproxPx = segmentApproxHeights[segIdx]!;
-                                          const segmentTimeline = visitTimeline[segIdx]!;
-                                          // The foot of this segment where processing runs to its
-                                          // end: masked out of the bar, so nothing is written there.
-                                          const segmentTrailingFreePx =
-                                            visitBlockH * (segmentTimeline.trailingFree / timelineTotal);
-                                          const gapAfter = segmentTimeline.gapAfter;
-                                          /**
-                                           * Clearance for the tray, per segment.
-                                           *
-                                           * Beside (wide lanes): every segment keeps the gutter on
-                                           * its right, and no height is spent.
-                                           *
-                                           * Below (narrow lanes): only the segments whose box the
-                                           * tray's footprint reaches give up height, each by the
-                                           * amount it overlaps. A segment that cannot spare that
-                                           * and still show one row keeps the gutter instead, so
-                                           * its text never runs under the buttons.
-                                           */
-                                          const segmentBottomOffsetPx = segmentApproxHeights
-                                            .slice(segIdx + 1)
-                                            .reduce((a, h) => a + h, 0);
-                                          const segmentTopFromBottomPx = segmentBottomOffsetPx + segmentApproxPx;
-                                          const segmentTrayOverlapPx =
-                                            actionInset.hasActions &&
-                                            actionInset.mode === 'below' &&
-                                            trayBottomFromBottomPx < segmentTopFromBottomPx
-                                              ? Math.max(
-                                                  0,
-                                                  Math.min(segmentApproxPx, trayTopFromBottomPx - segmentBottomOffsetPx),
-                                                )
-                                              : 0;
-                                          const segmentCanAffordOverlap =
-                                            segmentTrayOverlapPx <=
-                                            segmentApproxPx -
-                                              BOOKING_CARD_PADDING_SEGMENT_PX -
-                                              BOOKING_CARD_MIN_ROW_PX;
-                                          const segmentTrayReservePx =
-                                            segmentTrayOverlapPx > 0 && segmentCanAffordOverlap
-                                              ? segmentTrayOverlapPx
-                                              : 0;
-                                          const segmentGutterPx = !actionInset.hasActions
-                                            ? 0
-                                            : actionInset.mode === 'below'
-                                              ? segmentTrayOverlapPx > 0 && !segmentCanAffordOverlap
-                                                ? BOOKING_ACTIONS_CORNER_RIGHT_PX
-                                                : 0
-                                              : actionInset.right;
-                                          // Room left in this segment once its own padding, the
-                                          // tray reserve and (below) the pills row have had their
-                                          // share. Spending the raw segment height is what pushed
-                                          // the phone and time lines out of the box and under the
-                                          // following segment.
-                                          const segmentInnerPx = Math.max(
-                                            0,
-                                            segmentApproxPx -
-                                              BOOKING_CARD_PADDING_SEGMENT_PX -
-                                              segmentTrayReservePx -
-                                              segmentTrailingFreePx,
-                                          );
-                                          const showSegPills =
-                                            !isOverlapLane && segmentInnerPx >= 88 && bookingHasBlockPills(b);
-                                          const segmentContentPx = Math.max(
-                                            0,
-                                            segmentInnerPx - (showSegPills ? BOOKING_SEGMENT_PILLS_ROW_PX : 0),
-                                          );
-                                          const resSeg = b.resource_id ? resourceNameById.get(b.resource_id) : null;
-                                          const segServiceLabel = calendarBookingServiceLabel(b, svc, resSeg ?? null);
-                                          return (
-                                            <Fragment key={b.id}>
-                                            <div
-                                              className="relative flex min-h-0 flex-col overflow-hidden"
-                                              /**
-                                               * No fill of its own. The card underneath already
-                                               * paints this exact colour plus the gloss gradient
-                                               * every bar carries, and repainting it flat here
-                                               * erased that gloss, but only where the segments
-                                               * reach. The action gutter is padding, so no segment
-                                               * covers it, and the surviving gloss showed as a
-                                               * lighter band running the height of the bar's right
-                                               * edge, on multi-service visits only.
-                                               */
-                                              style={{ flex: dur }}
-                                            >
-                                              <button
-                                                type="button"
-                                                onClick={(e) => openGridBookingDetail(b, { x: e.clientX, y: e.clientY })}
-                                                className={`relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col justify-start overflow-hidden ${isOverlapLane ? 'px-1.5' : 'px-2.5'} py-1 text-left transition focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300`}
-                                                // Horizontal clearance for the bottom-right action
-                                                // tray, on the text button rather than the segment
-                                                // stack so the processing strip behind it can paint
-                                                // the full width. The bottom reserve is the last
-                                                // segment's share of the tray height, when the inset
-                                                // asks for one.
-                                                style={{
-                                                  paddingRight: segmentGutterPx || undefined,
-                                                  paddingBottom: segmentTrayReservePx + segmentTrailingFreePx || undefined,
-                                                }}
-                                                aria-label={`Open booking details for ${b.guest_name}`}
-                                              >
-                                                <BookingCard
-                                                  name={first.guest_name}
-                                                  nameAccessory={
-                                                    complianceFlags[b.id] ? (
-                                                      <ComplianceBarIcon flag={complianceFlags[b.id]!} />
-                                                    ) : undefined
-                                                  }
-                                                  // Once a service sits in its own lozenge (a wait
-                                                  // or gap before it), the guest's name goes on it
-                                                  // again; back to back, it reads once at the top.
-                                                  hideName={segIdx > 0 && !segmentStartsNewPiece(segIdx)}
-                                                  service={segServiceLabel}
-                                                  /**
-                                                   * Every segment of a visit is the same guest, so
-                                                   * the number only belongs on the first one.
-                                                   * Repeating it read as a duplicate and cost each
-                                                   * following segment a row that its own service
-                                                   * and time needed.
-                                                   */
-                                                  phone={segIdx === 0 ? formatPhoneForDisplay(b.guest_phone) : null}
-                                                  start={b.booking_time.slice(0, 5)}
-                                                  end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
-                                                  pill={
-                                                    segIdx === 0 ? (
-                                                      <CalendarBookingStatusBadge b={first} palette={clusterPalette} />
-                                                    ) : null
-                                                  }
-                                                  contentHeightPx={segmentContentPx}
-                                                  density={
-                                                    isOverlapLane || segmentContentPx < 56
-                                                      ? 'compact'
-                                                      : 'comfortable'
-                                                  }
-                                                />
-                                                {showSegPills ? (
-                                                  <div className="mt-1 flex w-full min-w-0 shrink-0 flex-col gap-1 border-t border-white/25 pt-1">
-                                                    <div className="flex flex-wrap content-start gap-x-1 gap-y-1">
-                                                      <BookingBlockPills b={b} />
-                                                    </div>
-                                                  </div>
-                                                ) : null}
-                                                <div className="min-h-0 min-w-0 flex-1" aria-hidden />
-                                              </button>
-                                            </div>
-                                            {/* The wait before the next service: masked out of the bar above. */}
-                                            {gapAfter > 0 ? <div style={{ flex: gapAfter }} aria-hidden /> : null}
-                                            </Fragment>
-                                          );
-                                        })}
-                                      </div>
-                                      <CalendarBookingRightColumn
-                                        b={first}
-                                        busy={qBusy}
-                                        // The same height the inset above was planned from, so
-                                        // the tray and the gutter agree during a resize preview
-                                        // as well as at rest (and shrink together in a narrow
-                                        // lane where the tray sits below the text).
-                                        blockHeightPx={actionInset.trayBlockHeightPx}
-                                        bottomOffsetPx={visitTrayBottomOffsetPx}
-                                        onStatus={(_id, s) => void quickPatchBookingCluster(items, { status: s })}
-                                        onArrived={(_id, v) => void quickPatchBookingCluster(items, { client_arrived: v })}
-                                        narrow={isOverlapLane}
-                                        shellRowWidthPx={shellRowWidthPx}
-                                        floating={false}
-                                      />
-                                      {/*
-                                        A multi-service visit had no duration
-                                        control at all: this branch rendered no
-                                        handle and the shell was canDrag={false}.
-                                        The handle drags the whole visit's end,
-                                        and the resolver decides which service
-                                        absorbs it.
-                                      */}
-                                      {/* The same running end time a single booking shows under the drag. */}
-                                      {resizePreviewEnd?.bookingId === first.id ? (
-                                        <span
-                                          className="pointer-events-none absolute left-1/2 z-20 max-w-[calc(100%-0.5rem)] -translate-x-1/2 truncate rounded-md bg-slate-900 px-2 py-0.5 text-center text-[10px] font-bold tabular-nums text-white shadow-md"
-                                          style={{ bottom: BOOKING_RESERVE_ABOVE_RESIZE_PX }}
-                                        >
-                                          Until {resizePreviewEnd.endHm}
-                                        </span>
-                                      ) : null}
-                                      {visitResizeArming ? <ResizeHoldHint label="Hold to adjust" /> : null}
-                                      {visitResizable ? (
-                                        <span
-                                          role="separator"
-                                          aria-orientation="horizontal"
-                                          aria-label="Press and hold, then drag to change the visit duration"
-                                          data-no-calendar-pan="true"
-                                          className={`${resizeAffordanceOn ? '' : 'hidden'} group/resize absolute bottom-0 left-0 z-40 flex cursor-ns-resize [touch-action:pan-x_pan-y] items-center justify-center rounded-b-2xl transition-colors duration-150 ${
-                                            visitResizeArming
-                                              ? 'bg-black/[0.12]'
-                                              : 'bg-black/0 hover:bg-black/[0.06] active:bg-black/[0.12]'
-                                          }`}
-                                          style={{
-                                            height: BOOKING_RESIZE_HANDLE_HEIGHT_PX,
-                                            right: actionInset.hasActions ? BOOKING_ACTIONS_CORNER_RIGHT_PX : 0,
-                                          }}
-                                          onPointerDown={beginAppointmentResize(first)}
-                                          onMouseDown={(e) => e.stopPropagation()}
-                                        >
-                                          <span
-                                            className={`h-[3px] w-7 rounded-full bg-current transition-opacity duration-150 ${
-                                              visitResizeArming
-                                                ? 'opacity-70'
-                                                : 'opacity-0 group-hover:opacity-25 group-hover/resize:opacity-50'
-                                            }`}
-                                            aria-hidden
-                                          />
-                                        </span>
-                                      ) : null}
-                                    </>
-                                    );
-                                  }}
-                                </BookingGuestActionsRowMeasured>
-                              </div>
-                              </>
-                            )}
-                          </DraggableBookingShell>
-                        );
                         });
                         /**
                          * Each booking's buffer, under its bar in its own lane. Drawn
@@ -9618,7 +8559,7 @@ export function PractitionerCalendarView({
                         const bufferBands = bookingClusters.flatMap((cluster) => {
                           const layout = clusterLayouts.get(clusterKey(cluster)) ?? SINGLE_LANE_LAYOUT;
                           const horizontal = clusterLayoutHorizontalStyle(layout);
-                          const members = cluster.kind === 'single' ? [cluster.booking] : cluster.items;
+                          const members = [cluster.booking];
                           return members.flatMap((b) => {
                             if (['Cancelled', 'No-Show'].includes(b.status)) return [];
                             const band = bookingBufferBandMinutes(b, serviceMapForBooking(b));
@@ -10012,17 +8953,8 @@ export function PractitionerCalendarView({
             setDetailBookingAnchor(null);
           }}
           onStatusChange={async (bookingId, _previous, newStatus) => {
-            const gridBooking =
-              bookings.find((x) => x.id === bookingId) ??
-              linkedNativeBookings.find((x) => x.id === bookingId);
-            if (gridBooking?.group_booking_id) {
-              const items = allGridBookings.filter(
-                (x) => x.group_booking_id === gridBooking.group_booking_id,
-              );
-              const ok = await quickPatchBookingCluster(items, { status: newStatus });
-              if (!ok) throw new Error('Update failed');
-              return;
-            }
+            // One row. A confirm still reaches the visit's other services on the
+            // server; Start and Complete are that service's own.
             const ok = await quickPatchBooking(bookingId, { status: newStatus });
             if (!ok) throw new Error('Update failed');
           }}

@@ -512,6 +512,8 @@ interface CatalogPractitioner {
     category?: ServiceCategoryRef | null;
     /** From service_items / appointment_services; used for deposit refund copy before booking completes. */
     cancellation_notice_hours?: number;
+    /** Override catalogue only: false when this person is not assigned the service. */
+    assigned?: boolean;
     /** Optional sub-options. When present, the customer must pick one before slot selection. */
     variants?: CatalogVariant[];
     /** Add-on groups linked to this service (visible online). Public catalog filters hidden ones. */
@@ -700,6 +702,51 @@ function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart:
     m += seg.durationMinutes + (seg.processingTailMinutes ?? 0) + seg.bufferMinutes;
     return row;
   });
+}
+
+/**
+ * The staff "override availability" tick box (Docs/staff-availability-override-plan.md).
+ * Shown on the staff member's first step, whichever it is: the person picker on
+ * a staff-first venue, the service list otherwise.
+ */
+const AVAILABILITY_OVERRIDE_HELP =
+  'Book any service with anyone, on any date from today and at any time, even over other bookings. Use this to squeeze someone in. You will see what it overrides before you save.';
+
+function AvailabilityOverrideToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label
+      className={`mb-4 flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 ${
+        checked ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-white'
+      }`}
+      title={AVAILABILITY_OVERRIDE_HELP}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+        data-testid="availability-override-toggle"
+        aria-describedby="availability-override-help"
+      />
+      <span className="text-sm font-semibold text-slate-900">Override availability</span>
+      {/* The full explanation lives in the tooltip so the box stays on one line. */}
+      <span
+        id="availability-override-help"
+        role="img"
+        aria-label={AVAILABILITY_OVERRIDE_HELP}
+        title={AVAILABILITY_OVERRIDE_HELP}
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 text-[10px] font-bold text-slate-500"
+      >
+        i
+      </span>
+    </label>
+  );
 }
 
 type Step =
@@ -916,7 +963,8 @@ export function AppointmentBookingFlow({
   const appointmentWaitlistEnabled = Boolean(venue.feature_flags?.resolved?.waitlist_v2);
   const [staffRequireDeposit, setStaffRequireDeposit] = useState(false);
   /** Card-hold services only (design doc 7.6): default ON, staff may waive per booking. */
-  const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
+  // Off by default: staff booking for a guest more often waive the hold than ask for it (2026-09-09).
+  const [staffRequireCardHold, setStaffRequireCardHold] = useState(false);
   // Public compliance pre-check (Phase 2 / G4): the guest's email, seeded from a
   // signed-in account and updated as they type, drives the pre-check resolve.
   const [precheckEmail, setPrecheckEmail] = useState<string>(
@@ -1162,6 +1210,37 @@ export function AppointmentBookingFlow({
     preselectedServiceId && !editBooking ? [preselectedServiceId] : [],
   );
   const [chainExtras, setChainExtras] = useState<ChainExtra[]>([]);
+  /**
+   * Staff "override availability" (Docs/staff-availability-override-plan.md): the
+   * engine is set aside for this one booking. The catalogue lists every person
+   * with every service, the date and time are typed rather than picked from
+   * slots, and the review step lists what the engine would have refused for.
+   * Per booking, never remembered.
+   */
+  const [availabilityOverride, setAvailabilityOverride] = useState(false);
+  const [overrideTime, setOverrideTime] = useState<string>(() => (initialTime ?? '09:00').slice(0, 5));
+  const [overrideChecking, setOverrideChecking] = useState(false);
+  /** "Balayage: outside working hours" lines from the last override dry run. */
+  const [overrideWarnings, setOverrideWarnings] = useState<string[]>([]);
+  /**
+   * Ticking or unticking clears every choice: with the override on, a choice the
+   * engine would not have offered must not survive it being turned off, and
+   * the catalogue itself changes shape either way.
+   */
+  const toggleAvailabilityOverride = useCallback((next: boolean) => {
+    setAvailabilityOverride(next);
+    setSelectedPractitionerId(null);
+    setSelectedServiceId(null);
+    setSelectedVariantId(null);
+    setSelectedAddonIds([]);
+    setSelectedTime(null);
+    setMultiServiceSegments(null);
+    setPendingServiceIds([]);
+    setChainExtras([]);
+    setOverrideWarnings([]);
+    setError(null);
+    setStep(isStaffFirst ? 'staff_pick' : 'service');
+  }, [isStaffFirst]);
   const [groupPendingServiceIds, setGroupPendingServiceIds] = useState<string[]>([]);
   const [groupChainExtras, setGroupChainExtras] = useState<ChainExtra[]>([]);
   /** Add-on buffer for the extra service currently on the add-ons step (the primary keeps `selectedAddonIds`). */
@@ -1327,7 +1406,10 @@ export function AppointmentBookingFlow({
     try {
       // Shared with the staff stack, which starts this request before the flow
       // mounts, so opening the form does not wait for profile then catalogue.
-      const res = await fetchJsonShared(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug, isStaff));
+      const res = await fetchJsonShared(
+        appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug, isStaff) +
+          (availabilityOverride ? '&override=1' : ''),
+      );
       const data = (res.data ?? {}) as { practitioners?: CatalogPractitioner[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Failed to load catalog');
       setCatalogStaff(data.practitioners ?? []);
@@ -1337,7 +1419,7 @@ export function AppointmentBookingFlow({
     } finally {
       setCatalogLoading(false);
     }
-  }, [venue.id, lockedPractitioner?.bookingSlug, isStaff]);
+  }, [venue.id, lockedPractitioner?.bookingSlug, isStaff, availabilityOverride]);
 
   useEffect(() => {
     fetchCatalog();
@@ -1698,6 +1780,8 @@ export function AppointmentBookingFlow({
 
   useEffect(() => {
     if (step !== 'slot' && step !== 'group_slot') return;
+    // Nothing to fetch: the override types the time instead of picking a slot.
+    if (availabilityOverride) return;
     const isGroup = step === 'group_slot';
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
@@ -1732,6 +1816,7 @@ export function AppointmentBookingFlow({
       chain,
     });
   }, [
+    availabilityOverride,
     step,
     date,
     selectedServiceId,
@@ -1848,6 +1933,8 @@ export function AppointmentBookingFlow({
    */
   useEffect(() => {
     if (step !== 'slot' && step !== 'group_slot') return;
+    // Nothing to fetch: the override types the time instead of picking a slot.
+    if (availabilityOverride) return;
     const isGroup = step === 'group_slot';
     const svc = isGroup ? groupServiceId : selectedServiceId;
     const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
@@ -1913,6 +2000,7 @@ export function AppointmentBookingFlow({
       cancelled = true;
     };
   }, [
+    availabilityOverride,
     step,
     selectedServiceId,
     selectedVariantId,
@@ -1980,6 +2068,7 @@ export function AppointmentBookingFlow({
         sort_order: number;
         category: ServiceCategoryRef | null;
         location_type?: import('@/types/booking-models').ServiceLocationType;
+        assigned?: boolean;
       }
     >();
     for (const p of catalogStaff) {
@@ -2099,6 +2188,7 @@ export function AppointmentBookingFlow({
           sort_order: s.sort_order ?? 0,
           category: s.category ?? null,
           location_type: s.location_type,
+          assigned: s.assigned,
         };
       })
       .sort((a, b) =>
@@ -2129,6 +2219,7 @@ export function AppointmentBookingFlow({
           sort_order: s.sort_order ?? 0,
           category: s.category ?? null,
           location_type: s.location_type,
+          assigned: s.assigned,
         };
       })
       .sort((a, b) =>
@@ -2924,6 +3015,7 @@ export function AppointmentBookingFlow({
   const validateMultiServiceChain = useCallback(
     async (chain: MultiServiceSegment[], bookingDateOverride?: string): Promise<string | null> => {
       const booking_date = bookingDateOverride ?? date;
+      const collected: string[] = [];
       const phantoms: Array<{
         practitioner_id: string;
         start_time: string;
@@ -2947,11 +3039,20 @@ export function AppointmentBookingFlow({
             start_time: seg.startTime,
             phantoms,
             ...(isStaff ? { staff: true } : {}),
+            ...(availabilityOverride
+              ? {
+                  override_availability: true,
+                  ...(seg.customDurationMinutes != null ? { duration_minutes: seg.customDurationMinutes } : {}),
+                }
+              : {}),
           }),
         });
-        const data = (await res.json()) as { ok?: boolean; error?: string };
+        const data = (await res.json()) as { ok?: boolean; error?: string; warnings?: string[] };
         if (!data.ok) {
           return data.error ?? 'One or more times are no longer available';
+        }
+        if (availabilityOverride) {
+          collected.push(...(data.warnings ?? []).map((w) => `${seg.serviceName}: ${w}`));
         }
         phantoms.push({
           practitioner_id: seg.practitionerId,
@@ -2963,10 +3064,36 @@ export function AppointmentBookingFlow({
           processing_time_blocks: seg.processingTimeBlocks ?? [],
         });
       }
+      if (availabilityOverride) setOverrideWarnings(collected);
       return null;
     },
-    [venue.id, date, isStaff],
+    [venue.id, date, isStaff, availabilityOverride],
   );
+  /** The override's "Continue": the typed date and time become the chain, checked once for its warnings. */
+  const continueWithOverrideTime = useCallback(async () => {
+    if (!date || !overrideTime) return;
+    if (date < todayYmdLocal()) {
+      setError('Choose today or a later date.');
+      return;
+    }
+    const hm = overrideTime.slice(0, 5);
+    const chain = buildChainFromStart(hm);
+    if (!chain) return;
+    setOverrideChecking(true);
+    try {
+      const err = await validateMultiServiceChain(chain);
+      if (err) {
+        setError(err);
+        return;
+      }
+      setError(null);
+      setSelectedTime(`${hm}:00`);
+      setMultiServiceSegments(chain);
+      setStep('multi_service');
+    } finally {
+      setOverrideChecking(false);
+    }
+  }, [date, overrideTime, buildChainFromStart, validateMultiServiceChain]);
 
   const continueStaffCalendarSlotPrefill = useCallback(
     async (opts: { serviceId: string; variantId: string | null; extras?: ChainExtra[] }) => {
@@ -3365,6 +3492,7 @@ export function AppointmentBookingFlow({
               marketing_consent: details.marketing_consent,
               collective_id: collectiveId,
               collective_service_item_id: collectiveServiceItemId,
+              ...(availabilityOverride ? { override_availability: true } : {}),
               ...complianceCreateFields,
             }),
           });
@@ -3464,6 +3592,7 @@ export function AppointmentBookingFlow({
                 ? { addons: singleCreateAddonIds.map((id) => ({ addon_id: id })) }
                 : {}),
               ...(linkedOwnerVenueId ? { owner_venue_id: linkedOwnerVenueId } : {}),
+              ...(availabilityOverride ? { override_availability: true } : {}),
             }),
           });
           const data = await res.json();
@@ -3540,6 +3669,7 @@ export function AppointmentBookingFlow({
       }
     },
     [
+      availabilityOverride,
       bookingCompliance,
       venue.id,
       date,
@@ -4239,6 +4369,9 @@ export function AppointmentBookingFlow({
             title={isStaff ? 'Who is this appointment with?' : 'Who would you like to see?'}
             description="Pick a person to see their services and prices."
           />
+          {isStaff && !isEdit ? (
+            <AvailabilityOverrideToggle checked={availabilityOverride} onChange={toggleAvailabilityOverride} />
+          ) : null}
           {catalogLoading ? (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => (
@@ -4259,7 +4392,8 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {anyAvailableCardVisible(flowShape, {
-                flagOn: anyAvailablePractitionerEnabled,
+                // No engine to pick for you while the override is on.
+                flagOn: anyAvailablePractitionerEnabled && !availabilityOverride,
                 listedCount: bookableStaff.length,
                 hasUniformOffering: catalogStaff.some((p) =>
                   p.services.some((s) => s.any_available !== false),
@@ -4337,22 +4471,19 @@ export function AppointmentBookingFlow({
           {isPublicGuest ? (
             <AppointmentStepHeader
               title="Select a service"
-              description={
-                isEdit
-                  ? 'Choose the service for your changed appointment.'
-                  : 'Choose one or more services. You will pick a date and time in a later step.'
-              }
+              description={isEdit ? 'Choose the service for your changed appointment.' : undefined}
             />
           ) : (
             <>
-              <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
-              <p className="mb-4 text-sm text-slate-500">
-                {isEdit
-                  ? 'Choose the service for your changed appointment.'
-                  : 'Choose one or more services. You will pick a date and time in a later step.'}
-              </p>
+              <h2 className={`${isEdit ? 'mb-1' : 'mb-4'} text-lg font-semibold text-slate-900`}>Select a service</h2>
+              {isEdit ? (
+                <p className="mb-4 text-sm text-slate-500">Choose the service for your changed appointment.</p>
+              ) : null}
             </>
           )}
+          {isStaff && !isEdit && !isStaffFirst ? (
+            <AvailabilityOverrideToggle checked={availabilityOverride} onChange={toggleAvailabilityOverride} />
+          ) : null}
           {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : serviceListForStep.length === 0 ? (
@@ -4422,6 +4553,14 @@ export function AppointmentBookingFlow({
                             {isCarriedService && (
                               <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-700 ring-1 ring-brand-200/80">
                                 You were booking this
+                              </span>
+                            )}
+                            {availabilityOverride && svc.assigned === false && (
+                              <span
+                                className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200/80"
+                                title="This person is not assigned this service. The override books it anyway, at the catalogue price."
+                              >
+                                Not usually offered by {selectedPrac?.name ?? 'this person'}
                               </span>
                             )}
                           </div>
@@ -5249,7 +5388,15 @@ export function AppointmentBookingFlow({
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{prac.name.charAt(0).toUpperCase()}</div>
-                        <div className="font-medium text-slate-900">{prac.name}</div>
+                        <div className="min-w-0">
+                          <div className="font-medium text-slate-900">{prac.name}</div>
+                          {availabilityOverride &&
+                          prac.services.find((s) => s.id === selectedServiceId)?.assigned === false ? (
+                            <div className="mt-0.5 text-[11px] font-semibold text-amber-800">
+                              Does not usually offer this service
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-2">
                         <span className={APPOINTMENT_PUBLIC_PRICE}>{formatPrice(priceWithSelectedAddons(offer?.price_pence))}</span>
@@ -5315,6 +5462,51 @@ export function AppointmentBookingFlow({
               </div>
             </div>
           )}
+          {availabilityOverride ? (
+            <div data-testid="override-date-time">
+              <h2 className="mb-1 text-lg font-semibold text-slate-900">Date and time</h2>
+              <p className="mb-4 text-sm text-slate-500">
+                Availability is overridden: choose any date from today and any time.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Date
+                  <input
+                    type="date"
+                    min={todayYmdLocal()}
+                    value={date}
+                    onChange={(e) => {
+                      setDate(e.target.value);
+                      setError(null);
+                    }}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal"
+                  />
+                </label>
+                <label className="block text-xs font-semibold text-slate-700">
+                  Start time
+                  <input
+                    type="time"
+                    step={300}
+                    value={overrideTime}
+                    onChange={(e) => {
+                      setOverrideTime(e.target.value);
+                      setError(null);
+                    }}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={!date || !overrideTime || overrideChecking}
+                onClick={() => void continueWithOverrideTime()}
+                className="mt-4 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {overrideChecking ? 'Checking…' : 'Continue'}
+              </button>
+            </div>
+          ) : (
+            <>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Date and time</h2>
           <p className="mb-4 text-sm text-slate-500">Green days have at least one bookable time. Select a day to see times.</p>
           {/**
@@ -5443,6 +5635,8 @@ export function AppointmentBookingFlow({
               setStep('multi_service');
             })
           )}
+            </>
+          )}
         </div>
       )}
 
@@ -5460,6 +5654,24 @@ export function AppointmentBookingFlow({
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
+          {availabilityOverride ? (
+            <div
+              className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+              data-testid="override-warnings"
+            >
+              <p className="font-semibold">What this overrides</p>
+              {overrideWarnings.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                  {overrideWarnings.map((w, i) => (
+                    <li key={`${i}-${w}`}>{w}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs">Nothing: this time would have been offered anyway.</p>
+              )}
+              <p className="mt-2 text-xs">The booking is made exactly as chosen. Nothing here stops it.</p>
+            </div>
+          ) : null}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Review your services</h2>
           <p className="mb-4 text-sm text-slate-500">
             {isAnyAvailablePractitionerId(selectedPractitionerId) && assignedStaffDisplayName ? (

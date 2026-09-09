@@ -1,6 +1,13 @@
 /**
- * Synthetic read-only blocks for the staff appointment calendar: venue closures /
- * amended hours and per-calendar working-hour / leave closures.
+ * Synthetic read-only blocks for the staff appointment calendar: venue closures
+ * and per-calendar working-hour / leave closures.
+ *
+ * Amended hours get no stripe of their own. The grid follows the venue's
+ * RESOLVED hours for the date, so on an amended day the closed stripes already
+ * sit outside the amended window and the open part looks like any other day.
+ * A sky-blue "Amended hours" band used to be drawn over the open window; it
+ * told the owner nothing the grid did not already show, and made the day look
+ * unlike every other working day.
  */
 
 import { addCalendarDays } from '@/lib/calendar/schedule-blocks-grouping';
@@ -8,10 +15,7 @@ import { getWorkingRanges } from '@/lib/availability/appointment-engine';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { getDayOfWeekForYmdInTimezone } from '@/lib/venue/venue-local-clock';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
-import {
-  blocksForDate,
-  resolveVenueWideAllowedMinuteRanges,
-} from '@/lib/availability/venue-wide-business-hours';
+import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { Practitioner, TimeRange, WorkingHours } from '@/types/booking-models';
 
@@ -40,7 +44,6 @@ export interface ScheduleClosureCalendarBlock {
  */
 export type ScheduleClosureBlockType =
   | 'venue_closed'
-  | 'venue_amended_hours'
   | 'practitioner_closed'
   | 'practitioner_leave'
   /**
@@ -163,17 +166,6 @@ export function closedRangesFromOpenWindows(
   return closed.filter((r) => r.end > r.start);
 }
 
-function unionAmendedPeriodsForDate(blocks: AvailabilityBlock[]): MinuteRange[] {
-  const periods: MinuteRange[] = [];
-  for (const b of blocks) {
-    if (b.block_type !== 'amended_hours' || !Array.isArray(b.override_periods)) continue;
-    for (const p of b.override_periods) {
-      periods.push({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) });
-    }
-  }
-  return mergeAdjacentRanges(periods);
-}
-
 function intersectRanges(a: MinuteRange[], b: MinuteRange[]): MinuteRange[] {
   const out: MinuteRange[] = [];
   for (const ra of a) {
@@ -235,7 +227,8 @@ function gridMinuteBounds(
 }
 
 /**
- * Venue-wide closed windows and amended-hours indicators for each visible calendar column.
+ * Venue-wide closed windows for each visible calendar column, from the resolved
+ * hours for the date (weekly hours, amended hours and closures already applied).
  */
 export function buildVenueScheduleClosureBlocks(params: {
   openingHours: OpeningHours | null | undefined;
@@ -259,50 +252,19 @@ export function buildVenueScheduleClosureBlocks(params: {
   for (const dateStr of enumerateDatesInclusive(fromDate, toDate)) {
     const bounds = gridBounds ?? gridMinuteBounds(dateStr, openingHours, timeZone, venueWideBlocks);
     const resolution = resolveVenueWideAllowedMinuteRanges(openingHours, dateStr, venueWideBlocks);
-    const dayBlocks = blocksForDate(venueWideBlocks, dateStr);
-    const amendedUnion = unionAmendedPeriodsForDate(dayBlocks);
 
     let closedRanges: MinuteRange[] = [];
-    let allowedRanges: MinuteRange[] = [];
-
     if (resolution.kind === 'closed') {
       closedRanges = [{ start: bounds.start, end: bounds.end }];
     } else if (resolution.kind === 'allowed') {
-      allowedRanges = resolution.ranges;
-      closedRanges = closedRangesFromOpenWindows(allowedRanges, bounds.start, bounds.end);
+      closedRanges = closedRangesFromOpenWindows(resolution.ranges, bounds.start, bounds.end);
     } else {
       continue;
     }
 
-    // `resolution.kind` is narrowed to 'closed' | 'allowed' here (the third kind
-    // `continue`s above), so no further `unrestricted` guard is needed.
-    /**
-     * No amended stripes on a day that resolves CLOSED.
-     *
-     * A closure beats an Hours override (§2.3 step 5), so drawing an open-looking "Amended
-     * hours" band across a greyed-out day told the owner two contradictory things at once.
-     * This used to be the only way an amended day was visible at all, because the old
-     * resolver returned closed for a weekly-closed weekday before it ever looked at amended
-     * hours -- the plan's §1.2 item 1 describes exactly that: greyed out AND striped. Stage 3
-     * made those days resolve `allowed`, so the only way to reach `closed` with an amended
-     * row now is an explicit closure over it, where the grey is the truthful answer.
-     */
-    const amendedRanges =
-      amendedUnion.length > 0 && resolution.kind === 'allowed'
-        ? intersectRanges(amendedUnion, allowedRanges)
-        : [];
-
     for (const columnId of columnIds) {
       for (const range of closedRanges) {
         out.push(toScheduleBlock('venue_closed', columnId, dateStr, range, null));
-      }
-      for (const range of amendedRanges) {
-        const clipped: MinuteRange = {
-          start: Math.max(range.start, bounds.start),
-          end: Math.min(range.end, bounds.end),
-        };
-        if (clipped.end <= clipped.start) continue;
-        out.push(toScheduleBlock('venue_amended_hours', columnId, dateStr, clipped, null));
       }
     }
   }
@@ -415,7 +377,6 @@ export function buildPractitionerScheduleClosureBlocks(params: {
 export function isScheduleClosureBlockType(blockType: string | undefined): boolean {
   return (
     blockType === 'venue_closed' ||
-    blockType === 'venue_amended_hours' ||
     blockType === 'practitioner_closed' ||
     blockType === 'practitioner_leave' ||
     blockType === 'linked_venue_closed'
@@ -423,7 +384,6 @@ export function isScheduleClosureBlockType(blockType: string | undefined): boole
 }
 
 export function scheduleClosureBlockLabel(blockType: string | undefined): string {
-  if (blockType === 'venue_amended_hours') return 'Amended hours';
   if (blockType === 'practitioner_leave') return 'On leave';
   return 'Closed';
 }

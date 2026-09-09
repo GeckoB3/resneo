@@ -38,6 +38,8 @@ interface Practitioner {
   /** Schedule periods and the older rota, as stored; see working-hours-rota.ts. */
   schedule_periods?: unknown;
   working_hours_rota?: unknown;
+  /** Per-date overrides (amended hours), as stored; see calendar-amended-hours.ts. */
+  availability_exceptions?: unknown;
   break_times: Array<{ start: string; end: string }>;
   break_times_by_day?: WorkingHours | null;
   days_off: string[];
@@ -118,7 +120,7 @@ const ALL_TABS: Array<{ key: Tab; label: string }> = [
   { key: 'team', label: 'Calendars' },
   { key: 'hours', label: 'Availability' },
   { key: 'breaks', label: 'Breaks' },
-  { key: 'daysoff', label: 'Closures' },
+  { key: 'daysoff', label: 'Closures & amended hours' },
 ];
 
 const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -359,6 +361,21 @@ export function AppointmentAvailabilitySettings({
       return { classTypes: nextClassTypes, resourceRows: nextResources, experienceEvents: nextEvents };
     } catch {
       return null;
+    }
+  }, []);
+
+  /**
+   * Amended hours are saved by the Closures tab through their own route, so the calendar
+   * rows this page holds (and the planning calendar reads) go stale until re-fetched.
+   */
+  const reloadPractitioners = useCallback(async () => {
+    try {
+      const res = await fetch('/api/venue/practitioners?roster=1', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = (await res.json().catch(() => null)) as { practitioners?: Practitioner[] } | null;
+      if (data?.practitioners) setPractitioners(data.practitioners);
+    } catch {
+      // Context only: the next full load picks it up.
     }
   }, []);
 
@@ -937,12 +954,13 @@ export function AppointmentAvailabilitySettings({
       )}
 
       {/* Tabs */}
-      <div className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1">
+      {/* Labels never wrap; on a narrow screen the strip wraps onto a second row instead. */}
+      <div className="mb-6 flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 sm:flex-nowrap">
         {visibleTabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex-1 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors ${
               tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -1230,7 +1248,9 @@ export function AppointmentAvailabilitySettings({
                           )?.id ?? null
                         : null
                     }
+                    venueHours={venueHours}
                     onError={setError}
+                    onChanged={() => void reloadPractitioners()}
                   />
                 </>
               )}
@@ -1331,6 +1351,8 @@ export function AppointmentAvailabilitySettings({
                       weeklyHours={selectedPrac.working_hours ?? {}}
                       daysOff={selectedPrac.days_off ?? []}
                       venueHours={venueHours}
+                      overrides={selectedPrac.availability_exceptions ?? null}
+                      amendedHoursHref="/dashboard/calendar-availability?tab=closures"
                       onSave={saveSchedule}
                       saving={saving}
                       readOnly={!canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)}

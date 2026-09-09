@@ -238,7 +238,8 @@ export function ResourceBookingFlow({
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const terms = venue.terminology ?? { client: 'Booker', booking: 'Booking', staff: 'Manager' };
   /** Card-hold resources only (design doc 7.6): default ON, staff may waive per booking. */
-  const [staffRequireCardHold, setStaffRequireCardHold] = useState(true);
+  // Off by default: staff booking for a guest more often waive the hold than ask for it (2026-09-09).
+  const [staffRequireCardHold, setStaffRequireCardHold] = useState(false);
 
   const [step, setStep] = useState<Step>('pick_resource');
   const advanceToGuestDetails = useCallback(async () => {

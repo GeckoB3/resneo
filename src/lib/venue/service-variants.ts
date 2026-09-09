@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ProcessingTimeBlock, ServiceVariant } from '@/types/booking-models';
 import {
+  canonicalServiceShape,
   parseProcessingTimeBlocksFromDb,
   processingTimeBlocksSchema,
   validateProcessingTimeBlocks,
@@ -33,6 +34,10 @@ export const variantsArraySchema = z.array(variantInputSchema).max(40);
  * Map a DB row to the shared `ServiceVariant` shape (used by catalog responses and dashboard).
  */
 export function mapVariantRow(row: Record<string, unknown>): ServiceVariant {
+  const canon = canonicalServiceShape({
+    durationMinutes: row.duration_minutes as number,
+    processingBlocks: parseProcessingTimeBlocksFromDb(row.processing_time_blocks),
+  });
   return {
     id: row.id as string,
     venue_id: row.venue_id as string,
@@ -40,14 +45,14 @@ export function mapVariantRow(row: Record<string, unknown>): ServiceVariant {
     appointment_service_id: (row.appointment_service_id as string | null) ?? null,
     name: row.name as string,
     description: (row.description as string | null) ?? null,
-    duration_minutes: row.duration_minutes as number,
+    duration_minutes: canon.durationMinutes,
     buffer_minutes: (row.buffer_minutes as number) ?? 0,
     price_pence: (row.price_pence as number | null) ?? null,
     deposit_pence: (row.deposit_pence as number | null) ?? null,
     sort_order: (row.sort_order as number) ?? 0,
     is_active: row.is_active !== false,
     created_at: (row.created_at as string) ?? new Date().toISOString(),
-    processing_time_blocks: parseProcessingTimeBlocksFromDb(row.processing_time_blocks),
+    processing_time_blocks: canon.processingBlocks,
   };
 }
 
@@ -110,6 +115,11 @@ export async function replaceServiceVariants(params: {
     }
     normalizedBlocks.push(chk.normalized ?? []);
   }
+  // Same rule as the parent service: processing that reaches the end of the
+  // option shortens it and becomes develop time after it.
+  const canonical = variants.map((v, idx) =>
+    canonicalServiceShape({ durationMinutes: v.duration_minutes, processingBlocks: normalizedBlocks[idx] ?? [] }),
+  );
 
   const { data: existingRows, error: existingErr } = await admin
     .from('service_variants')
@@ -133,13 +143,13 @@ export async function replaceServiceVariants(params: {
   const fieldsFor = (v: VariantInput, idx: number) => ({
     name: v.name.trim(),
     description: (v.description ?? null) || null,
-    duration_minutes: v.duration_minutes,
+    duration_minutes: canonical[idx]!.durationMinutes,
     buffer_minutes: v.buffer_minutes ?? 0,
     price_pence: v.price_pence ?? null,
     deposit_pence: v.deposit_pence ?? null,
     sort_order: v.sort_order ?? idx,
     is_active: v.is_active ?? true,
-    processing_time_blocks: normalizedBlocks[idx] ?? [],
+    processing_time_blocks: canonical[idx]!.processingBlocks,
   });
 
   for (const [idx, v] of variants.entries()) {

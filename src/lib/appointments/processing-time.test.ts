@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
+import { canonicalServiceShape } from './processing-time';
 import {
   PROCESSING_TAIL_MAX_MINUTES,
   busyIntervalsOverlap,
@@ -415,5 +416,61 @@ describe('processing-time', () => {
       expect(r).toEqual({ id: 'a', start_minute: 0, duration_minutes: 70 });
       expect(validateProcessingTimeBlocks([r], 60).ok).toBe(true);
     });
+  });
+});
+
+describe('canonicalServiceShape', () => {
+  it('leaves a service alone when no block reaches its end', () => {
+    const blocks: ProcessingTimeBlock[] = [{ id: 'a', start_minute: 30, duration_minutes: 30 }];
+    expect(canonicalServiceShape({ durationMinutes: 90, processingBlocks: blocks })).toEqual({
+      durationMinutes: 90,
+      processingBlocks: blocks,
+      changed: false,
+    });
+    // Already the new shape: the block starts AT the end.
+    const tail: ProcessingTimeBlock[] = [{ id: 'a', start_minute: 60, duration_minutes: 60 }];
+    expect(canonicalServiceShape({ durationMinutes: 60, processingBlocks: tail }).changed).toBe(false);
+    expect(canonicalServiceShape({ durationMinutes: 60, processingBlocks: [] }).changed).toBe(false);
+  });
+
+  it('shortens a service whose block runs to its end, keeping the total span', () => {
+    const out = canonicalServiceShape({
+      durationMinutes: 120,
+      processingBlocks: [{ id: 'a', start_minute: 60, duration_minutes: 60 }],
+    });
+    expect(out).toEqual({
+      durationMinutes: 60,
+      processingBlocks: [{ id: 'a', start_minute: 60, duration_minutes: 60 }],
+      changed: true,
+    });
+  });
+
+  it('merges a touching run that reaches the end and keeps a middle gap', () => {
+    const out = canonicalServiceShape({
+      durationMinutes: 150,
+      processingBlocks: [
+        { id: 'mid', start_minute: 30, duration_minutes: 15 },
+        { id: 'b', start_minute: 90, duration_minutes: 30 },
+        { id: 'c', start_minute: 120, duration_minutes: 40 },
+      ],
+    });
+    expect(out.durationMinutes).toBe(90);
+    expect(out.processingBlocks).toEqual([
+      { id: 'mid', start_minute: 30, duration_minutes: 15 },
+      { id: 'b', start_minute: 90, duration_minutes: 70 },
+    ]);
+    // Validates against the shorter duration, and the span is what it was.
+    expect(validateProcessingTimeBlocks(out.processingBlocks, out.durationMinutes).ok).toBe(true);
+    expect(
+      serviceSpanMinutes({ durationMinutes: out.durationMinutes, bufferMinutes: 0, processingBlocks: out.processingBlocks }),
+    ).toBe(160);
+  });
+
+  it('refuses to shrink a service to nothing', () => {
+    const out = canonicalServiceShape({
+      durationMinutes: 30,
+      processingBlocks: [{ id: 'a', start_minute: 0, duration_minutes: 30 }],
+    });
+    expect(out.changed).toBe(false);
   });
 });

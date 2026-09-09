@@ -30,7 +30,7 @@ A calendar that runs past your venue hours is trimmed, and the **Venue:** line u
 
 ## 4. A closure covers the date
 
-Check both places. **Closures & special days** on **Settings → Business hours** closes the whole venue, and the **Closures** tab on **Calendar Availability** takes one person or room off. Multi-day ranges are easy to miss, and a closure saved with both times blank closes the whole day rather than a window.
+Check both places. **Closures & special days** on **Settings → Business hours** closes the whole venue, and the **Closures & amended hours** tab on **Calendar Availability** takes one person or room off. Multi-day ranges are easy to miss, and a closure saved with both times blank closes the whole day rather than a window.
 
 ## 5. The service's own rules
 

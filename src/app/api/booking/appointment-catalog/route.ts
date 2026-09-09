@@ -9,6 +9,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { isCollectiveId } from '@/lib/linked-accounts/collective-booking-bridge';
 import { loadCollectiveAppointmentCatalog } from '@/lib/linked-accounts/collective-venue';
 import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
+import { resolveStaffOverrideActor } from '@/lib/booking/staff-availability-override';
 
 /**
  * GET /api/booking/appointment-catalog?venue_id=uuid
@@ -26,7 +27,13 @@ export async function GET(request: NextRequest) {
 
     const practitionerSlug = url.searchParams.get('practitioner_slug')?.trim();
     const includeHiddenRequested = url.searchParams.get('include_hidden') === 'true';
-
+    /**
+     * The staff "override availability" catalogue: every calendar with every
+     * service, assigned or not (`assigned` says which). A staff session for the
+     * venue, or for a member of the collective, is required; the public never
+     * sees it.
+     */
+    const overrideRequested = url.searchParams.get('override') === '1';
     const supabase = getSupabaseAdminClient();
 
     // Combined booking page (plan §22): the venue id is actually a collective —
@@ -37,13 +44,17 @@ export async function GET(request: NextRequest) {
       // groups, as they do on their own catalogue; the public does not. Both see
       // the combined page's offerings only.
       let memberStaff = false;
-      if (includeHiddenRequested) {
+      if (includeHiddenRequested || overrideRequested) {
         const authClient = await createVenueRouteClient(request);
         const staff = await getVenueStaff(authClient);
         memberStaff = Boolean(staff && (await resolveStaffCollectiveScope(supabase, staff.venue_id, venueId)));
       }
+      if (overrideRequested && !memberStaff) {
+        return NextResponse.json({ error: 'Override availability is for staff of a member venue.' }, { status: 403 });
+      }
       const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId, {
         includeHiddenAddons: memberStaff,
+        everyCalendar: overrideRequested,
       });
       return NextResponse.json(catalog);
     }
@@ -69,10 +80,17 @@ export async function GET(request: NextRequest) {
         includeHiddenAddons = true;
       }
     }
-
+    if (overrideRequested) {
+      const actor = await resolveStaffOverrideActor(supabase, request, { venueId });
+      if (!actor.ok) {
+        return NextResponse.json({ error: actor.error }, { status: actor.status });
+      }
+      includeHiddenAddons = true;
+    }
     const catalog = await fetchAppointmentCatalog(supabase, venueId, {
       practitionerSlug: practitionerSlug || undefined,
       includeHiddenAddons,
+      everyCalendarEveryService: overrideRequested,
     });
     if (practitionerSlug && catalog.practitioners.length === 0) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });

@@ -18,7 +18,7 @@ The React Native app (`reserveni-app`) authenticates with Supabase and sends `Au
 | GET | `/api/venue/guests/[guestId]` |
 | GET | `/api/venue/appointment-availability` |
 
-Card hold deposits: `POST /api/venue/bookings` accepts an optional `require_card_hold` boolean (default true for card-hold entities), and `GET /api/venue/bookings/[id]` returns a `card_hold` object (or `null`). See `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` §18 for the full contract. Since 2026-09-05 card holds are standard for every venue and the `card_hold_deposits` venue flag is retired: `feature_flags.resolved.card_hold_deposits` is still served as a constant `true` on `GET /api/venue` and `GET`/`PATCH /api/venue/feature-flags` so the app's entity editors and staff "Card hold" toggle keep working, and a PATCH that sends the key is ignored (the app's Booking settings toggle for it therefore reads as permanently on). The app should drop those gates and that toggle row; the compatibility key goes away once it has.
+Card hold deposits: `POST /api/venue/bookings` accepts an optional `require_card_hold` boolean (since 2026-09-09 an omitted value means NO hold, for card-hold entities on every model and both staff sources; send `true` to ask the guest for their card; it was default-on before), and `GET /api/venue/bookings/[id]` returns a `card_hold` object (or `null`). See `Docs/CARD_HOLD_DEPOSITS_DESIGN_AND_IMPLEMENTATION.md` §18 for the full contract. Since 2026-09-05 card holds are standard for every venue and the `card_hold_deposits` venue flag is retired: `feature_flags.resolved.card_hold_deposits` is still served as a constant `true` on `GET /api/venue` and `GET`/`PATCH /api/venue/feature-flags` so the app's entity editors and staff "Card hold" toggle keep working, and a PATCH that sends the key is ignored (the app's Booking settings toggle for it therefore reads as permanently on). The app should drop those gates and that toggle row; the compatibility key goes away once it has.
 
 ### Public endpoint (unchanged)
 
@@ -410,6 +410,45 @@ not exist for that caller, while the GET is a question whose answer is "no". It 
 beta allowlist. Bare `{ "error": "Unauthorised" }` 401 with no staff row.
 
 `assistant_enabled` on the venue bootstrap is additive; nothing else in that payload changed.
+
+## Saving calendar and venue hours (contract as it stands, 2026-09-09)
+
+Written down after a report that the app crashed and did not save when changing several calendars' hours and the venue's hours; none of this had been in the doc before. Two calls carry hours:
+
+- **Calendar hours:** `PATCH /api/venue/practitioners` with `{ id, working_hours?, break_times?, break_times_by_day?, days_off?, schedule_periods? }`. `working_hours` is keyed by weekday, either the number as a string (`"0"` Sunday to `"6"` Saturday) or the lowercase day name (`"monday"`); the resolver reads the number first, then the name, and each value is `[{ start, end }]` ranges. Since 2026-08-18 `days_off` must be exact ISO dates (`YYYY-MM-DD`); a lowercase weekday name, free text or an impossible date is refused with 400 `{ error: 'Invalid request', details }` for the whole list. `schedule_periods` (2026-09-03) is the hours-ahead timeline; send it only if you edit it (null removes every period). The venue's `PATCH /api/venue` does NOT take hours.
+- **Venue hours:** `PATCH /api/venue/opening-hours` (admin only) with the opening-hours object. `PATCH /api/venue` silently ignores an `opening_hours` key (it is not in that route's schema and never was), so hours sent there return 200 and change nothing.
+
+**Both hours calls answer `409 { requires_confirmation: true, affected_count, affected_bookings, message }`** when the new hours would leave an upcoming booking outside them (since 2026-06-15). Nothing is saved on a 409. Show `message`, and on the user's confirmation repeat the same request with `?acknowledge_affected_bookings=true`; the bookings are then kept as they are (grandfathered), not refused. A client that treats 409 as a failure will report "did not save" for exactly the hours changes that matter most.
+
+**Response shape.** Every calendar row (`GET` list, `POST`, `PATCH`) has carried extra keys since 2026-09-03: `schedule_periods` (object or null), `working_hours_rota` (object or null, legacy) and, since 2026-09-09, `availability_exceptions` (object or null, per-date amended hours and closures). Decoders must ignore unknown keys; a strict decoder fails the whole staff list.
+
+**Database dependency.** The calendar PATCH reads `unified_calendars.schedule_periods` while checking for affected bookings. On a database without migration `20270204120000` that read fails and the route answers `500 { error: 'Could not verify existing bookings. Please try again.' }` for every hours change that does not carry the acknowledge flag. If that message is what the app is seeing, the fix is the migration, not the app.
+
+## Staff "override availability" (2026-09-09)
+
+Additive and optional; nothing changes unless the app sends it. `POST /api/venue/bookings` and `POST /api/booking/create-multi-service` accept `override_availability: true` from a staff session (`phone` or `walk-in` source; a public source is refused with 400). With it the booking is made exactly as asked: any active service on any active calendar, at any time from today, over other bookings, breaks, leave, blocks and outside hours. Only a date in the past (400 `Choose today or a later date.`), an unknown service or calendar, or a length outside the limits still refuse. The 201 gains `availability_override_warnings: string[]`, the engine's reasons in plain words ("Outside working hours", "Conflicts with another booking", "Ada does not usually offer Colour"), and a `booking_availability_override` event with the same list appears on the booking's timeline. `POST /api/booking/validate-appointment-slot` takes the same flag (plus optional `duration_minutes`) as a dry run and answers `{ ok: true, warnings }`. `GET /api/booking/appointment-catalog?override=1` (staff session) lists every active calendar with every active service, each service carrying `assigned: boolean`; for a collective id it lists every calendar of every providing member venue with the offerings that venue provides. Linked venues: send `owner_venue_id` (or the collective id as `venue_id`) as today; the caller needs a `create_edit_cancel` link or membership of the live collective.
+
+## Start and Complete are per service in a multi-service visit (2026-09-09)
+
+`PATCH /api/venue/bookings/[id]` with `status: 'Seated'` or `'Completed'` (and their reverts,
+Seated back to Booked/Confirmed, Completed back to Seated) now writes THAT row only. It used to
+cascade every lifecycle status across the rows sharing a `group_booking_id`. `status: 'Confirmed'`
+and its undo, `client_arrived`, `staff_attendance_confirmed`, cancellation and no-show still apply
+to the whole visit. So an app that starts a visit by patching its first row starts the first
+service; to start the next one, patch that row. A visit's overall state is derived: Completed
+when every live service is Completed, Seated when any is, otherwise the earliest stage
+(`visitLifecycleStatus`). Docs/visit-services-independent-plan.md, phase 1.
+
+## One shape for processing that reaches the end of a service (2026-09-09)
+
+A service (or option) whose processing block runs to or beyond its end is now stored, copied and
+read as the shorter service plus a tail: a 120 minute service with a block at 60..120 becomes a 60
+minute service with a block at 60..120 (`canonicalServiceShape` in
+`src/lib/appointments/processing-time.ts`; backfill migration `20270208120000`). `duration_minutes`
+on the catalogue routes may therefore be smaller than it was for such services, `booking_end_time`
+on new bookings follows it, and the total span (duration plus tail) is unchanged. Nothing about the
+wire format changes; an app that adds duration and tail itself keeps the same answer, one that
+shows `duration_minutes` alone shows the service without its develop time, which is the intent.
 
 ## Processing time may run past the end of a service (2026-09-08)
 

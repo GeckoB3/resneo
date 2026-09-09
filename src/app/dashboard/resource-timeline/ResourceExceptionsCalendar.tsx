@@ -25,10 +25,14 @@ export type ExceptionDayValue =
   | { periods: Array<{ start: string; end: string }> }
   | { reducedCapacity: true; maxCovers?: number };
 
-/** Per-calendar closures tab: full day off or a blocked time window (not venue amended opening hours). */
+/**
+ * Per-calendar Closures tab: full day off, a blocked time window, or the hours the calendar
+ * works instead of its usual ones on that date (an amended-hours override).
+ */
 export type CalendarUnavailabilityDayValue =
   | { closed: true }
-  | { unavailableWindow: { start: string; end: string } };
+  | { unavailableWindow: { start: string; end: string } }
+  | { periods: Array<{ start: string; end: string }> };
 
 export type ResourceExceptionsDisplayMode = 'venue_exceptions' | 'calendar_unavailability';
 
@@ -192,10 +196,16 @@ export function ResourceExceptionsCalendar({
         {calendarMode ? (
           // Matches BLOCK_TYPE_LABELS in StaffLeaveCalendarPanel: these describe what is
           // stored (whether the row carries times), not a type anyone chose.
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded border border-rose-200 bg-rose-50" aria-hidden />
-            Part day
-          </span>
+          <>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border border-rose-200 bg-rose-50" aria-hidden />
+              Part day
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border border-amber-200 bg-amber-50" aria-hidden />
+              Amended hours
+            </span>
+          </>
         ) : (
           <>
             <span className="inline-flex items-center gap-1.5">

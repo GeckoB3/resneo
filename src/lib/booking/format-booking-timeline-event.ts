@@ -71,6 +71,7 @@ export function shouldShowBookingTimelineEvent(event: BookingTimelineEventRow): 
     case 'booking_status_changed':
       return payload?.new_status === 'Confirmed';
     case 'booking_created':
+    case 'booking_availability_override':
     case 'booking_modified':
     case 'auto_cancelled':
     case 'waitlist_converted':
@@ -108,6 +109,17 @@ export function formatBookingTimelineEvent(event: BookingTimelineEventRow): {
   switch (event.event_type) {
     case 'booking_created':
       return { title: 'Booking created' };
+    case 'booking_availability_override': {
+      // The staff member booked past the availability engine on purpose; the
+      // payload carries what the engine would have refused for.
+      const warnings = Array.isArray(payload?.warnings)
+        ? (payload.warnings as unknown[]).filter((w): w is string => typeof w === 'string')
+        : [];
+      return {
+        title: 'Booked with availability override',
+        ...(warnings.length > 0 ? { detail: warnings.join('. ') } : {}),
+      };
+    }
 
     case 'booking_status_changed': {
       const confirmedBy = payload?.confirmed_by;

@@ -48,6 +48,10 @@ function unifiedCalendarToPractitionerRow(
     days_off: row.days_off ?? [],
     schedule_periods: row.schedule_periods ?? null,
     working_hours_rota: row.working_hours_rota ?? null,
+    // Per-date Hours and Closed overrides. Omitted until amended hours for one calendar
+    // existed, which is why the diary never drew one: `calendarHours` reads it first, but
+    // the rows the diary builds its stripes from came through here without it.
+    availability_exceptions: row.availability_exceptions ?? null,
     is_active: row.is_active,
     sort_order: row.sort_order ?? 0,
     created_at: row.created_at,
@@ -673,6 +677,11 @@ export async function PATCH(request: NextRequest) {
       let oldWorking: Record<string, Array<{ start: string; end: string }>> = {};
       let oldSchedule: unknown = null;
       let oldRota: unknown = null;
+      // Days off and per-date overrides sit ABOVE the weekly shape, so a date they govern
+      // resolves the same before and after a weekly edit. Passing them keeps the warning
+      // from naming a booking on a date this change does not touch.
+      let oldDaysOff: string[] | null = null;
+      let oldExceptions: unknown = null;
       let calName: string | null = null;
       const { data: pracRow } = await admin
         .from('practitioners')
@@ -687,7 +696,7 @@ export async function PATCH(request: NextRequest) {
       } else {
         const { data: ucRow } = await admin
           .from('unified_calendars')
-          .select('working_hours, schedule_periods, working_hours_rota, name')
+          .select('working_hours, schedule_periods, working_hours_rota, days_off, availability_exceptions, name')
           .eq('id', id)
           .eq('venue_id', staff.venue_id)
           .maybeSingle();
@@ -696,6 +705,8 @@ export async function PATCH(request: NextRequest) {
           oldWorking = (ucRow.working_hours as Record<string, Array<{ start: string; end: string }>>) ?? {};
           oldSchedule = (ucRow as { schedule_periods?: unknown }).schedule_periods ?? null;
           oldRota = (ucRow as { working_hours_rota?: unknown }).working_hours_rota ?? null;
+          oldDaysOff = (ucRow as { days_off?: string[] | null }).days_off ?? null;
+          oldExceptions = (ucRow as { availability_exceptions?: unknown }).availability_exceptions ?? null;
           calName = (ucRow.name as string | null) ?? null;
         }
       }
@@ -731,6 +742,8 @@ export async function PATCH(request: NextRequest) {
               working_hours: oldWorking,
               schedule_periods: oldSchedule,
               working_hours_rota: oldRota,
+              days_off: oldDaysOff,
+              availability_exceptions: oldExceptions,
             }),
             newPeriodsForDate: calendarWorkingMinutesForDate({
               working_hours: hoursPatch
@@ -739,6 +752,8 @@ export async function PATCH(request: NextRequest) {
               // Writing the timeline (even null) retires the older rota for that calendar.
               schedule_periods: schedulePatch ? (rest.schedule_periods as unknown) : oldSchedule,
               working_hours_rota: schedulePatch ? null : oldRota,
+              days_off: oldDaysOff,
+              availability_exceptions: oldExceptions,
             }),
           });
           if (orphans.total > 0) {

@@ -142,8 +142,12 @@ function ownerVenueCatalogQuery(ownerVenueId: string | undefined): string {
 /** One service row of a multi-service visit, as the booking detail already has it. */
 export interface StaffVisitModifySegment {
   id: string;
+  /** Venue-local date, YYYY-MM-DD. Each service of a visit has its own. */
+  booking_date: string;
   booking_time: string;
   booking_end_time: string | null;
+  /** The calendar this service sits on; null when the row carries none. */
+  calendar_id: string | null;
   booking_item_name: string | null;
   /**
    * C10 — optional deliberately. Statusless fixtures exist in the visit tests,
@@ -171,11 +175,20 @@ interface VisitPlannedService {
   name: string | null;
   service_id?: string | null;
   service_variant_id?: string | null;
+  booking_date?: string;
   booking_time: string;
   booking_end_time: string;
   duration_minutes: number;
+  calendar_id?: string | null;
 }
-
+/** How staff want one service of the visit scheduled. */
+interface VisitServiceEdit {
+  date: string;
+  time: string;
+  calendarId: string;
+  /** null for a row that carries no end time, which keeps its length. */
+  duration: number | null;
+}
 /** One line of the visit as the staff member currently wants it. */
 interface VisitServiceLine {
   /** Stable across edits, so a row keeps its React identity while being swapped. */
@@ -189,6 +202,7 @@ interface VisitServiceLine {
 interface VisitPlanResponse {
   ok?: boolean;
   error?: string;
+  booking_date?: string;
   start_time?: string;
   end_time?: string;
   total_minutes?: number;
@@ -201,6 +215,12 @@ function hm(raw: string): string {
   return raw.slice(0, 5);
 }
 
+/** Minutes one service occupies, or null when its row carries no end time. */
+function segmentDurationMinutes(segment: StaffVisitModifySegment): number | null {
+  if (!segment.booking_end_time) return null;
+  const span = timeToMinutes(hm(segment.booking_end_time)) - timeToMinutes(hm(segment.booking_time));
+  return span > 0 ? span : span + 24 * 60;
+}
 /** Wall-clock span the rows currently occupy, first start to last end. */
 function visitSpanMinutes(segments: StaffVisitModifySegment[]): number | null {
   const first = segments[0];
@@ -227,10 +247,10 @@ export function StaffAppointmentModifyForm({
   catalogOwnerVenueId?: string;
   /**
    * The whole visit when this booking is one service of several. The form then
-   * edits the VISIT: one start, one calendar and one wall-clock duration, written
-   * through the visit endpoint so the services cannot come apart. Per-service
-   * duration editing is what left a 15 minute hole in the reported booking, so it
-   * is not offered here (see Docs/multi-service-visit-plan.md).
+   * offers two things, written through the visit endpoint so they land whole or
+   * not at all: a "visit start" that moves every service by the same amount,
+   * and one editor per service (date, start, calendar, length) for changing a
+   * service on its own. See Docs/visit-services-independent-plan.md, part D.
    */
   visit?: { groupBookingId: string; segments: StaffVisitModifySegment[] } | null;
   onSaved: () => void;
@@ -274,6 +294,23 @@ export function StaffAppointmentModifyForm({
   const isVisit = visitSegments.length > 1 && Boolean(visit?.groupBookingId);
   /** A visit's schedule belongs to its FIRST service, whichever segment was clicked. */
   const visitStartTime = isVisit ? hm(visitSegments[0]!.booking_time) : null;
+  const baselineDate = isVisit ? visitSegments[0]!.booking_date : booking.booking_date;
+  const baselineCalendarId = isVisit
+    ? (visitSegments[0]!.calendar_id ?? initialPractitionerId)
+    : initialPractitionerId;
+  /** What one service should look like, as its row stands. */
+  const seedServiceEdits = (segments: StaffVisitModifySegment[]): Record<string, VisitServiceEdit> =>
+    Object.fromEntries(
+      segments.map((seg) => [
+        seg.id,
+        {
+          date: seg.booking_date,
+          time: hm(seg.booking_time),
+          calendarId: seg.calendar_id ?? initialPractitionerId,
+          duration: segmentDurationMinutes(seg),
+        },
+      ]),
+    );
   const visitEndpoint = visit?.groupBookingId
     ? `/api/venue/visits/${encodeURIComponent(visit.groupBookingId)}/schedule`
     : null;
@@ -289,9 +326,9 @@ export function StaffAppointmentModifyForm({
   const [links, setLinks] = useState<PractitionerLink[]>([]);
   const [practitioners, setPractitioners] = useState<PractitionerRow[]>([]);
 
-  const [practitionerId, setPractitionerId] = useState(initialPractitionerId);
+  const [practitionerId, setPractitionerId] = useState(baselineCalendarId);
   const [serviceId, setServiceId] = useState(initialServiceId);
-  const [bookingDate, setBookingDate] = useState(booking.booking_date);
+  const [bookingDate, setBookingDate] = useState(baselineDate);
   const [bookingTime, setBookingTime] = useState(
     () => visitStartTime ?? booking.booking_time.slice(0, 5),
   );
@@ -342,11 +379,16 @@ export function StaffAppointmentModifyForm({
   const [serviceLines, setServiceLines] = useState<VisitServiceLine[] | null>(null);
   const [baselineServiceLines, setBaselineServiceLines] = useState<VisitServiceLine[] | null>(null);
   /**
-   * The rows are not in the shape the resolver would give them, before staff
-   * have touched anything: dead time an earlier per-service edit left behind.
-   * Saving closes it, so Save stays available on a form nobody has edited.
+   * Each service's own schedule as staff want it, keyed by booking id, and as
+   * it stood when the form opened. A service edited here is saved through the
+   * endpoint's per-service mode; the ones left alone are not touched.
    */
-  const [visitRelayNeeded, setVisitRelayNeeded] = useState(false);
+  const [serviceEdits, setServiceEdits] = useState<Record<string, VisitServiceEdit>>(() =>
+    seedServiceEdits(visitSegments),
+  );
+  const [baselineServiceEdits] = useState<Record<string, VisitServiceEdit>>(() =>
+    seedServiceEdits(visitSegments),
+  );
 
   const [validationState, setValidationState] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle');
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
@@ -484,15 +526,40 @@ export function StaffAppointmentModifyForm({
     const svcLinks = new Set(
       links.filter((l) => l.service_id === serviceId).map((l) => l.practitioner_id),
     );
-    return practitioners.filter((p) => p.is_active !== false && svcLinks.has(p.id));
-  }, [links, practitioners, serviceId]);
+    /**
+     * The booking's own person is always listed, linked to the service or not.
+     * A booking made with "override availability" (or moved on the diary) can
+     * sit with someone who does not offer its service; without this the effect
+     * below silently switched it to the first person who does, and saving
+     * anything else about the booking moved it.
+     */
+    return practitioners.filter(
+      (p) => p.id === initialPractitionerId || (p.is_active !== false && svcLinks.has(p.id)),
+    );
+  }, [links, practitioners, serviceId, initialPractitionerId]);
+  /**
+   * The calendars one service of a visit can go to: those that offer it, plus
+   * the one it is on now so a service on a since-unlinked calendar still shows
+   * where it is.
+   */
+  const calendarOptionsForService = useCallback(
+    (svcId: string, currentId: string) => {
+      const offered = new Set(
+        links.filter((l) => l.service_id === svcId).map((l) => l.practitioner_id),
+      );
+      return practitioners.filter(
+        (p) => p.id === currentId || (p.is_active !== false && offered.has(p.id)),
+      );
+    },
+    [links, practitioners],
+  );
 
   const baselineKey = useMemo(
     () =>
       JSON.stringify({
-        practitionerId: initialPractitionerId,
+        practitionerId: baselineCalendarId,
         serviceId: initialServiceId,
-        bookingDate: booking.booking_date,
+        bookingDate: baselineDate,
         bookingTime: visitStartTime ?? booking.booking_time.slice(0, 5),
         // Named to match `currentKey`'s shorthand. As `duration` the two objects
         // could never stringify alike, so `hasChanges` was always true: the
@@ -501,7 +568,7 @@ export function StaffAppointmentModifyForm({
         durationMinutes: baselineDuration,
         variant: booking.service_variant_id ?? null,
       }),
-    [booking, initialPractitionerId, initialServiceId, baselineDuration, visitStartTime],
+    [booking, baselineCalendarId, baselineDate, initialServiceId, baselineDuration, visitStartTime],
   );
 
   const currentKey = useMemo(
@@ -517,7 +584,80 @@ export function StaffAppointmentModifyForm({
     [practitionerId, serviceId, bookingDate, bookingTime, durationMinutes, variantId],
   );
 
-  const hasChanges = currentKey !== baselineKey;
+  const serviceEditsKey = useMemo(() => JSON.stringify(serviceEdits), [serviceEdits]);
+  const baselineServiceEditsKey = useMemo(
+    () => JSON.stringify(baselineServiceEdits),
+    [baselineServiceEdits],
+  );
+  /** True once staff have changed a service's own date, start, calendar or length. */
+  const serviceEditsChanged = isVisit && serviceEditsKey !== baselineServiceEditsKey;
+  /** True once staff have moved the visit start (date, time or calendar). */
+  const visitStartChanged =
+    isVisit &&
+    (bookingDate !== baselineDate ||
+      bookingTime !== (visitStartTime ?? '') ||
+      practitionerId !== baselineCalendarId);
+  const hasChanges = isVisit ? visitStartChanged || serviceEditsChanged : currentKey !== baselineKey;
+  const updateServiceEdit = useCallback((bookingId: string, patch: Partial<VisitServiceEdit>) => {
+    setServiceEdits((current) => {
+      const line = current[bookingId];
+      if (!line) return current;
+      return { ...current, [bookingId]: { ...line, ...patch } };
+    });
+  }, []);
+  /**
+   * What the visit endpoint is asked for. A moved visit start is a SHIFT of
+   * every service; anything else is the per-service list, naming only the
+   * services whose schedule differs from what the form opened with. The two
+   * are exclusive on screen (each disables the other's controls), so a request
+   * is never both.
+   */
+  const visitScheduleRequestBody = useCallback((): Record<string, unknown> => {
+    if (serviceEditsChanged) {
+      const services = visitSegments
+        .filter((seg) => {
+          const edit = serviceEdits[seg.id];
+          const base = baselineServiceEdits[seg.id];
+          return edit && base && JSON.stringify(edit) !== JSON.stringify(base);
+        })
+        .map((seg) => {
+          const edit = serviceEdits[seg.id]!;
+          return {
+            booking_id: seg.id,
+            booking_date: edit.date,
+            booking_time: edit.time,
+            practitioner_id: edit.calendarId,
+            ...(edit.duration != null ? { duration_minutes: edit.duration } : {}),
+          };
+        });
+      return {
+        services,
+        known_booking_ids: visitSegments.map((seg) => seg.id),
+        allow_outside_hours: true,
+      };
+    }
+        return {
+      shift: {
+        booking_date: bookingDate,
+        booking_time: bookingTime,
+        // Only a chosen calendar moves the whole visit; a date or time shift
+        // leaves each service where it is.
+        ...(practitionerId !== baselineCalendarId ? { practitioner_id: practitionerId } : {}),
+      },
+      // Staff may put a visit outside the calendar's hours from this form as
+      // from the diary; the dry run reports it and the form says so.
+      allow_outside_hours: true,
+    };
+  }, [
+    baselineCalendarId,
+    baselineServiceEdits,
+    bookingDate,
+    bookingTime,
+    practitionerId,
+    serviceEdits,
+    serviceEditsChanged,
+    visitSegments,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -677,6 +817,8 @@ export function StaffAppointmentModifyForm({
   const servicesChanged =
     baselineServiceLines != null && serviceLines != null && serviceLinesKey !== baselineServiceLinesKey;
 
+  /** Per-service editors stand aside while the visit start or its service list is being changed. */
+  const editorsLocked = servicesChanged || visitStartChanged;
   /** What the visit's services endpoint is asked for, schedule included. */
   const visitServicesRequestBody = useCallback(
     () => ({
@@ -795,6 +937,22 @@ export function StaffAppointmentModifyForm({
      * the WHOLE visit go there) and returns the layout the save will write.
      */
     if (isVisit && visitEndpoint) {
+      // A service edited to nothing cannot be checked, and the endpoint's own
+      // answer ("Invalid request") would not say which field.
+      if (
+        serviceEditsChanged &&
+        Object.values(serviceEdits).some(
+          (e) =>
+            !e.date ||
+            !e.time ||
+            !e.calendarId ||
+            (e.duration != null && e.duration < MIN_APPOINTMENT_CORE_DURATION_MINUTES),
+        )
+      ) {
+        setValidationState('invalid');
+        setValidationMessage('Give every service a date, a start, a calendar and a length.');
+        return;
+      }
       try {
         /**
          * A visit whose SERVICES changed is planned by the services endpoint,
@@ -809,14 +967,7 @@ export function StaffAppointmentModifyForm({
           body: JSON.stringify(
             useServices
               ? { dry_run: true, ...visitServicesRequestBody() }
-              : {
-                  dry_run: true,
-                  booking_date: bookingDate,
-                  booking_time: bookingTime,
-                  practitioner_id: practitionerId,
-                  total_duration_minutes: durationMinutes,
-                  allow_outside_hours: true,
-                },
+              : { dry_run: true, ...visitScheduleRequestBody() },
           ),
         });
         const data = (await res.json().catch(() => ({}))) as VisitPlanResponse;
@@ -886,22 +1037,22 @@ export function StaffAppointmentModifyForm({
     processingBlocksToSend,
     requiresVariant,
     serviceId,
+    serviceEdits,
+    serviceEditsChanged,
     servicesChanged,
     usesServiceItem,
     variantId,
     visitEndpoint,
+    visitScheduleRequestBody,
     visitServicesEndpoint,
     visitServicesRequestBody,
   ]);
 
   /**
-   * What the visit actually looks like to the resolver, asked once on open.
-   *
-   * The rows can carry dead time a per-service edit left behind (the reported
-   * booking's 11:30 to 11:45 hole), so the span they occupy is not the span the
-   * visit has. Adopting the planned total as BOTH value and baseline keeps that
-   * correction from reading as a staff edit, and `visitRelayNeeded` is what
-   * still lets them save it.
+   * The visit as the endpoint sees it, asked once on open with an empty shift:
+   * nothing moves, and the answer carries each row's service id, which the rows
+   * the booking list hands this form do not (they have names). That is what
+   * lets the service list below be edited.
    */
   useEffect(() => {
     if (!isVisit || !visitEndpoint || durationMinutes == null) return;
@@ -911,19 +1062,13 @@ export function StaffAppointmentModifyForm({
         const res = await fetch(visitEndpoint, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dry_run: true,
-            booking_date: booking.booking_date,
-            booking_time: baselineTime,
-            practitioner_id: initialPractitionerId,
-          }),
+          body: JSON.stringify({ dry_run: true, shift: {} }),
         });
         const data = (await res.json().catch(() => ({}))) as VisitPlanResponse;
         if (cancelled || !res.ok || !data.ok || typeof data.total_minutes !== 'number') return;
         setVisitPlan((current) => current ?? data);
         setDurationMinutes(data.total_minutes);
         setBaselineDuration(data.total_minutes);
-        setVisitRelayNeeded(data.changed === true);
         const lines = (data.services ?? [])
           .filter((s) => s.id && s.service_id)
           .map((s) => ({
@@ -960,6 +1105,7 @@ export function StaffAppointmentModifyForm({
     catalogError,
     practitionerId,
     serviceId,
+    serviceEditsKey,
     serviceLinesKey,
     bookingDate,
     bookingTime,
@@ -979,6 +1125,7 @@ export function StaffAppointmentModifyForm({
       return planned.map((s) => ({
         id: s.id,
         name: s.name,
+        date: s.booking_date ?? null,
         start: hm(s.booking_time),
         end: hm(s.booking_end_time),
       }));
@@ -986,35 +1133,12 @@ export function StaffAppointmentModifyForm({
     return visitSegments.map((s) => ({
       id: s.id,
       name: s.booking_item_name,
+      date: s.booking_date,
       start: hm(s.booking_time),
       end: s.booking_end_time ? hm(s.booking_end_time) : null,
     }));
   }, [visitPlan, visitSegments]);
 
-  /**
-   * What saving will actually do, in words.
-   *
-   * C10 — this notice is the only reason Save is enabled on a form nobody has
-   * touched, so it has to name the consequence. It used to describe the dead
-   * time being closed and never mentioned that the visit MOVES, which is the
-   * part staff needed to see before pressing a button they had not armed.
-   */
-  const visitRelayNotice = useMemo(() => {
-    if (!visitRelayNeeded) return null;
-    const rawSpan = visitSpanMinutes(visitSegments);
-    const planned = visitPlan?.total_minutes ?? baselineDuration;
-    const gap = rawSpan != null && planned != null ? rawSpan - planned : 0;
-    const plannedStart = visitPlan?.start_time ?? visitPlan?.services?.[0]?.booking_time ?? null;
-    const currentStart = visitSegments[0]?.booking_time ?? null;
-    const movesTo =
-      plannedStart && currentStart && hm(plannedStart) !== hm(currentStart)
-        ? ` The visit will start at ${hm(plannedStart)} instead of ${hm(currentStart)}.`
-        : '';
-    if (gap > 0) {
-      return `This visit has ${gap} minutes of dead time in it. Saving closes it, so the services run back to back.${movesTo}`;
-    }
-    return `Saving will re-lay this visit so its services run back to back.${movesTo}`;
-  }, [visitRelayNeeded, visitSegments, visitPlan, baselineDuration]);
 
   const endPreview = useMemo(() => {
     if (durationMinutes == null) return null;
@@ -1043,7 +1167,7 @@ export function StaffAppointmentModifyForm({
 
   const saveDisabled =
     saving ||
-    (!hasChanges && !visitRelayNeeded && !servicesChanged) ||
+    (!hasChanges && !servicesChanged) ||
     Boolean(serviceWarning) ||
     durationMinutes == null ||
     !bookingTime ||
@@ -1055,7 +1179,16 @@ export function StaffAppointmentModifyForm({
     (requiresVariant && !variantId);
 
   const baselineTime = visitStartTime ?? booking.booking_time.slice(0, 5);
-  const scheduleChanged = bookingDate !== booking.booking_date || bookingTime !== baselineTime;
+  /** Some service's date or start will differ, which is what the guest is told about. */
+  const scheduleChanged = isVisit
+    ? bookingDate !== baselineDate ||
+      bookingTime !== baselineTime ||
+      visitSegments.some((seg) => {
+        const edit = serviceEdits[seg.id];
+        const base = baselineServiceEdits[seg.id];
+        return edit && base && (edit.date !== base.date || edit.time !== base.time);
+      })
+    : bookingDate !== baselineDate || bookingTime !== baselineTime;
 
   const handleSave = async () => {
     if (durationMinutes == null) return;
@@ -1066,13 +1199,7 @@ export function StaffAppointmentModifyForm({
         const useServices = servicesChanged && visitServicesEndpoint != null;
         const visitBody: Record<string, unknown> = useServices
           ? { ...visitServicesRequestBody() }
-          : {
-              booking_date: bookingDate,
-              booking_time: bookingTime,
-              practitioner_id: practitionerId,
-              total_duration_minutes: durationMinutes,
-              allow_outside_hours: true,
-            };
+          : { ...visitScheduleRequestBody() };
         // Start moved: defer the guest notification so the follow-up panel can
         // offer notify / skip / undo, exactly as the single-booking save does.
         if (scheduleChanged) {
@@ -1098,11 +1225,13 @@ export function StaffAppointmentModifyForm({
           return;
         }
         if (scheduleChanged) {
+          // The visit's new earliest slot, which a per-service edit can change
+          // without the visit-start fields having moved.
           setNotifyFollowUp({
-            fromDate: booking.booking_date,
+            fromDate: baselineDate,
             fromTime: baselineTime,
-            toDate: bookingDate,
-            toTime: bookingTime,
+            toDate: data.booking_date ?? bookingDate,
+            toTime: data.start_time ?? bookingTime,
           });
           return;
         }
@@ -1153,7 +1282,7 @@ export function StaffAppointmentModifyForm({
         // renders. finishFollowUp() calls it once the staff member has chosen
         // notify / skip / undo.
         setNotifyFollowUp({
-          fromDate: booking.booking_date,
+          fromDate: baselineDate,
           fromTime: baselineTime,
           toDate: bookingDate,
           toTime: bookingTime,
@@ -1176,10 +1305,10 @@ export function StaffAppointmentModifyForm({
 
     /**
      * A visit goes back through the same endpoint, so undo is as all-or-nothing
-     * as the save was. It restores the visit the resolver would lay out at the
-     * original start, which is what the form opened on: any dead time the rows
-     * carried was already closed by the save, and re-opening it would be a
-     * different edit rather than an undo.
+     * as the save was. Every scheduled service is named with the date, start,
+     * calendar and length it had when the form opened, whichever mode the save
+     * used. Overlap is allowed: the rows are going back to where they already
+     * were, and a sibling they touched then is not news.
      */
     if (isVisit && visitEndpoint) {
       try {
@@ -1187,11 +1316,19 @@ export function StaffAppointmentModifyForm({
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            booking_date: booking.booking_date,
-            booking_time: baselineTime,
-            practitioner_id: initialPractitionerId,
-            total_duration_minutes: revertDuration,
+            services: visitSegments.map((seg) => {
+              const base = baselineServiceEdits[seg.id]!;
+              return {
+                booking_id: seg.id,
+                booking_date: base.date,
+                booking_time: base.time,
+                practitioner_id: base.calendarId,
+                ...(base.duration != null ? { duration_minutes: base.duration } : {}),
+              };
+            }),
+            known_booking_ids: visitSegments.map((seg) => seg.id),
             allow_outside_hours: true,
+            allow_manual_overlap: true,
             skip_booking_modification_guest_notification: true,
           }),
         });
@@ -1233,6 +1370,7 @@ export function StaffAppointmentModifyForm({
     bookingId,
     bookingBlocksKnown,
     bookingProcessingBlocks,
+    baselineServiceEdits,
     baselineTime,
     baselineDuration,
     initialPractitionerId,
@@ -1240,6 +1378,7 @@ export function StaffAppointmentModifyForm({
     isVisit,
     usesServiceItem,
     visitEndpoint,
+    visitSegments,
   ]);
 
   /**
@@ -1327,10 +1466,6 @@ export function StaffAppointmentModifyForm({
 
       {validationState === 'invalid' && validationMessage && !bookingTime ? (
         <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">{validationMessage}</p>
-      ) : visitRelayNotice && !hasChanges ? (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
-          {visitRelayNotice}
-        </p>
       ) : !hasChanges ? (
         <p className="text-xs text-slate-500">Adjust a field to check availability and enable save.</p>
       ) : null}
@@ -1347,6 +1482,7 @@ export function StaffAppointmentModifyForm({
                 const svc = services.find((s) => s.id === line.serviceId);
                 const lineVariants = (svc?.variants ?? []).filter((v) => v.is_active);
                 const lineName = svc?.name ?? planned?.name ?? 'Service';
+                const edit = line.bookingId ? serviceEdits[line.bookingId] : undefined;
                 return (
                   <li key={line.key} className="space-y-1">
                     <div className="flex items-center gap-1.5">
@@ -1364,6 +1500,7 @@ export function StaffAppointmentModifyForm({
                       </select>
                       <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-700">
                         {planned?.end ? `${planned.start} to ${planned.end}` : ''}
+                        {planned?.date && planned.date !== bookingDate ? ` on ${planned.date}` : ''}
                       </span>
                       <button
                         type="button"
@@ -1388,6 +1525,63 @@ export function StaffAppointmentModifyForm({
                           </option>
                         ))}
                       </select>
+                    ) : null}
+                    {edit ? (
+                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                        <label className="block text-[10px] font-semibold text-slate-500">
+                          Date for {lineName}
+                          <input
+                            type="date"
+                            value={edit.date}
+                            disabled={editorsLocked}
+                            onChange={(e) => updateServiceEdit(line.bookingId!, { date: e.target.value })}
+                            className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-normal text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                          />
+                        </label>
+                        <label className="block text-[10px] font-semibold text-slate-500">
+                          Start for {lineName}
+                          <input
+                            type="time"
+                            step={300}
+                            value={edit.time}
+                            disabled={editorsLocked}
+                            onChange={(e) => updateServiceEdit(line.bookingId!, { time: e.target.value })}
+                            className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-normal text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                          />
+                        </label>
+                        <label className="block text-[10px] font-semibold text-slate-500">
+                          Calendar for {lineName}
+                          <select
+                            value={edit.calendarId}
+                            disabled={editorsLocked}
+                            onChange={(e) => updateServiceEdit(line.bookingId!, { calendarId: e.target.value })}
+                            className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-normal text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                          >
+                            {calendarOptionsForService(line.serviceId, edit.calendarId).map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block text-[10px] font-semibold text-slate-500">
+                          Length for {lineName}
+                          <input
+                            type="number"
+                            min={MIN_APPOINTMENT_CORE_DURATION_MINUTES}
+                            max={MAX_APPOINTMENT_CORE_DURATION_MINUTES}
+                            step={5}
+                            value={edit.duration ?? ''}
+                            disabled={editorsLocked}
+                            onChange={(e) =>
+                              updateServiceEdit(line.bookingId!, {
+                                duration: e.target.value === '' ? null : Number(e.target.value),
+                              })
+                            }
+                            className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-normal text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                          />
+                        </label>
+                      </div>
                     ) : null}
                   </li>
                 );
@@ -1430,7 +1624,9 @@ export function StaffAppointmentModifyForm({
           <p className="mt-1.5 text-[11px] text-slate-500">
             {servicesChanged
               ? 'The visit is re-laid around these services, so its total follows them.'
-              : 'They move together and keep their own lengths. A service added here goes on the end.'}
+              : visitStartChanged
+                ? 'Moving the visit start moves every service by the same amount. Save that first to change one service on its own.'
+                : 'Each service keeps its own date, start, calendar and length. Change one here, or move the whole visit from the start below.'}
           </p>
         </div>
       ) : (
@@ -1477,12 +1673,23 @@ export function StaffAppointmentModifyForm({
         </label>
       ) : null}
 
+      {isVisit ? (
+        <div>
+          <p className="text-xs font-semibold text-slate-700">Visit start</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {serviceEditsChanged
+              ? 'A service is being changed on its own, so the visit start stays put for this save.'
+              : 'Moving the start moves every service by the same amount, on the calendar chosen here.'}
+          </p>
+        </div>
+      ) : null}
       <label className="block text-xs font-semibold text-slate-700">
-        Staff / calendar
+        {isVisit ? 'Staff / calendar for the whole visit' : 'Staff / calendar'}
         <select
           value={practitionerId}
+          disabled={serviceEditsChanged}
           onChange={(e) => setPractitionerId(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-500"
         >
           {practitionerOptions.length === 0 ? (
             <option value="">No staff offers this service</option>
@@ -1500,8 +1707,8 @@ export function StaffAppointmentModifyForm({
         ownerVenueId={ownerVenueId}
         linkedOwnerVenueId={catalogOwnerVenueId}
         bookingId={bookingId}
-        initialBookingDate={booking.booking_date}
-        initialBookingTime={booking.booking_time.slice(0, 5)}
+        initialBookingDate={baselineDate}
+        initialBookingTime={baselineTime}
         practitionerId={practitionerId}
         serviceId={serviceId}
         variantId={requiresVariant ? variantId : null}
@@ -1514,38 +1721,34 @@ export function StaffAppointmentModifyForm({
         // A visit's reason is shown above, with the visit. Repeating it under the
         // slots would say the same thing twice about different things.
         validationMessage={isVisit ? null : validationMessage}
-        disabled={Boolean(catalogError) || Boolean(serviceWarning) || !practitionerId || !serviceId}
+        disabled={
+          Boolean(catalogError) ||
+          Boolean(serviceWarning) ||
+          !practitionerId ||
+          !serviceId ||
+          serviceEditsChanged
+        }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-semibold text-slate-700 sm:col-span-2">
-          {isVisit ? 'Total duration (minutes)' : 'Duration (minutes)'}
-          <input
-            type="number"
-            min={MIN_APPOINTMENT_CORE_DURATION_MINUTES}
-            max={MAX_APPOINTMENT_CORE_DURATION_MINUTES}
-            step={5}
-            value={durationMinutes ?? ''}
-            // The services set the length of a visit being re-serviced, so the
-            // field reports it rather than competing with it.
-            readOnly={servicesChanged}
-            onChange={(e) => {
-              durationEditedByStaffRef.current = true;
-              setDurationMinutes(Number(e.target.value));
-            }}
-            className={`mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm ${
-              servicesChanged ? 'bg-slate-100 text-slate-500' : ''
-            }`}
-          />
-          {isVisit ? (
-            <span className="mt-1 block text-[11px] font-normal text-slate-500">
-              {servicesChanged
-                ? 'Set by the services in this visit.'
-                : 'The whole visit, start to finish. Extra time goes on the last service, and shortening takes it off the last service first.'}
-            </span>
-          ) : null}
-        </label>
-      </div>
+      {!isVisit ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs font-semibold text-slate-700 sm:col-span-2">
+            Duration (minutes)
+            <input
+              type="number"
+              min={MIN_APPOINTMENT_CORE_DURATION_MINUTES}
+              max={MAX_APPOINTMENT_CORE_DURATION_MINUTES}
+              step={5}
+              value={durationMinutes ?? ''}
+              onChange={(e) => {
+                durationEditedByStaffRef.current = true;
+                setDurationMinutes(Number(e.target.value));
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+      ) : null}
 
       {!isVisit && showProcessingPanel ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -1571,6 +1774,7 @@ export function StaffAppointmentModifyForm({
         </div>
       ) : null}
 
+      {!isVisit ? (
       <div>
         <p className="text-xs font-semibold text-slate-700">Quick durations</p>
         <div className="mt-1 flex flex-wrap gap-1.5">
@@ -1593,8 +1797,8 @@ export function StaffAppointmentModifyForm({
           ))}
         </div>
       </div>
-
-      {endPreview ? (
+      ) : null}
+      {endPreview && !isVisit ? (
         <p className="text-xs text-slate-600">
           Ends at <span className="font-semibold text-slate-800">{endPreview}</span> (same day)
         </p>

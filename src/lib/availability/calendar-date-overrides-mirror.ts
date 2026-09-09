@@ -192,3 +192,38 @@ export async function mirrorLeaveDelete(
     });
   }
 }
+
+/**
+ * Mirrors a calendar's amended hours (`unified_calendars.availability_exceptions`, the
+ * authoritative store) as `hours` rows. Rebuilt from the whole map on every write rather
+ * than edited row by row, so the rows are always a function of the stored value and a row
+ * lost to an earlier fail-soft write comes back on the next save. Leave-sourced rows are
+ * untouched: they carry `source_leave_id` and belong to the leave mirror above.
+ */
+export async function mirrorCalendarHoursOverrides(
+  admin: SupabaseClient,
+  params: { venueId: string; calendarId: string; rows: ReadonlyArray<Record<string, unknown>> },
+  source: string,
+): Promise<void> {
+  const { venueId, calendarId, rows } = params;
+  try {
+    const { error: deleteErr } = await admin
+      .from('calendar_date_overrides')
+      .delete()
+      .eq('venue_id', venueId)
+      .eq('calendar_id', calendarId)
+      .eq('override_kind', 'hours')
+      .is('source_leave_id', null);
+    if (deleteErr) {
+      reportMirrorFailure(source, [calendarId], deleteErr);
+      return;
+    }
+    if (rows.length === 0) return;
+    const { error: insertErr } = await admin.from('calendar_date_overrides').insert([...rows]);
+    if (insertErr) reportMirrorFailure(source, [calendarId], insertErr);
+  } catch (err) {
+    reportMirrorFailure(source, [calendarId], {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}

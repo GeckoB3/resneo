@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Deposits, full payments, card holds, and refunds',
   description: 'Stripe Connect, the four online payment options, card holds and no-show fees, the guest pay page, and every money action on a booking.',
   tags: ['stripe', 'payments', 'deposits', 'refunds', 'card hold', 'no-show'],
-  verified: '2026-09-06',
+  verified: '2026-09-09',
   content: `
 # Get paid the way you promise
 
@@ -75,7 +75,7 @@ If a link sat open too long they see plain wording instead of Stripe jargon: tha
 Phone and walk-in bookings follow the same catalogue rules, so nobody gets a different deal by ringing up.
 
 - **Deposit or full payment.** Create the booking and ResNeo sends the client a secure link to pay on their own device.
-- **Card hold.** A **Card hold** switch appears on the booking form, labelled **Send a link to the guest to add their card details**, switched on by default, with the fee shown underneath. Leave it on and the client gets a link. Turn it off to waive the hold for this one booking.
+- **Card hold.** A **Card hold** switch appears on the booking form, off by default. Its line says what the current position does: **Off: no card is taken, so a no-show cannot be charged.** or **On: the guest gets a link to add their card, charged only if they do not show. The booking is cancelled if no card is added within 24 hours.**
 
 The booking stays **Pending** until the money lands or the card is saved, then confirms on its own.
 

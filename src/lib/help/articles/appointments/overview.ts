@@ -36,7 +36,7 @@ Your plan is named **Appointments Light**, **Appointments Plus**, or **Appointme
 
 ## What “unified scheduling” means day to day
 
-- **Calendar Availability** is where admins build **calendars** and everyone sets hours. It has four tabs: **Calendars**, **Availability**, **Breaks**, and **Closures**.
+- **Calendar Availability** is where admins build **calendars** and everyone sets hours. It has four tabs: **Calendars**, **Availability**, **Breaks**, and **Closures & amended hours**.
 - **Services** holds your appointment catalogue: durations, buffers, deposits, and either **One fixed offering** or **Multiple bookable options** such as "45 min" and "60 min" at different prices.
 - **Appointment Calendar** is the live grid for moving and opening bookings. It sits directly under the list link in the sidebar when your venue is calendar-eligible.
 - **Appointments** (or **Bookings**) is the high-volume list: filters, search, expandable rows, and bulk messaging. To download a spreadsheet, go to **Settings → Reports** and use **Data export** instead.

@@ -49,8 +49,10 @@ function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminol
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{
+    searchParams: Promise<{
     tab?: string;
+    /** Booking page tab: `own` opens this venue's own page instead of the combined page. */
+    scope?: string;
     upgraded?: string;
     downgraded?: string;
     resubscribed?: string;
@@ -240,8 +242,8 @@ export default async function SettingsPage({
   );
   const featureFlagsResolved = resolveAppointmentsFeatureFlags(featureFlagsRaw);
 
-  // A live venue collective this venue belongs to: the Booking page tab then
-  // opens with a pointer to Manage combined page (hosts) or to Linked accounts.
+    // A live venue collective this venue belongs to: the Booking page tab then
+  // opens on the combined page (the host's manager, or a member's summary).
   let collective: SettingsCollectiveNote | null = null;
   const staffCollective = await findStaffCollectiveForVenue(getSupabaseAdminClient(), venueId);
   if (staffCollective) {
@@ -324,7 +326,8 @@ export default async function SettingsPage({
           referralsDashboard={referralsDashboard}
           referralsProgrammeAvailable={referralsProgrammeAvailable}
           trialBreakdown={trialBreakdown}
-          collective={collective}
+                    collective={collective}
+          initialBookingPageScope={sp.scope === 'own' ? 'own' : 'combined'}
         />
       </Suspense>
     </PageFrame>

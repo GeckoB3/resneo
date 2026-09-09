@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
+import { formatResolvedHoursLineForDate, formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import type { WorkingHours } from '@/types/booking-models';
 
 /**
@@ -88,5 +88,19 @@ describe('formatWorkingHoursLineForDate', () => {
     it('still reports a calendar closed that day as Closed', () => {
       expect(formatWorkingHoursLineForDate({}, TUE, TZ, [{ start: 540, end: 1080 }])).toBe('Closed');
     });
+  });
+});
+
+describe('formatResolvedHoursLineForDate', () => {
+  it('formats resolved ranges, and Closed when there are none', () => {
+    expect(formatResolvedHoursLineForDate([{ start: 8 * 60, end: 20 * 60 }])).toBe('08:00–20:00');
+    expect(formatResolvedHoursLineForDate([])).toBe('Closed');
+  });
+
+  it('clamps to the venue and shows the calendar hours in brackets when they differ', () => {
+    const venue = [{ start: 9 * 60, end: 17 * 60 }];
+    expect(formatResolvedHoursLineForDate([{ start: 8 * 60, end: 20 * 60 }], venue)).toBe('09:00–17:00 (calendar 08:00–20:00)');
+    expect(formatResolvedHoursLineForDate([{ start: 9 * 60, end: 17 * 60 }], venue)).toBe('09:00–17:00');
+    expect(formatResolvedHoursLineForDate([{ start: 18 * 60, end: 20 * 60 }], venue)).toBe('Closed (outside business hours)');
   });
 });

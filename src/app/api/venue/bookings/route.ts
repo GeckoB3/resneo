@@ -71,6 +71,14 @@ import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/nam
 import { logStaffBookingFlowEvent } from '@/lib/metrics/log-staff-booking-flow-event';
 import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
 import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
+import {
+  ensureOverrideServiceInInput,
+  isBookingDateInPast,
+  overrideWarningsForInterval,
+  PAST_DATE_OVERRIDE_ERROR,
+  recordAvailabilityOverrideEvent,
+  resolveOverrideCollectiveTarget,
+} from '@/lib/booking/staff-availability-override';
 import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
@@ -106,8 +114,9 @@ const phoneBookingSchema = z.object({
   require_deposit: z.boolean().optional(),
   /**
    * Card-hold toggle (spec 7.6 / D6). Only honoured when the selected entity's
-   * effective requirement is card_hold (owner venue flag on); defaults to true
-   * there, for BOTH 'phone' and 'walk-in' sources. Ignored otherwise.
+   * effective requirement is card_hold; omitted means NO hold, for BOTH 'phone'
+   * and 'walk-in' sources (staff booking for a guest more often waive it than
+   * ask for it, 2026-09-09). Ignored otherwise.
    */
   require_card_hold: z.boolean().optional(),
   practitioner_id: z.string().uuid().optional(),
@@ -120,6 +129,13 @@ const phoneBookingSchema = z.object({
   resource_id: z.string().uuid().optional(),
   booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
   source: z.enum(['phone', 'walk-in']).optional(),
+  /**
+   * Staff "override availability": book this service with this calendar at this
+   * time whatever the engine says. The engine's refusals come back as
+   * `availability_override_warnings`; only a past date, an unknown service or
+   * calendar, or an impossible length still refuse. Appointments only.
+   */
+  override_availability: z.boolean().optional(),
   area_id: z.string().uuid().optional(),
   /** One-off duration override for staff-created table or appointment bookings. */
   duration_minutes: z.number().int().min(MIN_APPOINTMENT_CORE_DURATION_MINUTES).max(14 * 60).optional(),
@@ -227,6 +243,7 @@ export async function POST(request: NextRequest) {
     } = parsed.data;
     const bookingSource = (parsed.data.source ?? 'phone') as 'phone' | 'walk-in';
     const staffWalkIn = bookingSource === 'walk-in';
+    const staffOverride = parsed.data.override_availability === true;
     const admin = getSupabaseAdminClient();
 
     /**
@@ -247,14 +264,24 @@ export async function POST(request: NextRequest) {
         if (!parsed.data.practitioner_id || !parsed.data.appointment_service_id) {
           return NextResponse.json({ error: 'Choose a calendar and a service.' }, { status: 400 });
         }
-        const target = await resolveCombinedBookingTarget(admin, {
-          collectiveId: collective.collectiveId,
-          offeringId: parsed.data.appointment_service_id,
-          calendarId: parsed.data.practitioner_id,
-        });
+        const target = staffOverride
+          ? await resolveOverrideCollectiveTarget(admin, {
+              collectiveId: collective.collectiveId,
+              offeringId: parsed.data.appointment_service_id,
+              calendarId: parsed.data.practitioner_id,
+            })
+          : await resolveCombinedBookingTarget(admin, {
+              collectiveId: collective.collectiveId,
+              offeringId: parsed.data.appointment_service_id,
+              calendarId: parsed.data.practitioner_id,
+            });
         if (!target) {
           return NextResponse.json(
-            { error: 'That service is not currently bookable on this calendar.' },
+            {
+              error: staffOverride
+                ? 'That venue has no copy of this service, so it cannot be booked there.'
+                : 'That service is not currently bookable on this calendar.',
+            },
             { status: 400 },
           );
         }
@@ -389,7 +416,7 @@ export async function POST(request: NextRequest) {
       // Card hold (spec 7.6): per-person fee x tickets, server-derived. Unlike
       // deposits, holds are honoured for walk-ins too (D6).
       const eventCardHoldFeePence: number | null = eventValidation.value.cardHoldFeePence ?? null;
-      const eventHoldRequired = eventCardHoldFeePence != null && (require_card_hold ?? true);
+      const eventHoldRequired = eventCardHoldFeePence != null && (require_card_hold ?? false);
 
       const ticketTotalDisplay = ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
       const eventEmailExtras = {
@@ -605,7 +632,7 @@ export async function POST(request: NextRequest) {
           );
         }
       }
-      const classHoldRequired = classCardHoldFeePence != null && (require_card_hold ?? true);
+      const classHoldRequired = classCardHoldFeePence != null && (require_card_hold ?? false);
       const classPriceDisplay =
         cls.price_pence != null ? `£${((cls.price_pence * party_size) / 100).toFixed(2)}` : null;
       const classEmailExtras = {
@@ -840,7 +867,7 @@ export async function POST(request: NextRequest) {
           );
         }
       }
-      const resourceHoldRequired = resourceCardHoldFeePence != null && (require_card_hold ?? true);
+      const resourceHoldRequired = resourceCardHoldFeePence != null && (require_card_hold ?? false);
 
       const resourceLabels = await getResourceBookingEmailLabels(admin, parsed.data.resource_id);
       const resourcePriceDisplay =
@@ -1021,9 +1048,15 @@ export async function POST(request: NextRequest) {
         typeof venue.timezone === 'string' && venue.timezone.trim() !== ''
           ? venue.timezone.trim()
           : 'Europe/London';
-      const dateAllowedForBooking = staffWalkIn
-        ? isStaffWalkInBookingDateAllowed(booking_date, svcWindow, tzAppt)
-        : isGuestBookingDateAllowed(booking_date, svcWindow, tzAppt);
+      // The override keeps one date rule: nothing goes into the past.
+      if (staffOverride && isBookingDateInPast(booking_date, tzAppt)) {
+        return NextResponse.json({ error: PAST_DATE_OVERRIDE_ERROR }, { status: 400 });
+      }
+      const dateAllowedForBooking = staffOverride
+        ? true
+        : staffWalkIn
+          ? isStaffWalkInBookingDateAllowed(booking_date, svcWindow, tzAppt)
+          : isGuestBookingDateAllowed(booking_date, svcWindow, tzAppt);
       if (!dateAllowedForBooking) {
         return NextResponse.json({ error: 'This date is not available for booking' }, { status: 400 });
       }
@@ -1040,6 +1073,15 @@ export async function POST(request: NextRequest) {
       // in for the source service's base terms, applied BEFORE the variant and
       // add-ons so whatever staff choose on top still stacks, exactly as the
       // public create does. No-op for an ordinary booking.
+            if (staffOverride) {
+        // The loader reads the calendar's assigned services only; the override
+        // may book any active service of the venue on any calendar. Added before
+        // the collective's length is applied, so an unassigned offering gets it.
+        const present = await ensureOverrideServiceInInput(admin, appointmentInput, venueId, appointment_service_id);
+        if (!present) {
+          return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+        }
+      }
       let collectiveOverride: Awaited<ReturnType<typeof resolveCollectiveServiceOverride>> = null;
       if (collectiveAttribution) {
         collectiveOverride = await resolveCollectiveServiceOverride(admin, {
@@ -1066,7 +1108,7 @@ export async function POST(request: NextRequest) {
         svcWindow,
       );
 
-      // ── Variant: apply its duration/buffer/price/deposit overrides to the engine
+            // ── Variant: apply its duration/buffer/price/deposit overrides to the engine
       // input BEFORE slot validation and add-on extension, mirroring public create.
       let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
       if (parsed.data.service_variant_id) {
@@ -1139,8 +1181,26 @@ export async function POST(request: NextRequest) {
       // before the insert ~250 lines below. Null for a staff walk-in, which is
       // deliberately not grid-validated at all (the guest is already present).
       let apptSlotRecheck: AppointmentSlotRecheck | null = null;
-
-      if (!staffWalkIn) {
+      /** What the engine would have refused for, when the override is on. */
+      let overrideWarnings: string[] | null = null;
+      if (staffOverride) {
+        const engineSvc = appointmentInput.services.find((s) => s.id === appointment_service_id);
+        const overrideEndMinutes =
+          parsed.data.duration_minutes != null
+            ? parsed.data.duration_minutes + chosenAddonTotals.total_duration_minutes
+            : (engineSvc?.duration_minutes ?? 30);
+        const check = overrideWarningsForInterval(
+          appointmentInput,
+          practitioner_id,
+          appointment_service_id,
+          timeStr,
+          endHHmmFromDuration(timeStr, overrideEndMinutes),
+        );
+        if (!check.ok) {
+          return NextResponse.json({ error: check.reason }, { status: 409 });
+        }
+        overrideWarnings = check.warnings;
+      } else if (!staffWalkIn) {
         if (parsed.data.duration_minutes != null) {
           // Staff override: the supplied duration_minutes is the BASE duration; add-ons add on top.
           const totalEndMinutes = parsed.data.duration_minutes + chosenAddonTotals.total_duration_minutes;
@@ -1205,7 +1265,7 @@ export async function POST(request: NextRequest) {
         collectiveOverride?.pricePence != null && !chosenVariant
           ? { ...svc, price_pence: collectiveOverride.pricePence }
           : svc;
-      if (staffWalkIn) {
+            if (staffWalkIn && !staffOverride) {
         // Walk-ins are taken "regardless": once the front desk hits Start Appointment
         // Now, the decision is final. So they may be booked past opening hours / outside
         // calendar availability (allowOutsideHours), double-book another booking
@@ -1326,7 +1386,7 @@ export async function POST(request: NextRequest) {
         online != null && online.chargeLabel === 'card_hold' && online.amountPence > 0
           ? online.amountPence
           : null;
-      const apptHoldRequired = apptCardHoldFeePence != null && (require_card_hold ?? true);
+      const apptHoldRequired = apptCardHoldFeePence != null && (require_card_hold ?? false);
 
       if (requiresDeposit && !venue.stripe_connected_account_id) {
         return NextResponse.json(
@@ -1480,6 +1540,13 @@ export async function POST(request: NextRequest) {
       if (apptErr || !apptBooking) {
         console.error('Appointment booking insert failed:', apptErr?.message, apptErr?.details);
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+      }
+      if (overrideWarnings) {
+        await recordAvailabilityOverrideEvent(admin, {
+          venueId,
+          bookingId: apptBooking.id,
+          warnings: overrideWarnings,
+        });
       }
 
       if (chosenAddonSnapshots.length > 0) {
@@ -1706,6 +1773,7 @@ export async function POST(request: NextRequest) {
             : 'Appointment created.',
           // audit M2: surface unmet warn_staff/warn_client requirements so the staff UI can flag them.
           ...(apptCompliance.warnings.length > 0 ? { compliance_warnings: apptCompliance.warnings } : {}),
+          ...(overrideWarnings ? { availability_override_warnings: overrideWarnings } : {}),
         },
         { status: 201 },
       );
@@ -1805,10 +1873,10 @@ export async function POST(request: NextRequest) {
     const tableEntityIsCardHold = tableDepositType === 'card_hold';
 
     // Card-hold services never charge a deposit (D6: the two toggles are never shown
-    // together); staff discretion is `require_card_hold`, default on, walk-ins included.
+    // together); staff discretion is `require_card_hold`, default off, walk-ins included.
     // The party-size threshold is NOT applied in the staff path, mirroring deposits.
     const requiresDeposit = !staffWalkIn && Boolean(require_deposit) && !tableEntityIsCardHold;
-    const tableHoldRequired = tableEntityIsCardHold && (require_card_hold ?? true);
+    const tableHoldRequired = tableEntityIsCardHold && (require_card_hold ?? false);
 
     // A card_hold service's configured amount is a NO-SHOW FEE, never a chargeable
     // deposit: with the flag off it must not convert into one (spec 6.3), so the

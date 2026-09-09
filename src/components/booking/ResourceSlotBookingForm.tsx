@@ -75,7 +75,8 @@ export function ResourceSlotBookingForm({
   const [error, setError] = useState<string | null>(null);
   const { addToast } = useToast();
   /** Card-hold resources only (design doc 7.6): default ON, staff may waive per booking. */
-  const [requireCardHold, setRequireCardHold] = useState(true);
+  // Off by default: staff booking for a guest more often waive the hold than ask for it (2026-09-09).
+  const [requireCardHold, setRequireCardHold] = useState(false);
 
   const [date, setDate] = useState(preselectedDate ?? '');
   const [startTime, setStartTime] = useState(preselectedTime ?? '');

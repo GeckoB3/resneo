@@ -78,3 +78,10 @@ export function cardHoldChargeWindowEndsAt(bookingEndIso: string): string {
   const endMs = new Date(bookingEndIso).getTime();
   return new Date(endMs + CARD_HOLD_CHARGE_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
 }
+
+/**
+ * How long a guest has to add their card after staff request a hold before
+ * the booking is cancelled (the auto-cancel cron's staff card-hold sweep). The
+ * booking form quotes this figure, so both read it from here.
+ */
+export const CARD_HOLD_LINK_TIMEOUT_HOURS = 24;

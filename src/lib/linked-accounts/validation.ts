@@ -266,6 +266,10 @@ export const catalogueActionSchema = z.object({
     'add_provider',
     'remove_provider',
     'set_providers',
+    // A member's copy following the origin (Docs/collective-service-sync-plan.md).
+    'sync_provider',
+    'detach_provider',
+    'link_provider',
     // Headings on the combined page (Docs/service-categories-plan.md, "Combined pages").
     'create_category',
     'rename_category',
@@ -315,6 +319,8 @@ export const catalogueActionSchema = z.object({
     .optional(),
   // Provider fields (add_provider / remove_provider).
   providerId: z.string().uuid().optional(),
+  /** sync_provider: replace a customised copy's changes (asked first in the manager). */
+  forceSync: z.boolean().optional(),
   venueId: z.string().uuid().optional(),
   sourceServiceId: z.string().uuid().optional(),
   practitionerId: z.string().uuid().nullable().optional(),

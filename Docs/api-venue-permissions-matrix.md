@@ -2,7 +2,7 @@
 
 Quick reference for **admin** vs **calendar-scoped staff** vs **staff with no assigned calendars**. Unauthenticated requests are omitted (401 unless noted).
 
-**Last verified against the code: 2026-08-26.** All six matrix rows still hold.
+**Last verified against the code: 2026-08-26.** All six matrix rows still hold. Calendar hours row added 2026-09-09 with the route (Docs/calendar-amended-hours-plan.md).
 
 | Area | Route / method | Admin | Staff (managed calendar) | Staff (no calendars) |
 |------|----------------|-------|---------------------------|----------------------|
@@ -12,6 +12,7 @@ Quick reference for **admin** vs **calendar-scoped staff** vs **staff with no as
 | Experience events | `PATCH/DELETE /api/venue/experience-events/[id]` | Allowed | **403** — use collection routes above | **403** |
 | Experience events | `POST .../experience-events/[id]/cancel` | Allowed | **403** | **403** |
 | Class instances | `POST .../class-instances/[id]/cancel` | Allowed | **403** | **403** |
+| Calendar hours | `GET/PUT/DELETE /api/venue/calendar-amended-hours` | Any active host calendar; `apply_to_all_active` on PUT | Only calendars in the managed set; no `apply_to_all_active` (403) | GET returns `{ entries: [] }`; PUT/DELETE 403 |
 
 **Notes**
 

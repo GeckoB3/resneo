@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Link with another venue",
   description: "Share calendars and bookings with another ResNeo venue, and put several linked venues on one combined booking page.",
   tags: ["linked accounts","linked venues","venue collective","combined booking page","chair rental","multi venue","sharing"],
-  verified: '2026-09-06',
+    verified: '2026-09-09',
   content: `# Link with another venue
 
 If you share a space with another business, rent a chair to someone self-employed, or run more than one venue, you can link your ResNeo accounts. Linking lets two venues see each other's calendars and, if you both agree, manage each other's bookings.
@@ -145,19 +145,21 @@ Your combined page works like a single venue: one services menu and one team acr
 
 ### Set up the combined page
 
-The venue that created the collective is the **Host** and is the only one who can edit the page. Click **Manage combined page** to open **Combined booking page**, which has three tabs.
+The venue that created the collective is the **Host** and is the only one who can edit the page. Once the collective is live, open **Settings**, then **Booking Page**: it opens on the combined page, with three tabs. A switch at the top, **Combined page** or **This venue's own page**, moves you between the shared page and your own. The same editor opens as a window from **Manage combined page** on the Linked Accounts tab.
 
 **Page** is the page designer, the same one you use for your own booking page, plus three things unique to a collective:
 
 - **Page name (shown to customers)**, which you can change at any time.
-- **Booking page address**: either a **Dedicated address** at \`/book/c/your-address\`, or **Use a member venue's existing booking address**, which puts the combined page on that venue's own address. Be careful with the second: that venue's solo page is then the combined page.
+- **Booking page address**: the full address with **Copy link** and **Open** buttons, then either a **Dedicated address** at \`/book/c/your-address\`, or **Use a member venue's existing booking address**, which puts the combined page on that venue's own address. Be careful with the second: that venue's solo page is then the combined page.
 - **Settings that follow the host venue**: the combined page has no settings of its own for the "any available practitioner" and staff-first booking options, the address, phone, website and opening hours in the header, or the currency and wording. Change those in the host venue's own **Settings** and the combined page follows. Prices, durations, deposits and cancellation notice always come from each member venue's own service, because every booking is made with that venue.
 
 **Services & calendars** is where you build the menu. **Choose services to offer** lists every bookable service at each member venue: tick the ones you want and add them together. They then appear under **Offerings on your combined page**, where you can open an offering and tick which venues' calendars can take it. You can also type a name to create a custom offering. Categories give the page its headings, and **Match categories from your venues** files anything uncategorised under the heading it already has at its own venue.
 
+When you tick a calendar at a venue that does not yet have the service, ResNeo copies it into that venue. From then on the copy is marked **in step**: its duration, buffer, processing periods and options follow the original whenever that is saved. Price, description and add-ons stay that venue's own. If the venue edits the copy's duration, processing or options itself, the row changes to **customised** and stops following; you can **Re-sync** it (ResNeo asks first), or click **Stop syncing** on any copy to leave it alone for good. Services a venue already had before you ticked its calendar show as **independent copy** and are never changed on their own. If you want one to match the original, click **Link to (venue) and update** beside it: ResNeo asks first, then updates its duration, processing periods and options and keeps it in step from then on. Removing an offering from the page and adding it back does not do this.
+
 **Members** lists every venue with **(host)** or **(invited)** beside it. From here the host can **Invite a venue** and click **Send invitation**, **Remove** a member, **Make host** to hand the collective to someone else, or **Dissolve collective**.
 
-Members who are not the host do not get these tabs. Their services appear using their own price, duration and availability, and they can view the page or use **Leave** on the collective row to step out.
+Members who are not the host do not get these tabs. Their **Booking Page** tab shows who hosts the page, its address with a **Copy link** button, and which of their calendars are on it. Their services appear using their own price, duration and availability, and they can view the page or use **Leave** on the collective row under Linked Accounts to step out.
 
 ### Ending a collective
 

@@ -229,15 +229,28 @@ async function resolveAppointmentLabels(
  * Fills `email_variant` and appointment fields when the booking row has either
  * legacy (`practitioner_id` + `appointment_service_id`) or USE (`calendar_id` + `service_item_id`) anchors.
  */
+/**
+ * Which of a visit's services an email lists beside the one it is about.
+ *
+ * `all` is the default and right for a confirmation or a change notice: the guest
+ * is told about the whole visit. `same_day` is for a reminder, which is sent per
+ * day (see `visitCommsAnchorIds`): a reminder for Tuesday's colour should not
+ * list Thursday's cut as if it were tomorrow too.
+ */
+export interface EnrichBookingEmailOptions {
+  siblingScope?: 'all' | 'same_day';
+}
+
 export async function enrichBookingEmailForAppointment(
   supabase: SupabaseClient,
   bookingId: string,
   base: BookingEmailData,
+  options: EnrichBookingEmailOptions = {},
 ): Promise<BookingEmailData> {
   const { data: row, error } = await supabase
     .from('bookings')
     .select(
-      'booking_model, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
+      'booking_model, booking_date, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
     )
     .eq('id', bookingId)
     .maybeSingle();
@@ -263,7 +276,7 @@ export async function enrichBookingEmailForAppointment(
   let groupTotalPricePence: number | null = null;
 
   if (anchor.group_booking_id && anchor.guest_id) {
-    const { data: siblings } = await supabase
+    const { data: allSiblings } = await supabase
       .from('bookings')
       .select(
         'id, booking_date, booking_time, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, person_label',
@@ -272,6 +285,11 @@ export async function enrichBookingEmailForAppointment(
       .eq('guest_id', anchor.guest_id)
       .order('booking_date')
       .order('booking_time');
+    const anchorDate = (row as { booking_date?: string | null }).booking_date ?? null;
+    const siblings =
+      options.siblingScope === 'same_day' && anchorDate
+        ? (allSiblings ?? []).filter((s) => s.booking_date === anchorDate)
+        : allSiblings;
 
     if (siblings && siblings.length > 1) {
       const siblingIds = siblings.map((s) => s.id as string).filter(Boolean);
@@ -700,8 +718,9 @@ export async function enrichBookingEmailForComms(
   supabase: SupabaseClient,
   bookingId: string,
   base: BookingEmailData,
+  options: EnrichBookingEmailOptions = {},
 ): Promise<BookingEmailData> {
-  const appt = await enrichBookingEmailForAppointment(supabase, bookingId, base);
+  const appt = await enrichBookingEmailForAppointment(supabase, bookingId, base, options);
   const withSecondary = await enrichBookingEmailForSecondaryModels(supabase, bookingId, appt);
   const withAddons = await enrichBookingEmailWithAddons(supabase, bookingId, withSecondary);
   return withCalendarDurationMinutes(supabase, bookingId, withAddons);

@@ -8,6 +8,7 @@ import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui
 import { CombinedPageManager } from './CombinedPageManager';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
 import type { CollectiveView } from '@/lib/linked-accounts/collectives';
+import { fullMutualLinks } from '@/lib/linked-accounts/full-mutual-links';
 
 const inputCls =
   'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500';
@@ -17,16 +18,7 @@ const inputCls =
  * detail AND create/edit/cancel access in both directions, so any member's staff
  * can manage any combined booking. Matches the create/invite write gate.
  */
-function fullMutualLinks(links: AccountLinkView[]): AccountLinkView[] {
-  return links.filter(
-    (l) =>
-      l.status === 'accepted' &&
-      l.iCan.calendar === 'full_details' &&
-      l.theyCan.calendar === 'full_details' &&
-      l.iCan.act === 'create_edit_cancel' &&
-      l.theyCan.act === 'create_edit_cancel',
-  );
-}
+
 
 interface ConfirmState {
   title: string;
@@ -39,18 +31,9 @@ interface ConfirmState {
 export function VenueCollectivesPanel({
   venueName,
   activeLinks,
-  manageCollectiveId = null,
-  onManageCollectiveOpened,
 }: {
   venueName: string;
   activeLinks: AccountLinkView[];
-  /**
-   * A collective to open in Manage combined page as soon as the list is in
-   * (the Booking page tab's pointer). Hosts only; a member's request just lands
-   * on this list. `onManageCollectiveOpened` clears the request either way.
-   */
-  manageCollectiveId?: string | null;
-  onManageCollectiveOpened?: () => void;
 }) {
   const [collectives, setCollectives] = useState<CollectiveView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,14 +80,7 @@ export function VenueCollectivesPanel({
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!manageCollectiveId || loading) return;
-    const target = collectives.find(
-      (c) => c.id === manageCollectiveId && c.isHost && c.status !== 'dissolved',
-    );
-    if (target) setManageTarget(target);
-    onManageCollectiveOpened?.();
-  }, [manageCollectiveId, loading, collectives, onManageCollectiveOpened]);
+  
 
   const memberAction = async (
     collectiveId: string,

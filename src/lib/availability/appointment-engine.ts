@@ -13,6 +13,7 @@ import type {
   ProcessingTimeBlock,
 } from '@/types/booking-models';
 import {
+  canonicalServiceShape,
   serviceSpanMinutes,
   effectiveProcessingBlocksForTemplate,
   fitProcessingBlocksToDuration,
@@ -860,8 +861,23 @@ export function validateAppointmentCustomInterval(
     allowDuringBreaks?: boolean;
     /** Snapshot blocks for this booking; when omitted, uses service template. */
     processingTimeBlocks?: ProcessingTimeBlock[] | null;
+    /**
+     * Accept a service the practitioner is not assigned to, priced and sized from
+     * the catalogue entry itself. The staff "override availability" booking: the
+     * front desk has chosen to put this service on this calendar.
+     */
+    allowUnassignedService?: boolean;
+    /**
+     * Report instead of refuse. Every gate a staff member may knowingly book
+     * through (hours, closures, leave, blocks, breaks, notice, overlap) becomes a
+     * line in `warnings` and the check still answers `ok: true`; only what cannot
+     * be booked at all (an unknown person or service, a length outside the
+     * limits, an impossible processing pattern) still refuses. The override
+     * booking shows the list before the save so the choice is a knowing one.
+     */
+    collectReasons?: boolean;
   },
-): { ok: boolean; reason?: string } {
+): { ok: boolean; reason?: string; warnings?: string[] } {
   const {
     date,
     practitioners,
@@ -889,14 +905,26 @@ export function validateAppointmentCustomInterval(
     currentMinute = now.getHours() * 60 + now.getMinutes();
   }
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
-
   const practitioner = practitioners.find((p) => p.id === practitionerId && p.is_active);
   if (!practitioner) {
     return { ok: false, reason: 'Staff not available' };
   }
-
+  const warnings: string[] = [];
+  const collect = options?.collectReasons === true;
+  /** A gate the caller may book through: a warning in collect mode, a refusal otherwise. */
+  const soft = (reason: string): { ok: false; reason: string } | null => {
+    if (collect) {
+      warnings.push(reason);
+      return null;
+    }
+    return { ok: false, reason };
+  };
   const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
-  const svc = offeredServices.find((s) => s.id === serviceId);
+  let svc = offeredServices.find((s) => s.id === serviceId);
+  if (!svc && options?.allowUnassignedService) {
+    svc = services.find((s) => s.id === serviceId);
+    if (svc && collect) warnings.push(`${practitioner.name} does not usually offer ${svc.name}`);
+  }
   if (!svc) {
     return { ok: false, reason: 'Service not available with this staff member' };
   }
@@ -967,42 +995,38 @@ export function validateAppointmentCustomInterval(
   // comments here claimed leave was still honoured (SA-M3). Partial leave was
   // always safe: it arrives as a blocked range of kind `leave`, checked below.
   if (input.fullDayLeavePractitionerIds?.includes(practitioner.id)) {
-    return { ok: false, reason: 'Staff on leave this day' };
+    const refused = soft('Staff on leave this day');
+    if (refused) return refused;
   }
-
   // Opening-hours / working-hours gates. Staff-initiated walk-ins, moves and
   // resizes pass `allowOutsideHours` to deliberately book past opening hours.
   if (!options?.allowOutsideHours) {
-    const workingRanges = getWorkingRanges(practitioner, date);
-    if (workingRanges.length === 0) {
-      return { ok: false, reason: 'Staff not working this day' };
+    const hoursReason = ((): string | null => {
+      const workingRanges = getWorkingRanges(practitioner, date);
+      if (workingRanges.length === 0) return 'Staff not working this day';
+      const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(
+        workingRanges,
+        venueOpeningHours,
+        date,
+        venueWideBlocks,
+      );
+      if (effectiveWorkingRanges.length === 0) return 'Outside opening hours';
+      const afterServiceCustom = intersectEffectiveRangesWithServiceCustom(effectiveWorkingRanges, svc, date);
+      if (afterServiceCustom.length === 0) return 'Outside service availability hours';
+      const fitsInRange = afterServiceCustom.some((r) => t >= r.start && busyEnd <= r.end);
+      if (!fitsInRange) return 'Outside working hours';
+      return null;
+    })();
+    if (hoursReason) {
+      const refused = soft(hoursReason);
+      if (refused) return refused;
     }
-
-    const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(
-      workingRanges,
-      venueOpeningHours,
-      date,
-      venueWideBlocks,
-    );
-    if (effectiveWorkingRanges.length === 0) {
-      return { ok: false, reason: 'Outside opening hours' };
-    }
-
-    const afterServiceCustom = intersectEffectiveRangesWithServiceCustom(effectiveWorkingRanges, svc, date);
-    if (afterServiceCustom.length === 0) {
-      return { ok: false, reason: 'Outside service availability hours' };
-    }
-
-    const fitsInRange = afterServiceCustom.some((r) => t >= r.start && busyEnd <= r.end);
-    if (!fitsInRange) {
-      return { ok: false, reason: 'Outside working hours' };
-    }
-
     // Venue closure covering this window. Inside the allowOutsideHours gate, because a
     // venue closure is an `hours` rule that staff can deliberately book through today --
     // unlike leave, which is checked above and which nothing may skip. See plan §2.1.
     if (venueClosureRangesForDate(date, venueWideBlocks).some((c) => overlaps(t, busyEnd, c.start, c.end))) {
-      return { ok: false, reason: 'The venue is closed for this date or time.' };
+      const refused = soft('The venue is closed for this date or time.');
+      if (refused) return refused;
     }
   }
 
@@ -1011,20 +1035,21 @@ export function validateAppointmentCustomInterval(
     !skipPastSlotFilter &&
     slotMinutesFromNow({ dateStr: date, todayStr, slotMinute: t, currentMinute }) < minNoticeMinutes
   ) {
-    return { ok: false, reason: 'Past minimum notice window' };
+    const refused = soft('Past minimum notice window');
+    if (refused) return refused;
   }
-
   if (!options?.allowDuringBreaks) {
     const breakRanges = getBreakRanges(practitioner, date);
     if (breakRanges.some((b) => overlaps(t, busyEnd, b.start, b.end))) {
-      return { ok: false, reason: 'Conflicts with a break' };
+      const refused = soft('Conflicts with a break');
+      if (refused) return refused;
     }
   }
-
   const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
   const blockHit = dayBlocks.find((b) => overlaps(t, busyEnd, b.start, b.end));
   if (blockHit) {
-    return { ok: false, reason: blockedRangeReason(blockHit.kind) };
+    const refused = soft(blockedRangeReason(blockHit.kind));
+    if (refused) return refused;
   }
 
   if (!options?.allowBookingOverlap) {
@@ -1041,11 +1066,11 @@ export function validateAppointmentCustomInterval(
       excludeBookingId,
     );
     if (concurrent >= parallelCap) {
-      return { ok: false, reason: 'Conflicts with another booking' };
+      const refused = soft('Conflicts with another booking');
+      if (refused) return refused;
     }
   }
-
-  return { ok: true };
+  return collect ? { ok: true, warnings } : { ok: true };
 }
 
 export function resolveEngineBookingProcessingBlocks(params: {
@@ -1319,9 +1344,14 @@ export async function fetchAppointmentInput(params: {
   }
   let allServices = (allServicesRes.data ?? []).map((raw) => {
     const s = raw as Record<string, unknown>;
+    const canon = canonicalServiceShape({
+      durationMinutes: (s.duration_minutes as number) ?? 30,
+      processingBlocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+    });
     return {
       ...(raw as AppointmentService),
-      processing_time_blocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+      duration_minutes: canon.durationMinutes,
+      processing_time_blocks: canon.processingBlocks,
     };
   }) as AppointmentService[];
   if (allServices.length > 0) {
@@ -1478,6 +1508,87 @@ export async function fetchAppointmentInput(params: {
 }
 
 /**
+ * One `service_items` row as the engine books it, with a calendar's own
+ * duration and price override applied when it has one. Shared by the unified
+ * loader and the staff override booking, which must size and price an
+ * unassigned service exactly as an assigned one would be.
+ */
+export function serviceItemRowToEngineService(
+  s: Record<string, unknown>,
+  venueId: string,
+  custom?: { custom_duration_minutes?: number | null; custom_price_pence?: number | null } | null,
+): AppointmentService {
+  const customDur = custom?.custom_duration_minutes;
+  const customPrice = custom?.custom_price_pence;
+  const canon = canonicalServiceShape({
+    durationMinutes: s.duration_minutes as number,
+    processingBlocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+  });
+  const effectiveDuration = (customDur ?? canon.durationMinutes) as number;
+  /**
+   * A calendar's `custom_duration_minutes` shortens the service without
+   * touching its processing pattern, so the catalogue's blocks can fall
+   * outside the duration this calendar actually books. Unfitted, they failed
+   * validation downstream and were dropped wholesale, which silently held the
+   * practitioner busy for the entire appointment and lost the parallel-booking
+   * capacity the venue had deliberately configured. Trimming keeps as much of
+   * the gap as still fits.
+   */
+  const fittedBlocks = fitProcessingBlocksToDuration(canon.processingBlocks, {
+    fromDurationMinutes: canon.durationMinutes,
+    toDurationMinutes: effectiveDuration,
+  }).blocks;
+  return {
+    id: s.id as string,
+    venue_id: venueId,
+    name: s.name as string,
+    description: (s.description as string) ?? null,
+    duration_minutes: effectiveDuration,
+    buffer_minutes: (s.buffer_minutes as number) ?? 0,
+    processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
+    processing_time_blocks: fittedBlocks,
+    price_pence: (customPrice ?? s.price_pence) as number | null,
+    payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
+    deposit_pence: (s.deposit_pence as number | null) ?? null,
+    colour: (s.colour as string) ?? '#3B82F6',
+    is_active: true,
+    sort_order: (s.sort_order as number) ?? 0,
+    created_at: (s.created_at as string) ?? new Date().toISOString(),
+    booking_interval_minutes: (s.booking_interval_minutes as number | undefined) ?? undefined,
+    booking_minute_marks: (s.booking_minute_marks as number[] | null | undefined) ?? null,
+    booking_start_times: (s.booking_start_times as string[] | null | undefined) ?? null,
+    custom_availability_enabled: Boolean(s.custom_availability_enabled),
+    custom_working_hours: parseCustomWorkingHoursFromDb(s.custom_working_hours),
+  };
+}
+
+/**
+ * Load one active `service_items` row for the engine when the calendar being
+ * booked is not assigned to it (the staff override booking). Null when the
+ * service does not exist, is inactive, or is another venue's.
+ */
+export async function loadServiceItemForEngine(
+  supabase: SupabaseClient,
+  venueId: string,
+  serviceId: string,
+): Promise<AppointmentService | null> {
+  const { data } = await supabase
+    .from('service_items')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('id', serviceId)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (!data) return null;
+  return serviceItemRowToEngineService(data as Record<string, unknown>, venueId, null);
+}
+
+/** Put a service the loader left out (not assigned to this calendar) in front of the engine. */
+export function ensureServiceInAppointmentInput(input: AppointmentEngineInput, svc: AppointmentService): void {
+  if (!input.services.some((s) => s.id === svc.id)) input.services.push(svc);
+}
+
+/**
  * Availability input for a unified calendar row (resource, or practitioner without legacy row).
  * Uses service_items + calendar_service_assignments; calendar UUID is both calendar and practitioner id.
  */
@@ -1572,44 +1683,7 @@ export async function fetchCalendarAppointmentInput(params: {
     const a = assignMap.get(s.id as string) as
       | { custom_duration_minutes?: number | null; custom_price_pence?: number | null }
       | undefined;
-    const customDur = a?.custom_duration_minutes;
-    const customPrice = a?.custom_price_pence;
-    const effectiveDuration = (customDur ?? s.duration_minutes) as number;
-    /**
-     * A calendar's `custom_duration_minutes` shortens the service without
-     * touching its processing pattern, so the catalogue's blocks can fall
-     * outside the duration this calendar actually books. Unfitted, they failed
-     * validation downstream and were dropped wholesale, which silently held the
-     * practitioner busy for the entire appointment and lost the parallel-booking
-     * capacity the venue had deliberately configured. Trimming keeps as much of
-     * the gap as still fits.
-     */
-    const fittedBlocks = fitProcessingBlocksToDuration(parseProcessingTimeBlocksFromDb(s.processing_time_blocks), {
-      fromDurationMinutes: s.duration_minutes as number,
-      toDurationMinutes: effectiveDuration,
-    }).blocks;
-    return {
-      id: s.id as string,
-      venue_id: venueId,
-      name: s.name as string,
-      description: (s.description as string) ?? null,
-      duration_minutes: effectiveDuration,
-      buffer_minutes: (s.buffer_minutes as number) ?? 0,
-      processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
-      processing_time_blocks: fittedBlocks,
-      price_pence: (customPrice ?? s.price_pence) as number | null,
-      payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
-      deposit_pence: (s.deposit_pence as number | null) ?? null,
-      colour: (s.colour as string) ?? '#3B82F6',
-      is_active: true,
-      sort_order: (s.sort_order as number) ?? 0,
-      created_at: (s.created_at as string) ?? new Date().toISOString(),
-      booking_interval_minutes: (s.booking_interval_minutes as number | undefined) ?? undefined,
-      booking_minute_marks: (s.booking_minute_marks as number[] | null | undefined) ?? null,
-      booking_start_times: (s.booking_start_times as string[] | null | undefined) ?? null,
-      custom_availability_enabled: Boolean(s.custom_availability_enabled),
-      custom_working_hours: parseCustomWorkingHoursFromDb(s.custom_working_hours),
-    };
+    return serviceItemRowToEngineService(s, venueId, a);
   });
   /**
    * Narrowed for SLOT GENERATION only. Existing bookings on this calendar can be

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { resolveCascadingVisitGroupId } from './group-booking-status-sync';
+vi.mock('@/lib/table-management/lifecycle', () => ({
+  applyBookingLifecycleStatusEffects: vi.fn(async () => {}),
+}));
+
+import { applyGroupBookingStatusChange, resolveCascadingVisitGroupId } from './group-booking-status-sync';
 
 /**
  * `group_booking_id` links two different things, and cascading a status change
@@ -106,5 +110,79 @@ describe('resolveCascadingVisitGroupId', () => {
     const db = { from } as unknown as SupabaseClient;
     expect(await resolveCascadingVisitGroupId(db, 'v1', null)).toBeNull();
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Start and Complete are per service (Docs/visit-services-independent-plan.md):
+ * a visit-level Confirm, or Undo confirm, must leave a service that is already
+ * under way exactly where it is.
+ */
+function dbWithUpdates(rows: Array<Record<string, unknown>>) {
+  const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+  const db = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          eq: async () => ({ data: rows, error: null }),
+        }),
+      }),
+      update: (payload: Record<string, unknown>) => ({
+        eq: (_k: string, id: string) => ({
+          eq: async () => {
+            updates.push({ id, payload });
+            return { error: null };
+          },
+        }),
+      }),
+    }),
+  } as unknown as SupabaseClient;
+  return { db, updates };
+}
+
+describe('applyGroupBookingStatusChange on a visit with a started service', () => {
+  const base = { guest_id: 'g1', person_label: null, class_instance_id: null, practitioner_id: 'p1', calendar_id: 'c1', deposit_status: 'Not Required' };
+  const params = (db: SupabaseClient, newStatus: 'Confirmed' | 'Booked', primaryPreviousStatus: string) => ({
+    db,
+    admin: db,
+    venueId: 'v1',
+    groupBookingId: 'g-visit',
+    newStatus,
+    actorId: 'staff-1',
+    primaryBookingId: 'b',
+    primaryPreviousStatus,
+  });
+
+  it('Confirm cascades to the Booked services and leaves the Seated one alone', async () => {
+    const { db, updates } = dbWithUpdates([
+      { id: 'a', status: 'Seated', ...base },
+      { id: 'b', status: 'Booked', ...base },
+      { id: 'c', status: 'Booked', ...base },
+    ]);
+    const updated = await applyGroupBookingStatusChange(params(db, 'Confirmed', 'Booked'));
+    expect(updated.sort()).toEqual(['b', 'c']);
+    expect(updates.map((u) => [u.id, u.payload.status])).toEqual([
+      ['b', 'Confirmed'],
+      ['c', 'Confirmed'],
+    ]);
+  });
+
+  it('Undo confirm leaves a Seated or Completed service alone too', async () => {
+    const { db, updates } = dbWithUpdates([
+      { id: 'a', status: 'Completed', ...base },
+      { id: 'b', status: 'Confirmed', ...base },
+    ]);
+    const updated = await applyGroupBookingStatusChange(params(db, 'Booked', 'Confirmed'));
+    expect(updated).toEqual(['b']);
+    expect(updates).toHaveLength(1);
+  });
+
+  it('still cancels every service, started or not', async () => {
+    const { db, updates } = dbWithUpdates([
+      { id: 'a', status: 'Seated', ...base },
+      { id: 'b', status: 'Booked', ...base },
+    ]);
+    await applyGroupBookingStatusChange({ ...params(db, 'Confirmed', 'Booked'), newStatus: 'Cancelled' as 'Confirmed' });
+    expect(updates.map((u) => u.id).sort()).toEqual(['a', 'b']);
   });
 });

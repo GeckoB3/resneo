@@ -487,3 +487,50 @@ export function snapshotProcessingTimeBlocksForBooking(params: {
     toDurationMinutes: params.bookingDurationMinutes,
   }).blocks;
 }
+
+/**
+ * One shape for "processing that reaches the end of the service".
+ *
+ * Two stored shapes said the same thing: a 120 minute service with a block at
+ * 60 to 120 (the shape the editor produced before 2026-09-08), and a 60 minute
+ * service with a block at 60 to 120 (the shape it produces now). The engine and
+ * the diary already read both as "the practitioner is free from minute 60", but
+ * the booked length (`booking_end_time`, the modify form, the customer's
+ * confirmation) came from `duration_minutes`, so the old shape booked two hours
+ * where the new shape booked one, and the same service copied into a partner
+ * venue behaved differently from its origin. The owner's rule: the service
+ * duration excludes any processing that runs to or beyond its end.
+ *
+ * The first shape becomes the second: the duration shrinks to where the
+ * end-reaching run of blocks starts, and that run (touching blocks count as
+ * one) is merged into a single block from there, so it validates against the
+ * shorter duration. Blocks with free time after them stay where they are.
+ * Total span (duration plus tail) is unchanged, so nothing about chaining,
+ * hours gates or busy time moves.
+ */
+export function canonicalServiceShape(params: {
+  durationMinutes: number;
+  processingBlocks: ProcessingTimeBlock[] | null | undefined;
+}): { durationMinutes: number; processingBlocks: ProcessingTimeBlock[]; changed: boolean } {
+  const duration = Math.max(0, params.durationMinutes);
+  const blocks = params.processingBlocks ?? [];
+  if (blocks.length === 0) return { durationMinutes: duration, processingBlocks: blocks, changed: false };
+  const activeEnd = processingActiveEndMinutes(blocks, duration);
+  if (activeEnd >= duration || activeEnd < PROCESSING_BLOCK_MIN_MINUTES) {
+    return { durationMinutes: duration, processingBlocks: blocks, changed: false };
+  }
+  const sorted = [...blocks].sort((a, b) => a.start_minute - b.start_minute);
+  const middle = sorted.filter((b) => b.start_minute < activeEnd);
+  const run = sorted.filter((b) => b.start_minute >= activeEnd);
+    const runEnd = Math.max(...run.map((b) => b.start_minute + b.duration_minutes));
+  // The merged tail must still pass validation; a longer one is left as stored.
+  if (runEnd - activeEnd > PROCESSING_TAIL_MAX_MINUTES) {
+    return { durationMinutes: duration, processingBlocks: blocks, changed: false };
+  }
+  const merged: ProcessingTimeBlock = {
+    ...run[0]!,
+    start_minute: activeEnd,
+    duration_minutes: runEnd - activeEnd,
+  };
+  return { durationMinutes: activeEnd, processingBlocks: [...middle, merged], changed: true };
+}

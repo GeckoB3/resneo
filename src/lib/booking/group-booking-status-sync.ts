@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isServiceLevelStatus } from '@/lib/booking/visit-status-scope';
 import { canTransitionBookingStatus, type BookingStatus } from '@/lib/table-management/booking-status';
 import { applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
 
@@ -188,9 +189,20 @@ export async function applyGroupBookingStatusChange(
 
   const updatedIds: string[] = [];
 
-  for (const row of siblings) {
+    for (const row of siblings) {
+    // Start and Complete are per service: a Confirm or Undo confirm on the
+    // visit must not pull a service that is already under way (or done) back
+    // to a booking-level status.
+    if (
+      row.id !== params.primaryBookingId &&
+      isServiceLevelStatus(row.status) &&
+      (newStatus === 'Booked' || newStatus === 'Confirmed')
+    ) {
+      continue;
+    }
     const payload = buildStatusPatchPayloadForRow(row, newStatus, { actualDepartedTime });
     if (!payload) continue;
+
 
     const previousStatus = row.status;
     const { error } = await db

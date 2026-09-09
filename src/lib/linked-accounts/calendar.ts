@@ -104,6 +104,9 @@ export interface LinkedBooking {
   experienceEventId?: string | null;
   classInstanceId?: string | null;
   eventSessionId?: string | null;
+  /** Shared by the services of one visit (or the people of one party, with `personLabel`). */
+  groupBookingId?: string | null;
+  personLabel?: string | null;
 }
 
 export interface LinkedService {
@@ -203,6 +206,8 @@ export function linkedBookingToGridBooking(
   experience_event_id?: string | null;
   class_instance_id?: string | null;
   event_session_id?: string | null;
+  group_booking_id?: string | null;
+  person_label?: string | null;
   source?: string | null;
   _linkedOwnerVenueId: string;
   _linkedColumnKey: string;
@@ -250,6 +255,8 @@ export function linkedBookingToGridBooking(
     experience_event_id: lb.experienceEventId ?? null,
     class_instance_id: lb.classInstanceId ?? null,
     event_session_id: lb.eventSessionId ?? null,
+    group_booking_id: lb.groupBookingId ?? null,
+    person_label: lb.personLabel ?? null,
     source: lb.source ?? null,
     _linkedOwnerVenueId: venueId,
     _linkedColumnKey: columnKey,

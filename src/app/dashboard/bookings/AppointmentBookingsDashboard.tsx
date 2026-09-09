@@ -16,7 +16,11 @@ import {
   resolveInitialGroupVisitBookings,
   warmGroupVisitBookings,
 } from '@/lib/booking/group-visit-bookings';
-import { collapseMultiServiceVisits, resolveBookingListBarSchedule } from '@/lib/booking/booking-list-row-schedule';
+import {
+  collapseMultiServiceVisits,
+  resolveBookingListBarSchedule,
+  type VisitListLineMarks,
+} from '@/lib/booking/booking-list-row-schedule';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from './BookingDetailPanel';
 import { expandedBookingRowShellClass } from '@/app/dashboard/bookings/booking-expand-accordion-classes';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
@@ -181,7 +185,7 @@ interface LinkedRowMeta {
   booking: LinkedBooking;
 }
 
-type DashboardRegistryRow = RegistryAppointment & { _linked?: LinkedRowMeta };
+type DashboardRegistryRow = RegistryAppointment & { _linked?: LinkedRowMeta } & VisitListLineMarks;
 
 function isDashboardLinkedRow(b: RegistryAppointment): boolean {
   return Boolean((b as DashboardRegistryRow)._linked);
@@ -230,6 +234,10 @@ function linkedBookingToDashboardRow(
     event_session_id: lb.eventSessionId ?? null,
     resource_id: lb.resourceId ?? null,
     booking_item_name: timeOnly ? null : (lb.serviceName ?? null),
+    // A visit's services share a group id; the panel reads its siblings from the
+    // owner venue with it (and a party's rows carry a person label instead).
+    group_booking_id: lb.groupBookingId ?? null,
+    person_label: lb.personLabel ?? null,
     _linked: {
       sourceVenueId: venue.venueId,
       sourceVenueName: venue.venueName,
@@ -1488,6 +1496,18 @@ export function AppointmentBookingsDashboard({
                   timeRangeLabel
                 )}
               </span>
+                            {b.visit_spans_days || b.visit_rest_hidden ? (
+                <span
+                  className="inline-flex shrink-0 items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                  title={
+                    b.visit_spans_days
+                      ? 'This line is one day of a visit. The rest of the visit is booked for another day.'
+                      : 'This line is one service of a visit. The rest of the visit is not shown in this view.'
+                  }
+                >
+                  Part of a visit
+                </span>
+              ) : null}
               <span
                 className={
                   expanded

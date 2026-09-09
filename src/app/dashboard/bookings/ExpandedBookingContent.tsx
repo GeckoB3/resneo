@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isServiceLevelStatus, statusChangeCascadesAcrossVisit } from '@/lib/booking/visit-status-scope';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -105,6 +106,7 @@ import {
   formatGroupVisitSegmentDurationLabel,
   invalidateGroupVisitBookings,
   groupVisitSegmentPillStatus,
+  mapGroupVisitListSeed,
   mergeGroupVisitRowsWithSeeds,
   mergePreferLaterGroupVisitRows,
   multiServiceVisitDatePhrase,
@@ -480,6 +482,13 @@ export function ExpandedBookingContent({
   ]);
 
   const detailCache = useOptionalDashboardDetailCache();
+  /**
+   * A booking on a linked venue's calendar keeps its siblings at that venue,
+   * so they are read through it; the own-venue query would find none and the
+   * panel would show no visit at all. `venueId` is the owner venue whenever
+   * the caller marks the booking linked.
+   */
+  const visitRowsOwnerVenueId = linkedAct != null ? venueId : null;
   const resolvedGroupBookingId =
     booking.group_booking_id ??
     (detailCache?.peekVenueBookingDetail(booking.id) as { group_booking_id?: string | null } | undefined)
@@ -509,16 +518,17 @@ export function ExpandedBookingContent({
     }
 
     let cancelled = false;
-    void fetchGroupVisitBookings(resolvedGroupBookingId).then((rows) => {
-      if (cancelled) return;
-      setGroupVisitBookings(rows);
-      setGroupVisitLoading(false);
-    });
-
+    void fetchGroupVisitBookings(resolvedGroupBookingId, { ownerVenueId: visitRowsOwnerVenueId }).then(
+      (rows) => {
+        if (cancelled) return;
+        setGroupVisitBookings(rows);
+        setGroupVisitLoading(false);
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, [resolvedGroupBookingId, initialGroupVisitBookings]);
+  }, [resolvedGroupBookingId, initialGroupVisitBookings, visitRowsOwnerVenueId]);
 
   const effectiveBooking = useMemo(
     () => ({ ...booking, ...rowOverlay }),
@@ -621,6 +631,49 @@ export function ExpandedBookingContent({
   const visitInferredModel = booking.inferred_booking_model ?? inferBookingRowModel(booking);
   const visitTableStyle = visitInferredModel === 'table_reservation';
 
+  /**
+   * Start / Complete (and their undos) for ONE service of a visit. Posts to that row,
+   * shows it straight away, then re-reads the visit; when the row is the one this
+   * panel opened on, the panel's own status is refreshed too.
+   */
+  const [segmentActionPending, setSegmentActionPending] = useState<string | null>(null);
+  const runSegmentStatusAction = useCallback(
+    async (segmentId: string, status: BookingStatus) => {
+      if (!resolvedGroupBookingId) return;
+      setSegmentActionPending(segmentId);
+      setInlineActionError(null);
+      setGroupVisitBookings((prev) => {
+        const next = prev.map((row) => (row.id === segmentId ? { ...row, status } : row));
+        primeGroupVisitBookings(resolvedGroupBookingId, next);
+        return next;
+      });
+      try {
+        const res = await fetch(`/api/venue/bookings/${segmentId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          setInlineActionError(payload.error ?? 'Could not update this service');
+        }
+      } catch {
+        setInlineActionError('Could not update this service');
+      } finally {
+        setSegmentActionPending(null);
+        const rows = await fetchGroupVisitBookings(resolvedGroupBookingId, {
+          ownerVenueId: visitRowsOwnerVenueId,
+        });
+        if (rows.length > 0) {
+          setGroupVisitBookings(rows);
+          primeGroupVisitBookings(resolvedGroupBookingId, rows);
+        }
+        if (segmentId === booking.id) onDetailUpdated();
+      }
+    },
+    [booking.id, onDetailUpdated, resolvedGroupBookingId, visitRowsOwnerVenueId],
+  );
+
   const multiServiceVisitCard = useMemo(() => {
     if (groupVisitFetchPending) {
       return (
@@ -640,18 +693,61 @@ export function ExpandedBookingContent({
         </SectionCard>
       );
     }
-    if (multiServiceVisitSegmentsForDisplay.length === 0) return null;
+    /**
+     * Every appointment gets the card, so the panel reads the same whether the
+     * client booked one service or four: a single service is listed as the one
+     * row it is. Start and Complete stay in the header for it (they would be
+     * the same buttons twice); a visit's rows carry their own. Tables, classes
+     * and events are not services and keep their own sections.
+     */
+    const isServiceVisitCard = multiServiceVisitSegments.length > 1;
+    const singleServiceRow: GroupVisitBookingRow | null =
+      !isServiceVisitCard &&
+      !isGroupPeopleVisit &&
+      !visitTableStyle &&
+      !effectiveBooking.class_instance_id &&
+      !effectiveBooking.experience_event_id
+        ? mapGroupVisitListSeed({
+            id: effectiveBooking.id,
+            booking_time: effectiveBooking.booking_time,
+            booking_end_time: effectiveBooking.booking_end_time ?? null,
+            estimated_end_time: effectiveBooking.estimated_end_time ?? null,
+            status: String(effectiveBooking.status),
+            group_booking_id: effectiveBooking.group_booking_id ?? null,
+            person_label: null,
+            booking_item_name: effectiveBooking.booking_item_name ?? effectiveBooking.service_name ?? null,
+            service_variant_name: effectiveBooking.service_variant_name ?? null,
+            booking_addon_labels: effectiveBooking.booking_addon_labels ?? [],
+          })
+        : null;
+    const cardSegments = isServiceVisitCard
+      ? multiServiceVisitSegmentsForDisplay
+      : singleServiceRow
+        ? [singleServiceRow]
+        : [];
+    if (cardSegments.length === 0) return null;
     const visitDatePhrase = multiServiceVisitDatePhrase(booking.booking_date);
+    /** Start, Complete, Undo start, Undo complete: the service-level lifecycle of one row. */
+    const segmentLifecycleActions = (status: string): Array<{ label: string; target: BookingStatus }> => {
+      if (status === 'Booked' || status === 'Confirmed') return [{ label: 'Start', target: 'Seated' }];
+      if (status === 'Seated') {
+        return [
+          { label: 'Undo start', target: 'Confirmed' },
+          { label: 'Complete', target: 'Completed' },
+        ];
+      }
+      if (status === 'Completed') return [{ label: 'Undo complete', target: 'Seated' }];
+      return [];
+    };
     return (
       <SectionCard className="border-brand-200 bg-brand-50/20">
         <SectionCard.Body className="p-4">
           <p className="text-xs font-semibold text-brand-900">Services in this visit</p>
           <p className="mt-0.5 text-[11px] text-slate-600">
-            {multiServiceVisitSegmentsForDisplay.length} consecutive{' '}
-            {multiServiceVisitSegmentsForDisplay.length === 1 ? 'service' : 'services'}{' '}
+            {cardSegments.length} {cardSegments.length === 1 ? 'service' : 'services'}{' '}
             {visitDatePhrase}
             {(() => {
-              const visitTotal = multiServiceVisitSegmentsForDisplay.reduce(
+              const visitTotal = cardSegments.reduce(
                 (sum, seg) => sum + (seg.duration_minutes ?? 0),
                 0,
               );
@@ -660,7 +756,7 @@ export function ExpandedBookingContent({
             .
           </p>
           <ul className="mt-3 space-y-2">
-            {multiServiceVisitSegmentsForDisplay.map((seg) => {
+            {cardSegments.map((seg) => {
               const offeringLine = expandedBookingOfferingLine({
                 serviceName: seg.booking_item_name,
                 variantName: seg.service_variant_name,
@@ -692,6 +788,21 @@ export function ExpandedBookingContent({
                           {bookingStatusDisplayLabel(seg.status, visitTableStyle)}
                         </BookingStatusPill>
                       </div>
+                      {isServiceVisitCard && segmentLifecycleActions(seg.status).length > 0 ? (
+                        <div className="mt-1.5 flex justify-end gap-1">
+                          {segmentLifecycleActions(seg.status).map((action) => (
+                            <button
+                              key={action.target}
+                              type="button"
+                              disabled={segmentActionPending !== null}
+                              onClick={() => void runSegmentStatusAction(seg.id, action.target)}
+                              className={`rounded-md px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${bookingTransitionButtonSurface(action.target)}`}
+                            >
+                              {action.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </li>
@@ -704,9 +815,14 @@ export function ExpandedBookingContent({
   }, [
     booking.booking_date,
     booking.id,
+    effectiveBooking,
     groupVisitFetchPending,
+    isGroupPeopleVisit,
+    multiServiceVisitSegments.length,
     multiServiceVisitSegmentsForDisplay,
     visitTableStyle,
+    segmentActionPending,
+    runSegmentStatusAction,
   ]);
   const displayLinkedBookings = isGroupPeopleVisit
     ? groupVisitBookings.filter((b) => b.id !== booking.id && b.person_label?.trim())
@@ -911,7 +1027,9 @@ export function ExpandedBookingContent({
   const refreshGroupVisitSegments = useCallback(async () => {
     if (!resolvedGroupBookingId) return;
     invalidateGroupVisitBookings(resolvedGroupBookingId);
-    const rows = await fetchGroupVisitBookings(resolvedGroupBookingId);
+    const rows = await fetchGroupVisitBookings(resolvedGroupBookingId, {
+      ownerVenueId: visitRowsOwnerVenueId,
+    });
     setGroupVisitBookings((prev) => {
       const merged = mergePreferLaterGroupVisitRows(prev, rows);
       if (merged.length > 0) {
@@ -919,7 +1037,7 @@ export function ExpandedBookingContent({
       }
       return merged;
     });
-  }, [resolvedGroupBookingId]);
+  }, [resolvedGroupBookingId, visitRowsOwnerVenueId]);
 
   const patchBookingQuick = async (body: Record<string, unknown>, loadingKey: string) => {
     setInlineActionLoading(loadingKey);
@@ -1038,7 +1156,10 @@ export function ExpandedBookingContent({
   const revertFromBookingStatus = BOOKING_REVERT_ACTIONS[effectiveBooking.status as BookingStatus];
   /** Suppress rarely-used Booked → Pending (“Mark pending”) in this dense inline bar. */
   const revertAction =
-    revertFromBookingStatus?.target === 'Pending' || canUndoNoShow
+    revertFromBookingStatus?.target === 'Pending' ||
+    canUndoNoShow ||
+    // Undo start / undo complete are per service on a visit (see forwardActions).
+    (multiServiceVisitSegments.length > 1 && isServiceLevelStatus(effectiveBooking.status))
       ? undefined
       : revertFromBookingStatus;
   const forwardPrimaryLabel = (target: BookingStatus, defaultLabel: string) => {
@@ -1058,6 +1179,12 @@ export function ExpandedBookingContent({
     return revertAction.label;
   };
 
+  /**
+   * A multi-service visit: Start and Complete belong to each service (buttons on the
+   * "Services in this visit" card), while Confirm, Arrived, Cancel and No-Show stay
+   * visit-wide here. Docs/visit-services-independent-plan.md.
+   */
+  const isServiceVisit = multiServiceVisitSegments.length > 1;
   const forwardActions = (
     [
       BOOKING_PRIMARY_ACTIONS.Pending,
@@ -1067,6 +1194,7 @@ export function ExpandedBookingContent({
     ] as Array<{ label: string; target: BookingStatus } | undefined>
   ).reduce<Array<{ label: string; target: BookingStatus }>>((actions, action) => {
     if (!action || !canTransitionBookingStatus(effectiveBooking.status, action.target)) return actions;
+    if (isServiceVisit && isServiceLevelStatus(action.target)) return actions;
     /** Do not treat lifecycle reverts as “forward” primaries (e.g. Confirmed→Booked reused Pending’s {Confirm,Booked} row). */
     if (isRevertTransition(effectiveBooking.status as BookingStatus, action.target)) return actions;
     if (actions.some((existing) => existing.target === action.target)) return actions;
@@ -1103,7 +1231,11 @@ export function ExpandedBookingContent({
     async (status: BookingStatus) => {
       setStatusActionPending(true);
       setInlineActionError(null);
-      if (resolvedGroupBookingId && !isGroupPeopleVisit) {
+      if (
+        resolvedGroupBookingId &&
+        !isGroupPeopleVisit &&
+        statusChangeCascadesAcrossVisit(effectiveBooking.status, status)
+      ) {
         setGroupVisitBookings((prev) => {
           if (prev.length <= 1) return prev;
           const next = applyStatusToAllGroupVisitRows(prev, status);
@@ -2396,7 +2528,9 @@ export function ExpandedBookingContent({
                   groupBookingId: resolvedGroupBookingId,
                   segments: multiServiceVisitSegments.map((seg) => ({
                     id: seg.id,
+                    booking_date: seg.booking_date ?? booking.booking_date,
                     booking_time: seg.booking_time,
+                    calendar_id: seg.calendar_id ?? null,
                     booking_end_time: seg.booking_end_time,
                     booking_item_name: seg.booking_item_name,
                     // C10 — the raw row status, so the modify form can drop

@@ -1170,7 +1170,7 @@ function BookingBarPieces({
 }
 
 /** Holds the 4px the glass edge used to take in the row, so the grip and text keep their place. */
-/** "Visit 1/2": one service of a multi-service visit, drawn as its own bar. */
+/** "1/2": one service of a multi-service visit, drawn as its own bar. */
 function VisitChip({ label }: { label: string }) {
   return (
     <span

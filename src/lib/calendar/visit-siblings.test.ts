@@ -27,7 +27,7 @@ describe('visitSiblingIndex', () => {
     expect(idx.get('b')?.index).toBe(1);
     expect(idx.get('c')?.index).toBe(2);
     expect(idx.has('x')).toBe(false);
-    expect(visitChipLabel(idx.get('b')!)).toBe('Visit 2/3');
+    expect(visitChipLabel(idx.get('b')!)).toBe('2/3');
   });
 
   it('ignores parties, class carts, cancelled services and lone rows', () => {

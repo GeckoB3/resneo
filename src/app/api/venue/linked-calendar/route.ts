@@ -460,7 +460,7 @@ export async function GET(request: NextRequest) {
           classInstanceId,
           eventSessionId: (b.event_session_id as string | null) ?? null,
           // A visit's services each draw their own bar; the group id is what lets the
-          // viewer's grid chip them "Visit 1/2" and colour them alike. A party's rows
+          // viewer's grid chip them "1/2" and colour them alike. A party's rows
           // carry a person label and are not a visit.
           groupBookingId: (b.group_booking_id as string | null) ?? null,
           personLabel: (b.person_label as string | null) ?? null,

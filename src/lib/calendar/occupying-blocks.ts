@@ -16,15 +16,13 @@
  * shipped help article promises it is allowed with a note rather than a refusal
  * (SA-H5).
  *
- * `venue_amended_hours` is the strangest of the four: it marks the window the
- * venue IS open on an amended day. Treating it as occupied blocked the one part
- * of the day that was actually working, while the guest engine sold that same
- * window (SA-H3). A closure day then locked staff out of the bookings already
- * sitting on it (SA-M2).
+ * A closure day used to lock staff out of the bookings already sitting on it
+ * (SA-M2). Amended hours produce no block at all: the diary draws an amended
+ * day exactly as a normal day, with closed stripes outside the amended window,
+ * so the open part is plain grid (SA-H3).
  */
 const NON_OCCUPYING_BLOCK_TYPES = new Set([
   'venue_closed',
-  'venue_amended_hours',
   'practitioner_closed',
   'break',
 ]);
@@ -44,10 +42,7 @@ export function isOccupyingBlock(blockType: string | undefined): boolean {
 
 /**
  * Whether a block means "not normally worked", for the amber outside-hours note.
- *
- * Amended hours are excluded: landing inside the window a venue opened
- * specially is not outside hours, it is the most inside-hours a slot gets.
  */
 export function isNonWorkingBlock(blockType: string | undefined): boolean {
-  return !isOccupyingBlock(blockType) && blockType !== 'venue_amended_hours';
+  return !isOccupyingBlock(blockType);
 }

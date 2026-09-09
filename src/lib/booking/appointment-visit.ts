@@ -6,15 +6,15 @@
  * opened a single row: a three service visit showed one service's time and one
  * service's duration, and the bar had no duration control at all.
  *
- * Everything that presents or edits a visit reads through here, so the rows stay
- * an implementation detail (as they already are for price, which has been
- * visit-level all along).
+ * Everything that PRESENTS a visit reads through here, so the rows stay an
+ * implementation detail (as they already are for price, which has been
+ * visit-level all along). Nothing edits through here any more: each service
+ * keeps its own schedule (Docs/visit-services-independent-plan.md), and the
+ * gaps this module reports are described, never closed.
  *
- * See Docs/multi-service-visit-plan.md.
+ * See Docs/multi-service-visit-plan.md for where it came from.
  */
 
-/** The smallest a service may be, matching the appointment engine's floor. */
-import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appointment-engine';
 
 export interface VisitServiceRow {
   id: string;
@@ -179,91 +179,4 @@ export function resolveAppointmentVisit(
     totalMinutes: spanMinutes(startHm, endHm),
     serviceMinutes: services.reduce((sum, s) => sum + s.durationMinutes, 0),
   };
-}
-
-/** One service's new schedule after a visit-level edit. */
-export interface VisitServiceSchedule {
-  id: string;
-  startHm: string;
-  endHm: string;
-  durationMinutes: number;
-}
-
-/**
- * Re-lays a visit's services end to end, preserving each configured gap.
- *
- * Every edit goes through this, which is what stops a hole appearing: shortening
- * a service used to leave the ones after it where they were, so the Fri 14 Aug
- * visit ended up with 15 minutes of dead time between Olaplex and Toner.
- */
-export function resequenceVisit(
-  visit: AppointmentVisit,
-  durations: ReadonlyMap<string, number>,
-  startHm: string = visit.startHm,
-): VisitServiceSchedule[] {
-  let cursor = hmToMinutes(startHm);
-  return visit.services.map((s) => {
-    const duration = Math.max(
-      MIN_APPOINTMENT_CORE_DURATION_MINUTES,
-      Math.round(durations.get(s.id) ?? s.durationMinutes),
-    );
-    const start = cursor;
-    cursor = start + duration + s.expectedGapAfterMinutes;
-    return {
-      id: s.id,
-      startHm: minutesToHm(start),
-      endHm: minutesToHm(start + duration),
-      durationMinutes: duration,
-    };
-  });
-}
-
-/** The shortest a visit can be: every service at its floor, gaps preserved. */
-export function minimumVisitMinutes(visit: AppointmentVisit): number {
-  const gaps = visit.services.reduce((sum, s) => sum + s.expectedGapAfterMinutes, 0);
-  return visit.services.length * MIN_APPOINTMENT_CORE_DURATION_MINUTES + gaps;
-}
-
-/**
- * Distributes a new total wall-clock span across a visit's services.
- *
- * Growth always extends the tail. Shrinkage comes off the tail first, and once
- * that reaches its floor it cascades backwards through the earlier services,
- * each down to its own floor. Configured gaps are never consumed: they belong to
- * the services' buffer and processing settings, and eating them would silently
- * delete a window the service actually needs.
- */
-export function distributeVisitDuration(
-  visit: AppointmentVisit,
-  requestedTotalMinutes: number,
-): Map<string, number> {
-  const durations = new Map<string, number>(
-    visit.services.map((s) => [s.id, s.durationMinutes]),
-  );
-  const gaps = visit.services.reduce((sum, s) => sum + s.expectedGapAfterMinutes, 0);
-  const targetServiceMinutes = Math.max(
-    visit.services.length * MIN_APPOINTMENT_CORE_DURATION_MINUTES,
-    Math.round(requestedTotalMinutes) - gaps,
-  );
-
-  let delta = targetServiceMinutes - visit.serviceMinutes;
-  if (delta === 0) return durations;
-
-  const tail = visit.services[visit.services.length - 1]!;
-  if (delta > 0) {
-    durations.set(tail.id, tail.durationMinutes + delta);
-    return durations;
-  }
-
-  // Shrinking: tail first, then backwards, each service to its own floor.
-  for (let i = visit.services.length - 1; i >= 0 && delta < 0; i -= 1) {
-    const s = visit.services[i]!;
-    const current = durations.get(s.id)!;
-    const canGive = current - MIN_APPOINTMENT_CORE_DURATION_MINUTES;
-    if (canGive <= 0) continue;
-    const take = Math.min(canGive, -delta);
-    durations.set(s.id, current - take);
-    delta += take;
-  }
-  return durations;
 }

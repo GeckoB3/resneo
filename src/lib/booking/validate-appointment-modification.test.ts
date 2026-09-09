@@ -123,14 +123,16 @@ describe('the break override reaches the engine (SA-H5)', () => {
     expect(dryRun).toContain("allowDuringBreaks: parsed.data.allow_during_breaks === true");
   });
 
-  it('is sent by the diary on a move, a visit move and a resize', () => {
+  it('is sent by the diary on a move and a resize', () => {
     const view = read('src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx');
     // The diary has to know a break was crossed to say so; the closure helper
     // cannot answer this, because the server treats the two permissions apart.
     expect(view).toContain('windowCrossesBreakBlock(');
     const sent = view.match(/allow_during_breaks: opts\?\.allowDuringBreaks === true/g) ?? [];
-    // The move PATCH, the resize PATCH, and the visit dry run.
-    expect(sent).toHaveLength(3);
+    // The move PATCH and the resize PATCH. The diary no longer moves a visit as
+    // one (each service is its own bar; Docs/visit-services-independent-plan.md),
+    // so the visit dry run it used to send is gone with it.
+    expect(sent).toHaveLength(2);
   });
 
   /**
@@ -218,21 +220,22 @@ describe('staff edits are always allowed outside hours', () => {
     return readFileSync(path.join(process.cwd(), rel), 'utf8');
   }
 
-  it('is sent by the diary on every move, resize, visit dry run and undo, never conditionally', () => {
+  it('is sent by the diary on every move, resize and undo, never conditionally', () => {
     const view = read('src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx');
     expect(view).not.toContain('allow_outside_hours: opts?.allowOutsideHours');
     expect(view).not.toContain('allowOutsideHours?: boolean');
     const sent = view.match(/allow_outside_hours: true,/g) ?? [];
-    // Move, resize, visit dry run, visit resize; undo of a visit (dry run and
-    // PATCH), undo of a resize, undo of a move.
-    expect(sent).toHaveLength(8);
+    // Move, resize, undo of a resize, undo of a move. The visit-level paths
+    // (visit dry run, visit resize, visit undo) went with the merged bar.
+    expect(sent).toHaveLength(4);
   });
 
   it('is sent by the modify form on its check, its save, its undo and both visit endpoints', () => {
     const form = read('src/components/booking/StaffAppointmentModifyForm.tsx');
     const sent = form.match(/allow_outside_hours: true,/g) ?? [];
-    // buildPatchPayload (save and undo), the single dry run, the visit dry run,
-    // the visit save, the visit undo, the services body.
+    // buildPatchPayload (save and undo), the single dry run, the visit's
+    // per-service body and its shift body (each used by the dry run and the
+    // save), the visit undo, the services body.
     expect(sent).toHaveLength(6);
   });
 

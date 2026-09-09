@@ -61,6 +61,7 @@ export function resolveStaffVisitChargeDiscretion(input: {
     isStaffSource: true,
     isWalkIn,
     chargeDeposits: !isWalkIn && (input.require_deposit ?? false),
-    holdCards: input.require_card_hold ?? true,
+    // Omitted means no hold: staff booking for a guest more often waive it than ask for it.
+    holdCards: input.require_card_hold ?? false,
   };
 }

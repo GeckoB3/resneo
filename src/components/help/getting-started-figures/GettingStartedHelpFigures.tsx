@@ -186,7 +186,13 @@ function BusinessHoursScreenSvg() {
    3. Calendar Availability - the four tabs + weekly hours for one calendar.
    ───────────────────────────────────────────────────────────────────────── */
 function AvailabilityTabsSvg() {
-  const tabs = ['Calendars', 'Availability', 'Breaks', 'Closures'];
+  // Widths follow the labels: the last tab is the long one.
+  const tabs = [
+    { t: 'Calendars', w: 98 },
+    { t: 'Availability', w: 104 },
+    { t: 'Breaks', w: 80 },
+    { t: 'Closures & amended hours', w: 158 },
+  ];
   const activeTab = 'Availability';
   const hours = [
     { d: 'Mon', t: '09:00 – 17:00' },
@@ -200,15 +206,14 @@ function AvailabilityTabsSvg() {
       viewBox="0 0 560 430"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The Calendar Availability screen with four tabs (Calendars, Availability, Breaks, Closures), a calendar picker, an information note about how hours combine, a weekly hours list, and a Save Working Hours button."
+      aria-label="The Calendar Availability screen with four tabs (Calendars, Availability, Breaks, Closures & amended hours), a calendar picker, an information note about how hours combine, a weekly hours list, and a Save Working Hours button."
     >
       <text x="20" y="32" fill={slateDark} fontSize="16" fontWeight="700">Availability Settings</text>
 
       {/* tab bar */}
       <rect x="20" y="48" width="520" height="38" rx="10" fill="#f1f5f9" />
-      {tabs.map((t, i) => {
-        const w = 124;
-        const tx = 26 + i * 128;
+      {tabs.map(({ t, w }, i) => {
+        const tx = 26 + tabs.slice(0, i).reduce((sum, tab) => sum + tab.w + 8, 0);
         const active = t === activeTab;
         return (
           <g key={t}>
@@ -397,7 +402,7 @@ const FIGURE_COPY: Record<string, { title: string; caption: string; node: ReactN
   },
   'availability-tabs': {
     title: 'Calendar Availability',
-    caption: 'Four tabs per calendar: Calendars, Availability (weekly hours), Breaks, and Closures.',
+    caption: 'Four tabs per calendar: Calendars, Availability (weekly hours), Breaks, and Closures & amended hours.',
     node: <AvailabilityTabsSvg />,
   },
   'closures-form': {

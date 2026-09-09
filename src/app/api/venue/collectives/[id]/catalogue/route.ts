@@ -10,7 +10,8 @@ import {
 import { loadCollectiveAccess } from '@/lib/linked-accounts/collective-access';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { loadCollectiveMemberImportSources } from '@/lib/linked-accounts/collective-page-config';
-import { ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
+import { ensureAddonGroupLinksForService, ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
+import { detachCopy, linkCopyToOrigin, syncOneCopy } from '@/lib/linked-accounts/service-sync';
 import { groupServicesForBulkAdd } from '@/lib/linked-accounts/group-services-for-bulk-add';
 import { resolveCollectiveCategoryId } from '@/lib/linked-accounts/collective-categories';
 import {
@@ -529,6 +530,60 @@ async function applyCatalogueAction(
         userId,
       );
       if (!res.ok) return res;
+      return { ok: true };
+    }
+
+    case 'sync_provider':
+    case 'detach_provider': {
+      // A member's copy following the origin (Docs/collective-service-sync-plan.md). Host
+      // only, like every action here; the copy is addressed through its provider row so a
+      // host can only reach services the combined page actually lists.
+      if (!input.providerId) return { ok: false, error: 'Provider not found.', status: 404 };
+      const provider = await loadProviderInCollective(admin, collectiveId, input.providerId);
+      if (!provider) return { ok: false, error: 'Provider not found.', status: 404 };
+      const { data: providerRow } = await admin
+        .from('collective_service_providers')
+        .select('source_service_id')
+        .eq('id', provider.id)
+        .maybeSingle();
+      const copyId = (providerRow as { source_service_id?: string } | null)?.source_service_id ?? null;
+      if (!copyId) return { ok: false, error: 'Provider not found.', status: 404 };
+      const res =
+        input.action === 'sync_provider'
+          ? await syncOneCopy(admin, copyId, { force: input.forceSync === true, source: 'PATCH catalogue sync_provider' })
+          : await detachCopy(admin, copyId);
+      if (!res.ok) return { ok: false, error: res.error, status: 409 };
+      return { ok: true };
+    }
+
+    case 'link_provider': {
+      // "Link to {origin} and update": the explicit, per-copy, retroactive action. The origin
+      // is the same one the tick copies from, so a linked copy and a fresh copy agree.
+      if (!input.providerId) return { ok: false, error: 'Provider not found.', status: 404 };
+      const provider = await loadProviderInCollective(admin, collectiveId, input.providerId);
+      if (!provider) return { ok: false, error: 'Provider not found.', status: 404 };
+      const { data: providerRow } = await admin
+        .from('collective_service_providers')
+        .select('source_service_id')
+        .eq('id', provider.id)
+        .maybeSingle();
+      const copyId = (providerRow as { source_service_id?: string } | null)?.source_service_id ?? null;
+      if (!copyId) return { ok: false, error: 'Provider not found.', status: 404 };
+      const template = await loadOfferingTemplate(admin, provider.itemId);
+      if (!template?.origin) return { ok: false, error: 'This offering has no original service to link to.', status: 409 };
+      if (template.origin.serviceId === copyId) {
+        return { ok: false, error: 'That service is the original.', status: 409 };
+      }
+      const linked = await linkCopyToOrigin(admin, {
+        copyServiceId: copyId,
+        originServiceId: template.origin.serviceId,
+        source: 'PATCH catalogue link_provider',
+      });
+      if (!linked.ok) return { ok: false, error: linked.error, status: 409 };
+      const addons = await ensureAddonGroupLinksForService(admin, provider.venue_id, copyId, template.addonGroups);
+      if (!addons) {
+        return { ok: false, error: 'The service was linked and updated, but its add-ons could not all be added. Check the venue’s add-ons.', status: 409 };
+      }
       return { ok: true };
     }
 

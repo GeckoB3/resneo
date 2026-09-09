@@ -1,3 +1,4 @@
+import { canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
@@ -105,7 +106,7 @@ async function loadLinkedResourcesForCalendar(
 
 /** Same column set as staff calendar list (`view=calendar`). */
 const LINKED_CALENDAR_BOOKING_SELECT =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, resource_id, booking_end_time, experience_event_id, class_instance_id, event_session_id, service_id';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, resource_id, booking_end_time, experience_event_id, class_instance_id, event_session_id, service_id, group_booking_id, person_label';
 
 /**
  * GET /api/venue/linked-calendar — bookings and practitioners of every venue
@@ -245,13 +246,19 @@ export async function GET(request: NextRequest) {
           schema: 'service_item',
           parentIds: serviceIds,
         });
-        services = (serviceRows ?? []).map((s) => ({
+        services = (serviceRows ?? []).map((s) => {
+          // Canonical shape, as the owner's own diary reads it (see canonicalServiceShape).
+          const canon = canonicalServiceShape({
+            durationMinutes: (s.duration_minutes as number) ?? 60,
+            processingBlocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
+          });
+          return {
           id: s.id as string,
           name: (s.name as string) ?? 'Service',
           isActive: s.is_active !== false,
-          durationMinutes: (s.duration_minutes as number) ?? 60,
+          durationMinutes: canon.durationMinutes,
           bufferMinutes: (s.buffer_minutes as number) ?? 0,
-          processingTimeBlocks: (s.processing_time_blocks as LinkedService['processingTimeBlocks']) ?? [],
+          processingTimeBlocks: canon.processingBlocks,
           colour: (s.colour as string) ?? '#6366f1',
           pricePence: (s.price_pence as number | null) ?? null,
           variants: (variantMap.get(s.id as string) ?? []).map((v) => ({
@@ -259,7 +266,8 @@ export async function GET(request: NextRequest) {
             name: v.name,
             processingTimeBlocks: v.processing_time_blocks,
           })),
-        }));
+          };
+        });
       }
 
       // Bookings are loaded via the admin client once the accepted link grant
@@ -451,6 +459,11 @@ export async function GET(request: NextRequest) {
           experienceEventId,
           classInstanceId,
           eventSessionId: (b.event_session_id as string | null) ?? null,
+          // A visit's services each draw their own bar; the group id is what lets the
+          // viewer's grid chip them "Visit 1/2" and colour them alike. A party's rows
+          // carry a person label and are not a visit.
+          groupBookingId: (b.group_booking_id as string | null) ?? null,
+          personLabel: (b.person_label as string | null) ?? null,
         };
       });
 

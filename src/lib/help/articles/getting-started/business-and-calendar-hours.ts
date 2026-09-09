@@ -95,10 +95,10 @@ Saved entries appear under **Upcoming**. Click one to change it, then click **Sa
 
 If one barber is on holiday but the shop is open, do not use a venue closure. Add a calendar closure instead.
 
-1. Open **Calendar Availability** from the sidebar, then the **Closures** tab. The panel is headed **Calendar closures**.
+1. Open **Calendar Availability** from the sidebar, then the **Closures & amended hours** tab. The panel is headed **Calendar closures and amended hours**.
 2. Admins pick the person or room from the **Calendar** dropdown. Team members see their own calendar.
-3. Click the first day they are away, then the last day, or type the **Start date** and **End date** in the **New block** form.
-4. Leave **Start time (optional)** and **End time (optional)** blank to block the whole day, or fill both in to block just that window on every date in the range.
+3. Click the first day they are away, then the last day, or type the **Start date** and **End date** in the **New entry** form.
+4. Leave **Closed** selected. Leave **Start time (optional)** and **End time (optional)** blank to block the whole day, or fill both in to block just that window on every date in the range.
 5. Pick a **Label (optional)**: **Closed**, **Unavailable** or **Other**. Add a note under **Notes (optional)**, such as "Annual leave".
 6. Admins can tick **Apply to all active calendars** to put the same dates and times on every active calendar at once.
 7. Click **Add to calendar**.
@@ -106,6 +106,16 @@ If one barber is on holiday but the shop is open, do not use a venue closure. Ad
 Everyone else stays bookable as normal. The entry appears under **Upcoming**, marked **All day** or **Part day**. Click it, or its date on the calendar, to edit it, then **Save changes** or **Delete**.
 
 > **Warning:** unlike a venue closure, a calendar closure will not save over an existing booking. If that person already has a booking in the range, you will see a message naming the calendar and the date that ends "Move or cancel it before marking the calendar unavailable." Deal with the booking in your **Calendar** first, then add the closure.
+
+## Giving one person different hours on a date
+
+The same panel does the opposite of a closure. If one stylist wants to work a Saturday they normally have off, or stay late for one evening, do not change their weekly hours.
+
+1. On the **Closures & amended hours** tab, select the date or range on the calendar.
+2. Choose **Working different hours**, then enter the **Open** and **Close** times. These replace the calendar's usual hours on those dates only.
+3. Add a note if you like, then click **Add to calendar**. The entry appears under **Upcoming** marked **Amended hours**.
+
+Your business hours are still the outer boundary: if the venue is closed that day, or closes earlier, the form tells you, and guests cannot book the extra time until you amend the venue's hours for that date too (see above). A closure on the same date wins, so remove it first if there is one.
 
 ## Plan your hours ahead, or work a rotating pattern
 

@@ -8,14 +8,20 @@
  * drift between forms. No em-dashes anywhere in this copy.
  */
 
-import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
+import { CARD_HOLD_LINK_TIMEOUT_HOURS } from '@/lib/booking/card-hold-terms';
 
 /** Switch label (§7.6, exact string). */
 export const STAFF_CARD_HOLD_TOGGLE_LABEL = 'Card hold';
 
-/** Switch sublabel (§7.6, exact string). */
-export const STAFF_CARD_HOLD_TOGGLE_SUBLABEL =
-  'Send a link to the guest to add their card details';
+/** Sublabel while the switch is ON: what the guest gets and when the card is charged. */
+export const STAFF_CARD_HOLD_TOGGLE_SUBLABEL_ON = `On: the guest gets a link to add their card, charged only if they do not show. The booking is cancelled if no card is added within ${CARD_HOLD_LINK_TIMEOUT_HOURS} hours.`;
+/** Sublabel while the switch is OFF (the default): what leaving it off means. */
+export const STAFF_CARD_HOLD_TOGGLE_SUBLABEL_OFF =
+  'Off: no card is taken, so a no-show cannot be charged.';
+/** The sublabel for the switch's current state, so staff can see what each position does. */
+export function staffCardHoldToggleSublabel(checked: boolean): string {
+  return checked ? STAFF_CARD_HOLD_TOGGLE_SUBLABEL_ON : STAFF_CARD_HOLD_TOGGLE_SUBLABEL_OFF;
+}
 
 /** Success toast when the booking was created with a hold requested (§7.6, ASCII hyphen). */
 export const STAFF_CARD_HOLD_CREATED_TOAST = 'Booking created - card request link sent';
@@ -23,10 +29,6 @@ export const STAFF_CARD_HOLD_CREATED_TOAST = 'Booking created - card request lin
 /** Confirmation-screen line for flows that show an inline panel instead of a toast. */
 export const STAFF_CARD_HOLD_LINK_SENT_LINE = 'A card request link was sent to the guest.';
 
-/** Small fee line under the toggle while it is on. */
-export function staffCardHoldFeeLine(feePence: number): string {
-  return `No-show fee up to ${formatCardHoldFeePence(feePence)}`;
-}
 
 /** The selected entity takes a card hold; `feePence` is the fee for the whole booking. */
 export interface StaffCardHoldContext {

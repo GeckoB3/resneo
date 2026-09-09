@@ -20,7 +20,7 @@ import { redactBookingPiiFields } from '@/lib/linked-accounts/redact-booking-pii
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
  * Optional: `guest=<uuid>&guest_history=1` — bookings for that guest across a wide venue-local date window (max 250 rows); use with `guest` filter.
  * Optional: `owner_venue_id=<uuid>` with `guest_history=1` — load history for a linked owner venue (requires an active link grant).
- * Optional: `owner_venue_id=<uuid>` with `experience_event_id` or `class_instance_id` — session bookings for a linked owner venue (requires full_details calendar grant).
+ * Optional: `owner_venue_id=<uuid>` with `experience_event_id`, `class_instance_id` or `group_booking_id` — session or visit rows for a linked owner venue (requires full_details calendar grant).
  * Optional: service=<uuid>[,<uuid>...] filters table reservations by venue_services.id.
  * Optional: calendar=<uuid> filters schedule bookings by calendar/practitioner/resource id.
  * Optional: experience_event_id=<uuid>, class_instance_id=<uuid>, or resource_id=<uuid> — all bookings for that event/class/resource (no date range required; capped).
@@ -97,11 +97,15 @@ export async function GET(request: NextRequest) {
         ? ownerVenueIdParam
         : null;
 
+    // A visit's sibling rows count as a session too: the booking panel reads them
+    // for a booking on a linked venue's calendar, which its own venue's rows do
+    // not contain.
     const linkedSessionMode =
       linkedOwnerVenueId != null &&
       Boolean(
         (experienceEventIdParam && guestUuidRe.test(experienceEventIdParam)) ||
-          (classInstanceIdParam && guestUuidRe.test(classInstanceIdParam)),
+          (classInstanceIdParam && guestUuidRe.test(classInstanceIdParam)) ||
+          (groupBookingId && guestUuidRe.test(groupBookingId)),
       );
 
     if (linkedOwnerVenueId && (guestHistoryMode || linkedSessionMode)) {
@@ -226,8 +230,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to load bookings' }, { status: 500 });
     }
 
-    type RawBookingRow = Record<string, unknown> & { guest_id: string };
-    const rawRows = (rows ?? []) as RawBookingRow[];
+        type RawBookingRow = Record<string, unknown> & { guest_id: string };
+    // §18 — a calendar-scoped link shows only its calendars' bookings, as the
+    // linked-calendar route does. A visit's other services can sit on columns
+    // the link never included.
+    const scopedLinkCalendars =
+      linkedGuestHistoryGrant?.calendarIds && linkedGuestHistoryGrant.calendarIds.length > 0
+        ? new Set(linkedGuestHistoryGrant.calendarIds)
+        : null;
+    const rawRows = ((rows ?? []) as RawBookingRow[]).filter((r) => {
+      if (!scopedLinkCalendars) return true;
+      const cid = (r.calendar_id ?? r.practitioner_id) as string | null | undefined;
+      return typeof cid === 'string' && scopedLinkCalendars.has(cid);
+    });
 
     // Count chosen add-ons per booking for the "+N extras" chip. One batched query
     // scoped to the page's booking ids; booking_addons is indexed on booking_id.

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  canonicalServiceShape,
   parseProcessingTimeBlocksFromDb,
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
@@ -8,6 +9,7 @@ import type { ComplianceCategory, ComplianceCaptureMethod } from '@/lib/complian
 import type { ComplianceResultType } from '@/lib/compliance/form-schema';
 import { createComplianceType } from '@/lib/compliance/types-service';
 import { loadVenueCatalogueData, normaliseServiceNameForMerge } from './catalogue';
+import { isMissingSyncColumnError } from './service-sync';
 import { cleanCategoryName, normaliseCategoryName } from './collective-categories';
 
 /**
@@ -133,7 +135,7 @@ export interface OfferingTemplate {
  * wins when the host provides the offering (the same preference the combined page gives
  * the host's description and heading); otherwise the earliest provider.
  */
-async function pickOriginProvider(
+export async function pickOriginProvider(
   admin: SupabaseClient,
   itemId: string,
   collectiveId: string | null,
@@ -361,12 +363,18 @@ export async function loadOfferingTemplate(
     (offering.default_price_pence as number | null) ?? (service.price_pence as number | null) ?? null;
 
   const columns = copyColumns(service, SERVICE_COLUMNS_NOT_COPIED);
+  let copyDurationMinutes = durationMinutes;
   if ('processing_time_blocks' in service) {
-    columns.processing_time_blocks = processingBlocksForCopy(
-      service.processing_time_blocks,
-      originDuration,
+    // The copy carries the canonical shape whatever the origin row holds, so a
+    // member's copy books the same length as its origin.
+    const canon = canonicalServiceShape({
       durationMinutes,
-    );
+      processingBlocks: parseProcessingTimeBlocksFromDb(
+        processingBlocksForCopy(service.processing_time_blocks, originDuration, durationMinutes),
+      ),
+    });
+    columns.processing_time_blocks = canon.processingBlocks;
+    copyDurationMinutes = canon.durationMinutes;
   }
 
   const [variants, addonGroups, complianceRequirements, categoryName] = await Promise.all([
@@ -382,7 +390,7 @@ export async function loadOfferingTemplate(
 
   return {
     name,
-    durationMinutes,
+    durationMinutes: copyDurationMinutes,
     pricePence,
     columns,
     categoryName,
@@ -454,12 +462,20 @@ async function copyVariants(
   variants: Row[],
 ): Promise<boolean> {
   if (variants.length === 0) return true;
-  const rows = variants.map((v, idx) => ({
-    ...v,
-    venue_id: venueId,
-    service_item_id: serviceId,
-    sort_order: (v.sort_order as number | null) ?? idx,
-  }));
+  const rows = variants.map((v, idx) => {
+    const canon = canonicalServiceShape({
+      durationMinutes: (v.duration_minutes as number) ?? 30,
+      processingBlocks: parseProcessingTimeBlocksFromDb(v.processing_time_blocks),
+    });
+    return {
+      ...v,
+      venue_id: venueId,
+      service_item_id: serviceId,
+      sort_order: (v.sort_order as number | null) ?? idx,
+      duration_minutes: canon.durationMinutes,
+      processing_time_blocks: canon.processingBlocks,
+    };
+  });
   const { error } = await admin.from('service_variants').insert(rows);
   if (error) {
     console.error('[service-duplication] variants insert failed:', error.message);
@@ -508,11 +524,13 @@ async function copyAddonGroups(
   serviceId: string,
   groups: AddonGroupTemplate[],
   createdGroupIds: string[],
+  /** Groups the service already links to; those are left alone (the update path). */
+  alreadyLinked: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
   if (groups.length === 0) return true;
   const library = await loadTargetAddonGroups(admin, venueId);
   const links: Row[] = [];
-  const linked = new Set<string>();
+  const linked = new Set<string>(alreadyLinked);
 
   for (const [idx, tpl] of groups.entries()) {
     const nameKey = normaliseName(tpl.group.name);
@@ -561,12 +579,34 @@ async function copyAddonGroups(
     });
   }
 
+  if (links.length === 0) return true;
   const { error } = await admin.from('service_addon_groups').insert(links);
   if (error) {
     console.error('[service-duplication] add-on links insert failed:', error.message);
     return false;
   }
   return true;
+}
+
+/**
+ * Give an EXISTING service at the target venue every add-on group of the origin it lacks
+ * (reused by name where the venue has one, created otherwise), leaving the groups it
+ * already links to untouched. The "link to origin and update" action; a created group that
+ * cannot be linked is not rolled back, since the service itself is not new.
+ */
+export async function ensureAddonGroupLinksForService(
+  admin: SupabaseClient,
+  venueId: string,
+  serviceId: string,
+  groups: AddonGroupTemplate[],
+): Promise<boolean> {
+  const { data: existing } = await admin
+    .from('service_addon_groups')
+    .select('addon_group_id')
+    .eq('venue_id', venueId)
+    .eq('service_item_id', serviceId);
+  const alreadyLinked = new Set(((existing ?? []) as Row[]).map((r) => r.addon_group_id as string));
+  return copyAddonGroups(admin, venueId, serviceId, groups, [], alreadyLinked);
 }
 
 /**
@@ -682,7 +722,17 @@ async function createServiceInVenue(
     // column does not exist and naming it would fail the insert.
     ...(categoryId ? { category_id: categoryId } : {}),
   };
-  const { data, error } = await admin.from('service_items').insert(row).select('id').single();
+  // The copy follows its origin from here on (Docs/collective-service-sync-plan.md). A
+  // database without migration 20270209120000 refuses the three columns; the copy is then
+  // made without them and stays independent, exactly as every copy did before.
+  const syncColumns: Row = template?.origin
+    ? { synced_from_service_id: template.origin.serviceId, sync_state: 'linked', synced_at: new Date().toISOString() }
+    : {};
+  let inserted = await admin.from('service_items').insert({ ...row, ...syncColumns }).select('id').single();
+  if (inserted.error && Object.keys(syncColumns).length > 0 && isMissingSyncColumnError(inserted.error)) {
+    inserted = await admin.from('service_items').insert(row).select('id').single();
+  }
+  const { data, error } = inserted;
   if (error || !data) {
     console.error('[service-duplication] service insert failed:', error?.message);
     return { error: 'Failed to create the service.' };

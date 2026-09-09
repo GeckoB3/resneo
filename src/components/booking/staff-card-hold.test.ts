@@ -4,16 +4,20 @@ import {
   resolveStaffTableSlotCardHold,
   STAFF_CARD_HOLD_CREATED_TOAST,
   STAFF_CARD_HOLD_TOGGLE_LABEL,
-  STAFF_CARD_HOLD_TOGGLE_SUBLABEL,
+  STAFF_CARD_HOLD_TOGGLE_SUBLABEL_OFF,
+  STAFF_CARD_HOLD_TOGGLE_SUBLABEL_ON,
+  staffCardHoldToggleSublabel,
   STAFF_CARD_HOLD_LINK_SENT_LINE,
-  staffCardHoldFeeLine,
 } from './staff-card-hold';
 
 describe('staff card-hold copy (design doc 7.6)', () => {
-  it('uses the exact toggle label and sublabel', () => {
+  it('uses the exact toggle label, and a sublabel that says what each position does', () => {
     expect(STAFF_CARD_HOLD_TOGGLE_LABEL).toBe('Card hold');
-    expect(STAFF_CARD_HOLD_TOGGLE_SUBLABEL).toBe(
-      'Send a link to the guest to add their card details',
+    expect(staffCardHoldToggleSublabel(false)).toBe(
+      'Off: no card is taken, so a no-show cannot be charged.',
+    );
+    expect(staffCardHoldToggleSublabel(true)).toBe(
+      'On: the guest gets a link to add their card, charged only if they do not show. The booking is cancelled if no card is added within 24 hours.',
     );
   });
 
@@ -24,19 +28,15 @@ describe('staff card-hold copy (design doc 7.6)', () => {
   it('contains no em-dashes in any staff-facing string', () => {
     for (const s of [
       STAFF_CARD_HOLD_TOGGLE_LABEL,
-      STAFF_CARD_HOLD_TOGGLE_SUBLABEL,
+      STAFF_CARD_HOLD_TOGGLE_SUBLABEL_OFF,
+      STAFF_CARD_HOLD_TOGGLE_SUBLABEL_ON,
       STAFF_CARD_HOLD_CREATED_TOAST,
       STAFF_CARD_HOLD_LINK_SENT_LINE,
-      staffCardHoldFeeLine(2550),
     ]) {
       expect(s).not.toMatch(/—/);
     }
   });
 
-  it('formats the fee line from pence', () => {
-    expect(staffCardHoldFeeLine(2500)).toBe('No-show fee up to £25.00');
-    expect(staffCardHoldFeeLine(1050)).toBe('No-show fee up to £10.50');
-  });
 });
 
 describe('resolveStaffTableSlotCardHold (tables, D5 staff semantics)', () => {

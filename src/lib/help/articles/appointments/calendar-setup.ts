@@ -27,7 +27,7 @@ A calendar is one bookable schedule: usually one person, one room, or one chair.
 ## Step 1: Open the Calendars tab
 
 1. Open **Calendar Availability** from the sidebar (\`/dashboard/calendar-availability\`). The page heading reads **Availability Settings**.
-2. Stay on **Calendars**, the first of four tabs: **Calendars**, **Availability**, **Breaks** and **Closures**.
+2. Stay on **Calendars**, the first of four tabs: **Calendars**, **Availability**, **Breaks** and **Closures & amended hours**.
 
 The panel is headed **Calendars**, with a pill beside it showing either how many you are using, such as **3 / 5 on plan**, or **Unlimited calendars**.
 

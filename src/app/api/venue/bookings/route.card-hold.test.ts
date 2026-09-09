@@ -331,10 +331,10 @@ beforeEach(() => {
 });
 
 describe('POST /api/venue/bookings card holds, class branch (spec 7.6)', () => {
-  it('defaults the toggle ON for a card_hold class: Pending + hold via shared helper', async () => {
+  it('holds a card_hold class when staff ask: Pending + hold via shared helper', async () => {
     const admin = setupClassScenario({});
 
-    const res = await POST(postRequest(classBody()));
+    const res = await POST(postRequest(classBody({ require_card_hold: true })));
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.card_hold_requested).toBe(true);
@@ -354,6 +354,19 @@ describe('POST /api/venue/bookings card holds, class branch (spec 7.6)', () => {
     expect(args.cardHoldFeePence).toBe(1000);
     expect(args.requiresDeposit).toBe(false);
     expect(args.stripeConnectedAccountId).toBe('acct_1');
+  });
+
+  it('makes no hold when the toggle is omitted: staff more often waive it than ask (2026-09-09)', async () => {
+    // Was default-on before; the app relies on this default, the web forms send it.
+    const admin = setupClassScenario({});
+    mockApplyComms.mockResolvedValue({ payment_url: undefined });
+    const res = await POST(postRequest(classBody()));
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.card_hold_requested).toBeUndefined();
+    expect(json.message).toBe('Class booking created.');
+    expect(admin.bookingInserts[0]).toMatchObject({ status: 'Booked', deposit_status: 'Not Required' });
+    expect(mockApplyComms.mock.calls[0]![0].cardHoldFeePence).toBeNull();
   });
 
   it('creates a plain confirmed booking when staff waive the hold (require_card_hold false)', async () => {
@@ -379,7 +392,7 @@ describe('POST /api/venue/bookings card holds, class branch (spec 7.6)', () => {
   it('applies the hold to walk-in bookings too (unlike deposits, D6)', async () => {
     const admin = setupClassScenario({});
 
-    const res = await POST(postRequest(classBody({ source: 'walk-in', phone: undefined })));
+    const res = await POST(postRequest(classBody({ source: 'walk-in', phone: undefined, require_card_hold: true })));
     expect(res.status).toBe(201);
     const json = await res.json();
     expect(json.card_hold_requested).toBe(true);
@@ -419,7 +432,7 @@ describe('POST /api/venue/bookings card holds, class branch (spec 7.6)', () => {
   it('rejects a hold when the venue has no connected Stripe account (mirrors the deposit 400)', async () => {
     const admin = setupClassScenario({ venue: { stripe_connected_account_id: null } });
 
-    const res = await POST(postRequest(classBody()));
+    const res = await POST(postRequest(classBody({ require_card_hold: true })));
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe(
@@ -435,7 +448,7 @@ describe('POST /api/venue/bookings card holds, table branch (spec 7.6 / D5)', ()
       restrictionRow: { deposit_amount_per_person_gbp: 5, deposit_type: 'card_hold' },
     });
 
-    const res = await POST(postRequest(tableBody()));
+    const res = await POST(postRequest(tableBody({ require_card_hold: true })));
     expect(res.status).toBe(201);
     const json = await res.json();
     expect(json.card_hold_requested).toBe(true);
@@ -456,7 +469,7 @@ describe('POST /api/venue/bookings card holds, table branch (spec 7.6 / D5)', ()
       restrictionRow: { deposit_amount_per_person_gbp: null, deposit_type: 'card_hold' },
     });
 
-    const res = await POST(postRequest(tableBody()));
+    const res = await POST(postRequest(tableBody({ require_card_hold: true })));
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toContain('No per-person no-show fee is configured');
@@ -470,7 +483,7 @@ describe('POST /api/venue/bookings card holds, table branch (spec 7.6 / D5)', ()
       restrictionRow: null,
     });
 
-    const res = await POST(postRequest(tableBody()));
+    const res = await POST(postRequest(tableBody({ require_card_hold: true })));
     expect(res.status).toBe(201);
     const json = await res.json();
     expect(json.card_hold_requested).toBe(true);

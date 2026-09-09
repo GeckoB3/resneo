@@ -9,6 +9,7 @@
  */
 
 import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { loadServiceSyncViews } from './service-sync';
 import { compareCombinedCatalogueItems, fetchCollectiveCategoryRefs } from './collective-categories';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -219,6 +220,17 @@ export interface CatalogueProviderView {
   status: ProviderStatus;
   /** Whether the underlying source service (and practitioner, if pinned) is still live. */
   sourceLive: boolean;
+  /**
+   * Whether this venue's service follows the origin it was copied from
+   * (Docs/collective-service-sync-plan.md). `none` for a service that is not a copy, and
+   * on a database without the sync columns.
+   */
+  sync: {
+    state: 'none' | 'independent' | 'linked' | 'customised';
+    originVenueName: string | null;
+    /** Null unless linked or customised with a readable origin. */
+    inStep: boolean | null;
+  };
 }
 
 export interface CatalogueItemView {
@@ -237,6 +249,12 @@ export interface CatalogueItemView {
   allowAnyAvailable: boolean;
   status: ItemStatus;
   providers: CatalogueProviderView[];
+  /**
+   * The venue whose service the tick copies from (the host's when the host provides the
+   * offering, else the earliest provider's): what "Link to {venue} and update" links to.
+   */
+  originVenueId: string | null;
+  originVenueName: string | null;
 }
 
 export interface CatalogueMemberSource {
@@ -427,9 +445,27 @@ export async function loadCatalogueForManagement(
   if (itemIds.length > 0) {
     const { data: providerRows } = await admin
       .from('collective_service_providers')
-      .select('id, item_id, venue_id, source_service_id, practitioner_id, status')
+      .select('id, item_id, venue_id, source_service_id, practitioner_id, status, created_at')
       .in('item_id', itemIds)
-      .neq('status', 'removed');
+      .neq('status', 'removed')
+      .order('created_at', { ascending: true });
+    const syncViews = await loadServiceSyncViews(
+      admin,
+      [...new Set((providerRows ?? []).map((r) => r.source_service_id as string))],
+    );
+    // The venue the tick copies from, per offering: the host's when it provides the
+    // offering, else the earliest provider's (pickOriginProvider in service-duplication.ts).
+    const hostVenueId = (collective.host_venue_id as string | null) ?? null;
+    const originVenueByItem = new Map<string, string>();
+    for (const raw of providerRows ?? []) {
+      if ((raw.status as string) !== 'active') continue;
+      const itemId = raw.item_id as string;
+      const venueId = raw.venue_id as string;
+      const current = originVenueByItem.get(itemId);
+      if (!current || (hostVenueId && venueId === hostVenueId && current !== hostVenueId)) {
+        originVenueByItem.set(itemId, venueId);
+      }
+    }
     for (const raw of providerRows ?? []) {
       const itemId = raw.item_id as string;
       const venueId = raw.venue_id as string;
@@ -456,6 +492,23 @@ export async function loadCatalogueForManagement(
         sourceLive:
           Boolean(source?.active) &&
           (practitionerId ? practitionerNameById.has(`${venueId}:${practitionerId}`) : true),
+        sync: (() => {
+          const v = syncViews.get(sourceServiceId);
+          if (!v) return { state: 'none' as const, originVenueName: null, inStep: null };
+          if (!v.originServiceId) {
+            // No origin recorded: a venue's own service. It is an "independent copy" only
+            // when it stands in for the offering at a venue other than the origin's, which
+            // is where "Link to {origin} and update" applies; at the origin it is the original.
+            const originVenue = originVenueByItem.get(itemId) ?? null;
+            const isCopyElsewhere = originVenue != null && originVenue !== venueId;
+            return { state: isCopyElsewhere ? ('independent' as const) : ('none' as const), originVenueName: null, inStep: null };
+          }
+          return {
+            state: v.state,
+            originVenueName: v.originVenueId ? venueNames[v.originVenueId] ?? null : null,
+            inStep: v.inStep,
+          };
+        })(),
       };
       const list = providersByItem.get(itemId) ?? [];
       list.push(view);
@@ -486,6 +539,16 @@ export async function loadCatalogueForManagement(
     allowAnyAvailable: (i.allow_any_available as boolean) ?? true,
     status: (i.status as ItemStatus) ?? 'active',
     providers: providersByItem.get(i.id as string) ?? [],
+    ...(() => {
+      // Same choice as pickOriginProvider in service-duplication.ts.
+      const active = (providersByItem.get(i.id as string) ?? []).filter((p) => p.status === 'active');
+      const host = collective.host_venue_id as string | null;
+      const origin = (host && active.find((p) => p.venueId === host)) || active[0] || null;
+      return {
+        originVenueId: origin?.venueId ?? null,
+        originVenueName: origin ? venueNames[origin.venueId] ?? null : null,
+      };
+    })(),
   }));
 
   return {

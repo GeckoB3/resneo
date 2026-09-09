@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, btnPrimary, btnSecondary, btnDanger } from './linked-accounts-ui';
+import { collectivePublicPath, collectivePublicUrl } from '@/lib/linked-accounts/collective-public-url';
 import { type BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import { BookingPageEditor } from '@/components/booking-page-editor/BookingPageEditor';
 import {
@@ -95,6 +96,12 @@ function buildEditorTeam(catalogue: CatalogueManagementView | null): EditorTeamM
 
 type TabKey = 'page' | 'services' | 'members';
 
+const noop = (): void => {};
+
+/**
+ * The manager as a modal, opened from Linked accounts. The Booking Page tab
+ * renders the same {@link CombinedPageManagerPanel} inline.
+ */
 export function CombinedPageManager({
   collective,
   eligibleLinks,
@@ -107,6 +114,39 @@ export function CombinedPageManager({
   onClose: () => void;
   /** Called after a change that affects the collective list (settings/members). */
   onChanged: () => void;
+}) {
+  return (
+    <CombinedPageManagerPanel
+      collective={collective}
+      eligibleLinks={eligibleLinks}
+      onClose={onClose}
+      onChanged={onChanged}
+    />
+  );
+}
+
+export function CombinedPageManagerPanel({
+  collective,
+  eligibleLinks,
+  onClose = noop,
+  onChanged,
+  inline = false,
+  onPendingChange,
+}: {
+  collective: CollectiveView;
+  /** Linked venues eligible to invite (full mutual create/edit/cancel). */
+  eligibleLinks: AccountLinkView[];
+  /** Modal only: dismiss. Inline there is nothing to close. */
+  onClose?: () => void;
+  /** Called after a change that affects the collective list (settings/members). */
+  onChanged: () => void;
+  /**
+   * Render as a section of the page (Settings, Booking Page tab) instead of a
+   * modal: no title, and a save bar under the body while calendar changes are staged.
+   */
+  inline?: boolean;
+  /** Inline: the number of staged calendar changes, so the page can warn before leaving. */
+  onPendingChange?: (count: number) => void;
 }) {
   const [catalogue, setCatalogue] = useState<CatalogueManagementView | null>(null);
   const [importSources, setImportSources] = useState<ImportSource[]>([]);
@@ -256,12 +296,21 @@ export function CombinedPageManager({
     return ops;
   }, [catalogue, pendingProviders]);
 
-  const pendingCount = providerOps.length;
+    const pendingCount = providerOps.length;
 
-  /** Apply every staged calendar change in one request, then close on success. */
+  useEffect(() => {
+    onPendingChange?.(pendingCount);
+  }, [pendingCount, onPendingChange]);
+  // Leaving the inline panel (unmount) drops its staged changes with it.
+  useEffect(() => () => onPendingChange?.(0), [onPendingChange]);
+
+  /**
+   * Apply every staged calendar change in one request; the modal then closes,
+   * the inline panel stays put.
+   */
   const saveAndClose = async (): Promise<void> => {
     if (pendingCount === 0) {
-      onClose();
+      if (!inline) onClose();
       return;
     }
     setSavingProviders(true);
@@ -269,7 +318,7 @@ export function CombinedPageManager({
     setSavingProviders(false);
     if (ok) {
       setPendingProviders({});
-      onClose();
+      if (!inline) onClose();
     }
   };
 
@@ -337,8 +386,9 @@ export function CombinedPageManager({
         const j = await res.json();
         throw new Error(j.error ?? 'Failed to dissolve the collective.');
       }
-      onChanged();
-      onClose();
+            onChanged();
+      // Inline, the settings page re-renders without the collective once it refreshes.
+      if (!inline) onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to dissolve the collective.');
       setBusy(false);
@@ -450,17 +500,12 @@ export function CombinedPageManager({
   const pageTeam = useMemo<EditorTeamMember[]>(() => buildEditorTeam(catalogue), [catalogue]);
 
   const pageAdapter = useMemo<BookingPageEditorAdapter>(() => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    // The address customers actually use: a member venue's own page when the
+        // The address customers actually use: a member venue's own page when the
     // collective adopted it, otherwise the dedicated combined address.
-    const adoptedSlug =
-      collective.slugStrategy === 'adopt_member' && collective.adoptedVenueId
-        ? (collective.members.find((m) => m.venueId === collective.adoptedVenueId)?.venueSlug ?? null)
-        : null;
-    const publicPath = adoptedSlug ? `/book/${adoptedSlug}` : `/book/c/${collective.slug}`;
+    const publicPath = collectivePublicPath(collective);
     return {
       displayName: collective.name,
-      publicUrl: `${origin}${publicPath}`,
+      publicUrl: collectivePublicUrl(collective),
       publicPath,
       seedKey: collective.id,
       getConfig: getPageConfig,
@@ -542,37 +587,11 @@ export function CombinedPageManager({
       ]
     : [];
 
-  return (
-    <Modal
-      open
-      onClose={requestClose}
-      busy={busy}
-      maxWidth="max-w-5xl"
-      title={`Combined booking page: ${collective.name}`}
-      description={
-        isHost
-          ? 'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.'
-          : 'This combined page is managed by the host venue.'
-      }
-      footer={
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {pendingCount > 0 ? (
-            <span className="text-xs text-amber-600">
-              {pendingCount} unsaved calendar change{pendingCount === 1 ? '' : 's'}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className={`${pendingCount > 0 ? btnPrimary : btnSecondary} w-full sm:w-auto`}
-            onClick={() => (pendingCount > 0 ? void saveAndClose() : requestClose())}
-            disabled={busy}
-          >
-            {savingProviders ? <ButtonSpinner /> : null}
-            {pendingCount > 0 ? 'Save and close' : 'Done'}
-          </button>
-        </div>
-      }
-    >
+    const pendingLabel =
+    pendingCount > 0 ? `${pendingCount} unsaved calendar change${pendingCount === 1 ? '' : 's'}` : null;
+
+  const body = (
+    <>
       {tabs.length > 1 ? (
         <div
           role="tablist"
@@ -649,15 +668,231 @@ export function CombinedPageManager({
           ) : null
         ) : null}
 
-        {!isHost ? (
-          <p className="text-sm text-slate-600">
-            Your services appear on this combined booking page using their own price, duration and
-            availability from your Services settings. The host venue chooses which of your calendars
-            are offered. To stop taking part, leave the collective from the Venue collectives list.
-          </p>
+                {!isHost ? (
+          <CombinedPageMemberSummary collective={collective} catalogue={catalogue} loading={loading} />
         ) : null}
       </div>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div className="space-y-4" data-testid="combined-page-panel">
+        {body}
+        {pendingCount > 0 ? (
+          <div
+            className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-3 rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-3 shadow-sm backdrop-blur"
+            data-testid="combined-page-save-bar"
+          >
+            <span className="text-xs text-amber-700">{pendingLabel}</span>
+            <button
+              type="button"
+              className={`${btnPrimary} w-full sm:w-auto`}
+              onClick={() => void saveAndClose()}
+              disabled={busy}
+            >
+              {savingProviders ? <ButtonSpinner /> : null}
+              Save calendar changes
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      open
+      onClose={requestClose}
+      busy={busy}
+      maxWidth="max-w-5xl"
+      title={`Combined booking page: ${collective.name}`}
+      description={
+        isHost
+          ? 'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.'
+          : 'This combined page is managed by the host venue.'
+      }
+      footer={
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {pendingLabel ? <span className="text-xs text-amber-600">{pendingLabel}</span> : null}
+          <button
+            type="button"
+            className={`${pendingCount > 0 ? btnPrimary : btnSecondary} w-full sm:w-auto`}
+            onClick={() => (pendingCount > 0 ? void saveAndClose() : requestClose())}
+            disabled={busy}
+          >
+            {savingProviders ? <ButtonSpinner /> : null}
+            {pendingCount > 0 ? 'Save and close' : 'Done'}
+          </button>
+        </div>
+      }
+    >
+      {body}
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The combined page's address, with copy and open
+// ---------------------------------------------------------------------------
+
+/** The full combined-page address with Copy link and Open buttons. */
+export function CombinedPageAddressRow({ collective }: { collective: CollectiveView }) {
+  const [copied, setCopied] = useState(false);
+  const path = collectivePublicPath(collective);
+  const [url, setUrl] = useState(path);
+  // The origin is only known in the browser; render the path first so server
+  // and client markup agree.
+  useEffect(() => {
+    setUrl(collectivePublicUrl(collective));
+  }, [collective]);
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(t);
+  }, [copied]);
+
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      window.prompt('Copy the address', url);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center" data-testid="combined-page-address">
+      <input
+        type="text"
+        readOnly
+        aria-label="Combined page address"
+        value={url}
+        onFocus={(e) => e.currentTarget.select()}
+        className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800"
+      />
+      <div className="flex shrink-0 gap-2">
+        <button type="button" className={btnSecondary} onClick={() => void copy()} aria-live="polite">
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+        <a href={path} target="_blank" rel="noopener noreferrer" className={btnSecondary}>
+          Open
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A member venue's read-only view of the combined page
+// ---------------------------------------------------------------------------
+
+/**
+ * What a non-host member sees: who manages the page, its address, and which of
+ * this venue's calendars and services take part. Loads the catalogue itself
+ * when the caller has none (the Booking Page tab).
+ */
+export function CombinedPageMemberSummary({
+  collective,
+  catalogue: given,
+  loading: givenLoading,
+}: {
+  collective: CollectiveView;
+  catalogue?: CatalogueManagementView | null;
+  loading?: boolean;
+}) {
+  const selfLoad = given === undefined;
+  const [own, setOwn] = useState<CatalogueManagementView | null>(null);
+  const [ownLoading, setOwnLoading] = useState(selfLoad);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selfLoad) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/venue/collectives/${collective.id}/catalogue`);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? 'Failed to load the combined page.');
+        if (!cancelled) setOwn(json.catalogue ?? null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load the combined page.');
+      } finally {
+        if (!cancelled) setOwnLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selfLoad, collective.id]);
+
+  const catalogue = selfLoad ? own : given;
+  const loading = selfLoad ? ownLoading : (givenLoading ?? false);
+  const host = hostVenueName(collective);
+
+  // This venue's calendars on the page, each with the services it provides there.
+  const calendars = useMemo(() => {
+    const byCalendar = new Map<string, { name: string; services: string[] }>();
+    if (!catalogue) return [];
+    for (const item of catalogue.items) {
+      if (item.status !== 'active') continue;
+      for (const p of item.providers) {
+        if (p.venueId !== collective.myVenueId || p.status === 'removed' || !p.practitionerId) continue;
+        const entry = byCalendar.get(p.practitionerId) ?? { name: p.practitionerName ?? 'Calendar', services: [] };
+        if (!entry.services.includes(item.name)) entry.services.push(item.name);
+        byCalendar.set(p.practitionerId, entry);
+      }
+    }
+    return [...byCalendar.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [catalogue, collective.myVenueId]);
+
+  return (
+    <div className="space-y-5" data-testid="combined-page-member-summary">
+      <p className="text-sm text-slate-600">
+        {host} hosts {collective.name} and manages its combined booking page: the services on it, which
+        calendars are offered, its headings, photos and branding. Your services appear there with the
+        price, length and availability set under your own Services settings.
+      </p>
+      <section className="space-y-2 rounded-xl border border-slate-200 p-4">
+        <p className="text-sm font-bold text-slate-900">Combined page address</p>
+        <p className="text-xs text-slate-500">This is the page to send your guests to.</p>
+        <CombinedPageAddressRow collective={collective} />
+      </section>
+      <section className="space-y-2 rounded-xl border border-slate-200 p-4">
+        <p className="text-sm font-bold text-slate-900">Your calendars on the combined page</p>
+        {error ? (
+          <p className="text-sm text-rose-700" role="alert">
+            {error}
+          </p>
+        ) : loading ? (
+          <div className="space-y-2" aria-busy="true">
+            <span className="sr-only">Loading your calendars…</span>
+            <div className="skeleton h-10 rounded-lg" />
+            <div className="skeleton h-10 rounded-lg" />
+          </div>
+        ) : calendars.length === 0 ? (
+          <p className="text-sm text-slate-600">
+            None of your calendars is offered on the combined page yet. {host} chooses which calendars
+            take part.
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {calendars.map((c) => (
+              <li key={c.name} className="flex flex-col gap-0.5 py-2 text-sm">
+                <span className="font-medium text-slate-900">{c.name}</span>
+                <span className="text-xs text-slate-500">{c.services.join(', ')}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-xs text-slate-500">
+          {host} chooses which calendars are offered. To stop taking part, leave the collective under{' '}
+          <a href="/dashboard/settings?tab=linked-accounts" className="font-medium text-brand-700 hover:underline">
+            Linked accounts
+          </a>
+          .
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -685,6 +920,7 @@ function PageAddressSection({
         Your combined page works like a single venue, with one services menu and one team across all
         members. Choose where customers reach it.
       </p>
+            <CombinedPageAddressRow collective={collective} />
       <label className="flex items-start gap-2 text-sm text-slate-700">
         <input
           type="radio"
@@ -1444,15 +1680,18 @@ function ItemCard({
       </div>
 
       <p className="mt-1 px-1 text-xs text-slate-500">
-        Price, duration, description, variants and add-ons all come from each venue&apos;s own service
-        settings (Dashboard → Services). Here you choose which calendars offer it. The photo for this
-        shared page is yours to set, on the Page tab.
+        Here you choose which calendars offer it. Price, description and add-ons come from each
+        venue&apos;s own service settings (Dashboard → Services). A service that ticking a calendar
+        copies into another venue is marked <span className="font-medium">in step</span>: its duration,
+        buffer, processing periods and options follow the original whenever that is saved, until the
+        venue edits them itself. The photo for this shared page is yours to set, on the Page tab.
       </p>
 
       <CalendarAssignment
         item={item}
         memberSources={memberSources}
         busy={busy}
+        action={action}
         providerStaging={providerStaging}
       />
     </div>
@@ -1470,11 +1709,13 @@ function CalendarAssignment({
   item,
   memberSources,
   busy,
+  action,
   providerStaging,
 }: {
   item: CatalogueItemView;
   memberSources: CatalogueMemberSource[];
   busy: boolean;
+  action: (body: Record<string, unknown>) => Promise<boolean>;
   providerStaging: ProviderStaging;
 }) {
   const providerByCalendar = new Map<string, CatalogueProviderView>();
@@ -1506,6 +1747,7 @@ function CalendarAssignment({
                   cal={cal}
                   provider={providerByCalendar.get(cal.id) ?? null}
                   busy={busy}
+                  action={action}
                   providerStaging={providerStaging}
                 />
               ))
@@ -1524,6 +1766,7 @@ function CalendarRow({
   cal,
   provider,
   busy,
+  action,
   providerStaging,
 }: {
   item: CatalogueItemView;
@@ -1532,6 +1775,7 @@ function CalendarRow({
   cal: { id: string; name: string; services: { id: string; name: string }[] };
   provider: CatalogueProviderView | null;
   busy: boolean;
+  action: (body: Record<string, unknown>) => Promise<boolean>;
   providerStaging: ProviderStaging;
 }) {
   // Server truth vs the staged (unsaved) desire. `checked` drives the box; a change
@@ -1568,6 +1812,7 @@ function CalendarRow({
           {provider.status === 'suspended' ? (
             <span className="font-medium text-amber-600">suspended</span>
           ) : null}
+          <SyncChip item={item} provider={provider} venueName={venueName} busy={busy} action={action} />
         </span>
       ) : checked && !provider ? (
         // Staged add: on save this ticks the calendar (duplicating the service into
@@ -1586,3 +1831,118 @@ function CalendarRow({
   );
 }
 
+
+/**
+ * Whether this venue's copy of the service follows its origin (Docs/collective-service-sync-plan.md).
+ * Nothing is shown for the origin itself, for a venue's own pre-existing service, or on a
+ * database without the sync columns.
+ */
+function SyncChip({
+  item,
+  provider,
+  venueName,
+  busy,
+  action,
+}: {
+  item: CatalogueItemView;
+  provider: CatalogueProviderView;
+  venueName: string;
+  busy: boolean;
+  action: (body: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const sync = provider.sync;
+  if (!sync || sync.state === 'none') return null;
+  const origin = sync.originVenueName ?? 'the original';
+  const linkClass = 'font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50';
+  if (sync.state === 'independent') {
+    // The one deliberately retroactive action: explicit, per copy, confirmed. Offered only
+    // at a venue other than the offering's origin.
+    const canLink = Boolean(item.originVenueId) && item.originVenueId !== provider.venueId;
+    const originName = item.originVenueName ?? 'the original';
+    return (
+      <>
+        <span className="text-slate-400">independent copy</span>
+        {canLink ? (
+          <button
+            type="button"
+            className={linkClass}
+            disabled={busy}
+            onClick={() => {
+              if (
+                typeof window !== 'undefined' &&
+                !window.confirm(
+                  `Link this service at ${venueName} to ${originName}'s and update it now? Its duration, buffer, processing periods and options will match ${originName}'s and follow it from now on. Price and description stay as they are.`,
+                )
+              ) {
+                return;
+              }
+              void action({ action: 'link_provider', providerId: provider.id });
+            }}
+          >
+            Link to {originName} and update
+          </button>
+        ) : null}
+      </>
+    );
+  }
+  if (sync.state === 'customised') {
+    return (
+      <>
+        <span className="font-medium text-amber-600">customised at {venueName}</span>
+        <button
+          type="button"
+          className={linkClass}
+          disabled={busy}
+          onClick={() => {
+            if (
+              typeof window !== 'undefined' &&
+              !window.confirm(
+                `Replace ${venueName}'s changes to this service with ${origin}'s duration, buffer, processing periods and options? Price and description stay as they are.`,
+              )
+            ) {
+              return;
+            }
+            void action({ action: 'sync_provider', providerId: provider.id, forceSync: true });
+          }}
+        >
+          Re-sync
+        </button>
+      </>
+    );
+  }
+  return (
+    <>
+      {sync.inStep === false ? (
+        <>
+          <span className="font-medium text-amber-600">update available</span>
+          <button
+            type="button"
+            className={linkClass}
+            disabled={busy}
+            onClick={() => void action({ action: 'sync_provider', providerId: provider.id })}
+          >
+            Update now
+          </button>
+        </>
+      ) : (
+        <span className="text-emerald-700">in step with {origin}</span>
+      )}
+      <button
+        type="button"
+        className="text-slate-400 hover:text-slate-700 disabled:opacity-50"
+        disabled={busy}
+        onClick={() => {
+          if (
+            typeof window !== 'undefined' &&
+            !window.confirm(`Stop this service at ${venueName} following ${origin}? Its settings stay as they are now.`)
+          ) {
+            return;
+          }
+          void action({ action: 'detach_provider', providerId: provider.id });
+        }}
+      >
+        Stop syncing
+      </button>
+    </>
+  );
+}

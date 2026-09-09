@@ -15,6 +15,15 @@ import { bookingAddonSelectionArraySchema } from '@/lib/addons/zod-schemas';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { z } from 'zod';
 import { processingTimeBlocksSchema } from '@/lib/appointments/processing-time';
+import { minutesToTime, timeToMinutes } from '@/lib/availability';
+import {
+  ensureOverrideServiceInInput,
+  isBookingDateInPast,
+  overrideWarningsForInterval,
+  PAST_DATE_OVERRIDE_ERROR,
+  resolveOverrideCollectiveTarget,
+  resolveStaffOverrideActor,
+} from '@/lib/booking/staff-availability-override';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { publicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
@@ -58,6 +67,14 @@ const bodySchema = z.object({
    * offerings only (a member venue's own services no longer resolve here).
    */
   staff: z.boolean().optional(),
+  /**
+   * The staff "override availability" dry run: answers `ok` with the engine's
+   * refusals as `warnings` instead of refusing, sizes the interval from the
+   * chosen length, and needs a staff session for the target venue.
+   */
+  override_availability: z.boolean().optional(),
+  /** Staff custom core length, honoured with the override only. */
+  duration_minutes: z.number().int().min(1).max(14 * 60).optional(),
 });
 
 /**
@@ -74,6 +91,8 @@ export async function POST(request: NextRequest) {
     const { booking_date, practitioner_id, variant_id, start_time, phantoms, waitlist_offer_id, addons } = parsed.data;
     let { venue_id, service_id } = parsed.data;
     const supabase = getSupabaseAdminClient();
+    const staffOverride = parsed.data.override_availability === true;
+    const requestedVenueId = venue_id;
 
     /**
      * Combined booking page (plan §22): the customer flow targets the synthetic
@@ -88,12 +107,19 @@ export async function POST(request: NextRequest) {
      * calls this endpoint once per segment.
      */
     let collectiveDurationOverride: number | null = null;
-    if (await isCollectiveId(supabase, venue_id)) {
-      const target = await resolveCombinedBookingTarget(supabase, {
-        collectiveId: venue_id,
-        offeringId: service_id,
-        calendarId: practitioner_id,
-      });
+    const isCollective = await isCollectiveId(supabase, venue_id);
+    if (isCollective) {
+      const target = staffOverride
+        ? await resolveOverrideCollectiveTarget(supabase, {
+            collectiveId: venue_id,
+            offeringId: service_id,
+            calendarId: practitioner_id,
+          })
+        : await resolveCombinedBookingTarget(supabase, {
+            collectiveId: venue_id,
+            offeringId: service_id,
+            calendarId: practitioner_id,
+          });
       if (!target) {
         return NextResponse.json(
           { ok: false, error: 'This booking option is no longer available.' },
@@ -107,6 +133,15 @@ export async function POST(request: NextRequest) {
       collectiveDurationOverride = target.durationMinutes;
     }
 
+    if (staffOverride) {
+      const actor = await resolveStaffOverrideActor(supabase, request, {
+        venueId: venue_id,
+        collectiveId: isCollective ? requestedVenueId : null,
+      });
+      if (!actor.ok) {
+        return NextResponse.json({ ok: false, error: actor.error }, { status: actor.status });
+      }
+    }
     const venueMode = await resolveVenueMode(supabase, venue_id);
     if (
       !isUnifiedSchedulingVenue(venueMode.bookingModel) &&
@@ -150,10 +185,14 @@ export async function POST(request: NextRequest) {
       String((venue as { timezone?: string | null }).timezone).trim() !== ''
         ? String((venue as { timezone?: string | null }).timezone).trim()
         : 'Europe/London';
-    if (!isGuestBookingDateAllowed(booking_date, serviceWindow, tz)) {
+    if (staffOverride) {
+      // The override keeps one date rule: nothing goes into the past.
+      if (isBookingDateInPast(booking_date, tz)) {
+        return NextResponse.json({ ok: false, error: PAST_DATE_OVERRIDE_ERROR });
+      }
+    } else if (!isGuestBookingDateAllowed(booking_date, serviceWindow, tz)) {
       return NextResponse.json({ ok: false, error: 'This date is not available for booking' });
     }
-
     const input = await fetchAppointmentInput({
       supabase,
       venueId: venue_id,
@@ -162,6 +201,13 @@ export async function POST(request: NextRequest) {
       serviceId: service_id,
     });
     input.phantomBookings = (phantoms ?? []) as PhantomBooking[];
+    if (staffOverride) {
+      // The loader reads assigned services only; the override may book any.
+      const present = await ensureOverrideServiceInInput(supabase, input, venue_id, service_id);
+            if (!present) {
+        return NextResponse.json({ ok: false, error: 'Service not found' });
+      }
+    }
 
     /**
      * Applied before the variant and add-on adjustments below, mirroring the
@@ -188,8 +234,21 @@ export async function POST(request: NextRequest) {
       if (!variant) {
         return NextResponse.json({ ok: false, error: 'Invalid variant_id for this service' });
       }
-      applyVariantToAppointmentInput({ services: input.services, serviceId: service_id, variant });
+            applyVariantToAppointmentInput({ services: input.services, serviceId: service_id, variant });
     }
+
+    /**
+     * Staff custom length: the BASE the add-ons stack on, applied after the
+     * collective and variant lengths exactly as the create routes do, so the
+     * interval checked here is the one that will be booked.
+     */
+    if (staffOverride && parsed.data.duration_minutes != null) {
+      const idx = input.services.findIndex((s) => s.id === service_id);
+      if (idx >= 0) {
+        input.services[idx] = { ...input.services[idx]!, duration_minutes: parsed.data.duration_minutes };
+      }
+    }
+
 
     if (addons && addons.length > 0) {
       const useUnified = await venueUsesUnifiedAppointmentServiceData(supabase, venue_id);
@@ -251,11 +310,19 @@ export async function POST(request: NextRequest) {
     }
 
     const timeStr = start_time.slice(0, 5);
+    if (staffOverride) {
+      const svc = input.services.find((s) => s.id === service_id);
+      const endHm = minutesToTime(timeToMinutes(timeStr) + (svc?.duration_minutes ?? 30));
+      const check = overrideWarningsForInterval(input, practitioner_id, service_id, timeStr, endHm);
+      if (!check.ok) {
+        return NextResponse.json({ ok: false, error: check.reason });
+      }
+      return NextResponse.json({ ok: true, warnings: check.warnings });
+    }
     const result = validateExactAppointmentStart(input, practitioner_id, service_id, timeStr);
     if (!result.ok) {
       return NextResponse.json({ ok: false, error: result.reason ?? 'Unavailable' });
     }
-
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('POST /api/booking/validate-appointment-slot failed:', err);

@@ -5,6 +5,7 @@ import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { TimeRange, WorkingHours } from '@/types/booking-models';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { resolveVenueWideAllowedMinuteRanges } from '@/lib/availability/venue-wide-business-hours';
+import { readOverrideMap } from '@/lib/availability/calendar-amended-hours';
 import {
   resolveScheduleForDate,
   type CalendarSchedule,
@@ -27,12 +28,14 @@ export interface LeaveRow {
   unavailable_end_time?: string | null;
 }
 
-export type DayReason = 'base' | 'period' | 'no-hours' | 'day-off' | 'venue-closed' | 'venue-closure' | 'leave';
+export type DayReason = 'base' | 'period' | 'amended' | 'no-hours' | 'day-off' | 'venue-closed' | 'venue-closure' | 'leave';
 
 export interface DaySummary {
   date: string;
   /** "09:00–17:00", "Closed", "Day off", "Venue closed", "Leave". */
   text: string;
+  /** The note saved with an amended-hours override, when the date carries one. */
+  overrideReason?: string | null;
   reason: DayReason;
   source: ScheduleSource;
   /** A part-day leave window, shown alongside the hours. */
@@ -108,31 +111,41 @@ export function summariseDay(input: {
   leave: readonly LeaveRow[];
   /** Venue-wide closures and amended hours; omit for the weekly hours alone. */
   venueWideBlocks?: readonly AvailabilityBlock[];
+  /**
+   * The calendar's per-date overrides (`availability_exceptions`), which `calendarHours`
+   * applies FIRST: an amended day replaces the weekly shape and the schedule period, and a
+   * day off does not reopen it. Leave still wins, as it does everywhere.
+   */
+  overrides?: unknown;
 }): DaySummary {
   const { date } = input;
   const resolution = resolveScheduleForDate({ working_hours: input.baseHours, schedule_periods: input.schedule }, date);
   const dow = getDayOfWeek(date);
   const base = { date, source: resolution.source, partialLeave: null as string | null };
-
   const leaveToday = input.leave.filter((l) => l.start_date <= date && date <= l.end_date);
   const fullDayLeave = leaveToday.some((l) => !l.unavailable_start_time || !l.unavailable_end_time);
   if (fullDayLeave) return { ...base, text: 'Leave', reason: 'leave' };
-  if (input.daysOff.includes(date) || input.daysOff.includes(DAY_NAMES[dow]!)) return { ...base, text: 'Day off', reason: 'day-off' };
-
+  const override = readOverrideMap(input.overrides)[date] ?? null;
+  const overrideReason = override?.reason ?? null;
+  if (override && 'closed' in override) return { ...base, text: 'Closed', reason: 'no-hours', overrideReason };
+  if (!override && (input.daysOff.includes(date) || input.daysOff.includes(DAY_NAMES[dow]!))) {
+    return { ...base, text: 'Day off', reason: 'day-off' };
+  }
   const venue = resolveVenueWideAllowedMinuteRanges(input.venueHours, date, [...(input.venueWideBlocks ?? [])]);
   if (venue.kind === 'closed') {
-    return { ...base, text: 'Venue closed', reason: venue.cause === 'weekly' ? 'venue-closed' : 'venue-closure' };
+    return { ...base, text: 'Venue closed', reason: venue.cause === 'weekly' ? 'venue-closed' : 'venue-closure', overrideReason };
   }
-
-  const ranges = intersectWithVenue(rangesForDay(resolution.hours, dow), venue.kind === 'allowed' ? venue.ranges : null);
+  const own = override ? override.periods : rangesForDay(resolution.hours, dow);
+  const ranges = intersectWithVenue(own, venue.kind === 'allowed' ? venue.ranges : null);
   const partial = leaveToday.find((l) => l.unavailable_start_time && l.unavailable_end_time);
   const partialLeave = partial ? `${partial.unavailable_start_time!.slice(0, 5)}–${partial.unavailable_end_time!.slice(0, 5)}` : null;
-  if (ranges.length === 0) return { ...base, text: 'Closed', reason: 'no-hours', partialLeave };
+  if (ranges.length === 0) return { ...base, text: 'Closed', reason: 'no-hours', partialLeave, overrideReason };
   return {
     ...base,
     text: ranges.map((r) => `${toHhMm(r.start)}–${toHhMm(r.end)}`).join(', '),
-    reason: resolution.source.kind === 'period' ? 'period' : 'base',
+    reason: override ? 'amended' : resolution.source.kind === 'period' ? 'period' : 'base',
     partialLeave,
+    overrideReason,
   };
 }
 
@@ -163,6 +176,8 @@ export interface ScheduleCalendarPreviewProps {
   initialMonth?: { year: number; monthIndex: number };
   /** Today, `YYYY-MM-DD`; defaults to the browser's date. Injected for tests. */
   todayYmd?: string;
+  /** The calendar's per-date overrides (`availability_exceptions`); see `summariseDay`. */
+  overrides?: unknown;
 }
 
 async function defaultLoadLeave(calendarId: string, from: string, to: string): Promise<LeaveRow[]> {
@@ -198,6 +213,7 @@ export function ScheduleCalendarPreview({
   loadVenueBlocks = defaultLoadVenueBlocks,
   initialMonth,
   todayYmd,
+  overrides = null,
 }: ScheduleCalendarPreviewProps) {
   const today = todayYmd ?? localTodayYmd();
   const [month, setMonth] = useState(() => {
@@ -235,10 +251,10 @@ export function ScheduleCalendarPreview({
   const summaries = useMemo(() => {
     const map = new Map<string, DaySummary>();
     for (const c of cells) {
-      if (c) map.set(c, summariseDay({ date: c, baseHours, schedule, daysOff, venueHours, leave, venueWideBlocks }));
+      if (c) map.set(c, summariseDay({ date: c, baseHours, schedule, daysOff, venueHours, leave, venueWideBlocks, overrides }));
     }
     return map;
-  }, [cells, baseHours, schedule, daysOff, venueHours, leave, venueWideBlocks]);
+  }, [cells, baseHours, schedule, daysOff, venueHours, leave, venueWideBlocks, overrides]);
 
   function shift(delta: number) {
     setMonth((m) => {
@@ -281,9 +297,13 @@ export function ScheduleCalendarPreview({
         {cells.map((cell, i) => {
           if (!cell) return <div key={`blank-${i}`} aria-hidden="true" />;
           const s = summaries.get(cell)!;
-          const periodIndex = s.source.kind === 'period' ? periodIndexById.get(s.source.period.id) ?? 0 : null;
-          const tint = periodIndex != null ? PERIOD_TINTS[periodIndex % PERIOD_TINTS.length]!.cell : 'bg-white border-slate-200';
-          const closed = s.reason !== 'base' && s.reason !== 'period';
+          const periodIndex = s.source.kind === 'period' && s.reason !== 'amended' ? periodIndexById.get(s.source.period.id) ?? 0 : null;
+          // An amended day is drawn plain with a chip, not tinted: the tints belong to the
+          // timeline's changes, and this date is an exception to whichever one covers it.
+          const tint = s.reason === 'amended'
+            ? 'bg-white border-amber-300'
+            : periodIndex != null ? PERIOD_TINTS[periodIndex % PERIOD_TINTS.length]!.cell : 'bg-white border-slate-200';
+          const closed = s.reason !== 'base' && s.reason !== 'period' && s.reason !== 'amended';
           const selected = selectedDate === cell;
           return (
             <button
@@ -291,7 +311,7 @@ export function ScheduleCalendarPreview({
               type="button"
               role="gridcell"
               aria-selected={selected}
-              aria-label={`${cell}: ${s.text}${s.partialLeave ? `, leave ${s.partialLeave}` : ''}`}
+              aria-label={`${cell}: ${s.text}${s.reason === 'amended' ? ' (amended hours)' : ''}${s.partialLeave ? `, leave ${s.partialLeave}` : ''}`}
               onClick={() => onPickDate?.(cell, s)}
               className={`flex min-h-[64px] flex-col items-start rounded-lg border p-1.5 text-left transition-colors hover:border-brand-400 ${tint} ${
                 closed ? 'text-slate-400' : 'text-slate-800'
@@ -299,7 +319,9 @@ export function ScheduleCalendarPreview({
             >
               <span className="flex w-full items-center justify-between text-xs">
                 <span>{Number(cell.slice(8, 10))}</span>
-                {s.source.kind === 'period' && s.source.period.weeks.length > 1 ? (
+                {s.reason === 'amended' ? (
+                  <span className="rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-800">Amended</span>
+                ) : s.source.kind === 'period' && s.source.period.weeks.length > 1 ? (
                   <span className="rounded bg-white/80 px-1 text-[10px] font-medium text-slate-600">W{s.source.weekIndex + 1}</span>
                 ) : null}
               </span>

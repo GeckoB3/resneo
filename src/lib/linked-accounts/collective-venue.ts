@@ -209,6 +209,12 @@ export interface CollectiveCatalogService {
   addon_groups: AppointmentCatalogAddonGroup[];
   processing_time_blocks?: ProcessingTimeBlock[];
   /**
+   * Only in the override catalogue (`everyCalendar`): false when this calendar
+   * is not a provider of the offering and books it through another provider
+   * calendar's copy at its venue.
+   */
+  assigned?: boolean;
+  /**
    * Whether "any available" is offered for this offering: true only when NO provider
    * has variants/add-ons (a plain service everywhere), so the customer would get the
    * same thing regardless of calendar. Otherwise they must pick a specific calendar.
@@ -272,9 +278,9 @@ export function invalidateCollectiveCatalogMemo(collectiveId: string): void {
 export async function loadCollectiveAppointmentCatalog(
   admin: SupabaseClient,
   collectiveId: string,
-  options?: { includeHiddenAddons?: boolean },
+  options?: { includeHiddenAddons?: boolean; everyCalendar?: boolean },
 ): Promise<CollectiveAppointmentCatalog> {
-  const key = `${collectiveId}|${options?.includeHiddenAddons ? 1 : 0}`;
+  const key = `${collectiveId}|${options?.includeHiddenAddons ? 1 : 0}|${options?.everyCalendar ? 1 : 0}`;
   const now = Date.now();
   const hit = catalogMemo.get(key);
   if (hit && now - hit.at < CATALOG_MEMO_TTL_MS) return hit.value;
@@ -293,6 +299,12 @@ async function loadCollectiveAppointmentCatalogUncached(
   options?: {
     /** Staff of a member venue see `hidden_from_online` add-on groups, as they do on their own catalogue. */
     includeHiddenAddons?: boolean;
+    /**
+     * The staff "override availability" catalogue: every active calendar of every
+     * providing venue, each listing every offering its venue provides, with
+     * `assigned: false` where the calendar itself is not a provider.
+     */
+    everyCalendar?: boolean;
   },
 ): Promise<{ practitioners: CollectiveCatalogPractitioner[]; categories: ServiceCategoryRef[] }> {
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
@@ -454,6 +466,7 @@ async function loadCollectiveAppointmentCatalogUncached(
         const paymentRequirement: ClassPaymentRequirement =
           rawPayReq === 'card_hold' ? (cardHoldFeeConfigured ? 'card_hold' : 'none') : rawPayReq;
         entry.services.push({
+          ...(options?.everyCalendar ? { assigned: true } : {}),
           id: item.id,
           name: item.name,
           description: item.description,
@@ -483,6 +496,53 @@ async function loadCollectiveAppointmentCatalogUncached(
   // other services from its own venue page. (For a few hours on 2026-09-05 each
   // member's own services were folded in under a "{Venue} only" heading; the
   // owner asked for the offerings only.)
+  if (options?.everyCalendar) {
+    /**
+     * Every active calendar of each providing venue, with every offering that
+     * venue provides on top of what the calendar already lists. An offering the
+     * venue has no copy of cannot be booked there at all, so it is left out; a
+     * calendar that ends up with nothing is left out too.
+     */
+    for (const venueId of venueIds) {
+      const data = venueData[venueId];
+      if (!data) continue;
+      for (const [calendarId, cal] of data.calendars) {
+        const entry = ensure(calendarId, cal.name, venueId);
+        for (const [itemIndex, item] of catalogue.items.entries()) {
+          if (entry.services.some((s) => s.id === item.id)) continue;
+          const provider = item.providers.find((p) => p.venueId === venueId);
+          if (!provider) continue;
+          const meta = metaByVenue[venueId]?.get(provider.sourceServiceId);
+          const rawPayReq = meta?.paymentRequirement ?? 'none';
+          const cardHoldFeeConfigured =
+            (meta?.deposit ?? 0) > 0 ||
+            activeVariants(venueId, provider.sourceServiceId).some((v) => (v.deposit_pence ?? 0) > 0);
+          const paymentRequirement: ClassPaymentRequirement =
+            rawPayReq === 'card_hold' ? (cardHoldFeeConfigured ? 'card_hold' : 'none') : rawPayReq;
+          entry.services.push({
+            assigned: false,
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            duration_minutes: provider.durationMinutes ?? 0,
+            buffer_minutes: meta?.buffer ?? 0,
+            price_pence: provider.pricePence,
+            deposit_pence: meta?.deposit ?? null,
+            payment_requirement: paymentRequirement,
+            sort_order: itemIndex,
+            category: item.category,
+            cancellation_notice_hours: meta?.cancellationNoticeHours ?? DEFAULT_CANCELLATION_NOTICE_HOURS,
+            variants: activeVariants(venueId, provider.sourceServiceId).map(variantToCatalog),
+            addon_groups: addonGroups(venueId, provider.sourceServiceId),
+            processing_time_blocks: meta?.processing ?? [],
+            any_available: false,
+            source_service_id: provider.sourceServiceId,
+          });
+        }
+        entry.services.sort((a, b) => a.sort_order - b.sort_order);
+      }
+    }
+  }
   const result = [...byCalendar.values()].filter((p) => p.services.length > 0);
 
   // Every calendar carries its venue's name: the picker shows it under each

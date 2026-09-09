@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Taking a booking",
   description: "Create bookings by hand for appointments that come in by phone, email, or in person.",
   tags: ["bookings","new booking","appointments","guests","contacts","deposits","rebooking","scheduling"],
-  verified: '2026-09-06',
+  verified: '2026-09-09',
   content: `# Taking a booking
 
 Book someone in yourself, for phone calls and walk-ins.
@@ -76,6 +76,16 @@ Click **Confirm Booking**, or **Continue to payment** if you asked for money up 
 ## Taking a walk-in
 
 **Walk-in** on the bookings list, the calendar, or the day sheet opens the same form with two differences: no contact details are required (a booking with no name is saved as Walk In), and a deposit is never collected, though a card hold can still be asked for. On the time step, **Start appointment now** fills in today's date and the current time in one click.
+
+## Squeezing a booking in
+
+Tick **Override availability** at the top of the first step when you need to book something ResNeo would not normally offer: a service with a person who does not usually do it, a time outside their hours, or a slot that is already taken. With it ticked:
+
+1. Every active team member is listed, and every active service. A person who does not usually offer the chosen service is marked **Does not usually offer this service**, and the booking is made at the catalogue price.
+2. Instead of a slot list you type a **Date** (today or later) and a **Start time**.
+3. The review step shows **What this overrides**: outside working hours, over a break, on leave, over another booking, and so on. Nothing in that list stops the booking.
+
+The booking then appears on the calendar like any other, and its timeline shows **Booked with availability override** with the same list. The box is off every time you open the form. It works the same way for a linked venue's calendars when you have full permissions through a collective.
 
 ## Rebooking a regular
 

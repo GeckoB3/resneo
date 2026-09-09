@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "What your clients see when they book",
   description: "A walk through the guest side of ResNeo, from your booking page to the confirmation, and the manage, confirm and pay pages afterwards.",
   tags: ["guest experience","public booking","booking flow","group booking","add-ons","manage booking","confirmation","waitlist","clients"],
-  verified: '2026-09-06',
+  verified: '2026-09-09',
   content: `# What your clients see when they book
 
 You spend your day in the dashboard. Your clients never see it. This article walks the other side of the screen, step by step, so you know exactly what happens after somebody taps your booking link.
@@ -40,7 +40,7 @@ Most people tap the first. The group route has its own section further down.
 
 ## Step 3: They pick a service, or a person
 
-By default the next screen is **Select a service**, headed "Choose one or more services. You will pick a date and time in a later step." Services are listed with their length and price. Where you have set categories, they are grouped, and with six or more services a **Search services** box appears.
+By default the next screen is **Select a service**. Services are listed with their length and price. Where you have set categories, they are grouped, and with six or more services a **Search services** box appears.
 
 If you have turned on **Staff-first booking**, the order flips: they see **Who would you like to see?** first ("Pick a person to see their services and prices"), then only that person's services at that person's own prices. See [let clients choose their person first](/help/getting-started/staff-first-booking).
 

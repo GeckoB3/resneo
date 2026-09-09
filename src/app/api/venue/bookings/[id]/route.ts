@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { statusChangeCascadesAcrossVisit } from '@/lib/booking/visit-status-scope';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
@@ -1384,7 +1385,12 @@ export async function PATCH(
         }
 
         let promotedIds: string[] = [id];
-        if (groupBookingId) {
+        /**
+         * Confirm (and its undo) is a fact about the visit and cascades; Start and
+         * Complete are facts about ONE service and write this row only
+         * (Docs/visit-services-independent-plan.md, `statusChangeCascadesAcrossVisit`).
+         */
+        if (groupBookingId && statusChangeCascadesAcrossVisit(booking.status as string, newStatus)) {
           const updatedIds = await applyGroupBookingStatusChange({
             db: staff.db,
             admin,

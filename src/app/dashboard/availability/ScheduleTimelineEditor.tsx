@@ -48,6 +48,10 @@ export interface ScheduleTimelineEditorProps {
   initialMonth?: { year: number; monthIndex: number };
   /** Today, `YYYY-MM-DD`; defaults to the browser's date. Injected for tests. */
   todayYmd?: string;
+  /** The calendar's per-date overrides (`availability_exceptions`), drawn on the planning calendar. */
+  overrides?: unknown;
+  /** Where amended hours are edited; the side panel links there for an amended day. */
+  amendedHoursHref?: string;
 }
 
 type Mode = { kind: 'idle' } | { kind: 'add'; from: string | null } | { kind: 'edit'; id: string };
@@ -76,6 +80,8 @@ export function ScheduleTimelineEditor({
   loadVenueBlocks,
   initialMonth,
   todayYmd,
+  overrides = null,
+  amendedHoursHref,
 }: ScheduleTimelineEditorProps) {
   const today = todayYmd ?? todayYmdLocal();
   const schedule = useMemo(
@@ -231,6 +237,7 @@ export function ScheduleTimelineEditor({
             loadVenueBlocks={loadVenueBlocks}
             initialMonth={initialMonth}
             todayYmd={today}
+            overrides={overrides}
           />
         </div>
         <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm" aria-live="polite">
@@ -242,7 +249,9 @@ export function ScheduleTimelineEditor({
                 {selectedSummary.partialLeave ? ` (leave ${selectedSummary.partialLeave})` : ''}
               </p>
               <p className="mt-2 text-xs text-slate-500">
-                {selectedSummary.source.kind === 'period'
+                {selectedSummary.reason === 'amended'
+                  ? `Rule: amended hours for this date${selectedSummary.overrideReason ? ` (${selectedSummary.overrideReason})` : ''}.`
+                  : selectedSummary.source.kind === 'period'
                   ? `Rule: change from ${describeYmdShort(selectedSummary.source.period.from)}${
                       selectedSummary.source.period.weeks.length > 1 ? `, week ${selectedSummary.source.weekIndex + 1} of ${selectedSummary.source.period.weeks.length}` : ''
                     }.`
@@ -254,6 +263,11 @@ export function ScheduleTimelineEditor({
               </p>
               {!readOnly && mode.kind === 'idle' ? (
                 <div className="mt-3 flex flex-col gap-1.5">
+                  {amendedHoursHref ? (
+                    <a href={amendedHoursHref} className="text-left text-xs font-medium text-brand-600 hover:text-brand-800">
+                      {selectedSummary.reason === 'amended' ? 'Edit amended hours on the Closures & amended hours tab' : 'Amend hours for this date on the Closures & amended hours tab'}
+                    </a>
+                  ) : null}
                   <button type="button" onClick={() => setMode({ kind: 'add', from: selectedDate })} disabled={saving} className="text-left text-xs font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50">
                     Change hours from this week
                   </button>

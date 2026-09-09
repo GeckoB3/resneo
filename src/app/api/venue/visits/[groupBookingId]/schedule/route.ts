@@ -9,10 +9,11 @@ import {
   linkedGrantAllowsMutation,
   loadStaffAccessibleBooking,
 } from '@/lib/booking/staff-booking-access';
-import { planVisitSchedule } from '@/lib/booking/visit-schedule-plan';
-import type { VisitServiceRow } from '@/lib/booking/appointment-visit';
-import type { ProcessingTimeBlock } from '@/types/booking-models';
-import { timeToMinutes } from '@/lib/availability';
+import {
+  planVisitSchedule,
+  type PlannedVisitService,
+  type VisitScheduleRow,
+} from '@/lib/booking/visit-schedule-plan';
 import { validateAppointmentModificationInterval } from '@/lib/booking/validate-appointment-modification';
 import { bookingEndFieldsForStorage } from '@/lib/booking/booking-end-time';
 import {
@@ -20,7 +21,6 @@ import {
   visitCancellationFields,
 } from '@/lib/booking/visit-write-shared';
 import {
-  processingTailMinutes,
   parseProcessingTimeBlocksFromDb,
   processingBlocksForDurationChange,
 } from '@/lib/appointments/processing-time';
@@ -37,24 +37,60 @@ import { MIN_APPOINTMENT_CORE_DURATION_MINUTES } from '@/lib/availability/appoin
 /**
  * The statuses that put a service on the calendar. A cancelled or no-show row
  * keeps its `group_booking_id`, but it is no longer part of the visit's shape
- * and must not be re-laid with the rest.
+ * and must not be moved with the rest.
  */
 const SCHEDULED_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const hms = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/);
+
 const bodySchema = z
   .object({
-    booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    /** New start for the visit's FIRST service; the rest follow it. */
-    booking_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).optional(),
-    /** Target calendar (unified `calendar_id`, legacy `practitioner_id`). */
-    practitioner_id: z.string().uuid().optional(),
-    /** New wall-clock span for the whole visit, configured gaps included. */
-    total_duration_minutes: z
-      .number()
-      .int()
-      .min(MIN_APPOINTMENT_CORE_DURATION_MINUTES)
-      .max(14 * 60)
+    /**
+     * Move the WHOLE visit: every scheduled service moves by the same amount as
+     * the visit's earliest one, keeping the gaps between them and any cross-day
+     * offset. A calendar given here applies to every service. An empty object
+     * is allowed and describes the visit as it stands (a dry run uses it to
+     * learn the layout before anything is edited).
+     */
+    shift: z
+      .object({
+        booking_date: ymd.optional(),
+        booking_time: hms.optional(),
+        practitioner_id: z.string().uuid().optional(),
+      })
       .optional(),
+    /**
+     * Change named services only. Each takes exactly the date, start, calendar
+     * and length asked for; a service not named is left where it is. Shortening
+     * one service no longer pulls the next one forward.
+     */
+    services: z
+      .array(
+        z.object({
+          booking_id: z.string().uuid(),
+          booking_date: ymd.optional(),
+          booking_time: hms.optional(),
+          practitioner_id: z.string().uuid().optional(),
+          duration_minutes: z
+            .number()
+            .int()
+            .min(MIN_APPOINTMENT_CORE_DURATION_MINUTES)
+            .max(14 * 60)
+            .optional(),
+        }),
+      )
+      .min(1)
+      .max(12)
+      .optional(),
+    /**
+     * Every scheduled row of the visit as the caller last saw it. Optional here
+     * (unlike the services endpoint, this route never removes a row), but a
+     * caller writing per-service schedules should send it: an edit planned
+     * against three services must not land on a visit that has since gained a
+     * fourth nobody on that screen has seen.
+     */
+    known_booking_ids: z.array(z.string().uuid()).max(12).optional(),
     allow_manual_overlap: z.boolean().optional(),
     allow_outside_hours: z.boolean().optional(),
     /**
@@ -62,32 +98,22 @@ const bodySchema = z
      * because the engine has never let `allowOutsideHours` relax its break
      * check: a caller meaning "past closing" must not silently also mean "over
      * a break".
-     *
-     * SA-H5 threaded this through the single-booking PATCH and its dry run and
-     * stopped one route short of the two visit routes, so a staff member could
-     * drag a single appointment over a break but not a multi-service visit,
-     * with nothing explaining the difference.
      */
     allow_during_breaks: z.boolean().optional(),
     /**
-     * Plan and check the whole visit, write nothing. The modify form's live
-     * check and its save then judge the same request through the same code,
-     * rather than the form validating each service on its own and hoping the
-     * write agrees.
+     * Plan and check every affected service, write nothing. The modify form's
+     * live check and its save then judge the same request through the same
+     * code, rather than the form validating each service on its own and hoping
+     * the write agrees.
      */
     dry_run: z.boolean().optional(),
-    /** The caller will fire the guest notification itself (calendar's undo window). */
+    /** The caller will fire the guest notification itself (undo window). */
     defer_modification_guest_notification: z.boolean().optional(),
     skip_booking_modification_guest_notification: z.boolean().optional(),
   })
-  .refine(
-    (v) =>
-      v.booking_date !== undefined ||
-      v.booking_time !== undefined ||
-      v.practitioner_id !== undefined ||
-      v.total_duration_minutes !== undefined,
-    { message: 'Nothing to change' },
-  );
+  .refine((v) => (v.shift !== undefined) !== (v.services !== undefined), {
+    message: 'Send either a shift for the whole visit or a list of services to change.',
+  });
 
 type BookingRow = Record<string, unknown> & {
   id: string;
@@ -109,20 +135,30 @@ function calendarIdOf(row: BookingRow): string | null {
   return (row.calendar_id as string | null) ?? (row.practitioner_id as string | null) ?? null;
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Venue-local "Wed 16 Sep" for a refusal that names another day. */
+function describeDay(dateYmd: string): string {
+  const [y, m, d] = dateYmd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
+  return `${WEEKDAYS[dt.getUTCDay()]} ${dt.getUTCDate()} ${MONTHS[dt.getUTCMonth()]}`;
+}
+
 /**
  * PATCH /api/venue/visits/[groupBookingId]/schedule
  *
- * Move a multi-service visit, change its wall-clock length, or both, as ONE
- * write.
+ * Move a multi-service visit as one (`shift`), or change the schedule of some
+ * of its services (`services`), as ONE write.
  *
- * A visit is N rows sharing a `group_booking_id`, so every schedule edit rewrites
- * all of them. Done as N client PATCHes, a refusal part-way through leaves one
- * service moved and the rest behind: that is exactly how the reported booking
- * ended up running 10:11 to 18:16. Every service is planned, then checked
- * against the availability engine, then written, and a write that fails part-way
- * puts back the rows that already landed.
+ * A visit is N rows sharing a `group_booking_id`. Each row has its own date,
+ * start, calendar and length, and the calendar moves them one at a time; this
+ * route is for the edits that touch several at once, which must land whole or
+ * not at all. Every affected service is planned, then checked against the
+ * availability engine, then written, and a write that fails part-way puts back
+ * the rows that already landed.
  *
- * See Docs/multi-service-visit-plan.md, workstream 5.
+ * See Docs/visit-services-independent-plan.md, part D.
  */
 export async function PATCH(
   request: NextRequest,
@@ -143,7 +179,6 @@ export async function PATCH(
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
-
     const parsed = bodySchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
@@ -157,7 +192,6 @@ export async function PATCH(
       .from('bookings')
       .select('*')
       .eq('group_booking_id', groupBookingId);
-
     if (rowsErr) {
       console.error('Visit schedule load failed:', rowsErr);
       return NextResponse.json({ error: 'Could not load this visit' }, { status: 500 });
@@ -166,10 +200,9 @@ export async function PATCH(
     if (allRows.length === 0) {
       return NextResponse.json({ error: 'Visit not found' }, { status: 404 });
     }
-
     const rows = allRows
       .filter((r) => SCHEDULED_STATUSES.includes(r.status))
-      .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
+      .sort((a, b) => `${a.booking_date}T${a.booking_time}`.localeCompare(`${b.booking_date}T${b.booking_time}`));
     if (rows.length === 0) {
       return NextResponse.json(
         { error: 'This visit has no services left to move.' },
@@ -188,7 +221,6 @@ export async function PATCH(
       return NextResponse.json({ error: loaded.error }, { status: loaded.status });
     }
     const { ownerVenueId: scopeVenueId, isOwnVenue, linkedGrant, linkId } = loaded.ctx;
-
     if (rows.some((r) => r.venue_id !== scopeVenueId)) {
       return NextResponse.json(
         { error: 'This visit spans more than one venue and cannot be moved as one.' },
@@ -201,40 +233,115 @@ export async function PATCH(
         { status: 403 },
       );
     }
-
-    const admin = getSupabaseAdminClient();
-    const currentCalendarId = calendarIdOf(rows[0]!);
-    const targetCalendarId = body.practitioner_id ?? currentCalendarId;
-    if (!targetCalendarId) {
+    if (rows.some((r) => !calendarIdOf(r))) {
       return NextResponse.json(
         { error: 'This visit is not on a calendar, so it cannot be rescheduled here.' },
         { status: 400 },
       );
     }
 
+    const admin = getSupabaseAdminClient();
+    const rowById = new Map(rows.map((r) => [r.id, r]));
+
+    const planned = planVisitSchedule({
+      rows: rows.map(
+        (r): VisitScheduleRow => ({
+          id: r.id,
+          booking_date: r.booking_date,
+          booking_time: r.booking_time,
+          booking_end_time: r.booking_end_time ?? null,
+          calendar_id: calendarIdOf(r),
+          group_booking_id: groupBookingId,
+          person_label: (r.person_label as string | null) ?? null,
+          booking_item_name:
+            (r.service_name_snapshot as string | null) ??
+            (r.booking_item_name as string | null) ??
+            null,
+          addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
+        }),
+      ),
+      shift: body.shift ?? null,
+      services: body.services ?? null,
+      knownBookingIds: body.known_booking_ids ?? null,
+    });
+    if (!planned.ok) {
+      if (planned.code === 'stale_visit') {
+        return NextResponse.json({ error: planned.reason, code: 'stale_visit' }, { status: 412 });
+      }
+      return NextResponse.json({ error: planned.reason }, { status: 409 });
+    }
+    const plan = planned.plan;
+    const targets = plan.services.filter((s) => s.changed);
+
+    /**
+     * One shape for every answer, so a dry run tells the form exactly what the
+     * save would do: the same per-service slots, the same `changed`.
+     */
+    // Set once every service has been checked: true when the hours override is
+    // what lets a service sit where it is going, so a dry run can say so.
+    let outsideHours = false;
+    const describePlan = (changed: boolean) => ({
+      ok: true as const,
+      group_booking_id: groupBookingId,
+      booking_date: plan.startDateYmd,
+      start_time: plan.startHm,
+      end_date: plan.endDateYmd,
+      end_time: plan.endHm,
+      total_minutes: plan.totalMinutes,
+      calendar_id: plan.calendarId,
+      outside_hours: outsideHours,
+      changed,
+      dry_run: body.dry_run === true,
+      services: plan.services.map((s) => ({
+        id: s.id,
+        name: s.name,
+        // Carried so a caller that only has the visit's rows can drive the
+        // services endpoint, which needs each line's service to say what the
+        // visit is made of. The rows the booking list hands the UI have names,
+        // not ids.
+        service_id: serviceIdOf(rowById.get(s.id)!),
+        service_variant_id: (rowById.get(s.id)!.service_variant_id as string | null) ?? null,
+        booking_date: s.dateYmd,
+        booking_time: `${s.startHm}:00`,
+        booking_end_time: `${s.endHm}:00`,
+        duration_minutes: s.durationMinutes,
+        calendar_id: s.calendarId,
+        moved: s.moved,
+        changed: s.changed,
+      })),
+    });
+    if (targets.length === 0) {
+      return NextResponse.json(describePlan(false));
+    }
+
+    /**
+     * Calendar access is checked for every calendar a changed service leaves
+     * and every one it lands on. Gating only on the target would let a staff
+     * member pull a colleague's service onto their own column, and gating only
+     * on the source would let them push one onto anybody's.
+     */
     if (isOwnVenue) {
       if (staff.role !== 'admin') {
-        /**
-         * BOTH calendars, because a move has two. The per-booking route gates on
-         * the calendar a booking sits on; gating only on the target would let a
-         * staff member pull a colleague's visit onto their own column, and
-         * gating only on the source would let them push one onto anybody's.
-         */
-        const scopedCalendarId = await resolveBookingScopedCalendarId(
-          admin,
-          scopeVenueId,
-          rows[0]! as Parameters<typeof resolveBookingScopedCalendarId>[2],
-        );
-        if (!scopedCalendarId) {
-          return NextResponse.json(
-            {
-              error:
-                'This visit is not on a team calendar column tied to your permissions. Ask a venue admin to move it.',
-            },
-            { status: 403 },
+        const calendarsToCheck = new Set<string>();
+        for (const t of targets) {
+          const scoped = await resolveBookingScopedCalendarId(
+            admin,
+            scopeVenueId,
+            rowById.get(t.id)! as Parameters<typeof resolveBookingScopedCalendarId>[2],
           );
+          if (!scoped) {
+            return NextResponse.json(
+              {
+                error:
+                  'This visit is not on a team calendar column tied to your permissions. Ask a venue admin to move it.',
+              },
+              { status: 403 },
+            );
+          }
+          calendarsToCheck.add(scoped);
+          if (t.calendarId) calendarsToCheck.add(t.calendarId);
         }
-        for (const calId of new Set([scopedCalendarId, targetCalendarId])) {
+        for (const calId of calendarsToCheck) {
           const access = await requireManagedCalendarAccess(
             admin,
             scopeVenueId,
@@ -247,176 +354,113 @@ export async function PATCH(
           }
         }
       }
-    } else if (!linkedGrantAllowsCalendar(linkedGrant, false, targetCalendarId)) {
-      // §18 — the move TARGET must be in the link's scope, not just the calendar
-      // the visit sits on today. This route writes with the admin client, so the
-      // RLS backstop never runs.
-      return NextResponse.json({ error: 'This link does not include that calendar.' }, { status: 403 });
+    } else {
+      // §18 — every move TARGET must be in the link's scope, not just the
+      // calendar the service sits on today. This route writes with the admin
+      // client, so the RLS backstop never runs.
+            for (const t of targets) {
+        const current = rowById.get(t.id);
+        const currentCalendarId =
+          ((current?.calendar_id ?? current?.practitioner_id) as string | null | undefined) ?? null;
+        if (
+          !linkedGrantAllowsCalendar(linkedGrant, false, t.calendarId) ||
+          !linkedGrantAllowsCalendar(linkedGrant, false, currentCalendarId)
+        ) {
+          return NextResponse.json(
+            { error: 'This link does not include that calendar.' },
+            { status: 403 },
+          );
+        }
+      }
     }
 
     /**
-     * `buffer_minutes` is what separates a service's configured gap from dead
-     * time an earlier edit left behind. Without it the resolver preserves every
-     * observed gap, so the 11:30 to 11:45 hole in the reported visit would
-     * survive the re-lay that is supposed to close it.
+     * Two services moved in the same request are each checked with the other
+     * taken off the calendar (they are leaving their old slots), so their NEW
+     * slots are compared here: landing on top of each other on one calendar
+     * is a collision like any other.
      */
-    const serviceItemIds = rows
-      .map((r) => r.service_item_id as string | null)
+    if (body.allow_manual_overlap !== true) {
+      const toMin = (hm: string): number => {
+        const [h, m] = hm.split(':').map(Number);
+        return (h ?? 0) * 60 + (m ?? 0);
+      };
+      for (let i = 0; i < targets.length; i += 1) {
+        for (let j = i + 1; j < targets.length; j += 1) {
+          const a = targets[i]!;
+          const b = targets[j]!;
+          if (a.dateYmd !== b.dateYmd || !a.calendarId || a.calendarId !== b.calendarId) continue;
+          const aStart = toMin(a.startHm);
+          const bStart = toMin(b.startHm);
+          if (aStart < bStart + b.durationMinutes && bStart < aStart + a.durationMinutes) {
+            const later = aStart <= bStart ? b : a;
+            return NextResponse.json(
+              {
+                error: `${later.name ?? 'A service'} cannot go to ${later.startHm}: it would overlap ${
+                  (later === a ? b : a).name ?? 'another service of this visit'
+                }. Nothing on this visit was changed.`,
+                service_id: later.id,
+                reason: 'Overlaps another service of this visit',
+              },
+              { status: 409 },
+            );
+          }
+        }
+      }
+    }
+
+    /**
+     * The catalogue pattern for each service, so a row whose length changes
+     * carries processing blocks re-fitted to its new length rather than the
+     * ones snapshotted against the old one.
+     */
+    const serviceItemIds = targets
+      .map((t) => rowById.get(t.id)!.service_item_id as string | null)
       .filter((v): v is string => Boolean(v));
-    const legacyServiceIds = rows
+    const legacyServiceIds = targets
+      .map((t) => rowById.get(t.id)!)
       .filter((r) => !r.service_item_id)
       .map((r) => r.appointment_service_id as string | null)
       .filter((v): v is string => Boolean(v));
-
     const [itemsRes, legacyRes] = await Promise.all([
       serviceItemIds.length > 0
         ? admin
             .from('service_items')
-            .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks')
+            .select('id, duration_minutes, processing_time_blocks')
             .in('id', serviceItemIds)
         : Promise.resolve({ data: [] as Record<string, unknown>[] }),
       legacyServiceIds.length > 0
         ? admin
             .from('appointment_services')
-            .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks')
+            .select('id, duration_minutes, processing_time_blocks')
             .in('id', legacyServiceIds)
         : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     ]);
-    const catalogue = new Map<
-      string,
-      { duration_minutes: number; buffer_minutes: number; processing_time_blocks: unknown }
-    >();
+    const catalogue = new Map<string, { duration_minutes: number; processing_time_blocks: unknown }>();
     for (const svc of [...(itemsRes.data ?? []), ...(legacyRes.data ?? [])] as Record<
       string,
       unknown
     >[]) {
       catalogue.set(svc.id as string, {
         duration_minutes: Math.max(0, (svc.duration_minutes as number | null) ?? 30),
-        buffer_minutes: Math.max(0, (svc.buffer_minutes as number | null) ?? 0),
         processing_time_blocks: svc.processing_time_blocks,
       });
     }
 
-    /** The row's own length, which its snapshot was drawn against. */
-    const rowDurationMinutes = (r: (typeof rows)[number]): number => {
-      const start = timeToMinutes(String(r.booking_time).slice(0, 5));
-      const end = r.booking_end_time ? timeToMinutes(String(r.booking_end_time).slice(0, 5)) : NaN;
-      return Number.isFinite(end) && end > start ? end - start : 0;
-    };
-    /** The pattern this row carries: its snapshot, else the catalogue's re-fitted to its length. */
-    const rowBlocks = (r: (typeof rows)[number]): ProcessingTimeBlock[] => {
-      const svcId = serviceIdOf(r);
-      const cat = svcId ? catalogue.get(svcId) : undefined;
-      return (
-        processingBlocksForDurationChange({
-          snapshot: r.processing_time_blocks ?? null,
-          currentDurationMinutes: rowDurationMinutes(r),
-          templateBlocks: parseProcessingTimeBlocksFromDb(cat?.processing_time_blocks),
-          templateDurationMinutes: cat?.duration_minutes ?? rowDurationMinutes(r),
-          durationMinutes: rowDurationMinutes(r),
-        }) ?? []
-      );
-    };
-
-    const visitRows: VisitServiceRow[] = rows.map((r) => {
-      const svcId = serviceIdOf(r);
-      return {
-        id: r.id,
-        booking_time: r.booking_time,
-        booking_end_time: r.booking_end_time ?? null,
-        group_booking_id: groupBookingId,
-        person_label: (r.person_label as string | null) ?? null,
-        booking_item_name:
-          (r.service_name_snapshot as string | null) ??
-          (r.booking_item_name as string | null) ??
-          null,
-        addons_total_duration_minutes: (r.addons_total_duration_minutes as number | null) ?? 0,
-        buffer_minutes: svcId ? (catalogue.get(svcId)?.buffer_minutes ?? null) : null,
-        // The wait after this service, which the next one also stands behind.
-        processing_tail_minutes: svcId ? processingTailMinutes(rowBlocks(r), rowDurationMinutes(r)) : null,
-      };
-    });
-
-    const planned = planVisitSchedule({
-      rows: visitRows,
-      startHm: body.booking_time ?? null,
-      totalDurationMinutes: body.total_duration_minutes ?? null,
-    });
-    if (!planned.ok) {
-      return NextResponse.json({ error: planned.reason }, { status: 409 });
-    }
-    const plan = planned.plan;
-
-    const currentDate = rows[0]!.booking_date;
-    const newDate = body.booking_date ?? currentDate;
-    const rowById = new Map(rows.map((r) => [r.id, r]));
-    const visitBookingIds = rows.map((r) => r.id);
-    const calendarChanged = targetCalendarId !== currentCalendarId;
-    const dateChanged = newDate !== currentDate;
-    const visitStartChanged = dateChanged || plan.startHm !== plan.visit.startHm;
-
-    /**
-     * One shape for every answer, so a dry run tells the form exactly what the
-     * save would do: the same per-service times, the same total, the same
-     * `changed`.
-     */
-    // Set once every service has been checked: true when the hours override is
-    // what lets the visit sit here, so a dry run can say so.
-    let outsideHours = false;
-    const describePlan = (changed: boolean) => ({
-      ok: true as const,
-      group_booking_id: groupBookingId,
-      booking_date: newDate,
-      outside_hours: outsideHours,
-      start_time: plan.startHm,
-      end_time: plan.endHm,
-      total_minutes: plan.totalMinutes,
-      calendar_id: targetCalendarId,
-      changed,
-      dry_run: body.dry_run === true,
-      services: plan.services.map((s) => ({
-        id: s.id,
-        name: plan.visit.services.find((v) => v.id === s.id)?.name ?? null,
-        // Carried so a caller that only has the visit's rows can drive the
-        // services endpoint, which needs each line's service to say what the
-        // visit is made of. The rows the booking list hands the UI have names,
-        // not ids.
-        service_id: serviceIdOf(rowById.get(s.id)!),
-        service_variant_id: (rowById.get(s.id)!.service_variant_id as string | null) ?? null,
-        booking_date: newDate,
-        booking_time: `${s.startHm}:00`,
-        booking_end_time: `${s.endHm}:00`,
-        duration_minutes: s.durationMinutes,
-        moved: s.changed,
-      })),
-    });
-
-    if (!plan.changed && !dateChanged && !calendarChanged) {
-      return NextResponse.json(describePlan(false));
-    }
-
-    /**
-     * Every service is checked before any of them is written, and each is checked
-     * with the whole visit taken off the calendar: the rows are moving together,
-     * so a service must not be reported as conflicting with the sibling it is
-     * about to follow.
-     */
-    const targets = plan.services.map((s) => {
-      const row = rowById.get(s.id)!;
+    const writes = targets.map((t) => {
+      const row = rowById.get(t.id)!;
       const svcId = serviceIdOf(row);
+      const cat = svcId ? catalogue.get(svcId) : undefined;
       const blocks = processingBlocksForDurationChange({
         snapshot: row.processing_time_blocks,
-        currentDurationMinutes: rowDurationMinutes(row),
-        templateBlocks: parseProcessingTimeBlocksFromDb(
-          svcId ? catalogue.get(svcId)?.processing_time_blocks : null,
-        ),
-        templateDurationMinutes: svcId ? (catalogue.get(svcId)?.duration_minutes ?? rowDurationMinutes(row)) : rowDurationMinutes(row),
-        durationMinutes: s.durationMinutes,
+        currentDurationMinutes: t.previous.durationMinutes,
+        templateBlocks: parseProcessingTimeBlocksFromDb(cat?.processing_time_blocks),
+        templateDurationMinutes: cat?.duration_minutes ?? t.previous.durationMinutes,
+        durationMinutes: t.durationMinutes,
       });
-      return { schedule: s, row, svcId, blocks };
+      return { schedule: t, row, svcId, blocks };
     });
-
-    const missingService = targets.find((t) => !t.svcId);
+    const missingService = writes.find((w) => !w.svcId);
     if (missingService) {
       return NextResponse.json(
         { error: 'A service on this visit has no service record, so it cannot be checked.' },
@@ -424,37 +468,47 @@ export async function PATCH(
       );
     }
 
+    /**
+     * Every changed service is checked before any is written. A service is
+     * checked with its fellow MOVING services taken off the calendar, since
+     * they are leaving the slots they hold; a sibling that stays put is a real
+     * collision and is reported like any other, with `allow_manual_overlap` to
+     * override it on purpose.
+     */
+    const movingIds = targets.map((t) => t.id);
     const checks = await Promise.all(
-      targets.map(async (t) => {
+      writes.map(async (w) => {
         const result = await validateAppointmentModificationInterval({
           admin,
           venueId: scopeVenueId,
-          bookingId: t.row.id,
-          newDate,
-          timeStr: t.schedule.startHm,
-          practId: targetCalendarId,
-          svcId: t.svcId!,
-          durationMinutes: t.schedule.durationMinutes,
-          bookingServiceVariantId: (t.row.service_variant_id as string | null) ?? null,
-          bookingProcessingSnapshot: t.row.processing_time_blocks,
-          ...(t.blocks !== null ? { processingTimeBlocksOverride: t.blocks } : {}),
+          bookingId: w.row.id,
+          newDate: w.schedule.dateYmd,
+          timeStr: w.schedule.startHm,
+          practId: w.schedule.calendarId!,
+          svcId: w.svcId!,
+          durationMinutes: w.schedule.durationMinutes,
+          bookingServiceVariantId: (w.row.service_variant_id as string | null) ?? null,
+          bookingProcessingSnapshot: w.row.processing_time_blocks,
+          ...(w.blocks !== null ? { processingTimeBlocksOverride: w.blocks } : {}),
           allowManualOverlap: body.allow_manual_overlap === true,
           allowOutsideHours: body.allow_outside_hours === true,
           allowDuringBreaks: body.allow_during_breaks === true,
-          excludeBookingIds: visitBookingIds,
+          excludeBookingIds: movingIds,
         });
-        return { t, result };
+        return { w, result };
       }),
     );
-
     const blocked = checks.find((c) => !c.result.ok);
     if (blocked) {
-      const name = plan.visit.services.find((s) => s.id === blocked.t.row.id)?.name ?? 'A service';
+      const s = blocked.w.schedule;
+      const name = s.name ?? 'A service';
       const reason = blocked.result.ok ? '' : blocked.result.reason;
+      const where =
+        s.dateYmd !== s.previous.dateYmd ? `${s.startHm} on ${describeDay(s.dateYmd)}` : s.startHm;
       return NextResponse.json(
         {
-          error: `${name} cannot go to ${blocked.t.schedule.startHm}: ${reason}. The visit was not moved.`,
-          service_id: blocked.t.row.id,
+          error: `${name} cannot go to ${where}: ${reason}. Nothing on this visit was changed.`,
+          service_id: blocked.w.row.id,
           reason,
         },
         { status: 409 },
@@ -462,40 +516,38 @@ export async function PATCH(
     }
     outsideHours = checks.some((c) => c.result.ok && c.result.outsideHours);
 
-    if (visitStartChanged) {
-      for (const t of targets) {
-        // A per-visit record was completed for THIS booking, so it moves with the visit.
-        // Runs before the gate, which would otherwise reject the reschedule on the consent
-        // signed for the date being left behind. Skipped on a dry run, which must not write:
-        // the trade-off is that a dry run can still report a per-visit block that the real
-        // save would clear.
-        if (body.dry_run !== true) {
-          await rescheduleBookingComplianceRecords(admin, {
-            venueId: scopeVenueId,
-            bookingId: t.row.id as string,
-            newBookingDate: newDate,
-          });
-        }
-
-        const compliance = await checkBookingCompliance(admin, {
+    for (const w of writes) {
+      if (!w.schedule.moved) continue;
+      // A per-visit record was completed for THIS booking, so it moves with the
+      // service. Runs before the gate, which would otherwise reject the
+      // reschedule on the consent signed for the date being left behind. Skipped
+      // on a dry run, which must not write: the trade-off is that a dry run can
+      // still report a per-visit block that the real save would clear.
+      if (body.dry_run !== true) {
+        await rescheduleBookingComplianceRecords(admin, {
           venueId: scopeVenueId,
-          guestId: (t.row.guest_id as string | null) ?? null,
-          appointmentServiceId: (t.row.appointment_service_id as string | null) ?? null,
-          serviceItemId: (t.row.service_item_id as string | null) ?? null,
-          bookingDate: newDate,
-          bookingTime: t.schedule.startHm,
-          context: 'staff',
+          bookingId: w.row.id,
+          newBookingDate: w.schedule.dateYmd,
         });
-        if (compliance.blocked) {
-          return NextResponse.json(
-            {
-              error: COMPLIANCE_REQUIREMENT_UNMET,
-              message: complianceUnmetMessage(compliance.details, 'staff'),
-              details: compliance.details,
-            },
-            { status: 409 },
-          );
-        }
+      }
+      const compliance = await checkBookingCompliance(admin, {
+        venueId: scopeVenueId,
+        guestId: (w.row.guest_id as string | null) ?? null,
+        appointmentServiceId: (w.row.appointment_service_id as string | null) ?? null,
+        serviceItemId: (w.row.service_item_id as string | null) ?? null,
+        bookingDate: w.schedule.dateYmd,
+        bookingTime: w.schedule.startHm,
+        context: 'staff',
+      });
+      if (compliance.blocked) {
+        return NextResponse.json(
+          {
+            error: COMPLIANCE_REQUIREMENT_UNMET,
+            message: complianceUnmetMessage(compliance.details, 'staff'),
+            details: compliance.details,
+          },
+          { status: 409 },
+        );
       }
     }
 
@@ -503,25 +555,34 @@ export async function PATCH(
       return NextResponse.json(describePlan(true));
     }
 
+    /**
+     * One cancellation deadline for the whole visit, pinned to its earliest
+     * service. When that slot moves, every scheduled row is re-pinned, the
+     * unchanged ones included: a row keeping a deadline computed against a
+     * start the visit no longer has would enforce a window its own stored
+     * policy no longer matches.
+     */
     const firstRow = rowById.get(plan.services[0]!.id)!;
-    const cancellation = await visitCancellationFields({
-      admin,
-      venueId: scopeVenueId,
-      anchorRow: {
-        service_item_id: (firstRow.service_item_id as string | null) ?? null,
-        appointment_service_id: (firstRow.appointment_service_id as string | null) ?? null,
-      },
-      dateYmd: newDate,
-      startHm: plan.startHm,
-    });
+    const cancellation = plan.visitStartChanged
+      ? await visitCancellationFields({
+          admin,
+          venueId: scopeVenueId,
+          anchorRow: {
+            service_item_id: (firstRow.service_item_id as string | null) ?? null,
+            appointment_service_id: (firstRow.appointment_service_id as string | null) ?? null,
+          },
+          dateYmd: plan.startDateYmd,
+          startHm: plan.startHm,
+        })
+      : null;
 
     /**
      * Written one row at a time, because a visit's rows are separate bookings
      * with separate optimistic-concurrency guards. A row that fails puts the
      * rows already written back where they were: the endpoint exists so a visit
-     * cannot be left half re-laid, and it must not do that itself.
+     * cannot be left half changed, and it must not do that itself.
      */
-    const written: { row: BookingRow; after: Record<string, unknown> }[] = [];
+    const written: { row: BookingRow; after: Record<string, unknown>; schedule: PlannedVisitService | null }[] = [];
     const restoreWritten = async () => {
       for (const w of written) {
         const { error: undoErr } = await admin
@@ -545,40 +606,22 @@ export async function PATCH(
         }
       }
     };
-
-    for (const t of targets) {
-      const endFields = bookingEndFieldsForStorage({
-        dateYmd: newDate,
-        startHHmm: t.schedule.startHm,
-        durationMinutes: t.schedule.durationMinutes,
-      });
-      const update: Record<string, unknown> = {
-        booking_date: newDate,
-        booking_time: `${t.schedule.startHm}:00`,
-        booking_end_time: endFields.booking_end_time,
-        estimated_end_time: endFields.estimated_end_time,
-        ...cancellation,
-        updated_at: new Date().toISOString(),
-        ...(t.blocks !== null ? { processing_time_blocks: t.blocks } : {}),
-        ...(calendarChanged
-          ? t.row.calendar_id != null
-            ? { calendar_id: targetCalendarId }
-            : { practitioner_id: targetCalendarId }
-          : {}),
-      };
-
+    const writeRow = async (
+      row: BookingRow,
+      update: Record<string, unknown>,
+      schedule: PlannedVisitService | null,
+    ): Promise<NextResponse | null> => {
       const { data: updated, error: updErr } = await admin
         .from('bookings')
         .update(update)
-        .eq('id', t.row.id)
-        .eq('updated_at', t.row.updated_at)
+        .eq('id', row.id)
+        .eq('updated_at', row.updated_at)
         .select('*')
         .maybeSingle();
-
       if (updErr) {
         console.error('Visit schedule update failed:', updErr);
         await restoreWritten();
-        return NextResponse.json({ error: 'Could not move this visit' }, { status: 500 });
+        return NextResponse.json({ error: 'Could not change this visit' }, { status: 500 });
       }
       if (!updated) {
         await restoreWritten();
@@ -590,41 +633,79 @@ export async function PATCH(
           { status: 412 },
         );
       }
-      written.push({ row: t.row, after: updated as Record<string, unknown> });
+      written.push({ row, after: updated as Record<string, unknown>, schedule });
+      return null;
+    };
+    for (const w of writes) {
+      const s = w.schedule;
+      const endFields = bookingEndFieldsForStorage({
+        dateYmd: s.dateYmd,
+        startHHmm: s.startHm,
+        durationMinutes: s.durationMinutes,
+      });
+      const update: Record<string, unknown> = {
+        booking_date: s.dateYmd,
+        booking_time: `${s.startHm}:00`,
+        booking_end_time: endFields.booking_end_time,
+        estimated_end_time: endFields.estimated_end_time,
+        ...(cancellation ?? {}),
+        updated_at: new Date().toISOString(),
+        ...(w.blocks !== null ? { processing_time_blocks: w.blocks } : {}),
+        ...(s.calendarChanged
+          ? w.row.calendar_id != null
+            ? { calendar_id: s.calendarId }
+            : { practitioner_id: s.calendarId }
+          : {}),
+      };
+      const failed = await writeRow(w.row, update, s);
+      if (failed) return failed;
+    }
+    if (cancellation) {
+      for (const s of plan.services) {
+        if (s.changed) continue;
+        const failed = await writeRow(
+          rowById.get(s.id)!,
+          { ...cancellation, updated_at: new Date().toISOString() },
+          null,
+        );
+        if (failed) return failed;
+      }
     }
 
     const { logBookingModifiedEvent } = await import('@/lib/booking/log-booking-modified-event');
-    for (const t of targets) {
+    for (const w of writes) {
       await logBookingModifiedEvent(admin, {
         venue_id: scopeVenueId,
-        booking_id: t.row.id,
+        booking_id: w.row.id,
         modification_actor: 'staff',
         before: {
-          booking_date: t.row.booking_date,
-          booking_time: t.row.booking_time.slice(0, 5),
-          party_size: (t.row.party_size as number | null) ?? 1,
+          booking_date: w.row.booking_date,
+          booking_time: w.row.booking_time.slice(0, 5),
+          party_size: (w.row.party_size as number | null) ?? 1,
         },
         after: {
-          booking_date: newDate,
-          booking_time: t.schedule.startHm,
-          party_size: (t.row.party_size as number | null) ?? 1,
-          booking_end_time: t.schedule.endHm,
+          booking_date: w.schedule.dateYmd,
+          booking_time: w.schedule.startHm,
+          party_size: (w.row.party_size as number | null) ?? 1,
+          booking_end_time: w.schedule.endHm,
         },
       });
     }
 
-    if (visitStartChanged) {
-      await resetVisitScheduledComms(admin, visitBookingIds);
+    // Reminders are scheduled per row, so the rows that moved are the ones
+    // whose reminders must re-trigger against the new time.
+    const movedIds = targets.filter((t) => t.moved).map((t) => t.id);
+    if (movedIds.length > 0) {
+      await resetVisitScheduledComms(admin, movedIds);
     }
 
     /**
-     * ONE notification for the visit, against its first service, matching what
-     * the calendar's own move already does. A visit is one appointment to the
-     * guest: three emails saying their booking moved would be three times the
-     * same news.
+     * ONE notification for the visit, against its earliest service. A visit is
+     * one appointment to the guest: three emails saying their booking moved
+     * would be three times the same news.
      */
     if (
-      visitStartChanged &&
+      plan.startChanged &&
       body.defer_modification_guest_notification !== true &&
       body.skip_booking_modification_guest_notification !== true
     ) {
@@ -649,7 +730,8 @@ export async function PATCH(
       } catch {
         auditActorUserId = null;
       }
-      for (const w of written) {
+      const changedWrites = written.filter((w) => w.schedule !== null);
+      for (const w of changedWrites) {
         await recordBookingWriteAudit({
           admin,
           linkId,
@@ -663,7 +745,7 @@ export async function PATCH(
         });
       }
       // §17.3 — the owning venue hears about it once, for the visit.
-      const firstWrite = written[0];
+      const firstWrite = changedWrites[0];
       if (firstWrite) {
         after(() =>
           notifyCrossVenueBookingWrite({

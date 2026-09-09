@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { CARD_HOLD_LINK_TIMEOUT_HOURS } from '@/lib/booking/card-hold-terms';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { sendStaffPush } from '@/lib/communications/staff-push-notification';
@@ -169,7 +170,7 @@ async function handlePost(request: NextRequest) {
   try {
     const supabase = getSupabaseAdminClient();
     const now = Date.now();
-    const cutoff = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(now - CARD_HOLD_LINK_TIMEOUT_HOURS * 60 * 60 * 1000).toISOString();
     // 20 minutes (plan follow-up): the clock starts at "Continue to payment",
     // so this only has to cover time ON the payment step, and in-flight
     // guests are protected by the PI status check (requires_action /

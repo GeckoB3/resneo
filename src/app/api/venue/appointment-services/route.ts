@@ -1,5 +1,6 @@
 import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
+import { isMissingSyncColumnError, patchTouchesSyncedShape, syncCopiesOfService } from '@/lib/linked-accounts/service-sync';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import {
@@ -35,6 +36,7 @@ import { addonGroupLinksArraySchema } from '@/lib/addons/zod-schemas';
 import { replaceServiceAddonGroupLinks } from '@/lib/venue/addon-groups';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
 import {
+  canonicalServiceShape,
   parseProcessingTimeBlocksFromDb,
   processingTimeBlocksSchema,
   validateProcessingTimeBlocks,
@@ -386,8 +388,16 @@ function applyBookingStartPatch(
 }
 
 function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<string, unknown> {
+  // Rows saved before the canonical shape existed read as if they had been (the
+  // backfill migration makes this a no-op once applied).
+  const canon = canonicalServiceShape({
+    durationMinutes: (row.duration_minutes as number) ?? 30,
+    processingBlocks: parseProcessingTimeBlocksFromDb(row.processing_time_blocks),
+  });
   return {
     ...row,
+    duration_minutes: canon.durationMinutes,
+    processing_time_blocks: canon.processingBlocks,
     colour: row.colour ?? '#3B82F6',
     category_id: (row.category_id as string | null | undefined) ?? null,
     location_type: (row.location_type as string | undefined) ?? 'business_venue',
@@ -784,12 +794,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const normalizedParentProcessing =
-      validateProcessingTimeBlocks(
-        parseProcessingTimeBlocksFromDb(parsed.data.processing_time_blocks ?? []),
-        parsed.data.duration_minutes,
-      )
-        .normalized ?? [];
+    // One shape for processing that reaches the end of the service: the service
+    // shortens to where it starts and the run becomes develop time after it. See
+    // canonicalServiceShape.
+    const canonicalParent = canonicalServiceShape({
+      durationMinutes: parsed.data.duration_minutes,
+      processingBlocks:
+        validateProcessingTimeBlocks(
+          parseProcessingTimeBlocksFromDb(parsed.data.processing_time_blocks ?? []),
+          parsed.data.duration_minutes,
+        ).normalized ?? [],
+    });
+    const normalizedParentProcessing = canonicalParent.processingBlocks;
+    const parentDurationMinutes = canonicalParent.durationMinutes;
 
     const variantsRaw = (body as { variants?: unknown }).variants;
     const variantsProvided = variantsRaw !== undefined;
@@ -905,7 +922,7 @@ export async function POST(request: NextRequest) {
         name: parsed.data.name,
         description: parsed.data.description ?? null,
         item_type: 'service' as const,
-        duration_minutes: parsed.data.duration_minutes,
+        duration_minutes: parentDurationMinutes,
         buffer_minutes: parsed.data.buffer_minutes ?? 0,
         processing_time_minutes: 0,
         processing_time_blocks: normalizedParentProcessing,
@@ -1039,6 +1056,7 @@ export async function POST(request: NextRequest) {
         parsed.data.sort_order ??
         (await nextServiceSortOrder(admin, 'appointment_services', staff.venue_id)),
       buffer_minutes: parsed.data.buffer_minutes ?? 0,
+      duration_minutes: parentDurationMinutes,
       processing_time_blocks: normalizedParentProcessing,
       payment_requirement: pay.payment_requirement,
       deposit_pence: pay.deposit_pence,
@@ -1437,18 +1455,62 @@ export async function PATCH(request: NextRequest) {
       if (Object.prototype.hasOwnProperty.call(updatePayload, 'processing_time_blocks')) {
         updatePayload.processing_time_blocks = procCheckU.normalized ?? [];
       }
+      {
+        const canon = canonicalServiceShape({ durationMinutes: effectiveDurU, processingBlocks: procCheckU.normalized ?? [] });
+        if (canon.changed) {
+          updatePayload.duration_minutes = canon.durationMinutes;
+          updatePayload.processing_time_blocks = canon.processingBlocks;
+        }
+      }
 
       applyBookingStartPatch(updatePayload, serviceRow as Record<string, unknown>);
 
+      /**
+       * Copies follow the origin (Docs/collective-service-sync-plan.md). A change to a
+       * synced field on a LINKED copy detaches it here, visibly, rather than being
+       * silently overwritten on the origin's next save; a change to price or
+       * description leaves it linked. The origin side runs after the response.
+       */
+            const currentVariantsForShape = variantsProvided
+        ? ((
+            await loadVariantsForServices({
+              admin,
+              venueId: staff.venue_id,
+              schema: 'service_item',
+              parentIds: [id as string],
+            })
+          ).get(id as string) ?? [])
+        : null;
+      const touchesShape = patchTouchesSyncedShape(
+        updatePayload,
+        currentVariantsForShape
+          ? {
+              next: parsedVariants as unknown as Record<string, unknown>[],
+              current: currentVariantsForShape as unknown as Record<string, unknown>[],
+            }
+          : null,
+        serviceRow as Record<string, unknown>,
+      );
+      const currentSyncState = (serviceRow as { sync_state?: string }).sync_state;
+      if (touchesShape && currentSyncState === 'linked') {
+        updatePayload.sync_state = 'customised';
+      }
+
       let savedRow = serviceRow as Record<string, unknown>;
       if (Object.keys(updatePayload).length > 0) {
-        const { data, error } = await admin
+        let saved = await admin
           .from('service_items')
           .update(updatePayload)
           .eq('id', id)
           .eq('venue_id', staff.venue_id)
           .select()
           .single();
+        if (saved.error && 'sync_state' in updatePayload && isMissingSyncColumnError(saved.error)) {
+          // Database without the sync columns: save the rest as before.
+          const { sync_state: _omit, ...rest } = updatePayload;
+          saved = await admin.from('service_items').update(rest).eq('id', id).eq('venue_id', staff.venue_id).select().single();
+        }
+        const { data, error } = saved;
 
         if (error) {
           console.error('PATCH /api/venue/appointment-services (service_items) failed:', error);
@@ -1485,6 +1547,13 @@ export async function PATCH(request: NextRequest) {
         if (!linkRes.ok) {
           return NextResponse.json({ error: linkRes.error }, { status: 500 });
         }
+      }
+
+      if (touchesShape) {
+        // Members' copies of THIS service follow its shape. After the response: a partner
+        // venue's problem must neither slow nor fail the owner's own save.
+        const originId = id as string;
+        after(() => syncCopiesOfService(admin, originId, 'PATCH /api/venue/appointment-services'));
       }
 
       const [variantMap, addonGroupMap] = await Promise.all([
@@ -1715,6 +1784,13 @@ export async function PATCH(request: NextRequest) {
     }
     if (Object.prototype.hasOwnProperty.call(patchPayload, 'processing_time_blocks')) {
       patchPayload.processing_time_blocks = procCheckL.normalized ?? [];
+    }
+    {
+      const canon = canonicalServiceShape({ durationMinutes: effectiveDurL, processingBlocks: procCheckL.normalized ?? [] });
+      if (canon.changed) {
+        patchPayload.duration_minutes = canon.durationMinutes;
+        patchPayload.processing_time_blocks = canon.processingBlocks;
+      }
     }
 
     applyBookingStartPatch(patchPayload, serviceRow as Record<string, unknown>);

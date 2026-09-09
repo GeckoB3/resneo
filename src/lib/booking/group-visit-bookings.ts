@@ -4,7 +4,11 @@ import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 /** Row shape for “Services in this visit” / group dining linked bookings. */
 export interface GroupVisitBookingRow {
   id: string;
+  /** Venue-local date. Optional only for fixtures; the list route always sends it. */
+  booking_date?: string;
   booking_time: string;
+  /** The calendar the row sits on (unified `calendar_id`, else legacy `practitioner_id`). */
+  calendar_id?: string | null;
   booking_end_time: string | null;
   status: string;
   guest_attendance_confirmed_at?: string | null;
@@ -21,12 +25,14 @@ export interface GroupVisitBookingRow {
 export function groupVisitRowsToScheduleSeeds(
   rows: GroupVisitBookingRow[],
 ): Array<{
+  booking_date?: string | null;
   booking_time: string;
   booking_end_time: string | null;
   estimated_end_time?: string | null;
   addons_total_duration_minutes: number;
 }> {
   return rows.map((r) => ({
+    booking_date: r.booking_date ?? null,
     booking_time: r.booking_time,
     booking_end_time: r.booking_end_time,
     addons_total_duration_minutes: r.addons_total_duration_minutes,
@@ -177,7 +183,41 @@ export function resolveVisitPillAnchorStatus(
     if (isTerminalVisitStatus(seg.status)) continue;
     anchor = anchor == null ? seg.status : preferLaterBookingStatus(anchor, seg.status);
   }
+  /**
+   * Started and Completed belong to ONE service (Docs/visit-services-independent-plan.md),
+   * so the visit-wide floor stops at Confirmed: a started colour must not make the cut
+   * that has not begun read Started. Confirmation is still a fact about the whole visit.
+   */
+  if (anchor != null && (VISIT_STATUS_RANK[anchor] ?? -1) > (VISIT_STATUS_RANK.Confirmed ?? 2)) {
+    return 'Confirmed';
+  }
   return anchor;
+}
+
+/**
+ * One status for a whole visit, derived from its services, for lists, badges and the
+ * detail panel header. Nothing stores it.
+ *
+ * Every live service Completed: Completed. Any service Started: Seated (shown as
+ * "Started" / "In progress"). Otherwise the earliest stage among the live services
+ * (a visit is only Confirmed when every service is). Terminal rows (Cancelled, No-Show)
+ * are left out unless they are all there is, in which case the anchor's own status stands.
+ */
+export function visitLifecycleStatus(
+  rows: ReadonlyArray<Pick<GroupVisitBookingRow, 'status'>>,
+  anchorStatus?: string | null,
+): string {
+  const live = rows.filter((r) => !isTerminalVisitStatus(r.status));
+  if (live.length === 0) return anchorStatus ?? rows[0]?.status ?? 'Booked';
+  if (live.every((r) => r.status === 'Completed')) return 'Completed';
+  if (live.some((r) => r.status === 'Seated' || r.status === 'Started')) return 'Seated';
+  let earliest: string | null = null;
+  for (const r of live) {
+    if (r.status === 'Completed') continue; // a finished service does not hold the visit back
+    const rank = VISIT_STATUS_RANK[r.status] ?? -1;
+    if (earliest == null || rank < (VISIT_STATUS_RANK[earliest] ?? -1)) earliest = r.status;
+  }
+  return earliest ?? 'Completed';
 }
 
 /** Lifecycle status for a visit segment pill (attendance timestamps + visit anchor). */
@@ -322,7 +362,14 @@ export function mapGroupVisitListRow(raw: Record<string, unknown>): GroupVisitBo
   const addonLabels = raw.booking_addon_labels;
   return {
     id: String(raw.id),
+    booking_date: typeof raw.booking_date === 'string' ? raw.booking_date : undefined,
     booking_time: String(raw.booking_time),
+    calendar_id:
+      typeof raw.calendar_id === 'string' && raw.calendar_id.trim()
+        ? raw.calendar_id
+        : typeof raw.practitioner_id === 'string' && raw.practitioner_id.trim()
+          ? raw.practitioner_id
+          : null,
     booking_end_time:
       typeof raw.booking_end_time === 'string' && raw.booking_end_time.trim()
         ? raw.booking_end_time
@@ -425,15 +472,31 @@ export function resolveInitialGroupVisitBookings(
   return undefined;
 }
 
-export async function fetchGroupVisitBookings(groupBookingId: string): Promise<GroupVisitBookingRow[]> {
+/**
+ * Where a visit's rows live when they are not this venue's own. A booking on a
+ * linked venue's calendar is read through that venue (`owner_venue_id`), and
+ * the list route serves its siblings under the link's `full_details` grant;
+ * without it the own-venue query finds nothing and the panel shows no visit.
+ */
+export interface FetchGroupVisitOptions {
+  ownerVenueId?: string | null;
+}
+
+export async function fetchGroupVisitBookings(
+  groupBookingId: string,
+  options: FetchGroupVisitOptions = {},
+): Promise<GroupVisitBookingRow[]> {
   const gid = groupBookingId.trim();
   if (!gid) return [];
 
   const inFlight = groupVisitFetchInFlight.get(gid);
   if (inFlight) return inFlight;
 
+  const owner = options.ownerVenueId?.trim();
   const promise = fetch(
-    `/api/venue/bookings/list?group_booking_id=${encodeURIComponent(gid)}&_=${Date.now()}`,
+    `/api/venue/bookings/list?group_booking_id=${encodeURIComponent(gid)}${
+      owner ? `&owner_venue_id=${encodeURIComponent(owner)}` : ''
+    }&_=${Date.now()}`,
   )
     .then(async (res) => {
       if (!res.ok) return peekGroupVisitBookings(gid) ?? [];
@@ -455,10 +518,13 @@ export async function fetchGroupVisitBookings(groupBookingId: string): Promise<G
 }
 
 /** Best-effort prefetch (e.g. row hover before expand). */
-export function warmGroupVisitBookings(groupBookingId: string | null | undefined): void {
+export function warmGroupVisitBookings(
+  groupBookingId: string | null | undefined,
+  options: FetchGroupVisitOptions = {},
+): void {
   const gid = groupBookingId?.trim();
   if (!gid) return;
   const cached = peekGroupVisitBookings(gid);
   if (cached && cached.length > 1) return;
-  void fetchGroupVisitBookings(gid);
+  void fetchGroupVisitBookings(gid, options);
 }

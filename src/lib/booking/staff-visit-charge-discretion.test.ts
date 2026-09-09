@@ -75,13 +75,17 @@ describe('resolveStaffVisitChargeDiscretion', () => {
     });
   });
 
-  describe('card holds are a separate decision, defaulting on', () => {
-    it('holds by default for staff phone bookings', () => {
-      expect(resolveStaffVisitChargeDiscretion({ source: 'phone' }).holdCards).toBe(true);
+  describe('card holds are a separate decision, defaulting off', () => {
+    // Staff booking for a guest more often waive the hold than ask for it
+    // (2026-09-09; it defaulted on before), so an omitted toggle means no hold.
+    it('does not hold unless staff ask, on a phone booking', () => {
+      expect(resolveStaffVisitChargeDiscretion({ source: 'phone' }).holdCards).toBe(false);
+      expect(resolveStaffVisitChargeDiscretion({ source: 'phone', require_card_hold: true }).holdCards).toBe(true);
     });
 
-    it('holds by default on walk-ins too (D6)', () => {
-      expect(resolveStaffVisitChargeDiscretion({ source: 'walk-in' }).holdCards).toBe(true);
+    it('does not hold unless staff ask, on a walk-in either (D6: the ask is honoured there too)', () => {
+      expect(resolveStaffVisitChargeDiscretion({ source: 'walk-in' }).holdCards).toBe(false);
+      expect(resolveStaffVisitChargeDiscretion({ source: 'walk-in', require_card_hold: true }).holdCards).toBe(true);
     });
 
     it('drops the hold when staff switch it off', () => {

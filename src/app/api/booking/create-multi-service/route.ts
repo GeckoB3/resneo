@@ -25,6 +25,16 @@ import {
   MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import {
+  ensureOverrideServiceInInput,
+  isBookingDateInPast,
+  overrideWarningsForInterval,
+  PAST_DATE_OVERRIDE_ERROR,
+  prefixWarnings,
+  recordAvailabilityOverrideEvent,
+  resolveOverrideCollectiveTarget,
+  resolveStaffOverrideActor,
+} from '@/lib/booking/staff-availability-override';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
 import { MAX_SERVICES_PER_VISIT } from '@/lib/booking/service-chain';
 import {
@@ -115,6 +125,13 @@ const createMultiServiceSchema = z.object({
   phone: z.string().max(24).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
   /**
+   * Staff "override availability": every segment lands where it is asked to,
+   * whatever the engine says, and the refusals come back as warnings. Staff
+   * sources only, with a staff session for the venue; see
+   * `staff-availability-override.ts`.
+   */
+  override_availability: z.boolean().optional(),
+  /**
    * Staff discretion over money, honoured only for the `phone` / `walk-in`
    * sources and ignored outright for public ones. See
    * `resolveStaffVisitChargeDiscretion`.
@@ -167,8 +184,13 @@ export async function POST(request: NextRequest) {
       marketing_consent: marketingConsentRaw,
       collective_id,
       collective_service_item_id,
+      override_availability,
     } = parsed.data;
-
+    const staffOverride = override_availability === true;
+    if (staffOverride && source !== 'phone' && source !== 'walk-in') {
+      return NextResponse.json({ error: 'Override availability is for staff bookings only.' }, { status: 400 });
+    }
+    const overrideWarnings: string[] = [];
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
     if (phoneRaw) {
@@ -229,11 +251,17 @@ export async function POST(request: NextRequest) {
       const resolved: SegmentEntry[] = [];
       let owningVenueId: string | null = null;
       for (const s of rawServices) {
-        const target = await resolveCombinedBookingTarget(supabase, {
-          collectiveId: requestedVenueId,
-          offeringId: s.service_id,
-          calendarId: s.practitioner_id,
-        });
+        const target = staffOverride
+          ? await resolveOverrideCollectiveTarget(supabase, {
+              collectiveId: requestedVenueId,
+              offeringId: s.service_id,
+              calendarId: s.practitioner_id,
+            })
+          : await resolveCombinedBookingTarget(supabase, {
+              collectiveId: requestedVenueId,
+              offeringId: s.service_id,
+              calendarId: s.practitioner_id,
+            });
         if (!target || (owningVenueId && target.venueId !== owningVenueId)) {
           return NextResponse.json(
             { error: 'This booking option is no longer available.' },
@@ -253,6 +281,15 @@ export async function POST(request: NextRequest) {
       collectiveIdFromVenue = requestedVenueId;
     }
     const effectiveCollectiveId = collectiveIdFromVenue ?? collective_id ?? null;
+    if (staffOverride) {
+      const actor = await resolveStaffOverrideActor(supabase, request, {
+        venueId: venue_id,
+        collectiveId: collectiveIdFromVenue,
+      });
+      if (!actor.ok) {
+        return NextResponse.json({ error: actor.error }, { status: actor.status });
+      }
+    }
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
@@ -356,6 +393,14 @@ export async function POST(request: NextRequest) {
         serviceId: seg.service_id,
       });
       input.phantomBookings = [...phantoms];
+      if (staffOverride) {
+        // The loader reads the calendar's assigned services only; the override
+        // may book any active service of the venue on any calendar.
+        const present = await ensureOverrideServiceInInput(supabase, input, venue_id, seg.service_id);
+        if (!present) {
+          return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+        }
+      }
 
       // The collective may sell the offering at its own length; reserve that,
       // not the source service's. Applied before the variant and add-ons, so
@@ -497,40 +542,61 @@ export async function POST(request: NextRequest) {
        * Uses the timezone the attach just resolved, so this asks about the same
        * calendar day the engine is working in.
        */
-      const msDateAllowed =
-        source === 'walk-in'
-          ? isStaffWalkInBookingDateAllowed(booking_date, svcWindow, input.venueTimezone ?? 'Europe/London')
-          : isGuestBookingDateAllowed(booking_date, svcWindow, input.venueTimezone ?? 'Europe/London');
+      const msTz = input.venueTimezone ?? 'Europe/London';
+      if (staffOverride && isBookingDateInPast(booking_date, msTz)) {
+        return NextResponse.json({ error: PAST_DATE_OVERRIDE_ERROR }, { status: 400 });
+      }
+      const msDateAllowed = staffOverride
+        ? true
+        : source === 'walk-in'
+          ? isStaffWalkInBookingDateAllowed(booking_date, svcWindow, msTz)
+          : isGuestBookingDateAllowed(booking_date, svcWindow, msTz);
       if (!msDateAllowed) {
         return NextResponse.json(
           { error: 'This date is not available for booking' },
           { status: 400 },
         );
       }
-
-      const exact = validateExactAppointmentStart(input, practitionerId, seg.service_id, timeStr);
-      if (!exact.ok) {
-        return NextResponse.json(
-          { error: exact.reason ?? `Slot at ${timeStr} is not available` },
-          { status: 409 },
+      if (staffOverride) {
+        const engineSvc = input.services.find((s) => s.id === seg.service_id);
+        const check = overrideWarningsForInterval(
+          input,
+          practitionerId,
+          seg.service_id,
+          timeStr,
+          minutesToTime(timeToMinutes(timeStr) + (engineSvc?.duration_minutes ?? 30)),
         );
+        if (!check.ok) {
+          return NextResponse.json({ error: `${svc?.name ?? 'A service'}: ${check.reason}` }, { status: 409 });
+        }
+        overrideWarnings.push(...prefixWarnings(svc?.name ?? 'Service', check.warnings));
+      } else {
+        const exact = validateExactAppointmentStart(input, practitionerId, seg.service_id, timeStr);
+        if (!exact.ok) {
+          return NextResponse.json(
+            { error: exact.reason ?? `Slot at ${timeStr} is not available` },
+            { status: 409 },
+          );
+        }
       }
       // C3 interim — a visit validates every segment up front and writes them
       // in a later loop, so each segment's slot can be taken in between.
       // `exact` mode: a visit books off-grid starts, so the grid check would
       // refuse starts this route legitimately allows.
-      visitSlotRechecks.push(
-        createAppointmentSlotRecheck({
-          supabase,
-          venueId: venue_id,
-          date: booking_date,
-          practitionerId,
-          serviceId: seg.service_id,
-          timeHm: timeStr,
-          input,
-          mode: 'exact',
-        }),
-      );
+      if (!staffOverride) {
+        visitSlotRechecks.push(
+          createAppointmentSlotRecheck({
+            supabase,
+            venueId: venue_id,
+            date: booking_date,
+            practitionerId,
+            serviceId: seg.service_id,
+            timeHm: timeStr,
+            input,
+            mode: 'exact',
+          }),
+        );
+      }
 
       if (i > 0) {
         const prev = validated[i - 1]!;
@@ -1144,6 +1210,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (staffOverride) {
+      for (const id of bookingIds) {
+        await recordAvailabilityOverrideEvent(supabase, { venueId: venue_id, bookingId: id, warnings: overrideWarnings });
+      }
+    }
     // A member venue's staff booking for the collective onto a partner's calendar:
     // record the cross-venue write and tell the owner, as the staff create route does.
     // Registered with `after` like the emails above: a promise merely left running
@@ -1177,6 +1248,7 @@ export async function POST(request: NextRequest) {
         stripe_account_id: hasPaymentStep ? venue.stripe_connected_account_id : undefined,
         status: hasPaymentStep ? 'Pending' : 'Booked',
         cancellation_notice_hours: refundWindowHours,
+        ...(staffOverride ? { availability_override_warnings: overrideWarnings } : {}),
       },
       { status: 201 },
     );

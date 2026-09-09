@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Your public booking page and embed",
   description: "Share your booking link, add a booking widget to your website, and brand it with your colour and a QR code.",
   tags: ["public booking","embed","widget","qr code","accent colour","booking page address","guests","resize.js"],
-  verified: '2026-09-06',
+    verified: '2026-09-09',
   content: `# Your public booking page and embed
 
 Your booking page is where clients book with you online, day or night. This guide covers finding your link, giving each person their own, branding the page, filling out its tabs, and putting it on your own website.
@@ -29,7 +29,7 @@ Miss any one and your page will load and look right, but offer nothing to book.
 
 Your link is your booking page address with \`/book/\` in front of it.
 
-1. Open **Settings**, then the **Booking Page** tab. Under **URL & branding** sits the **Your booking page** card.
+1. Open **Settings**, then the **Booking Page** tab. Under **URL & branding** sits the **Your booking page** card. If your venue is part of a combined booking page, the tab opens on that page instead: choose **This venue's own page** at the top to reach these settings.
 2. At the top of the card, **Public booking page** shows your full link. Select it to copy it, or click **Open booking page in a new tab** to see it as a client would. The sidebar's **Your Booking Page** link opens the same page (it is hidden while your venue is part of a combined booking page).
 3. To change your part of the link, use the **Booking page address** field in the **Book now** group just below. Lowercase letters, numbers and hyphens only. As you type, ResNeo checks the address and tells you **This address is available.** or that it is already in use. It saves on its own once it is valid.
 

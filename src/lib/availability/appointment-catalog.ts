@@ -22,7 +22,8 @@ import { getOfferedAppointmentServicesForPractitioner } from '@/lib/availability
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
-import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import {
+  canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
 import type { AppointmentCatalogAddonGroup } from '@/types/booking-models';
 
@@ -69,6 +70,12 @@ export interface AppointmentCatalogPractitioner {
      * exposed here — they are emailed after booking.
      */
     location_type?: import('@/types/booking-models').ServiceLocationType;
+    /**
+     * Only in the override catalogue (`everyCalendarEveryService`): false when
+     * this calendar is not assigned the service and books it at the catalogue's
+     * own length and price.
+     */
+    assigned?: boolean;
   }>;
 }
 
@@ -120,29 +127,43 @@ export interface AppointmentCatalogOptions {
    * service into that venue).
    */
   includeCalendarsWithoutServices?: boolean;
+  /**
+   * The staff "override availability" catalogue: every active calendar listed
+   * with EVERY active service, whether or not it is assigned. An assigned
+   * service keeps the calendar's own price and length; an unassigned one carries
+   * the catalogue's, and `assigned: false` so the picker can say so.
+   */
+  everyCalendarEveryService?: boolean;
 }
 
 export function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
+  const canon = canonicalServiceShape({ durationMinutes: v.duration_minutes, processingBlocks: v.processing_time_blocks ?? [] });
   return {
     id: v.id,
     name: v.name,
     description: v.description,
-    duration_minutes: v.duration_minutes,
+    duration_minutes: canon.durationMinutes,
     buffer_minutes: v.buffer_minutes,
     price_pence: v.price_pence,
     deposit_pence: v.deposit_pence,
     sort_order: v.sort_order,
-    processing_time_blocks: v.processing_time_blocks ?? [],
+    processing_time_blocks: canon.processingBlocks,
   };
 }
 
 function serviceItemRowToAppointmentService(row: Record<string, unknown>): AppointmentService {
+  // Canonical shape on read, so a row saved before the rule (or before the
+  // backfill migration reaches this database) books like one saved after it.
+  const canon = canonicalServiceShape({
+    durationMinutes: row.duration_minutes as number,
+    processingBlocks: parseProcessingTimeBlocksFromDb((row as { processing_time_blocks?: unknown }).processing_time_blocks),
+  });
   return {
     id: row.id as string,
     venue_id: row.venue_id as string,
     name: row.name as string,
     description: (row.description as string | null) ?? null,
-    duration_minutes: row.duration_minutes as number,
+    duration_minutes: canon.durationMinutes,
     buffer_minutes: (row.buffer_minutes as number) ?? 0,
     processing_time_minutes: (row.processing_time_minutes as number) ?? 0,
     price_pence: (row.price_pence as number | null) ?? null,
@@ -162,7 +183,7 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
     booking_start_times: (row.booking_start_times as string[] | null | undefined) ?? null,
     custom_availability_enabled: Boolean(row.custom_availability_enabled),
     custom_working_hours: parseCustomWorkingHoursFromDb(row.custom_working_hours),
-    processing_time_blocks: parseProcessingTimeBlocksFromDb((row as { processing_time_blocks?: unknown }).processing_time_blocks),
+    processing_time_blocks: canon.processingBlocks,
     location_type: parseServiceLocationType(row.location_type),
     online_meeting_url: (row.online_meeting_url as string | null) ?? null,
     online_meeting_info: (row.online_meeting_info as string | null) ?? null,
@@ -262,14 +283,18 @@ async function fetchUnifiedAppointmentCatalog(
   for (const practitioner of practitioners) {
     if (!practitioner.is_active) continue;
     const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
-    if (offeredServices.length === 0 && !options?.includeCalendarsWithoutServices) continue;
-
+    const assignedIds = new Set(offeredServices.map((svc) => svc.id));
+    const listedServices = options?.everyCalendarEveryService
+      ? services.map((svc) => offeredServices.find((o) => o.id === svc.id) ?? svc)
+      : offeredServices;
+    if (listedServices.length === 0 && !options?.includeCalendarsWithoutServices) continue;
     result.push({
       id: practitioner.id,
       name: practitioner.name,
-      services: offeredServices.map((svc) => {
+      services: listedServices.map((svc) => {
         const variants = (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog);
         return {
+          ...(options?.everyCalendarEveryService ? { assigned: assignedIds.has(svc.id) } : {}),
           id: svc.id,
           name: svc.name,
           description: svc.description ?? null,
@@ -367,14 +392,18 @@ export async function fetchAppointmentCatalog(
   for (const practitioner of practitioners) {
     if (!practitioner.is_active) continue;
     const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
-    if (offeredServices.length === 0 && !options?.includeCalendarsWithoutServices) continue;
-
+    const assignedIds = new Set(offeredServices.map((svc) => svc.id));
+    const listedServices = options?.everyCalendarEveryService
+      ? services.map((svc) => offeredServices.find((o) => o.id === svc.id) ?? svc)
+      : offeredServices;
+    if (listedServices.length === 0 && !options?.includeCalendarsWithoutServices) continue;
     result.push({
       id: practitioner.id,
       name: practitioner.name,
-      services: offeredServices.map((svc) => {
+      services: listedServices.map((svc) => {
         const variants = (variantMap.get(svc.id) ?? []).filter((v) => v.is_active).map(variantToCatalog);
         return {
+          ...(options?.everyCalendarEveryService ? { assigned: assignedIds.has(svc.id) } : {}),
           id: svc.id,
           name: svc.name,
           description: svc.description ?? null,

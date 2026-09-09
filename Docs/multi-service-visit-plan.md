@@ -1,5 +1,14 @@
 # Multi-service visits: one booking, not N rows
 
+> **Superseded in part (2026-09-09).** `visit-services-independent-plan.md` reverses the
+> "one duration, contiguous rows, move as one" decisions below: services in a visit become
+> individually movable and resizable on the calendar and in the staff modify form, with
+> per-service Start and Complete. The data model, the endpoints' all-or-nothing writes and
+> the service-list editing (3b) stand; the schedule endpoint's `total_duration_minutes`
+> re-lay (workstream 5) is gone, replaced by `shift` and `services` modes, and
+> `distributeVisitDuration` / `resequenceVisit` no longer exist. This document stays as
+> the record of what was built.
+
 Status: every workstream is built. See the Status section at the bottom for where
 each one landed, and the open question about notifying a guest when a visit's
 services change. Branch: `staging`.

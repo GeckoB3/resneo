@@ -92,3 +92,34 @@ export function formatWorkingHoursLineForDate(
   // Only mention the calendar's own hours when they differ, so the common case stays terse.
   return effectiveLine === own ? effectiveLine : `${effectiveLine} (calendar ${own})`;
 }
+
+/**
+ * The same line, from hours ALREADY RESOLVED for the date (`calendarHours`: per-date
+ * override, day off, schedule period, weekly shape, in that order). The diary's native
+ * column header uses this so that on an amended day, or a day off, the header and the
+ * grid beside it read the same hours. Linked columns keep the weekly formatter above:
+ * their rows arrive without the resolver's inputs.
+ */
+export function formatResolvedHoursLineForDate(
+  resolved: readonly MinuteRangeLike[],
+  venueRanges?: readonly MinuteRangeLike[] | null,
+): string {
+  const own = resolved
+    .filter((r) => r.end > r.start)
+    .map((r) => `${toHhMm(r.start)}–${toHhMm(r.end)}`)
+    .join(', ');
+  if (!own) return 'Closed';
+  if (!venueRanges) return own;
+  const effective: MinuteRangeLike[] = [];
+  for (const r of resolved) {
+    for (const v of venueRanges) {
+      const start = Math.max(r.start, v.start);
+      const end = Math.min(r.end, v.end);
+      if (end > start) effective.push({ start, end });
+    }
+  }
+  effective.sort((a, b) => a.start - b.start);
+  if (effective.length === 0) return 'Closed (outside business hours)';
+  const effectiveLine = effective.map((r) => `${toHhMm(r.start)}–${toHhMm(r.end)}`).join(', ');
+  return effectiveLine === own ? effectiveLine : `${effectiveLine} (calendar ${own})`;
+}

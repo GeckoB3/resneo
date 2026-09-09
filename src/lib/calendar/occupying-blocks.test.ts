@@ -18,12 +18,6 @@ describe('isOccupyingBlock', () => {
     expect(isOccupyingBlock('break')).toBe(false);
   });
 
-  it('lets staff book inside the open window of an amended-hours day (SA-H3)', () => {
-    // This block marks the hours the venue IS open. Treating it as occupied
-    // blocked the one window that was working while the guest engine sold it.
-    expect(isOccupyingBlock('venue_amended_hours')).toBe(false);
-  });
-
   it('still refuses a booking over staff leave', () => {
     // A closure is a boundary the venue may work past; leave means the person
     // is not there. This is the distinction SA-M28 had to create first.
@@ -54,12 +48,6 @@ describe('isNonWorkingBlock', () => {
     expect(isNonWorkingBlock('venue_closed')).toBe(true);
     expect(isNonWorkingBlock('practitioner_closed')).toBe(true);
     expect(isNonWorkingBlock('break')).toBe(true);
-  });
-
-  it('does not count amended hours, which are the hours the venue opened', () => {
-    // Landing here must not raise "moved outside opening hours": it is the most
-    // inside-hours a slot gets on that day.
-    expect(isNonWorkingBlock('venue_amended_hours')).toBe(false);
   });
 
   it('does not count blocks that already refuse the move', () => {

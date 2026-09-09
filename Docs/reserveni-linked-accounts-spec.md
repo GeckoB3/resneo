@@ -899,6 +899,22 @@ The rule now:
   created on the way) and the tick is refused with the step that failed, so a half-configured
   service never appears in a member's catalogue.
 
+### 7.7.3 Copies follow the origin's scheduling shape (2026-09-09)
+
+A copy created by the tick (§7.7.2) records the origin it came from
+(`service_items.synced_from_service_id`) and starts `linked`. While the two venues share a
+live collective, the origin's duration, buffer, processing periods and variants (names,
+durations, buffers, processing periods) are written to the copy whenever the origin is saved.
+Price, deposit, description, photo, colour, heading, booking window, add-on groups and
+compliance requirements are never synced: they are the member's own.
+
+A member saving a change to a synced field detaches the copy (`customised`); the host sees
+it in the combined-page manager and may re-sync it, which asks first. The host may also stop a
+copy following (`independent`). Copies that existed before this shipped are `independent` and
+are not linked automatically (owner's decision); the host may link one by hand from the manager
+("Link to {origin} and update"), which is confirmed and per copy. Removing and re-adding an
+offering reuses an existing same-named service unchanged. See `Docs/collective-service-sync-plan.md`.
+
 ### 7.8 Branding scope
 
 Collective branding applies only to `/book/c/{slug}` and to confirmation communications for

@@ -81,7 +81,7 @@ describe('buildVenueScheduleClosureBlocks', () => {
     expect(closed[0]?.block_date).toBe('2030-06-03');
   });
 
-  it('emits venue_amended_hours only for amended periods', () => {
+  it('emits no stripe of its own for amended periods', () => {
     const venueWideBlocks: AvailabilityBlock[] = [
       {
         id: 'b1',
@@ -102,23 +102,42 @@ describe('buildVenueScheduleClosureBlocks', () => {
       toDate: '2030-06-03',
       columnIds: ['col-1'],
     });
-    const amended = blocks.filter((b) => b.block_type === 'venue_amended_hours');
-    expect(amended).toHaveLength(1);
-    expect(amended[0]).toMatchObject({
-      start_time: '10:00',
-      end_time: '14:00',
-    });
-    // Stage 4/5: the grid follows the venue's RESOLVED hours, so on an amended day the grid
-    // IS the amended window and there is no band outside it left to grey. This used to
-    // assert grey bands at 09:00-10:00 and 14:00-17:00, which existed only because the
-    // renderer derived its bounds from the weekly shape while the grid had already moved.
-    // Both halves now read the same hours. See parity-closure-renderer.test.ts.
-    const closed = blocks.filter((b) => b.block_type === 'venue_closed');
-    expect(closed).toHaveLength(0);
+    // An amended day is drawn exactly like a normal day. The grid follows the venue's
+    // RESOLVED hours, so here the grid IS the 10:00-14:00 window: nothing outside it is
+    // drawn, so there is nothing to grey, and nothing inside it is painted either. The
+    // sky-blue "Amended hours" band that used to sit over the window is gone. See
+    // parity-closure-renderer.test.ts for the split-day and wider-grid cases.
+    expect(blocks).toHaveLength(0);
   });
 });
 
 describe('buildPractitionerScheduleClosureBlocks', () => {
+  it('greys outside an amended-hours override on that date and leaves other dates alone', () => {
+    // The override REPLACES the weekly 09:00-17:00 for the one date it names; the grid is
+    // the resolved 08:00-20:00 that day, so nothing is greyed, and the next day is weekly.
+    const blocks = buildPractitionerScheduleClosureBlocks({
+      practitioners: [
+        {
+          id: 'p1',
+          is_active: true,
+          working_hours: { '1': [{ start: '09:00', end: '17:00' }], '2': [{ start: '09:00', end: '17:00' }] },
+          days_off: [],
+          break_times: [],
+          break_times_by_day: null,
+          availability_exceptions: { '2030-06-03': { periods: [{ start: '08:00', end: '20:00' }] } },
+        } as Parameters<typeof buildPractitionerScheduleClosureBlocks>[0]['practitioners'][number],
+      ],
+      leavePeriods: [],
+      fromDate: '2030-06-03',
+      toDate: '2030-06-04',
+      openingHours: null,
+      gridBounds: { start: 7 * 60, end: 21 * 60 },
+    });
+    const day = (d: string) => blocks.filter((b) => b.block_date === d).map((b) => `${b.block_type} ${b.start_time}-${b.end_time}`);
+    expect(day('2030-06-03')).toEqual(['practitioner_closed 07:00-08:00', 'practitioner_closed 20:00-21:00']);
+    expect(day('2030-06-04')).toEqual(['practitioner_closed 07:00-09:00', 'practitioner_closed 17:00-21:00']);
+  });
+
   it('emits full-day practitioner_closed when not working', () => {
     const blocks = buildPractitionerScheduleClosureBlocks({
       practitioners: [

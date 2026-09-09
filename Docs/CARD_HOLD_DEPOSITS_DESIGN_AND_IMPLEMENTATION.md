@@ -25,7 +25,7 @@ A new payment requirement, **Card hold**, available on appointment services, uni
 
 - The venue enables deposits as today and chooses **Card hold** as the type, with a defined no-show fee.
 - **Online:** the guest must enter card details to book. **£0 is taken.** The card is saved securely with Stripe against the venue's connected account.
-- **Phone / in person:** staff create the booking as today. If the entity requires a card hold, a **"Card hold" toggle** on the New Booking form (default on) controls it; staff may switch it off case by case. When on, the booking is held as `Pending` and the guest receives a **secure-your-booking link by email and/or SMS** to add their card details on their own device; the booking confirms when the card is saved. This mirrors today's phone deposit-request flow exactly (same link machinery, same 2-hour reminder, same 24-hour auto-cancel).
+- **Phone / in person:** staff create the booking as today. If the entity requires a card hold, a **"Card hold" toggle** on the New Booking form (default off since 2026-09-09; it was on before) controls it; staff may switch it off case by case. When on, the booking is held as `Pending` and the guest receives a **secure-your-booking link by email and/or SMS** to add their card details on their own device; the booking confirms when the card is saved. This mirrors today's phone deposit-request flow exactly (same link machinery, same 2-hour reminder, same 24-hour auto-cancel).
 - If the guest does not attend, staff mark the booking **No-Show** exactly as today. That unlocks an explicit **"Charge no-show fee"** action on the booking. Nothing is ever charged automatically.
 - The charge is a merchant-initiated, off-session Stripe payment of up to the defined fee, on the venue's connected account (direct charge, no platform fee, matching deposits).
 - If the guest cancels **before the booking's cancellation deadline** (start minus the entity's Cancellation notice hours), the hold is released and can never be charged. A guest- or staff-recorded cancellation **after the deadline keeps a saved hold chargeable** (§9.3 amendment, July 2026): staff may charge the fee from the cancelled booking or release the hold without charging. Venue-initiated cancellations (class/event cancels, auto-cancel crons, GDPR) always release. Holds also auto-release 14 days after the booking.
@@ -530,12 +530,12 @@ Written at create with the exact consent string to be displayed; template consta
 
 1. Resolve the entity's effective requirement (6.3; tables: rules `deposit_type='card_hold'` with a per-person amount).
 2. If it is not `card_hold`, the field is ignored (deposit logic untouched, including `require_deposit` and its per-model quirks).
-3. If it is `card_hold`: `holdRequired = require_card_hold ?? true` (**default on**; the UI sends the toggle state explicitly).
+3. If it is `card_hold`: `holdRequired = require_card_hold ?? false` (**default off since 2026-09-09**, it was on before; the UI sends the toggle state explicitly).
    - `holdRequired === false` (staff waived): create exactly as a no-deposit booking: `status:'Booked'`, `deposit_status:'Not Required'`, `deposit_amount_pence: null`, manage link + confirmation comms (existing non-deposit path). Matches today's create-time toggle-off semantics; `'Waived'` stays reserved for the post-hoc action.
    - `holdRequired === true`: require `stripe_connected_account_id` (mirror the deposit 400); insert `status:'Pending'`, `deposit_status:'Pending'`, `deposit_amount_pence: null`; customer + SetupIntent + hold row(s) (fees per D5; **table staff path: per-person x party with no threshold, toggle is the gate, 400 if no amount configured**, mirroring the deposit staff path exactly); then in `after()`: `createOrGetPaymentShortLink(...)` + send **card-request comms** (Section 10.3). Stripe failure rolls back the insert (mirror existing).
 4. Extend `applyStaffBookingPaymentAndComms` (`staff-booking-payment-comms.ts`) with the card-hold variant so the CDE branches and (refactored) table/appointment branches share one implementation.
 
-**Form UI, all five staff surfaces.** The switch is labelled **"Card hold"** with sublabel **"Send a link to the guest to add their card details"**, default **on**, rendered when the selected entity resolves to `card_hold` (owner venue's flag on), in place of the deposit toggle where one exists (the two are never shown together). Hidden when editing, like the deposit toggle. Success toast: `'Booking created - card request link sent'` (or the normal confirmed toast when waived). The staff surfaces are NOT one form:
+**Form UI, all five staff surfaces.** The switch is labelled **"Card hold"** with a sublabel that follows its state (since 2026-09-09: **"Off: no card is taken, so a no-show cannot be charged."** / **"On: the guest gets a link to add their card, charged only if they do not show. The booking is cancelled if no card is added within 24 hours."** (no fee line under the switch any more); it was "Send a link to the guest to add their card details"), default **off** since 2026-09-09 (was on), rendered when the selected entity resolves to `card_hold` (owner venue's flag on), in place of the deposit toggle where one exists (the two are never shown together). Hidden when editing, like the deposit toggle. Success toast: `'Booking created - card request link sent'` (or the normal confirmed toast when waived). The staff surfaces are NOT one form:
 - **Tables:** `UnifiedBookingForm.tsx` (existing deposit toggle location; needs the slot data exposure from 6.3).
 - **Appointments:** `AppointmentBookingFlow.tsx` staff branch (where `staffRequireDeposit` lives today, ~2100, ~3982).
 - **Classes / events:** `ClassBookingFlow.tsx` / `EventBookingFlow.tsx` staff-audience branches (no deposit toggle exists today; the card-hold toggle is new UI there). Slot payloads already carry `payment_requirement` + amounts for both.
@@ -908,7 +908,7 @@ Each phase leaves the app shippable with the flag off.
 - Fee math per model (class/event x party, resource flat, table per-person GBP -> pence).
 - `card-hold-terms`: consent rendering, snapshot shape, window computation.
 - Charge guard matrix (9.2a) as a pure function: every 4xx.
-- Staff route `require_card_hold` semantics per model: default on, waive-off -> `'Not Required'`, walk-in allowed, table no-amount -> 400, deposit-toggle paths untouched.
+- Staff route `require_card_hold` semantics per model: default off (since 2026-09-09), waive-off -> `'Not Required'`, walk-in allowed, table no-amount -> 400, deposit-toggle paths untouched.
 - Webhook ordering: fee-PI success never reaches generic confirm; `payment_with_setup` confirms per-row.
 - `class-attendance` writes `'No-Show'` (Phase 0 regression).
 - Entitlement engine untouched by card-hold lines; `pay_with_class_credits` rejection.
@@ -953,7 +953,7 @@ Staging walkthrough: configure one card-hold entity per model incl. a table serv
 | `POST /api/booking/create` (+ `create-multi-service`, `create-group`) | Response adds `payment_mode`, `card_hold_fee_pence`; setup mode returns a SetupIntent `client_secret` |
 | `POST /api/booking/class-cart/checkout` (+ `/quote`) | Same additions; quote lines add `card_hold_fee_pence` |
 | `POST /api/booking/confirm-payment` | Accepts `setup_intent_id` (XOR `payment_intent_id`); `booking_id` form resolves to the booking's PI or hold SI |
-| `POST /api/venue/bookings` | New `require_card_hold` (default true for card-hold entities, all models, phone and walk-in) |
+| `POST /api/venue/bookings` | New `require_card_hold` (omitted means no hold since 2026-09-09; was default true; card-hold entities, all models, phone and walk-in) |
 | `GET /api/booking/pay` | Eligibility: PI **or** open unsaved hold; setup payload `{ payment_mode:'setup', client_secret, card_hold_fee_pence, ... }` |
 | `GET /api/venue/bookings/[id]` | Adds `card_hold: {...} | null` |
 | `POST /api/venue/bookings/[id]/deposit` | New `action:'charge_no_show_fee'`; `send_payment_link` card-aware; `waive` releases; `refund` handles `'Charged'` |

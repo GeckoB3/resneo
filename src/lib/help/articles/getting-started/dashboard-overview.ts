@@ -47,7 +47,7 @@ The links are exactly the same as on a computer, so everything below applies eit
 6. **Compliance**: patch tests, consent forms, and anything a client must complete before an appointment. Only appears once compliance records are switched on. See [compliance](/help/getting-started/compliance).
 7. **Services**: what clients can book, with lengths and prices. See [set up your services](/help/getting-started/services). If you sell them, **Classes**, **Events**, and **Resources** sit directly below it.
 8. **Waitlist**: clients waiting for a slot that is not free yet. Only appears once the waitlist is switched on. See [using the waitlist](/help/getting-started/waitlist).
-9. **Calendar Availability**: four tabs in one place. **Calendars** is where you add a bookable column for each person or chair (admins only). **Availability** sets the hours each calendar can be booked. **Breaks** blocks out lunch and gaps. **Closures** blocks out days off and other time away. See [business and calendar hours](/help/getting-started/business-and-calendar-hours).
+9. **Calendar Availability**: four tabs in one place. **Calendars** is where you add a bookable column for each person or chair (admins only). **Availability** sets the hours each calendar can be booked. **Breaks** blocks out lunch and gaps. **Closures & amended hours** blocks out days off and other time away, or gives one calendar different hours on a date. See [business and calendar hours](/help/getting-started/business-and-calendar-hours).
 10. **Settings**: everything about your venue, admins only.
 11. **Your Booking Page**: opens your public page in a new tab, exactly as clients see it.
 

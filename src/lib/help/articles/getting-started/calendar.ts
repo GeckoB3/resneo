@@ -68,7 +68,7 @@ Clients cannot book over blocked time online, and the grid will not let you drop
 
 > **Warning: silence means send.** Leave that bar alone and the client is told about the change by email or text when the countdown ends. If you are only tidying your own diary, tap **Skip notify** before it runs out. **Undo** puts the booking back where it was and sends nothing.
 
-> **Good to know:** dragging moves in one-minute steps. Dropping outside your opening hours is allowed: you will see a note reading **Moved outside opening hours.** rather than a refusal. A visit with several services moves as one booking.
+> **Good to know:** dragging moves in one-minute steps. Dropping outside your opening hours is allowed: you will see a note reading **Moved outside opening hours.** rather than a refusal. In a visit with several services, each service is its own card and moves on its own; use **Modify** in the booking panel to move the whole visit.
 
 The **Undo** button in the toolbar reverses your most recent move or length change.
 

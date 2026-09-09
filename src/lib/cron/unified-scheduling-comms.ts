@@ -7,7 +7,12 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
-import { visitCommsAnchorIds } from '@/lib/cron/visit-comms-anchor';
+import {
+  visitCommsAnchorIds,
+  visitPostVisitAnchorIds,
+  visitSiblingIdsOf,
+  type VisitPostVisitRow,
+} from '@/lib/cron/visit-comms-anchor';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
@@ -309,7 +314,11 @@ async function runLaneReminder(opts: {
       ]);
       booking.manage_booking_link = manageLink;
       booking.confirm_cancel_link = confirmLink;
-      booking = await enrichBookingEmailForComms(opts.supabase, row.id, booking);
+      // A reminder goes out per day of a visit (see the anchors above), so it lists
+      // that day's services and not the ones booked for another day.
+      booking = await enrichBookingEmailForComms(opts.supabase, row.id, booking, {
+        siblingScope: 'same_day',
+      });
 
       let sentAny = false;
       if (policy.channels.includes('email')) {
@@ -395,21 +404,60 @@ async function runLanePostVisit(opts: {
 
   const eligible = rows.filter((row) => laneEligible(row, opts.cdeOnly, opts.venue.booking_model));
   /**
-   * One thank-you per visit, not one per service, anchored on the LAST service because
-   * that is when the visit actually ended.
+   * One thank-you per visit, not one per service, and only once the whole visit is
+   * over. Services are completed one at a time, so the window's Completed rows are
+   * not the whole story: every row of their visits is read, whatever its status or
+   * date, and a visit sends from its LAST live service once every live service is
+   * Completed (see `visitPostVisitAnchorIds`). Before a visit sends, the log is
+   * checked against every one of its rows, so a thank-you already sent from a
+   * sibling is never sent again from another.
    */
-  const anchors = opts.cdeOnly ? null : visitCommsAnchorIds(eligible, 'latest');
-
+  const groupIds = opts.cdeOnly
+    ? []
+    : [...new Set(eligible.map((r) => r.group_booking_id).filter((g): g is string => Boolean(g)))];
+  const visitRows: VisitPostVisitRow[] = groupIds.length
+    ? (
+        (
+          await opts.supabase
+            .from('bookings')
+            .select('id, group_booking_id, guest_id, status, booking_date, booking_time')
+            .eq('venue_id', opts.venue.id)
+            .in('group_booking_id', groupIds)
+        ).data ?? []
+      ).map((r) => {
+        const row = r as Record<string, unknown>;
+        return {
+          id: String(row.id),
+          group_booking_id: (row.group_booking_id as string | null) ?? null,
+          guest_id: (row.guest_id as string | null) ?? null,
+          status: String(row.status ?? ''),
+          booking_date: String(row.booking_date ?? ''),
+          booking_time: (row.booking_time as string | null) ?? null,
+        };
+      })
+    : [];
+  const anchors = opts.cdeOnly ? null : visitPostVisitAnchorIds(eligible, visitRows);
   const venueData = venueRowToEmailData(opts.venue);
   for (const row of eligible) {
     try {
       if (anchors && !anchors.has(row.id)) continue;
-
       const delta = msSinceBookingStartUtc(row.booking_date, row.booking_time, tz, nowMs);
       if (delta < targetMs - CRON_COMMS_TOLERANCE_MS || delta > targetMs + CRON_COMMS_TOLERANCE_MS) {
         continue;
       }
-
+      if (anchors && row.group_booking_id) {
+        const siblingIds = visitSiblingIdsOf(row, visitRows).filter((id) => id !== row.id);
+        if (siblingIds.length > 0) {
+          const { data: priorSend } = await opts.supabase
+            .from('communication_logs')
+            .select('id')
+            .in('booking_id', siblingIds)
+            .eq('message_type', 'post_visit_thankyou_email')
+            .eq('status', 'sent')
+            .limit(1);
+          if (priorSend && priorSend.length > 0) continue;
+        }
+      }
       let booking = buildBookingData(row, opts.venue.booking_model);
       booking.manage_booking_link = await createOrGetBookingShortLink({
         venueId: row.venue_id,

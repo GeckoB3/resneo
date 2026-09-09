@@ -129,6 +129,15 @@ describe('summariseDay', () => {
     expect(summariseDay({ ...base, date: '2026-09-09', baseHours: { '3': [{ start: '08:00', end: '18:00' }] }, schedule: null, venueWideBlocks: [wedOpen] })).toMatchObject({ text: '09:00–12:00', reason: 'base' });
   });
 
+  it('shows an amended-hours override inside the venue hours, and lets leave beat it', () => {
+    const overrides = { '2026-09-15': { periods: [{ start: '07:00', end: '21:00' }], reason: 'Late night' } };
+    expect(summariseDay({ ...base, date: '2026-09-15', overrides })).toMatchObject({ text: '08:00–20:00', reason: 'amended', overrideReason: 'Late night' });
+    // A day off does not reopen an amended day: the override sits above it.
+    expect(summariseDay({ ...base, date: '2026-09-15', overrides, daysOff: ['2026-09-15'] })).toMatchObject({ reason: 'amended' });
+    expect(summariseDay({ ...base, date: '2026-09-15', overrides, leave: [{ start_date: '2026-09-15', end_date: '2026-09-15' }] })).toMatchObject({ text: 'Leave', reason: 'leave' });
+    expect(summariseDay({ ...base, date: '2026-09-16', overrides })).toMatchObject({ reason: 'venue-closed' });
+  });
+
   it('lays a month out Monday-first', () => {
     const cells = monthCells(2026, 8);
     // September 2026 starts on a Tuesday, so one blank sits under Monday.

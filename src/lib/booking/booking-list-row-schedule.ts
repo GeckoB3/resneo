@@ -4,11 +4,14 @@ import {
   formatGroupVisitSegmentDurationLabel,
   groupVisitRowsToScheduleSeeds,
   peekGroupVisitBookings,
+  visitLifecycleStatus,
 } from '@/lib/booking/group-visit-bookings';
 import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
 
 /** Fields available on dashboard booking list rows for bar time/duration. */
 export interface BookingListRowScheduleSeed {
+  /** Each service of a visit has its own date; a bar only spans the services on its own day. */
+  booking_date?: string | null;
   booking_time: string;
   booking_end_time?: string | null;
   estimated_end_time?: string | null;
@@ -31,48 +34,97 @@ export function isMultiServiceVisitGroup(
   return rows.every((r) => !r.person_label?.trim());
 }
 
+/** A list line that stands for one day of a visit whose other services are on another day. */
+export interface VisitListLineMarks {
+  /**
+   * Set on a line that is one service of a visit with nothing else of that visit on
+   * this day in view: the rest of the visit is on another day, and the list says so.
+   */
+    visit_spans_days?: boolean;
+  /**
+   * Set on a lone service of a visit whose other services are not in view on
+   * any day (cancelled, filtered out, or on a hidden calendar).
+   */
+  visit_rest_hidden?: boolean;
+}
+
 /**
- * Collapse multi-service visits to a single representative row so one booking shows as one
- * bar. A multi-service visit is several rows sharing a `group_booking_id` with no per-person
- * `person_label` (one guest, consecutive services + add-ons). Group bookings — distinct people,
- * each with a `person_label` — are left untouched so they still render as separate bars, as do
- * standalone bookings. The earliest-start segment is kept as the representative.
+ * Collapse multi-service visits to a single representative row per DAY, so one day of a
+ * visit shows as one bar. A multi-service visit is several rows sharing a `group_booking_id`
+ * with no per-person `person_label` (one guest, several services). Each service keeps its
+ * own date, so a visit split across days shows one line on each of them. Group bookings
+ * (distinct people, each with a `person_label`) and class carts are left untouched so they
+ * still render as separate bars, as do standalone bookings. The earliest-start segment of
+ * the day is kept as the representative, carrying the visit's derived status.
  */
 export function collapseMultiServiceVisits<
   T extends {
     id: string;
+    booking_date?: string | null;
     booking_time: string;
     group_booking_id?: string | null;
     person_label?: string | null;
+    class_instance_id?: string | null;
+    status?: string;
   },
->(rows: T[]): T[] {
-  const byGroup = new Map<string, T[]>();
+>(rows: T[]): Array<T & VisitListLineMarks> {
+  const dayKey = (row: T) => `${row.group_booking_id!.trim()}::${row.booking_date ?? ''}`;
+  const byGroupDay = new Map<string, T[]>();
+  const daysByGroup = new Map<string, Set<string>>();
   for (const row of rows) {
     const gid = row.group_booking_id?.trim();
-    if (!gid) continue;
-    const list = byGroup.get(gid) ?? [];
+    if (!gid || row.class_instance_id) continue;
+    const key = dayKey(row);
+    const list = byGroupDay.get(key) ?? [];
     list.push(row);
-    byGroup.set(gid, list);
+    byGroupDay.set(key, list);
+    const days = daysByGroup.get(gid) ?? new Set<string>();
+    days.add(row.booking_date ?? '');
+    daysByGroup.set(gid, days);
   }
 
-  /** group_booking_id -> the single representative row id kept for multi-service visits. */
+  /** group::day -> the single representative row id kept for that day of the visit. */
   const representativeId = new Map<string, string>();
-  for (const [gid, group] of byGroup) {
+  for (const [key, group] of byGroupDay) {
     if (!isMultiServiceVisitGroup(group)) continue;
     const earliest = [...group].sort((a, b) => a.booking_time.localeCompare(b.booking_time))[0]!;
-    representativeId.set(gid, earliest.id);
+    representativeId.set(key, earliest.id);
   }
 
-  if (representativeId.size === 0) return rows;
-
-  return rows.filter((row) => {
+  return rows.flatMap((row): Array<T & VisitListLineMarks> => {
     const gid = row.group_booking_id?.trim();
-    if (!gid) return true;
-    const repId = representativeId.get(gid);
-    // Not a multi-service visit (group booking / single) → keep every row.
-    if (!repId) return true;
-    // Multi-service visit → keep only the representative.
-    return row.id === repId;
+    if (!gid || row.class_instance_id) return [row];
+    const key = dayKey(row);
+    const repId = representativeId.get(key);
+    if (!repId) {
+      /**
+       * A lone service of a visit: nothing else of the visit is on this day in view.
+       * A party's rows arrive here too and are left alone; only a service of a visit
+       * is marked (a standalone booking never carries a group id).
+       */
+            const group = byGroupDay.get(key) ?? [row];
+      const loneVisitService = group.length === 1 && !row.person_label?.trim();
+      if (!loneVisitService) return [row];
+      const otherDayInView = (daysByGroup.get(gid)?.size ?? 1) > 1;
+      return [otherDayInView ? { ...row, visit_spans_days: true } : { ...row, visit_rest_hidden: true }];
+    }
+    // Multi-service day: keep only the representative.
+    if (row.id !== repId) return [];
+    const spansDays = (daysByGroup.get(gid)?.size ?? 1) > 1;
+    // Start and Complete are per service, so the line's status is the visit's derived
+    // one rather than whatever the earliest row happens to be at.
+    const group = byGroupDay.get(key) ?? [row];
+    const status =
+      typeof row.status === 'string'
+        ? visitLifecycleStatus(group as Array<{ status: string }>, row.status)
+        : row.status;
+    return [
+      {
+        ...row,
+        ...(typeof status === 'string' ? { status } : {}),
+        ...(spansDays ? { visit_spans_days: true } : {}),
+      },
+    ];
   });
 }
 
@@ -116,13 +168,15 @@ function siblingsForGroupVisitBar(
 ): BookingListRowScheduleSeed[] {
   const groupId = row.group_booking_id?.trim();
   if (!groupId) return [row];
-
-  const inView = allRowsInView.filter((r) => r.group_booking_id?.trim() === groupId);
+  // A bar spans one day of the visit: a sibling booked for another day is its own line.
+  const sameDay = (r: { booking_date?: string | null }) =>
+    !row.booking_date || !r.booking_date || r.booking_date === row.booking_date;
+  const inView = allRowsInView.filter((r) => r.group_booking_id?.trim() === groupId && sameDay(r));
   if (inView.length > 1) return inView;
-
   const cached = peekGroupVisitBookings(groupId);
   if (cached && cached.length > 1) {
-    return groupVisitRowsToScheduleSeeds(cached);
+    const cachedSameDay = cached.filter(sameDay);
+    return groupVisitRowsToScheduleSeeds(cachedSameDay.length > 0 ? cachedSameDay : cached);
   }
 
   return inView.length > 0 ? inView : [row];

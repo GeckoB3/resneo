@@ -15,6 +15,7 @@ import {
   peekGroupVisitBookings,
   primeGroupVisitBookingsFromListSeeds,
   resolveInitialGroupVisitBookings,
+  visitLifecycleStatus,
 } from '@/lib/booking/group-visit-bookings';
 
 describe('group-visit-bookings cache', () => {
@@ -362,11 +363,36 @@ describe('visit pill anchor and terminal outcomes (H8)', () => {
     expect(pill('Cancelled', anchor)).toBe('Cancelled');
   });
 
-  it('still floors live siblings at the furthest-along live status', () => {
+  it('still lifts a stale Booked sibling, but only as far as Confirmed', () => {
     // The behaviour the anchor exists for must survive: a stale Booked seed is
-    // still lifted to Confirmed by a sibling that has got further.
+    // still lifted by a sibling that has got further. Since Start and Complete
+    // became per service (visit-services-independent-plan), the lift stops at
+    // Confirmed: the client is here, but only the started service is Started.
     const anchor = resolveVisitPillAnchorStatus('Booked', [seg('Booked'), seg('Seated')], false);
-    expect(anchor).toBe('Seated');
-    expect(pill('Booked', anchor)).toBe('Seated');
+    expect(anchor).toBe('Confirmed');
+    expect(pill('Booked', anchor)).toBe('Confirmed');
+  });
+});
+
+describe('per-service Start and Complete (visit-services-independent-plan)', () => {
+  it('floors sibling pills at Confirmed, never at Started or Completed', () => {
+    expect(resolveVisitPillAnchorStatus('Seated', [{ status: 'Booked' }], false)).toBe('Confirmed');
+    expect(resolveVisitPillAnchorStatus('Booked', [{ status: 'Completed' }, { status: 'Booked' }], false)).toBe('Confirmed');
+    expect(resolveVisitPillAnchorStatus('Booked', [{ status: 'Booked' }], false)).toBe('Booked');
+    expect(resolveVisitPillAnchorStatus('Booked', [{ status: 'Booked' }], true)).toBe('Confirmed');
+    // A Booked sibling next to a Started service reads Confirmed (the client is here), not Started.
+    expect(groupVisitSegmentPillStatus({ status: 'Booked' }, resolveVisitPillAnchorStatus('Seated', [{ status: 'Booked' }], false), false)).toBe('Confirmed');
+  });
+
+  it('derives one visit status from the services', () => {
+    expect(visitLifecycleStatus([{ status: 'Completed' }, { status: 'Completed' }])).toBe('Completed');
+    expect(visitLifecycleStatus([{ status: 'Completed' }, { status: 'Seated' }])).toBe('Seated');
+    expect(visitLifecycleStatus([{ status: 'Seated' }, { status: 'Booked' }])).toBe('Seated');
+    expect(visitLifecycleStatus([{ status: 'Completed' }, { status: 'Confirmed' }])).toBe('Confirmed');
+    expect(visitLifecycleStatus([{ status: 'Confirmed' }, { status: 'Booked' }])).toBe('Booked');
+    expect(visitLifecycleStatus([{ status: 'Confirmed' }, { status: 'Confirmed' }])).toBe('Confirmed');
+    // A cancelled service is left out; all cancelled falls back to the anchor.
+    expect(visitLifecycleStatus([{ status: 'Cancelled' }, { status: 'Confirmed' }])).toBe('Confirmed');
+    expect(visitLifecycleStatus([{ status: 'Cancelled' }, { status: 'Cancelled' }], 'Cancelled')).toBe('Cancelled');
   });
 });

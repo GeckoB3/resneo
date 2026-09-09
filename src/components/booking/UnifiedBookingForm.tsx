@@ -231,7 +231,8 @@ export function UnifiedBookingForm({
 
   const [requireDeposit, setRequireDeposit] = useState(false);
   /** Card-hold slots only (design doc 7.6): default ON, staff may waive per booking. */
-  const [requireCardHold, setRequireCardHold] = useState(true);
+  // Off by default: staff booking for a guest more often waive the hold than ask for it (2026-09-09).
+  const [requireCardHold, setRequireCardHold] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

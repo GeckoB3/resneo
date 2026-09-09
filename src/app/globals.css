@@ -298,6 +298,14 @@ button, a, input, select, textarea {
   --linked-border: #e2e8f0; /* slate-200 */
   --linked-muted-text: #64748b; /* slate-500 */
 }
+
+/* Every bar of a multi-service visit lights up while any one of them is hovered
+   (`setVisitHover` in PractitionerCalendarView), so services that have drifted
+   apart on the grid still read as one booking. */
+.calendar-visit-hover {
+  border-radius: 1rem;
+  box-shadow: 0 0 0 2px #00c2c7;
+}
 @utility linked-chip {
   background: var(--linked-surface);
   border: 1px solid var(--linked-border);

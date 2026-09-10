@@ -45,6 +45,42 @@ describe('mergeBookingSummaryOverDetail', () => {
     );
   });
 
+  it('keeps the per-service lines when the summary carries the visit money without them', () => {
+    const lines = [
+      { booking_id: 'bk-1', name: 'Cut', total_pence: 3000 },
+      { booking_id: 'bk-2', name: 'Colour', total_pence: 5000 },
+    ];
+    const prev = detail({
+      visit_payment: {
+        booking_count: 2,
+        booking_ids: ['bk-1', 'bk-2'],
+        total_pence: 8000,
+        amount_paid_pence: 0,
+        balance_due_pence: 8000,
+        lines,
+      },
+    });
+    const summary = detail({
+      visit_payment: {
+        booking_count: 2,
+        booking_ids: ['bk-1', 'bk-2'],
+        total_pence: 8000,
+        amount_paid_pence: 3000,
+        balance_due_pence: 5000,
+      },
+    });
+    const merged = mergeBookingSummaryOverDetail(prev, summary);
+    expect(merged.visit_payment?.amount_paid_pence).toBe(3000); // summary money wins
+    expect(merged.visit_payment?.lines).toEqual(lines);
+
+    // Lines the summary does carry win outright.
+    const fresh = [{ booking_id: 'bk-1', name: 'Cut', total_pence: 3500 }];
+    const withLines = detail({
+      visit_payment: { ...summary.visit_payment!, lines: fresh },
+    });
+    expect(mergeBookingSummaryOverDetail(prev, withLines).visit_payment?.lines).toEqual(fresh);
+  });
+
   it('returns the summary as-is when there is no prior detail or ids differ', () => {
     const summary = detail({});
     expect(mergeBookingSummaryOverDetail(null, summary)).toBe(summary);

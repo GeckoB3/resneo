@@ -23,8 +23,13 @@ import path from 'node:path';
 
 const API = path.join(process.cwd(), 'src', 'app', 'api');
 
-/** C2's scope: /api/account, /api/v1 and /api/booking are the customer surface. */
-const SCANNED_NAMESPACES = ['account', 'v1', 'booking'] as const;
+/**
+ * C2's scope: /api/account, /api/v1 and /api/booking are the customer surface.
+ * /api/venue joined on 2026-09-10 (R32): staff reach it over Bearer from the app,
+ * and its change-password route was answering "Auth session missing" for exactly
+ * this reason.
+ */
+const SCANNED_NAMESPACES = ['account', 'v1', 'booking', 'venue'] as const;
 
 const FORBIDDEN = /\.auth\.(updateUser|signOut|refreshSession)\s*\(/;
 
@@ -39,7 +44,7 @@ function collectRouteFiles(dir: string): string[] {
 }
 
 describe('customer-reachable routes are Bearer-safe', () => {
-  it('no route under /api/account, /api/v1 or /api/booking calls a session-storage auth mutator', () => {
+  it('no route under /api/account, /api/v1, /api/booking or /api/venue calls a session-storage auth mutator', () => {
     const offenders: string[] = [];
     for (const ns of SCANNED_NAMESPACES) {
       for (const file of collectRouteFiles(path.join(API, ns))) {
@@ -64,5 +69,6 @@ describe('customer-reachable routes are Bearer-safe', () => {
     expect(seen.length).toBeGreaterThan(30);
     expect(seen.some((f) => f.includes('sign-out-everywhere'))).toBe(true);
     expect(seen.some((f) => f.replace(/\\/g, '/').includes('v1/auth/logout'))).toBe(true);
+    expect(seen.some((f) => f.replace(/\\/g, '/').includes('venue/staff/change-password'))).toBe(true);
   });
 });

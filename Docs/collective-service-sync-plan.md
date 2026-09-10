@@ -209,3 +209,41 @@ as a shape change on its own: `patchTouchesSyncedShape` compares the requested v
 (names, lengths, buffers, processing) with the stored ones, and a price-only save of a linked copy
 leaves it linked as §3 promised. The origin-side `syncCopiesOfService` also runs only on a real
 shape change now.
+
+### Ask on add, drift on every copy, sync one or all (2026-09-10)
+
+The owner found the retroactive rule too quiet: an existing same-named service reused by the
+tick sat as "independent copy" with no sign of whether it had drifted, and bringing several
+into line meant one confirmed click per copy. Changes, all on the manager and the catalogue
+route:
+
+- **Ask at tick time.** Ticking a calendar whose venue already has the service asks whether to
+  update it to the origin's shape and keep it in step; the answer rides the staged op as
+  `ops[].sync` and `set_providers` links the copy after adding the calendar (a copy the tick
+  just created is in step already). No answer means no change, as before.
+- **Drift is shown for every copy.** `loadServiceSyncViews` accepts origin overrides, so the
+  catalogue compares an independent copy with the offering's origin too. Each copy row now
+  carries a badge ("In step with {origin}", "Differs from {origin}: 30 min here, 45 min at
+  {origin}", "Customised at {venue}", "Same as {origin}, not linked", "Behind {origin}") and a
+  real button, "Match {origin}" (or "Link to {origin}" for a matching independent copy), so the
+  state and the one thing to do about it sit together; the earlier text-link chips read as
+  labels and the owner did not find the action.
+- **Sync one offering or the whole page.** `sync_all_providers` (optional `itemId`) brings every
+  copy at a non-origin venue into step: independent copies are linked and updated (add-on groups
+  included), customised or drifted linked copies are re-synced with force; origins are never
+  touched. `unlink_all_providers` (optional `itemId`) is the reverse: every linked or customised
+  copy is detached, settings untouched. The manager shows "Link all copies (n)" and "Unlink all
+  copies (n)" above the list and "Link all n copies" / "Unlink all n copies" on each offering, each
+  only while it has something to do and each confirmed first. Row buttons read "Link to {origin}",
+  "Update from {origin}", "Relink to {origin}" and "Unlink"; badges read "Linked to {origin}, in
+  step", "Linked, behind {origin}: ...", "Not linked. Differs from {origin}: ...", "Not linked. Same
+  as {origin} today" and "Edited at {venue}, no longer following".
+- **Add-ons match on link and update (owner, 2026-09-10).** `matchAddonGroupsToOrigin` runs after
+  every manager-driven link, relink and update (`link_provider`, `sync_provider`, `sync_all_providers`,
+  the tick-time link): the copy ends up linked to exactly the origin's groups, each resolved to the
+  venue's own group with the same name, selection type and options (name, extra length, extra
+  price), created when the venue has none, and unlinked (never deleted) from any other group.
+  Decision 2 still holds for the automatic origin-save sync: that path touches scheduling shape
+  only, because a member's add-on group may be shared by its other services; add-ons follow when
+  the host acts in the manager, and a badge does not yet report add-on drift on its own. Decision 5's "not retroactive" still
+  holds: nothing links a copy without the host asking for it.

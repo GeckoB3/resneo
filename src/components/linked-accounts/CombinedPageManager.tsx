@@ -8,11 +8,12 @@
  * its solo-page behaviour (D2).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, btnPrimary, btnSecondary, btnDanger } from './linked-accounts-ui';
 import { collectivePublicPath, collectivePublicUrl } from '@/lib/linked-accounts/collective-public-url';
 import { type BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import { BookingPageEditor } from '@/components/booking-page-editor/BookingPageEditor';
+import { BookOpeningHours } from '@/components/booking/BookOpeningHours';
 import {
   ServiceCategoriesManager,
   type ServiceCategoryApi,
@@ -56,15 +57,87 @@ function ButtonSpinner() {
  * when it matches the server); `toggle` records or clears one change.
  */
 type ProviderStaging = {
-  get: (itemId: string, calendarId: string) => boolean | undefined;
+  get: (itemId: string, calendarId: string) => { desired: boolean; sync: boolean } | undefined;
   toggle: (
     itemId: string,
     venueId: string,
     calendarId: string,
     nextChecked: boolean,
     serverChecked: boolean,
+    /** 'add' only: update the venue's existing same-named service to the origin's shape on save. */
+    sync?: boolean,
   ) => void;
 };
+
+/**
+ * A yes/no question asked with the app's own dialog rather than `window.confirm`.
+ * The native dialog is blocked or auto-dismissed in some browsers (the desktop app's
+ * pane among them), which silently answered "no" to every link and unlink here.
+ */
+type ConfirmRequest = { message: string; confirmLabel: string; resolve: (yes: boolean) => void };
+type AskConfirm = (message: string, confirmLabel?: string) => Promise<boolean>;
+const ConfirmContext = createContext<AskConfirm | null>(null);
+
+/** "No" wherever the panel has not mounted the dialog (a test rendering a piece alone). */
+function useAskConfirm(): AskConfirm {
+  const ask = useContext(ConfirmContext);
+  return ask ?? (async () => false);
+}
+
+function ConfirmDialog({ request, onDone }: { request: ConfirmRequest | null; onDone: () => void }) {
+  if (!request) return null;
+  const answer = (yes: boolean) => {
+    request.resolve(yes);
+    onDone();
+  };
+  return (
+    <Modal
+      open
+      onClose={() => answer(false)}
+      title={request.confirmLabel}
+      maxWidth="max-w-md"
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className={btnSecondary} onClick={() => answer(false)}>
+            Cancel
+          </button>
+          <button type="button" className={btnPrimary} onClick={() => answer(true)}>
+            {request.confirmLabel}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-2 text-sm text-slate-700">
+        {request.message.split('\n\n').map((para, i) => (
+          <p key={i}>{para}</p>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * The copies of an offering that "Link all" would act on: every copy at another venue
+ * that is not linked and in step, that is, independent copies (whether or not they
+ * happen to match today), customised copies, and linked copies whose origin has moved
+ * on. One entry per service, whatever number of calendars offer it. The origin itself
+ * never counts.
+ */
+function copiesOutOfStep(item: CatalogueItemView): CatalogueProviderView[] {
+  const seen = new Set<string>();
+  const out: CatalogueProviderView[] = [];
+  for (const p of item.providers) {
+    if (p.status === 'removed' || seen.has(p.sourceServiceId)) continue;
+    if (item.originVenueId && p.venueId === item.originVenueId) continue;
+    const s = p.sync;
+    if (s.state === 'none') continue;
+    const linkedAndCurrent = s.state === 'linked' && s.inStep !== false;
+    if (linkedAndCurrent) continue;
+    seen.add(p.sourceServiceId);
+    out.push(p);
+  }
+  return out;
+}
 
 function fmtPrice(p: number | null): string {
   return p == null ? '-' : `£${(p / 100).toFixed(2)}`;
@@ -159,9 +232,15 @@ export function CombinedPageManagerPanel({
   // Staged calendar-assignment changes (Services & calendars tab), keyed by
   // `${itemId}::${calendarId}`. Applied together by "Save and close".
   const [pendingProviders, setPendingProviders] = useState<
-    Record<string, { itemId: string; venueId: string; calendarId: string; desired: boolean }>
+    Record<string, { itemId: string; venueId: string; calendarId: string; desired: boolean; sync: boolean }>
   >({});
   const [savingProviders, setSavingProviders] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const ask = useCallback<AskConfirm>(
+    (message, confirmLabel = 'Confirm') =>
+      new Promise<boolean>((resolve) => setConfirmRequest({ message, confirmLabel, resolve })),
+    [],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -249,13 +328,16 @@ export function CombinedPageManagerPanel({
   // server state clears the entry, so a tick-then-untick nets to nothing.
   const providerStaging = useMemo<ProviderStaging>(
     () => ({
-      get: (itemId, calendarId) => pendingProviders[`${itemId}::${calendarId}`]?.desired,
-      toggle: (itemId, venueId, calendarId, nextChecked, serverChecked) =>
+      get: (itemId, calendarId) => {
+        const entry = pendingProviders[`${itemId}::${calendarId}`];
+        return entry ? { desired: entry.desired, sync: entry.sync } : undefined;
+      },
+      toggle: (itemId, venueId, calendarId, nextChecked, serverChecked, sync = false) =>
         setPendingProviders((prev) => {
           const key = `${itemId}::${calendarId}`;
           const next = { ...prev };
           if (nextChecked === serverChecked) delete next[key];
-          else next[key] = { itemId, venueId, calendarId, desired: nextChecked };
+          else next[key] = { itemId, venueId, calendarId, desired: nextChecked, sync };
           return next;
         }),
     }),
@@ -267,13 +349,13 @@ export function CombinedPageManagerPanel({
   // stale op behind.
   const providerOps = useMemo<
     Array<
-      | { op: 'add'; itemId: string; venueId: string; practitionerId: string }
+      | { op: 'add'; itemId: string; venueId: string; practitionerId: string; sync?: boolean }
       | { op: 'remove'; providerId: string }
     >
   >(() => {
     if (!catalogue) return [];
     const ops: Array<
-      | { op: 'add'; itemId: string; venueId: string; practitionerId: string }
+      | { op: 'add'; itemId: string; venueId: string; practitionerId: string; sync?: boolean }
       | { op: 'remove'; providerId: string }
     > = [];
     for (const entry of Object.values(pendingProviders)) {
@@ -288,6 +370,7 @@ export function CombinedPageManagerPanel({
           itemId: entry.itemId,
           venueId: entry.venueId,
           practitionerId: entry.calendarId,
+          ...(entry.sync ? { sync: true } : {}),
         });
       } else if (!entry.desired && provider) {
         ops.push({ op: 'remove', providerId: provider.id });
@@ -324,10 +407,10 @@ export function CombinedPageManagerPanel({
 
   /** Dismissal (overlay / Escape / Done): warn before discarding staged changes. */
   const requestClose = (): void => {
-    if (
-      pendingCount > 0 &&
-      !window.confirm('You have unsaved calendar changes. Discard them and close?')
-    ) {
+    if (pendingCount > 0) {
+      void ask('You have unsaved calendar changes. Discard them and close?', 'Discard changes').then((yes) => {
+        if (yes) onClose();
+      });
       return;
     }
     onClose();
@@ -514,6 +597,7 @@ export function CombinedPageManagerPanel({
         <div className="space-y-4">
           <PageNameField collective={collective} busy={busy} onSettings={settings} />
           <PageAddressSection collective={collective} busy={busy} onSettings={settings} />
+          <CombinedPageAboutSection collective={collective} />
           <HostInheritedSettingsNote collective={collective} />
         </div>
       ),
@@ -591,7 +675,8 @@ export function CombinedPageManagerPanel({
     pendingCount > 0 ? `${pendingCount} unsaved calendar change${pendingCount === 1 ? '' : 's'}` : null;
 
   const body = (
-    <>
+    <ConfirmContext.Provider value={ask}>
+      <ConfirmDialog request={confirmRequest} onDone={() => setConfirmRequest(null)} />
       {tabs.length > 1 ? (
         <div
           role="tablist"
@@ -672,7 +757,7 @@ export function CombinedPageManagerPanel({
           <CombinedPageMemberSummary collective={collective} catalogue={catalogue} loading={loading} />
         ) : null}
       </div>
-    </>
+    </ConfirmContext.Provider>
   );
 
   if (inline) {
@@ -857,6 +942,7 @@ export function CombinedPageMemberSummary({
         <p className="text-xs text-slate-500">This is the page to send your guests to.</p>
         <CombinedPageAddressRow collective={collective} />
       </section>
+      <CombinedPageAboutSection collective={collective} />
       <section className="space-y-2 rounded-xl border border-slate-200 p-4">
         <p className="text-sm font-bold text-slate-900">Your calendars on the combined page</p>
         {error ? (
@@ -985,6 +1071,117 @@ function PageAddressSection({
 // Settings the combined page follows from the host venue
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// About: the contact details and opening hours the combined page shows
+// ---------------------------------------------------------------------------
+
+/**
+ * Read-only. The combined page has no contact details or opening hours of its
+ * own: its header and About tab show the HOST venue's, read from the same
+ * columns the public page reads. The section says where they come from, how to
+ * change them, and, the part that catches people out, that the hours shown are
+ * information only: what a customer can actually book on each calendar is
+ * decided by that calendar's own venue account, in its own business hours,
+ * closures and calendar hours.
+ */
+function CombinedPageAboutSection({ collective }: { collective: CollectiveView }) {
+  const host = hostVenueName(collective);
+  const contact = collective.hostContact ?? null;
+  const website = contact?.websiteUrl ?? null;
+  const websiteHref = website ? (/^https?:\/\//i.test(website) ? website : `https://${website}`) : null;
+  const hours = contact?.openingHours ?? null;
+  const hoursSet = Boolean(hours && Object.keys(hours).length > 0);
+  const notSet = <span className="text-slate-400">Not set</span>;
+  const rowLabel = 'shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:w-28';
+  const settingsLink = 'font-semibold text-brand-700 underline decoration-brand-200 underline-offset-2 hover:text-brand-900';
+
+  return (
+    <section className="space-y-4 rounded-xl border border-slate-200 p-4" data-testid="combined-page-about">
+      <div>
+        <p className="text-sm font-bold text-slate-900">About: contact details and opening hours</p>
+        <p className="mt-1 text-xs text-slate-600">
+          What the combined page shows in its header and About tab. These are {host}&rsquo;s details:
+          the combined page has none of its own.
+        </p>
+      </div>
+
+      <dl className="space-y-3">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-4">
+          <dt className={rowLabel}>Phone</dt>
+          <dd className="text-sm text-slate-800">{contact?.phone ?? notSet}</dd>
+        </div>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-4">
+          <dt className={rowLabel}>Website</dt>
+          <dd className="min-w-0 break-words text-sm text-slate-800 [overflow-wrap:anywhere]">
+            {website && websiteHref ? (
+              <a href={websiteHref} target="_blank" rel="noopener noreferrer" className={settingsLink}>
+                {website}
+              </a>
+            ) : (
+              notSet
+            )}
+          </dd>
+        </div>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-4">
+          <dt className={rowLabel}>Address</dt>
+          <dd className="text-sm text-slate-800">{contact?.address ?? notSet}</dd>
+        </div>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:gap-4">
+          <dt className={rowLabel}>Opening hours</dt>
+          <dd className="min-w-0 flex-1 text-sm text-slate-800 sm:max-w-sm">
+            {hoursSet && hours ? <BookOpeningHours hours={hours} variant="expanded" /> : notSet}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+        <p>
+          <span className="font-semibold text-slate-800">Where they come from.</span> {host} sets the phone,
+          website and address under Settings, Profile, and the opening hours under Settings, Business
+          hours. There is no separate copy for the combined page, so a change there shows on the page
+          straight away.
+          {collective.isHost ? (
+            <>
+              {' '}
+              <a href="/dashboard/settings?tab=profile" className={settingsLink}>
+                Edit contact details
+              </a>
+              {' or '}
+              <a href="/dashboard/settings?tab=business-hours" className={settingsLink}>
+                edit opening hours
+              </a>
+              .
+            </>
+          ) : (
+            <> To change them, ask {host}.</>
+          )}
+        </p>
+        <p>
+          <span className="font-semibold text-slate-800">What customers can book.</span> The hours above
+          are information for customers. They do not decide availability. Each linked account sets its
+          own business hours, closures and calendar hours for its own people, and the combined page
+          offers a time on a calendar only when that calendar&rsquo;s own account says it is free. So a
+          calendar at another venue can be open outside the hours shown here, or closed inside them.
+        </p>
+        <p>
+          <span className="font-semibold text-slate-800">Keeping them in step.</span> Keep your own
+          venue&rsquo;s hours right under{' '}
+          <a href="/dashboard/settings?tab=business-hours" className={settingsLink}>
+            Business hours
+          </a>{' '}
+          and each person&rsquo;s hours under{' '}
+          <a href="/dashboard/calendar-availability" className={settingsLink}>
+            Availability
+          </a>
+          , since those are what bookings into your calendars follow. If the venues keep different
+          hours, the header cannot match every calendar: {host}&rsquo;s business hours are the ones to
+          set to describe the group as a whole.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function hostVenueName(collective: CollectiveView): string {
   return (
     collective.members.find((m) => m.venueId === collective.hostVenueId)?.venueName ??
@@ -1013,7 +1210,7 @@ function HostInheritedSettingsNote({ collective }: { collective: CollectiveView 
           (currently {collective.hostStaffFirstBookingFlow ? 'on' : 'off'}): Settings, Booking
           settings.
         </li>
-        <li>Address, phone, website and opening hours shown in the header: Settings, Profile.</li>
+        <li>Address, phone and website shown in the header: Settings, Profile. Opening hours: Settings, Business hours.</li>
         <li>Currency and wording (for example &ldquo;appointment&rdquo;): Settings, Profile.</li>
       </ul>
       <p className="text-xs text-slate-600">
@@ -1307,7 +1504,17 @@ function HostCatalogue({
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-2">
-          <p className="text-sm font-bold text-slate-900">Offerings on your combined page</p>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-slate-900">Offerings on your combined page</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Each offering lists the calendars that provide it. A calendar at another venue uses that
+              venue&apos;s own copy of the service. A <span className="font-medium">linked</span> copy
+              follows the original&apos;s duration, buffer, processing periods and options whenever the
+              original is saved, and its add-ons are matched whenever it is linked or updated; price
+              and description are always the venue&apos;s own.
+            </p>
+          </div>
+          <LinkAllCopiesButtons items={activeItems} busy={busy} action={action} />
           {uncategorisedCount > 0 ? (
             <button
               type="button"
@@ -1486,8 +1693,9 @@ function VenueServicesPicker({
           <p className="text-sm font-bold text-slate-900">Choose services to offer</p>
           <p className="mt-1 text-xs text-slate-500">
             Tick the services you want on the combined page, then add them together. To offer one at
-            more than one venue, open the offering below and tick that venue&apos;s calendars. The
-            service is created there automatically if it doesn&apos;t have it yet.
+            more than one venue, open the offering below and tick that venue&apos;s calendars. If the
+            venue does not have the service, an exact copy is created there and linked to the
+            original; if it already has one with the same name, you are asked whether to link it.
           </p>
         </div>
         {addable.length > 0 ? (
@@ -1645,8 +1853,8 @@ function ItemCard({
             }}
           />
           <p className="px-1 text-xs text-slate-500">
-            {item.providers.length} calendar{item.providers.length === 1 ? '' : 's'} · customers see the
-            “from” price
+            {item.providers.length} calendar{item.providers.length === 1 ? '' : 's'}
+            {item.pricingDisplay === 'from' ? ' · customers see the “from” price' : ''}
           </p>
           {categories.length > 0 ? (
             <label className="mt-1 flex items-center gap-2 px-1 text-xs text-slate-600">
@@ -1669,22 +1877,24 @@ function ItemCard({
             </label>
           ) : null}
         </div>
-        <button
-          type="button"
-          className="text-xs font-medium text-rose-500 hover:text-rose-700 disabled:opacity-50"
-          disabled={busy}
-          onClick={() => void action({ action: 'archive_item', itemId: item.id })}
-        >
-          Remove offering
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <LinkOfferingCopiesButton item={item} busy={busy} action={action} />
+          <UnlinkOfferingCopiesButton item={item} busy={busy} action={action} />
+          <button
+            type="button"
+            className="text-xs font-medium text-rose-500 hover:text-rose-700 disabled:opacity-50"
+            disabled={busy}
+            onClick={() => void action({ action: 'archive_item', itemId: item.id })}
+          >
+            Remove offering
+          </button>
+        </div>
       </div>
 
       <p className="mt-1 px-1 text-xs text-slate-500">
-        Here you choose which calendars offer it. Price, description and add-ons come from each
-        venue&apos;s own service settings (Dashboard → Services). A service that ticking a calendar
-        copies into another venue is marked <span className="font-medium">in step</span>: its duration,
-        buffer, processing periods and options follow the original whenever that is saved, until the
-        venue edits them itself. The photo for this shared page is yours to set, on the Page tab.
+        Tick the calendars that offer it. Each row at another venue shows whether that venue&apos;s copy
+        is linked to the original and up to date, with a button for the next step. The photo for this
+        shared page is set on the Page tab.
       </p>
 
       <CalendarAssignment
@@ -1778,11 +1988,12 @@ function CalendarRow({
   action: (body: Record<string, unknown>) => Promise<boolean>;
   providerStaging: ProviderStaging;
 }) {
+  const ask = useAskConfirm();
   // Server truth vs the staged (unsaved) desire. `checked` drives the box; a change
   // is only applied when the host clicks "Save and close".
   const serverChecked = Boolean(provider);
-  const desired = providerStaging.get(item.id, cal.id);
-  const checked = desired ?? serverChecked;
+  const staged = providerStaging.get(item.id, cal.id);
+  const checked = staged?.desired ?? serverChecked;
   // Whether this calendar's venue already offers the service. If not, ticking the box
   // duplicates the service into that venue (a real, same-named service it can book + manage).
   const hasService = cal.services.some(
@@ -1797,9 +2008,27 @@ function CalendarRow({
           className="rounded border-slate-300"
           checked={checked}
           disabled={busy}
-          onChange={(e) =>
-            providerStaging.toggle(item.id, venueId, cal.id, e.target.checked, serverChecked)
-          }
+          onChange={(e) => {
+            const nextChecked = e.target.checked;
+            // Ticking a calendar whose venue already has the service: the tick reuses that
+            // service as it is, so ask whether to bring it into step with the original now.
+            const originName = item.originVenueName ?? 'the original';
+            const askToSync =
+              nextChecked &&
+              !serverChecked &&
+              hasService &&
+              Boolean(item.originVenueId) &&
+              item.originVenueId !== venueId;
+            providerStaging.toggle(item.id, venueId, cal.id, nextChecked, serverChecked, false);
+            if (askToSync) {
+              void ask(
+                `${venueName} already has a service called “${item.name}”. Link it to ${originName}'s? Its duration, buffer, processing periods, options and add-ons will be updated to match ${originName}'s now and follow it from then on. Price and description stay as they are.\n\nChoose Link to link it, or Cancel to add the calendar and leave the service as it is.`,
+                'Link it',
+              ).then((yes) => {
+                if (yes) providerStaging.toggle(item.id, venueId, cal.id, nextChecked, serverChecked, true);
+              });
+            }
+          }}
         />
         <span className="truncate text-slate-800">{cal.name}</span>
       </label>
@@ -1812,14 +2041,16 @@ function CalendarRow({
           {provider.status === 'suspended' ? (
             <span className="font-medium text-amber-600">suspended</span>
           ) : null}
-          <SyncChip item={item} provider={provider} venueName={venueName} busy={busy} action={action} />
+          <CopySyncStatus item={item} provider={provider} venueName={venueName} busy={busy} action={action} />
         </span>
       ) : checked && !provider ? (
         // Staged add: on save this ticks the calendar (duplicating the service into
         // its venue when that venue does not already offer it).
         <span className="flex shrink-0 items-center gap-2 text-xs">
           {!hasService ? (
-            <span className="text-brand-600">adds “{item.name}” to {venueName}</span>
+            <span className="text-brand-600">copies “{item.name}” to {venueName}, linked</span>
+          ) : staged?.sync ? (
+            <span className="text-brand-600">will link to {item.originVenueName ?? 'the original'}</span>
           ) : null}
           <span className="font-medium text-amber-600">unsaved</span>
         </span>
@@ -1832,12 +2063,162 @@ function CalendarRow({
 }
 
 
+/** The compact action button used beside a copy's status and on the offering header. */
+const btnMatch =
+  'inline-flex items-center rounded-lg border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-800 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50';
+const btnQuiet =
+  'inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
+
+const SYNCED_FIELDS_COPY = 'duration, buffer, processing periods, options and add-ons';
+
+/** Copies at other venues that are following their origin (linked, or customised and so once linked). */
+function linkedCopies(item: CatalogueItemView): CatalogueProviderView[] {
+  const seen = new Set<string>();
+  const out: CatalogueProviderView[] = [];
+  for (const p of item.providers) {
+    if (p.status === 'removed' || seen.has(p.sourceServiceId)) continue;
+    if (item.originVenueId && p.venueId === item.originVenueId) continue;
+    if (p.sync.state !== 'linked' && p.sync.state !== 'customised') continue;
+    seen.add(p.sourceServiceId);
+    out.push(p);
+  }
+  return out;
+}
+
 /**
- * Whether this venue's copy of the service follows its origin (Docs/collective-service-sync-plan.md).
- * Nothing is shown for the origin itself, for a venue's own pre-existing service, or on a
- * database without the sync columns.
+ * "Link all" for one offering: every copy at another venue that is not linked and in
+ * step is linked to the origin and updated. Shown only while there is one.
  */
-function SyncChip({
+function LinkOfferingCopiesButton({
+  item,
+  busy,
+  action,
+}: {
+  item: CatalogueItemView;
+  busy: boolean;
+  action: (body: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const ask = useAskConfirm();
+  const out = copiesOutOfStep(item);
+  if (out.length === 0) return null;
+  const origin = item.originVenueName ?? 'the original';
+  const venues = [...new Set(out.map((p) => p.venueName))].join(', ');
+  return (
+    <button
+      type="button"
+      className={btnMatch}
+      disabled={busy}
+      title={`Not linked or behind at ${venues}`}
+      onClick={() => {
+        void ask(
+            `Link “${item.name}” at ${venues} to ${origin}'s and update ${out.length === 1 ? 'it' : 'them'} now? ${out.length === 1 ? 'Its' : 'Their'} ${SYNCED_FIELDS_COPY} will match ${origin}'s and follow it from now on. Price and description stay as they are.`,
+            'Link and update',
+        ).then((yes) => {
+          if (yes) void action({ action: 'sync_all_providers', itemId: item.id });
+        });
+      }}
+    >
+      Link {out.length === 1 ? '1 copy' : `all ${out.length} copies`}
+    </button>
+  );
+}
+
+/** "Unlink all" for one offering: every linked copy stops following; nothing else changes. */
+function UnlinkOfferingCopiesButton({
+  item,
+  busy,
+  action,
+}: {
+  item: CatalogueItemView;
+  busy: boolean;
+  action: (body: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const ask = useAskConfirm();
+  const linked = linkedCopies(item);
+  if (linked.length === 0) return null;
+  const venues = [...new Set(linked.map((p) => p.venueName))].join(', ');
+  return (
+    <button
+      type="button"
+      className={btnQuiet}
+      disabled={busy}
+      onClick={() => {
+        void ask(
+            `Unlink “${item.name}” at ${venues}? ${linked.length === 1 ? 'The copy keeps' : 'The copies keep'} ${linked.length === 1 ? 'its' : 'their'} current settings and no longer ${linked.length === 1 ? 'follows' : 'follow'} the original.`,
+            'Unlink',
+        ).then((yes) => {
+          if (yes) void action({ action: 'unlink_all_providers', itemId: item.id });
+        });
+      }}
+    >
+      Unlink {linked.length === 1 ? '1 copy' : `all ${linked.length} copies`}
+    </button>
+  );
+}
+
+/** The same two actions across every offering on the page. */
+function LinkAllCopiesButtons({
+  items,
+  busy,
+  action,
+}: {
+  items: CatalogueItemView[];
+  busy: boolean;
+  action: (body: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const ask = useAskConfirm();
+  const toLink = items.reduce((n, item) => n + copiesOutOfStep(item).length, 0);
+  const toUnlink = items.reduce((n, item) => n + linkedCopies(item).length, 0);
+  if (toLink === 0 && toUnlink === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {toLink > 0 ? (
+        <button
+          type="button"
+          className={btnMatch}
+          disabled={busy}
+          title="Every copy at another venue that is not linked, or has fallen behind, is linked to its original and updated."
+          onClick={() => {
+            void ask(
+                `Link ${toLink === 1 ? '1 service copy' : `all ${toLink} service copies`} to the originals and update ${toLink === 1 ? 'it' : 'them'} now? ${SYNCED_FIELDS_COPY[0].toUpperCase() + SYNCED_FIELDS_COPY.slice(1)} will match the originals and follow them from now on. Prices and descriptions stay as they are.`,
+                'Link and update',
+            ).then((yes) => {
+              if (yes) void action({ action: 'sync_all_providers' });
+            });
+          }}
+        >
+          Link all copies ({toLink})
+        </button>
+      ) : null}
+      {toUnlink > 0 ? (
+        <button
+          type="button"
+          className={btnQuiet}
+          disabled={busy}
+          title="Every linked copy stops following its original. Their settings stay as they are."
+          onClick={() => {
+            void ask(
+                `Unlink ${toUnlink === 1 ? '1 service copy' : `all ${toUnlink} service copies`}? ${toUnlink === 1 ? 'It keeps its' : 'They keep their'} current settings and no longer ${toUnlink === 1 ? 'follows' : 'follow'} the originals.`,
+                'Unlink',
+            ).then((yes) => {
+              if (yes) void action({ action: 'unlink_all_providers' });
+            });
+          }}
+        >
+          Unlink all copies ({toUnlink})
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A copy's standing against its origin, and the one thing to do about it
+ * (Docs/collective-service-sync-plan.md). A badge says the state in plain words; the
+ * button beside it is always the next sensible action. Nothing is shown for the origin
+ * itself, for a venue's own unrelated service, or on a database without the sync columns.
+ */
+function CopySyncStatus({
   item,
   provider,
   venueName,
@@ -1850,99 +2231,110 @@ function SyncChip({
   busy: boolean;
   action: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
+  const ask = useAskConfirm();
   const sync = provider.sync;
   if (!sync || sync.state === 'none') return null;
-  const origin = sync.originVenueName ?? 'the original';
-  const linkClass = 'font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50';
+  const origin = sync.originVenueName ?? item.originVenueName ?? 'the original';
+  const atOrigin = Boolean(item.originVenueId) && item.originVenueId === provider.venueId;
+  if (atOrigin) return null;
+
+  // What differs, as far as the row can tell: the length is on both providers, so it can be
+  // named; anything else is one of the other synced fields.
+  const originProvider = item.originVenueId
+    ? item.providers.find((p) => p.venueId === item.originVenueId && p.status !== 'removed') ?? null
+    : null;
+  const here = provider.effectiveDurationMinutes;
+  const there = originProvider?.effectiveDurationMinutes ?? null;
+  const differenceNote =
+    here != null && there != null && here !== there
+      ? `${fmtDuration(here)} here, ${fmtDuration(there)} at ${origin}`
+      : 'buffer, processing periods or options differ';
+
+  const badge = (tone: 'ok' | 'warn' | 'muted', text: string) => (
+    <span
+      className={
+        tone === 'ok'
+          ? 'rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200'
+          : tone === 'warn'
+            ? 'rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200'
+            : 'rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200'
+      }
+    >
+      {text}
+    </span>
+  );
+
+  const button = (label: string, confirmText: string, body: Record<string, unknown>, quiet = false) => (
+    <button
+      type="button"
+      className={quiet ? btnQuiet : btnMatch}
+      disabled={busy}
+      onClick={() => {
+        void ask(confirmText, quiet ? 'Unlink' : label).then((yes) => {
+          if (yes) void action(body);
+        });
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const linkConfirm = `Link “${item.name}” at ${venueName} to ${origin}'s and update it now? Its ${SYNCED_FIELDS_COPY} will match ${origin}'s and follow it from now on. Price and description stay as they are.`;
+  const unlinkButton = button(
+    'Unlink',
+    `Unlink “${item.name}” at ${venueName}? It keeps its current settings and no longer follows ${origin}.`,
+    { action: 'detach_provider', providerId: provider.id },
+    true,
+  );
+
   if (sync.state === 'independent') {
-    // The one deliberately retroactive action: explicit, per copy, confirmed. Offered only
-    // at a venue other than the offering's origin.
-    const canLink = Boolean(item.originVenueId) && item.originVenueId !== provider.venueId;
-    const originName = item.originVenueName ?? 'the original';
     return (
       <>
-        <span className="text-slate-400">independent copy</span>
-        {canLink ? (
-          <button
-            type="button"
-            className={linkClass}
-            disabled={busy}
-            onClick={() => {
-              if (
-                typeof window !== 'undefined' &&
-                !window.confirm(
-                  `Link this service at ${venueName} to ${originName}'s and update it now? Its duration, buffer, processing periods and options will match ${originName}'s and follow it from now on. Price and description stay as they are.`,
-                )
-              ) {
-                return;
-              }
-              void action({ action: 'link_provider', providerId: provider.id });
-            }}
-          >
-            Link to {originName} and update
-          </button>
-        ) : null}
+        {sync.inStep === false
+          ? badge('warn', `Not linked. Differs from ${origin}: ${differenceNote}`)
+          : sync.inStep === true
+            ? badge('muted', `Not linked. Same as ${origin} today`)
+            : badge('muted', 'Not linked')}
+        {button(`Link to ${origin}`, linkConfirm, { action: 'link_provider', providerId: provider.id })}
       </>
     );
   }
   if (sync.state === 'customised') {
+    // Was linked; the venue edited a synced field, so it stopped following.
     return (
       <>
-        <span className="font-medium text-amber-600">customised at {venueName}</span>
-        <button
-          type="button"
-          className={linkClass}
-          disabled={busy}
-          onClick={() => {
-            if (
-              typeof window !== 'undefined' &&
-              !window.confirm(
-                `Replace ${venueName}'s changes to this service with ${origin}'s duration, buffer, processing periods and options? Price and description stay as they are.`,
-              )
-            ) {
-              return;
-            }
-            void action({ action: 'sync_provider', providerId: provider.id, forceSync: true });
-          }}
-        >
-          Re-sync
-        </button>
+        {badge(
+          'warn',
+          sync.inStep === false
+            ? `Edited at ${venueName}, no longer following. ${differenceNote[0].toUpperCase() + differenceNote.slice(1)}`
+            : `Edited at ${venueName}, no longer following`,
+        )}
+        {button(
+          `Relink to ${origin}`,
+          `Replace ${venueName}'s changes to “${item.name}” with ${origin}'s ${SYNCED_FIELDS_COPY}, and follow ${origin} again from now on? Price and description stay as they are.`,
+          { action: 'sync_provider', providerId: provider.id, forceSync: true },
+        )}
+        {unlinkButton}
+      </>
+    );
+  }
+  if (sync.inStep === false) {
+    return (
+      <>
+        {badge('warn', `Linked, behind ${origin}: ${differenceNote}`)}
+        {button(
+          `Update from ${origin}`,
+          `Update “${item.name}” at ${venueName} to ${origin}'s current ${SYNCED_FIELDS_COPY}?`,
+          { action: 'sync_provider', providerId: provider.id },
+        )}
+        {unlinkButton}
       </>
     );
   }
   return (
     <>
-      {sync.inStep === false ? (
-        <>
-          <span className="font-medium text-amber-600">update available</span>
-          <button
-            type="button"
-            className={linkClass}
-            disabled={busy}
-            onClick={() => void action({ action: 'sync_provider', providerId: provider.id })}
-          >
-            Update now
-          </button>
-        </>
-      ) : (
-        <span className="text-emerald-700">in step with {origin}</span>
-      )}
-      <button
-        type="button"
-        className="text-slate-400 hover:text-slate-700 disabled:opacity-50"
-        disabled={busy}
-        onClick={() => {
-          if (
-            typeof window !== 'undefined' &&
-            !window.confirm(`Stop this service at ${venueName} following ${origin}? Its settings stay as they are now.`)
-          ) {
-            return;
-          }
-          void action({ action: 'detach_provider', providerId: provider.id });
-        }}
-      >
-        Stop syncing
-      </button>
+      {badge('ok', `Linked to ${origin}, in step`)}
+      {unlinkButton}
     </>
   );
 }

@@ -8,7 +8,7 @@ vi.mock('./catalogue', async (importOriginal) => ({
 }));
 
 import { loadVenueCatalogueData } from './catalogue';
-import { ensureServiceForCalendar, loadOfferingTemplate } from './service-duplication';
+import { ensureServiceForCalendar, loadOfferingTemplate, matchAddonGroupsToOrigin } from './service-duplication';
 
 const mockCatalogue = vi.mocked(loadVenueCatalogueData);
 
@@ -486,8 +486,9 @@ describe('ensureServiceForCalendar', () => {
           { id: 'grp-b-other', venue_id: MEMBER_B, name: 'Finish', selection_type: 'single', is_active: true },
         ],
         addons: [
-          { id: 'b-addon-1', addon_group_id: 'grp-b-finish', venue_id: MEMBER_B, name: 'Straighten', archived_at: null },
-          { id: 'b-addon-2', addon_group_id: 'grp-b-finish', venue_id: MEMBER_B, name: 'blow dry', archived_at: null },
+          // Same options as the origin's, price and length included, so the group is reused.
+          { id: 'b-addon-1', addon_group_id: 'grp-b-finish', venue_id: MEMBER_B, name: 'Straighten', additional_price_pence: 1000, additional_duration_minutes: 15, archived_at: null },
+          { id: 'b-addon-2', addon_group_id: 'grp-b-finish', venue_id: MEMBER_B, name: 'blow dry', additional_price_pence: 1500, additional_duration_minutes: 20, archived_at: null },
           { id: 'b-addon-3', addon_group_id: 'grp-b-other', venue_id: MEMBER_B, name: 'Curl', archived_at: null },
         ],
         compliance_types: [
@@ -525,6 +526,36 @@ describe('ensureServiceForCalendar', () => {
     expect(rowsFor(db, 'service_compliance_requirements', MEMBER_B)).toEqual([
       expect.objectContaining({ service_item_id: newId, compliance_type_id: 'type-b-ppd', enforcement: 'block_online' }),
     ]);
+  });
+
+  it('matchAddonGroupsToOrigin leaves the copy linked to exactly the origin’s groups', async () => {
+    const db = seedDb({
+      targetExtra: {
+        service_items: [{ id: 'svc-b-existing', venue_id: MEMBER_B, name: 'Cut and colour', is_active: true }],
+        addon_groups: [
+          { id: 'grp-b-finish', venue_id: MEMBER_B, name: 'Finish', selection_type: 'single', is_active: true },
+          { id: 'grp-b-extra', venue_id: MEMBER_B, name: 'Treatments', selection_type: 'multi', is_active: true },
+        ],
+        addons: [
+          { id: 'b-addon-1', addon_group_id: 'grp-b-finish', venue_id: MEMBER_B, name: 'Straighten', additional_price_pence: 1000, additional_duration_minutes: 15, archived_at: null },
+          { id: 'b-addon-2', addon_group_id: 'grp-b-finish', venue_id: MEMBER_B, name: 'Blow dry', additional_price_pence: 1500, additional_duration_minutes: 20, archived_at: null },
+          { id: 'b-addon-9', addon_group_id: 'grp-b-extra', venue_id: MEMBER_B, name: 'Olaplex', additional_price_pence: 2000, additional_duration_minutes: 10, archived_at: null },
+        ],
+      },
+    });
+    // The copy links to a matching group and to one the origin does not have.
+    db.tables.service_addon_groups!.push(
+      { id: 'b-link-1', venue_id: MEMBER_B, service_item_id: 'svc-b-existing', addon_group_id: 'grp-b-finish', sort_order: 0 },
+      { id: 'b-link-2', venue_id: MEMBER_B, service_item_id: 'svc-b-existing', addon_group_id: 'grp-b-extra', sort_order: 1 },
+    );
+    const admin = db.asClient();
+    const template = await loadOfferingTemplate(admin, ITEM);
+
+    expect(await matchAddonGroupsToOrigin(admin, MEMBER_B, 'svc-b-existing', template!.addonGroups)).toBe(true);
+
+    // Linked to the matching group only; the extra group is unlinked but still exists.
+    expect(rowsFor(db, 'service_addon_groups', MEMBER_B).map((l) => l.addon_group_id)).toEqual(['grp-b-finish']);
+    expect(rowsFor(db, 'addon_groups', MEMBER_B).map((g) => g.id)).toEqual(['grp-b-finish', 'grp-b-extra']);
   });
 
   it('removes the partial copy and reports the step when part of it cannot be written', async () => {

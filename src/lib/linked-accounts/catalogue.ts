@@ -228,7 +228,11 @@ export interface CatalogueProviderView {
   sync: {
     state: 'none' | 'independent' | 'linked' | 'customised';
     originVenueName: string | null;
-    /** Null unless linked or customised with a readable origin. */
+    /**
+     * Whether the copy's duration, buffer, processing periods and options match the
+     * origin's. Null when the origin cannot be read. For an independent copy this is
+     * drift information only.
+     */
     inStep: boolean | null;
   };
 }
@@ -449,14 +453,11 @@ export async function loadCatalogueForManagement(
       .in('item_id', itemIds)
       .neq('status', 'removed')
       .order('created_at', { ascending: true });
-    const syncViews = await loadServiceSyncViews(
-      admin,
-      [...new Set((providerRows ?? []).map((r) => r.source_service_id as string))],
-    );
     // The venue the tick copies from, per offering: the host's when it provides the
     // offering, else the earliest provider's (pickOriginProvider in service-duplication.ts).
     const hostVenueId = (collective.host_venue_id as string | null) ?? null;
     const originVenueByItem = new Map<string, string>();
+    const originServiceByItem = new Map<string, string>();
     for (const raw of providerRows ?? []) {
       if ((raw.status as string) !== 'active') continue;
       const itemId = raw.item_id as string;
@@ -464,8 +465,25 @@ export async function loadCatalogueForManagement(
       const current = originVenueByItem.get(itemId);
       if (!current || (hostVenueId && venueId === hostVenueId && current !== hostVenueId)) {
         originVenueByItem.set(itemId, venueId);
+        originServiceByItem.set(itemId, raw.source_service_id as string);
       }
     }
+    // A copy at another venue that records no origin (made before sync existed) is still
+    // compared with the offering's origin, so the manager can say whether it has diverged.
+    const originOverrides = new Map<string, string>();
+    for (const raw of providerRows ?? []) {
+      const itemId = raw.item_id as string;
+      const originVenue = originVenueByItem.get(itemId);
+      const originService = originServiceByItem.get(itemId);
+      if (originVenue && originService && originVenue !== (raw.venue_id as string)) {
+        originOverrides.set(raw.source_service_id as string, originService);
+      }
+    }
+    const syncViews = await loadServiceSyncViews(
+      admin,
+      [...new Set((providerRows ?? []).map((r) => r.source_service_id as string))],
+      originOverrides,
+    );
     for (const raw of providerRows ?? []) {
       const itemId = raw.item_id as string;
       const venueId = raw.venue_id as string;
@@ -495,13 +513,13 @@ export async function loadCatalogueForManagement(
         sync: (() => {
           const v = syncViews.get(sourceServiceId);
           if (!v) return { state: 'none' as const, originVenueName: null, inStep: null };
-          if (!v.originServiceId) {
-            // No origin recorded: a venue's own service. It is an "independent copy" only
-            // when it stands in for the offering at a venue other than the origin's, which
-            // is where "Link to {origin} and update" applies; at the origin it is the original.
-            const originVenue = originVenueByItem.get(itemId) ?? null;
-            const isCopyElsewhere = originVenue != null && originVenue !== venueId;
-            return { state: isCopyElsewhere ? ('independent' as const) : ('none' as const), originVenueName: null, inStep: null };
+          // A venue's own service is an "independent copy" only when it stands in for the
+          // offering at a venue other than the origin's, which is where "Link to {origin}
+          // and update" applies; at the origin it is the original.
+          const originVenue = originVenueByItem.get(itemId) ?? null;
+          const isCopyElsewhere = originVenue != null && originVenue !== venueId;
+          if (!isCopyElsewhere && v.state === 'independent') {
+            return { state: 'none' as const, originVenueName: null, inStep: null };
           }
           return {
             state: v.state,

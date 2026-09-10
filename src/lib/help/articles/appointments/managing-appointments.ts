@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Managing the appointments list',
   description: 'Ranges, filters and sorting, what an expanded row can do, bulk tagging and messaging, live updates, and where exports really live.',
   tags: ['bookings', 'filters', 'bulk', 'list'],
-  verified: '2026-09-06',
+  verified: '2026-09-10',
   content: `
 # The appointments list in practice
 
@@ -57,7 +57,7 @@ Click a row to open it in place. You get the client's name with **Call**, **Emai
 - The status buttons for where the booking is now: **Accept** on a request, then **Start**, **Complete**, and their reverses **Undo Start** and **Reopen**. **Arrived** marks someone as waiting and **Clear** takes it off again.
 - **Confirm** records that the client has said they are coming. To take that back, use **Cancel confirmation**, or **Undo confirm** on a booking whose status is already **Confirmed**.
 - **New**, **Rebook**, and **Modify**, then **Cancel** and **No-Show**. Both of the last two ask you to confirm, with **Keep as is** to back out. **Undo No-Show** appears afterwards.
-- **Services in this visit** when several services were booked together. Each service has its own **Start** and **Complete** (with **Undo start** and **Undo complete**), so a colour can be finished while the cut has not begun; **Confirm** and **Arrived** at the top of the panel apply to the whole visit. A group booking block appears when several people were booked at once.
+- The visit summary at the top: the start and end time, how long it runs, the date and the client's last visit, then every service with its own time, length and price, the total, and anything paid or still outstanding. A deposit that is due, a card hold or a charged fee shows as a label beside the status. When several services were booked together, each has its own **Start** and **Complete** (with **Undo start** and **Undo complete**), so a colour can be finished while the cut has not begun; **Confirm** and **Arrived** at the top of the panel apply to the whole visit. A group booking block appears when several people were booked at once.
 - **Notes** for tags and booking notes, **SMS / email guest** to write to them, **Compliance** for outstanding forms, **Records** for their documents and photos, and **Timeline** for what has happened to the booking and when.
 - The payment actions when money is involved: **Send payment link**, **Waive**, **Record cash**, **Refund deposit** or **Refund payment**, and **Resend confirmation**. These are covered in [Deposits, full payments, card holds, and refunds](/help/appointments/deposits).
 

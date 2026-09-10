@@ -74,6 +74,8 @@ export interface GuestBookingHistoryRow {
   booking_time: string;
   party_size: number | null;
   status: string;
+  /** How the booking was made (`phone`, `booking_page`, `walk-in`, `staff`...). */
+  source?: string | null;
   deposit_status: string | null;
   deposit_amount_pence?: number | null;
   booking_model: BookingModel;

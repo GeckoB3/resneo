@@ -491,9 +491,22 @@ interface TargetAddonGroup {
   optionKey: string;
 }
 
-/** The option names of a group, order-insensitive, so two groups can be judged the same. */
+/**
+ * The options of a group as one comparable key: name, extra length and extra price,
+ * order-insensitive. Two groups with the same key are the same group as far as a booking
+ * is concerned, so a copy may reuse the venue's; any difference means a new group, because
+ * the venue's group may be shared by its other services and must not be rewritten.
+ */
 function addonOptionKey(addons: Row[]): string {
-  return JSON.stringify(addons.map((a) => normaliseName(a.name)).sort());
+  return JSON.stringify(
+    addons
+      .map((a) => [
+        normaliseName(a.name),
+        (a.additional_duration_minutes as number | null) ?? 0,
+        (a.additional_price_pence as number | null) ?? 0,
+      ])
+      .sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+  );
 }
 
 /** The target venue's active add-on groups with their unarchived options, for matching. */
@@ -607,6 +620,51 @@ export async function ensureAddonGroupLinksForService(
     .eq('service_item_id', serviceId);
   const alreadyLinked = new Set(((existing ?? []) as Row[]).map((r) => r.addon_group_id as string));
   return copyAddonGroups(admin, venueId, serviceId, groups, [], alreadyLinked);
+}
+
+/**
+ * Make an EXISTING service's add-ons the same as the origin's: it ends up linked to exactly
+ * the groups the origin has (each the venue's own group with the same name, selection type
+ * and options, created there when the venue has none) and to nothing else. Groups the copy
+ * no longer needs are unlinked from it, never deleted, so the venue's other services keep
+ * them. The "link to origin" and "update from origin" actions.
+ */
+export async function matchAddonGroupsToOrigin(
+  admin: SupabaseClient,
+  venueId: string,
+  serviceId: string,
+  groups: AddonGroupTemplate[],
+): Promise<boolean> {
+  const ok = await ensureAddonGroupLinksForService(admin, venueId, serviceId, groups);
+  if (!ok) return false;
+  // Every origin group now has an exact counterpart at the venue; anything else linked to the
+  // copy is the venue's own addition and comes off.
+  const library = await loadTargetAddonGroups(admin, venueId);
+  const wanted = new Set<string>();
+  for (const tpl of groups) {
+    const nameKey = normaliseName(tpl.group.name);
+    const optionKey = addonOptionKey(tpl.addons);
+    const hit = library.find(
+      (g) => g.nameKey === nameKey && g.selectionType === tpl.group.selection_type && g.optionKey === optionKey,
+    );
+    if (hit) wanted.add(hit.id);
+  }
+  const { data: links } = await admin
+    .from('service_addon_groups')
+    .select('id, addon_group_id')
+    .eq('venue_id', venueId)
+    .eq('service_item_id', serviceId);
+  const extra = ((links ?? []) as Row[]).filter((l) => !wanted.has(l.addon_group_id as string));
+  if (extra.length === 0) return true;
+  const { error } = await admin
+    .from('service_addon_groups')
+    .delete()
+    .in('id', extra.map((l) => l.id as string));
+  if (error) {
+    console.error('[service-duplication] add-on unlink failed:', error.message, { serviceId });
+    return false;
+  }
+  return true;
 }
 
 /**

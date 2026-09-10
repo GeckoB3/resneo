@@ -223,7 +223,7 @@ export async function PATCH(
     const { ownerVenueId: scopeVenueId, isOwnVenue, linkedGrant, linkId } = loaded.ctx;
     if (rows.some((r) => r.venue_id !== scopeVenueId)) {
       return NextResponse.json(
-        { error: 'This visit spans more than one venue and cannot be moved as one.' },
+        { error: 'The services of this visit are on different ResNeo accounts, so it cannot be moved as one. Move each service on its own, or make a new booking on the other calendar and cancel this one.' },
         { status: 409 },
       );
     }

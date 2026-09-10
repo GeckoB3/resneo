@@ -5,6 +5,7 @@ import { getAcceptedLinkBetween, getStandingLinkBetween } from './queries';
 import { evaluateLinkEligibility } from './eligibility';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
+import type { OpeningHours } from '@/components/booking/types';
 import {
   inheritCollectivePageConfigFromHost,
   type CollectiveBookingPageConfig,
@@ -150,6 +151,18 @@ export interface CollectiveView {
   isHost: boolean;
   /** The host venue's id (so the UI can identify which member is the host). */
   hostVenueId: string;
+  /**
+   * The host venue's public contact details and opening hours, exactly what the
+   * combined page shows in its header and About tab (`loadCollectiveVenue`
+   * reads the same columns). Read-only here: they are set in the host's own
+   * Profile and Business hours settings.
+   */
+  hostContact?: {
+    phone: string | null;
+    websiteUrl: string | null;
+    address: string | null;
+    openingHours: OpeningHours | null;
+  };
   /** The venue this view was loaded for. */
   myVenueId: string;
   /** This venue's membership status, if it is a member. */
@@ -329,12 +342,24 @@ export async function loadCollectiveViewsForVenue(
   const venueStaffFirst: Record<string, boolean> = {};
   const venueSlugs: Record<string, string | null> = {};
   const venuePageConfigs: Record<string, BookingPageConfig | null> = {};
+  const venueContacts: Record<string, NonNullable<CollectiveView['hostContact']>> = {};
   if (venueIdsToLoad.size > 0) {
     const { data: venues } = await admin
       .from('venues')
-      .select('id, name, slug, feature_flags, booking_page_config')
+      .select('id, name, slug, feature_flags, booking_page_config, phone, website_url, address, opening_hours')
       .in('id', [...venueIdsToLoad]);
     for (const v of venues ?? []) {
+      const contact = v as { phone?: unknown; website_url?: unknown; address?: unknown; opening_hours?: unknown };
+      venueContacts[v.id as string] = {
+        phone: typeof contact.phone === 'string' && contact.phone.trim() ? contact.phone.trim() : null,
+        websiteUrl:
+          typeof contact.website_url === 'string' && contact.website_url.trim() ? contact.website_url.trim() : null,
+        address: typeof contact.address === 'string' && contact.address.trim() ? contact.address.trim() : null,
+        openingHours:
+          contact.opening_hours && typeof contact.opening_hours === 'object'
+            ? (contact.opening_hours as OpeningHours)
+            : null,
+      };
       venueNames[v.id as string] = (v.name as string) ?? 'Venue';
       venueSlugs[v.id as string] = (v.slug as string | null) ?? null;
       const flags = resolveAppointmentsFeatureFlags(
@@ -395,6 +420,7 @@ export async function loadCollectiveViewsForVenue(
       ),
       isHost: row.host_venue_id === venueId,
       hostVenueId: row.host_venue_id,
+      hostContact: venueContacts[row.host_venue_id],
       myVenueId: venueId,
       myMembershipStatus: mine?.status ?? null,
       myConfig: myRaw

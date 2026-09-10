@@ -105,7 +105,12 @@ const phoneBookingSchema = z.object({
   /** Optional for staff/walk-in; both may be omitted. */
   first_name: z.string().max(100).optional(),
   last_name: z.string().max(100).optional(),
-  /** Required for table (Model A) phone bookings and staff-created practitioner appointments (Model B); optional only for non-appointment unified paths if added later. */
+  /**
+   * Optional for every staff source. A booking taken at the desk or over the
+   * phone must never be blocked on a number the staff member does not have;
+   * a booking without a phone or an email simply gets no confirmation. The
+   * public routes keep their own contact requirements.
+   */
   phone: z.string().max(24).optional(),
   email: z.union([z.literal(''), z.string().email()]).optional(),
   dietary_notes: z.string().max(500).optional(),
@@ -324,28 +329,14 @@ export async function POST(request: NextRequest) {
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
-    if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
-      if (isAppointmentCreateRequest && !phoneRaw && !staffWalkIn) {
-        return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+    // A phone is optional for staff bookings of every kind (see the schema note);
+    // one that IS given must be a real number.
+    if (phoneRaw) {
+      const n = normalizeToE164(phoneRaw, 'GB');
+      if (!n) {
+        return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
       }
-      if (phoneRaw) {
-        const n = normalizeToE164(phoneRaw, 'GB');
-        if (!n) {
-          return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
-        }
-        phoneE164 = n;
-      }
-    } else {
-      if (!phoneRaw && !staffWalkIn) {
-        return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
-      }
-      if (phoneRaw) {
-        const n = normalizeToE164(phoneRaw, 'GB');
-        if (!n) {
-          return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
-        }
-        phoneE164 = n;
-      }
+      phoneE164 = n;
     }
 
     const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
@@ -378,9 +369,6 @@ export async function POST(request: NextRequest) {
           { error: 'This venue does not support event ticket bookings' },
           { status: 400 },
         );
-      }
-      if (!phoneE164 && !staffWalkIn) {
-        return NextResponse.json({ error: 'Phone number is required for event bookings' }, { status: 400 });
       }
       const ticketLinesInput = parsed.data.ticket_lines ?? [];
 
@@ -586,9 +574,6 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-      if (!phoneE164 && !staffWalkIn) {
-        return NextResponse.json({ error: 'Phone number is required for class bookings' }, { status: 400 });
-      }
 
       const classInput = await fetchClassInput({ supabase: admin, venueId, date: booking_date });
       const classSlots = computeClassAvailability(classInput);
@@ -786,9 +771,6 @@ export async function POST(request: NextRequest) {
           { error: 'This venue does not support resource bookings' },
           { status: 400 },
         );
-      }
-      if (!phoneE164 && !staffWalkIn) {
-        return NextResponse.json({ error: 'Phone number is required for resource bookings' }, { status: 400 });
       }
 
       const booking_end_time = parsed.data.booking_end_time;

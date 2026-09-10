@@ -10,8 +10,8 @@ import {
 import { loadCollectiveAccess } from '@/lib/linked-accounts/collective-access';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { loadCollectiveMemberImportSources } from '@/lib/linked-accounts/collective-page-config';
-import { ensureAddonGroupLinksForService, ensureServiceForCalendar, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
-import { detachCopy, linkCopyToOrigin, syncOneCopy } from '@/lib/linked-accounts/service-sync';
+import { ensureServiceForCalendar, loadOfferingTemplate, matchAddonGroupsToOrigin } from '@/lib/linked-accounts/service-duplication';
+import { detachCopy, linkCopyToOrigin, loadServiceSyncViews, syncOneCopy } from '@/lib/linked-accounts/service-sync';
 import { groupServicesForBulkAdd } from '@/lib/linked-accounts/group-services-for-bulk-add';
 import { resolveCollectiveCategoryId } from '@/lib/linked-accounts/collective-categories';
 import {
@@ -225,7 +225,16 @@ async function addCalendarToOffering(
   calendarId: string,
   actingVenueId: string,
   userId: string | null,
-): Promise<{ ok: true; added: number } | { ok: false; error: string; status: number }> {
+): Promise<
+  | {
+      ok: true;
+      added: number;
+      /** The venue's service now behind the calendar, and whether the tick just created it. */
+      sourceServiceId: string;
+      created: boolean;
+    }
+  | { ok: false; error: string; status: number }
+> {
   const { data: member } = await admin
     .from('venue_collective_members')
     .select('id')
@@ -251,6 +260,7 @@ async function addCalendarToOffering(
   // Host-curated: assignments go live immediately (no per-service member consent).
   const approval = 'approved' as const;
   const approvedBy = userId;
+  const outcome = { sourceServiceId: resolved.sourceServiceId, created: resolved.created };
 
   const { data: existing } = await admin
     .from('collective_service_providers')
@@ -266,9 +276,9 @@ async function addCalendarToOffering(
         .from('collective_service_providers')
         .update({ status: 'active', approval_status: approval, approved_by_user_id: approvedBy })
         .eq('id', existing.id);
-      return { ok: true, added: 1 };
+      return { ok: true, added: 1, ...outcome };
     }
-    return { ok: true, added: 0 };
+    return { ok: true, added: 0, ...outcome };
   }
 
   await admin.from('collective_service_providers').insert({
@@ -281,7 +291,48 @@ async function addCalendarToOffering(
     approved_by_user_id: approvedBy,
     status: 'active',
   });
-  return { ok: true, added: 1 };
+  return { ok: true, added: 1, ...outcome };
+}
+
+/**
+ * Bring one copy into step with the offering's origin, whatever state it is in: an
+ * independent copy is linked and updated (add-on groups included), a customised or
+ * drifted linked copy is re-synced. The origin itself is left alone.
+ */
+async function bringCopyIntoStep(
+  admin: SupabaseClient,
+  params: { itemId: string; venueId: string; copyServiceId: string; source: string },
+): Promise<{ ok: true; changed: boolean } | { ok: false; error: string }> {
+  const template = await loadOfferingTemplate(admin, params.itemId);
+  if (!template?.origin) return { ok: false, error: 'This offering has no original service to sync from.' };
+  if (template.origin.serviceId === params.copyServiceId || template.origin.venueId === params.venueId) {
+    return { ok: true, changed: false };
+  }
+  const views = await loadServiceSyncViews(
+    admin,
+    [params.copyServiceId],
+    new Map([[params.copyServiceId, template.origin.serviceId]]),
+  );
+  const view = views.get(params.copyServiceId);
+  if (!view) return { ok: false, error: 'Service sync is not available on this database yet.' };
+  if (view.state === 'linked' && view.inStep === true) return { ok: true, changed: false };
+  if (view.state === 'linked' || view.state === 'customised') {
+    const res = await syncOneCopy(admin, params.copyServiceId, { force: true, source: params.source });
+    if (!res.ok) return res;
+  } else {
+    const linked = await linkCopyToOrigin(admin, {
+      copyServiceId: params.copyServiceId,
+      originServiceId: template.origin.serviceId,
+      source: params.source,
+    });
+    if (!linked.ok) return linked;
+  }
+  // Add-ons match the origin too: the same groups and options, nothing extra.
+  const addons = await matchAddonGroupsToOrigin(admin, params.venueId, params.copyServiceId, template.addonGroups);
+  if (!addons) {
+    return { ok: false, error: 'The service was updated, but its add-ons could not all be matched. Check the venue’s add-ons.' };
+  }
+  return { ok: true, changed: true };
 }
 
 /** Load a provider scoped to this collective (via its item). */
@@ -553,6 +604,15 @@ async function applyCatalogueAction(
           ? await syncOneCopy(admin, copyId, { force: input.forceSync === true, source: 'PATCH catalogue sync_provider' })
           : await detachCopy(admin, copyId);
       if (!res.ok) return { ok: false, error: res.error, status: 409 };
+      if (input.action === 'sync_provider') {
+        const template = await loadOfferingTemplate(admin, provider.itemId);
+        if (template) {
+          const addons = await matchAddonGroupsToOrigin(admin, provider.venue_id, copyId, template.addonGroups);
+          if (!addons) {
+            return { ok: false, error: 'The service was updated, but its add-ons could not all be matched. Check the venue’s add-ons.', status: 409 };
+          }
+        }
+      }
       return { ok: true };
     }
 
@@ -580,9 +640,85 @@ async function applyCatalogueAction(
         source: 'PATCH catalogue link_provider',
       });
       if (!linked.ok) return { ok: false, error: linked.error, status: 409 };
-      const addons = await ensureAddonGroupLinksForService(admin, provider.venue_id, copyId, template.addonGroups);
+      const addons = await matchAddonGroupsToOrigin(admin, provider.venue_id, copyId, template.addonGroups);
       if (!addons) {
-        return { ok: false, error: 'The service was linked and updated, but its add-ons could not all be added. Check the venue’s add-ons.', status: 409 };
+        return { ok: false, error: 'The service was linked and updated, but its add-ons could not all be matched. Check the venue’s add-ons.', status: 409 };
+      }
+      return { ok: true };
+    }
+
+    case 'unlink_all_providers': {
+      // Every linked or customised copy of every offering (or of one offering) stops
+      // following its origin. Nothing about the copies changes but the link.
+      let providerQuery = admin
+        .from('collective_service_providers')
+        .select('id, item_id, venue_id, source_service_id, status, collective_service_items!inner(collective_id)')
+        .eq('collective_service_items.collective_id', collectiveId)
+        .eq('status', 'active');
+      if (input.itemId) providerQuery = providerQuery.eq('item_id', input.itemId);
+      const { data: providerRows, error: providerErr } = await providerQuery;
+      if (providerErr) {
+        console.error('[catalogue] unlink_all_providers read failed:', providerErr.message, { collectiveId });
+        return { ok: false, error: 'Could not read the offerings.', status: 500 };
+      }
+      const seen = new Set<string>();
+      const originVenueByItem = new Map<string, string | null>();
+      for (const raw of (providerRows ?? []) as Array<Record<string, unknown>>) {
+        const itemId = raw.item_id as string;
+        const copyId = raw.source_service_id as string;
+        if (seen.has(copyId)) continue;
+        seen.add(copyId);
+        if (!originVenueByItem.has(itemId)) {
+          const template = await loadOfferingTemplate(admin, itemId);
+          originVenueByItem.set(itemId, template?.origin?.venueId ?? null);
+        }
+        // The origin's own service is never a copy; an independent copy is a no-op in detachCopy.
+        if (originVenueByItem.get(itemId) === (raw.venue_id as string)) continue;
+        const res = await detachCopy(admin, copyId);
+        if (!res.ok && res.error.startsWith('Service sync is not available')) {
+          return { ok: false, error: res.error, status: 409 };
+        }
+      }
+      return { ok: true };
+    }
+
+    case 'sync_all_providers': {
+      // Every copy of every offering (or of one offering) at a venue other than the
+      // origin's is linked and brought into step; the origin services themselves are untouched.
+      let providerQuery = admin
+        .from('collective_service_providers')
+        .select('id, item_id, venue_id, source_service_id, status, collective_service_items!inner(collective_id)')
+        .eq('collective_service_items.collective_id', collectiveId)
+        .eq('status', 'active');
+      if (input.itemId) providerQuery = providerQuery.eq('item_id', input.itemId);
+      const { data: providerRows, error: providerErr } = await providerQuery;
+      if (providerErr) {
+        console.error('[catalogue] sync_all_providers read failed:', providerErr.message, { collectiveId });
+        return { ok: false, error: 'Could not read the offerings.', status: 500 };
+      }
+      const seen = new Set<string>();
+      let updated = 0;
+      let failed = 0;
+      for (const raw of (providerRows ?? []) as Array<Record<string, unknown>>) {
+        const copyId = raw.source_service_id as string;
+        const key = `${raw.item_id as string}:${copyId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const res = await bringCopyIntoStep(admin, {
+          itemId: raw.item_id as string,
+          venueId: raw.venue_id as string,
+          copyServiceId: copyId,
+          source: 'PATCH catalogue sync_all_providers',
+        });
+        if (!res.ok) {
+          failed += 1;
+          console.warn('[catalogue] sync_all_providers copy failed:', res.error, { copyId });
+        } else if (res.changed) {
+          updated += 1;
+        }
+      }
+      if (failed > 0 && updated === 0) {
+        return { ok: false, error: 'None of the copies could be updated. Check the venues’ services and try again.', status: 409 };
       }
       return { ok: true };
     }
@@ -630,6 +766,19 @@ async function applyCatalogueAction(
         );
         if (!res.ok) continue; // Skip a single failure; apply the rest.
         applied += 1;
+        // The host said yes to "match the original" when ticking a calendar whose venue
+        // already had the service. A fresh copy is made in step already.
+        if (op.sync && !res.created) {
+          const synced = await bringCopyIntoStep(admin, {
+            itemId: op.itemId,
+            venueId: op.venueId,
+            copyServiceId: res.sourceServiceId,
+            source: 'PATCH catalogue set_providers sync',
+          });
+          if (!synced.ok) {
+            console.warn('[catalogue] sync on add failed:', synced.error, { itemId: op.itemId, venueId: op.venueId });
+          }
+        }
       }
 
       if (applied === 0) {

@@ -38,6 +38,8 @@ export interface GuestBookingHistoryRow {
   booking_time: string;
   party_size: number;
   status: string;
+  /** How the booking was made (`phone`, `booking_page`, `walk-in`, `staff`...). */
+  source?: string | null;
   estimated_end_time: string | null;
   /** Wall-clock segment end when `estimated_end_time` is unavailable (PostgreSQL `time`). */
   booking_end_time?: string | null;
@@ -112,6 +114,25 @@ function guestBookingHistoryDurationLabel(row: GuestBookingHistoryRow): string |
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
+/**
+ * Where a booking came from, in the words staff use. The booking panel used to carry the raw
+ * value as a chip on the open booking; it now sits on each row here, so a client's history
+ * reads "Online, Phone, Walk-in" at a glance.
+ */
+export function guestBookingSourceLabel(source: string | null | undefined): string | null {
+  const raw = typeof source === 'string' ? source.trim().toLowerCase() : '';
+  if (!raw) return null;
+  if (raw === 'booking_page' || raw === 'online' || raw === 'widget' || raw === 'public' || raw === 'web') {
+    return 'Online';
+  }
+  if (raw === 'walk-in' || raw === 'walk_in' || raw === 'walkin') return 'Walk-in';
+  if (raw === 'phone') return 'Phone';
+  if (raw === 'staff') return 'Staff';
+  if (raw === 'recurring') return 'Recurring';
+  const words = raw.replace(/[_-]+/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 const guestBookingBarBaseClass =
   'flex min-w-0 items-start justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 shadow-sm ring-1 ring-slate-900/[0.03]';
 const guestBookingBarCurrentClass =
@@ -144,6 +165,7 @@ function GuestBookingHistoryBar({
   const areaLabel =
     typeof r.area_name === 'string' && r.area_name.trim() !== '' ? r.area_name.trim() : null;
   const secondaryLocationLabel = calendarLabel ?? areaLabel;
+  const sourceLabel = guestBookingSourceLabel(r.source);
 
   return (
     <li className={isThisBooking ? guestBookingBarCurrentClass : guestBookingBarBaseClass} aria-current={isThisBooking ? 'true' : undefined}>
@@ -172,6 +194,14 @@ function GuestBookingHistoryBar({
               <span className="shrink-0 text-slate-300">·</span>
               <span className="min-w-0 max-w-[min(14rem,100%)] truncate text-slate-600" title={secondaryLocationLabel}>
                 {secondaryLocationLabel}
+              </span>
+            </>
+          ) : null}
+          {sourceLabel ? (
+            <>
+              <span className="shrink-0 text-slate-300">·</span>
+              <span className="shrink-0 rounded-md border border-slate-200/80 bg-slate-50 px-1.5 py-px text-[10px] font-medium leading-4 text-slate-500" title="How this booking was made">
+                {sourceLabel}
               </span>
             </>
           ) : null}

@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Using the bookings list",
   description: "Your one place to find every booking, open the details, update statuses, and message or tag several guests at once.",
   tags: ["bookings","appointments","list","filter","search","status","bulk actions","tags"],
-  verified: '2026-09-09',
+  verified: '2026-09-10',
   content: `# Using the bookings list
 
 The bookings list is where you find any booking, open it for the detail, change its status, and message or tag several clients at once. It is called **Appointments** in the sidebar, or **Bookings** once you also sell classes, events, or resources.
@@ -54,15 +54,16 @@ It searches every client you have, not just the dates on screen. The same search
 Click any row to open it in place. Click again to close. Inside you will find:
 
 - The client's name, with a person icon beside it. **Open in Contacts** goes to their full record.
+- The visit summary: the time, every service with its length and price, the total, the status, and anything still owed.
 - **Payments and confirmation**: what is owed, what has been paid, and the money buttons.
 - **Notes**: their tags, notes that live on the client record, and notes about this booking.
 - **SMS / email guest**: a box to write to this client.
 - **Compliance**: any forms this service needs.
 - **Records**: documents and photos held for this client.
-- **Guest bookings**: everything else they have booked, past and upcoming, each with **Rebook**.
+- **Guest bookings**: everything else they have booked, past and upcoming, each with **Rebook** and a label for how it was made (**Online**, **Phone**, **Walk-in**).
 - **Timeline**: when the booking was created, confirmed, changed, or cancelled.
 
-If a client booked several services back to back, the row opens with a **Services in this visit** card listing each one with its own start time. When one of those services has been moved to another day, that day's list shows it as its own row marked **Part of a visit**.
+If a client booked several services back to back, the visit summary lists each one with its own start time, price and **Start** and **Complete** buttons. When one of those services has been moved to another day, that day's list shows it as its own row marked **Part of a visit**.
 
 The small labels on a row tell you the rest at a glance: the status, **Deposit pending**, **Confirmed**, the price and its deposit status, **+1 extra**, the number of people, **Online** or **Client address**, **Linked** for a partner venue's booking, and a compliance label such as **2 forms due**.
 

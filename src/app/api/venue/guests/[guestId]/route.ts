@@ -172,7 +172,7 @@ export async function GET(
     const { data: recentRaw, error: rbErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, booking_model, estimated_end_time, booking_end_time, service_id, area_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, experience_event_id, class_instance_id, resource_id, event_session_id',
+        'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, booking_model, estimated_end_time, booking_end_time, service_id, area_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, experience_event_id, class_instance_id, resource_id, event_session_id',
       )
       .eq('guest_id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -273,6 +273,7 @@ export async function GET(
         booking_time: string;
         party_size: number | null;
         status: string;
+        source?: string | null;
         deposit_status: string | null;
         deposit_amount_pence?: number | null;
         booking_model?: string | null;
@@ -326,6 +327,7 @@ export async function GET(
         booking_time: bookingTimeShort(row.booking_time),
         party_size: row.party_size,
         status: row.status,
+        source: row.source ?? null,
         deposit_status: row.deposit_status,
         deposit_amount_pence:
           typeof row.deposit_amount_pence === 'number' && Number.isFinite(row.deposit_amount_pence)

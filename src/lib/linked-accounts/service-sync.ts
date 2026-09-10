@@ -441,17 +441,28 @@ export async function detachCopy(admin: SupabaseClient, copyServiceId: string): 
 
 export interface ServiceSyncView {
   state: ServiceSyncState;
+  /** The recorded origin, else the offering's origin the caller supplied for an independent copy. */
   originServiceId: string | null;
   originVenueId: string | null;
-  /** Null when the state is not `linked` or `customised`, or the origin cannot be read. */
+  /**
+   * Whether the copy's scheduling shape matches its origin's. Null when no origin can be
+   * read. For an `independent` copy this is drift information only: nothing follows.
+   */
   inStep: boolean | null;
 }
 
 /**
  * Sync state and drift for a set of services (any venue), for the combined-page manager.
  * Empty on a database without the sync columns, so the manager shows no chips there.
+ *
+ * `originOverrides` names the offering's origin service for copies that record none
+ * (independent, pre-sync copies), so the manager can say whether they have diverged.
  */
-export async function loadServiceSyncViews(admin: SupabaseClient, serviceIds: readonly string[]): Promise<Map<string, ServiceSyncView>> {
+export async function loadServiceSyncViews(
+  admin: SupabaseClient,
+  serviceIds: readonly string[],
+  originOverrides?: ReadonlyMap<string, string>,
+): Promise<Map<string, ServiceSyncView>> {
   const out = new Map<string, ServiceSyncView>();
   if (serviceIds.length === 0) return out;
   const { data, error } = await admin.from('service_items').select(SERVICE_SELECT).in('id', [...serviceIds]);
@@ -460,9 +471,9 @@ export async function loadServiceSyncViews(admin: SupabaseClient, serviceIds: re
     return out;
   }
   const rows = (data ?? []) as Row[];
-  const originIds = [
-    ...new Set(rows.map((r) => r.synced_from_service_id as string | null).filter((v): v is string => Boolean(v))),
-  ];
+  const effectiveOriginId = (r: Row): string | null =>
+    (r.synced_from_service_id as string | null) ?? originOverrides?.get(r.id as string) ?? null;
+  const originIds = [...new Set(rows.map(effectiveOriginId).filter((v): v is string => Boolean(v)))];
   const origins = new Map<string, Row>();
   if (originIds.length > 0) {
     const { data: originRows } = await admin.from('service_items').select(SERVICE_SELECT).in('id', originIds);
@@ -471,10 +482,10 @@ export async function loadServiceSyncViews(admin: SupabaseClient, serviceIds: re
   // Variants for every row that needs a comparison, grouped by venue (one query per venue).
   const compareIds = new Set<string>();
   for (const r of rows) {
-    const state = (r.sync_state as ServiceSyncState) ?? 'independent';
-    if ((state === 'linked' || state === 'customised') && r.synced_from_service_id) {
+    const originId = effectiveOriginId(r);
+    if (originId && originId !== r.id) {
       compareIds.add(r.id as string);
-      compareIds.add(r.synced_from_service_id as string);
+      compareIds.add(originId);
     }
   }
   const variantsByService = new Map<string, Row[]>();
@@ -489,10 +500,10 @@ export async function loadServiceSyncViews(admin: SupabaseClient, serviceIds: re
   }
   for (const r of rows) {
     const state = (r.sync_state as ServiceSyncState) ?? 'independent';
-    const originId = (r.synced_from_service_id as string | null) ?? null;
-    const origin = originId ? origins.get(originId) ?? null : null;
+    const originId = effectiveOriginId(r);
+    const origin = originId && originId !== r.id ? origins.get(originId) ?? null : null;
     let inStep: boolean | null = null;
-    if ((state === 'linked' || state === 'customised') && origin) {
+    if (origin) {
       inStep = shapesMatch(
         serviceShapeOf(origin, variantsByService.get(origin.id as string) ?? []),
         serviceShapeOf(r, variantsByService.get(r.id as string) ?? []),

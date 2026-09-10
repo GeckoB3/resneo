@@ -72,7 +72,11 @@ function buildDetailsSchemaWithTerms(phoneCc: CountryCode, collectAddress: boole
     );
 }
 
-/** Staff dashboard: name + phone required; email optional when provided. No guest terms checkbox. */
+/**
+ * Staff dashboard: every contact field is optional, so a booking taken over the
+ * phone is never held up by a detail the staff member does not have. A phone or
+ * email that IS typed must be valid. No guest terms checkbox.
+ */
 function buildDetailsSchemaStaff(phoneCc: CountryCode, collectAddress: boolean) {
   return z.object({
     first_name: z.string().max(100),
@@ -80,9 +84,8 @@ function buildDetailsSchemaStaff(phoneCc: CountryCode, collectAddress: boolean) 
     email: z.union([z.literal(''), z.string().email('Valid email required')]),
     phone: z
       .string()
-      .min(1, 'Phone is required')
       .max(24)
-      .refine((v) => normalizeToE164(v, phoneCc) !== null, 'Enter a valid mobile number'),
+      .refine((v) => !v.trim() || normalizeToE164(v, phoneCc) !== null, 'Enter a valid mobile number or leave blank'),
     dietary_notes: z.string().max(1000).optional(),
     occasion: z.string().max(200).optional(),
     comments_requests: z.string().max(1000).optional(),
@@ -475,7 +478,7 @@ export function DetailsStep({
                 setSelectedKnownContact(true);
               }}
               emailReadOnly={emailReadOnly}
-              phoneRequired={!isStaffWalkIn}
+              phoneRequired={false}
               namesOptional={!isStaffWalkIn}
               emailOptional
               firstNameId="details-first-name"

@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Taking a booking",
   description: "Create bookings by hand for appointments that come in by phone, email, or in person.",
   tags: ["bookings","new booking","appointments","guests","contacts","deposits","rebooking","scheduling"],
-  verified: '2026-09-09',
+  verified: '2026-09-10',
   content: `# Taking a booking
 
 Book someone in yourself, for phone calls and walk-ins.
@@ -16,7 +16,7 @@ Book someone in yourself, for phone calls and walk-ins.
 ## Before you start
 
 - The sidebar link is **New Appointment**, or **New Booking** once you also sell classes, events, or resources. The page heading always reads New Booking.
-- Have the client's phone number to hand. It is the only field the form insists on.
+- Nothing on the form is compulsory. A name, phone number or email is worth having if you can get it, but the booking goes through without them.
 - Nothing saves until you finish. Clicking the sidebar link again part way through clears the form and starts you over.
 
 ## Step 1: Pick what they are booking
@@ -58,7 +58,7 @@ Every booking passes through **Review your services**, whether it holds one serv
 
 :::help-figure newbooking-guest
 
-Phone is the field to fill. First name, surname, and email are marked optional, but they are worth having, because without an email the client gets no confirmation.
+Every field here is optional, so a caller who is in a hurry can still be booked in. They are worth filling when you can: without an email the client gets no confirmation, and without a phone number they get no text reminder.
 
 As you type into any of those four boxes, ResNeo searches your saved contacts and offers matches underneath. Click one to fill the whole form from their record.
 
@@ -107,7 +107,7 @@ The same **Rebook** button sits on every booking in the **Guest bookings** secti
 | --- | --- | --- |
 | The tab I want is missing | That booking type is not turned on | An admin can turn it on under **Settings → Booking Settings**, in the **Booking models** card |
 | No times are offered | Nobody with that service is working then | Try another day or person, use **See someone else**, or book it from the calendar by clicking the slot you want |
-| I cannot finish the booking | The phone number is missing | Add a phone number, then confirm |
+| I cannot finish the booking | A phone number or email was typed but is not valid | Correct it, or clear the box and confirm |
 | I cannot tick a fifth service | Four services in one visit is the limit | Take the rest as a second booking |
 | The pencil for a longer appointment is missing | That service has options, so the length belongs to the option | Choose the option first, then use its own length pill |
 | The client got no confirmation | They have no email address on the booking | Add one, then use **Resend confirmation** from the bookings list |

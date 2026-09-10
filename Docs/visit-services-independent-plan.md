@@ -474,3 +474,17 @@ Fixed before the day's work went to staging:
   calendars, as the linked-calendar route does.
 - The list chip distinguishes a visit that spans days (`visit_spans_days`, other day in view) from a
   lone service whose siblings are simply not in view (`visit_rest_hidden`), with honest copy.
+
+### Per-service colour and status on the diary (2026-09-10)
+
+- Each bar of a visit is now coloured by its own status. The shared colour (decision above, "same
+  colour", earliest service's palette on every bar) made a Start or Complete on one service look
+  like every service starting or finishing together. The chip, the spine and the hover still say the
+  bars are one visit.
+- Three client paths were copying one service's PATCH result (status included) onto every sibling
+  row: the calendar popover's `onUpdated` overlay, and the two list dashboards' optimistic and
+  post-response updates. `visitSiblingOverlay` now hands siblings the visit-wide fields only
+  (arrived, attendance confirmations) and the status only when `statusChangeCascadesAcrossVisit`
+  says the transition cascades; `applyOptimisticStatusToBookingRows` applies the same rule. The
+  server had been writing the one row since phase 1; the calendar's retained overlay never matched
+  the row underneath, so the wrong colour outlived the refetch.

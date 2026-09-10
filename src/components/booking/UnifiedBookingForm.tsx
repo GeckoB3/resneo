@@ -911,9 +911,16 @@ export function UnifiedBookingForm({
     e.preventDefault();
     setError(null);
 
-    const resolvedPhone = normalizeToE164(phone, phoneDefaultCountry);
-    if (!date || !selectedTime || !resolvedPhone) {
-      setError('Date, time, and a valid phone number are required.');
+    if (!date || !selectedTime) {
+      setError('Choose a date and time.');
+      return;
+    }
+    // A phone is optional on every staff form: a booking taken at the desk or over
+    // the phone must never wait on a number the staff member does not have. One
+    // that IS typed has to be a real number.
+    const resolvedPhone = phone.trim() ? normalizeToE164(phone, phoneDefaultCountry) : null;
+    if (phone.trim() && !resolvedPhone) {
+      setError('Enter a valid phone number, or leave it blank.');
       return;
     }
 
@@ -1076,7 +1083,7 @@ export function UnifiedBookingForm({
           party_size: partySize,
           first_name: firstName.trim(),
           last_name: lastName.trim(),
-          phone: resolvedPhone,
+          phone: resolvedPhone ?? undefined,
           email: email.trim() || undefined,
           dietary_notes: dietaryNotes.trim() || undefined,
           special_requests: notes.trim() || undefined,
@@ -1612,6 +1619,7 @@ export function UnifiedBookingForm({
             selectedKnownContactRef.current = true;
           }}
           phoneDefaultCountry={phoneDefaultCountry}
+          phoneRequired={false}
           firstNameRef={firstNameRef}
           firstNameId="ubf-first-name"
           lastNameId="ubf-last-name"

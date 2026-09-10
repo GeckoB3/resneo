@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Using the Appointment Calendar',
   description: 'Every control on the grid: Day, Week and Month, the Filter panel, the slot menu, drag rules, and the four detail sheets.',
   tags: ['calendar', 'grid', 'drag', 'filters'],
-  verified: '2026-09-08',
+  verified: '2026-09-10',
   content: `
 # The Appointment Calendar in practice
 
@@ -72,7 +72,7 @@ Press and hold a card to move it, or its bottom edge to change its length. Wheth
 
 What opens when you click depends on what you clicked.
 
-- An **appointment** opens the booking panel. It holds the client's name with **Call**, **Email**, and an icon that opens them in Contacts; the status buttons; **Modify**; **Cancel** and **No-Show**; and the sections **Services in this visit**, **Notes**, **SMS / email guest**, **Compliance**, **Payments**, **Records**, and **Timeline**.
+- An **appointment** opens the booking panel. It holds the client's name with **Call**, **Email**, and an icon that opens them in Contacts; the visit summary at the top (the time, each service with its price, the status, and what is owed); the status buttons; **Modify**; **Cancel** and **No-Show**; and the sections **Notes**, **SMS / email guest**, **Compliance**, **Payments**, **Records**, and **Timeline**.
 - A **class session** opens **Class session**, with **Bookings & guests**: each guest, their contact details, deposit, and whether they are **Checked in**.
 - An **event** opens the event sheet, with **Ticket types** and **Bookings**.
 - A **resource booking** opens **Resource booking**, with **Payment** and **Message guest**.

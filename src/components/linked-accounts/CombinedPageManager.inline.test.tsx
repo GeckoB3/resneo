@@ -72,6 +72,12 @@ describe('inline panel (host)', () => {
     expect(ada).not.toBeChecked();
     fireEvent.click(ada);
     expect(ada).toBeChecked();
+    // Ada's venue already has the service, so the panel asks (in its own dialog, never
+    // window.confirm) whether to link that copy to the original; say yes.
+    const prompt = await screen.findByRole('dialog', { name: 'Link it' });
+    expect(prompt).toHaveTextContent(/already has a service called/);
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Link it' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Link it' })).toBeNull());
     const bar = await screen.findByTestId('combined-page-save-bar');
     expect(within(bar).getByText('1 unsaved calendar change')).toBeInTheDocument();
     expect(onPendingChange).toHaveBeenLastCalledWith(1);
@@ -82,7 +88,7 @@ describe('inline panel (host)', () => {
     expect(patch.url).toBe('/api/venue/collectives/col-1/catalogue');
     expect(patch.body).toEqual({
       action: 'set_providers',
-      ops: [{ op: 'add', itemId: 'item-1', venueId: 'v-host', practitionerId: 'cal-h1' }],
+      ops: [{ op: 'add', itemId: 'item-1', venueId: 'v-host', practitionerId: 'cal-h1', sync: true }],
     });
     await waitFor(() => expect(screen.queryByTestId('combined-page-save-bar')).toBeNull());
     expect(onPendingChange).toHaveBeenLastCalledWith(0);

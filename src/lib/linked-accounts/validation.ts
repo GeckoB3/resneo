@@ -270,6 +270,10 @@ export const catalogueActionSchema = z.object({
     'sync_provider',
     'detach_provider',
     'link_provider',
+    /** Link every copy of every offering (or of `itemId`) to its origin and update it. */
+    'sync_all_providers',
+    /** Unlink every linked copy of every offering (or of `itemId`); settings stay as they are. */
+    'unlink_all_providers',
     // Headings on the combined page (Docs/service-categories-plan.md, "Combined pages").
     'create_category',
     'rename_category',
@@ -338,6 +342,11 @@ export const catalogueActionSchema = z.object({
         venueId: z.string().uuid().optional(),
         practitionerId: z.string().uuid().optional(),
         providerId: z.string().uuid().optional(),
+        /**
+         * 'add' only: when the calendar's venue already has a same-named service, update it
+         * to the origin's shape and keep it in step (the manager asks the host at tick time).
+         */
+        sync: z.boolean().optional(),
       }),
     )
     .min(1)

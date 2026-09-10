@@ -57,6 +57,7 @@ import {
   applyBookingRowOverlayFields,
   applyOptimisticStatusToBookingRows,
   overlayFromPatchPayload,
+  visitSiblingOverlay,
 } from '@/lib/booking/booking-row-overlay';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -1046,11 +1047,18 @@ export function BookingsDashboard({
       if (payload && typeof payload === 'object' && !('error' in payload)) {
         const groupId = bookings.find((row) => row.id === bookingId)?.group_booking_id;
         const patchOverlay = overlayFromPatchPayload(payload);
+        // The visit's other services follow only for visit-wide changes
+        // (Confirm, Arrived); Start and Complete stay with this one service.
+        const siblingOverlay = visitSiblingOverlay(patchOverlay, {
+          previous: String(previous),
+          next: newStatus,
+        });
         setBookings((prev) =>
           prev.map((row) => {
+            if (row.id === bookingId) return applyBookingRowOverlayFields(row, patchOverlay);
             const inGroup = Boolean(groupId && row.group_booking_id === groupId);
-            if (row.id !== bookingId && !inGroup) return row;
-            return applyBookingRowOverlayFields(row, patchOverlay);
+            if (!inGroup) return row;
+            return applyBookingRowOverlayFields(row, siblingOverlay);
           }),
         );
       }

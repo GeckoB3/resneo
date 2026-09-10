@@ -67,6 +67,7 @@ import {
   applyBookingRowOverlayFields,
   applyOptimisticStatusToBookingRows,
   overlayFromPatchPayload,
+  visitSiblingOverlay,
 } from '@/lib/booking/booking-row-overlay';
 import {
   canTransitionBookingStatus,
@@ -1009,11 +1010,18 @@ export function AppointmentBookingsDashboard({
       if (prev && payload && typeof payload === 'object' && !('error' in payload)) {
         const groupId = prev.group_booking_id;
         const patchOverlay = overlayFromPatchPayload(payload);
+        // The visit's other services follow only for visit-wide changes
+        // (Confirm, Arrived); Start and Complete stay with this one service.
+        const siblingOverlay = visitSiblingOverlay(patchOverlay, {
+          previous: String(prev.status),
+          next: nextStatus,
+        });
         setBookings((rows) =>
           rows.map((r) => {
+            if (r.id === bookingId) return applyBookingRowOverlayFields(r, patchOverlay);
             const inGroup = Boolean(groupId && r.group_booking_id === groupId);
-            if (r.id !== bookingId && !inGroup) return r;
-            return applyBookingRowOverlayFields(r, patchOverlay);
+            if (!inGroup) return r;
+            return applyBookingRowOverlayFields(r, siblingOverlay);
           }),
         );
       }

@@ -1,4 +1,5 @@
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
+import { statusChangeCascadesAcrossVisit } from '@/lib/booking/visit-status-scope';
 import {
   canTransitionBookingStatus,
   type BookingStatus,
@@ -15,6 +16,39 @@ export type BookingRowOverlayFields = {
 };
 
 export type BookingRowOverlay = Partial<BookingRowOverlayFields>;
+
+/**
+ * The part of one service's PATCH result that its visit SIBLINGS may take on.
+ *
+ * Arrived and the attendance confirmations are facts about the visit, so they
+ * spread. The status spreads only when the transition itself cascades on the
+ * server (Confirm and its undo); Start and Complete are one service's, and
+ * copying `Seated` or `Completed` onto the siblings made every bar of the visit
+ * read Started the moment one service began. The deposit fields belong to the
+ * row that holds the deposit and never spread. Pass the transition when it is
+ * known; without it the status is left out and the next list fetch supplies it.
+ */
+export function visitSiblingOverlay(
+  overlay: BookingRowOverlay,
+  transition?: { previous: string; next: string },
+): BookingRowOverlay {
+  const next: BookingRowOverlay = {};
+  if ('client_arrived_at' in overlay) next.client_arrived_at = overlay.client_arrived_at;
+  if ('staff_attendance_confirmed_at' in overlay) {
+    next.staff_attendance_confirmed_at = overlay.staff_attendance_confirmed_at;
+  }
+  if ('guest_attendance_confirmed_at' in overlay) {
+    next.guest_attendance_confirmed_at = overlay.guest_attendance_confirmed_at;
+  }
+  if (
+    typeof overlay.status === 'string' &&
+    transition &&
+    statusChangeCascadesAcrossVisit(transition.previous, transition.next)
+  ) {
+    next.status = overlay.status;
+  }
+  return next;
+}
 
 export function mergeBookingRowOverlay(
   base: BookingRowOverlay,
@@ -164,8 +198,12 @@ export function overlayFromPatchBody(
   return {};
 }
 
-/** Optimistic overlay for lifecycle status changes (mirrors status PATCH branch in venue route). */
-/** Optimistic list/calendar update for one row or every sibling in a multi-service visit. */
+/**
+ * Optimistic list/calendar update for one row, and for its visit siblings when
+ * the change is a fact about the visit (Confirm, Undo confirm). Start and
+ * Complete are one service's and reach this row only, matching what the server
+ * will write (`statusChangeCascadesAcrossVisit`).
+ */
 export function applyOptimisticStatusToBookingRows<
   T extends BookingRowOverlayFields & { id: string; group_booking_id?: string | null; status: string },
 >(
@@ -175,7 +213,10 @@ export function applyOptimisticStatusToBookingRows<
   isTableReservation: (row: T) => boolean,
 ): T[] {
   const anchor = rows.find((row) => row.id === bookingId);
-  const groupId = anchor?.group_booking_id;
+  const groupId =
+    anchor && statusChangeCascadesAcrossVisit(anchor.status, newStatus)
+      ? anchor.group_booking_id
+      : null;
   return rows.map((row) => {
     const inGroup = Boolean(groupId && row.group_booking_id === groupId);
     if (!inGroup && row.id !== bookingId) return row;

@@ -20,7 +20,7 @@ vi.mock('@/lib/linked-accounts/collective-page-config', () => ({
 vi.mock('@/lib/linked-accounts/service-duplication', () => ({
   ensureServiceForCalendar: vi.fn(),
   loadOfferingTemplate: vi.fn(),
-  ensureAddonGroupLinksForService: vi.fn(async () => true),
+  matchAddonGroupsToOrigin: vi.fn(async () => true),
 }));
 vi.mock('@/lib/linked-accounts/service-sync', () => ({
   syncOneCopy: vi.fn(),
@@ -41,7 +41,7 @@ import { resolveLinkAdmin } from '@/lib/linked-accounts/route-helpers';
 import { loadCollectiveAccess } from '@/lib/linked-accounts/collective-access';
 import { loadCatalogueForManagement } from '@/lib/linked-accounts/catalogue';
 import { detachCopy, linkCopyToOrigin, syncOneCopy } from '@/lib/linked-accounts/service-sync';
-import { ensureAddonGroupLinksForService, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
+import { matchAddonGroupsToOrigin, loadOfferingTemplate } from '@/lib/linked-accounts/service-duplication';
 import { PATCH } from './route';
 
 const mockResolve = vi.mocked(resolveLinkAdmin);
@@ -51,7 +51,7 @@ const mockSync = vi.mocked(syncOneCopy);
 const mockDetach = vi.mocked(detachCopy);
 const mockLink = vi.mocked(linkCopyToOrigin);
 const mockTemplate = vi.mocked(loadOfferingTemplate);
-const mockAddons = vi.mocked(ensureAddonGroupLinksForService);
+const mockAddons = vi.mocked(matchAddonGroupsToOrigin);
 const ORIGIN = '66666666-6666-4666-8666-666666666666';
 
 const COLLECTIVE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -169,7 +169,7 @@ describe('PATCH sync actions', () => {
 });
 
 describe('PATCH link_provider', () => {
-  it('links the copy to the offering’s origin, updates it, then adds missing add-on groups', async () => {
+  it('links the copy to the offering’s origin, updates it, then matches its add-on groups', async () => {
     setup();
     mockTemplate.mockResolvedValue({ origin: { venueId: HOST, serviceId: ORIGIN }, addonGroups: [{ group: {}, addons: [] }] } as never);
     mockLink.mockResolvedValue({ ok: true });

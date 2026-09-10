@@ -593,7 +593,7 @@ function NewbookingGuestSvg() {
       viewBox="0 0 560 470"
       className="mx-auto h-auto w-full max-w-[560px]"
       role="img"
-      aria-label="The guest details step of the booking flow: four input fields for first name, surname, email (all optional) and a required phone field, with the first name field active and an open autocomplete dropdown listing two matching saved contacts plus an empty-state line."
+      aria-label="The guest details step of the booking flow: four input fields for first name, surname, email and phone, all optional, with the first name field active and an open autocomplete dropdown listing two matching saved contacts plus an empty-state line."
     >
       {/* Card */}
       <rect x="12" y="12" width="536" height="446" rx="14" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
@@ -638,9 +638,8 @@ function NewbookingGuestSvg() {
       <text x="36" y="394" fill="#64748b" fontSize="11" fontWeight="600">Email (optional)</text>
       <rect x="36" y="402" width="236" height="38" rx="9" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
 
-      {/* Phone field (required) */}
-      <text x="288" y="394" fill="#64748b" fontSize="11" fontWeight="600">Phone </text>
-      <text x="324" y="394" fill="#dc2626" fontSize="11" fontWeight="700">*</text>
+      {/* Phone field (optional, like the rest) */}
+      <text x="288" y="394" fill="#64748b" fontSize="11" fontWeight="600">Phone (optional)</text>
       <rect x="288" y="402" width="236" height="38" rx="9" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
     </svg>
   );

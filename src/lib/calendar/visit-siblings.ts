@@ -3,10 +3,12 @@
  *
  * Services of a visit are independent rows (Docs/visit-services-independent-plan.md):
  * each has its own bar, grip, handle and tray. What still says "these belong together"
- * is identity rather than geometry: a chip on every bar ("1/2"), the earliest
- * service's colour shared by all of them, and siblings lit together on hover. This
- * module is the pure part: which rows form a visit, their order, and whether a moved
- * service now overlaps one of its own siblings.
+ * is identity rather than geometry: a chip on every bar ("1/2"), a spine where two
+ * services meet, and siblings lit together on hover. Each bar is coloured by its own
+ * status (a started colour is green while the cut that has not begun stays booked);
+ * the bars no longer share the earliest service's colour. This module is the pure
+ * part: which rows form a visit, their order, and whether a moved service now
+ * overlaps one of its own siblings.
  */
 
 export interface VisitSiblingRow {
@@ -26,7 +28,7 @@ export interface VisitPosition {
   /** 0-based place among the visit's live services, by date then time. */
   index: number;
   count: number;
-  /** The earliest live service: the one whose colour the whole visit takes. */
+  /** The earliest live service of the visit. */
   anchorId: string;
 }
 

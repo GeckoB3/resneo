@@ -227,7 +227,7 @@ export async function PATCH(
 
     if (rows.some((r) => r.venue_id !== scopeVenueId)) {
       return NextResponse.json(
-        { error: 'This visit spans more than one venue and cannot be edited as one.' },
+        { error: 'The services of this visit are on different ResNeo accounts, so it cannot be edited as one. Change each service on its own.' },
         { status: 409 },
       );
     }

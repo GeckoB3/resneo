@@ -14,9 +14,9 @@ import {
 import { StaffExpandedBookingModifyModal } from '@/components/booking/StaffExpandedBookingModifyModal';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { BookingPaymentDetails } from '@/components/booking/BookingPaymentDetails';
-import { BookingPriceSummary } from '@/components/booking/BookingPriceSummary';
 import { bookingDisplayEndHm } from '@/lib/booking/booking-detail-from-row';
 import {
+  buildPriceSummary,
   formatPence,
   toPaymentDisplayBooking,
   type BookingPaymentRow,
@@ -79,7 +79,6 @@ import {
   canShowCancelStaffAttendanceConfirmationAction,
   canShowConfirmBookingAttendanceAction,
   isAttendanceConfirmed,
-  showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import {
   BOOKING_ATTENDANCE_CONFIRM_SOLID_BUTTON,
@@ -109,7 +108,6 @@ import {
   mapGroupVisitListSeed,
   mergeGroupVisitRowsWithSeeds,
   mergePreferLaterGroupVisitRows,
-  multiServiceVisitDatePhrase,
   peekGroupVisitBookings,
   primeGroupVisitBookings,
   resolveVisitPillAnchorStatus,
@@ -298,6 +296,19 @@ function formatRelative(value: string | null | undefined): string {
   return d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/** Start, Complete, Undo start, Undo complete: the service-level lifecycle of one row of a visit. */
+function segmentLifecycleActions(status: string): Array<{ label: string; target: BookingStatus }> {
+  if (status === 'Booked' || status === 'Confirmed') return [{ label: 'Start', target: 'Seated' }];
+  if (status === 'Seated') {
+    return [
+      { label: 'Undo start', target: 'Confirmed' },
+      { label: 'Complete', target: 'Completed' },
+    ];
+  }
+  if (status === 'Completed') return [{ label: 'Undo complete', target: 'Seated' }];
+  return [];
+}
+
 function formatDateNice(value: string): string {
   const d = new Date(value + 'T12:00:00');
   if (Number.isNaN(d.getTime())) return value;
@@ -409,7 +420,6 @@ export function ExpandedBookingContent({
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [inlineActionLoading, setInlineActionLoading] = useState<string | null>(null);
   const [statusActionPending, setStatusActionPending] = useState(false);
-  const [refCopied, setRefCopied] = useState(false);
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
   const [recordsCount, setRecordsCount] = useState<number | null>(null);
   const [inlineActionError, setInlineActionError] = useState<string | null>(null);
@@ -429,7 +439,6 @@ export function ExpandedBookingContent({
   useEffect(() => {
     setSuppressPatchCancelAfterUndoConfirm(false);
     setStatusActionPending(false);
-    setRefCopied(false);
     setRowOverlay({});
   }, [booking.id]);
 
@@ -674,32 +683,15 @@ export function ExpandedBookingContent({
     [booking.id, onDetailUpdated, resolvedGroupBookingId, visitRowsOwnerVenueId],
   );
 
-  const multiServiceVisitCard = useMemo(() => {
-    if (groupVisitFetchPending) {
-      return (
-        <SectionCard className="border-brand-200 bg-brand-50/20" aria-busy="true" aria-label="Loading services in this visit">
-          <SectionCard.Body className="p-4">
-            <div className="h-4 w-40 animate-pulse rounded bg-brand-100" />
-            <div className="mt-2 h-3 w-56 animate-pulse rounded bg-slate-100" />
-            <ul className="mt-3 space-y-2">
-              {[0, 1].map((i) => (
-                <li key={i} className="rounded-lg border border-slate-200/90 bg-white/80 px-3 py-3">
-                  <div className="h-3 w-16 animate-pulse rounded bg-slate-100" />
-                  <div className="mt-2 h-4 w-3/4 max-w-xs animate-pulse rounded bg-slate-200" />
-                </li>
-              ))}
-            </ul>
-          </SectionCard.Body>
-        </SectionCard>
-      );
-    }
-    /**
-     * Every appointment gets the card, so the panel reads the same whether the
-     * client booked one service or four: a single service is listed as the one
-     * row it is. Start and Complete stay in the header for it (they would be
-     * the same buttons twice); a visit's rows carry their own. Tables, classes
-     * and events are not services and keep their own sections.
-     */
+  /**
+   * The rows of the visit summary at the top of the panel. Every appointment gets
+   * them, so the panel reads the same whether the client booked one service or
+   * four: a single service is listed as the one row it is. Start and Complete
+   * stay in the actions bar for it (they would be the same buttons twice); a
+   * visit's rows carry their own. Tables, classes and events are not services
+   * and produce no rows: the summary then shows the time, status and money only.
+   */
+  const visitServiceRows = useMemo(() => {
     const isServiceVisitCard = multiServiceVisitSegments.length > 1;
     const singleServiceRow: GroupVisitBookingRow | null =
       !isServiceVisitCard &&
@@ -720,109 +712,18 @@ export function ExpandedBookingContent({
             booking_addon_labels: effectiveBooking.booking_addon_labels ?? [],
           })
         : null;
-    const cardSegments = isServiceVisitCard
+    const segments = isServiceVisitCard
       ? multiServiceVisitSegmentsForDisplay
       : singleServiceRow
         ? [singleServiceRow]
         : [];
-    if (cardSegments.length === 0) return null;
-    const visitDatePhrase = multiServiceVisitDatePhrase(booking.booking_date);
-    /** Start, Complete, Undo start, Undo complete: the service-level lifecycle of one row. */
-    const segmentLifecycleActions = (status: string): Array<{ label: string; target: BookingStatus }> => {
-      if (status === 'Booked' || status === 'Confirmed') return [{ label: 'Start', target: 'Seated' }];
-      if (status === 'Seated') {
-        return [
-          { label: 'Undo start', target: 'Confirmed' },
-          { label: 'Complete', target: 'Completed' },
-        ];
-      }
-      if (status === 'Completed') return [{ label: 'Undo complete', target: 'Seated' }];
-      return [];
-    };
-    return (
-      <SectionCard className="border-brand-200 bg-brand-50/20">
-        <SectionCard.Body className="p-4">
-          <p className="text-xs font-semibold text-brand-900">Services in this visit</p>
-          <p className="mt-0.5 text-[11px] text-slate-600">
-            {cardSegments.length} {cardSegments.length === 1 ? 'service' : 'services'}{' '}
-            {visitDatePhrase}
-            {(() => {
-              const visitTotal = cardSegments.reduce(
-                (sum, seg) => sum + (seg.duration_minutes ?? 0),
-                0,
-              );
-              return visitTotal > 0 ? ` · ${formatDurationMinutesLabel(visitTotal)} total` : '';
-            })()}
-            .
-          </p>
-          <ul className="mt-3 space-y-2">
-            {cardSegments.map((seg) => {
-              const offeringLine = expandedBookingOfferingLine({
-                serviceName: seg.booking_item_name,
-                variantName: seg.service_variant_name,
-                addonLabels: seg.booking_addon_labels,
-              });
-              const durationLabel = formatGroupVisitSegmentDurationLabel(seg);
-              const endHm = seg.booking_end_time?.slice(0, 5) ?? null;
-              const timeRange = endHm
-                ? `${seg.booking_time.slice(0, 5)}–${endHm}`
-                : seg.booking_time.slice(0, 5);
-              return (
-                <li
-                  key={seg.id}
-                  className="rounded-lg border border-slate-200/90 bg-white/80 px-3 py-2"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900">
-                        {offeringLine ?? 'Service'}
-                      </p>
-                      {durationLabel ? (
-                        <p className="mt-1 text-[11px] font-medium text-slate-500">{durationLabel}</p>
-                      ) : null}
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <span className="text-xs font-medium tabular-nums text-slate-600">{timeRange}</span>
-                      <div className="mt-1 flex justify-end">
-                        <BookingStatusPill statusKey={seg.status}>
-                          {bookingStatusDisplayLabel(seg.status, visitTableStyle)}
-                        </BookingStatusPill>
-                      </div>
-                      {isServiceVisitCard && segmentLifecycleActions(seg.status).length > 0 ? (
-                        <div className="mt-1.5 flex justify-end gap-1">
-                          {segmentLifecycleActions(seg.status).map((action) => (
-                            <button
-                              key={action.target}
-                              type="button"
-                              disabled={segmentActionPending !== null}
-                              onClick={() => void runSegmentStatusAction(seg.id, action.target)}
-                              className={`rounded-md px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${bookingTransitionButtonSurface(action.target)}`}
-                            >
-                              {action.label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </SectionCard.Body>
-      </SectionCard>
-    );
+    return { isServiceVisitCard, segments };
   }, [
-    booking.booking_date,
-    booking.id,
     effectiveBooking,
-    groupVisitFetchPending,
     isGroupPeopleVisit,
     multiServiceVisitSegments.length,
     multiServiceVisitSegmentsForDisplay,
     visitTableStyle,
-    segmentActionPending,
-    runSegmentStatusAction,
   ]);
   const displayLinkedBookings = isGroupPeopleVisit
     ? groupVisitBookings.filter((b) => b.id !== booking.id && b.person_label?.trim())
@@ -969,8 +870,6 @@ export function ExpandedBookingContent({
     contactsGuestId && !linkedBookingContext
       ? `/dashboard/contacts?guest=${encodeURIComponent(contactsGuestId)}`
       : null;
-  const visitCount =
-    activeDetail?.guest?.visit_count ?? booking.guest_visit_count ?? profileGuest?.visit_count ?? 0;
   const previousVisitDate = activeDetail?.guest?.last_visit_date ?? profileGuest?.last_visit_date ?? null;
   const tableNames = (activeDetail?.table_assignments ?? booking.table_assignments ?? []).map((t) => t.name);
   const addonCurrencySymbol = currencySymbolFromCode(venueCurrency ?? 'GBP');
@@ -991,7 +890,6 @@ export function ExpandedBookingContent({
     },
     activeDetail,
   );
-  const showGlobalExtras = bookingAddons.length > 0 && multiServiceVisitSegments.length === 0;
   // CDE context card. The omit-set models (class/event/resource/appointment) normally
   // suppress the card because the offering title is denormalised into the header
   // serviceLine. But if the list API did NOT denormalise a name, serviceLine is empty
@@ -1180,8 +1078,8 @@ export function ExpandedBookingContent({
   };
 
   /**
-   * A multi-service visit: Start and Complete belong to each service (buttons on the
-   * "Services in this visit" card), while Confirm, Arrived, Cancel and No-Show stay
+   * A multi-service visit: Start and Complete belong to each service (buttons on its
+   * row of the visit summary), while Confirm, Arrived, Cancel and No-Show stay
    * visit-wide here. Docs/visit-services-independent-plan.md.
    */
   const isServiceVisit = multiServiceVisitSegments.length > 1;
@@ -1216,16 +1114,6 @@ export function ExpandedBookingContent({
 
   const toolbarBusy =
     inlineActionLoading !== null || statusActionPending || sendingMessage || confirmAction !== null;
-
-  const copyBookingRef = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(booking.id);
-      setRefCopied(true);
-      window.setTimeout(() => setRefCopied(false), 2000);
-    } catch (e) {
-      console.error('[ExpandedBookingContent] copy booking ref', e);
-    }
-  }, [booking.id]);
 
   const runStatusAction = useCallback(
     async (status: BookingStatus) => {
@@ -1332,91 +1220,14 @@ export function ExpandedBookingContent({
       estimated_end_time: effectiveBooking.estimated_end_time ?? null,
     });
 
-  const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [];
-
-  if (bookingStartHm) {
-    bookingMetaSegments.push({
-      key: 'when',
-      node: (
-        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-          <span className="font-medium text-slate-500">Time</span>
-          <span className="font-semibold tabular-nums text-slate-800">
-            {bookingEndHm ? `${bookingStartHm}–${bookingEndHm}` : bookingStartHm}
-          </span>
-        </span>
-      ),
-    });
-  }
-
   /**
-   * A visit's header carries its total duration and the services it is made of, so the
-   * panel answers "how long is this and what is in it" without scrolling to the
-   * breakdown below. The duration is the wall-clock span, matching the single control
-   * the visit is edited by, not the sum of the services (those differ whenever a
-   * service's buffer or processing gap sits between two of them).
+   * The chips under the visit summary. Only what the summary does not already
+   * say: the table or party for dining bookings, and when the client checked in.
+   * The time, duration, services, deposit, visit count, source and reference
+   * that used to sit here moved into the summary, the guest history rows
+   * (source) or out of the panel (visit count, reference).
    */
-  if (visitSpan) {
-    bookingMetaSegments.push({
-      key: 'visit-duration',
-      node: (
-        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-          <span className="font-medium text-slate-500">Duration</span>
-          <span className="font-semibold tabular-nums text-slate-800">
-            {formatDurationMinutesLabel(visitSpan.totalMinutes)}
-          </span>
-        </span>
-      ),
-    });
-  }
-
-  if (visitSpan && multiServiceVisitSegmentsForDisplay.length > 0) {
-    const visitServiceNames = multiServiceVisitSegmentsForDisplay.map(
-      (seg) =>
-        expandedBookingOfferingLine({
-          serviceName: seg.booking_item_name,
-          variantName: seg.service_variant_name,
-          addonLabels: seg.booking_addon_labels,
-        }) ?? 'Service',
-    );
-    bookingMetaSegments.push({
-      key: 'visit-services',
-      node: (
-        <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-          <span className="font-medium text-slate-500">
-            {visitServiceNames.length === 1 ? 'Service' : 'Services'}
-          </span>
-          <span className="break-words font-semibold text-slate-800 [overflow-wrap:anywhere]">
-            {visitServiceNames.join(', ')}
-          </span>
-        </span>
-      ),
-    });
-  }
-
-  bookingMetaSegments.push(
-    {
-      key: 'previous-visit',
-      node: (
-      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-        <span className="font-medium text-slate-500">Previous visit</span>
-        <span className="break-words font-semibold text-slate-800 [overflow-wrap:anywhere]">
-          {previousVisitDate ? formatDateNice(previousVisitDate) : 'None yet'}
-        </span>
-      </span>
-      ),
-    },
-    {
-      key: 'visits',
-      node: (
-      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-        <span className="font-medium text-slate-500">Visits</span>
-        <span className="font-semibold text-slate-800">
-          {visitCount > 0 ? `${visitCount} visit${visitCount === 1 ? '' : 's'}` : 'First visit'}
-        </span>
-      </span>
-      ),
-    },
-  );
+  const bookingMetaSegments: { key: string; node: React.ReactNode }[] = [];
 
   if (tableStyle) {
     bookingMetaSegments.push({
@@ -1447,40 +1258,6 @@ export function ExpandedBookingContent({
     });
   }
 
-  bookingMetaSegments.push({
-    key: 'deposit',
-    node: (
-    <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-      <span className="font-medium text-slate-500">
-        {cardHoldState
-          ? 'Card hold'
-          : isFullPayment && effectiveBooking.deposit_status === 'Paid'
-            ? 'Paid in full'
-            : isFullPayment
-              ? 'Payment'
-              : 'Deposit'}
-      </span>
-      <span
-        className={`font-semibold ${effectiveBooking.deposit_status === 'Paid' ? 'text-emerald-700' : effectiveBooking.deposit_status === 'Pending' || effectiveBooking.deposit_status === 'Charged' ? 'text-amber-700' : effectiveBooking.deposit_status === 'Card Held' ? 'text-sky-700' : 'text-slate-800'}`}
-      >
-        {cardHoldState?.pill
-          ? cardHoldState.pill.label
-          : effectiveBooking.deposit_status === 'Not Required'
-            ? 'None'
-            : effectiveBooking.deposit_status === 'Paid' && depositAmtStr
-              ? isFullPayment
-                ? depositAmtStr
-                : `${depositAmtStr} paid`
-              : effectiveBooking.deposit_status === 'Card Held'
-                ? 'Card held'
-                : effectiveBooking.deposit_status === 'Charged'
-                  ? 'Fee charged'
-                  : effectiveBooking.deposit_status}
-      </span>
-    </span>
-    ),
-  });
-
   if (activeDetail?.checked_in_at) {
     bookingMetaSegments.push({
       key: 'checked-in',
@@ -1493,36 +1270,133 @@ export function ExpandedBookingContent({
     });
   }
 
-  bookingMetaSegments.push(
-    {
-      key: 'source',
-      node: (
-      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-        <span className="font-medium text-slate-500">Source</span>
-        <span className="break-words font-semibold text-slate-800 [overflow-wrap:anywhere]">{booking.source}</span>
+  /* ---- Visit summary: the block at the top of the panel ---- */
+  const { isServiceVisitCard, segments: visitSegments } = visitServiceRows;
+  const visitPaymentLines =
+    paymentDisplayBooking.visit_payment && paymentDisplayBooking.visit_payment.booking_count > 1
+      ? (paymentDisplayBooking.visit_payment.lines ?? [])
+      : [];
+  const useVisitLinePrices = isServiceVisitCard && visitPaymentLines.length > 1;
+  // The single service's own price: the variant price, else the stored total minus
+  // its add-ons. Both are snapshots on the booking, so the row and the total below
+  // it always agree rather than one of them following the catalogue's live price.
+  const singleServicePence = (() => {
+    const variant = paymentDisplayBooking.service_variant_price_pence ?? null;
+    if (variant != null) return variant;
+    const total = paymentDisplayBooking.booking_total_price_pence ?? null;
+    if (total == null) return null;
+    return total - (paymentDisplayBooking.addons_total_price_pence ?? 0);
+  })();
+  const segmentPricePence = (segmentId: string): number | null => {
+    if (useVisitLinePrices) {
+      return visitPaymentLines.find((line) => line.booking_id === segmentId)?.total_pence ?? null;
+    }
+    return visitSegments.length === 1 ? singleServicePence : null;
+  };
+  // Mirrors buildPriceSummary: the visit's total for a multi-service visit, else
+  // the stored total, else variant + add-ons, else genuinely unknown.
+  const visitTotalPence = (() => {
+    const visit = paymentDisplayBooking.visit_payment;
+    if (visit && visit.booking_count > 1) return visit.total_pence;
+    const stored = paymentDisplayBooking.booking_total_price_pence;
+    if (stored != null && stored > 0) return stored;
+    const computed =
+      (paymentDisplayBooking.service_variant_price_pence ?? 0) +
+      (paymentDisplayBooking.addons_total_price_pence ?? 0);
+    return computed > 0 ? computed : null;
+  })();
+  // Deposit paid, paid so far and outstanding; the item lines are drawn per service above.
+  const moneyFooterRows = buildPriceSummary(paymentDisplayBooking).filter(
+    (row) => row.key === 'deposit' || row.key === 'paid' || row.key === 'balance',
+  );
+  const looseAddons = visitSegments.length === 0 ? bookingAddons : [];
+  const showMoneyFooter =
+    visitTotalPence != null ||
+    moneyFooterRows.length > 0 ||
+    looseAddons.length > 0 ||
+    (detailHydrating && visitSegments.length > 0);
+  const visitTotalMinutes =
+    visitSpan?.totalMinutes ?? (visitSegments.length === 1 ? visitSegments[0]!.duration_minutes : null);
+  const visitTimeLabel = bookingStartHm
+    ? bookingEndHm
+      ? `${bookingStartHm}–${bookingEndHm}`
+      : bookingStartHm
+    : null;
+  const visitContextLabel = [
+    visitTotalMinutes != null && visitTotalMinutes > 0 ? formatDurationMinutesLabel(visitTotalMinutes) : null,
+    formatDateNice(booking.booking_date),
+    previousVisitDate ? `Last visit ${formatDateNice(previousVisitDate)}` : 'First visit',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const visitStatusKey = String(effectiveBooking.status);
+  /** Only when money is owed, held or charged: a paid deposit is a line in the footer instead. */
+  const depositBadge = (() => {
+    if (cardHoldState?.pill) {
+      return (
+        <Pill variant="info" size="sm" dot>
+          {cardHoldState.pill.label}
+        </Pill>
+      );
+    }
+    const ds = effectiveBooking.deposit_status;
+    if (ds === 'Pending') {
+      return (
+        <Pill variant="warning" size="sm" dot>
+          {isFullPayment ? 'Payment due' : 'Deposit due'}
+          {depositAmtStr ? ` ${depositAmtStr}` : ''}
+        </Pill>
+      );
+    }
+    if (ds === 'Charged') {
+      return (
+        <Pill variant="warning" size="sm" dot>
+          Fee charged
+        </Pill>
+      );
+    }
+    if (ds === 'Card Held') {
+      return (
+        <Pill variant="info" size="sm" dot>
+          Card held
+        </Pill>
+      );
+    }
+    if (ds === 'Paid' && isFullPayment) {
+      return (
+        <Pill variant="success" size="sm" dot>
+          Paid in full
+        </Pill>
+      );
+    }
+    if (ds === 'Refunded') {
+      return (
+        <Pill variant="neutral" size="sm">
+          {isFullPayment ? 'Payment refunded' : 'Deposit refunded'}
+        </Pill>
+      );
+    }
+    return null;
+  })();
+  const addonRow = (a: (typeof bookingAddons)[number]) => (
+    <li key={a.id} className="flex items-baseline justify-between gap-3 text-[11px] text-slate-600">
+      <span className="min-w-0">
+        <span className="text-slate-400" aria-hidden>
+          +{' '}
+        </span>
+        {a.addon_group_name_snapshot ? (
+          <span className="text-slate-500">{a.addon_group_name_snapshot}: </span>
+        ) : null}
+        <span className="font-medium text-slate-700">{a.addon_name_snapshot}</span>
+        {a.duration_minutes_at_booking > 0 ? (
+          <span className="ml-1 text-slate-400">+{a.duration_minutes_at_booking} min</span>
+        ) : null}
       </span>
-      ),
-    },
-    {
-      key: 'ref',
-      node: (
-      <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1">
-        <span className="font-medium text-slate-500">Ref</span>
-        <button
-          type="button"
-          onClick={() => {
-            void copyBookingRef();
-          }}
-          className="font-semibold text-slate-800 hover:text-brand-700"
-          title={refCopied ? 'Copied!' : 'Copy booking reference'}
-          aria-label={refCopied ? 'Booking reference copied' : 'Copy booking reference'}
-        >
-          #{booking.id.slice(0, 8)}
-          {refCopied ? ' ✓' : ''}
-        </button>
+      <span className="shrink-0 tabular-nums text-slate-700">
+        {addonCurrencySymbol}
+        {(a.price_pence_at_booking / 100).toFixed(2)}
       </span>
-      ),
-    },
+    </li>
   );
 
   return (
@@ -1616,11 +1490,6 @@ export function ExpandedBookingContent({
                       <span className="font-medium text-slate-700">{serviceLine}</span>
                     </>
                   ) : null}
-                  {showDepositPendingPill(effectiveBooking) ? (
-                    <Pill variant="warning" size="sm" dot>
-                      Deposit pending
-                    </Pill>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -1655,20 +1524,184 @@ export function ExpandedBookingContent({
               ) : null}
             </div>
           </div>
-          <div
-            className="mt-2.5 flex min-w-0 flex-wrap gap-1.5 border-t border-slate-100 pt-2.5 text-[11px] text-slate-700"
-            role="list"
-          >
-            {bookingMetaSegments.map((segment) => (
-              <span
-                key={segment.key}
-                role="listitem"
-                className="inline-flex items-baseline gap-1.5 rounded-lg border border-slate-200/70 bg-slate-50/70 px-2.5 py-1 leading-none transition-colors hover:border-slate-300/70 hover:bg-slate-50"
+          {/* The visit at a glance: when, how long, each service with its time and price,
+              status, money owed. One block in place of the chip row, the separate
+              "Services in this visit" card and the "Price" list, which spread the same
+              facts across three places. */}
+          <div className="mt-2.5 overflow-hidden rounded-xl border border-brand-200/70 bg-white ring-1 ring-brand-100/40">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 bg-gradient-to-r from-brand-50/80 via-brand-50/40 to-white px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                {visitTimeLabel ? (
+                  <span className="text-[17px] font-bold tabular-nums leading-tight tracking-tight text-brand-900">
+                    {visitTimeLabel}
+                  </span>
+                ) : null}
+                <span className="text-[11px] font-medium text-slate-500">{visitContextLabel}</span>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                {depositBadge}
+                <BookingStatusPill statusKey={visitStatusKey} dot>
+                  {bookingStatusDisplayLabel(visitStatusKey, tableStyle)}
+                </BookingStatusPill>
+              </div>
+            </div>
+            {groupVisitFetchPending ? (
+              <ul
+                className="divide-y divide-slate-100 border-t border-brand-100/60"
+                aria-busy="true"
+                aria-label="Loading services in this visit"
               >
-                {segment.node}
-              </span>
-            ))}
+                {[0, 1].map((i) => (
+                  <li key={i} className="px-3 py-2.5">
+                    <div className="h-3.5 w-2/5 max-w-[12rem] animate-pulse rounded bg-slate-200" />
+                    <div className="mt-1.5 h-3 w-1/4 max-w-[6rem] animate-pulse rounded bg-slate-100" />
+                  </li>
+                ))}
+              </ul>
+            ) : visitSegments.length > 0 ? (
+              <ul className="divide-y divide-slate-100 border-t border-brand-100/60">
+                {visitSegments.map((seg) => {
+                  const offeringLine =
+                    expandedBookingOfferingLine({
+                      serviceName: seg.booking_item_name,
+                      variantName: seg.service_variant_name,
+                      addonLabels: seg.booking_addon_labels,
+                    }) ?? 'Service';
+                  const durationLabel = formatGroupVisitSegmentDurationLabel(seg);
+                  const endHm = seg.booking_end_time?.slice(0, 5) ?? null;
+                  const segTime = endHm
+                    ? `${seg.booking_time.slice(0, 5)}–${endHm}`
+                    : seg.booking_time.slice(0, 5);
+                  // A lone service runs for the whole visit, and the header already says when.
+                  const showSegTime = isServiceVisitCard || segTime !== visitTimeLabel;
+                  const pence = segmentPricePence(seg.id);
+                  const lifecycle = isServiceVisitCard ? segmentLifecycleActions(seg.status) : [];
+                  const segAddons = isServiceVisitCard ? [] : bookingAddons;
+                  return (
+                    <li key={seg.id} className="px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere]">
+                            {offeringLine}
+                          </p>
+                          {showSegTime || durationLabel ? (
+                            <p className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[11px] tabular-nums text-slate-500">
+                              {showSegTime ? <span className="font-medium text-slate-700">{segTime}</span> : null}
+                              {showSegTime && durationLabel ? (
+                                <span className="text-slate-300" aria-hidden>
+                                  ·
+                                </span>
+                              ) : null}
+                              {durationLabel ? <span>{durationLabel}</span> : null}
+                            </p>
+                          ) : null}
+                          {segAddons.length > 0 ? (
+                            <ul className="mt-1 space-y-0.5">{segAddons.map(addonRow)}</ul>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          {/* Status beside the price when the row is wide enough; it wraps under it when not. */}
+                          <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                            {isServiceVisitCard ? (
+                              <BookingStatusPill statusKey={seg.status}>
+                                {bookingStatusDisplayLabel(seg.status, visitTableStyle)}
+                              </BookingStatusPill>
+                            ) : null}
+                            {pence != null ? (
+                              <span className="text-[13px] font-semibold tabular-nums text-slate-900">
+                                {formatPence(pence)}
+                              </span>
+                            ) : detailHydrating ? (
+                              <span className="h-4 w-12 animate-pulse rounded bg-slate-100" aria-hidden />
+                            ) : (
+                              <span className="text-[11px] font-medium text-slate-400">Price not set</span>
+                            )}
+                          </div>
+                          {lifecycle.length > 0 ? (
+                            <div className="flex justify-end gap-1">
+                              {lifecycle.map((action) => (
+                                <button
+                                  key={action.target}
+                                  type="button"
+                                  disabled={segmentActionPending !== null}
+                                  onClick={() => void runSegmentStatusAction(seg.id, action.target)}
+                                  className={`rounded-md px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${bookingTransitionButtonSurface(action.target)}`}
+                                >
+                                  {action.label}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {showMoneyFooter ? (
+              <div className="border-t border-brand-100/60 bg-slate-50/70 px-3 py-2">
+                {looseAddons.length > 0 ? (
+                  <ul className="mb-1.5 space-y-0.5">{looseAddons.map(addonRow)}</ul>
+                ) : null}
+                {visitTotalPence != null || detailHydrating ? (
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {isServiceVisitCard ? 'Visit total' : 'Total'}
+                    </span>
+                    {visitTotalPence != null ? (
+                      <span className="text-[15px] font-bold tabular-nums leading-tight text-slate-900">
+                        {formatPence(visitTotalPence)}
+                      </span>
+                    ) : (
+                      <span className="h-4 w-14 animate-pulse rounded bg-slate-200" aria-hidden />
+                    )}
+                  </div>
+                ) : null}
+                {moneyFooterRows.map((row) => {
+                  const isBalance = row.key === 'balance';
+                  const owed = isBalance && row.pence != null && row.pence > 0;
+                  const settled = isBalance && row.pence === 0;
+                  return (
+                    <div key={row.key} className="mt-0.5 flex items-baseline justify-between gap-3 text-[11px]">
+                      <span className={isBalance ? 'font-semibold text-slate-700' : 'text-slate-500'}>
+                        {row.label}
+                      </span>
+                      <span
+                        className={`tabular-nums ${
+                          owed
+                            ? 'font-semibold text-amber-700'
+                            : settled
+                              ? 'font-semibold text-emerald-700'
+                              : isBalance
+                                ? 'font-medium text-slate-400'
+                                : 'text-slate-700'
+                        }`}
+                      >
+                        {row.pence != null ? formatPence(row.pence) : (row.note ?? '')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
+          {bookingMetaSegments.length > 0 ? (
+            <div
+              className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-[11px] text-slate-700"
+              role="list"
+            >
+              {bookingMetaSegments.map((segment) => (
+                <span
+                  key={segment.key}
+                  role="listitem"
+                  className="inline-flex items-baseline gap-1.5 rounded-lg border border-slate-200/70 bg-slate-50/70 px-2.5 py-1 leading-none transition-colors hover:border-slate-300/70 hover:bg-slate-50"
+                >
+                  {segment.node}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {/* Its own callout rather than another meta chip: someone travelling to this booking
               needs the address before the deposit status. Address and type come from the list row,
               so this appears immediately; the online joining details arrive with the full detail. */}
@@ -1677,39 +1710,6 @@ export function ExpandedBookingContent({
               <BookingLocationCallout view={staffLocation} />
             </div>
           ) : null}
-          {showGlobalExtras ? (
-            <div className="mt-2 border-t border-slate-100 pt-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Extras</p>
-              <ul className="mt-1 space-y-0.5 text-[11px] text-slate-700">
-                {bookingAddons.map((a) => (
-                  <li key={a.id} className="flex items-start justify-between gap-3">
-                    <span className="min-w-0">
-                      {a.addon_group_name_snapshot ? (
-                        <span className="text-slate-500">{a.addon_group_name_snapshot}: </span>
-                      ) : null}
-                      <span className="font-medium text-slate-800">{a.addon_name_snapshot}</span>
-                      {a.duration_minutes_at_booking > 0 ? (
-                        <span className="ml-1 text-slate-500">(+{a.duration_minutes_at_booking} min)</span>
-                      ) : null}
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      +{addonCurrencySymbol}
-                      {(a.price_pence_at_booking / 100).toFixed(2)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {/* What the appointment costs, out in the open. The same breakdown used to sit inside the
-              collapsed payments section, where staff had to go looking for it. */}
-          <div className="mt-2 border-t border-slate-100 pt-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Price</p>
-            <BookingPriceSummary
-              booking={paymentDisplayBooking}
-              serviceName={effectiveBooking.booking_item_name ?? effectiveBooking.service_name ?? null}
-            />
-          </div>
         </SectionCard.Body>
       </SectionCard>
 
@@ -1914,8 +1914,6 @@ export function ExpandedBookingContent({
         </div>
       </div>
       ) : null}
-
-      {profileGuestId ? multiServiceVisitCard : null}
 
       {profileGuestId ? (
         <details className={bookingExpandAccordionDetailsClass}>
@@ -2302,8 +2300,6 @@ export function ExpandedBookingContent({
           </div>
         </details>
       ) : null}
-
-      {!profileGuestId ? multiServiceVisitCard : null}
 
       {!profileGuestId ? (
       <details className={bookingExpandAccordionDetailsClass}>

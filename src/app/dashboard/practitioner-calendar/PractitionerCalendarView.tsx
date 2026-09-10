@@ -106,6 +106,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { getStaffBookingSurfaceTabs } from '@/lib/booking/staff-booking-modal-options';
+import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 import { warmStaffBookingSurface } from '@/lib/booking/staff-surface-warm';
 import type { StaffCollectiveSummary } from '@/lib/linked-accounts/collective-staff-scope';
 import {
@@ -178,6 +179,7 @@ import {
   overlayFromClientArrivedPatch,
   overlayFromPatchBody,
   overlayFromPatchPayload,
+  visitSiblingOverlay,
   overlayFromStatusTransition,
   retainBookingRowOverlay,
   type BookingRowOverlay,
@@ -271,6 +273,36 @@ interface CalendarVariantRow {
  * core calendar is unaffected. The `key` is namespaced to avoid colliding with
  * a native column id.
  */
+/** "Tue 8 Sep" for the cross-account move dialog; the ISO date if it cannot be parsed. */
+function formatDateNice(isoDate: string): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+/** What the cross-account move dialog needs to say and to do. */
+interface CrossVenueMoveDialog {
+  booking: Booking;
+  sourceCalendarName: string;
+  /** Null when the dragged booking is on this venue. */
+  sourceVenueName: string | null;
+  targetColumnKey: string;
+  targetCalendarName: string;
+  /** Null when the drop column is this venue's own. */
+  targetVenueName: string | null;
+  targetLinkedColumn: LinkedColumn | null;
+  dateStr: string;
+  time: string;
+}
+
+interface CrossVenueRebook {
+  bookingId: string;
+  guestName: string;
+  originalLabel: string;
+  targetLabel: string;
+  bootstrap: StaffRebookBootstrapPayloadV1;
+}
+
 interface LinkedColumn {
   key: string;
   venueId: string;
@@ -3083,6 +3115,18 @@ export function PractitionerCalendarView({
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   /**
+   * A booking dropped on a calendar that belongs to another ResNeo account. A
+   * booking cannot be transferred between accounts (every row belongs to one
+   * venue; the database refuses a change of venue), so the dialog says so and
+   * offers the two steps that do the job: book the client on the target
+   * calendar, prefilled from this booking, then cancel this one.
+   */
+  const [crossVenueMove, setCrossVenueMove] = useState<CrossVenueMoveDialog | null>(null);
+  /** The prefill handed to the booking modal by the dialog, and the booking to offer to cancel. */
+  const [crossVenueRebook, setCrossVenueRebook] = useState<CrossVenueRebook | null>(null);
+  /** After the new booking is made: offer to cancel the original. */
+  const [cancelOriginalPrompt, setCancelOriginalPrompt] = useState<CrossVenueRebook | null>(null);
+  /**
    * The live venue collective this venue books for as one business, or null.
    * A click on a column that is one of the collective's calendars opens the
    * staff form for the collective with that calendar preselected; New and
@@ -4899,6 +4943,59 @@ export function PractitionerCalendarView({
     setSlotMenu(null);
   }
 
+  /**
+   * Step one of a cross-account move: open the booking form on the target
+   * calendar at the dropped slot, with the client's details filled in from the
+   * booking that was dragged. The service is chosen afresh: the target venue has
+   * its own catalogue, so the dragged booking's service id means nothing there.
+   */
+  function startCrossVenueRebook(move: CrossVenueMoveDialog) {
+    const b = move.booking;
+    const [firstName, ...rest] = (b.guest_name ?? '').trim().split(/\s+/);
+    const rebook: CrossVenueRebook = {
+      bookingId: b.id,
+      guestName: b.guest_name,
+      originalLabel: `${b.booking_time.slice(0, 5)} on ${formatDateNice(b.booking_date)} with ${move.sourceCalendarName}`,
+      targetLabel: `${move.targetCalendarName}'s calendar`,
+      bootstrap: {
+        v: 1,
+        surface: 'unified_scheduling',
+        guest: {
+          firstName: firstName ?? '',
+          lastName: rest.join(' '),
+          email: b.guest_email ?? null,
+          phone: b.guest_phone ?? null,
+        },
+        initialDate: move.dateStr,
+      },
+    };
+    setCrossVenueMove(null);
+    setCrossVenueRebook(rebook);
+    if (move.targetLinkedColumn) {
+      const venue = linkedVenueById.get(move.targetLinkedColumn.venueId);
+      if (!venue) {
+        setCrossVenueRebook(null);
+        addToast('That calendar is no longer available.', 'error');
+        return;
+      }
+      setLinkedCreating({
+        venue,
+        practitionerId: move.targetLinkedColumn.practitionerId,
+        time: move.time,
+        intent: 'new',
+      });
+      return;
+    }
+    openNewAtSlot(move.targetColumnKey, move.dateStr, move.time);
+  }
+
+  /** Step two: cancel the original through the ordinary cancel path (client told, deposit rules applied). */
+  async function cancelOriginalAfterCrossVenueRebook(prompt: CrossVenueRebook) {
+    const ok = await quickPatchBooking(prompt.bookingId, { status: 'Cancelled' });
+    setCancelOriginalPrompt(null);
+    if (ok) addToast(`Cancelled the original booking with ${prompt.guestName}.`, 'success');
+  }
+
   function openBlockModal(pracId: string, dateStr: string, startTime: string) {
     const sm = timeToMinutes(startTime);
     const endM = Math.min(sm + 60, endHour * 60);
@@ -6022,9 +6119,31 @@ export function PractitionerCalendarView({
     // calendar id onto the booking. (The drop column's owning venue is the linked
     // column's `venueId`, or this venue for a native column.)
     const draggedOwnerVenueId = b._linkedOwnerVenueId ?? venueId;
-    const targetOwnerVenueId = linkedNativeGridColumnByKey.get(pracId)?.venueId ?? venueId;
+    const targetLinkedColumn = linkedNativeGridColumnByKey.get(pracId) ?? null;
+    const targetOwnerVenueId = targetLinkedColumn?.venueId ?? venueId;
     if (draggedOwnerVenueId !== targetOwnerVenueId) {
-      addToast('A booking can only be moved within the same venue.', 'error');
+      const sourceLinkedColumn = b._linkedColumnKey
+        ? linkedNativeGridColumnByKey.get(b._linkedColumnKey) ?? null
+        : null;
+      const sourceColumnId = resolveBookingColumnId(b, resourceParentById);
+      setCrossVenueMove({
+        booking: b,
+        sourceCalendarName:
+          sourceLinkedColumn?.practitionerName ??
+          practitioners.find((p) => p.id === sourceColumnId)?.name ??
+          'its current calendar',
+        sourceVenueName: sourceLinkedColumn?.venueName ?? null,
+        targetColumnKey: pracId,
+        targetCalendarName:
+          targetLinkedColumn?.practitionerName ??
+          practitioners.find((p) => p.id === pracId)?.name ??
+          'that calendar',
+        targetVenueName: targetLinkedColumn?.venueName ?? null,
+        targetLinkedColumn,
+        dateStr,
+        // The booking form offers whole slots, so the dropped minute rounds to five.
+        time: minutesToTime(Math.round(targetStartMins / 5) * 5),
+      });
       return;
     }
     // The stripes only decide what to SAY. The save is always allowed outside
@@ -8131,10 +8250,13 @@ export function PractitionerCalendarView({
                           const layout = clusterLayouts.get(clusterKey(cluster)) ?? { laneIndex: 0, laneCount: 1 };
                         {
                           const b = cluster.booking;
-                          // A visit's services share the earliest service's colour.
+                          // Each service of a visit is coloured by ITS OWN status: a started
+                          // colour is green while the cut that has not begun stays booked.
+                          // The bars used to share the earliest service's colour, which read
+                          // as every service starting or finishing together. The chip and the
+                          // spine still say the bars belong to one visit.
                           const visitPos = visitPositions.get(b.id) ?? null;
-                          const visitAnchor = visitPos ? allGridBookings.find((x) => x.id === visitPos.anchorId) ?? b : b;
-                          const palette = calendarBlockPaletteForBooking(visitAnchor);
+                          const palette = calendarBlockPaletteForBooking(b);
                           // A short spine where this service meets a sibling in the same column.
                           const visitEdges = visitPos
                             ? visitTouchingEdges({
@@ -8972,8 +9094,14 @@ export function PractitionerCalendarView({
                 .then((payload) => {
                   if (payload && typeof payload === 'object' && !('error' in payload)) {
                     const overlay = overlayFromPatchPayload(payload as Record<string, unknown>);
+                    mergeCalendarBookingOverlay(detailBookingId, overlay);
+                    // Siblings take the visit-wide facts only. Start and Complete
+                    // are one service's: copying the status here painted every
+                    // bar of the visit Started, and the overlay outlived the
+                    // refetch because it never matched the row underneath.
+                    const siblingOverlay = visitSiblingOverlay(overlay);
                     for (const id of groupIds) {
-                      mergeCalendarBookingOverlay(id, overlay);
+                      if (id !== detailBookingId) mergeCalendarBookingOverlay(id, siblingOverlay);
                     }
                   }
                 })
@@ -8999,6 +9127,7 @@ export function PractitionerCalendarView({
                 onClose={() => {
                   setStaffBookingModal(null);
                   clearStaffBookingPrefill();
+                  setCrossVenueRebook(null);
                 }}
                 onCreated={() => {
                   setStaffBookingModal(null);
@@ -9006,7 +9135,12 @@ export function PractitionerCalendarView({
                   void refetchBookingsList();
                   // A collective booking may have landed on a partner's calendar.
                   if (collectiveTarget) void loadLinkedData();
+                  if (crossVenueRebook) {
+                    setCancelOriginalPrompt(crossVenueRebook);
+                    setCrossVenueRebook(null);
+                  }
                 }}
+                staffRebookBootstrap={crossVenueRebook?.bootstrap ?? null}
                 onBookingSubmitted={() => {
                   void refetchBookingsList();
                   if (collectiveTarget) void loadLinkedData();
@@ -9089,6 +9223,76 @@ export function PractitionerCalendarView({
         />
       ) : null}
 
+      {crossVenueMove ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setCrossVenueMove(null);
+          }}
+          title={`${crossVenueMove.booking.guest_name}'s booking can't move to ${crossVenueMove.targetCalendarName}'s calendar`}
+          size="sm"
+          contentClassName="max-w-md"
+          footer={
+            <div className="flex w-full flex-wrap items-center justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setCrossVenueMove(null)}>
+                Not now
+              </Button>
+              <Button type="button" variant="primary" size="sm" onClick={() => startCrossVenueRebook(crossVenueMove)}>
+                Book on {crossVenueMove.targetCalendarName}&apos;s calendar
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>
+              {crossVenueMove.targetCalendarName}
+              {crossVenueMove.targetVenueName ? ` (${crossVenueMove.targetVenueName})` : ' (your venue)'} and{' '}
+              {crossVenueMove.sourceCalendarName}
+              {crossVenueMove.sourceVenueName ? ` (${crossVenueMove.sourceVenueName})` : ' (your venue)'} are on
+              different ResNeo accounts, and a booking cannot be transferred between accounts.
+            </p>
+            <p>
+              To move it, make a new booking on {crossVenueMove.targetCalendarName}&apos;s calendar and cancel this one.
+              The button below opens the booking form for {crossVenueMove.targetCalendarName}. Choose the
+              service, confirm, and you will be offered to cancel the original.
+            </p>
+          </div>
+        </Dialog>
+      ) : null}
+
+      {cancelOriginalPrompt ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setCancelOriginalPrompt(null);
+          }}
+          title="Cancel the original booking?"
+          description={`The new booking is on ${cancelOriginalPrompt.targetLabel}. ${cancelOriginalPrompt.guestName} still has the original at ${cancelOriginalPrompt.originalLabel}.`}
+          size="sm"
+          contentClassName="max-w-md"
+          footer={
+            <div className="flex w-full flex-wrap items-center justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setCancelOriginalPrompt(null)}>
+                Keep both
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={quickActionId === cancelOriginalPrompt.bookingId}
+                onClick={() => void cancelOriginalAfterCrossVenueRebook(cancelOriginalPrompt)}
+              >
+                Cancel the original
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-sm text-slate-700">
+            This cancels it the usual way, so the client is told and any deposit follows the venue&apos;s cancellation rules.
+          </p>
+        </Dialog>
+      ) : null}
+
       {linkedCreating
         ? (() => {
             // A partner's column inside the collective books for the collective with
@@ -9106,13 +9310,21 @@ export function PractitionerCalendarView({
                 linkedOwnerVenueId={ownerVenueId}
                 linkedVenueName={collectiveTarget?.name ?? linkedCreating.venue.venueName}
                 stackKey={`linked-${ownerVenueId}-${linkedCreating.practitionerId ?? 'any'}`}
-                onClose={() => setLinkedCreating(null)}
+                onClose={() => {
+                  setLinkedCreating(null);
+                  setCrossVenueRebook(null);
+                }}
                 onCreated={() => {
                   setLinkedCreating(null);
                   void loadLinkedData();
                   // A collective booking may have landed on one of this venue's own calendars.
                   if (collectiveTarget) void refetchBookingsList();
+                  if (crossVenueRebook) {
+                    setCancelOriginalPrompt(crossVenueRebook);
+                    setCrossVenueRebook(null);
+                  }
                 }}
+                staffRebookBootstrap={crossVenueRebook?.bootstrap ?? null}
                 onBookingSubmitted={() => {
                   void loadLinkedData();
                   if (collectiveTarget) void refetchBookingsList();

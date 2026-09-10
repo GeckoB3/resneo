@@ -11,6 +11,7 @@ export function mapContactGuestHistoryToAccordionRows(
     booking_time: h.booking_time,
     party_size: h.party_size ?? 1,
     status: h.status,
+    source: h.source ?? null,
     estimated_end_time: h.estimated_end_time ?? null,
     booking_end_time: h.booking_end_time ?? null,
     booking_item_name: h.detail_label || h.service_name || h.kind_label || null,

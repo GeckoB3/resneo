@@ -159,6 +159,12 @@ export async function GET(
         total_pence: visit.totalPence,
         amount_paid_pence: visit.amountPaidPence,
         balance_due_pence: visit.balanceDuePence,
+        // Same per-service lines as the full GET. The panel re-reads the summary
+        // first on every refresh (a status button, a live-sync ping) and merges
+        // it over what is shown, so a visit_payment without lines replaced the
+        // full one and each service flicked to "Price not set" until the full
+        // payload landed.
+        lines: visit.lines,
       },
     });
   } catch (err) {

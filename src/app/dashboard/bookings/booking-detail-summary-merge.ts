@@ -20,5 +20,13 @@ export function mergeBookingSummaryOverDetail(
     events: summary.events?.length ? summary.events : prev.events,
     communications: summary.communications?.length ? summary.communications : prev.communications,
     combination_staff_notes: summary.combination_staff_notes ?? prev.combination_staff_notes,
+    // A summary that carries the visit's money but not its per-service lines
+    // must not drop the lines already on screen: the visit rows price
+    // themselves from `visit_payment.lines`, and losing them shows
+    // "Price not set" until the full payload arrives.
+    visit_payment:
+      summary.visit_payment && !summary.visit_payment.lines?.length && prev.visit_payment?.lines?.length
+        ? { ...summary.visit_payment, lines: prev.visit_payment.lines }
+        : (summary.visit_payment ?? prev.visit_payment),
   };
 }

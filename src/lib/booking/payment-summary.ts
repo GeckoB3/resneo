@@ -396,53 +396,39 @@ export interface VisitPaymentPicture {
   depositPaidByBooking: Map<string, number>;
 }
 
+/** What {@link loadRowTotalResolver} hands back. */
+export interface RowTotalResolver {
+  /** A row's resolved total in pence, null when it cannot be priced. */
+  rowTotal: (r: VisitBookingRow) => number | null;
+  /** Variant names, only when `needNames` was asked for. */
+  variantNames: Map<string, string>;
+}
+
 /**
- * Build the visit picture for a booking. Pass the already-loaded anchor row
- * (routes hold it from `loadStaffAccessibleBooking`) to avoid re-reading it.
- *
- * Cost: at most three queries (siblings, variant prices, ledger), and only one
- * when the booking is a standalone appointment with a known price.
+ * Batch price resolver for a set of booking rows: loads the variant prices,
+ * service list prices and per-practitioner overrides those rows need in a
+ * handful of queries, then prices each row with the app's precedence (stored
+ * total, else chosen variant, else practitioner override, else the service's
+ * list price, plus add-ons). Shared by the visit payment picture and the
+ * booked-revenue report so the two never disagree on what a booking is worth.
  */
-export async function loadVisitPaymentPicture(
+export async function loadRowTotalResolver(
   admin: SupabaseClient,
-  anchor: VisitBookingRow,
+  rows: VisitBookingRow[],
   opts?: {
-    /** Anchor's variant price when the caller already has it (detail bundle). */
-    anchorServiceVariantPricePence?: number | null;
-    /** Scope siblings to this venue; defaults to the anchor's own venue. */
+    /** Scope catalogue reads to this venue. */
     venueId?: string | null;
+    /** Variant prices the caller already holds; never overwritten by a load. */
+    presetVariantPrices?: Iterable<[string, number]>;
+    /** Also load variant names (costs a query when rows carry variants). */
+    needNames?: boolean;
   },
-): Promise<VisitPaymentPicture> {
-  const venueId = opts?.venueId ?? anchor.venue_id ?? null;
-
-  let rows: VisitBookingRow[] = [anchor];
-  const groupId = anchor.group_booking_id ?? null;
-  if (groupId) {
-    let q = admin
-      .from('bookings')
-      .select(
-        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
-      )
-      .eq('group_booking_id', groupId);
-    // Never let a group id reach across venues.
-    if (venueId) q = q.eq('venue_id', venueId);
-    const { data, error } = await q;
-    if (error) {
-      console.error('[payment-summary] visit sibling load failed:', error.message, { groupId });
-      throw error;
-    }
-    const loaded = (data ?? []) as Array<VisitBookingRow & { status?: string | null }>;
-    // Cancelled lines are not owed for, so they never inflate the visit total.
-    const live = loaded.filter((r) => r.status !== 'Cancelled' || r.id === anchor.id);
-    if (live.length > 0) rows = live;
-  }
-
+): Promise<RowTotalResolver> {
+  const venueId = opts?.venueId ?? null;
   // Variant prices for rows that need one, in a single batched query.
   const variantPrices = new Map<string, number>();
   const variantNames = new Map<string, string>();
-  if (opts?.anchorServiceVariantPricePence != null && anchor.service_variant_id) {
-    variantPrices.set(anchor.service_variant_id, opts.anchorServiceVariantPricePence);
-  }
+  for (const [id, price] of opts?.presetVariantPrices ?? []) variantPrices.set(id, price);
   const needPrice = rows
     .filter(
       (r) => !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0),
@@ -453,12 +439,9 @@ export async function loadVisitPaymentPicture(
   // standalone booking already carries `service_variant_name` from the detail
   // bundle, so asking for names there would cost a second query for nothing and
   // lose this function's single-query fast path.
-  const needName =
-    rows.length > 1
-      ? rows
-          .map((r) => r.service_variant_id)
-          .filter((v): v is string => typeof v === 'string')
-      : [];
+  const needName = opts?.needNames
+    ? rows.map((r) => r.service_variant_id).filter((v): v is string => typeof v === 'string')
+    : [];
   const needed = [...new Set([...needPrice, ...needName])];
   if (needed.length > 0) {
     let vq = admin.from('service_variants').select('id, price_pence, name').in('id', needed);
@@ -567,6 +550,62 @@ export async function loadVisitPaymentPicture(
       service_variant_price_pence: basePrice(r),
       addons_total_price_pence: r.addons_total_price_pence ?? null,
     });
+
+  return { rowTotal, variantNames };
+}
+
+/**
+ * Build the visit picture for a booking. Pass the already-loaded anchor row
+ * (routes hold it from `loadStaffAccessibleBooking`) to avoid re-reading it.
+ *
+ * Cost: at most three queries (siblings, variant prices, ledger), and only one
+ * when the booking is a standalone appointment with a known price.
+ */
+export async function loadVisitPaymentPicture(
+  admin: SupabaseClient,
+  anchor: VisitBookingRow,
+  opts?: {
+    /** Anchor's variant price when the caller already has it (detail bundle). */
+    anchorServiceVariantPricePence?: number | null;
+    /** Scope siblings to this venue; defaults to the anchor's own venue. */
+    venueId?: string | null;
+  },
+): Promise<VisitPaymentPicture> {
+  const venueId = opts?.venueId ?? anchor.venue_id ?? null;
+
+  let rows: VisitBookingRow[] = [anchor];
+  const groupId = anchor.group_booking_id ?? null;
+  if (groupId) {
+    let q = admin
+      .from('bookings')
+      .select(
+        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
+      )
+      .eq('group_booking_id', groupId);
+    // Never let a group id reach across venues.
+    if (venueId) q = q.eq('venue_id', venueId);
+    const { data, error } = await q;
+    if (error) {
+      console.error('[payment-summary] visit sibling load failed:', error.message, { groupId });
+      throw error;
+    }
+    const loaded = (data ?? []) as Array<VisitBookingRow & { status?: string | null }>;
+    // Cancelled lines are not owed for, so they never inflate the visit total.
+    const live = loaded.filter((r) => r.status !== 'Cancelled' || r.id === anchor.id);
+    if (live.length > 0) rows = live;
+  }
+
+  const { rowTotal, variantNames } = await loadRowTotalResolver(admin, rows, {
+    venueId,
+    presetVariantPrices:
+      opts?.anchorServiceVariantPricePence != null && anchor.service_variant_id
+        ? [[anchor.service_variant_id, opts.anchorServiceVariantPricePence]]
+        : [],
+    // Names label the per-line breakdown, which only exists for a real visit. A
+    // standalone booking already carries `service_variant_name` from the detail
+    // bundle, so asking for names there would cost a second query for nothing.
+    needNames: rows.length > 1,
+  });
 
   // Visit total: the sum, but UNKNOWN if any line is unresolvable. Treating an
   // unresolvable line as £0 would silently understate the visit and the clamp

@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
 import { BaselineMetricsSection } from './BaselineMetricsSection';
+import { BookedRevenueSection } from './BookedRevenueSection';
 import type { VenueBaselineMetrics } from '@/lib/metrics/baseline-metrics-types';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
@@ -272,6 +273,8 @@ function normalizeLogConfig(config: BookingLogEmailConfig | null | undefined, fa
   };
 }
 
+type ReportsSubTab = 'overview' | 'revenue' | 'clients';
+
 export interface ReportsViewProps {
   bookingModel: BookingModel;
   terminology: VenueTerminology;
@@ -324,14 +327,18 @@ export function ReportsView({
     [data?.pricing_tier, data?.enabled_models, pricingTier, resolvedBookingModel],
   );
   const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
-  const activeTab = searchParams.get(subTabQueryKey) === 'clients' ? 'clients' : 'overview';
-  const recharts = useDeferredRecharts(activeTab === 'overview' && Boolean(data));
+  const subTabParam = searchParams.get(subTabQueryKey);
+  const activeTab: ReportsSubTab =
+    subTabParam === 'clients' ? 'clients' : subTabParam === 'revenue' ? 'revenue' : 'overview';
+  const recharts = useDeferredRecharts(
+    (activeTab === 'overview' && Boolean(data)) || activeTab === 'revenue',
+  );
 
   const setActiveTab = useCallback(
-    (tab: 'overview' | 'clients') => {
+    (tab: ReportsSubTab) => {
       const p = new URLSearchParams(searchParams.toString());
-      if (tab === 'clients') p.set(subTabQueryKey, 'clients');
-      else p.delete(subTabQueryKey);
+      if (tab === 'overview') p.delete(subTabQueryKey);
+      else p.set(subTabQueryKey, tab);
       const qs = p.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -549,6 +556,7 @@ export function ReportsView({
     () =>
       [
         { id: 'overview' as const, label: 'Overview' },
+        { id: 'revenue' as const, label: 'Revenue' },
         { id: 'clients' as const, label: `${terminology.client}s` },
       ] as const,
     [terminology.client],
@@ -663,6 +671,7 @@ export function ReportsView({
         actions={<TabBar tabs={reportTabs} value={activeTab} onChange={setActiveTab} />}
       />
 
+      {activeTab !== 'revenue' ? (
       <SectionCard elevated>
         <SectionCard.Header eyebrow="Range" title="Date range" />
         <SectionCard.Body className="flex flex-wrap items-center gap-3">
@@ -694,6 +703,15 @@ export function ReportsView({
           </button>
         </SectionCard.Body>
       </SectionCard>
+      ) : null}
+
+      {activeTab === 'revenue' ? (
+        <BookedRevenueSection
+          recharts={recharts}
+          bookingWord={terminology.booking}
+          onExportNotice={notifyExport}
+        />
+      ) : null}
 
       {activeTab === 'clients' && data ? (
         <ClientsSection

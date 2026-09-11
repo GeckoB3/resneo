@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bookingPageEmailBrandColour } from '@/lib/booking/booking-page-theme';
+import { resolveVenueBookingPageUrl } from '@/lib/emails/venue-booking-page-link';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const { data: venue } = await admin
       .from('venues')
-      .select('name, address, booking_model, feature_flags, booking_page_config')
+      .select('name, slug, address, booking_model, feature_flags, booking_page_config')
       .eq('id', staff.venue_id)
       .single();
 
@@ -74,6 +75,12 @@ export async function POST(request: NextRequest) {
     });
 
     const venueData = getPreviewVenueSample(venue?.name ?? undefined, venue?.address ?? undefined);
+    // Previews link to the venue's real booking page so the owner can click through.
+    venueData.booking_page_url =
+      (await resolveVenueBookingPageUrl(admin, {
+        id: staff.venue_id,
+        slug: (venue as { slug?: string | null } | null)?.slug,
+      })) ?? venueData.booking_page_url;
     // Previews follow the venue's own email branding so what the owner sees is what goes out.
     venueData.brand_colour = bookingPageEmailBrandColour(
       (venue as { booking_page_config?: unknown } | null)?.booking_page_config,

@@ -11,7 +11,7 @@ import {
   formatTime,
 } from '@/lib/emails/templates/base-template';
 import { confirmationSubject } from '@/lib/emails/templates/booking-confirmation';
-import { buildCardHoldNoticeHtml, guestFirstName, renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
+import { buildCardHoldNoticeHtml, emailFooterVenue, guestFirstName, renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
 import { emailAccent } from '@/lib/emails/email-accent';
 import {
   formatMessagePlainText,
@@ -221,13 +221,6 @@ function withStaffSms(booking: BookingEmailData, label: string): string {
   );
   if (staffNames.size !== 1) return L;
   return `${L} with ${clipSmsText([...staffNames][0]!, 22)}`;
-}
-
-function emailFooterText(venue: VenueEmailData): string {
-  const parts = [venue.name];
-  if (venue.phone) parts.push(venue.phone);
-  if (venue.address) parts.push(venue.address);
-  return parts.join(' • ');
 }
 
 function emailVariantForLane(lane: CommunicationLane): 'table' | 'appointment' {
@@ -1016,32 +1009,41 @@ export function renderCommunicationEmail(
       },
     });
   } else {
+    const thankYou = opts.messageKey === 'post_visit_thankyou';
     html = renderTransactionalEmailHtml({
       venueName: opts.venue.name,
       venueLogoUrl: opts.venue.logo_url ?? null,
       brandColour: opts.venue.brand_colour ?? null,
       heading: config.heading,
       mainContent: config.mainContent,
-      bookingDate: formatDate(bookingDisplayStart(opts.booking).date),
-      bookingTime: formatTime(bookingDisplayStart(opts.booking).time),
-      partySize: opts.booking.party_size,
-      venueAddress: resolvedLocation.rowValue,
-      locationJoinUrl: resolvedLocation.joinUrl,
-      locationExtra: resolvedLocation.rowExtra,
-      specialRequests: opts.booking.special_requests ?? null,
+      // A thank-you is a note after the visit, not a booking record: no date chip,
+      // detail rows or location. The footer already carries the venue's contact block.
+      ...(thankYou
+        ? {}
+        : {
+            bookingDate: formatDate(bookingDisplayStart(opts.booking).date),
+            bookingTime: formatTime(bookingDisplayStart(opts.booking).time),
+            partySize: opts.booking.party_size,
+            venueAddress: resolvedLocation.rowValue,
+            locationJoinUrl: resolvedLocation.joinUrl,
+            locationExtra: resolvedLocation.rowExtra,
+            specialRequests: opts.booking.special_requests ?? null,
+          }),
       customMessage: opts.emailCustomMessage ?? null,
       ctaLabel: config.ctaLabel,
       ctaUrl: config.ctaUrl,
       secondaryCtaLabel: config.secondaryCtaLabel,
       secondaryCtaUrl: config.secondaryCtaUrl,
       postCtaHtml: config.postCtaHtml ?? null,
-      footerNote: emailFooterText(opts.venue),
+      footerVenue: emailFooterVenue(opts.venue, resolvedLocation.mapsUrl, {
+        includeAddress: resolvedLocation.kind === 'business_venue',
+      }),
       emailVariant: emailVariantForLane(opts.lane),
-      practitionerName: opts.booking.practitioner_name ?? null,
-      serviceName: appointmentLane ? bookingLabel(opts.booking) : null,
+      practitionerName: thankYou ? null : (opts.booking.practitioner_name ?? null),
+      serviceName: appointmentLane && !thankYou ? bookingLabel(opts.booking) : null,
       priceDisplay: null,
-      groupAppointments: opts.booking.group_appointments,
-      addonLines: appointmentLane ? (opts.booking.addon_lines ?? null) : null,
+      groupAppointments: thankYou ? undefined : opts.booking.group_appointments,
+      addonLines: appointmentLane && !thankYou ? (opts.booking.addon_lines ?? null) : null,
     });
   }
 

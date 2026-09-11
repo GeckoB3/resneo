@@ -6,9 +6,8 @@ export function renderPostVisitEmail(
   venue: VenueEmailData,
   customMessage?: string | null,
 ): RenderedEmail {
-  const bookAgainUrl =
-    venue.booking_page_url ??
-    `${process.env.NEXT_PUBLIC_BASE_URL || "https://www.resneo.com"}/book/${venue.name.toLowerCase().replace(/\s+/g, "-")}`;
+  // Never guess the address from the venue name: a wrong link is worse than no button.
+  const bookAgainUrl = venue.booking_page_url ?? null;
 
   const mainContent =
     `<p style="margin:0 0 12px 0">Hi ${booking.guest_name},</p>` +
@@ -31,7 +30,9 @@ export function renderPostVisitEmail(
   textParts.push(
     `We hope you enjoyed your visit to ${venue.name}.`,
     "",
-    `We would love to welcome you back. Book again: ${bookAgainUrl}`,
+    bookAgainUrl
+      ? `We would love to welcome you back. Book again: ${bookAgainUrl}`
+      : "We would love to welcome you back.",
   );
   if (customMessage) textParts.push("", customMessage);
   textParts.push("", venue.name);

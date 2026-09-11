@@ -1,6 +1,7 @@
 import type { BookingEmailData, VenueEmailData, RenderedEmail } from "../types";
 import { escapeHtml, formatDate, formatTime } from "./base-template";
-import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
+import { emailFooterVenue, renderTransactionalEmailHtml } from "./booking-confirmation-layout";
+import { buildGoogleMapsDirectionsUrl } from "../external-links";
 
 function isAppointment(booking: BookingEmailData): boolean {
   return (
@@ -224,6 +225,7 @@ export function renderPaymentReceiptEmail(
 
   const html = renderTransactionalEmailHtml({
     venueName: venue.name,
+    footerVenue: emailFooterVenue(venue, buildGoogleMapsDirectionsUrl(venue.address)),
     brandColour: venue.brand_colour ?? null,
     venueLogoUrl: venue.logo_url,
     heading: "Payment received",

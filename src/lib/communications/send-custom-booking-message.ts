@@ -2,6 +2,7 @@ import type { BookingModel } from '@/types/booking-models';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { resolveVenueBookingPageUrl } from '@/lib/emails/venue-booking-page-link';
 import { sendPolicyMessage } from './outbound';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
@@ -119,7 +120,7 @@ export async function sendCustomBookingMessage(
   const { data: venueRow, error: venueError } = await admin
     .from('venues')
     .select(
-      'name, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config, logo_url, cover_photo_url, website_url, booking_page_url',
+      'name, slug, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config, logo_url, cover_photo_url, website_url',
     )
     .eq('id', input.venueId)
     .maybeSingle();
@@ -134,6 +135,8 @@ export async function sendCustomBookingMessage(
 
   const venue: VenueEmailData = venueRowToEmailData({
     name: venueRow.name,
+    slug: venueRow.slug ?? null,
+    booking_page_url: await resolveVenueBookingPageUrl(admin, { id: input.venueId, slug: venueRow.slug }),
     address: venueRow.address ?? null,
     phone: venueRow.phone ?? null,
     email: venueRow.email ?? null,
@@ -143,7 +146,6 @@ export async function sendCustomBookingMessage(
     logo_url: venueRow.logo_url ?? null,
     cover_photo_url: venueRow.cover_photo_url ?? null,
     website_url: venueRow.website_url ?? null,
-    booking_page_url: venueRow.booking_page_url ?? null,
   });
 
   const bookingModel: BookingModel = booking.experience_event_id

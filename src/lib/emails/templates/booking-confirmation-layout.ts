@@ -110,8 +110,8 @@ function buildTotalRowHtml(totalValue: string): string {
   return isLongPriceValue(totalValue)
     ? `<tr>` +
       `<td colspan="2" style="padding:16px 0 2px;vertical-align:top">` +
-      `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Total</p>` +
-      `<p style="margin:0;font-size:14px;color:${TEXT_BODY};line-height:1.6">${escapeHtmlMultiline(totalValue)}</p>` +
+      `<p style="margin:0 0 6px;font-size:12px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Total</p>` +
+      `<p style="margin:0;font-size:15px;color:${TEXT_BODY};line-height:1.6">${escapeHtmlMultiline(totalValue)}</p>` +
       `</td>` +
       `</tr>`
     : `<tr>` +
@@ -126,7 +126,7 @@ function buildTotalRowHtml(totalValue: string): string {
 
 /** Card-on-file notice shown in the details card deposit slot (card-hold bookings). */
 export function buildCardHoldNoticeHtml(noticeText: string): string {
-  return `<div style="margin:20px 0 0;padding:16px 18px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${escapeHtml(noticeText)}</div>`;
+  return `<div style="margin:20px 0 0;padding:16px 18px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:15px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${escapeHtml(noticeText)}</div>`;
 }
 
 // ─── Account portal callout (rendered as the final card, above the footer) ────
@@ -137,8 +137,8 @@ const ACCOUNT_CALLOUT_BORDER = '#d6e3ef';
 /** Wraps the provided account-link HTML in a centred, brand-tinted end-of-email callout. */
 function buildAccountCalloutInner(linkHtml: string, accent: string): string {
   return (
-    `<p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${accent};font-family:${FONT};text-align:center">Your ResNeo account</p>` +
-    `<div style="text-align:center;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${linkHtml}</div>`
+    `<p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${accent};font-family:${FONT};text-align:center">Your ResNeo account</p>` +
+    `<div style="text-align:center;font-size:15px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${linkHtml}</div>`
   );
 }
 
@@ -202,14 +202,14 @@ function buildEventTicketDetailRows(
 
     const priceCell = subFmt
       ? `<td style="padding:14px 0;border-bottom:1px solid ${RULE};text-align:right;vertical-align:top;white-space:nowrap">` +
-        `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(subFmt)}</p>` +
+        `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(subFmt)}</p>` +
         `</td>`
       : `<td></td>`;
 
     return (
       `<tr>` +
       `<td style="padding:14px 12px 14px 0;border-bottom:1px solid ${RULE};vertical-align:top">` +
-      `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(label)}</p>` +
+      `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(label)}</p>` +
       `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5">${escapeHtml(qtyLine)}</p>` +
       `</td>` +
       priceCell +
@@ -240,8 +240,8 @@ function buildEventTicketDetailRows(
   const paymentRow = paymentDisplay?.trim()
     ? `<tr>` +
       `<td colspan="2" style="padding:16px 0 0;vertical-align:top;border-top:1px solid ${RULE}">` +
-      `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Payment</p>` +
-      `<p style="margin:0;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${escapeHtmlMultiline(paymentDisplay.trim())}</p>` +
+      `<p style="margin:0 0 6px;font-size:12px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Payment</p>` +
+      `<p style="margin:0;font-size:15px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${escapeHtmlMultiline(paymentDisplay.trim())}</p>` +
       `</td>` +
       `</tr>`
     : '';
@@ -251,7 +251,7 @@ function buildEventTicketDetailRows(
     `<tbody>` +
     `<tr>` +
     `<td colspan="2" style="padding:0 0 12px;vertical-align:top">` +
-    `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(eventName)}</p>` +
+    `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(eventName)}</p>` +
     `</td>` +
     `</tr>` +
     itemRows.join('') +
@@ -292,7 +292,7 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
         .join('');
 
       const priceTop = g.price_display?.trim()
-        ? `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(g.price_display.trim())}</p>`
+        ? `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(g.price_display.trim())}</p>`
         : '';
 
       // When add-ons apply, close the person block with an aligned subtotal row.
@@ -303,7 +303,7 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
       const serviceRow =
         `<tr>` +
         `<td style="padding:14px 12px ${firstRowPadBottom} 0;${firstRowBorder}vertical-align:top">` +
-        `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(g.service_name)}</p>` +
+        `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(g.service_name)}</p>` +
         sub +
         addonLinesHtml +
         `</td>` +
@@ -315,10 +315,10 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
       const subtotalRow = hasSubtotal
         ? `<tr>` +
           `<td style="padding:2px 12px 14px 0;border-bottom:1px solid ${RULE};vertical-align:top">` +
-          `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Subtotal</p>` +
+          `<p style="margin:0;font-size:12px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Subtotal</p>` +
           `</td>` +
           `<td style="padding:2px 0 14px;border-bottom:1px solid ${RULE};text-align:right;vertical-align:top;white-space:nowrap">` +
-          `<p style="margin:0;font-size:15px;font-weight:700;color:${TEXT_DARK}">${escapeHtml(g.subtotal_display!.trim())}</p>` +
+          `<p style="margin:0;font-size:16px;font-weight:700;color:${TEXT_DARK}">${escapeHtml(g.subtotal_display!.trim())}</p>` +
           `</td>` +
           `</tr>`
         : '';
@@ -358,14 +358,14 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
 
     const priceCell = lineItemPrice
       ? `<td style="padding:14px 0;border-bottom:${hasPriceRow && (totalPrice || hasAddonRows) ? `1px solid ${RULE}` : 'none'};text-align:right;vertical-align:top;white-space:nowrap">` +
-        `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(lineItemPrice)}</p>` +
+        `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK}">${escapeHtml(lineItemPrice)}</p>` +
         `</td>`
       : `<td></td>`;
 
     const addonRows = hasAddonRows
       ? `<tr><td colspan="2" style="padding:14px 0 4px;border-bottom:${totalPrice ? `1px solid ${RULE}` : 'none'};vertical-align:top">` +
-        `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Extras</p>` +
-        `<ul style="margin:8px 0 0;padding-left:18px;font-size:14px;color:${TEXT_DARK};line-height:1.6">` +
+        `<p style="margin:0;font-size:12px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em">Extras</p>` +
+        `<ul style="margin:8px 0 0;padding-left:18px;font-size:15px;color:${TEXT_DARK};line-height:1.6">` +
         addonLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('') +
         `</ul>` +
         `</td></tr>`
@@ -378,7 +378,7 @@ function buildAppointmentDetailRows(booking: BookingEmailData, priceDisplay: str
       `<tbody>` +
       `<tr>` +
       `<td style="padding:14px 12px 14px 0;border-bottom:${totalPrice || hasAddonRows ? `1px solid ${RULE}` : 'none'};vertical-align:top">` +
-      `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(svcName)}</p>` +
+      `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK};line-height:1.4">${escapeHtml(svcName)}</p>` +
       subLine +
       `</td>` +
       priceCell +
@@ -409,8 +409,8 @@ function buildTableDetailRows(booking: BookingEmailData): string {
     return (
       `<tr>` +
       `<td style="padding:14px 0;${isLast ? '' : `border-bottom:1px solid ${RULE};`}vertical-align:top">` +
-      `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em;line-height:1.3">${escapeHtml(item.label)}</p>` +
-      `<p style="margin:6px 0 0;font-size:15px;font-weight:500;color:${TEXT_DARK};line-height:1.5">${escapeHtml(item.value)}</p>` +
+      `<p style="margin:0;font-size:12px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em;line-height:1.3">${escapeHtml(item.label)}</p>` +
+      `<p style="margin:6px 0 0;font-size:16px;font-weight:500;color:${TEXT_DARK};line-height:1.5">${escapeHtml(item.value)}</p>` +
       `</td>` +
       `</tr>`
     );
@@ -441,8 +441,8 @@ function buildLocationInner(opts: {
 
   return (
     `<p style="margin:0 0 14px;font-size:17px;font-weight:700;color:${TEXT_DARK};letter-spacing:-0.01em;font-family:${FONT}">Location</p>` +
-    `<p style="margin:0 0 5px;font-size:15px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">${escapeHtml(opts.venueName)}</p>` +
-    `<p style="margin:0;font-size:14px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">${escapeHtml(opts.address)}</p>` +
+    `<p style="margin:0 0 5px;font-size:16px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">${escapeHtml(opts.venueName)}</p>` +
+    `<p style="margin:0;font-size:15px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">${escapeHtml(opts.address)}</p>` +
     directionsLink
   );
 }
@@ -463,13 +463,13 @@ function buildOnlineLocationInner(opts: {
     : '';
 
   const infoBlock = opts.info
-    ? `<p style="margin:12px 0 0;font-size:14px;color:${TEXT_BODY};line-height:1.55;font-family:${FONT}">${escapeHtmlMultiline(opts.info)}</p>`
+    ? `<p style="margin:12px 0 0;font-size:15px;color:${TEXT_BODY};line-height:1.55;font-family:${FONT}">${escapeHtmlMultiline(opts.info)}</p>`
     : '';
 
   return (
     `<p style="margin:0 0 14px;font-size:17px;font-weight:700;color:${TEXT_DARK};letter-spacing:-0.01em;font-family:${FONT}">Location</p>` +
-    `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">Online</p>` +
-    `<p style="margin:5px 0 0;font-size:14px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">This service is delivered online, so there is no need to travel.</p>` +
+    `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">Online</p>` +
+    `<p style="margin:5px 0 0;font-size:15px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">This service is delivered online, so there is no need to travel.</p>` +
     infoBlock +
     joinButton
   );
@@ -479,9 +479,9 @@ function buildOnlineLocationInner(opts: {
 function buildClientAddressLocationInner(opts: { address: string | null }): string {
   return (
     `<p style="margin:0 0 14px;font-size:17px;font-weight:700;color:${TEXT_DARK};letter-spacing:-0.01em;font-family:${FONT}">Location</p>` +
-    `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">Your address</p>` +
+    `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_BODY};font-family:${FONT}">Your address</p>` +
     (opts.address
-      ? `<p style="margin:5px 0 0;font-size:14px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">${escapeHtml(opts.address)}</p>`
+      ? `<p style="margin:5px 0 0;font-size:15px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">${escapeHtml(opts.address)}</p>`
       : '') +
     `<p style="margin:12px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.6;font-family:${FONT}">We come to you for this appointment.</p>`
   );
@@ -493,7 +493,7 @@ function buildInfoCardInner(heading: string, body: string, accentBg = '#f8fafc',
   return (
     `<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:${TEXT_DARK};letter-spacing:-0.01em;font-family:${FONT}">${escapeHtml(heading)}</p>` +
     `<div style="padding:16px 18px;background:${accentBg};border-radius:12px;border:1px solid ${accentBorder}">` +
-    `<p style="margin:0;font-size:14px;color:${TEXT_BODY};line-height:1.65;font-family:${FONT}">${escapeHtml(body)}</p>` +
+    `<p style="margin:0;font-size:15px;color:${TEXT_BODY};line-height:1.65;font-family:${FONT}">${escapeHtml(body)}</p>` +
     `</div>`
   );
 }
@@ -536,7 +536,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
   // ── Hero card ──────────────────────────────────────────────────────────────
 
   const heroInner =
-    `<p style="margin:0 0 10px;font-size:15px;color:${TEXT_MUTED};font-family:${FONT}">Hi ${escapeHtml(firstName)},</p>` +
+    `<p style="margin:0 0 10px;font-size:16px;color:${TEXT_MUTED};font-family:${FONT}">Hi ${escapeHtml(firstName)},</p>` +
     // Title: "Your appointment is" + line break + "confirmed" in accent
     `<p style="margin:0;font-family:${FONT};font-size:28px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;color:${TEXT_DARK}">` +
     `${escapeHtml(before)}<br/><span style="color:${accent}">${escapeHtml(highlight)}</span>` +
@@ -578,13 +578,13 @@ export function renderBookingConfirmationDocumentHtml(input: {
       : 'Booking details';
 
   const preambleSection = blocks.preambleHtml?.trim()
-    ? `<div style="margin:16px 0 0;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${blocks.preambleHtml}</div>`
+    ? `<div style="margin:16px 0 0;font-size:15px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT}">${blocks.preambleHtml}</div>`
     : '';
 
   const preInstructions = blocks.preAppointmentInstructions?.trim()
     ? `<div style="margin:20px 0 0;padding:16px 18px;background:#eef2f3;border-radius:12px;border:1px solid #c5d3d7">` +
-      `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#2e4f59;font-family:${FONT};text-transform:uppercase;letter-spacing:0.06em">Before your appointment</p>` +
-      `<p style="margin:0;font-size:14px;color:#3d5f6a;line-height:1.6;font-family:${FONT}">${escapeHtml(blocks.preAppointmentInstructions.trim())}</p>` +
+      `<p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#2e4f59;font-family:${FONT};text-transform:uppercase;letter-spacing:0.06em">Before your appointment</p>` +
+      `<p style="margin:0;font-size:15px;color:#3d5f6a;line-height:1.6;font-family:${FONT}">${escapeHtml(blocks.preAppointmentInstructions.trim())}</p>` +
       `</div>`
     : '';
 
@@ -595,7 +595,7 @@ export function renderBookingConfirmationDocumentHtml(input: {
   const depositSection = blocks.depositHtml ?? '';
 
   const customMessageSection = blocks.customMessage?.trim()
-    ? `<div style="margin:20px 0 0;padding:16px 18px;background:#f8fafc;border-radius:12px;border:1px solid ${CARD_BORDER};font-size:14px;color:${TEXT_BODY};line-height:1.65;font-family:${FONT}">${escapeHtml(blocks.customMessage.trim())}</div>`
+    ? `<div style="margin:20px 0 0;padding:16px 18px;background:#f8fafc;border-radius:12px;border:1px solid ${CARD_BORDER};font-size:15px;color:${TEXT_BODY};line-height:1.65;font-family:${FONT}">${escapeHtml(blocks.customMessage.trim())}</div>`
     : '';
 
   const bookingRefLine =
@@ -682,16 +682,100 @@ export function renderBookingConfirmationDocumentHtml(input: {
     // Cards
     cardRows,
     // Footer
-    `<tr><td style="padding:20px 12px 36px;text-align:center">`,
-    `<p style="margin:0 0 6px;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.6">${footerText}</p>`,
-    `<p style="margin:0;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.6">Powered by ` +
-      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">ResNeo</a></p>`,
-    `</td></tr>`,
+    buildEmailFooterHtml({
+      accent,
+      venue: emailFooterVenue(venue, mapsUrl, { includeAddress: resolvedLocation.kind === 'business_venue' }),
+      note: footerText,
+      baseUrl: base,
+    }),
     `</table>`,
     `</td></tr>`,
     `</table>`,
     `</body></html>`,
   ].join('\n');
+}
+
+// ─── Page footer ─────────────────────────────────────────────────────────────
+// One contact block under every guest email: the venue's name, then its address,
+// phone and website as real links in the accent colour. Explicit anchors matter
+// here: left as plain text, Gmail and Apple Mail auto-link the address and phone
+// in their own colours, so the three lines never matched.
+
+export interface EmailFooterVenue {
+  name: string;
+  address?: string | null;
+  phone?: string | null;
+  /** Normalised website href, or null to omit. */
+  websiteUrl?: string | null;
+  /** Google Maps link for the address, or null to show the address as plain text. */
+  mapsUrl?: string | null;
+}
+
+function footerLink(href: string, label: string, accent: string): string {
+  return (
+    `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" ` +
+    `style="color:${accent};font-weight:600;text-decoration:none;white-space:nowrap">${escapeHtml(label)}</a>`
+  );
+}
+
+export function buildEmailFooterHtml(opts: {
+  accent: string;
+  venue?: EmailFooterVenue | null;
+  note: string;
+  baseUrl: string;
+}): string {
+  const v = opts.venue;
+  const links: string[] = [];
+  if (v?.address?.trim()) {
+    const address = v.address.trim();
+    links.push(
+      v.mapsUrl?.trim()
+        ? footerLink(v.mapsUrl.trim(), address, opts.accent)
+        : `<span style="color:${TEXT_MUTED};white-space:nowrap">${escapeHtml(address)}</span>`,
+    );
+  }
+  if (v?.phone?.trim()) {
+    const phone = v.phone.trim();
+    links.push(footerLink(`tel:${phone.replace(/[^+\d]/g, '')}`, phone, opts.accent));
+  }
+  if (v?.websiteUrl?.trim()) links.push(footerLink(v.websiteUrl.trim(), 'Visit website', opts.accent));
+
+  const separator = `<span style="color:#cbd5e1;padding:0 8px">&middot;</span>`;
+  const contactBlock = v
+    ? `<p style="margin:0 0 6px;font-family:${FONT};font-size:13px;font-weight:700;letter-spacing:-0.01em;color:${TEXT_BODY};line-height:1.5">${escapeHtml(v.name)}</p>` +
+      (links.length > 0
+        ? `<p style="margin:0 0 18px;font-family:${FONT};font-size:12px;line-height:2;color:${TEXT_MUTED}">${links.join(separator)}</p>`
+        : `<div style="height:12px"></div>`)
+    : '';
+
+  return (
+    `<tr><td style="padding:24px 12px 36px;text-align:center">` +
+    contactBlock +
+    `<p style="margin:0 0 6px;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.6">${opts.note}</p>` +
+    `<p style="margin:0;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.6">Powered by ` +
+    `<a href="${escapeHtml(opts.baseUrl)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">ResNeo</a></p>` +
+    `</td></tr>`
+  );
+}
+
+/**
+ * The footer block for a venue's own emails, built from the venue email data.
+ * The address is shown only when the visit happens at the venue: for a service
+ * at the client's address or online, a venue address in the footer reads as a
+ * place to go, so it stays out, as it does in the location card.
+ */
+export function emailFooterVenue(
+  venue: VenueEmailData,
+  mapsUrl: string | null,
+  opts: { includeAddress: boolean } = { includeAddress: true },
+): EmailFooterVenue {
+  return {
+    name: venue.name,
+    address: opts.includeAddress ? (venue.address ?? null) : null,
+    phone: venue.phone ?? null,
+    websiteUrl: normalizeWebsiteUrlForLink(venue.website_url ?? undefined),
+    mapsUrl,
+  };
 }
 
 // ─── Generic transactional email layout ──────────────────────────────────────
@@ -751,7 +835,7 @@ function buildTransactionalDetailRows(opts: {
       return (
         `<tr>` +
         `<td style="padding:14px 0;${isLast ? '' : `border-bottom:1px solid ${RULE};`}vertical-align:top">` +
-        `<p style="margin:0;font-size:15px;font-weight:600;color:${TEXT_DARK};line-height:1.4;font-family:${FONT}">${headline}</p>` +
+        `<p style="margin:0;font-size:16px;font-weight:600;color:${TEXT_DARK};line-height:1.4;font-family:${FONT}">${headline}</p>` +
         `<p style="margin:4px 0 0;font-size:13px;color:${TEXT_MUTED};line-height:1.5;font-family:${FONT}">${detail}</p>` +
         addonLinesHtml +
         subtotalHtml +
@@ -762,8 +846,8 @@ function buildTransactionalDetailRows(opts: {
 
     const summaryRow = opts.priceDisplay?.trim()
       ? `<tr><td style="padding:14px 0 2px;vertical-align:top">` +
-        `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${FONT}">Total</p>` +
-        `<p style="margin:6px 0 0;font-size:15px;font-weight:500;color:${TEXT_DARK};line-height:1.5;font-family:${FONT}">${escapeHtmlMultiline(opts.priceDisplay.trim())}</p>` +
+        `<p style="margin:0;font-size:12px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em;font-family:${FONT}">Total</p>` +
+        `<p style="margin:6px 0 0;font-size:16px;font-weight:500;color:${TEXT_DARK};line-height:1.5;font-family:${FONT}">${escapeHtmlMultiline(opts.priceDisplay.trim())}</p>` +
         `</td></tr>`
       : '';
 
@@ -819,8 +903,8 @@ function buildTransactionalDetailRows(opts: {
     return (
       `<tr>` +
       `<td style="padding:14px 0;${isLast ? '' : `border-bottom:1px solid ${RULE};`}vertical-align:top">` +
-      `<p style="margin:0;font-size:11px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em;line-height:1.3;font-family:${FONT}">${escapeHtml(item.label)}</p>` +
-      `<p style="margin:6px 0 0;font-size:15px;font-weight:500;color:${TEXT_DARK};line-height:1.5;font-family:${FONT}">${valueHtml}</p>` +
+      `<p style="margin:0;font-size:12px;font-weight:700;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.06em;line-height:1.3;font-family:${FONT}">${escapeHtml(item.label)}</p>` +
+      `<p style="margin:6px 0 0;font-size:16px;font-weight:500;color:${TEXT_DARK};line-height:1.5;font-family:${FONT}">${valueHtml}</p>` +
       (item.extraHtml ?? '') +
       `</td>` +
       `</tr>`
@@ -840,7 +924,7 @@ function ctaPillButton(label: string, href: string, accent: string, outlined = f
     `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto">` +
     `<tr><td align="center" style="border-radius:9999px;background:${outlined ? CARD_BG : accent};${outlined ? `border:2px solid ${accent};` : ''}">` +
     `<a href="${escapeHtml(href)}" target="_blank" ` +
-    `style="display:inline-block;padding:${outlined ? '13px 34px' : '15px 36px'};font-family:${FONT};font-size:15px;font-weight:600;` +
+    `style="display:inline-block;padding:${outlined ? '13px 34px' : '15px 36px'};font-family:${FONT};font-size:16px;font-weight:600;` +
     `text-decoration:none;border-radius:9999px;color:${outlined ? accent : '#ffffff'}">${escapeHtml(label)}</a>` +
     `</td></tr></table>`
   );
@@ -878,6 +962,8 @@ export interface TransactionalEmailOptions {
   secondaryCtaUrl?: string | null;
   postCtaHtml?: string | null;
   footerNote?: string;
+  /** Venue contact block above the footer note: name, address, phone and website links. */
+  footerVenue?: EmailFooterVenue | null;
   /** Venue brand colour for buttons and links; absent means the ResNeo default. */
   brandColour?: string | null;
 }
@@ -914,7 +1000,7 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
   const heroSection =
     logoSection +
     `<p style="margin:0 0 10px;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:${TEXT_MUTED};text-align:center;font-family:${FONT}">${escapeHtml(opts.venueName)}</p>` +
-    `<p style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.02em;color:${TEXT_DARK};text-align:center;line-height:1.25;font-family:${FONT}">${escapeHtml(opts.heading)}</p>` +
+    `<p style="margin:0;font-size:26px;font-weight:700;letter-spacing:-0.02em;color:${TEXT_DARK};text-align:center;line-height:1.25;font-family:${FONT}">${escapeHtml(opts.heading)}</p>` +
     dateTimeHero;
 
   // ── Body section ───────────────────────────────────────────────────────────
@@ -940,7 +1026,7 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
 
   const customSection = opts.customMessage?.trim()
     ? `<div style="margin:20px 0 0;padding:16px 18px;background:#f8fafc;border-radius:12px;` +
-      `border:1px solid ${CARD_BORDER};font-size:14px;color:${TEXT_BODY};line-height:1.65;font-family:${FONT}">` +
+      `border:1px solid ${CARD_BORDER};font-size:15px;color:${TEXT_BODY};line-height:1.65;font-family:${FONT}">` +
       `${escapeHtml(opts.customMessage.trim())}</div>`
     : '';
 
@@ -954,11 +1040,11 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
       : '';
 
   const postCtaSection = opts.postCtaHtml?.trim()
-    ? `<div style="margin:28px 0 0;padding:18px 20px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:14px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT};text-align:center">${opts.postCtaHtml}</div>`
+    ? `<div style="margin:28px 0 0;padding:18px 20px;background:#eef4fa;border:1px solid #d6e3ef;border-radius:12px;font-size:15px;color:${TEXT_BODY};line-height:1.6;font-family:${FONT};text-align:center">${opts.postCtaHtml}</div>`
     : '';
 
   const bodySection =
-    `<div style="font-family:${FONT};font-size:15px;color:${TEXT_BODY};line-height:1.65">` +
+    `<div style="font-family:${FONT};font-size:16px;color:${TEXT_BODY};line-height:1.65">` +
     opts.mainContent +
     `</div>` +
     detailRows +
@@ -990,11 +1076,12 @@ export function renderTransactionalEmailHtml(opts: TransactionalEmailOptions): s
     `<tr><td align="center" style="padding:36px 16px 28px">`,
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%">`,
     `<tr><td>${mainCard}</td></tr>`,
-    `<tr><td style="padding:20px 12px 36px;text-align:center">`,
-    `<p style="margin:0 0 6px;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.6">${escapeHtml(footerText)}</p>`,
-    `<p style="margin:0;font-family:${FONT};font-size:12px;color:${TEXT_FAINT};line-height:1.6">Powered by ` +
-      `<a href="${escapeHtml(base)}" target="_blank" style="color:#003B6F;font-weight:600;text-decoration:none">ResNeo</a></p>`,
-    `</td></tr>`,
+    buildEmailFooterHtml({
+      accent,
+      venue: opts.footerVenue ?? null,
+      note: escapeHtml(footerText),
+      baseUrl: base,
+    }),
     `</table>`,
     `</td></tr>`,
     `</table>`,

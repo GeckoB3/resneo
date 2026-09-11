@@ -5,6 +5,7 @@ import {
   type BookingAnchorRow,
 } from '@/lib/emails/booking-email-enrichment';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { resolveVenueBookingPageUrl } from '@/lib/emails/venue-booking-page-link';
 import { sendPolicyMessage } from './outbound';
 import type { MessageType, Recipient, TemplateVariables } from './types';
 import { sendEmail } from '@/lib/emails/send-email';
@@ -162,7 +163,7 @@ async function buildGuestBookingContext(
   const venueRow = await admin
     .from('venues')
     .select(
-      'name, address, phone, booking_model, email, reply_to_email, logo_url, cover_photo_url, website_url, timezone, booking_page_config',
+      'name, slug, address, phone, booking_model, email, reply_to_email, logo_url, cover_photo_url, website_url, timezone, booking_page_config',
     )
     .eq('id', ctx.venue_id)
     .maybeSingle();
@@ -175,6 +176,7 @@ async function buildGuestBookingContext(
   const venue = venueRow.data as
     | {
         name?: string | null;
+        slug?: string | null;
         address?: string | null;
         phone?: string | null;
         booking_model?: string | null;
@@ -283,6 +285,8 @@ async function buildGuestBookingContext(
     },
     venue: venueRowToEmailData({
       name: venue.name,
+      slug: venue.slug ?? null,
+      booking_page_url: await resolveVenueBookingPageUrl(admin, { id: ctx.venue_id, slug: venue.slug }),
       address: venue.address ?? null,
       phone: venue.phone ?? null,
       email: venue.email ?? null,

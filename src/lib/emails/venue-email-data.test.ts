@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { venueRowToEmailData } from './venue-email-data';
+import { venueBookingPageUrl, venueRowToEmailData } from './venue-email-data';
 
 describe('venueRowToEmailData', () => {
   it('prefers logo_url over cover_photo_url for the email avatar', () => {
@@ -38,6 +38,24 @@ describe('venueRowToEmailData', () => {
     ).toBe('hello@example.com');
 
     expect(venueRowToEmailData({ name: 'Test Venue' }).reply_to_email).toBeNull();
+  });
+
+  it('derives booking_page_url from the venue slug on the public origin', () => {
+    const out = venueRowToEmailData({ name: 'Test Venue', slug: 'sharps-barbers' });
+    expect(out.booking_page_url).toMatch(/^https?:\/\/[^/]+\/book\/sharps-barbers$/);
+  });
+
+  it('leaves booking_page_url unset without a slug, so the Book again button is dropped', () => {
+    expect(venueRowToEmailData({ name: 'Test Venue' }).booking_page_url).toBeUndefined();
+    expect(venueRowToEmailData({ name: 'Test Venue', slug: '  ' }).booking_page_url).toBeUndefined();
+    expect(venueBookingPageUrl(null)).toBeNull();
+  });
+
+  it('prefers an explicit booking_page_url over the slug', () => {
+    expect(
+      venueRowToEmailData({ name: 'Test Venue', slug: 'x', booking_page_url: 'https://example.com/book/y' })
+        .booking_page_url,
+    ).toBe('https://example.com/book/y');
   });
 
   it('passes through website_url for the Venue button', () => {

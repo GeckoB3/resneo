@@ -36,13 +36,13 @@ export function buildReviewRequestBlock(
 
   const replyTo = venue.reply_to_email?.trim() || null;
   const directLine = replyTo
-    ? `<p style="margin:12px 0 0 0;font-size:13px;color:#64748b">Something not quite right? <a href="mailto:${escapeHtml(replyTo)}" style="color:#64748b">Tell us directly</a> and we will put it right.</p>`
+    ? `<p style="margin:12px 0 0 0;font-size:14px;color:#64748b">Something not quite right? <a href="mailto:${escapeHtml(replyTo)}" style="color:#64748b">Tell us directly</a> and we will put it right.</p>`
     : '';
 
   const html =
     `<div style="margin:20px 0 0 0;padding:16px;border:1px solid #e2e8f0;border-radius:12px">` +
-    `<p style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#0f172a">How did we do?</p>` +
-    `<p style="margin:0 0 12px 0;font-size:14px;color:#334155">${intro} If you have a moment, a Google review really helps other people find us.</p>` +
+    `<p style="margin:0 0 6px 0;font-size:16px;font-weight:600;color:#0f172a">How did we do?</p>` +
+    `<p style="margin:0 0 12px 0;font-size:15px;color:#334155">${intro} If you have a moment, a Google review really helps other people find us.</p>` +
     `<a href="${reviewUrl}" style="display:inline-block;padding:10px 18px;border-radius:9999px;background:${emailAccent(venue.brand_colour)};color:#ffffff;font-size:14px;font-weight:600;text-decoration:none">Leave a Google review</a>` +
     directLine +
     `</div>`;

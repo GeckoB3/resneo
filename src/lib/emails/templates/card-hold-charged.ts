@@ -1,7 +1,8 @@
 import type { BookingEmailData, VenueEmailData, RenderedEmail } from "../types";
 import { formatCardHoldFeePence } from "@/lib/booking/card-hold-terms";
 import { formatDate, formatTime } from "./base-template";
-import { renderTransactionalEmailHtml } from "./booking-confirmation-layout";
+import { emailFooterVenue, renderTransactionalEmailHtml } from "./booking-confirmation-layout";
+import { buildGoogleMapsDirectionsUrl } from "../external-links";
 
 function isAppointment(booking: BookingEmailData): boolean {
   return (
@@ -74,6 +75,7 @@ export function renderCardHoldChargedEmail(
 
   const html = renderTransactionalEmailHtml({
     venueName: venue.name,
+    footerVenue: emailFooterVenue(venue, buildGoogleMapsDirectionsUrl(venue.address)),
     brandColour: venue.brand_colour ?? null,
     venueLogoUrl: venue.logo_url,
     heading: "No-show fee charged",

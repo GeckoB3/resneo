@@ -345,12 +345,24 @@ describe("renderDayOfReminderSms", () => {
 });
 
 describe("renderPostVisitEmail", () => {
-  it("renders thank-you email", () => {
-    const result = renderPostVisitEmail(SAMPLE_BOOKING, SAMPLE_VENUE);
+  it("renders thank-you email with a Book again link to the venue's booking page", () => {
+    const result = renderPostVisitEmail(SAMPLE_BOOKING, {
+      ...SAMPLE_VENUE,
+      booking_page_url: "https://www.resneo.com/book/golden-whisk",
+    });
     expect(result.subject).toContain("Thanks");
     expect(result.html).toContain("enjoyed your visit");
     expect(result.html).toContain("Book again");
+    expect(result.html).toContain('href="https://www.resneo.com/book/golden-whisk"');
+    expect(result.text).toContain("Book again: https://www.resneo.com/book/golden-whisk");
     expect(result.html).toContain("had a booking");
+  });
+
+  it("drops the Book again button rather than guessing an address", () => {
+    const result = renderPostVisitEmail(SAMPLE_BOOKING, SAMPLE_VENUE);
+    expect(result.html).not.toContain("Book again");
+    expect(result.html).not.toContain("/book/the-golden-whisk");
+    expect(result.text).not.toContain("Book again:");
   });
 });
 

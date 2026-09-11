@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { datedCalendarHoursOutsideVenue, describeDatedMismatch, type CalendarLike } from '@/lib/calendar/hours-mismatch';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import type { VenueSettings } from '../types';
@@ -39,6 +41,36 @@ interface BusinessClosuresSectionProps {
   isAdmin: boolean;
   onUpdate: (patch: Partial<VenueSettings>) => void;
   onInitialLoadComplete?: () => void;
+  /** yyyy-mm-dd to open on with that day picked (the diary's hours dialog). */
+  initialDate?: string | null;
+}
+
+/**
+ * Loads the roster and says which calendars are still scheduled to work
+ * outside the venue's resolved hours on the saved block's dates; null when none.
+ */
+async function venueDatedAdvice(
+  openingHours: VenueSettings['opening_hours'],
+  allBlocks: Block[],
+  saved: Block,
+): Promise<string | null> {
+  try {
+    const res = await fetch('/api/venue/practitioners?roster=1', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { practitioners?: CalendarLike[] };
+    const venueWide = allBlocks.filter((b) => b.service_id == null) as unknown as AvailabilityBlock[];
+    return describeDatedMismatch(
+      datedCalendarHoursOutsideVenue(
+        body.practitioners ?? [],
+        openingHours as OpeningHours | null,
+        venueWide,
+        saved.date_start,
+        saved.date_end,
+      ),
+    );
+  } catch {
+    return null;
+  }
 }
 
 function pad2(n: number): string {
@@ -200,21 +232,24 @@ export function BusinessClosuresSection({
   isAdmin,
   onUpdate: _onUpdate,
   onInitialLoadComplete,
+  initialDate = null,
 }: BusinessClosuresSectionProps) {
   useEffect(() => {
     if (!isAdmin) onInitialLoadComplete?.();
   }, [isAdmin, onInitialLoadComplete]);
 
   if (!isAdmin) return null;
-  return <UnifiedBlocksEditor venue={venue} onInitialLoadComplete={onInitialLoadComplete} />;
+  return <UnifiedBlocksEditor venue={venue} onInitialLoadComplete={onInitialLoadComplete} initialDate={initialDate} />;
 }
 
 function UnifiedBlocksEditor({
   venue,
   onInitialLoadComplete,
+  initialDate,
 }: {
   venue: VenueSettings;
   onInitialLoadComplete?: () => void;
+  initialDate?: string | null;
 }) {
   const isRestaurant = isRestaurantTableProductTier(venue.pricing_tier ?? null);
 
@@ -223,14 +258,21 @@ function UnifiedBlocksEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** After a save: calendars still scheduled to work outside the new closure or amended hours. */
+  const [advice, setAdvice] = useState<string | null>(null);
 
+  // Opened from the diary's clock button, the editor lands on the day being
+  // viewed with that day already picked.
+  const seededDate = initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate) ? initialDate : null;
   const nowDate = new Date();
-  const [calYear, setCalYear] = useState(nowDate.getFullYear());
-  const [calMonth, setCalMonth] = useState(nowDate.getMonth() + 1);
-  const [rangeStart, setRangeStart] = useState<string | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+  const [calYear, setCalYear] = useState(seededDate ? Number(seededDate.slice(0, 4)) : nowDate.getFullYear());
+  const [calMonth, setCalMonth] = useState(seededDate ? Number(seededDate.slice(5, 7)) : nowDate.getMonth() + 1);
+  const [rangeStart, setRangeStart] = useState<string | null>(seededDate);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(seededDate);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<DraftState>(emptyDraft);
+  const [draft, setDraft] = useState<DraftState>(() =>
+    seededDate ? { ...emptyDraft(), date_start: seededDate, date_end: seededDate } : emptyDraft(),
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -378,18 +420,21 @@ function UnifiedBlocksEditor({
       if (!data.block) {
         throw new Error('Failed to save');
       }
-      if (editingId) {
-        setBlocks((prev) => prev.map((b) => (b.id === editingId ? data.block! : b)));
-      } else {
-        setBlocks((prev) => [...prev, data.block!]);
-      }
+      const savedBlock = data.block;
+      const nextBlocks = editingId
+        ? blocks.map((b) => (b.id === editingId ? savedBlock : b))
+        : [...blocks, savedBlock];
+      setBlocks(nextBlocks);
       cancelEdit();
+      if (savedBlock.block_type === 'closed' || savedBlock.block_type === 'amended_hours') {
+        setAdvice(await venueDatedAdvice(venue.opening_hours, nextBlocks, savedBlock));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
       setSaving(false);
     }
-  }, [draft, editingId, cancelEdit]);
+  }, [draft, editingId, cancelEdit, blocks, venue.opening_hours]);
 
   const handleDelete = useCallback(async (id: string) => {
     if (!confirm('Remove this block?')) return;
@@ -416,12 +461,14 @@ function UnifiedBlocksEditor({
     [blocks, today],
   );
 
-  const blockTypeOptions: { value: BlockType; label: string }[] = [
-    { value: 'closed', label: 'Closure' },
-    { value: 'amended_hours', label: 'Amended Hours' },
+  // Same chooser as the Closures & amended hours tab on Calendar availability:
+  // one button per kind, with a hint, instead of a dropdown.
+  const blockTypeOptions: { value: BlockType; label: string; hint: string }[] = [
+    { value: 'closed', label: 'Closure', hint: 'All day, or a window each day' },
+    { value: 'amended_hours', label: 'Amended hours', hint: 'Open on these dates with these hours' },
   ];
   if (isRestaurant) {
-    blockTypeOptions.push({ value: 'reduced_capacity', label: 'Reduced Capacity' });
+    blockTypeOptions.push({ value: 'reduced_capacity', label: 'Reduced capacity', hint: 'Fewer covers on these dates' });
   }
 
   if (loading) {
@@ -471,15 +518,25 @@ function UnifiedBlocksEditor({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
-              <select
-                value={draft.block_type}
-                onChange={(e) => setDraft({ ...draft, block_type: e.target.value as BlockType })}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-              >
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Block type">
                 {blockTypeOptions.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.block_type === o.value}
+                    onClick={() => setDraft({ ...draft, block_type: o.value })}
+                    className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                      draft.block_type === o.value
+                        ? 'border-brand-600 bg-brand-50 text-brand-900'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="block font-medium">{o.label}</span>
+                    <span className="block text-[11px] text-slate-500">{o.hint}</span>
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
 
             <div>
@@ -636,6 +693,26 @@ function UnifiedBlocksEditor({
             </div>
           </div>
 
+          {advice ? (
+            <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-start sm:justify-between">
+          <p>{advice}</p>
+          <div className="flex shrink-0 items-center gap-2">
+            <a
+              href="/dashboard/calendar-availability?tab=closures"
+              className="whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Open calendar closures
+            </a>
+            <button
+              type="button"
+              onClick={() => setAdvice(null)}
+              className="text-xs font-medium text-amber-800 underline-offset-2 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+          ) : null}
           {error && (
             <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
           )}

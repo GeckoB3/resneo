@@ -3,10 +3,8 @@ import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
-import {
-  sendCustomBookingMessage,
-  type SendCustomBookingMessageResult,
-} from '@/lib/communications/send-custom-booking-message';
+import type { SendCustomBookingMessageResult } from '@/lib/communications/send-custom-booking-message';
+import { hasMarketingPermission, marketingSkipReason } from '@/lib/guests/marketing-permission';
 import { formatGuestDisplayName } from '@/lib/guests/name';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
@@ -15,14 +13,23 @@ export type SendCustomGuestMessageInput = {
   guestId: string;
   message: string;
   channel: GuestMessageChannel;
+  /**
+   * Bulk sends (contacts selected with the tick boxes) are marketing: only contacts
+   * with a recorded consent and no opt-out receive them. One-to-one messages from a
+   * contact's own panel are sent regardless, like a phone call would be.
+   */
+  requireMarketingPermission?: boolean;
 };
 
-export type SendCustomGuestMessageResult = SendCustomBookingMessageResult;
+export type SendCustomGuestMessageResult = SendCustomBookingMessageResult & {
+  /** Set when the contact was skipped for lack of marketing permission; nothing was attempted. */
+  skippedReason?: string;
+};
 
 /**
- * Sends a staff-authored custom message to a guest (contacts / CRM), reusing the same
- * policy + templates as booking-initiated custom messages. Prefer the latest booking as
- * anchor for communication_logs when one exists; otherwise log with guest_id only.
+ * Sends a staff-authored custom message to a guest (contacts / CRM). The message is a
+ * plain note: it is never anchored on, and never mentions, any of the guest's bookings.
+ * Logged against the guest (communication_logs.guest_id) with no booking.
  */
 export async function sendCustomGuestMessage(
   input: SendCustomGuestMessageInput,
@@ -31,7 +38,7 @@ export async function sendCustomGuestMessage(
 
   const { data: guestRow, error: guestError } = await admin
     .from('guests')
-    .select('id, venue_id, first_name, last_name, email, phone')
+    .select('id, venue_id, first_name, last_name, email, phone, marketing_consent, marketing_opt_out')
     .eq('id', input.guestId)
     .eq('venue_id', input.venueId)
     .maybeSingle();
@@ -51,34 +58,22 @@ export async function sendCustomGuestMessage(
     last_name: string | null;
     email: string | null;
     phone: string | null;
+    marketing_consent: boolean | null;
+    marketing_opt_out: boolean | null;
   };
 
-  const { data: anchorBooking, error: anchorError } = await admin
-    .from('bookings')
-    .select('id')
-    .eq('guest_id', guest.id)
-    .eq('venue_id', input.venueId)
-    .order('booking_date', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (anchorError) {
-    console.error('[sendCustomGuestMessage] anchor booking lookup failed:', anchorError);
-  }
-
-  if (anchorBooking?.id && typeof anchorBooking.id === 'string') {
-    return sendCustomBookingMessage({
-      venueId: input.venueId,
-      bookingId: anchorBooking.id,
-      message: input.message,
-      channel: input.channel,
-    });
+  if (input.requireMarketingPermission && !hasMarketingPermission(guest)) {
+    return {
+      attempted: [],
+      skippedReason: marketingSkipReason(guest) ?? 'No marketing permission on file',
+    };
   }
 
   const { data: venueRow, error: venueError } = await admin
     .from('venues')
-    .select('name, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config')
+    .select(
+      'name, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config, logo_url, cover_photo_url, website_url, booking_page_url',
+    )
     .eq('id', input.venueId)
     .maybeSingle();
 
@@ -98,6 +93,10 @@ export async function sendCustomGuestMessage(
     reply_to_email: venueRow.reply_to_email ?? null,
     timezone: venueRow.timezone ?? null,
     booking_page_config: venueRow.booking_page_config ?? null,
+    logo_url: venueRow.logo_url ?? null,
+    cover_photo_url: venueRow.cover_photo_url ?? null,
+    website_url: venueRow.website_url ?? null,
+    booking_page_url: venueRow.booking_page_url ?? null,
   });
 
   const bookingModel: BookingModel =
@@ -107,6 +106,8 @@ export async function sendCustomGuestMessage(
   const guestEmail = guest.email?.trim() || null;
   const guestPhone = guest.phone?.trim() || null;
 
+  // The renderer ignores every booking field for custom_message; this shape only
+  // satisfies the policy pipeline's contract and carries the recipient details.
   const minimalBooking: BookingEmailData = {
     id: guest.id,
     guest_name: formatGuestDisplayName(guest.first_name, guest.last_name),

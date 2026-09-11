@@ -118,7 +118,9 @@ export async function sendCustomBookingMessage(
 
   const { data: venueRow, error: venueError } = await admin
     .from('venues')
-    .select('name, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config')
+    .select(
+      'name, address, phone, booking_model, email, reply_to_email, timezone, booking_page_config, logo_url, cover_photo_url, website_url, booking_page_url',
+    )
     .eq('id', input.venueId)
     .maybeSingle();
 
@@ -138,6 +140,10 @@ export async function sendCustomBookingMessage(
     reply_to_email: venueRow.reply_to_email ?? null,
     timezone: venueRow.timezone ?? null,
     booking_page_config: venueRow.booking_page_config ?? null,
+    logo_url: venueRow.logo_url ?? null,
+    cover_photo_url: venueRow.cover_photo_url ?? null,
+    website_url: venueRow.website_url ?? null,
+    booking_page_url: venueRow.booking_page_url ?? null,
   });
 
   const bookingModel: BookingModel = booking.experience_event_id

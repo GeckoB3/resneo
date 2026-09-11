@@ -563,20 +563,40 @@ export async function PATCH(
     let nextConsent = Boolean(prev.marketing_consent);
     let nextConsentAt: string | null = prev.marketing_consent_at;
 
+    // The two flags are one preference seen from two sides (see
+    // lib/guests/marketing-permission.ts): recording a fresh consent lifts a
+    // standing opt-out, and opting out withdraws the consent, so the pair can
+    // never say "consented" and "opted out" at once.
     if (parsed.data.marketing_opt_out !== undefined) {
       nextOptOut = parsed.data.marketing_opt_out;
       update.marketing_opt_out = nextOptOut;
+      if (nextOptOut && parsed.data.marketing_consent === undefined && nextConsent) {
+        nextConsent = false;
+        nextConsentAt = null;
+        update.marketing_consent = false;
+        update.marketing_consent_at = null;
+      }
     }
     if (parsed.data.marketing_consent !== undefined) {
       nextConsent = parsed.data.marketing_consent;
       update.marketing_consent = nextConsent;
       if (nextConsent) {
-        nextConsentAt = new Date().toISOString();
+        nextConsentAt = prev.marketing_consent ? prev.marketing_consent_at ?? new Date().toISOString() : new Date().toISOString();
         update.marketing_consent_at = nextConsentAt;
+        if (nextOptOut && parsed.data.marketing_opt_out === undefined) {
+          nextOptOut = false;
+          update.marketing_opt_out = false;
+        }
       } else {
         nextConsentAt = null;
         update.marketing_consent_at = null;
       }
+    }
+    if (nextConsent && nextOptOut) {
+      return NextResponse.json(
+        { error: 'A contact cannot both consent to marketing and be opted out. Choose one.' },
+        { status: 400 },
+      );
     }
 
     if (parsed.data.custom_fields !== undefined) {

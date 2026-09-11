@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { hasMarketingPermission } from '@/lib/guests/marketing-permission';
 import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
@@ -150,9 +151,8 @@ export async function POST(request: NextRequest) {
       for (const row of rows) {
         const r = row as { id: string; marketing_opt_out: boolean; marketing_consent: boolean };
         if (body.dry_run) {
-          if (r.marketing_opt_out) results.push({ guest_id: r.id, skipped_reason: 'opt_out' });
-          else if (!r.marketing_consent) results.push({ guest_id: r.id, skipped_reason: 'no_consent' });
-          else results.push({ guest_id: r.id, sent: true });
+          if (hasMarketingPermission(r)) results.push({ guest_id: r.id, sent: true });
+          else results.push({ guest_id: r.id, skipped_reason: r.marketing_opt_out ? 'opt_out' : 'no_consent' });
           continue;
         }
         const out = await sendMarketingContactMessage({

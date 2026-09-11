@@ -702,27 +702,33 @@ export function ContactsDashboard({
               const res = await fetch(`/api/venue/guests/${guestId}/message`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message, channel }),
+                // Selected with the tick boxes = a broadcast: only contacts with
+                // marketing permission receive it. The server skips the rest.
+                body: JSON.stringify({ message, channel, respect_marketing_permission: true }),
               });
               const payload = (await res.json().catch(() => ({}))) as {
                 success?: boolean;
+                skipped?: boolean;
+                reason?: string;
                 error?: string;
                 errors?: string[];
               };
+              const skipped = Boolean(res.ok && payload.skipped);
               const sent = Boolean(res.ok && payload.success);
               const issues =
                 payload.errors && payload.errors.length > 0
                   ? payload.errors.join('; ')
                   : payload.error ?? null;
-              return { sent, issues, guestId };
+              return { sent, skipped, issues, guestId };
             } catch {
-              return { sent: false, issues: 'Request failed', guestId };
+              return { sent: false, skipped: false, issues: 'Request failed', guestId };
             }
           }),
         );
         const okCount = outcomes.filter((o) => o.sent).length;
+        const skippedCount = outcomes.filter((o) => o.skipped).length;
         const failureSummaries = outcomes
-          .filter((o) => !o.sent && o.issues)
+          .filter((o) => !o.sent && !o.skipped && o.issues)
           .slice(0, 5)
           .map((o) => {
             const row = guests.find((rowGuest) => rowGuest.id === o.guestId);
@@ -734,15 +740,26 @@ export function ContactsDashboard({
                   : '';
             return `${name || clientWord}: ${o.issues}`;
           });
-        if (okCount === selectedIds.length) {
-          addToast(`Message sent to ${okCount} ${clientLower}${okCount === 1 ? '' : 's'}`, 'success');
+        const skippedNote =
+          skippedCount > 0
+            ? `${skippedCount} skipped (no marketing permission)`
+            : '';
+        if (okCount + skippedCount === selectedIds.length && okCount > 0) {
+          addToast(
+            `Message sent to ${okCount} ${clientLower}${okCount === 1 ? '' : 's'}${skippedNote ? `, ${skippedNote}` : ''}`,
+            'success',
+          );
         } else if (okCount > 0) {
           const preview = failureSummaries.slice(0, 2).join(' · ');
-          setError(`Sent to ${okCount}/${selectedIds.length}. ${preview}`);
+          setError(`Sent to ${okCount}/${selectedIds.length}. ${skippedNote ? `${skippedNote}. ` : ''}${preview}`);
           addToast(`Sent to ${okCount}/${selectedIds.length}`, 'error');
+        } else if (skippedCount === selectedIds.length) {
+          const msg = `No messages sent: none of the selected ${clientLower}s has given marketing permission.`;
+          setError(msg);
+          addToast(msg, 'error');
         } else {
           const first = failureSummaries[0] ?? 'No messages were sent.';
-          setError(first);
+          setError(skippedNote ? `${first} ${skippedNote}.` : first);
           addToast(first, 'error');
         }
         setSelectedIds([]);
@@ -1971,7 +1988,7 @@ export function ContactsDashboard({
             void runBulkContactMessage(msg, ch);
           }}
           title={`Message ${selectedIds.length} ${clientWord}${selectedIds.length !== 1 ? 's' : ''}`}
-          description={`The same message goes to each selected ${clientLower}. Contacts without email or SMS on file are skipped when that channel is chosen, same behaviour as bulk messaging from ${bookingWord}s.`}
+          description={`The same message goes to each selected ${clientLower} who has given marketing permission. Anyone opted out, or without a recorded consent, is skipped, as are contacts without email or SMS on file for the chosen channel.`}
         />
       ) : null}
 

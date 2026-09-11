@@ -24,6 +24,7 @@
 const NON_OCCUPYING_BLOCK_TYPES = new Set([
   'venue_closed',
   'practitioner_closed',
+  'venue_and_calendar_closed',
   'break',
 ]);
 

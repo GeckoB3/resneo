@@ -263,6 +263,8 @@ export function StaffLeaveCalendarPanel({
   venueHours = null,
   onError,
   onChanged,
+  initialDate = null,
+  initialCalendarId: initialCalendarIdProp = null,
 }: {
   practitioners: CalendarOption[];
   isAdmin: boolean;
@@ -272,11 +274,18 @@ export function StaffLeaveCalendarPanel({
   onError: (msg: string | null) => void;
   /** Called after amended hours change, so the page can refresh the calendars it holds. */
   onChanged?: () => void;
+  /** yyyy-mm-dd to open on with that day picked (the diary's hours dialog). */
+  initialDate?: string | null;
+  /** Calendar to preselect when the user may choose (admins). */
+  initialCalendarId?: string | null;
 }) {
   const canManageUnavailability = isAdmin || Boolean(selfPractitionerId);
 
   const initialCalendarId =
-    selfPractitionerId ?? practitioners[0]?.id ?? '';
+    selfPractitionerId ??
+    (initialCalendarIdProp && practitioners.some((p) => p.id === initialCalendarIdProp)
+      ? initialCalendarIdProp
+      : practitioners[0]?.id ?? '');
 
   const [calendarId, setCalendarId] = useState(initialCalendarId);
   const [periods, setPeriods] = useState<LeavePeriodRow[]>([]);
@@ -286,13 +295,18 @@ export function StaffLeaveCalendarPanel({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Opened from the diary's clock button, the panel lands on the day being
+  // viewed with that day already picked, so one save covers the common case.
+  const seededDate = initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate) ? initialDate : null;
   const nowDate = new Date();
-  const [calYear, setCalYear] = useState(nowDate.getFullYear());
-  const [calMonth, setCalMonth] = useState(nowDate.getMonth() + 1);
-  const [rangeStart, setRangeStart] = useState<string | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+  const [calYear, setCalYear] = useState(seededDate ? Number(seededDate.slice(0, 4)) : nowDate.getFullYear());
+  const [calMonth, setCalMonth] = useState(seededDate ? Number(seededDate.slice(5, 7)) : nowDate.getMonth() + 1);
+  const [rangeStart, setRangeStart] = useState<string | null>(seededDate);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(seededDate);
   const [editing, setEditing] = useState<Editing>(null);
-  const [draft, setDraft] = useState<DraftState>(emptyDraft);
+  const [draft, setDraft] = useState<DraftState>(() =>
+    seededDate ? { ...emptyDraft(), date_start: seededDate, date_end: seededDate } : emptyDraft(),
+  );
 
   useEffect(() => {
     if (selfPractitionerId) {

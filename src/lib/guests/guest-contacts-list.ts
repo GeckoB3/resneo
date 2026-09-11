@@ -316,6 +316,8 @@ export interface GuestFilterChain<Self> {
   eq(column: string, value: unknown): Self;
   contains(column: string, value: string[]): Self;
   in(column: string, values: string[]): Self;
+  /** PostgREST `or=(...)` filter string, e.g. `a.eq.false,b.eq.true`. */
+  or(filters: string): Self;
 }
 
 /**
@@ -362,10 +364,11 @@ export function applyGuestsDirectorySegment<Self extends GuestFilterChain<Self>>
     }
     case 'marketing': {
       let out: Self = q;
+      // "Subscribed" mirrors hasMarketingPermission: consent recorded AND no opt-out.
       if (params.marketing === 'subscribed') {
-        out = out.eq('marketing_consent', true) as Self;
+        out = out.eq('marketing_consent', true).eq('marketing_opt_out', false) as Self;
       } else if (params.marketing === 'not_subscribed') {
-        out = out.eq('marketing_consent', false) as Self;
+        out = out.or('marketing_consent.eq.false,marketing_opt_out.eq.true') as Self;
       }
       if (bounds.from) {
         out = out.gte('marketing_consent_at', `${bounds.from}T00:00:00`) as Self;

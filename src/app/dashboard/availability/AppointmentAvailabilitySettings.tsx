@@ -20,6 +20,10 @@ import {
   describeVenueDay,
   venueDayContext,
 } from '@/lib/calendar/venue-hours-context';
+import {
+  describeCalendarWeeklyMismatch,
+  weeklyCalendarHoursOutsideVenue,
+} from '@/lib/calendar/hours-mismatch';
 import type { OpeningHours } from '@/types/availability';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -151,17 +155,33 @@ function canEditWorkingHoursFor(p: Practitioner | null, isAdmin: boolean, staffI
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
+/**
+ * Inside the diary's "Amend calendar hours" dialog the screen has no URL of
+ * its own: the tab comes from here instead of `?tab=`, the Calendars tab and
+ * the page heading are left out, and the closures panel opens on the day the
+ * diary was showing.
+ */
+export interface AppointmentAvailabilityEmbedOptions {
+  initialTab: 'hours' | 'breaks' | 'daysoff';
+  /** yyyy-mm-dd the diary was showing. */
+  initialDate: string;
+  initialCalendarId?: string | null;
+}
+
 export function AppointmentAvailabilitySettings({
   isAdmin,
   currentStaffId,
+  embedded = null,
 }: {
   isAdmin: boolean;
   currentStaffId: string | null;
+  embedded?: AppointmentAvailabilityEmbedOptions | null;
 }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>(() => {
+    if (embedded) return embedded.initialTab;
     const fromUrl = parseTabQueryParam(searchParams.get('tab'));
     if (fromUrl) {
       if (fromUrl === 'team' && !isAdmin) return 'hours';
@@ -171,6 +191,7 @@ export function AppointmentAvailabilitySettings({
   });
 
   useEffect(() => {
+    if (embedded) return;
     const fromUrl = parseTabQueryParam(searchParams.get('tab'));
     if (!fromUrl) return;
     if (fromUrl === 'team' && !isAdmin) {
@@ -178,7 +199,7 @@ export function AppointmentAvailabilitySettings({
       return;
     }
     setTab(fromUrl);
-  }, [searchParams, isAdmin]);
+  }, [searchParams, isAdmin, embedded]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   /** Venue weekly hours, shown as context beside each calendar day (decision (K), step 6). */
   const [venueHours, setVenueHours] = useState<OpeningHours | null>(null);
@@ -188,6 +209,12 @@ export function AppointmentAvailabilitySettings({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  /**
+   * Standing advice after a save that leaves calendar hours outside business
+   * hours: the save went through, but guests cannot book those hours until the
+   * business hours widen too. Stays until dismissed or the next save.
+   */
+  const [advice, setAdvice] = useState<string | null>(null);
 
   // Add/edit practitioner state
   const [showForm, setShowForm] = useState(false);
@@ -218,16 +245,16 @@ export function AppointmentAvailabilitySettings({
   const [calendarModalError, setCalendarModalError] = useState<string | null>(null);
 
   // Selected practitioner for hours / breaks tabs
-  const [selectedPractitionerId, setSelectedPractitionerId] = useState<string>('');
+  const [selectedPractitionerId, setSelectedPractitionerId] = useState<string>(embedded?.initialCalendarId ?? '');
 
   const visibleTabs = useMemo(() => {
-    if (isAdmin) return ALL_TABS;
+    if (isAdmin && !embedded) return ALL_TABS;
     return ALL_TABS.filter((t) => t.key !== 'team');
-  }, [isAdmin]);
+  }, [isAdmin, embedded]);
 
   useEffect(() => {
-    if (!isAdmin && tab === 'team') setTab('hours');
-  }, [isAdmin, tab]);
+    if ((!isAdmin || embedded) && tab === 'team') setTab('hours');
+  }, [isAdmin, embedded, tab]);
 
   /** Host appointment columns only (excludes resource-type unified rows). */
   const appointmentCalendars = useMemo(
@@ -798,6 +825,12 @@ export function AppointmentAvailabilitySettings({
         }
         if (!res.ok) throw new Error(body.error ?? 'Failed to save');
         flash('Working hours saved');
+        setAdvice(
+          describeCalendarWeeklyMismatch(
+            selectedPrac.name,
+            weeklyCalendarHoursOutsideVenue(hours as WorkingHours, venueHours),
+          ),
+        );
         await fetchData();
       };
       await doSave(false);
@@ -849,6 +882,12 @@ export function AppointmentAvailabilitySettings({
     try {
       if ((await patchSchedule(selectedPrac.id, schedule)) === 'saved') {
         flash('Schedule saved');
+        // Each period carries its own weekly template; any of them running past
+        // the venue's weekly hours earns the same advice as the base template.
+        const outside = (schedule?.periods ?? []).flatMap((p) =>
+          p.weeks.flatMap((week) => weeklyCalendarHoursOutsideVenue(week, venueHours)),
+        );
+        setAdvice(describeCalendarWeeklyMismatch(selectedPrac.name, outside));
         await fetchData();
       }
     } catch (e) {
@@ -937,7 +976,9 @@ export function AppointmentAvailabilitySettings({
 
   return (
     <div>
-      <h1 className={`text-2xl font-semibold text-slate-900 ${isAdmin ? 'mb-6' : 'mb-2'}`}>Availability Settings</h1>
+      {embedded ? null : (
+        <h1 className={`text-2xl font-semibold text-slate-900 ${isAdmin ? 'mb-6' : 'mb-2'}`}>Availability Settings</h1>
+      )}
 
       {!isAdmin && (
         <p className="mb-6 text-sm text-slate-600">
@@ -946,6 +987,26 @@ export function AppointmentAvailabilitySettings({
         </p>
       )}
 
+      {advice ? (
+        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-start sm:justify-between">
+          <p>{advice}</p>
+          <div className="flex shrink-0 items-center gap-2">
+            <a
+              href="/dashboard/settings?tab=business-hours"
+              className="whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Open business hours
+            </a>
+            <button
+              type="button"
+              onClick={() => setAdvice(null)}
+              className="text-xs font-medium text-amber-800 underline-offset-2 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
       {success && (
         <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>
       )}
@@ -1251,6 +1312,8 @@ export function AppointmentAvailabilitySettings({
                     venueHours={venueHours}
                     onError={setError}
                     onChanged={() => void reloadPractitioners()}
+                    initialDate={embedded?.initialDate ?? null}
+                    initialCalendarId={embedded?.initialCalendarId ?? null}
                   />
                 </>
               )}

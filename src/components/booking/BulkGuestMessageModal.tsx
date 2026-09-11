@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { GuestMessageChannelSelect } from './GuestMessageChannelSelect';
+import { GuestMessageComposerHint } from './GuestMessageComposerHint';
 
 export interface BulkGuestMessageModalProps {
   onClose: () => void;
@@ -66,12 +67,14 @@ export function BulkGuestMessageModal({
           id="bulk-guest-body"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          rows={5}
+          rows={7}
+          maxLength={2000}
           disabled={sending}
           placeholder="Type your message…"
-          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm leading-relaxed focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
           autoFocus
         />
+        <GuestMessageComposerHint message={message} channel={channel} />
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"

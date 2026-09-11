@@ -6,6 +6,7 @@ import { BusinessClosuresSection } from './BusinessClosuresSection';
 import { OpeningHoursControl } from '@/components/scheduling/OpeningHoursControl';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import { describeVenueWeeklyMismatch, type CalendarLike } from '@/lib/calendar/hours-mismatch';
 
 const DAYS: { key: string; label: string }[] = [
   { key: '0', label: 'Sunday' },
@@ -16,6 +17,18 @@ const DAYS: { key: string; label: string }[] = [
   { key: '5', label: 'Friday' },
   { key: '6', label: 'Saturday' },
 ];
+
+/** Loads the roster and says which calendars the given weekly hours leave outside; null when none. */
+async function venueWeeklyAdvice(openingHours: OpeningHoursSettings): Promise<string | null> {
+  try {
+    const res = await fetch('/api/venue/practitioners?roster=1', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { practitioners?: CalendarLike[] };
+    return describeVenueWeeklyMismatch(body.practitioners ?? [], openingHours);
+  } catch {
+    return null;
+  }
+}
 
 function getDayConfig(oh: OpeningHoursSettings | null, day: string): OpeningHoursDaySettings {
   const d = oh?.[day] as { closed?: boolean; periods?: { open: string; close: string }[]; open?: string; close?: string } | undefined;
@@ -32,6 +45,8 @@ interface OpeningHoursSectionProps {
   isAdmin: boolean;
   bookingModel: string;
   onInitialLoadComplete?: () => void;
+  /** Weekly hours only; the closures card is rendered elsewhere (the diary's hours dialog tabs). */
+  hideClosures?: boolean;
 }
 
 export function OpeningHoursSection({
@@ -40,9 +55,12 @@ export function OpeningHoursSection({
   isAdmin,
   bookingModel,
   onInitialLoadComplete,
+  hideClosures = false,
 }: OpeningHoursSectionProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** After a save: which calendars the new hours leave outside (guests cannot book those hours). */
+  const [advice, setAdvice] = useState<string | null>(null);
 
   const [local, setLocal] = useState<OpeningHoursSettings>(() => {
     const o: OpeningHoursSettings = {};
@@ -89,6 +107,7 @@ export function OpeningHoursSection({
           throw new Error('Failed to save');
         }
         onUpdate({ opening_hours: body.opening_hours });
+        setAdvice(await venueWeeklyAdvice(body.opening_hours));
       };
       await doSave(false);
     } catch (err) {
@@ -109,6 +128,26 @@ export function OpeningHoursSection({
         <SectionCard.Body className="space-y-4">
           <OpeningHoursControl value={local} onChange={setLocal} disabled={!isAdmin} />
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {advice ? (
+            <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-start sm:justify-between">
+          <p>{advice}</p>
+          <div className="flex shrink-0 items-center gap-2">
+            <a
+              href="/dashboard/calendar-availability?tab=hours"
+              className="whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              Open calendar hours
+            </a>
+            <button
+              type="button"
+              onClick={() => setAdvice(null)}
+              className="text-xs font-medium text-amber-800 underline-offset-2 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+          ) : null}
           {isAdmin && (
             <div className="sticky bottom-0 z-10 -mx-4 border-t border-slate-100 bg-white/95 px-4 py-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -127,6 +166,7 @@ export function OpeningHoursSection({
         </SectionCard.Body>
       </SectionCard>
 
+      {hideClosures ? null : (
       <SectionCard elevated>
         <SectionCard.Header
           eyebrow="Exceptions"
@@ -143,6 +183,7 @@ export function OpeningHoursSection({
           />
         </SectionCard.Body>
       </SectionCard>
+      )}
     </div>
   );
 }

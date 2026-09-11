@@ -94,6 +94,8 @@ export default async function CalendarPage() {
             calendarTodayIso={calendarTodayIso}
             linkFeature={linkFeature}
             initialStaffCollective={initialStaffCollective}
+            isAdmin={staff.role === 'admin'}
+            currentStaffId={staff.id ?? null}
           />
         </div>
       </div>

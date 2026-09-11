@@ -37,7 +37,16 @@ export interface StaffGuestContactFieldsProps {
   /** When true, first/last name labels show "(optional)" */
   namesOptional?: boolean;
   emailOptional?: boolean;
+  /**
+   * The dedicated "Find an existing contact" box above the fields, as in the
+   * mobile app's guest step. On by default; the per-field lookup stays too.
+   */
+  showSearchBox?: boolean;
+  searchBoxId?: string;
 }
+
+/** The search box counts as a field for the shared dropdown state. */
+type ActiveLookup = StaffGuestContactFieldKey | 'search';
 
 export function StaffGuestContactFields({
   values,
@@ -56,13 +65,17 @@ export function StaffGuestContactFields({
   labelClassName = 'mb-1.5 block text-sm font-medium text-slate-700',
   namesOptional = true,
   emailOptional = true,
+  showSearchBox = true,
+  searchBoxId = 'staff-guest-search',
 }: StaffGuestContactFieldsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<number | null>(null);
-  const [activeField, setActiveField] = useState<StaffGuestContactFieldKey | null>(null);
+  const [activeField, setActiveField] = useState<ActiveLookup | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
 
-  const searchQuery = activeField ? values[activeField].trim() : '';
+  const searchQuery =
+    activeField === 'search' ? searchInput.trim() : activeField ? values[activeField].trim() : '';
   const { results, loading, error, showHint, showEmpty, minQueryLength } = useGuestToolbarSearch(searchQuery);
 
   const clearBlurTimeout = useCallback(() => {
@@ -73,7 +86,7 @@ export function StaffGuestContactFields({
   }, []);
 
   const handleFieldFocus = useCallback(
-    (field: StaffGuestContactFieldKey) => {
+    (field: ActiveLookup) => {
       clearBlurTimeout();
       setActiveField(field);
       setDropdownOpen(true);
@@ -109,14 +122,19 @@ export function StaffGuestContactFields({
       clearBlurTimeout();
       setActiveField(null);
       setDropdownOpen(false);
+      // As in the app: picking a contact empties the search box so the list folds away.
+      setSearchInput('');
     },
     [clearBlurTimeout, onContactSelected, onFieldChange],
   );
 
+  const dropdownHasContent =
+    searchQuery.length > 0 || loading || results.length > 0 || showEmpty || Boolean(error);
+  const showSearchDropdown = dropdownOpen && activeField === 'search' && dropdownHasContent;
   const showDropdown =
-    dropdownOpen &&
-    activeField !== null &&
-    (searchQuery.length > 0 || loading || results.length > 0 || showEmpty || Boolean(error));
+    dropdownOpen && activeField !== null && activeField !== 'search' && dropdownHasContent;
+
+  const dropdownProps = { results, loading, error, showHint, showEmpty, minQueryLength, onSelect: handleSelectContact };
 
   const resolvedPhoneInputClassName =
     phoneInputClassName ??
@@ -124,6 +142,70 @@ export function StaffGuestContactFields({
 
   return (
     <div ref={containerRef} className="relative space-y-4">
+      {showSearchBox ? (
+        <div>
+          <label htmlFor={searchBoxId} className={labelClassName}>
+            Find an existing contact <span className="font-normal text-slate-400">(optional)</span>
+          </label>
+          <div className="relative">
+            <svg
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
+            </svg>
+            <input
+              id={searchBoxId}
+              type="text"
+              role="combobox"
+              aria-expanded={showSearchDropdown}
+              aria-controls={`${searchBoxId}-results`}
+              aria-autocomplete="list"
+              autoComplete="off"
+              enterKeyHint="search"
+              value={searchInput}
+              onChange={(e) => {
+                setSearchInput(e.target.value);
+                clearBlurTimeout();
+                setActiveField('search');
+                setDropdownOpen(true);
+              }}
+              onFocus={() => handleFieldFocus('search')}
+              onBlur={handleFieldBlur}
+              placeholder="Search by name, phone or email"
+              className={`${inputClassName} pl-10${searchInput ? ' pr-16' : ''}`}
+            />
+            {searchInput ? (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setSearchInput('');
+                  setDropdownOpen(false);
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-500 hover:text-slate-800"
+              >
+                Clear
+              </button>
+            ) : null}
+            {showSearchDropdown ? (
+              <div id={`${searchBoxId}-results`}>
+                <GuestContactAutocompleteDropdown {...dropdownProps} />
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-3 flex items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" aria-hidden />
+            or enter details
+            <span className="h-px flex-1 bg-slate-200" aria-hidden />
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor={firstNameId} className={labelClassName}>
@@ -209,17 +291,7 @@ export function StaffGuestContactFields({
         </div>
       </div>
 
-      {showDropdown ? (
-        <GuestContactAutocompleteDropdown
-          results={results}
-          loading={loading}
-          error={error}
-          showHint={showHint}
-          showEmpty={showEmpty}
-          minQueryLength={minQueryLength}
-          onSelect={handleSelectContact}
-        />
-      ) : null}
+      {showDropdown ? <GuestContactAutocompleteDropdown {...dropdownProps} /> : null}
     </div>
   );
 }

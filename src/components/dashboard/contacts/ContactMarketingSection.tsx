@@ -48,18 +48,36 @@ export function ContactMarketingSection({
     <div className="rounded-xl border border-slate-200 p-4">
       <h3 className="text-sm font-semibold text-slate-800">Marketing preferences</h3>
       <p className="mt-1 text-xs text-slate-600">
-        Transactional messages (confirmations, reminders) may still be sent where required. Marketing broadcasts require
-        consent and respect opt-out.
+        Booking messages (confirmations, reminders) and one-to-one messages you send from this panel are always
+        delivered. Messages sent to several contacts at once from the contacts list only go to contacts with marketing
+        consent who have not opted out.
       </p>
       {err ? <p className="mt-2 text-sm text-red-600">{err}</p> : null}
       <label className="mt-3 flex items-center gap-2 text-sm text-slate-800">
-        <input type="checkbox" checked={optOut} onChange={(e) => setOptOut(e.target.checked)} />
-        Opt out of marketing
+        <input
+          type="checkbox"
+          checked={optOut}
+          onChange={(e) => {
+            setOptOut(e.target.checked);
+            if (e.target.checked) setConsent(false);
+          }}
+        />
+        Opted out of marketing
       </label>
       <label className="mt-2 flex items-center gap-2 text-sm text-slate-800">
-        <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-        Marketing consent
+        <input
+          type="checkbox"
+          checked={consent}
+          onChange={(e) => {
+            setConsent(e.target.checked);
+            if (e.target.checked) setOptOut(false);
+          }}
+        />
+        Marketing consent given
       </label>
+      <p className="mt-2 text-xs font-medium text-slate-700">
+        {consent && !optOut ? 'Receives marketing messages.' : 'Does not receive marketing messages.'}
+      </p>
       {detail.guest.marketing_consent_at ? (
         <p className="mt-1 text-xs text-slate-500">Last consent recorded: {new Date(detail.guest.marketing_consent_at).toLocaleString()}</p>
       ) : null}

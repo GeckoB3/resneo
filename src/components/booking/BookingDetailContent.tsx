@@ -5,6 +5,7 @@ import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEdit
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import { GuestMessageComposerHint } from './GuestMessageComposerHint';
 import { BookingStatusPill } from '@/components/ui/dashboard/BookingStatusPill';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -988,10 +989,14 @@ export function BookingDetailContent({ ctx }: { ctx: BookingDetailDrawerContext 
                 <textarea
                   value={customMessage}
                   onChange={(e) => setCustomMessage(e.target.value)}
-                  rows={isPopover ? 1 : 2}
-                  className={`w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-200 ${isPopover ? 'py-1.5' : 'py-2'}`}
+                  rows={isPopover ? 2 : 4}
+                  maxLength={2000}
+                  className={`w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs leading-relaxed placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-200 ${isPopover ? 'py-1.5' : 'py-2'}`}
                   placeholder="SMS / email to guest…"
                 />
+                {isPopover ? null : (
+                  <GuestMessageComposerHint message={customMessage} channel={guestMessageChannel} />
+                )}
                 <button
                   type="button"
                   disabled={actionLoading || customMessage.trim().length === 0 || !isHydrated}

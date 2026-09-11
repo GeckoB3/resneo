@@ -9,6 +9,12 @@ import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 const schema = z.object({
   message: z.string().min(1).max(2000),
   channel: z.enum(['email', 'sms', 'both']).optional().default('both'),
+  /**
+   * Bulk sends from the contacts list set this so only contacts with marketing
+   * permission (consent recorded, no opt-out) are messaged. A one-to-one message
+   * from the contact's own panel leaves it unset and is always sent.
+   */
+  respect_marketing_permission: z.boolean().optional().default(false),
 });
 
 export async function POST(
@@ -31,10 +37,20 @@ export async function POST(
     guestId,
     message: parsed.data.message,
     channel,
+    requireMarketingPermission: parsed.data.respect_marketing_permission,
   });
 
   if (result.error) {
     return NextResponse.json({ error: result.error }, { status: 404 });
+  }
+
+  if (result.skippedReason) {
+    // Not a failure: the contact was deliberately left out. 200 so bulk callers can
+    // count it separately from delivery errors.
+    return NextResponse.json(
+      { success: false, skipped: true, reason: result.skippedReason, channels: { email: null, sms: null }, errors: [] },
+      { status: 200 },
+    );
   }
 
   const anySent = Boolean(result.email?.sent || result.sms?.sent);

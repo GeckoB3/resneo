@@ -40,6 +40,8 @@ export interface PractitionerCalendarToolbarProps {
     onUndo: () => void;
   };
   liveState?: 'live' | 'reconnecting';
+  /** Clock button, top left: amend calendar hours (everyone) or business hours (admins). */
+  onAmendHours?: () => void;
   searchPanel?: ReactNode;
   searchActive?: boolean;
   searchAriaLabel?: string;
@@ -112,6 +114,7 @@ export function PractitionerCalendarToolbar({
   todayIso,
   scheduleUndo,
   liveState = 'live',
+  onAmendHours,
   searchPanel,
   searchActive = false,
   searchAriaLabel = 'Search bookings',
@@ -151,6 +154,19 @@ export function PractitionerCalendarToolbar({
   const viewModeSwitcher = useCallback(
     (toolbarPanelAnchorRef: RefObject<HTMLDivElement | null>) => (
       <>
+      {onAmendHours ? (
+        <button
+          type="button"
+          onClick={onAmendHours}
+          aria-label="Amend hours"
+          title="Amend calendar or business hours"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </button>
+      ) : null}
       <div ref={viewModeWrapRef} className="relative shrink-0">
         <button
           ref={viewModeTriggerRef}
@@ -235,7 +251,7 @@ export function PractitionerCalendarToolbar({
       ) : null}
       </>
     ),
-    [compactDay, onToggleCompactDay, onViewModeChange, viewMode, viewModePanelId, viewModePopoverOpen],
+    [compactDay, onAmendHours, onToggleCompactDay, onViewModeChange, viewMode, viewModePanelId, viewModePopoverOpen],
   );
 
   const datePickerPanel = (

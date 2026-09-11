@@ -78,6 +78,7 @@ import { ResourceInstanceDetailSheet } from '@/components/practitioner-calendar/
 import { useToast } from '@/components/ui/Toast';
 import { useAcceptUnpaidGuard } from '@/components/booking/AcceptUnpaidBookingDialog';
 import { Dialog } from '@/components/ui/primitives/Dialog';
+import { CalendarHoursQuickEdit } from './CalendarHoursQuickEdit';
 import { Button } from '@/components/ui/primitives/Button';
 import { useDashboardDetailCache } from '@/components/providers/DashboardDetailCacheProvider';
 import { bindDetailPrefetchHandlers } from '@/lib/dashboard/detail-prefetch-intent';
@@ -136,7 +137,9 @@ import {
   buildLinkedColumnClosureBlocks,
   buildPractitionerScheduleClosureBlocks,
   buildVenueScheduleClosureBlocks,
+  calendarWorkingBoundsForDates,
   isScheduleClosureBlockType,
+  partitionScheduleClosureBlocks,
   scheduleClosureBlockLabel,
 } from '@/lib/calendar/schedule-closure-blocks';
 import { isNonWorkingBlock, isOccupyingBlock } from '@/lib/calendar/occupying-blocks';
@@ -551,10 +554,16 @@ function isManualEditableBlock(bl: CalendarBlock): boolean {
   );
 }
 
-function calendarBlockHeading(bl: CalendarBlock): string {
+function calendarBlockHeading(bl: CalendarBlock, columnName?: string | null): string {
   if (isBreakCalendarBlock(bl)) return 'Break';
-  if (isScheduleClosureBlock(bl)) return scheduleClosureBlockLabel(bl.block_type);
-  if (isManualEditableBlock(bl)) return 'Break';
+  if (isScheduleClosureBlock(bl)) {
+    return scheduleClosureBlockLabel(bl.block_type, {
+      columnName,
+      startTime: bl.start_time,
+      endTime: bl.end_time,
+    });
+  }
+  if (isManualEditableBlock(bl)) return 'Time blocked';
   return 'Blocked';
 }
 
@@ -562,23 +571,39 @@ function calendarBlockShellClass(bl: CalendarBlock): string {
   if (isBreakCalendarBlock(bl)) {
     return 'border-amber-200 bg-amber-50/95 hover:bg-amber-50';
   }
+  // Two single-cause tints: rose when the business is shut but the calendar
+  // would work, sky when the business is open but the calendar is not. Slate
+  // means both, or a linked venue's own closed hours.
   if (bl.block_type === 'venue_closed') {
-    return 'border-slate-300 bg-slate-100/95';
+    return 'border-rose-200 bg-rose-50/95';
+  }
+  if (bl.block_type === 'practitioner_closed') {
+    return 'border-sky-200 bg-sky-50/95';
   }
   if (bl.block_type === 'practitioner_leave') {
     return 'border-violet-200 bg-violet-50/95';
   }
-  if (bl.block_type === 'practitioner_closed' || bl.block_type === 'linked_venue_closed') {
+  if (bl.block_type === 'venue_and_calendar_closed' || bl.block_type === 'linked_venue_closed') {
     return 'border-slate-300 bg-slate-200/90';
   }
   return 'border-slate-300 bg-slate-200/90 hover:bg-slate-300/90';
 }
 
+/** Heading text colour that matches {@link calendarBlockShellClass}. */
+function calendarBlockHeadingTextClass(bl: CalendarBlock): string {
+  if (isBreakCalendarBlock(bl)) return 'text-amber-950';
+  if (bl.block_type === 'venue_closed') return 'text-rose-950';
+  if (bl.block_type === 'practitioner_closed') return 'text-sky-950';
+  if (bl.block_type === 'practitioner_leave') return 'text-violet-950';
+  return 'text-slate-900';
+}
+
 function calendarBlockAccentColor(bl: CalendarBlock): string {
   if (isBreakCalendarBlock(bl)) return '#d97706';
-  if (bl.block_type === 'venue_closed') return '#64748b';
+  if (bl.block_type === 'venue_closed') return '#e11d48';
+  if (bl.block_type === 'practitioner_closed') return '#0284c7';
   if (bl.block_type === 'practitioner_leave') return '#7c3aed';
-  if (bl.block_type === 'practitioner_closed' || bl.block_type === 'linked_venue_closed') {
+  if (bl.block_type === 'venue_and_calendar_closed' || bl.block_type === 'linked_venue_closed') {
     return '#94a3b8';
   }
   return '#94a3b8';
@@ -2997,8 +3022,14 @@ export function PractitionerCalendarView({
   calendarTodayIso,
   linkFeature = false,
   initialStaffCollective,
+  isAdmin = false,
+  currentStaffId = null,
 }: {
   venueId: string;
+  /** Venue admin: may amend business hours from the diary's clock button. */
+  isAdmin?: boolean;
+  /** For the calendar-hours dialog, which limits staff to their allocated calendars. */
+  currentStaffId?: string | null;
   currency?: string;
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages (unified scheduling). */
@@ -3650,10 +3681,25 @@ export function PractitionerCalendarView({
       // amended window running past the weekly close used to leave the grid at the weekly
       // bounds, and schedule-closure-blocks then clipped the stripe away -- so the hours
       // the owner had just entered were the ones they could neither see nor drag into.
-      const base = getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21, {
+      const venueBase = getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21, {
         timeZone: venueTimezone,
         venueWideBlocks,
       });
+      // The grid always shows the widest span anything is scheduled open: the
+      // venue's hours OR any visible calendar's own hours. A calendar working
+      // 08:00-20:00 in a venue open 09:00-18:00 draws 08:00-20:00, with the
+      // stripes saying which side is closed in each hour.
+      const calendarBounds = calendarWorkingBoundsForDates(
+        practitioners.filter((p) => p.is_active && p.calendar_type !== 'resource'),
+        viewMode === 'day' ? activeDayDate : listFromTo.from,
+        viewMode === 'day' ? activeDayDate : listFromTo.to,
+      );
+      const base = calendarBounds
+        ? {
+            startHour: Math.min(venueBase.startHour, Math.floor(calendarBounds.start / 60)),
+            endHour: Math.min(24, Math.max(venueBase.endHour, Math.ceil(calendarBounds.end / 60))),
+          }
+        : venueBase;
       if (viewMode !== 'day') return base;
 
       let minM = base.startHour * 60;
@@ -3725,10 +3771,12 @@ export function PractitionerCalendarView({
       const endHour = Math.max(startHour + 1, Math.ceil(maxM / 60));
       return { startHour, endHour };
     },
-    [activeDayDate, blocks, practitionerBreakBlocks, bookings, linkedServiceMapsByVenue, linkedVenues, openingHours, scheduleBlocks, services, venueTimezone, venueWideBlocks, viewMode, visibleLinkedColumnIds],
+    [activeDayDate, blocks, practitionerBreakBlocks, bookings, linkedServiceMapsByVenue, linkedVenues, listFromTo.from, listFromTo.to, openingHours, practitioners, scheduleBlocks, services, venueTimezone, venueWideBlocks, viewMode, visibleLinkedColumnIds],
   );
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  /** The clock button's dialog (amend calendar hours / business hours). */
+  const [hoursQuickEditOpen, setHoursQuickEditOpen] = useState(false);
   /**
    * "Compact" day view. `compactDay` is the user's persisted toggle; `measuredSlotHeight`
    * is the px-per-slot computed each layout to fit the whole day on one screen. Until the
@@ -3940,8 +3988,20 @@ export function PractitionerCalendarView({
       timeZone: venueTimezone,
       gridBounds,
     });
-    return [...venueBlocks, ...practitionerBlocks] as CalendarBlock[];
+    // One explanation per minute: venue-only, calendar-only, or both.
+    return partitionScheduleClosureBlocks([...venueBlocks, ...practitionerBlocks]) as CalendarBlock[];
   }, [practitioners, openingHours, venueWideBlocks, leavePeriods, listFromTo.from, listFromTo.to, venueTimezone, viewMode, startHour, endHour]);
+
+  /** Column id to display name, for "<calendar> unavailable" stripes. */
+  const columnNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of practitioners) m.set(p.id, p.name);
+    return m;
+  }, [practitioners]);
+  const blockColumnName = useCallback(
+    (bl: CalendarBlock) => columnNameById.get(bl.calendar_id ?? bl.practitioner_id ?? '') ?? null,
+    [columnNameById],
+  );
 
   const displayBlocks = useMemo(
     () => [...scheduleClosureBlocks, ...blocks, ...practitionerBreakBlocks],
@@ -7197,6 +7257,7 @@ export function PractitionerCalendarView({
           startHour={startHour}
           endHour={endHour}
           onTimeRangeChange={handleTimeRangeChange}
+          onAmendHours={() => setHoursQuickEditOpen(true)}
           onRefresh={() => {
             void fetchData({ refreshCatalog: true });
             void requestLinkedCalendarSync();
@@ -7373,22 +7434,20 @@ export function PractitionerCalendarView({
                                 disabled={readOnlyBlock}
                                 className={`rounded-lg border px-2 py-1 text-left text-xs ${
                                   readOnlyBlock
-                                    ? `cursor-default ${calendarBlockShellClass(bl)} ${
-                                        breakBlock ? 'text-amber-950' : 'text-slate-800'
-                                      }`
+                                    ? `cursor-default ${calendarBlockShellClass(bl)} text-slate-800`
                                     : 'border-slate-300 bg-slate-200/90 text-slate-800 hover:bg-slate-300/90'
                                 }`}
                                 title={
                                   breakBlock
                                     ? 'Break (set in Calendar availability)'
                                     : closureBlock
-                                      ? scheduleClosureBlockLabel(bl.block_type)
+                                      ? calendarBlockHeading(bl, blockColumnName(bl))
                                       : bl.reason?.trim()
                                         ? `${calendarBlockHeading(bl)}: ${bl.reason.trim()}`
                                         : calendarBlockHeading(bl)
                                 }
                               >
-                                <span className="font-semibold">{calendarBlockHeading(bl)}</span>
+                                <span className={`font-semibold ${calendarBlockHeadingTextClass(bl)}`}>{calendarBlockHeading(bl, blockColumnName(bl))}</span>
                                 <span className="mt-0.5 block text-[10px] tabular-nums text-slate-600">
                                   {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
                                 </span>
@@ -8066,20 +8125,14 @@ export function PractitionerCalendarView({
                                     breakBlock
                                       ? 'Break (set in Calendar availability)'
                                       : closureBlock
-                                        ? scheduleClosureBlockLabel(bl.block_type)
+                                        ? calendarBlockHeading(bl, blockColumnName(bl))
                                         : 'Click to edit block'
                                   }
                                 >
                                   <span
-                                    className={`truncate text-[13px] font-extrabold tracking-tight ${
-                                      breakBlock
-                                        ? 'text-amber-950'
-                                        : bl.block_type === 'practitioner_leave'
-                                          ? 'text-violet-950'
-                                          : 'text-slate-900'
-                                    }`}
+                                    className={`truncate text-[13px] font-extrabold tracking-tight ${calendarBlockHeadingTextClass(bl)}`}
                                   >
-                                    {calendarBlockHeading(bl)}
+                                    {calendarBlockHeading(bl, blockColumnName(bl))}
                                   </span>
                                   {bl.reason ? (
                                     <span className="mt-0.5 block truncate text-[11px] font-medium leading-snug text-slate-600/90">
@@ -8890,6 +8943,20 @@ export function PractitionerCalendarView({
         );
       })()}
 
+      {hoursQuickEditOpen ? (
+        <CalendarHoursQuickEdit
+          isAdmin={isAdmin}
+          currentStaffId={currentStaffId}
+          date={activeDayDate}
+          bookingModel={bookingModel}
+          onClose={() => {
+            setHoursQuickEditOpen(false);
+            // Hours may have changed: re-read venue hours and the calendar
+            // catalogue so the grid range and stripes follow.
+            void fetchData({ refreshCatalog: true });
+          }}
+        />
+      ) : null}
       {blockModal ? (
         <Dialog
           open

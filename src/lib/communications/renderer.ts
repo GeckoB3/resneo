@@ -11,12 +11,18 @@ import {
   formatTime,
 } from '@/lib/emails/templates/base-template';
 import { confirmationSubject } from '@/lib/emails/templates/booking-confirmation';
-import { buildCardHoldNoticeHtml, renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
+import { buildCardHoldNoticeHtml, guestFirstName, renderBookingConfirmationDocumentHtml, renderTransactionalEmailHtml } from '@/lib/emails/templates/booking-confirmation-layout';
 import { emailAccent } from '@/lib/emails/email-accent';
+import {
+  formatMessagePlainText,
+  renderCustomMessageEmailHtml,
+  renderCustomMessageEmailText,
+} from '@/lib/emails/templates/custom-message-email';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
 import {
   bookingDisplayStart,
   groupAppointmentTextLines,
+  isVisitLines,
 } from '@/lib/emails/group-appointment-display';
 import { normalizeWebsiteUrlForLink } from '@/lib/emails/external-links';
 import { resolveEmailLocation } from '@/lib/emails/booking-location';
@@ -148,6 +154,8 @@ function bookingLabel(booking: BookingEmailData): string {
 
 /** GSM-style single-segment target; prose is clipped before URLs when needed. */
 const SMS_CHAR_BUDGET = 160;
+/** Custom staff messages may run to three concatenated GSM segments (3 x 153). */
+export const CUSTOM_SMS_CHAR_BUDGET = 459;
 
 function clipSmsText(s: string, max: number): string {
   const t = s.trim();
@@ -182,11 +190,37 @@ function venueSmsName(name: string): string {
   return clipSmsText(name, 40);
 }
 
+/**
+ * What an SMS calls the booking: every service, not the one row that
+ * triggered the send. A visit (one guest, several services) reads "Cut and
+ * Colour", or "Cut, Colour and 2 more" past three; a party reads
+ * "3 appointments". Single-row bookings keep the service name as before.
+ */
+function smsBookingLabel(booking: BookingEmailData): string {
+  const lines = booking.group_appointments ?? [];
+  if (lines.length <= 1) return bookingLabel(booking);
+  if (!isVisitLines(lines)) return `${lines.length} appointments`;
+  const names = lines
+    .map((l) => clipSmsText(l.service_name?.trim() || 'service', 24))
+    .filter((n, i, all) => all.indexOf(n) === i);
+  if (names.length === 1) return names[0]!;
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+}
+
 function withStaffSms(booking: BookingEmailData, label: string): string {
-  const L = clipSmsText(label, 34);
-  const p = booking.practitioner_name?.trim();
-  if (!p) return L;
-  return `${L} with ${clipSmsText(p, 22)}`;
+  const lines = booking.group_appointments ?? [];
+  const L = clipSmsText(label, lines.length > 1 ? 60 : 34);
+  // Name the staff member only when the whole booking is with one person;
+  // a visit split across two stylists would otherwise credit only one of them.
+  const staffNames = new Set(
+    lines.length > 1
+      ? lines.map((l) => l.practitioner_name?.trim()).filter((n): n is string => Boolean(n))
+      : [booking.practitioner_name?.trim()].filter((n): n is string => Boolean(n)),
+  );
+  if (staffNames.size !== 1) return L;
+  return `${L} with ${clipSmsText([...staffNames][0]!, 22)}`;
 }
 
 function emailFooterText(venue: VenueEmailData): string {
@@ -208,10 +242,13 @@ export function renderCommunicationSms(
   opts: CommunicationRenderOptions,
 ): RenderedSms | null {
   const vn = venueSmsName(opts.venue.name);
-  const smsDate = formatSmsDate(opts.booking.booking_date);
-  const time = formatTime(opts.booking.booking_time);
+  // A multi-service booking starts at its earliest line, not at whichever
+  // row triggered this send (a 09:00 visit was being texted as 11:30).
+  const start = bookingDisplayStart(opts.booking);
+  const smsDate = formatSmsDate(start.date);
+  const time = formatTime(start.time);
   const partySize = opts.booking.party_size;
-  const label = bookingLabel(opts.booking);
+  const label = smsBookingLabel(opts.booking);
   const leadPart = smsLeadPart(opts.smsCustomMessage);
   const refundMsg = opts.refundMessage?.trim()
     ? clipSmsText(opts.refundMessage.trim(), 56)
@@ -238,7 +275,7 @@ export function renderCommunicationSms(
       case 'deposit_payment_request': {
         const url = opts.paymentLink?.trim() ?? '';
         const core = isAppointmentLane(opts.lane)
-          ? `${leadPart}${vn}: Deposit needed to confirm ${clipSmsText(label, 34)} on ${smsDate} at ${time}.`
+          ? `${leadPart}${vn}: Deposit needed to confirm ${clipSmsText(label, label.length > 34 ? 52 : 34)} on ${smsDate} at ${time}.`
           : `${leadPart}${vn}: Deposit needed to confirm ${partySize} guests on ${smsDate} at ${time}.`;
         return joinSmsPrefixAndUrl(core, url || null, 'Pay: ');
       }
@@ -259,7 +296,7 @@ export function renderCommunicationSms(
       case 'deposit_payment_reminder': {
         const url = opts.paymentLink?.trim() ?? '';
         const core = isAppointmentLane(opts.lane)
-          ? `${leadPart}${vn}: Reminder: deposit still needed for ${clipSmsText(label, 30)} on ${smsDate} at ${time}.`
+          ? `${leadPart}${vn}: Reminder: deposit still needed for ${clipSmsText(label, label.length > 30 ? 48 : 30)} on ${smsDate} at ${time}.`
           : `${leadPart}${vn}: Reminder: deposit still needed for ${partySize} guests on ${smsDate} at ${time}.`;
         return joinSmsPrefixAndUrl(core, url || null, 'Pay: ');
       }
@@ -294,7 +331,7 @@ export function renderCommunicationSms(
       case 'cancellation_confirmation': {
         const tail = refundMsg ? ` ${refundMsg}` : '';
         const core = isAppointmentLane(opts.lane)
-          ? `${leadPart}${vn}: Cancelled: your ${clipSmsText(label, 32)} on ${smsDate} at ${time}.${tail}`
+          ? `${leadPart}${vn}: Cancelled: your ${clipSmsText(label, label.length > 32 ? 50 : 32)} on ${smsDate} at ${time}.${tail}`
           : `${leadPart}${vn}: Cancelled: your booking for ${partySize} guests on ${smsDate} at ${time}.${tail}`;
         return clipSmsText(core, SMS_CHAR_BUDGET);
       }
@@ -308,13 +345,16 @@ export function renderCommunicationSms(
           ? 'card details were not added'
           : 'deposit was not paid';
         const core = isAppointmentLane(opts.lane)
-          ? `${leadPart}${vn}: Cancelled: ${clipSmsText(label, 30)} on ${smsDate} at ${time}; ${reason}.`
+          ? `${leadPart}${vn}: Cancelled: ${clipSmsText(label, label.length > 30 ? 48 : 30)} on ${smsDate} at ${time}; ${reason}.`
           : `${leadPart}${vn}: Cancelled: booking for ${partySize} guests on ${smsDate} at ${time}; ${reasonShort}.`;
         return clipSmsText(core, SMS_CHAR_BUDGET);
       }
       case 'custom_message': {
-        const msg = clipSmsText(opts.message ?? '', 130);
-        return clipSmsText(`${vn}: ${msg}`, SMS_CHAR_BUDGET);
+        // Staff write these by hand, so allow a few segments rather than the
+        // single-segment budget the templated messages target. Paragraph
+        // breaks are kept; the venue name leads so the recipient knows the sender.
+        const msg = formatMessagePlainText(opts.message ?? '');
+        return clipSmsText(`${vn}: ${msg}`, CUSTOM_SMS_CHAR_BUDGET);
       }
       case 'compliance_form_request':
       case 'compliance_form_reminder': {
@@ -914,6 +954,28 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
 export function renderCommunicationEmail(
   opts: CommunicationRenderOptions,
 ): RenderedEmail | null {
+  // A staff-authored custom message is a plain note, not a booking email. It
+  // renders through its own template so no date, time, party size or other
+  // booking detail can leak into it, whichever surface started it.
+  if (opts.messageKey === 'custom_message') {
+    const customOpts = {
+      venueName: opts.venue.name,
+      venueLogoUrl: opts.venue.logo_url ?? null,
+      brandColour: opts.venue.brand_colour ?? null,
+      guestFirstName: guestFirstName(opts.booking.guest_name),
+      message: opts.message ?? '',
+      venueAddress: opts.venue.address ?? null,
+      venuePhone: opts.venue.phone ?? null,
+      venueWebsiteUrl: opts.venue.website_url ?? null,
+      bookingPageUrl: opts.venue.booking_page_url ?? null,
+    };
+    return {
+      subject: `A message from ${opts.venue.name}`,
+      html: renderCustomMessageEmailHtml(customOpts),
+      text: renderCustomMessageEmailText(customOpts),
+    };
+  }
+
   const config = buildMainContentEmail(opts);
 
   const appointmentLane = isAppointmentLane(opts.lane);

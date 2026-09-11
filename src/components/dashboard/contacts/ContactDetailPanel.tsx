@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import { GuestMessageComposerHint } from '@/components/booking/GuestMessageComposerHint';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { useToast } from '@/components/ui/Toast';
 import { StaffSurfaceBookingModal } from '@/components/booking/StaffSurfaceBookingModal';
@@ -718,11 +719,13 @@ export function ContactDetailPanel({
               <textarea
                 value={messageDraft}
                 onChange={(e) => setMessageDraft(e.target.value)}
-                rows={3}
+                rows={5}
+                maxLength={2000}
                 disabled={messageSending}
                 placeholder={`SMS / email to ${clientLower}…`}
-                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-200 disabled:opacity-50"
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm leading-relaxed placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-200 disabled:opacity-50"
               />
+              <GuestMessageComposerHint message={messageDraft} channel={messageChannel} />
               <button
                 type="button"
                 disabled={messageSending || messageDraft.trim().length === 0}

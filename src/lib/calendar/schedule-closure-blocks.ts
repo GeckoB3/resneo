@@ -55,7 +55,14 @@ export type ScheduleClosureBlockType =
    * inside another venue's closed hours is not the same act, and the partner
    * has not agreed to it.
    */
-  | 'linked_venue_closed';
+  | 'linked_venue_closed'
+  /**
+   * Minutes where the venue is shut AND the calendar is not working. Produced
+   * by {@link partitionScheduleClosureBlocks}, never by a builder directly, so
+   * the two single-cause stripes ("Venue closed", "<calendar> unavailable")
+   * each mean exactly one thing.
+   */
+  | 'venue_and_calendar_closed';
 
 export interface PractitionerLeavePeriodInput {
   practitioner_id: string;
@@ -379,11 +386,123 @@ export function isScheduleClosureBlockType(blockType: string | undefined): boole
     blockType === 'venue_closed' ||
     blockType === 'practitioner_closed' ||
     blockType === 'practitioner_leave' ||
-    blockType === 'linked_venue_closed'
+    blockType === 'linked_venue_closed' ||
+    blockType === 'venue_and_calendar_closed'
   );
 }
 
-export function scheduleClosureBlockLabel(blockType: string | undefined): string {
-  if (blockType === 'practitioner_leave') return 'On leave';
-  return 'Closed';
+function hm(t: string): string {
+  return t.slice(0, 5);
+}
+
+/**
+ * The words on a closure stripe. Every stripe says why the minutes are
+ * unavailable and which minutes: "Venue closed 18:00 to 20:00" when the
+ * calendar would work but the business is shut, "Hannah unavailable 08:00 to
+ * 09:00" when the business is open but the calendar is not working.
+ */
+export function scheduleClosureBlockLabel(
+  blockType: string | undefined,
+  opts?: { columnName?: string | null; startTime?: string; endTime?: string },
+): string {
+  const range = opts?.startTime && opts?.endTime ? ` ${hm(opts.startTime)} to ${hm(opts.endTime)}` : '';
+  if (blockType === 'practitioner_leave') return `On leave${range}`;
+  if (blockType === 'venue_closed') return `Venue closed${range}`;
+  if (blockType === 'practitioner_closed') {
+    const who = opts?.columnName?.trim() || 'Calendar';
+    return `${who} unavailable${range}`;
+  }
+  if (blockType === 'linked_venue_closed') return `Linked venue closed${range}`;
+  if (blockType === 'venue_and_calendar_closed') {
+    // The venue is shut too, but the calendar's own closure is what keeps
+    // these minutes closed, so it is named rather than a bare "Closed".
+    const who = opts?.columnName?.trim() || 'Calendar';
+    return `${who} closed${range}`;
+  }
+  return `Closed${range}`;
+}
+
+function subtractRanges(from: MinuteRange[], remove: MinuteRange[]): MinuteRange[] {
+  let out = mergeAdjacentRanges(from);
+  for (const r of mergeAdjacentRanges(remove)) {
+    const next: MinuteRange[] = [];
+    for (const f of out) {
+      if (r.end <= f.start || r.start >= f.end) {
+        next.push(f);
+        continue;
+      }
+      if (r.start > f.start) next.push({ start: f.start, end: r.start });
+      if (r.end < f.end) next.push({ start: r.end, end: f.end });
+    }
+    out = next;
+  }
+  return out;
+}
+
+/**
+ * Splits venue-closed and calendar-closed stripes so no minute carries two
+ * explanations. Where only the venue is shut the stripe stays `venue_closed`;
+ * where only the calendar is off it stays `practitioner_closed`; where both
+ * apply it becomes `venue_and_calendar_closed`. Leave and linked-venue stripes
+ * pass through untouched.
+ */
+export function partitionScheduleClosureBlocks(
+  blocks: ScheduleClosureCalendarBlock[],
+): ScheduleClosureCalendarBlock[] {
+  type Key = string;
+  const venueByKey = new Map<Key, MinuteRange[]>();
+  const calByKey = new Map<Key, MinuteRange[]>();
+  const passthrough: ScheduleClosureCalendarBlock[] = [];
+  const keyOf = (b: ScheduleClosureCalendarBlock) => `${b.calendar_id ?? b.practitioner_id ?? ''}|${b.block_date}`;
+  const rangeOf = (b: ScheduleClosureCalendarBlock): MinuteRange => ({
+    start: timeToMinutes(hm(b.start_time)),
+    end: timeToMinutes(hm(b.end_time)),
+  });
+  for (const b of blocks) {
+    if (b.block_type === 'venue_closed') {
+      venueByKey.set(keyOf(b), [...(venueByKey.get(keyOf(b)) ?? []), rangeOf(b)]);
+    } else if (b.block_type === 'practitioner_closed') {
+      calByKey.set(keyOf(b), [...(calByKey.get(keyOf(b)) ?? []), rangeOf(b)]);
+    } else {
+      passthrough.push(b);
+    }
+  }
+  const out: ScheduleClosureCalendarBlock[] = [];
+  const keys = new Set<Key>([...venueByKey.keys(), ...calByKey.keys()]);
+  for (const key of keys) {
+    const [columnId, dateStr] = key.split('|') as [string, string];
+    const venue = venueByKey.get(key) ?? [];
+    const cal = calByKey.get(key) ?? [];
+    const both = intersectRanges(venue, cal);
+    for (const r of subtractRanges(venue, cal)) out.push(toScheduleBlock('venue_closed', columnId, dateStr, r, null));
+    for (const r of subtractRanges(cal, venue)) out.push(toScheduleBlock('practitioner_closed', columnId, dateStr, r, null));
+    for (const r of both) out.push(toScheduleBlock('venue_and_calendar_closed', columnId, dateStr, r, null));
+  }
+  return [...out, ...passthrough];
+}
+
+/**
+ * The earliest start and latest end any of these calendars is scheduled to
+ * work across the dates, in minutes from midnight. The diary widens its grid
+ * to this so a calendar working past the venue's hours is always drawn, with
+ * the venue-closed stripe explaining the difference.
+ */
+export function calendarWorkingBoundsForDates(
+  practitioners: PractitionerClosureInput[],
+  fromDate: string,
+  toDate: string,
+): { start: number; end: number } | null {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  for (const prac of practitioners) {
+    if (!prac.is_active) continue;
+    for (const dateStr of enumerateDatesInclusive(fromDate, toDate)) {
+      for (const r of getWorkingRanges(prac as Practitioner, dateStr)) {
+        if (!Number.isFinite(r.start) || !Number.isFinite(r.end) || r.end <= r.start) continue;
+        start = Math.min(start, r.start);
+        end = Math.max(end, r.end);
+      }
+    }
+  }
+  return Number.isFinite(start) && Number.isFinite(end) ? { start, end } : null;
 }

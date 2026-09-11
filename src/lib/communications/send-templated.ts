@@ -461,12 +461,13 @@ export async function sendCardHoldChargedReceipt(params: {
 
   const { data: venueRow } = await admin
     .from('venues')
-    .select('name, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model, booking_page_config')
+    .select('name, slug, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model, booking_page_config')
     .eq('id', venueId)
     .maybeSingle();
   const v = venueRow as
     | {
         name?: string | null;
+        slug?: string | null;
         address?: string | null;
         phone?: string | null;
         email?: string | null;
@@ -521,6 +522,7 @@ export async function sendCardHoldChargedReceipt(params: {
 
   const venueData = venueRowToEmailData({
     name: v.name,
+    slug: v.slug ?? null,
     address: v.address ?? null,
     phone: v.phone ?? null,
     email: v.email ?? null,
@@ -593,12 +595,13 @@ export async function sendPaymentReceiptEmail(params: {
 
   const { data: venueRow } = await admin
     .from('venues')
-    .select('name, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model, booking_page_config')
+    .select('name, slug, address, phone, email, reply_to_email, logo_url, website_url, timezone, booking_model, booking_page_config')
     .eq('id', venueId)
     .maybeSingle();
   const v = venueRow as
     | {
         name?: string | null;
+        slug?: string | null;
         address?: string | null;
         phone?: string | null;
         email?: string | null;
@@ -652,6 +655,7 @@ export async function sendPaymentReceiptEmail(params: {
 
   const venueData = venueRowToEmailData({
     name: v.name,
+    slug: v.slug ?? null,
     address: v.address ?? null,
     phone: v.phone ?? null,
     email: v.email ?? null,

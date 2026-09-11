@@ -4,6 +4,7 @@ import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { resolveVenueBookingPageUrl } from '@/lib/emails/venue-booking-page-link';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -194,7 +195,7 @@ async function sendConfirmOrCancelPrompts(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, google_review_url, review_request_enabled, booking_page_config');
+    .select('id, name, slug, address, phone, timezone, booking_model, email, reply_to_email, google_review_url, review_request_enabled, booking_page_config');
 
   if (!venues?.length) return;
 
@@ -235,7 +236,10 @@ async function sendConfirmOrCancelPrompts(results: {
        */
       const closureBlocks = await fetchVenueClosureBlocksForDates(supabase, venue.id, dates);
 
-      const venueData = venueRowToEmailData(venue);
+      const venueData = venueRowToEmailData({
+        ...venue,
+        booking_page_url: await resolveVenueBookingPageUrl(supabase, venue),
+      });
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;
@@ -332,7 +336,7 @@ async function sendPreVisitReminders(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, google_review_url, review_request_enabled, booking_page_config');
+    .select('id, name, slug, address, phone, timezone, booking_model, email, reply_to_email, google_review_url, review_request_enabled, booking_page_config');
 
   if (!venues?.length) return;
 
@@ -367,7 +371,10 @@ async function sendPreVisitReminders(results: {
       /** SA-M2; see the note on the confirm/cancel lane above. */
       const closureBlocks = await fetchVenueClosureBlocksForDates(supabase, venue.id, dates);
 
-      const venueData = venueRowToEmailData(venue);
+      const venueData = venueRowToEmailData({
+        ...venue,
+        booking_page_url: await resolveVenueBookingPageUrl(supabase, venue),
+      });
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;
@@ -492,7 +499,7 @@ async function sendPostVisitThankYous(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, google_review_url, review_request_enabled, booking_page_config');
+    .select('id, name, slug, address, phone, timezone, booking_model, email, reply_to_email, google_review_url, review_request_enabled, booking_page_config');
 
   if (!venues?.length) return;
 
@@ -523,7 +530,10 @@ async function sendPostVisitThankYous(results: {
 
       if (!bookings?.length) continue;
 
-      const venueData = venueRowToEmailData(venue);
+      const venueData = venueRowToEmailData({
+        ...venue,
+        booking_page_url: await resolveVenueBookingPageUrl(supabase, venue),
+      });
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;

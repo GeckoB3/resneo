@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { resolveVenueBookingPageUrl } from '@/lib/emails/venue-booking-page-link';
 import type { BookingModel } from '@/types/booking-models';
 import { createOrGetBookingShortLink } from '@/lib/booking-short-links';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
@@ -270,7 +271,10 @@ async function runLaneReminder(opts: {
    */
   const anchors = opts.cdeOnly ? null : visitCommsAnchorIds(eligible, 'earliest');
 
-  const venueData = venueRowToEmailData(opts.venue);
+  const venueData = venueRowToEmailData({
+    ...opts.venue,
+    booking_page_url: await resolveVenueBookingPageUrl(opts.supabase, opts.venue),
+  });
   for (const row of eligible) {
     try {
       if (anchors && !anchors.has(row.id)) continue;
@@ -437,7 +441,10 @@ async function runLanePostVisit(opts: {
       })
     : [];
   const anchors = opts.cdeOnly ? null : visitPostVisitAnchorIds(eligible, visitRows);
-  const venueData = venueRowToEmailData(opts.venue);
+  const venueData = venueRowToEmailData({
+    ...opts.venue,
+    booking_page_url: await resolveVenueBookingPageUrl(opts.supabase, opts.venue),
+  });
   for (const row of eligible) {
     try {
       if (anchors && !anchors.has(row.id)) continue;
@@ -505,7 +512,7 @@ export async function runUnifiedSchedulingComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, pricing_tier, enabled_models, active_booking_models, email, reply_to_email, booking_page_config');
+    .select('id, name, slug, address, phone, timezone, booking_model, pricing_tier, enabled_models, active_booking_models, email, reply_to_email, booking_page_config');
 
   for (const venue of venues ?? []) {
     if (!venueSupportsUnifiedSchedulingComms(venue)) continue;
@@ -542,7 +549,7 @@ export async function runSecondaryModelScheduledComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_config');
+    .select('id, name, slug, address, phone, timezone, booking_model, email, reply_to_email, booking_page_config');
 
   for (const venue of venues ?? []) {
     await runLaneReminder({

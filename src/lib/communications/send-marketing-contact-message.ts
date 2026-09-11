@@ -2,6 +2,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
+import { resolveVenueBookingPageUrl } from '@/lib/emails/venue-booking-page-link';
 
 export type MarketingContactChannel = 'email' | 'sms' | 'both';
 
@@ -58,14 +59,17 @@ export async function sendMarketingContactMessage(
 
   const { data: venueRow, error: vErr } = await admin
     .from('venues')
-    .select('name, address, phone, booking_page_url, logo_url, timezone, reply_to_email, email, booking_page_config')
+    .select('name, slug, address, phone, logo_url, cover_photo_url, website_url, timezone, reply_to_email, email, booking_page_config')
     .eq('id', input.venueId)
     .maybeSingle();
   if (vErr || !venueRow) {
     return { attempted: [], error: 'Venue not found' };
   }
 
-  const venue = venueRowToEmailData(venueRow as import('@/lib/emails/venue-email-data').VenueRowForGuestEmail);
+  const venue = venueRowToEmailData({
+    ...(venueRow as import('@/lib/emails/venue-email-data').VenueRowForGuestEmail),
+    booking_page_url: await resolveVenueBookingPageUrl(admin, { id: input.venueId, slug: (venueRow as { slug?: string | null }).slug }),
+  });
   const attempted: ('email' | 'sms')[] = [];
   let emailSent = false;
   let smsSent = false;

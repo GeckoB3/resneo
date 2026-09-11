@@ -1,5 +1,6 @@
 import type { VenueEmailData } from '@/lib/emails/types';
 import { bookingPageEmailBrandColour } from '@/lib/booking/booking-page-theme';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 
 /** Venue row fields needed to build {@link VenueEmailData} for transactional email. */
 export interface VenueRowForGuestEmail {
@@ -7,6 +8,9 @@ export interface VenueRowForGuestEmail {
   address?: string | null;
   phone?: string | null;
   website_url?: string | null;
+  /** `venues.slug`. Select it wherever the email carries a Book again button, or the button is dropped. */
+  slug?: string | null;
+  /** Explicit override of the public booking page; derived from `slug` when absent. */
   booking_page_url?: string | null;
   logo_url?: string | null;
   /** Fallback hero image when `logo_url` is unset (email templates prefer logo). */
@@ -22,6 +26,13 @@ export interface VenueRowForGuestEmail {
    * switch; select it wherever this row is loaded or the email falls back to ResNeo colours.
    */
   booking_page_config?: unknown;
+}
+
+/** The venue's public booking page (`/book/{slug}`) on the canonical site origin. */
+export function venueBookingPageUrl(slug: string | null | undefined): string | null {
+  const s = slug?.trim();
+  if (!s) return null;
+  return `${normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL)}/book/${encodeURIComponent(s)}`;
 }
 
 function normalisedReplyTo(row: VenueRowForGuestEmail): string | null {
@@ -45,7 +56,7 @@ export function venueRowToEmailData(row: VenueRowForGuestEmail): VenueEmailData 
     phone: row.phone ?? null,
     logo_url: logo,
     website_url: row.website_url?.trim() ? row.website_url.trim() : null,
-    booking_page_url: row.booking_page_url ?? undefined,
+    booking_page_url: row.booking_page_url?.trim() || venueBookingPageUrl(row.slug) || undefined,
     timezone: row.timezone ?? undefined,
     reply_to_email: normalisedReplyTo(row),
     google_review_url: row.google_review_url ?? null,

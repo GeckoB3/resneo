@@ -1,6 +1,7 @@
 import type { RenderedEmail } from '../types';
 import { escapeHtml, formatDate } from './base-template';
 import { renderTransactionalEmailHtml } from './booking-confirmation-layout';
+import { buildGoogleMapsDirectionsUrl } from '../external-links';
 
 export interface AppointmentWaitlistOfferEmailInput {
   venueName: string;
@@ -45,6 +46,12 @@ export function renderAppointmentWaitlistOfferEmail(
 
   const html = renderTransactionalEmailHtml({
     venueName: input.venueName,
+    footerVenue: {
+      name: input.venueName,
+      address: input.venueAddress ?? null,
+      phone: input.venuePhone ?? null,
+      mapsUrl: buildGoogleMapsDirectionsUrl(input.venueAddress),
+    },
     brandColour: input.venueBrandColour ?? null,
     venueLogoUrl: input.venueLogoUrl,
     heading: 'Appointment availability',

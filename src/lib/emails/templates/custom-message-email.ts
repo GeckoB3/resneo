@@ -15,7 +15,7 @@
  */
 
 import { emailAccent } from '../email-accent';
-import { normalizeWebsiteUrlForLink } from '../external-links';
+import { buildGoogleMapsDirectionsUrl, normalizeWebsiteUrlForLink } from '../external-links';
 import { escapeHtml } from './base-template';
 
 const PAGE_BG = '#f0f2f5';
@@ -118,7 +118,12 @@ export function renderCustomMessageEmailHtml(opts: CustomMessageEmailOptions): s
   const body = formatMessageParagraphsHtml(opts.message);
 
   const contactRows = [
-    address ? contactRow('Address', escapeHtml(address).replace(/\n/g, '<br/>')) : '',
+    address
+      ? contactRow(
+          'Address',
+          `<a href="${escapeHtml(buildGoogleMapsDirectionsUrl(address) ?? '')}" target="_blank" rel="noopener noreferrer" style="color:${accent};font-weight:600;text-decoration:none">${escapeHtml(address).replace(/\n/g, '<br/>')}</a>`,
+        )
+      : '',
     phone
       ? contactRow(
           'Phone',

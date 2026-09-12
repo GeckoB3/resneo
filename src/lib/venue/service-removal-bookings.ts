@@ -89,6 +89,25 @@ export function parseServiceRemovalConfirmation(payload: unknown): ServiceRemova
 }
 
 /**
+ * The calendars the confirmation is about: the ones this save would stop offering a
+ * service that is already booked on them. Backing out of the dialog has to put those
+ * ticks back, or the form goes on showing a removal that never reached the database.
+ *
+ * Read from the bookings on show, so a calendar whose bookings all fell beyond the
+ * sample cap is left alone. That one is safe: the next save asks about it again.
+ */
+export function affectedCalendarIds(confirmation: ServiceRemovalConfirmation | null): string[] {
+  if (!confirmation) return [];
+  return [...new Set(confirmation.bookings.map((b) => b.calendar_id).filter(Boolean))];
+}
+
+/** The same list the other way round: the services a calendar would stop offering. */
+export function affectedServiceIds(confirmation: ServiceRemovalConfirmation | null): string[] {
+  if (!confirmation) return [];
+  return [...new Set(confirmation.bookings.map((b) => b.service_id).filter(Boolean))];
+}
+
+/**
  * Moves each chosen booking onto its target calendar, one at a time so a single clash
  * cannot take the rest down with it. Same date and time, same duration: only the column
  * changes, so the guest is not notified and nothing is cancelled.

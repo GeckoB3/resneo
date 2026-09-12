@@ -228,7 +228,7 @@ function ContactRow({
             className="inline-flex items-center rounded-md border border-slate-200/80 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-700"
             title={visitsLabel}
           >
-            {g.visit_count} visits
+            {g.visit_count} {g.visit_count === 1 ? 'visit' : 'visits'}
             {g.no_show_count > 0 ? (
               <span className="ml-1 font-semibold text-red-600">{g.no_show_count} NS</span>
             ) : null}
@@ -428,6 +428,12 @@ export function ContactsDashboard({
   const [sort, setSort] = useState('last_visit_desc');
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState<'identified' | 'all' | 'anonymous'>('identified');
+  /**
+   * How many more contacts the current search and filters would find under "All identified
+   * guests": clients booked in by name alone, with no email or phone. Null when not asked.
+   */
+  const [hiddenByScope, setHiddenByScope] = useState<number | null>(null);
+  const hiddenByScopeRequest = useRef(0);
   const [segment, setSegment] = useState<ContactsSegment>('all');
   const [segmentTag, setSegmentTag] = useState('');
   const [dateFrom, setDateFrom] = useState<string | null>(null);
@@ -603,11 +609,37 @@ export function ContactsDashboard({
       if (!res.ok) {
         throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load list');
       }
+      const identifiedTotal = data.total_count ?? 0;
       setGuests(data.guests ?? []);
-      setTotalCount(data.total_count ?? 0);
+      setTotalCount(identifiedTotal);
+
+      // Every field on the booking form is optional, so a walk-in booked by name alone has no
+      // email or phone and the default scope hides them. A search for that exact name used to
+      // answer "No matches" with nothing to say why (R36). Ask the same question at "All
+      // identified guests" and say what the scope is holding back.
+      const requestId = ++hiddenByScopeRequest.current;
+      if (filter === 'identified' && (debouncedSearch || (data.guests ?? []).length === 0)) {
+        const wider = new URLSearchParams(params);
+        wider.set('filter', 'all');
+        wider.set('page', '0');
+        wider.set('limit', '1');
+        void fetch(`/api/venue/guests?${wider}`)
+          .then(async (r) => (r.ok ? ((await r.json()) as { total_count?: number }) : null))
+          .then((widerData) => {
+            if (requestId !== hiddenByScopeRequest.current) return;
+            setHiddenByScope(widerData ? Math.max(0, (widerData.total_count ?? 0) - identifiedTotal) : null);
+          })
+          .catch(() => {
+            if (requestId === hiddenByScopeRequest.current) setHiddenByScope(null);
+          });
+      } else {
+        setHiddenByScope(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
       setGuests([]);
+      hiddenByScopeRequest.current += 1;
+      setHiddenByScope(null);
     } finally {
       if (!silent) {
         setLoading(false);
@@ -1095,22 +1127,45 @@ export function ContactsDashboard({
     return formatGuestDisplayName(g.first_name, g.last_name);
   };
 
+  /** Contacts the default scope is holding back from this search (see `hiddenByScope`). */
+  const scopeHiddenCount = filter === 'identified' && hiddenByScope != null ? hiddenByScope : 0;
+  const scopeHiddenText =
+    scopeHiddenCount > 0
+      ? `${scopeHiddenCount} ${scopeHiddenCount === 1 ? clientLower : `${clientLower}s`} ${
+          debouncedSearch
+            ? `${scopeHiddenCount === 1 ? 'matches' : 'match'} “${debouncedSearch}” but ${scopeHiddenCount === 1 ? 'has' : 'have'}`
+            : scopeHiddenCount === 1
+              ? 'has'
+              : 'have'
+        } no saved email or phone. The “${
+          CONTACT_SHOW_OPTIONS.find((o) => o.value === 'identified')?.label ?? 'Saved contact details'
+        }” filter is hiding them.`
+      : null;
+  const showScopeHiddenContacts = useCallback(() => {
+    setFilter('all');
+    setPage(0);
+  }, []);
+
   const emptyTitle =
     tagSegmentNeedsInput && !loading
       ? 'Choose a tag'
       : visitSegmentNeedsDates && !loading
         ? 'Choose visit dates'
-        : !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
-          ? `No ${clientLower}s yet`
-          : 'No matches';
+        : scopeHiddenText && !debouncedSearch
+          ? `No ${clientLower}s with saved contact details`
+          : !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
+            ? `No ${clientLower}s yet`
+            : 'No matches';
   const emptyDescription =
     tagSegmentNeedsInput && !loading
       ? 'Open Filters, choose Filter by tag under Smart lists, then pick a suggestion or type a tag.'
       : visitSegmentNeedsDates && !loading
         ? 'Under Smart lists, pick By last visit and set a starting date, an ending date, or both. Only contacts with a last visit in that range are shown.'
-        : !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
-          ? `No ${clientLower}s yet. They’ll appear here automatically as ${bookingWord.toLowerCase()}s come in.`
-          : 'No clients match your search. Try another filter or search.';
+        : scopeHiddenText
+          ? scopeHiddenText
+          : !hasActiveFilters && !debouncedSearch && guests.length === 0 && !loading
+            ? `No ${clientLower}s yet. They’ll appear here automatically as ${bookingWord.toLowerCase()}s come in.`
+            : 'No clients match your search. Try another filter or search.';
 
   const toolbarDatePlaceholder = isoDateToday();
 
@@ -1784,7 +1839,26 @@ export function ContactsDashboard({
               title={emptyTitle}
               description={emptyDescription}
               action={
-                searchActive ? (
+                scopeHiddenText ? (
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={showScopeHiddenContacts}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-300"
+                    >
+                      Show them
+                    </button>
+                    {searchActive ? (
+                      <button
+                        type="button"
+                        onClick={clearSearch}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-300"
+                      >
+                        Clear search
+                      </button>
+                    ) : null}
+                  </div>
+                ) : searchActive ? (
                   <button
                     type="button"
                     onClick={clearSearch}
@@ -1811,6 +1885,21 @@ export function ContactsDashboard({
             />
           ) : (
             <div className="space-y-3">
+              {scopeHiddenText ? (
+                <div
+                  role="status"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900"
+                >
+                  <span className="min-w-0">{scopeHiddenText}</span>
+                  <button
+                    type="button"
+                    onClick={showScopeHiddenContacts}
+                    className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  >
+                    Show them
+                  </button>
+                </div>
+              ) : null}
               {/* Select-all bar */}
               <div className="flex items-center justify-between rounded-2xl border border-slate-200/90 bg-white/95 px-4 py-3 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.03] backdrop-blur-sm">
                 <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm font-medium text-slate-600 hover:text-slate-900">

@@ -59,6 +59,21 @@ Each switched-on calendar becomes one column on your **Calendar** and one bookab
 
 To change any of this later, click **Edit** on the calendar's row. The same form opens with **Edit calendar** at the top.
 
+### Stopping a calendar offering a service
+
+Untick a service under **Appointment services** and click **Save**. From that moment the calendar takes no new bookings for it, on your booking page or from your own staff.
+
+If that service already has upcoming bookings on the calendar, ResNeo does not refuse the change. It lists every booking affected, with the date, the time and the client's name, and asks what should happen to them:
+
+- **Leave them on this calendar.** They stay exactly as they are and go ahead as normal. Only new bookings stop.
+- **Move them to another calendar.** Choose the calendar from the dropdown. Each booking keeps its date, its time and its length, so nobody is emailed and nothing is cancelled.
+
+This is the way to retire a service on one chair or one room: stop the new bookings today, and let the ones in the diary run out.
+
+Only calendars that are switched on and already offer the service can take the bookings, so the dropdown lists those. When no other calendar offers it, the only choice is to leave the bookings where they are. Add the service to another calendar first if you would rather move them.
+
+If a booking cannot be moved, usually because the other calendar is already busy at that time, ResNeo names it and says why. Pick a different calendar for it, or leave it where it is and save.
+
 ## Step 3: Give a calendar its own booking link (optional)
 
 Every calendar card has a **Booking link** strip along the bottom. It creates a direct link to that one person or room, alongside your main booking page.
@@ -117,6 +132,9 @@ For what each tier costs and includes, see [Appointments Light, Plus, and Pro](/
 | I cannot see the **Calendars** tab at all | Your login is a team member, not an admin | Ask an admin to make the change, or to change your role under **Settings → Staff** |
 | Saving the calendar says "Name is required" | **Display name** is empty | Type a name, then click **Save** again |
 | A service does not appear for guests on this calendar | The service is not ticked under **Appointment services**, or the calendar is switched off | Click **Edit**, tick the service, and check **Active (bookable)** |
+| Unticking a service opens a list of bookings | Those bookings are already in the diary for that service on this calendar | Leave them where they are, or move them to another calendar, then save. Nothing is cancelled either way |
+| A booking would not move to another calendar | That calendar is already booked at the same time | Choose a different calendar for it, or leave it where it is and save |
+| The move dropdown offers nowhere to go | No other calendar that is switched on offers that service | Tick the service on another calendar first, then come back |
 | A room or piece of equipment cannot be booked | A resource has to sit on a calendar column | Click **Edit** on the calendar and tick it under **Resources on this column** |
 | The card shows **Conflict** | Two resources on that column have overlapping weekly hours | Change one resource's hours, or move it to a different calendar |
 | Ticking a class or event asks to move it | Classes, resources and events live on one column at a time | Confirm to move it, or cancel and pick a different calendar |

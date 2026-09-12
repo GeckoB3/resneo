@@ -193,6 +193,15 @@ A service is only bookable on the calendars ticked here, so this list decides wh
 
 You can work from the calendar side instead: **Calendar Availability**, the **Calendars** tab, **Edit** a calendar, then tick services under **Appointment services**. The same service can sit on as many columns as you like.
 
+### Untick a calendar that already has bookings
+
+Unticking a calendar that still has upcoming bookings for this service does not stop the save. ResNeo lists every booking affected, with the date, the time and the client's name, and asks what should happen to them:
+
+- **Leave them where they are.** Nothing changes for those clients. The calendar simply stops offering the service for new bookings.
+- **Move them to another calendar.** Pick the calendar from the dropdown, which lists the calendars that are switched on and already offer this service. Each booking keeps its date, time and length, so nobody is emailed and nothing is cancelled.
+
+Bookings are never cancelled by this, whichever you choose. If a move cannot go ahead, because the other calendar is already busy at that time, ResNeo says so and leaves that booking where it is for you to sort out.
+
 ## When guests can book this service online
 
 Online availability is the overlap of three things: your venue opening hours, the weekly hours of each calendar you ticked, and this service's own schedule. The preview under **When guests can book this service online** draws that result before you save. Staff blocks and one-off calendar changes are not shown in the preview, but they do apply live.

@@ -14,6 +14,14 @@ import { BookableCalendarsPanel } from '@/app/dashboard/availability/BookableCal
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 import { useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { AppointmentAvailabilityTabPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { ServiceRemovalBookingsDialog } from '@/components/scheduling/ServiceRemovalBookingsDialog';
+import {
+  moveAffectedBookings,
+  parseServiceRemovalConfirmation,
+  type ServiceRemovalConfirmation,
+  type ServiceRemovalMove,
+  type ServiceRemovalMoveFailure,
+} from '@/lib/venue/service-removal-bookings';
 import { pickScheduleCalendarId } from '@/lib/calendar/pick-schedule-calendar';
 import {
   calendarHoursOutsideVenue,
@@ -243,6 +251,17 @@ export function AppointmentAvailabilitySettings({
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   /** Validation / API errors for the Add/Edit calendar modal only (not the page-level banner). */
   const [calendarModalError, setCalendarModalError] = useState<string | null>(null);
+
+  /**
+   * Taking a service off a calendar that already has bookings for it is allowed: the
+   * calendar stops offering it and the bookings stay put. The API answers the first
+   * attempt with the list so this dialog can show it and offer to move them instead.
+   */
+  const [serviceRemoval, setServiceRemoval] = useState<ServiceRemovalConfirmation | null>(null);
+  const [pendingServiceLinks, setPendingServiceLinks] = useState<{ calendarId: string; serviceIds: string[] } | null>(null);
+  const [serviceRemovalFailures, setServiceRemovalFailures] = useState<ServiceRemovalMoveFailure[]>([]);
+  const [serviceRemovalError, setServiceRemovalError] = useState<string | null>(null);
+  const [serviceRemovalSaving, setServiceRemovalSaving] = useState(false);
 
   // Selected practitioner for hours / breaks tabs
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string>(embedded?.initialCalendarId ?? '');
@@ -771,14 +790,13 @@ export function AppointmentAvailabilitySettings({
       }
       }
 
-      const linkRes = await fetch('/api/venue/practitioner-services', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practitioner_id: editingPracId, service_ids: formServiceIds }),
-      });
-      if (!linkRes.ok) {
-        const linkJson = (await linkRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(linkJson.error ?? 'Failed to sync service links for this calendar.');
+      const linkResult = await putServiceLinks(editingPracId, formServiceIds, false);
+      if (linkResult === 'needs_confirmation') {
+        // Everything else on the calendar has saved; only the service list is waiting on
+        // the operator's choice. Close this form so the two dialogs never stack, and
+        // reopen it untouched if they back out.
+        setShowForm(false);
+        return;
       }
 
       setShowForm(false);
@@ -790,6 +808,90 @@ export function AppointmentAvailabilitySettings({
     } finally {
       setSaving(false);
     }
+  }
+
+  /**
+   * PUT the calendar's service links. Answers `needs_confirmation` when the save would
+   * take a service off a calendar that already has upcoming bookings for it, having
+   * loaded those bookings into the confirmation dialog. Anything else throws.
+   */
+  async function putServiceLinks(
+    calendarId: string,
+    serviceIds: string[],
+    acknowledge: boolean,
+  ): Promise<'saved' | 'needs_confirmation'> {
+    const res = await fetch(
+      acknowledge
+        ? '/api/venue/practitioner-services?acknowledge_affected_bookings=true'
+        : '/api/venue/practitioner-services',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practitioner_id: calendarId, service_ids: serviceIds }),
+      },
+    );
+    if (res.ok) return 'saved';
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(body) : null;
+    if (confirmation) {
+      setPendingServiceLinks({ calendarId, serviceIds });
+      setServiceRemovalFailures([]);
+      setServiceRemovalError(null);
+      setServiceRemoval(confirmation);
+      return 'needs_confirmation';
+    }
+    throw new Error(body.error ?? 'Failed to sync service links for this calendar.');
+  }
+
+  /** The operator has seen the affected bookings: move the ones they chose, then save. */
+  async function confirmServiceRemoval(moves: ServiceRemovalMove[]) {
+    if (!serviceRemoval || !pendingServiceLinks) return;
+    setServiceRemovalSaving(true);
+    setServiceRemovalError(null);
+    try {
+      if (moves.length > 0) {
+        const { movedIds, failures } = await moveAffectedBookings(moves, serviceRemoval.bookings);
+        if (failures.length > 0) {
+          // Drop what did move so a second attempt cannot move it twice.
+          setServiceRemoval({
+            ...serviceRemoval,
+            bookings: serviceRemoval.bookings.filter((b) => !movedIds.has(b.id)),
+            total: Math.max(serviceRemoval.total - movedIds.size, 0),
+          });
+          setServiceRemovalFailures(failures);
+          return;
+        }
+      }
+      await putServiceLinks(pendingServiceLinks.calendarId, pendingServiceLinks.serviceIds, true);
+      closeServiceRemoval();
+      flash(
+        moves.length > 0
+          ? `Calendar updated. ${moves.length} booking${moves.length === 1 ? '' : 's'} moved.`
+          : 'Calendar updated. Existing bookings were left in place.',
+      );
+      await fetchData();
+      await refreshCalendarEntitlement();
+    } catch (err) {
+      setServiceRemovalError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setServiceRemovalSaving(false);
+    }
+  }
+
+  function closeServiceRemoval() {
+    setServiceRemoval(null);
+    setPendingServiceLinks(null);
+    setServiceRemovalFailures([]);
+    setServiceRemovalError(null);
+  }
+
+  /**
+   * Does this calendar column currently offer the service? Decides which columns the
+   * removal dialog can offer as a destination: a move onto one that does not offer it is
+   * refused by `/api/venue/bookings/[id]`.
+   */
+  function calendarOffersService(calendarId: string, serviceId: string): boolean {
+    return pLinks.some((l) => l.practitioner_id === calendarId && l.service_id === serviceId);
   }
 
   // ─── Working Hours Tab ──────────────────────────────────────────────
@@ -1490,6 +1592,26 @@ export function AppointmentAvailabilitySettings({
           )}
         </>
       )}
+
+      <ServiceRemovalBookingsDialog
+        open={serviceRemoval !== null}
+        confirmation={serviceRemoval}
+        calendars={appointmentCalendars
+          // Paused calendars cannot take a booking: the modification route answers
+          // "Staff not available", so they are not offered as a destination.
+          .filter((p) => p.is_active)
+          .map((p) => ({ id: p.id, name: p.name }))}
+        calendarOffersService={calendarOffersService}
+        saving={serviceRemovalSaving}
+        failures={serviceRemovalFailures}
+        error={serviceRemovalError}
+        onCancel={() => {
+          closeServiceRemoval();
+          setShowForm(true);
+          void fetchData();
+        }}
+        onConfirm={(moves) => void confirmServiceRemoval(moves)}
+      />
 
       <Dialog
         open={showUpgradeModal}

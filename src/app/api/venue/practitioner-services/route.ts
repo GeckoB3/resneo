@@ -8,9 +8,9 @@ import {
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { PractitionerService } from '@/types/booking-models';
 import {
-  hasBlockingBookingsRemovingServicesFromCalendarLegacy,
-  hasBlockingBookingsRemovingServicesFromCalendarUnified,
-  SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
+  findBookingsAffectedByRemovingServicesLegacy,
+  findBookingsAffectedByRemovingServicesUnified,
+  serviceRemovalConfirmationPayload,
 } from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
@@ -25,6 +25,11 @@ const syncSchema = z.object({
  * Replaces all service links for a practitioner calendar with the provided set.
  * For `unified_scheduling`, `practitioner_id` is a `unified_calendars.id`.
  * Removing a service from this calendar does not assign it elsewhere; links on other calendars are unchanged.
+ *
+ * Removing one that already has upcoming bookings is allowed: the calendar stops offering it
+ * to new guests and the bookings already taken stay exactly where they are. The first attempt
+ * answers 409 with those bookings listed so the dashboard can show them and offer to move
+ * them; `?acknowledge_affected_bookings=true` then carries the same save through.
  */
 export async function PUT(request: NextRequest) {
   try {
@@ -40,6 +45,8 @@ export async function PUT(request: NextRequest) {
 
     const { practitioner_id, service_ids } = parsed.data;
     const admin = getSupabaseAdminClient();
+    const acknowledgeAffectedBookings =
+      request.nextUrl.searchParams.get('acknowledge_affected_bookings') === 'true';
 
     const useUnified = await venueUsesUnifiedAppointmentServiceData(admin, staff.venue_id);
 
@@ -86,17 +93,17 @@ export async function PUT(request: NextRequest) {
       const previousServiceIds = new Set(preserve.keys());
       const nextServiceIds = new Set(effectiveServiceIds);
       const removedServiceIds = [...previousServiceIds].filter((sid) => !nextServiceIds.has(sid));
-      if (removedServiceIds.length > 0) {
-        const check = await hasBlockingBookingsRemovingServicesFromCalendarUnified(admin, {
+      if (removedServiceIds.length > 0 && !acknowledgeAffectedBookings) {
+        const impact = await findBookingsAffectedByRemovingServicesUnified(admin, {
           venueId: staff.venue_id,
-          calendarId: practitioner_id,
+          calendarIds: [practitioner_id],
           serviceItemIds: removedServiceIds,
         });
-        if (check.error) {
-          return NextResponse.json({ error: check.error }, { status: 500 });
+        if (impact.error) {
+          return NextResponse.json({ error: impact.error }, { status: 500 });
         }
-        if (check.blocked) {
-          return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+        if (impact.total > 0) {
+          return NextResponse.json(serviceRemovalConfirmationPayload(impact), { status: 409 });
         }
       }
 
@@ -157,17 +164,17 @@ export async function PUT(request: NextRequest) {
     const previousLegacyIds = new Set(preserve.keys());
     const nextLegacyIds = new Set(effectiveServiceIds);
     const removedLegacyIds = [...previousLegacyIds].filter((sid) => !nextLegacyIds.has(sid));
-    if (removedLegacyIds.length > 0) {
-      const check = await hasBlockingBookingsRemovingServicesFromCalendarLegacy(admin, {
+    if (removedLegacyIds.length > 0 && !acknowledgeAffectedBookings) {
+      const impact = await findBookingsAffectedByRemovingServicesLegacy(admin, {
         venueId: staff.venue_id,
-        practitionerId: practitioner_id,
+        practitionerIds: [practitioner_id],
         appointmentServiceIds: removedLegacyIds,
       });
-      if (check.error) {
-        return NextResponse.json({ error: check.error }, { status: 500 });
+      if (impact.error) {
+        return NextResponse.json({ error: impact.error }, { status: 500 });
       }
-      if (check.blocked) {
-        return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+      if (impact.total > 0) {
+        return NextResponse.json(serviceRemovalConfirmationPayload(impact), { status: 409 });
       }
     }
 

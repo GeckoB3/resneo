@@ -10,9 +10,9 @@ import {
 } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
-  hasBlockingBookingsRemovingServicesFromCalendarLegacy,
-  hasBlockingBookingsRemovingServicesFromCalendarUnified,
-  SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
+  findBookingsAffectedByRemovingServicesLegacy,
+  findBookingsAffectedByRemovingServicesUnified,
+  serviceRemovalConfirmationPayload,
 } from '@/lib/venue/service-calendar-removal';
 import {
   buildEntityNotFoundMessage,
@@ -1164,6 +1164,8 @@ export async function PATCH(request: NextRequest) {
     } = body;
     const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    const acknowledgeAffectedBookings =
+      request.nextUrl.searchParams.get('acknowledge_affected_bookings') === 'true';
 
     const parsed = servicePatchSchema.safeParse(rest);
     if (!parsed.success) {
@@ -1355,17 +1357,19 @@ export async function PATCH(request: NextRequest) {
             : currentCalendarIds.filter((cid) => managedScope?.ok && managedScope.managedCalendarIds.includes(cid));
         const removedCalendars = currentManagedIds.filter((cid) => !requestedManagedCalendarIds.includes(cid));
 
-        for (const cid of removedCalendars) {
-          const check = await hasBlockingBookingsRemovingServicesFromCalendarUnified(admin, {
+        // Taking the service off a calendar that already has bookings for it is allowed;
+        // those bookings stay put. Warn once with the list, then honour the retry.
+        if (removedCalendars.length > 0 && !acknowledgeAffectedBookings) {
+          const impact = await findBookingsAffectedByRemovingServicesUnified(admin, {
             venueId: staff.venue_id,
-            calendarId: cid,
+            calendarIds: removedCalendars,
             serviceItemIds: [id],
           });
-          if (check.error) {
-            return NextResponse.json({ error: check.error }, { status: 500 });
+          if (impact.error) {
+            return NextResponse.json({ error: impact.error }, { status: 500 });
           }
-          if (check.blocked) {
-            return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+          if (impact.total > 0) {
+            return NextResponse.json(serviceRemovalConfirmationPayload(impact), { status: 409 });
           }
         }
 
@@ -1680,17 +1684,17 @@ export async function PATCH(request: NextRequest) {
           : currentPractitionerIds.filter((pid) => managedScope?.ok && managedScope.managedCalendarIds.includes(pid));
       const removedPractitioners = currentManagedIds.filter((pid) => !requestedPractitionerIds.includes(pid));
 
-      for (const pid of removedPractitioners) {
-        const check = await hasBlockingBookingsRemovingServicesFromCalendarLegacy(admin, {
+      if (removedPractitioners.length > 0 && !acknowledgeAffectedBookings) {
+        const impact = await findBookingsAffectedByRemovingServicesLegacy(admin, {
           venueId: staff.venue_id,
-          practitionerId: pid,
+          practitionerIds: removedPractitioners,
           appointmentServiceIds: [id],
         });
-        if (check.error) {
-          return NextResponse.json({ error: check.error }, { status: 500 });
+        if (impact.error) {
+          return NextResponse.json({ error: impact.error }, { status: 500 });
         }
-        if (check.blocked) {
-          return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+        if (impact.total > 0) {
+          return NextResponse.json(serviceRemovalConfirmationPayload(impact), { status: 409 });
         }
       }
 

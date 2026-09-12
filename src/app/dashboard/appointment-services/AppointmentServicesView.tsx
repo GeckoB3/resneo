@@ -15,6 +15,14 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
+import { ServiceRemovalBookingsDialog } from '@/components/scheduling/ServiceRemovalBookingsDialog';
+import {
+  moveAffectedBookings,
+  parseServiceRemovalConfirmation,
+  type ServiceRemovalConfirmation,
+  type ServiceRemovalMove,
+  type ServiceRemovalMoveFailure,
+} from '@/lib/venue/service-removal-bookings';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { toServiceCustomScheduleV2 } from '@/lib/service-custom-availability';
@@ -135,6 +143,14 @@ interface PractitionerServiceLink {
 
 type ServicesPageTab = 'services' | 'categories' | 'addons';
 
+/**
+ * A save that stopped to show its affected bookings, held so it can be replayed with
+ * `acknowledge_affected_bookings` once the operator has chosen what happens to them.
+ */
+type PendingServiceRemoval =
+  | { kind: 'calendar_links'; calendarId: string; serviceIds: string[] }
+  | { kind: 'service_form'; payload: Record<string, unknown> };
+
 function servicesPageTabFromParam(raw: string | null): ServicesPageTab {
   return raw === 'addons' || raw === 'categories' ? raw : 'services';
 }
@@ -227,6 +243,17 @@ export function AppointmentServicesView({
   const [categories, setCategories] = useState<ServiceCategoryRef[]>([]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
+
+  /**
+   * Taking a service off a calendar that already has bookings for it is allowed: the
+   * calendar stops offering it and the bookings stay put. The API answers the first
+   * attempt with the list so this dialog can show it and offer to move them instead.
+   */
+  const [serviceRemoval, setServiceRemoval] = useState<ServiceRemovalConfirmation | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<PendingServiceRemoval | null>(null);
+  const [serviceRemovalFailures, setServiceRemovalFailures] = useState<ServiceRemovalMoveFailure[]>([]);
+  const [serviceRemovalError, setServiceRemovalError] = useState<string | null>(null);
+  const [serviceRemovalSaving, setServiceRemovalSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -560,6 +587,36 @@ export function AppointmentServicesView({
     return mine.some((l) => l.service_id === serviceId);
   }
 
+  /**
+   * PUT one calendar's service links. Answers `needs_confirmation` when the save would take
+   * a service off a calendar that already has upcoming bookings for it, having loaded those
+   * bookings into the confirmation dialog. Anything else throws.
+   */
+  async function putCalendarServiceLinks(
+    calendarId: string,
+    serviceIds: string[],
+    acknowledge: boolean,
+  ): Promise<'saved' | 'needs_confirmation'> {
+    const res = await fetch(
+      acknowledge
+        ? '/api/venue/practitioner-services?acknowledge_affected_bookings=true'
+        : '/api/venue/practitioner-services',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practitioner_id: calendarId, service_ids: serviceIds }),
+      },
+    );
+    if (res.ok) return 'saved';
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(data) : null;
+    if (confirmation) {
+      openServiceRemoval({ kind: 'calendar_links', calendarId, serviceIds }, confirmation);
+      return 'needs_confirmation';
+    }
+    throw new Error(data.error ?? 'Failed to update service allocation');
+  }
+
   async function toggleStaffServiceCalendar(serviceId: string, calendarId: string, nextEnabled: boolean) {
     setLinkSavingKey(`${serviceId}:${calendarId}`);
     setError(null);
@@ -569,20 +626,62 @@ export function AppointmentServicesView({
       const nextServiceIds = nextEnabled
         ? Array.from(new Set([...baseline, serviceId]))
         : baseline.filter((id) => id !== serviceId);
-      const res = await fetch('/api/venue/practitioner-services', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practitioner_id: calendarId, service_ids: nextServiceIds }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error ?? 'Failed to update service allocation');
+      if ((await putCalendarServiceLinks(calendarId, nextServiceIds, false)) === 'needs_confirmation') {
+        return;
       }
       await fetchAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update service allocation');
     } finally {
       setLinkSavingKey(null);
+    }
+  }
+
+  function openServiceRemoval(pending: PendingServiceRemoval, confirmation: ServiceRemovalConfirmation) {
+    setPendingRemoval(pending);
+    setServiceRemovalFailures([]);
+    setServiceRemovalError(null);
+    setServiceRemoval(confirmation);
+  }
+
+  function closeServiceRemoval() {
+    setServiceRemoval(null);
+    setPendingRemoval(null);
+    setServiceRemovalFailures([]);
+    setServiceRemovalError(null);
+  }
+
+  /** The operator has seen the affected bookings: move the ones they chose, then save. */
+  async function confirmServiceRemoval(moves: ServiceRemovalMove[]) {
+    if (!serviceRemoval || !pendingRemoval) return;
+    setServiceRemovalSaving(true);
+    setServiceRemovalError(null);
+    try {
+      if (moves.length > 0) {
+        const { movedIds, failures } = await moveAffectedBookings(moves, serviceRemoval.bookings);
+        if (failures.length > 0) {
+          // Drop what did move so a second attempt cannot move it twice.
+          setServiceRemoval({
+            ...serviceRemoval,
+            bookings: serviceRemoval.bookings.filter((b) => !movedIds.has(b.id)),
+            total: Math.max(serviceRemoval.total - movedIds.size, 0),
+          });
+          setServiceRemovalFailures(failures);
+          return;
+        }
+      }
+      if (pendingRemoval.kind === 'calendar_links') {
+        await putCalendarServiceLinks(pendingRemoval.calendarId, pendingRemoval.serviceIds, true);
+      } else {
+        await patchServicePayload(pendingRemoval.payload, true);
+        setShowModal(false);
+      }
+      closeServiceRemoval();
+      await fetchAll();
+    } catch (err) {
+      setServiceRemovalError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setServiceRemovalSaving(false);
     }
   }
 
@@ -788,6 +887,48 @@ export function AppointmentServicesView({
     }
   }
 
+  /**
+   * POST or PATCH the service itself. Like the calendar-links save, unticking a calendar
+   * that still has upcoming bookings for this service answers `needs_confirmation` with
+   * those bookings rather than refusing the edit.
+   */
+  async function patchServicePayload(
+    payload: Record<string, unknown>,
+    acknowledge: boolean,
+  ): Promise<'saved' | 'needs_confirmation'> {
+    const res = await fetch(
+      acknowledge
+        ? '/api/venue/appointment-services?acknowledge_affected_bookings=true'
+        : '/api/venue/appointment-services',
+      {
+        method: editingId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (res.ok) return 'saved';
+
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      details?: unknown;
+    };
+    const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(data) : null;
+    if (confirmation) {
+      openServiceRemoval({ kind: 'service_form', payload }, confirmation);
+      return 'needs_confirmation';
+    }
+    const baseMsg = data.error ?? 'Failed to save service';
+    // `details` is a zod flatten() OBJECT, not a string. Typed as a string it
+    // interpolated as "[object Object]", so a service that failed schema
+    // validation reported "Invalid request [object Object]" and left the
+    // owner with nothing to act on.
+    throw new Error(
+      typeof data.details === 'string' && data.details.trim() !== ''
+        ? `${baseMsg} ${data.details}`
+        : baseMsg,
+    );
+  }
+
   async function handleSave() {
     const built = appointmentServiceFormToPayload(form, { isAdmin, editingId });
     if (!built.ok) {
@@ -799,27 +940,10 @@ export function AppointmentServicesView({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/venue/appointment-services', {
-        method: editingId ? 'PATCH' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          details?: unknown;
-        };
-        const baseMsg = data.error ?? 'Failed to save service';
-        // `details` is a zod flatten() OBJECT, not a string. Typed as a string it
-        // interpolated as "[object Object]", so a service that failed schema
-        // validation reported "Invalid request [object Object]" and left the
-        // owner with nothing to act on.
-        throw new Error(
-          typeof data.details === 'string' && data.details.trim() !== ''
-            ? `${baseMsg} ${data.details}`
-            : baseMsg,
-        );
+      if ((await patchServicePayload(payload, false)) === 'needs_confirmation') {
+        // The service form closes so the two dialogs never stack; cancelling reopens it.
+        setShowModal(false);
+        return;
       }
 
       setShowModal(false);
@@ -1572,6 +1696,23 @@ export function AppointmentServicesView({
       ) : null}
 
 
+
+      <ServiceRemovalBookingsDialog
+        open={serviceRemoval !== null}
+        confirmation={serviceRemoval}
+        calendars={calendarsForServiceForm.map((p) => ({ id: p.id, name: p.name }))}
+        calendarOffersService={calendarOffersService}
+        saving={serviceRemovalSaving}
+        failures={serviceRemovalFailures}
+        error={serviceRemovalError}
+        onCancel={() => {
+          const reopenForm = pendingRemoval?.kind === 'service_form';
+          closeServiceRemoval();
+          if (reopenForm) setShowModal(true);
+          void fetchAll();
+        }}
+        onConfirm={(moves) => void confirmServiceRemoval(moves)}
+      />
 
       <Dialog
         open={serviceToDelete != null}

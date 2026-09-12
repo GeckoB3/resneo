@@ -408,6 +408,8 @@ interface CalendarBlock {
   reason: string | null;
   block_type?: string;
   class_instance_id?: string | null;
+  /** A calendar closure's Label, on `practitioner_leave` stripes (`schedule-closure-blocks`). */
+  leave_type?: string | null;
 }
 
 interface VenueResourceRow {
@@ -561,6 +563,7 @@ function calendarBlockHeading(bl: CalendarBlock, columnName?: string | null): st
       columnName,
       startTime: bl.start_time,
       endTime: bl.end_time,
+      leaveType: bl.leave_type,
     });
   }
   if (isManualEditableBlock(bl)) return 'Time blocked';

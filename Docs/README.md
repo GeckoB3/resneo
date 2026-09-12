@@ -119,6 +119,13 @@ scheduling audit.
 
 ## Cross-repo correspondence
 
+`R35_WEB_RESPONSE.md` answers the app repo's R35 handover (2026-09-12), which reported that a
+booking left behind by "stopping a calendar offering a service" could never be rescheduled again.
+Confirmed and fixed: the offered-services gate now applies to the pair being chosen, not to one a
+booking is merely carrying. The response also records a second defect found while verifying it
+(a left-behind booking stopped holding its buffer) and answers their copy question with "do not
+ship the warning".
+
 `R26_WEB_RESPONSE.md` answers the two asks in the app repo’s `R26_WEB_HANDOVER.md` (2026-09-06):
 releasing a deferred guest email on a linked booking, and a partner’s guest’s Records. Both are
 implemented; the response records one deliberate difference, that deleting a partner’s file needs

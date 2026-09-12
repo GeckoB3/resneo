@@ -261,6 +261,147 @@ describe('staff edits are always allowed outside hours', () => {
  * instead: it re-runs the same pure check without the override, and the hours
  * gate is the only thing that can fail on that run once the relaxed run passed.
  */
+/**
+ * A calendar that stops offering a service keeps the bookings already in the diary,
+ * and the dialog promises they "go ahead as normal". They did not: every drag, resize
+ * and modify save runs this validator, and the offered-services check refused all of
+ * them, so a left-behind booking could never be rescheduled again (R35, from the app).
+ */
+describe('a booking carrying the service it already has', () => {
+  const date = '2030-06-03';
+  const dk = String(getDayOfWeek(date));
+  const VENUE_ROW = {
+    timezone: 'Europe/London',
+    booking_rules: null,
+    opening_hours: null,
+    venue_opening_exceptions: null,
+  };
+
+  /** The calendar offers nothing: the link is gone, so the loaders leave the service out. */
+  function unlinkedInput(): AppointmentEngineInput {
+    return {
+      date,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as Practitioner,
+      ],
+      services: [],
+      practitionerServices: [],
+      existingBookings: [],
+    };
+  }
+
+  /** Parked as well as unlinked, to prove neither is read as "cannot be carried". */
+  const SERVICE_ROW = {
+    id: 's1',
+    venue_id: 'v1',
+    name: 'Cut',
+    duration_minutes: 30,
+    buffer_minutes: 15,
+    price_pence: 2500,
+    is_active: false,
+  };
+
+  function adminStub(opts: { booking?: Record<string, unknown> | null }) {
+    const tables: string[] = [];
+    const admin = {
+      from(table: string) {
+        tables.push(table);
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: () => chain,
+          single: async () => ({ data: table === 'venues' ? VENUE_ROW : null }),
+          maybeSingle: async () => ({
+            data:
+              table === 'bookings'
+                ? (opts.booking ?? null)
+                : table === 'service_items'
+                  ? SERVICE_ROW
+                  : null,
+          }),
+        };
+        return chain;
+      },
+    } as unknown as SupabaseClient;
+    return { admin, tables };
+  }
+
+  async function check(booking: Record<string, unknown> | null, svcId = 's1', practId = 'p1') {
+    vi.mocked(fetchAppointmentInput).mockResolvedValue(unlinkedInput());
+    const { admin, tables } = adminStub({ booking });
+    const result = await validateAppointmentModificationInterval({
+      admin,
+      venueId: 'v1',
+      bookingId: 'b1',
+      newDate: date,
+      timeStr: '10:00',
+      practId,
+      svcId,
+      durationMinutes: 30,
+      allowOutsideHours: true,
+    });
+    return { result, tables };
+  }
+
+  it('may still be moved on the column it already sits on', async () => {
+    const { result } = await check({ calendar_id: 'p1', practitioner_id: null, service_item_id: 's1' });
+    expect(result).toEqual({ ok: true, outsideHours: false });
+  });
+
+  it('is read from `practitioner_id` when the row has no `calendar_id`', async () => {
+    const { result } = await check({ calendar_id: null, practitioner_id: 'p1', service_item_id: 's1' });
+    expect(result).toEqual({ ok: true, outsideHours: false });
+  });
+
+  it('is still refused when the edit changes the service', async () => {
+    const { result } = await check({ calendar_id: 'p1', service_item_id: 's-other' });
+    expect(result).toEqual({ ok: false, reason: 'Service not available with this staff member' });
+  });
+
+  it('is still refused when the edit moves it to a column that does not offer the service', async () => {
+    const { result } = await check({ calendar_id: 'p-other', service_item_id: 's1' });
+    expect(result).toEqual({ ok: false, reason: 'Service not available with this staff member' });
+  });
+
+  it('is refused when the booking cannot be read at all', async () => {
+    const { result } = await check(null);
+    expect(result).toEqual({ ok: false, reason: 'Service not available with this staff member' });
+  });
+
+  it('costs no extra read when the calendar does offer the service', async () => {
+    vi.mocked(fetchAppointmentInput).mockResolvedValue({
+      ...unlinkedInput(),
+      services: [
+        { id: 's1', name: 'Cut', duration_minutes: 30, buffer_minutes: 0, is_active: true } as AppointmentService,
+      ],
+      practitionerServices: [
+        { id: 'ps1', practitioner_id: 'p1', service_id: 's1', custom_duration_minutes: null, custom_price_pence: null },
+      ],
+    });
+    const { admin, tables } = adminStub({ booking: null });
+    const result = await validateAppointmentModificationInterval({
+      admin,
+      venueId: 'v1',
+      bookingId: 'b1',
+      newDate: date,
+      timeStr: '10:00',
+      practId: 'p1',
+      svcId: 's1',
+      durationMinutes: 30,
+      allowOutsideHours: true,
+    });
+    expect(result).toEqual({ ok: true, outsideHours: false });
+    expect(tables).not.toContain('bookings');
+    expect(tables).not.toContain('service_items');
+  });
+});
+
 describe('reports when the hours override was what let an edit through', () => {
   const date = '2030-06-03';
   const dk = String(getDayOfWeek(date));

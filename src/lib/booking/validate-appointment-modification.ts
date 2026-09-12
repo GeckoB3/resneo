@@ -2,14 +2,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import {
   attachVenueClockToAppointmentInput,
+  ensureServiceInAppointmentInput,
   fetchAppointmentInput,
   getOfferedAppointmentServicesForPractitioner,
   MIN_APPOINTMENT_CORE_DURATION_MINUTES,
+  serviceItemRowToEngineService,
   validateAppointmentCustomInterval,
 } from '@/lib/availability/appointment-engine';
 import { applyVariantToAppointmentInput } from '@/lib/appointments/service-variant';
-import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import { canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { loadActiveVariantForService } from '@/lib/venue/service-variants';
+import type { AppointmentService } from '@/types/booking-models';
 
 /** Matches `validateAppointmentCustomInterval` cap in appointment-engine. */
 export const MAX_APPOINTMENT_CORE_DURATION_MINUTES = 14 * 60;
@@ -57,6 +60,98 @@ export function resolveAppointmentModifyEndCoreHHmm(params: {
     return { ok: true, endCoreHHmm: raw.length >= 5 ? raw.slice(0, 5) : minutesToTime(startMin + defaultDurationMinutes) };
   }
   return { ok: true, endCoreHHmm: minutesToTime(startMin + defaultDurationMinutes) };
+}
+
+/**
+ * The booking's own calendar column. Exactly one of the two ids is authoritative:
+ * `PATCH /api/venue/bookings/[id]` writes `calendar_id` when the row has one and
+ * `practitioner_id` otherwise, so reads must resolve it the same way.
+ */
+function owningColumnId(row: { calendar_id?: string | null; practitioner_id?: string | null }): string | null {
+  return row.calendar_id ?? row.practitioner_id ?? null;
+}
+
+/**
+ * Is this edit merely CARRYING the service the booking already has, on the column it
+ * already sits on?
+ *
+ * The offered-services check answers "may this be BOOKED here", so it belongs to the
+ * pair being CHOSEN. A calendar that stops offering a service keeps the bookings
+ * already in the diary, and the dashboard promises they go ahead as normal; without
+ * this exemption not one of them could be dragged five minutes, resized, or saved
+ * from the modify form again, because every one of those edits runs this validator.
+ * A service that is simply parked closes the same trap.
+ *
+ * Only the exact stored pair is exempt. Change the calendar or change the service and
+ * the ordinary check applies, so nothing NEW can be put on a calendar that does not
+ * offer it.
+ */
+async function bookingCarriesItsOwnService(params: {
+  admin: SupabaseClient;
+  venueId: string;
+  bookingId: string;
+  practId: string;
+  svcId: string;
+}): Promise<boolean> {
+  const { admin, venueId, bookingId, practId, svcId } = params;
+  const { data } = await admin
+    .from('bookings')
+    .select('calendar_id, practitioner_id, service_item_id, appointment_service_id')
+    .eq('id', bookingId)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  if (!data) return false;
+  const row = data as {
+    calendar_id?: string | null;
+    practitioner_id?: string | null;
+    service_item_id?: string | null;
+    appointment_service_id?: string | null;
+  };
+  const storedService = row.service_item_id ?? row.appointment_service_id ?? null;
+  return owningColumnId(row) === practId && storedService === svcId;
+}
+
+/**
+ * The catalogue row for a service the calendar's loaders left out, so the engine can
+ * still size and space the booking that carries it.
+ *
+ * Deliberately unfiltered on `is_active`: a parked service's existing bookings have to
+ * stay editable, and this row is only ever put in front of the engine for the pair a
+ * booking already has. The per-calendar override is not merged in because there is no
+ * link row left to merge; the base catalogue entry is what the booking falls back to.
+ */
+async function loadCarriedServiceForEngine(
+  admin: SupabaseClient,
+  venueId: string,
+  serviceId: string,
+): Promise<AppointmentService | null> {
+  const { data: item } = await admin
+    .from('service_items')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('id', serviceId)
+    .maybeSingle();
+  if (item) {
+    return serviceItemRowToEngineService(item as Record<string, unknown>, venueId, null);
+  }
+  const { data: legacy } = await admin
+    .from('appointment_services')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('id', serviceId)
+    .maybeSingle();
+  if (!legacy) return null;
+  const raw = legacy as Record<string, unknown>;
+  const canon = canonicalServiceShape({
+    durationMinutes: (raw.duration_minutes as number) ?? 30,
+    processingBlocks: parseProcessingTimeBlocksFromDb(raw.processing_time_blocks),
+  });
+  return {
+    ...(legacy as unknown as AppointmentService),
+    duration_minutes: canon.durationMinutes,
+    processing_time_blocks: canon.processingBlocks,
+    is_active: true,
+  };
 }
 
 export interface ValidateAppointmentModificationIntervalParams {
@@ -159,6 +254,26 @@ export async function validateAppointmentModificationInterval(
   );
   apptInput.skipPastSlotFilter = true;
 
+  /**
+   * A booking carrying the service it already has, on the column it already sits on,
+   * is not choosing anything: see `bookingCarriesItsOwnService`. Costs one read, and
+   * only on the path that used to refuse outright.
+   */
+  const offersServiceAlready =
+    apptInput.services.some((s) => s.id === svcId && s.is_active !== false) &&
+    apptInput.practitionerServices.some((ps) => ps.practitioner_id === practId && ps.service_id === svcId);
+  let carriesOwnService = false;
+  if (!offersServiceAlready) {
+    carriesOwnService = await bookingCarriesItsOwnService({ admin, venueId, bookingId, practId, svcId });
+    if (carriesOwnService && !apptInput.services.some((s) => s.id === svcId)) {
+      const carried = await loadCarriedServiceForEngine(admin, venueId, svcId);
+      // No catalogue row at all means the service is gone, not merely unlinked, and
+      // there is nothing to size the booking with: leave the refusal to stand.
+      if (carried) ensureServiceInAppointmentInput(apptInput, carried);
+      else carriesOwnService = false;
+    }
+  }
+
   const variantIdToUse =
     serviceVariantId !== undefined ? serviceVariantId : (bookingServiceVariantId ?? null);
 
@@ -198,7 +313,9 @@ export async function validateAppointmentModificationInterval(
     apptInput.services,
     apptInput.practitionerServices,
   );
-  const svc = offered.find((s) => s.id === svcId);
+  const svc =
+    offered.find((s) => s.id === svcId) ??
+    (carriesOwnService ? apptInput.services.find((s) => s.id === svcId) : undefined);
   if (!svc) {
     return { ok: false, reason: 'Service not available with this staff member' };
   }
@@ -217,11 +334,15 @@ export async function validateAppointmentModificationInterval(
     allowBookingOverlap?: boolean;
     allowOutsideHours?: boolean;
     allowDuringBreaks?: boolean;
+    allowUnassignedService?: boolean;
     processingTimeBlocks?: ReturnType<typeof parseProcessingTimeBlocksFromDb>;
   } = {
     allowBookingOverlap: allowManualOverlap === true,
     allowOutsideHours: allowOutsideHours === true,
     allowDuringBreaks: allowDuringBreaks === true,
+    // Carried through to the engine's own copy of the offered check, and to the
+    // strict re-run below, which spreads these options.
+    allowUnassignedService: carriesOwnService,
   };
   if (processingTimeBlocksOverride !== undefined) {
     intervalOpts.processingTimeBlocks = parseProcessingTimeBlocksFromDb(processingTimeBlocksOverride);

@@ -4,9 +4,9 @@ export const article: HelpArticle = {
   slug: 'appointment-calendar',
   helpSection: 'operations',
   title: 'Using the Appointment Calendar',
-  description: 'Every control on the grid: Day, Week and Month, the Filter panel, the slot menu, drag rules, and the four detail sheets.',
-  tags: ['calendar', 'grid', 'drag', 'filters'],
-  verified: '2026-09-10',
+  description: 'Every control on the grid: Day, Week and Month, the Filter panel, closed time, amending hours from the grid, the slot menu, drag rules, and the four detail sheets.',
+  tags: ['calendar', 'grid', 'drag', 'filters', 'amend hours', 'closed', 'double book', 'overlap', 'two bookings at once'],
+  verified: '2026-09-12',
   content: `
 # The Appointment Calendar in practice
 
@@ -33,6 +33,32 @@ The arrows either side of the date step by a day, a week, or a month to match th
 Every column is a bookable calendar you created under **Calendar Availability**. Names and order come from there, not from this page.
 
 If another venue shares its calendars with you, its columns sit alongside your own and carry the venue name. You can take a booking on them, but their bookings open read-only, and their slot menu has no **Block time**: blocks belong to the venue that owns the calendar.
+
+## Closed time on the grid
+
+Bands cover the minutes outside someone's working time, and each one says why and when. The colour tells you whose time it is:
+
+| Band | Colour | Means |
+| --- | --- | --- |
+| **Venue closed 18:00 to 20:00** | Pink | The business is shut, though that calendar would work |
+| **Hannah unavailable 08:00 to 09:00** | Blue | The business is open, but that calendar is not working |
+| **Hannah closed 18:00 to 20:00** | Grey | Both are shut, so the calendar's own closure is named |
+| **On leave 09:00 to 13:00** | Purple | Booked leave |
+| **Break** | Amber | A recurring break on that calendar |
+| **Linked venue closed** | Grey | A shared column whose own venue is shut |
+
+The grid draws the widest span anything is open, so a calendar working 08:00 to 20:00 inside a venue open 09:00 to 18:00 still shows its whole day, with a stripe on each side.
+
+Amended hours get no band of their own. The grid follows whatever hours apply to that date, so a day with amended hours looks like any other working day, with the stripes sitting outside the amended window.
+
+## Amend hours without leaving the grid
+
+The clock button, just left of the view switcher, opens **Amend hours**.
+
+- Admins choose **Amend calendar hours** (one calendar's weekly availability, breaks, and closures or amended hours) or **Amend business hours** (the whole venue's opening hours, closures and amended hours).
+- Everyone else goes straight to calendar hours, and sees only the calendars they are allocated.
+
+Either way it opens on the closures tab with the day you are looking at already picked, and the grid reloads when you close it. See [Working hours, breaks, and closures](/help/appointments/working-hours) for what each control does.
 
 ## The Filter panel
 
@@ -66,7 +92,11 @@ Processing time (a wait where the client stays but you are free, such as colour 
 
 Buffer time is the opposite: turnover after a service that nobody can be booked into. It is drawn as a grey hatched band marked **Buffer** directly under the card (after any processing that runs on past the service), so you can see why those slots will not take a booking.
 
-Press and hold a card to move it, or its bottom edge to change its length. Whether a card can be dragged depends on the booking, not on your role: **Pending**, **Booked**, **Confirmed**, and **Started** bookings move, while **Completed**, **Cancelled**, **No Show**, and resource bookings stay put. In a visit with several services, each service is its own card, marked **1/2**, **2/2** and so on: move or resize one and the others stay where they are, even onto another calendar or day. If a service lands on another service of the same visit you see a note, and both are kept. To move the whole visit at once, use **Modify** in the booking panel. Every move and every length change offers to tell the client afterwards, so read the follow-up steps in [Using the calendar](/help/getting-started/calendar) before you rearrange a busy day.
+Press and hold a card to move it, or its bottom edge to change its length. Whether a card can be dragged depends on the booking, not on your role: **Pending**, **Booked**, **Confirmed**, and **Started** bookings move, while **Completed**, **Cancelled**, **No Show**, and resource bookings stay put. In a visit with several services, each service is its own card, marked **1/2**, **2/2** and so on: move or resize one and the others stay where they are, even onto another calendar or day. If a service lands on another service of the same visit you see a note, and both are kept. To move the whole visit at once, use **Modify** in the booking panel. A staff move is never refused for being outside hours: drop a card past closing, onto a closed stripe, or over a break and it saves, with a note saying **Moved outside opening hours.** or **Moved over a break.** You can also **double book on purpose**: drop a card on top of another booking and it lands, with the two sitting side by side in the column. Only booked leave, a **Block time** you made by hand, a class or an event refuses a drop, and the outline turns red as you drag over one. Every move and every length change offers to tell the client afterwards, so read the follow-up steps in [Using the calendar](/help/getting-started/calendar) before you rearrange a busy day.
+
+### Dragging onto another venue's column
+
+A booking cannot be transferred between two ResNeo accounts. Drag one onto a linked venue's column and a window opens saying so, with **Book on (calendar)'s calendar**. That opens the booking form for the other calendar with the client already filled in: choose the service and confirm, and ResNeo then asks **Cancel the original booking?**, offering **Keep both** or **Cancel the original**. Cancelling runs the normal route, so the client is told and any deposit follows that venue's cancellation rules.
 
 ## Detail sheets
 
@@ -100,6 +130,7 @@ A staff member who manages exactly one calendar starts with the grid filtered to
 | A column I expect is missing | It is unticked in **Calendars**, or **Only calendars working on the selected day** is hiding it | Open **Filter** and click **Reset filters** |
 | A linked venue's columns are missing | **Linked venues** is set to individual columns, or the link is not active | Tick **All linked calendars** in **Filter**, then check the link under **Settings → Linked Accounts** |
 | I cannot drag a card | The booking is **Completed**, **Cancelled**, **No Show**, or it is a resource booking | Reopen a completed booking first. Resource bookings are changed from their detail sheet |
+| A card will not drop where I want it | Something that cannot be worked through is there: booked leave, a hand-made block, a class or an event | Move or remove that first. Another booking, a break and closed time never refuse a drop |
 | Nothing has updated for a while | The live dot is yellow, so the connection dropped | Press **Refresh**. It reconnects on its own too |
 | The month cells look empty | Nothing is booked, or a status filter is hiding it | Hover a cell to read the day, then clear **Status** in **Filter** |
 

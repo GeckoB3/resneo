@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   description:
     'Add calendars on the Calendars tab, choose what can be booked on each one, give them their own booking link, set the column order, and stay inside your plan limit.',
   tags: ['calendars', 'columns', 'booking link', 'entitlements', 'admin'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Bookable calendars (your columns)
 
@@ -132,7 +132,8 @@ For what each tier costs and includes, see [Appointments Light, Plus, and Pro](/
 | I cannot see the **Calendars** tab at all | Your login is a team member, not an admin | Ask an admin to make the change, or to change your role under **Settings → Staff** |
 | Saving the calendar says "Name is required" | **Display name** is empty | Type a name, then click **Save** again |
 | A service does not appear for guests on this calendar | The service is not ticked under **Appointment services**, or the calendar is switched off | Click **Edit**, tick the service, and check **Active (bookable)** |
-| Unticking a service opens a list of bookings | Those bookings are already in the diary for that service on this calendar | Leave them where they are, or move them to another calendar, then save. Nothing is cancelled either way |
+| Unticking a service opens a list of bookings | Those bookings are already in the diary for that service on this calendar | Leave them where they are, or move them to another calendar, then save. Nothing is cancelled either way, and **Cancel** puts the tick back |
+| A booking left on a calendar that no longer offers its service | That is how it is meant to work: only new bookings stop | Nothing to do. It can still be dragged, resized and modified as normal |
 | A booking would not move to another calendar | That calendar is already booked at the same time | Choose a different calendar for it, or leave it where it is and save |
 | The move dropdown offers nowhere to go | No other calendar that is switched on offers that service | Tick the service on another calendar first, then come back |
 | A room or piece of equipment cannot be booked | A resource has to sit on a calendar column | Click **Edit** on the calendar and tick it under **Resources on this column** |

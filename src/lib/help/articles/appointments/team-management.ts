@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Team access, roles, and calendar links',
   description: 'Invite admins and staff, assign calendars, respect plan staff caps, reset passwords, and set the auto-logout timer for shared devices.',
   tags: ['staff', 'roles', 'security', 'invites', 'calendars', 'auto-logout'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Build a safe team workspace
 
@@ -38,7 +38,7 @@ If that address already has a ResNeo login, ResNeo still adds them to your team 
 
 | Message | What it means |
 | --- | --- |
-| **This email is already a staff member for this venue** | They are on your list already. Find their row and use **Resend invitation email** |
+| **This email is already a staff member at this venue** | They are on your list already. Find their row and use **Resend invitation email** |
 | **Inactive calendars cannot be assigned to staff. Activate the calendar first or choose another.** | The calendar you picked is switched off |
 | **Add an active bookable calendar under Calendar availability first.** | You have no active bookable calendars yet |
 | A message naming your plan and how many team logins it allows | You have used every login your plan includes |

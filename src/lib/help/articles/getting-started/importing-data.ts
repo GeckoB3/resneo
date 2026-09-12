@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Importing your data",
   description: "Bring your clients and bookings over from a spreadsheet in a few guided steps, with a 24-hour undo if anything looks off.",
   tags: ["import","data","csv","excel","migration","clients","bookings","undo"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Importing your data
 
 Bring your client list and booking history across from your old system. ResNeo matches your columns for you, checks the file, and gives you 24 hours to undo the whole thing.

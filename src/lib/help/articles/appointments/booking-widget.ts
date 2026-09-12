@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Your booking page, embed, and QR code',
   description: 'Every public address your venue has, the two-line embed code and how it resizes, the accent colour, ?tab= deep links, QR codes, and how widget bookings appear in reports.',
   tags: ['embed', 'widget', 'iframe', 'qr', 'marketing', 'accent colour', 'resize.js', 'tab', 'combined page', 'collective'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Meet clients wherever they browse
 

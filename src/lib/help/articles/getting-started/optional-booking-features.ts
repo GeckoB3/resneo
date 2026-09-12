@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Optional booking features",
   description: "The Booking Settings tab: which booking types appear on your page, whether clients must sign in, in-person card payments, and the five optional features.",
   tags: ["booking settings","feature flags","booking models","any available","waitlist","self-reschedule","class packs","settings"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Optional booking features
 
 One tab decides what your booking page offers and which extra tools you get: **Settings**, then **Booking Settings**. Nothing here is required, and every setting can be changed back.

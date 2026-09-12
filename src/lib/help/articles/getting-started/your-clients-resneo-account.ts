@@ -6,10 +6,12 @@ export const article: HelpArticle = {
   title: "Your clients' ResNeo account",
   description: "What a client can see and do at resneo.com/account, and what that means for your venue.",
   tags: ["customer portal","account","clients","marketing consent","saved cards","gdpr","self service","bookings"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Your clients' ResNeo account
 
 Anyone who books with you can have a free ResNeo account of their own at **resneo.com/account**. It is where they find their bookings, their passes, their receipts and their contact details, without ringing you.
+
+They can also use the **ResNeo app**, the same one your team uses. Signing in without a staff profile opens the customer side instead of your diary, with four tabs of their own: **Home**, **Bookings**, **Passes** and **Profile**. From a booking they can confirm they are coming, change the date or time, or cancel, within the rules you have set. It is the same account and the same bookings as the website, so it does not matter which they use.
 
 You do not switch this on and you cannot switch it off. It is worth knowing anyway, because half the calls you take are questions the account already answers.
 
@@ -18,10 +20,11 @@ You do not switch this on and you cannot switch it off. It is worth knowing anyw
 - Nothing to set up, and nothing to pay for. It is the same account for every venue they book with.
 - A client only needs one, however many ResNeo venues they use.
 - You have no way in. You cannot sign in as a client, set their password, or add a booking to their account by hand.
+- If one of your team also books as a customer somewhere, one email covers both. The app asks which side they want the first time they sign in, and they can switch at any point.
 
 ## How a client gets in
 
-They sign in at **resneo.com/login**, with a password or with a one-time link sent to their email.
+They sign in at **resneo.com/login**, or in the app, with a password or with a one-time link sent to their email.
 
 The important part for you: **their bookings are matched by email address**. When somebody signs in for the first time, every booking already held under that email, including ones you took by phone or imported, is linked to their new account. If they book with one email and sign in with another, they will see nothing, and the fix is for them to sign in with the email on the booking.
 
@@ -38,7 +41,7 @@ Below that, only when they apply:
 - A panel saying **One booking still has something to pay**, listing the venue, the date and the balance, with the note "You pay the venue directly for these, when you go." The account cannot take that money, and does not pretend to.
 - **Also coming up**, a short list of their other upcoming bookings, each with a **Details** link.
 - A line telling them one of their other bookings has a form to complete.
-- **Your venues**, "Everywhere you have booked, most recent first", one card per venue with the number of bookings, the deposits they have paid there, when they are next in, and **View booking** and **Book again** links. **Book again** goes straight to your booking page.
+- **Your venues**, "Everywhere you have booked, most recent first", one card per venue with the number of bookings, the deposits they have paid there, when they are next in, and **View booking** and **Book again** links. **Book again** goes straight to your booking page, or to your combined page if you are in a live venue collective.
 
 ## Bookings
 

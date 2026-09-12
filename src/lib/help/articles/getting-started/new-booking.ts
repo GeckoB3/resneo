@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Taking a booking",
   description: "Create bookings by hand for appointments that come in by phone, email, or in person.",
   tags: ["bookings","new booking","appointments","guests","contacts","deposits","rebooking","scheduling"],
-  verified: '2026-09-10',
+  verified: '2026-09-12',
   content: `# Taking a booking
 
 Book someone in yourself, for phone calls and walk-ins.
@@ -60,14 +60,14 @@ Every booking passes through **Review your services**, whether it holds one serv
 
 Every field here is optional, so a caller who is in a hurry can still be booked in. They are worth filling when you can: without an email the client gets no confirmation, and without a phone number they get no text reminder.
 
-As you type into any of those four boxes, ResNeo searches your saved contacts and offers matches underneath. Click one to fill the whole form from their record.
+Above the fields, **Find an existing contact (optional)** searches everyone you have by name, email or phone. Start typing, then click a result and the whole form fills from their record. The same lookup still runs as you type into any of the four boxes underneath, so either way works.
 
 Add anything they mention under **Comments or requests**.
 
 If the service asks for money online, two controls appear above the button:
 
 - **Require deposit** (or **Require payment**) with the amount. It is off to start with: leave it off to confirm the booking now and take the money in person, or tick it to send a payment link and hold the booking until it is paid.
-- **Card hold**, which sends the client a link to add their card details so a no-show fee can be charged later. This one is on to start with, and you can switch it off for a client you trust.
+- **Card hold**, which sends the client a link to add their card details so a no-show fee can be charged later. It is **off** to start with: a booking you are taking yourself more often waives the hold than asks for it. The line under the switch says what each position does. Turned on it reads "the guest gets a link to add their card, charged only if they do not show. The booking is cancelled if no card is added within 24 hours." Left off it reads "no card is taken, so a no-show cannot be charged."
 
 ## Step 6: Finish
 

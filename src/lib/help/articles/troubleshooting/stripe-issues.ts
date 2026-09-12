@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Stripe and payment problems',
   description: 'Client payment errors, unfinished Stripe setup, and the difference between Stripe Connect and your ResNeo subscription.',
   tags: ['stripe', 'payments', 'errors'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Stripe and payment problems
 

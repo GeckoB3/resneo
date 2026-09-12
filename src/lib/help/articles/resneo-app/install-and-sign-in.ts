@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Install the app and sign in",
   description: "Find the ResNeo app in the App Store or on Google Play, sign in with a password or a sign-in code, and choose whether you land on your venue or your own bookings.",
   tags: ["app","mobile","install","sign in","password","magic link","sign-in code","staff access"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Install the app and sign in
 
 The ResNeo app puts your diary in your pocket. It is the same venue as the web dashboard, so a booking taken on the app appears on the web straight away, and the other way round.
@@ -31,7 +31,7 @@ The app runs on both iPhone and Android. A few features differ between the two, 
 The sign-in screen has two tabs, **Password** and **Magic Link**, and opens on **Password**.
 
 1. Type your email in the **Email** box.
-2. Type your password in the **Password** box.
+2. Type your password in the **Password** box. Tap the eye at the end of the box to see what you have typed, and tap it again to hide it. Every password box in the app has one.
 3. Tap **Sign in**.
 
 If you see "That email and password did not match", either the password is wrong, or you have never chosen one. If you have never set a password, use the **Magic Link** tab instead (Step 3), then set a password afterwards.
@@ -77,12 +77,14 @@ From then on you can sign in with your email and password, or keep using sign-in
 
 ## Step 6: Choose where you land
 
-One email address can be two things at once: a member of your team, and a customer with bookings of their own somewhere. The first time that applies to you, the app asks once, in a panel titled **Where would you like to go?**:
+One email address can be two things at once: a member of your team, and a customer with bookings of their own somewhere. When that applies to you, the app asks after you sign in, on a screen titled **Where would you like to go?**:
 
 - **My venue** takes you to the diary, the tabs and the tools in this category.
 - **My own bookings** takes you to your personal bookings as a customer.
 
-The app remembers your answer, so it only asks once. To change your mind later:
+Your answer holds for the rest of that sign-in, so you are not asked again while you stay signed in. If you would rather never be asked, set where you want to land under **Where signing in takes you**, on your profile: **Ask me**, **My bookings** or **Venue dashboard**. That setting is shared with the ResNeo website, so it decides where the browser lands too. Pick one of the last two and neither the app nor the website asks again.
+
+To change sides at any point:
 
 1. Open the **More** tab.
 2. Scroll to **Your own bookings**.

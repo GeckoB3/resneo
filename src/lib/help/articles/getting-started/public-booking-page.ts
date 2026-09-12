@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Your public booking page and embed",
   description: "Share your booking link, add a booking widget to your website, and brand it with your colour and a QR code.",
   tags: ["public booking","embed","widget","qr code","accent colour","booking page address","guests","resize.js"],
-    verified: '2026-09-09',
+    verified: '2026-09-12',
   content: `# Your public booking page and embed
 
 Your booking page is where clients book with you online, day or night. This guide covers finding your link, giving each person their own, branding the page, filling out its tabs, and putting it on your own website.

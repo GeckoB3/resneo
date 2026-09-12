@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Using the calendar",
   description: "Read your day at a glance, add and reschedule bookings with a click or drag, and keep each one on track.",
   tags: ["calendar","bookings","scheduling","drag","reschedule","status","appointments"],
-  verified: '2026-09-08',
+  verified: '2026-09-12',
   content: `# Using the calendar
 
 The **Appointment Calendar** is your day as a grid, one column per person or room. It is where you see what is happening now, move things, and block out time.
@@ -54,7 +54,7 @@ Keep a slot free for a delivery, a break, or a chair that is out of action.
 1. Click the empty slot where the block should start.
 2. Choose **Block time**.
 3. Set the **Start time** and **End time**. The **Duration** updates as you go.
-4. Add a **Reason (optional)** so your team knows what it is for, then click **Save**.
+4. Add a **Reason (optional)** so your team knows what it is for, then click **Save**. The block appears on the grid headed **Time blocked**.
 
 Clients cannot book over blocked time online, and the grid will not let you drop a booking onto it. Press and hold a block to drag it to a new time, or pull its bottom edge to change its length. Click it to open **Edit block**, where you can change the details or **Delete** it.
 
@@ -63,12 +63,12 @@ Clients cannot book over blocked time online, and the grid will not let you drop
 ## Move a booking by dragging
 
 1. Press and hold the grip on the left of the card for about a second. **Hold to move** appears, then the card lifts.
-2. Drag it to a free slot. A green outline means it will land there. Amber means it lands outside your opening hours, which is allowed. Red means something is already there, and the booking will not drop.
+2. Drag it where you want it. A green outline means it will land there. Amber means it lands outside your opening hours or over a break, which is allowed. Red means the slot is genuinely taken: booked leave, a block you made by hand, a class, or an event. Those will not drop.
 3. Let go. A bar appears at the bottom of the screen saying where the booking went, for example **Moved Sam Jones to 11:15**, with the line **The customer will be notified in 60s unless you skip or undo.** and three buttons: **Notify now**, **Skip notify**, and **Undo**.
 
 > **Warning: silence means send.** Leave that bar alone and the client is told about the change by email or text when the countdown ends. If you are only tidying your own diary, tap **Skip notify** before it runs out. **Undo** puts the booking back where it was and sends nothing.
 
-> **Good to know:** dragging moves in one-minute steps. Dropping outside your opening hours is allowed: you will see a note reading **Moved outside opening hours.** rather than a refusal. In a visit with several services, each service is its own card and moves on its own; use **Modify** in the booking panel to move the whole visit.
+> **Good to know:** dragging moves in one-minute steps. Dropping outside your opening hours is allowed, and so is dropping over a break or on top of another booking: you get a note reading **Moved outside opening hours.** or **Moved over a break.** rather than a refusal. Two bookings at the same time sit side by side in the column. In a visit with several services, each service is its own card and moves on its own; use **Modify** in the booking panel to move the whole visit.
 
 The **Undo** button in the toolbar reverses your most recent move or length change.
 
@@ -89,7 +89,7 @@ Dragging is fiddly on a tablet. When a client is on the phone, use the form.
 2. Change the **Service**, the **Staff / calendar**, the date, the time, or the duration. The **Quick durations** buttons are the fastest way to set a length.
 3. Click **Save changes**. It stays greyed out until ResNeo has checked that the new slot is free.
 
-A time outside your opening hours is allowed here too. The window shows a note saying so, and **Save changes** still works. It still refuses a time that clashes with another booking, a break, a block, or leave.
+A time outside your opening hours is allowed here too. The window shows a note saying so, and **Save changes** still works. The form is stricter than dragging: it refuses a time that clashes with another booking, a break, a block, or leave. If you need to double-book, drag the card on the grid instead.
 
 If you changed the date or time, the window then shows **Time changed and saved** with the same 60-second countdown and three choices: **Notify now**, **Skip notify**, or **Undo change**. Closing the window without choosing sends the update. Other changes, such as a different service or a longer duration, save straight away.
 

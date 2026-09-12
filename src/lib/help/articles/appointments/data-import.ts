@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Importing clients and bookings',
   description: 'Where the importer lives, what each of the six wizard steps does, how duplicates and odd dates are settled, and how the 24-hour undo differs from deleting a session.',
   tags: ['import', 'csv', 'migration', 'admin'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Importing clients and bookings
 

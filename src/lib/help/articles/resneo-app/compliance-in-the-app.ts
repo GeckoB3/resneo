@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Compliance in the app",
   description: "Track patch tests, consent forms and other records from your phone: capture a signature in the venue, send a link, read a record and set up your templates.",
   tags: ["app","mobile","compliance","consent","patch test","forms","signature","records","screenshots"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Compliance in the app
 
 If your venue keeps patch tests, consent forms, health questionnaires or certificates against clients, the app carries the whole thing in your pocket. Open **More**, then **Compliance**.

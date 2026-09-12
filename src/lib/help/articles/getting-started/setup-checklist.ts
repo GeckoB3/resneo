@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Your go-live checklist",
   description: "A friendly walkthrough of the setup card that gets your business ready to take bookings online.",
   tags: ["checklist","onboarding","home","admin","setup","go-live","stripe","getting-started"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Your go-live checklist
 
 When you sign in as an admin, your **Home** screen shows a setup card listing exactly what is left to do before clients can book you. Work through it and you are ready to go.

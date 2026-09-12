@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Building a class course',
   description: 'Bundle a fixed set of class sessions into one course, set a cap and an enrolment window, and handle cancellations and refunds.',
   tags: ['classes', 'courses', 'commerce'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Building a class course
 
 A **course** bundles a fixed set of sessions into one price: six weeks of beginners Pilates, a four-session yoga immersion, a Saturday workshop series. Clients pay once, and every session in the course is then free for them to book.

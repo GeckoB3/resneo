@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Selling memberships',
   description: 'Set up recurring class plans, unlimited or a set number per period, with rollover, a member discount and repeat bookings.',
   tags: ['classes', 'memberships', 'commerce', 'subscriptions'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Selling memberships
 
 A **membership** is a repeating subscription that gives someone ongoing access to your classes: unlimited, or a set number every billing period. It bills on your own Stripe account, not through ResNeo, so the money comes straight to you.

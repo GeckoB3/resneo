@@ -3,10 +3,10 @@ import type { HelpArticle } from '../../types';
 export const article: HelpArticle = {
   slug: "dashboard-overview",
   helpSection: "gs-start-here",
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   title: "A tour of your dashboard",
   description: "A quick tour of your dashboard sidebar, so you can find any tool in a couple of clicks.",
-  tags: ["dashboard","navigation","sidebar","roles","admin","staff","home","booking page"],
+  tags: ["dashboard","navigation","sidebar","roles","admin","staff","home","booking page","ask resneo","help assistant","support"],
   content: `# A tour of your dashboard
 
 Your dashboard is where you run the business: today's bookings, your calendar, your clients, and every setting. This tour walks the sidebar top to bottom so you always know where to click.
@@ -55,7 +55,9 @@ If your venue belongs to a combined booking page shared with another ResNeo busi
 
 > **Good to know:** the sidebar changes with what you sell. Links for classes, events, resources, the waitlist, and compliance only appear once those features are switched on, so a simple salon sees a shorter list than a busy clinic.
 
-At the very bottom sits a card with your venue name, your own name, and your email, then a **Support** row for contacting the ResNeo team and a **Sign out** button. Next to **Support** is a button that expands ResNeo to fill the screen (**Enter Full Screen**), which is handy on a front-desk tablet. Admins whose venue is linked with another venue also see a **Notifications** bell there for activity on that link.
+At the very bottom sits a card with your venue name, your own name, and your email. Under it, where your venue has it switched on, is **Ask ResNeo**: ask how to do something in your own words and it answers from this help centre, with a link to the article it used. Keep client details out of the question. It can make mistakes, so check the linked article for the full steps, and if it cannot help you can send the question straight to Support from the same panel.
+
+Below that sits a **Support** row for contacting the ResNeo team and a **Sign out** button. Next to **Support** is a button that expands ResNeo to fill the screen (**Enter Full Screen**), which is handy on a front-desk tablet. Admins whose venue is linked with another venue also see a **Notifications** bell there for activity on that link.
 
 ## Banners across the top
 

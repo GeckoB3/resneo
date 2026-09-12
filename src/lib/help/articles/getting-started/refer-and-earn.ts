@@ -9,7 +9,7 @@ export const article: HelpArticle = {
   title: "Refer and earn",
   description: "Share ResNeo with other business owners and earn credit toward your own bill when they join.",
   tags: ["refer","referral","refer and earn","credit","rewards","share","invite"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Refer and earn
 
 Recommend ResNeo to another business and you both get something: they get an extra free month on top of their trial, you get a free month's credit off your bill.

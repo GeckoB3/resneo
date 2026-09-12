@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Selling class packs (credits)',
   description: 'Sell prepaid class credits, set an expiry, limit a pack to certain class types, and see how clients buy and spend them.',
   tags: ['classes', 'class-packs', 'credits', 'commerce', 'memberships'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Selling class packs (credits)
 
 A **class pack** sells a set number of credits up front. One credit books one spot in one class, so a client who buys a 10 class pass can book ten classes without reaching for their card again.

@@ -5,8 +5,8 @@ export const article: HelpArticle = {
   helpSection: "gs-run",
   title: "Your contacts (CRM)",
   description: "See every client's visits, bookings, and contact details in one place, and reach them in a click.",
-  tags: ["contacts","crm","guests","tags","segments","merge","messaging","rebooking","gdpr","documents","export"],
-  verified: '2026-09-06',
+  tags: ["contacts","crm","guests","tags","segments","merge","messaging","bulk message","marketing permission","marketing consent","opt out","skipped","rebooking","gdpr","documents","export"],
+  verified: '2026-09-12',
   content: `# Your contacts (CRM)
 
 **Contacts** is your client book: who they are, what they have booked, what you have sent them, and what you know about them. Open it from **Contacts** in the sidebar. Everyone on your team can use it, and the list keeps itself up to date as bookings come in.
@@ -65,7 +65,7 @@ Click a row to open the full profile underneath it. The top card and the row of 
 1. At the top sits the name with a visits pill (it says **New** for someone who has not been in yet), a no-show pill where there are no-shows, and a count of bookings on file. **Call** and **Email** buttons appear where you have the details.
 2. Below are **First name**, **Surname**, **Email**, **Phone**, **Last visit** and **Next visit**, plus **Address** where one is saved. Click **Edit** to change them, then **Save changes**.
 3. **Tags** and **Customer info** sit at the bottom of that card. Tags save the moment you add or remove one. **Customer info** is a private staff note, good for allergies, accessibility needs or payment preferences.
-4. Open **Guest bookings** for their history, split into **Upcoming** and **Previous**. Most rows have a **Rebook** button that starts a new booking with the same details.
+4. Open **Guest bookings** for their history, split into **Upcoming** and **Previous**. Each row carries a pill saying how the booking was made, **Online**, **Phone** or **Walk-in**, and most have a **Rebook** button that starts a new booking with the same details.
 5. Open **Preferences** for **Marketing preferences** (the tick boxes **Opt out of marketing** and **Marketing consent**, saved with **Save marketing preferences**) and **Household**.
 6. Open **Records** for their documents and photos.
 7. Open **Compliance** to see their patch tests, consents and intake forms. This section only appears when compliance records are switched on for your venue.
@@ -106,6 +106,10 @@ Everything you send is listed in **Message log** underneath, with the channel, w
 2. A bar appears saying how many are selected, with **Add tag…**, **Message** and **Clear selection**.
 3. **Add tag…** applies one tag to all of them. Type a new tag or click one of your **Existing tags**.
 4. **Message** sends the same message to each of them. Pick a **Channel**, write the **Message**, then click **Send**. Anyone without an email or phone for that channel is skipped, and you are told who.
+
+> **Important: a bulk message from Contacts counts as marketing.** Ticking several contacts and clicking **Message** only sends to the people who have given marketing permission, which means **Marketing consent** is ticked and **Opt out of marketing** is not (both under **Preferences**). The rest are skipped, and the confirmation says how many, for example "Message sent to 12 clients, 3 skipped (no marketing permission)". If none of them has given permission, nothing is sent at all and ResNeo says so.
+>
+> Messaging one person from their own record always sends, and so does messaging from a booking. Those are about a booking they have made, not marketing.
 
 Changing a filter, a page or the search clears your selection, so finish a bulk action before moving on.
 

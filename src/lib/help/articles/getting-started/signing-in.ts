@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   title: "Signing in to ResNeo",
   description: "The two ways into your account, creating a password from an invite or a reset link, and what to do when a link has expired.",
   tags: ["sign in","login","password","magic link","sign-in link","session","logout","invite"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Signing in to ResNeo
 
 Everything you do in ResNeo starts at the same sign-in page. You can use a password, or ask for a link by email and skip the password altogether. Both ways get you to the same place.

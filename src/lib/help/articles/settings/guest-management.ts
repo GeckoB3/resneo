@@ -4,8 +4,8 @@ export const article: HelpArticle = {
   slug: 'guest-management',
   title: 'Your client records',
   description: 'Contacts is home base: filters, bulk actions and the full profile, plus how Reports and Compliance relate to it.',
-  tags: ['guests', 'clients', 'crm', 'contacts', 'tags', 'gdpr'],
-  verified: '2026-09-06',
+  tags: ['guests', 'clients', 'crm', 'contacts', 'tags', 'gdpr', 'bulk message', 'marketing permission', 'marketing consent', 'opt out', 'subscribed'],
+  verified: '2026-09-12',
   content: `
 # Your client records
 
@@ -47,6 +47,10 @@ Tick the boxes on the rows you want, or the box at the top of the list to take e
 - **Clear selection** starts again.
 
 > **Warning:** a bulk message goes to real people. Check **Who to include** and your **Marketing consent** filter first, so you are only writing to those who agreed to hear from you.
+
+ResNeo backs you up here rather than taking your word for it. A marketing send skips anybody without permission, and the result says why each one was skipped: they opted out, or no consent was recorded. Permission means consent is on file **and** no opt-out stands, so an old consent never outlives an unsubscribe. The **Subscribed** filter counts people the same way.
+
+Ticking several people in the **Contacts** list and clicking **Message** follows the same rule. Messaging one person from their own record, or from a booking, always sends: those are about a booking they have made, not marketing.
 
 ## What is inside one record
 

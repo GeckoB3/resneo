@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   title: 'SMS messages not sending',
   description: 'Why a text did not arrive: no mobile number, the SMS tickbox, the Light card requirement, and where to read the failure.',
   tags: ['sms', 'texts', 'twilio', 'communications'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # SMS not sending
 
@@ -20,6 +20,8 @@ A text needs a mobile number on the client's record. A UK number starting 0 is t
 ## 2. SMS is not ticked on that message
 
 Open **Settings**, then **Communications**. Find the card for the message you expected, check its switch is on, and tick **SMS**. Three cards are email only and never offer SMS: **Deposit confirmation**, **No-show notification** and **Post-visit thank you**, as is the **New booking alert** further down.
+
+> **A text for a booking of several services** names all of them, so a cut and a colour read "Cut and Colour", and four services read "Cut, Colour and 2 more". The time is the start of the first service. Several people booked together read as "3 appointments" instead. If that is not what your client received, check you are looking at the right booking rather than changing your wording.
 
 Messages your team writes by hand ride on the **Custom message** card. Untick its **SMS** box and those stop going by text too.
 

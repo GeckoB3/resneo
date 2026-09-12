@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Exporting all your data',
   description: 'Whole-venue CSVs, per-report CSVs, the contacts export, one person as JSON, and the import report.',
   tags: ['export', 'csv', 'backup', 'gdpr', 'reports'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Exporting all your data
 
@@ -15,7 +15,7 @@ Your data is yours, and you can take a copy at any time. This article covers eve
 
 ## Where the exports live
 
-Sign in as an **admin** and open **Settings → Reports**. It has two tabs, **Overview** and your client directory.
+Sign in as an **admin** and open **Settings → Reports**. It has three tabs: **Overview**, **Revenue** and your client directory. The exports that cover your whole venue are on **Overview**.
 
 An old \`/dashboard/reports\` bookmark still works and brings you straight here.
 

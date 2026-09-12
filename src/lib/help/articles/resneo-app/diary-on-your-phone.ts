@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "The diary on your phone",
   description: "Read your day on the Calendar tab, switch between Day, Week and Month, add a booking or a block from a slot, and drag an appointment to a new time.",
   tags: ["app","mobile","calendar","diary","day","week","month","drag","block time","walk-in"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# The diary on your phone
 
 The **Calendar** tab is the app's home. It shows the same diary as the web dashboard, laid out for a phone screen, and it is where most of your day happens.
@@ -73,7 +73,7 @@ When a bar is tall enough, it carries up to two small buttons in its bottom-righ
 
 Once someone has arrived, the **Arrived** button becomes **Clear**, in case you tapped it by mistake. Cancelled and no-show bookings carry no buttons.
 
-If the bar stands for a visit of several services, or a group booked together, the button applies to the whole thing at once.
+A booking of several services is not one bar. Each service gets its own bar, in its own colour for its own status, marked with a small **1/2**, **2/2** and so on so you can see it belongs to a visit. The buttons act on that service alone, so a colour can be finished while the cut has not begun, and finishing one does not change the others. A service that is complete stays in the visit rather than disappearing from it. A group booked together, several people at one time, still acts as one.
 
 ## Step 6: Move a booking by dragging
 
@@ -93,11 +93,21 @@ After you move a booking to a new time, a panel appears headed **Booking moved**
 - **Don't notify** changes the diary quietly.
 - **Undo change** puts the booking back where it was.
 
-If you only changed the length, the panel reads **Duration updated** instead. There is no notify button, because the start time has not moved and the guest has not been told anything. You still get **Undo change** and **Done**.
+If you only changed the length, no panel opens. A short message appears at the top saying **Duration updated**, or **Service length updated** when it was one service of a visit, with **Undo** on it. The guest is not told, because the start time has not moved.
 
 You get the same panel when you move a booking on a venue you are linked with, as long as the link lets you edit their bookings. The message goes out from that venue, in their name, not yours.
 
 **Undo change** is the app's only undo for a drag, so use it there and then if the move was a mistake.
+
+## Reading the shape of a booking
+
+A bar is not always a plain block.
+
+- **Processing time**, a wait where the client stays but you are free, is drawn as a gap in the bar, with the pieces either side rounded off. You can tap that gap and book someone else into it.
+- Processing that runs past the end of the service carries on after the bar, in the same way.
+- **Buffer time**, the turnover nobody can be booked into, sits under the bar as its own band.
+- **Closed time** is shaded, and says why: the venue is shut, that calendar is not working, or someone is on leave.
+- A day with **amended hours** has no band of its own. The grid simply follows the hours that apply to that date.
 
 ## Step 8: The Today overview
 

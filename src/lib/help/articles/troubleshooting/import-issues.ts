@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Data import problems',
   description: 'A stuck wizard step, validation you cannot clear, ambiguous dates, a part-finished run, and the 24-hour undo.',
   tags: ['import', 'csv', 'errors'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Data import problems
 

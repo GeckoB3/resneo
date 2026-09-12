@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   description:
     'Add rooms, courts, studios, or equipment as bookable resources, set the slot grid and price, control the hours three layers deep, and book them yourself from the calendar.',
   tags: ['resources', 'facilities', 'rooms', 'slots', 'availability', 'utilisation'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Resources and facilities
 

@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Set up your business profile",
   description: "Add your business details, booking address, timezone, logo, and the kinds of bookings you offer, all in a few minutes.",
   tags: ["business profile","settings","venue details","booking page address","slug","timezone","booking models","logo"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Set up your business profile
 
 Your business profile is the name, address, and contact details clients see when they book, plus the web address of your booking page. Get it right once and it flows through your booking page, your confirmations, and your reminders.

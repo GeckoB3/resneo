@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Taking a booking in the app",
   description: "Walk through the booking form on your phone: pick services, choose a person or Any available, find a time, take the guest's details, decide about a deposit, and confirm.",
   tags: ["app","mobile","new booking","walk-in","deposit","card hold","waitlist","group booking","classes","events","resources"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Taking a booking in the app
 
 The booking form is the same wherever you start it: the round **+** button on the **Calendar** or **Appointments** tab, an empty slot in the diary, or **Rebook** on an existing booking. It asks one thing per screen, with a progress bar along the top telling you which step you are on.
@@ -74,11 +74,11 @@ On **Guest details**:
 
 1. If you tapped **Walk-in** to get here, a **Booking type** switch at the top shows **Phone** and **Walk-in**. It starts on the right one, and you can change it.
 2. **Find an existing guest** searches your contacts by name or phone. Pick someone and their details fill in, so you are not typing a regular's number every time.
-3. Otherwise fill in **First name**, **Surname**, **Email** and **Phone**. Some venues also collect an address.
+3. Otherwise fill in **First name**, **Surname**, **Email** and **Phone**. The phone field has a flag and dialling code beside it: tap that to pick another country, then type the number as it is written locally. Some venues also collect an address.
 4. **Comments or requests** is for anything the guest mentions: access needs, preferences, running late.
 5. Tap **Continue**.
 
-For a walk-in the contact fields are optional, because somebody standing at the counter may not want to give you their email.
+**None of the contact details are required**, on any staff booking, not just a walk-in. Somebody on the phone in a hurry can be booked in with a name alone. The fields say what is lost without them: no email means no confirmation, and no phone means no text reminder.
 
 ## Step 9: Decide about money, then confirm
 
@@ -87,7 +87,7 @@ For a walk-in the contact fields are optional, because somebody standing at the 
 Two controls may appear underneath, depending on the service:
 
 - **Require deposit** (or **Require payment** where the service is paid in full). It is **off** by default, because you may want to take the money at the counter. Tick it and ResNeo sends the guest a payment link and holds the booking until it is paid. Leave it unticked to confirm now and collect in person. It is never offered on a walk-in.
-- **Card hold**, with the line "Send a link to the guest to add their card details". It is **on** by default where the service carries a no-show fee. No money is taken at the time; the card is only there in case of a no-show. Untick it to book without one.
+- **Card hold**, shown where the service carries a no-show fee. It is **off** by default, the same as the web dashboard. The line under the switch follows it: turned on, the guest gets a link to add their card, charged only if they do not show, and the booking is cancelled if no card is added within 24 hours; left off, no card is taken and a no-show cannot be charged. No money is taken at the time either way.
 
 The summary shows these as separate lines, **Deposit** (or **Pay now**) and **No-show fee**, so you can see exactly what is being asked for.
 

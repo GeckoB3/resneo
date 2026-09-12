@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Set up bookable resources",
   description: "Add your rooms, courts, studios, or equipment as bookable resources, then set their hours, prices, and rules so clients can reserve them.",
   tags: ["resources","rooms","courts","equipment","slots","availability","pricing","bookings"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Set up bookable resources
 
 Got a treatment room, a wash station, a hire chair, a studio, or a piece of kit that clients book by the hour? This page shows you how to add one, set how long it can be booked, price it, and choose when clients can reserve it. Each resource sits on your calendar alongside the rest of your schedule.

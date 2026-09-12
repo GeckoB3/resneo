@@ -119,6 +119,13 @@ scheduling audit.
 
 ## Cross-repo correspondence
 
+`R36_WEB_RESPONSE.md` answers the app repo's R36 handover (2026-09-12), three findings from a
+device pass. A multi-service visit now counts once per day on the home page, the month grid and a
+guest's `visit_count`, as the appointments list already drew it. A calendar closure's Label now
+names its diary stripe. `last_visit_date` records the booking's own day and never a future one, and
+Undo start on one service of a visit now takes the visit back. It also records the Contacts hint for
+clients booked in by name alone.
+
 `R35_WEB_RESPONSE.md` answers the app repo's R35 handover (2026-09-12), which reported that a
 booking left behind by "stopping a calendar offering a service" could never be rescheduled again.
 Confirmed and fixed: the offered-services gate now applies to the pair being chosen, not to one a

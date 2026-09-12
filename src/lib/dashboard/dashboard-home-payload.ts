@@ -26,6 +26,7 @@ import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import { isAttendanceConfirmed } from '@/lib/booking/booking-staff-indicators';
 import type { VenueStaff } from '@/lib/venue-auth';
 import { formatGuestDisplayName } from '@/lib/guests/name';
+import { collapseMultiServiceVisits } from '@/lib/booking/booking-list-row-schedule';
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -119,6 +120,11 @@ export interface DashboardHomePayload {
     }>;
   }>;
   alerts: Array<{ type: string; message: string }>;
+  /**
+   * Today's appointments in time order, at most 10. A multi-service visit is ONE entry per
+   * day, like every count in this payload: its earliest service that day, carrying the
+   * visit's status, with `group_booking_id` set so a client can tell it stands for the visit.
+   */
   recent_bookings: Array<{
     id: string;
     time: string;
@@ -128,6 +134,7 @@ export interface DashboardHomePayload {
     deposit_status: string;
     kind_label?: string;
     booking_model?: string;
+    group_booking_id?: string | null;
   }>;
   /**
    * Restaurant table-primary venue with secondary enabled models (`enabled_models`): dining metrics (`today`,
@@ -179,7 +186,7 @@ export interface DashboardHomePayload {
 }
 
 type DashboardBookingOpsRow = {
-  /** Present on week-scope rows only; omit for same-day aggregates. */
+  /** Selected on both queries: a visit is counted once per day, so its rows are keyed on it. */
   booking_date?: string;
   booking_time?: string | null;
   party_size: number;
@@ -189,6 +196,22 @@ type DashboardBookingOpsRow = {
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
 } & Record<string, unknown>;
+
+/**
+ * The rows to COUNT: one per visit per day.
+ *
+ * A multi-service visit is one booking made of several rows (Docs/visit-services-independent-plan.md),
+ * and the appointments list shows it as one line. Counting rows made the Today tile say 2 for
+ * one guest with two services while the list showed 1 (R36). Parties (a `person_label` per
+ * person) and class carts still count row by row, as the list draws them. Time-based figures
+ * (next appointment, covers in house, arriving soon, the heatmap) keep every row, because each
+ * service of a visit still happens at its own time.
+ */
+function countableVisitRows<T extends DashboardBookingOpsRow>(rows: T[]): T[] {
+  return collapseMultiServiceVisits(
+    rows.map((row) => ({ ...row, id: String(row.id), booking_time: String(row.booking_time ?? '') })),
+  ) as unknown as T[];
+}
 
 function inferBookingRowModelFromFetchedRow(row: DashboardBookingOpsRow): BookingModel {
   return inferBookingRowModel({
@@ -203,7 +226,7 @@ function inferBookingRowModelFromFetchedRow(row: DashboardBookingOpsRow): Bookin
   });
 }
 
-function computeBookingForecastAndTodayOps(input: {
+export function computeBookingForecastAndTodayOps(input: {
   todayBookings: DashboardBookingOpsRow[];
   weekBookingsForOps: DashboardBookingOpsRow[];
   dateStrs: string[];
@@ -213,13 +236,14 @@ function computeBookingForecastAndTodayOps(input: {
   today: NonNullable<DashboardHomePayload['secondary_booking_activity']>['today'];
 } {
   const { todayBookings, weekBookingsForOps, dateStrs, nowMinutes } = input;
+  const todayVisits = countableVisitRows(todayBookings);
   const todayCovers = todayBookings.reduce((sum, b) => sum + b.party_size, 0);
-  const todayBookingCount = todayBookings.length;
+  const todayBookingCount = todayVisits.length;
   const todayRevenue =
     todayBookings.reduce((sum, b) => sum + (b.deposit_amount_pence ?? 0), 0) / 100;
-  const confirmedCount = todayBookings.filter((b) => isAttendanceConfirmed(b)).length;
-  const pendingCount = todayBookings.filter((b) => b.status === 'Pending').length;
-  const seatedCount = todayBookings.filter((b) => b.status === 'Seated').length;
+  const confirmedCount = todayVisits.filter((b) => isAttendanceConfirmed(b)).length;
+  const pendingCount = todayVisits.filter((b) => b.status === 'Pending').length;
+  const seatedCount = todayVisits.filter((b) => b.status === 'Seated').length;
 
   let nextBooking: { time: string; party_size: number } | null = null;
   for (const b of [...todayBookings].sort((a, c) =>
@@ -240,7 +264,7 @@ function computeBookingForecastAndTodayOps(input: {
       date: dateStr,
       day: weekdayShortForDateStr(dateStr),
       covers: dayBookings.reduce((sum, b) => sum + b.party_size, 0),
-      bookings: dayBookings.length,
+      bookings: countableVisitRows(dayBookings).length,
     });
   }
 
@@ -561,7 +585,7 @@ export async function buildDashboardHomePayload(
     Boolean(defaultAreaId);
 
   const bookingListCols =
-    'id, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id';
+    'id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, group_booking_id, person_label';
 
   const [todayBookingsRes, weekBookingsRes] = await Promise.all([
     admin
@@ -573,7 +597,7 @@ export async function buildDashboardHomePayload(
     admin
       .from('bookings')
       .select(
-        `id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, service_id, area_id`,
+        `id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status, guest_attendance_confirmed_at, staff_attendance_confirmed_at, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, service_id, area_id, group_booking_id, person_label`,
       )
       .eq('venue_id', staff.venue_id)
       .gte('booking_date', todayStrVenue)
@@ -587,8 +611,10 @@ export async function buildDashboardHomePayload(
     ? weekBookings.filter((b) => String((b as { area_id?: string | null }).area_id ?? '') === String(defaultAreaId))
     : weekBookings;
 
+  const todayVisits = countableVisitRows(todayBookings as DashboardBookingOpsRow[]);
+
   const todayByModel: Record<string, number> = {};
-  for (const b of todayBookings) {
+  for (const b of todayVisits) {
     const row = b as Record<string, unknown>;
     const m = inferBookingRowModel({
       experience_event_id: row.experience_event_id as string | null | undefined,
@@ -707,8 +733,8 @@ export async function buildDashboardHomePayload(
       message: `Today is ${todayHeat.fill_percent}% full at the busiest time (${todayHeat.peak_in_house_covers ?? 0}${todayHeat.concurrent_cap != null ? ` of ${todayHeat.concurrent_cap}` : ''} covers) - walk-in availability may be limited.`,
     });
   }
-  if (todayBookings.some((b) => b.status === 'Pending')) {
-    const pend = todayBookings.filter((b) => b.status === 'Pending').length;
+  if (todayVisits.some((b) => b.status === 'Pending')) {
+    const pend = todayVisits.filter((b) => b.status === 'Pending').length;
     alerts.push({
       type: 'info',
       message: `${pend} pending ${alertsUseAppointmentTone ? 'appointment' : 'booking'}${pend > 1 ? 's' : ''} awaiting payment.`,
@@ -726,7 +752,14 @@ export async function buildDashboardHomePayload(
     }
   }
 
-  const guestIds = [...new Set(todayBookings.slice(0, 10).map((b) => b.guest_id).filter(Boolean))] as string[];
+  const recentTodayBookings = [...todayVisits]
+    .sort((a, b) => String(a.booking_time).localeCompare(String(b.booking_time)))
+    .slice(0, 10);
+
+  // Names for the rows actually listed. This used to take the first ten rows in query order
+  // rather than time order, so on a day with more than ten appointments some listed rows
+  // read "Guest".
+  const guestIds = [...new Set(recentTodayBookings.map((b) => b.guest_id).filter(Boolean))] as string[];
   const guestNameById = new Map<string, string>();
   if (guestIds.length > 0) {
     const { data: guests } = await admin.from('guests').select('id, first_name, last_name').in('id', guestIds);
@@ -735,10 +768,6 @@ export async function buildDashboardHomePayload(
       guestNameById.set(row.id, formatGuestDisplayName(row.first_name, row.last_name));
     }
   }
-
-  const sortedTodayBookings = [...todayBookings].sort((a, b) =>
-    String(a.booking_time).localeCompare(String(b.booking_time)),
-  );
 
   const todayByModelMerged = mergeTodayByModelWithActiveModels(todayByModel, venueBookingModel, enabledModelsNorm);
 
@@ -763,7 +792,7 @@ export async function buildDashboardHomePayload(
     forecast,
     heatmap,
     alerts,
-    recent_bookings: sortedTodayBookings.slice(0, 10).map((b) => {
+    recent_bookings: recentTodayBookings.map((b) => {
       const row = b as Record<string, unknown>;
       const m = inferBookingRowModel({
         experience_event_id: row.experience_event_id as string | null | undefined,
@@ -776,14 +805,15 @@ export async function buildDashboardHomePayload(
         appointment_service_id: row.appointment_service_id as string | null | undefined,
       });
       return {
-        id: b.id,
+        id: String(b.id),
         time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '',
         party_size: b.party_size,
         status: b.status,
-        guest_name: b.guest_id ? (guestNameById.get(b.guest_id) ?? 'Guest') : 'Guest',
+        guest_name: b.guest_id ? (guestNameById.get(String(b.guest_id)) ?? 'Guest') : 'Guest',
         deposit_status: (b.deposit_status as string | undefined) ?? 'N/A',
         booking_model: m,
         kind_label: bookingModelShortLabel(m),
+        group_booking_id: (row.group_booking_id as string | null | undefined) ?? null,
       };
     }),
   };

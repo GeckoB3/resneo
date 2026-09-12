@@ -893,7 +893,9 @@ export function AppointmentBookingsDashboard({
     if (viewMode === 'day' && timeRangeFilterActive) {
       reg = reg.filter((b) => isBookingTimeInHourRange(b.booking_time, pickerStartHour, pickerEndHour));
     }
-    return reg;
+    // Count what the list draws: one line per visit per day, carrying the visit's status.
+    // Counting rows made "Appointments 2" sit above a single line for one guest (R36).
+    return collapseMultiServiceVisits(reg);
   }, [
     allStatusBookings,
     practitionerFilter,

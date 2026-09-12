@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Set up your services",
   description: "Create the services clients can book: set one fixed length and price or offer several bookable options, add optional extras with add-ons, decide how clients pay, and link them to a calendar.",
   tags: ["services","appointments","duration","deposit","payments","calendar","catalogue","booking","one fixed offering","multiple bookable options","options","variants","add-ons","extras","upsell","card hold","no-show fee","processing time","categories","booking interval","start times","location","online"],
-  verified: '2026-09-08',
+  verified: '2026-09-12',
   content: `# Set up your services
 
 A service is anything a client can book with you: a consultation, a treatment, a session. Get one set up here and it will show on your booking page, ready for clients to choose a time.

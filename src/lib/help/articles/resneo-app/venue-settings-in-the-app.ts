@@ -4,8 +4,8 @@ export const article: HelpArticle = {
   slug: "venue-settings-in-the-app",
   title: "Venue settings you can change in the app",
   description: "A tour of the More tab: your venue profile, hours and closures, booking settings, booking page, communications, team, plan, referrals, linked venues and support, with a note on which of them are read only.",
-  tags: ["app","mobile","settings","more tab","venue profile","business hours","booking page","communications","team","plan","linked venues","collectives","support"],
-  verified: '2026-09-06',
+  tags: ["app","mobile","settings","more tab","venue profile","business hours","booking page","communications","team","plan","linked venues","collectives","support","ask resneo","reports","booked revenue"],
+  verified: '2026-09-12',
   content: `# Venue settings you can change in the app
 
 The **More** tab is the app's settings drawer. Most of what an owner changes week to week is here: your address and phone number, your opening hours, your booking page, the messages your clients get, and who is on your team.
@@ -20,9 +20,11 @@ A few things only ever show you the answer rather than let you change it, and th
 
 ## What is on the More tab
 
-At the top is your name, your venue and your role, with a bell for [notifications](/help/resneo-app/push-notifications-and-security). Below that:
+At the top is your name, your venue and your role, with a bell for [notifications](/help/resneo-app/push-notifications-and-security). Under that, where your venue has it switched on, sits **Ask ResNeo**: ask how to do something in your own words and it answers from the ResNeo help centre. It stands where the settings search box used to, because a person at the top of this tab is usually looking for how to do something. Keep client details out of the question, and check the article it links to for the full steps.
 
-- **Quick actions**: **Today**, **Calendar availability**, **Waitlist** and, for admins, **Reports**.
+Below that:
+
+- **Quick actions**: **Today**, **Calendar availability**, **Waitlist** and, for admins, **Reports**. **Reports** covers bookings, no-shows, cancellations, deposits, your team and your services, and **Booked revenue**, the value of everything on the diary by day and by calendar.
 - **Your venue**: **Services**, **Business hours**, **Booking settings**, **Booking page**, **Venue profile**, and **Compliance** with **Compliance settings** where your plan includes them.
 - **Team & clients**: **Team**, **Communications** and **Import contacts**.
 - **Booking types**: whichever of **Classes**, **Events**, **Resources** and **Tables** your venue has switched on.

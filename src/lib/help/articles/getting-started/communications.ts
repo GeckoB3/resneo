@@ -8,7 +8,7 @@ export const article: HelpArticle = {
   title: "Guest communications (email and SMS)",
   description: "Switch on automatic emails and texts so every confirmation, reminder, and follow-up reaches your guests without any extra work.",
   tags: ["communications","email","sms","reminders","templates","notifications","settings","messaging"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Guest communications (email and SMS)
 
 Keep clients in the loop without lifting a finger. ResNeo sends confirmations, reminders and follow-ups automatically. You decide which messages go out, by which channel, and when.
@@ -125,7 +125,12 @@ The cards above are the automatic messages. You can also write to a client on th
 
 - **One client, from a booking.** Open the booking from the bookings list or the calendar, expand **SMS / email guest**, type your note, then set **Send via** to **Email & SMS (if available)**, **Email only**, or **SMS only**, and click **Send**.
 - **Several bookings at once.** Tick the bookings in the list, then click **Message** in the bar that appears. Choose a **Channel**, write the **Message**, and click **Send**. The same message goes to each one, and anyone without the contact method you chose is skipped.
-- **From Contacts.** Tick the clients you want and click **Message**, or open one client and use **Send a message**. Everything you send shows in that client's **Message log**.
+- **One client, from Contacts.** Open the client and use **Send a message**. This always sends.
+- **Several contacts at once.** Tick them in the **Contacts** list and click **Message**. This one counts as marketing, so only the clients who have given marketing permission receive it. The rest are skipped, and the confirmation says how many. If none of them has given permission, nothing is sent.
+
+Everything you send shows in that client's **Message log**.
+
+> **Marketing permission** means **Marketing consent** is ticked on the client's **Preferences** and **Opt out of marketing** is not. Messages about a booking somebody has actually made, from the booking or from the bookings list, are not marketing and always go.
 
 > **Note:** all of these ride on the **Custom message** card. If you switch that card off, or untick its **SMS** box, your hand-written messages stop going out by that channel too.
 

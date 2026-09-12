@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Business hours and special closures',
   description: 'The Business hours tab: the weekly grid and its explicit save, and the closures form field by field.',
   tags: ['hours', 'closures', 'exceptions', 'amended hours', 'holiday'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Business hours and special closures
 
@@ -27,6 +27,8 @@ Nothing here saves on its own. The button sits in a strip at the bottom of the c
 
 > **Good to know:** if upcoming bookings already sit outside the hours you are about to save, ResNeo asks **"Save these hours anyway?"**. Saying yes keeps those bookings exactly where they are. New hours only stop new bookings being made.
 
+> **Good to know:** if these hours end up narrower than a calendar's own working hours, ResNeo tells you after the save, naming the calendars and the days. The save still goes through: nothing is clamped or thrown away. Guests can only book inside your business hours, so either widen these hours or trim those calendars under **Calendar Availability**.
+
 > **Good to know:** the last period of a day cannot be removed, because an open day needs at least one. Untick the day instead. And if the last period already runs to the end of the day, **+ Add period** is replaced by a note saying there is no room for another one.
 
 ## Closures and special days
@@ -35,7 +37,7 @@ The second card is **Closures & special days**, headed **Closures, Amended Hours
 
 1. Click the first date on the month calendar, then the last, to select a range. One click selects a single day, and clicking that same day again clears it. Use the arrows either side of the month name to move to another month.
 2. In the **New Block** form below, check **Start date** and **End date**. You can also type them straight in.
-3. Choose a **Type**: **Closure** or **Amended Hours**.
+3. Choose a **Type** by clicking one of the buttons: **Closure** (all day, or a window each day) or **Amended hours** (open on these dates with these hours). Table venues get **Reduced capacity** as a third.
 4. Fill in the times for that type (below).
 5. Add a **Reason (optional)**, such as "Bank Holiday" or "Staff training", so your team knows why.
 6. Click **Add to Calendar**. **Clear Selection** starts the dates again.

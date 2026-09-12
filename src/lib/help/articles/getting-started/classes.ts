@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Set up your classes",
   description: "Create reusable class types and put them on real dates so guests can book your group sessions.",
   tags: ["classes","class types","sessions","timetable","rosters","capacity","schedule","check-in"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Set up your classes
 
 Classes let several clients book the same session at once, such as a weekly beard-care workshop or a beginners' studio hour. You set them up in two stages: first a class type, which is a reusable template, then the real dates people can book.

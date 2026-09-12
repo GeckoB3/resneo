@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   description:
     'Create one-off, weekly, or custom-date events, price your ticket types, run the door with the attendee list, and duplicate, cancel, or delete an event safely.',
   tags: ['events', 'tickets', 'capacity', 'attendees', 'door', 'stripe'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Ticketed events
 

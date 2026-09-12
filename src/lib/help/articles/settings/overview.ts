@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Settings overview',
   description: 'Every Settings tab and what it holds, what your team sees instead, the ?tab= links, and where the related work lives.',
   tags: ['settings', 'admin', 'staff', 'tabs'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Settings overview
 
@@ -73,7 +73,7 @@ Your team's logins: **My account**, **Staff members** and **Security settings**.
 
 ### Reports
 
-Your figures and your CSV exports, on two tabs, **Overview** and your client directory. Reports live here now: an old \`/dashboard/reports\` bookmark sends you straight to this tab. See [Exporting your data](/help/settings/data-export).
+Your figures and your CSV exports, on three tabs: **Overview**, **Revenue** (the value of everything on the diary, by day and by calendar) and your client directory. Reports live here now: an old \`/dashboard/reports\` bookmark sends you straight to this tab. See [Exporting your data](/help/settings/data-export).
 
 ### Refer & Earn
 

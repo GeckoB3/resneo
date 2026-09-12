@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Deposits, full payments, card holds, and refunds',
   description: 'Stripe Connect, the four online payment options, card holds and no-show fees, the guest pay page, and every money action on a booking.',
   tags: ['stripe', 'payments', 'deposits', 'refunds', 'card hold', 'no-show'],
-  verified: '2026-09-09',
+  verified: '2026-09-12',
   content: `
 # Get paid the way you promise
 

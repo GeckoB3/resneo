@@ -1825,6 +1825,51 @@ export async function fetchCalendarAppointmentInput(params: {
 
   const serviceMapForBookings = new Map(allServices.map((s) => [s.id, s]));
 
+  /**
+   * Bookings left behind by a service this calendar no longer offers, or by one that
+   * has been parked. `allServices` is built from the assignments, so their catalogue
+   * row is missing and they were measured as a bufferless 30 minutes: a 30 minute
+   * buffer stopped holding time and the next guest could be booked straight into it.
+   *
+   * Loaded for MEASUREMENT only, and deliberately not added to `services`: the
+   * calendar still offers nothing new for them. `is_active` is not filtered for the
+   * same reason - the booking exists either way.
+   */
+  const unmappedBookedServiceIds = [
+    ...new Set(
+      (bookingsRes.data ?? [])
+        .map((b) => {
+          const row = b as { service_item_id?: string | null; appointment_service_id?: string | null };
+          return row.service_item_id ?? row.appointment_service_id ?? null;
+        })
+        .filter((id): id is string => Boolean(id) && !serviceMapForBookings.has(id as string)),
+    ),
+  ];
+  if (unmappedBookedServiceIds.length > 0) {
+    const { data: leftBehindRows, error: leftBehindErr } = await supabase
+      .from('service_items')
+      .select('*')
+      .eq('venue_id', venueId)
+      .in('id', unmappedBookedServiceIds);
+    if (leftBehindErr) {
+      reportAvailabilityReadFailure(
+        {
+          source: 'fetchCalendarAppointmentInput',
+          table: 'service_items (left behind by a removed link)',
+          assumed: 'those bookings hold no buffer, so their buffer is offered to someone else',
+          venueId,
+          calendarId,
+          date,
+        },
+        leftBehindErr,
+      );
+    }
+    for (const raw of leftBehindRows ?? []) {
+      const svc = serviceItemRowToEngineService(raw as Record<string, unknown>, venueId, null);
+      serviceMapForBookings.set(svc.id, svc);
+    }
+  }
+
   const calVariantIds = [
     ...new Set(
       (bookingsRes.data ?? [])

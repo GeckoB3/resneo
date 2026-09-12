@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Reading your reports",
   description: "See how your business is doing at a glance, pick a date range, and download the numbers as a spreadsheet.",
   tags: ["reports","analytics","csv","export","no-shows","cancellations","deposits","admin"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Reading your reports
 
 Reports tell you how busy you are, how much you are taking, and where your bookings come from. This guide walks the page and, more importantly, says what each number means.
@@ -14,6 +14,7 @@ Reports tell you how busy you are, how much you are taking, and where your booki
 ## Before you start
 
 - Reports are admin only, under **Settings**, then the **Reports** tab. There is no Reports row in the sidebar. An old \`/dashboard/reports\` link still works: it sends you to the same tab.
+- The page has three tabs at the top right: **Overview** (everything below), **Revenue**, and your client directory.
 - Figures follow the date range you set, except the two exports at the bottom, which always cover everything.
 - Card and column names follow the wording your venue uses. This guide says "appointment" and "client". If your profile uses "session" and "patient", you will see those words instead.
 
@@ -65,7 +66,19 @@ When ResNeo has saved a reference period, a **Reference period saved** bar at th
 
 > **Good to know:** this card has no Export CSV button. If there is too little activity in your range, it says so instead of showing figures. Widen the dates and look again.
 
-## Step 4: Check the Clients tab
+## Step 4: See what is on the diary, on the Revenue tab
+
+Click **Revenue** at the top right. This tab is not about what has been paid, it is about what is booked: the value of every appointment on the diary that has not been cancelled, added up by day and split by calendar.
+
+1. Pick a range with the chips: **Today**, **This week**, **This month**, **Last 30 days**, **Next 30 days**, or **Custom range** for your own dates. This range is separate from the one on **Overview**.
+2. Use **Show by** to group by **Day**, **Week** or **Month**.
+3. Read the total, then the chart underneath: one colour per calendar, so you can see who is carrying the week.
+
+Services marked as a no-show are taken off a past date's total and shown beside it. Tick **Include no-shows** to add them back. Future dates have no no-shows yet, so they show everything booked.
+
+**Export CSV** downloads the table exactly as you set it up.
+
+## Step 5: Check the Clients tab
 
 Click the **Clients** tab beside **Overview**, at the top right of the page. You land on the **Client directory**, which follows the same date range.
 

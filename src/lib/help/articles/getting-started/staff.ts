@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Add and manage your team",
   description: "Invite your team by email, give each person the right role, and choose which calendars they look after.",
   tags: ["staff","team","roles","admin","permissions","invites","session timeout","calendars"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Add and manage your team
 
 Give the people you work with their own sign-in, decide what they can reach, and keep the account secure.
@@ -102,7 +102,7 @@ At the top of the **Staff** tab, the **My account** card has **Change Password**
 | There is no **Add User** button | You have used every login your plan includes | Check the table above, then change plan under **Settings**, then **Plan** |
 | No calendars appear when I invite someone | You have no active bookable calendars yet | Add one under **Calendar Availability**, **Calendars** tab |
 | A calendar will not assign | It is switched off, or it is a resource calendar | Tick **Active (bookable)** for that calendar first. Resource calendars cannot be assigned |
-| **This email is already a staff member for this venue** | They are already on your list | Find their row and use **Resend invitation email** instead |
+| **This email is already a staff member at this venue** | They are already on your list | Find their row and use **Resend invitation email** instead |
 | The invitation never arrived | It went to spam, the address was mistyped, or they already had a ResNeo login | Check the address, use **Resend invitation email**, or ask them to try **Forgot password?** on the login page |
 | I cannot change my own role | You cannot change your own role or remove yourself | Ask another admin to do it |
 | A team member cannot edit their hours | Their account is not assigned to that calendar | Assign the calendar to them on the **Staff** tab |

@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Let clients choose their person first",
   description: "Swap the order of your booking page so clients pick who they want to see before they pick a service.",
   tags: ["staff-first","booking order","booking page","picker","team photos","who first","practitioner"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Let clients choose their person first
 
 By default your booking page asks for a service, then who the client wants to see. If your regulars book a person rather than a treatment, you can swap those two steps around with the **Staff-first booking** setting.

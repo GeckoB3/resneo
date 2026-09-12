@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Slots not showing or calendar gaps',
   description: 'Why your booking page offers no times: services without a calendar, the two sets of hours, closures, booking rules, and paused billing.',
   tags: ['availability', 'slots', 'calendar'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # No times showing on your booking page
 
@@ -26,7 +26,7 @@ Bookable time is the overlap of your venue's opening hours and that calendar's o
 - **Settings → Business hours**, the **Weekly opening hours** card: when the business is open.
 - **Calendar Availability**, the **Availability** tab: when that person or room works.
 
-A calendar that runs past your venue hours is trimmed, and the **Venue:** line under each day flags the time that is not bookable. Widen whichever of the two is the narrower.
+A calendar that runs past your venue hours is trimmed, and the **Venue:** line under each day flags the time that is not bookable. Widen whichever of the two is the narrower. ResNeo also says so when you save either one, naming the calendars and the days that fall outside, so if you have seen that message recently this is your answer.
 
 ## 4. A closure covers the date
 

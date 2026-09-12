@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Notifications, app lock and your account",
   description: "Choose which alerts your phone shows you, set quiet hours, lock the app behind Face ID, and manage your own sign-in details, password and account.",
   tags: ["app","mobile","notifications","push","alerts","quiet hours","face id","biometric","app lock","account","password","delete account","sign out"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Notifications, app lock and your account
 
 The app can tap you on the shoulder when something happens at your venue, and it can lock itself behind Face ID so client records stay private if your phone is left on the counter. Both are yours to set, and neither is on by force.

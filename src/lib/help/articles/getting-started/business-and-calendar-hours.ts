@@ -3,7 +3,7 @@ import type { HelpArticle } from '../../types';
 export const article: HelpArticle = {
   slug: 'business-and-calendar-hours',
   helpSection: 'gs-set-up',
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   title: 'Business & calendar hours',
   description: 'How your venue’s opening hours and each calendar’s own hours work together to decide when guests can book, plus breaks, closures, and one-off changes.',
   tags: ['hours', 'opening hours', 'availability', 'closures', 'breaks', 'calendar', 'closed', 'holiday'],
@@ -35,6 +35,8 @@ Open **Settings** from the sidebar, then the **Business hours** tab.
 6. Click **Save opening hours**.
 
 > **Good to know:** if some upcoming bookings already sit outside your new hours, ResNeo asks "Save these hours anyway?". Saving keeps those bookings. It only stops new ones being made outside the hours.
+
+> **Good to know:** ResNeo also checks your business hours against your calendars' hours whenever you save, on either screen, and tells you when they disagree, naming the calendars and days. It never refuses the save and never trims anything. Guests can only book inside your business hours, so treat it as a nudge to widen these hours or trim that calendar.
 
 ## Step 2: Set each calendar's working hours
 

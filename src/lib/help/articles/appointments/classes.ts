@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   description:
     'Switch classes on, build class types, schedule sessions, run the roster on the day, and see how classes use calendar columns, roles, and reports.',
   tags: ['classes', 'timetable', 'roster', 'sessions', 'check-in', 'capacity'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Classes and timetables
 

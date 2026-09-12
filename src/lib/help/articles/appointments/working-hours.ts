@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   description:
     'The Availability, Breaks and Closures & amended hours tabs in detail: weekly hours per calendar, recurring breaks, one-off closures, planned hours and rotas, and how they sit inside your business hours.',
   tags: ['hours', 'breaks', 'closures', 'rota', 'availability', 'venue'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Keep your availability trustworthy
 
@@ -30,6 +30,8 @@ A time is offered to a guest only when every layer agrees:
 5. **The service's own rules** then decide which of the remaining slots a guest actually sees, through **Min booking notice (hours)** and **Max advance (days)** on the service. See [Services](/help/appointments/services).
 
 You will see this spelled out on screen too: the **Availability** tab opens with a note headed **How calendar hours and business hours work together**.
+
+ResNeo also checks the two against each other whenever you save, on either screen, and says so rather than refusing. Save calendar hours that run outside your business hours and you get a line naming the days, such as "Hannah's hours on Monday and Tuesday run outside your business hours (Monday: calendar 08:00 to 20:00, business 09:00 to 17:00). Guests can only book within business hours, so widen your business hours for those days too." Narrow your business hours under a calendar and the same advice appears there, naming the calendars instead. Nothing is clamped: staff can still book the extra time, guests cannot.
 
 ## The Calendar picker
 

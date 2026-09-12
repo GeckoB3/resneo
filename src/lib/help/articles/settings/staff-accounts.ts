@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Staff accounts, roles and permissions',
   description: 'The Staff tab: your own password, invites, Admin vs Staff, calendar assignments, the auto-logout timer and plan caps.',
   tags: ['staff', 'roles', 'permissions', 'invites', 'session timeout'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Staff accounts, roles and permissions
 

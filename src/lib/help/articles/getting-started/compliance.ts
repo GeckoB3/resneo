@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Compliance: patch tests, consent and intake forms",
   description: "Set up patch tests, consent and intake forms so the right records are collected before each client sits down.",
   tags: ["compliance","patch test","consent","intake","forms","enforcement","expiry","services"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Compliance: patch tests, consent and intake forms
 
 If some of your services need a patch test, a signed consent, or an intake form before a client sits down, ResNeo can collect those for you, attach them to the right services, and warn or block bookings when a record is missing or out of date.

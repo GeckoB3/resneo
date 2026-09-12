@@ -8,7 +8,7 @@ export const article: HelpArticle = {
   title: 'Appointments Light, Plus, and Pro',
   description: 'How unified scheduling fits together, what each tier includes, how the sidebar labels change, and where to manage your subscription.',
   tags: ['plans', 'tiers', 'sms', 'navigation', 'limits'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Welcome to your Appointments plan
 

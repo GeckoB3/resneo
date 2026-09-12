@@ -16,6 +16,7 @@ import { useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { AppointmentAvailabilityTabPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { ServiceRemovalBookingsDialog } from '@/components/scheduling/ServiceRemovalBookingsDialog';
 import {
+  affectedServiceIds,
   moveAffectedBookings,
   parseServiceRemovalConfirmation,
   type ServiceRemovalConfirmation,
@@ -1606,7 +1607,14 @@ export function AppointmentAvailabilitySettings({
         failures={serviceRemovalFailures}
         error={serviceRemovalError}
         onCancel={() => {
+          // Backing out means the calendar keeps these services. The links were never
+          // saved, so put the ticks back: leaving them off showed a removal that never
+          // happened, and the next save would ask all over again.
+          const restore = affectedServiceIds(serviceRemoval);
           closeServiceRemoval();
+          if (restore.length > 0) {
+            setFormServiceIds((prev) => [...new Set([...prev, ...restore])]);
+          }
           setShowForm(true);
           void fetchData();
         }}

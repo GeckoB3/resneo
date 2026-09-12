@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: 'Login, staff access and permissions',
   description: 'Sign-in links that will not work, password resets, what a team member cannot reach, auto-logout, and billing locks.',
   tags: ['login', 'access', 'auth'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Login, staff access and permissions
 

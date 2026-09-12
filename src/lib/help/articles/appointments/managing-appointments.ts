@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Managing the appointments list',
   description: 'Ranges, filters and sorting, what an expanded row can do, bulk tagging and messaging, live updates, and where exports really live.',
   tags: ['bookings', 'filters', 'bulk', 'list'],
-  verified: '2026-09-10',
+  verified: '2026-09-12',
   content: `
 # The appointments list in practice
 

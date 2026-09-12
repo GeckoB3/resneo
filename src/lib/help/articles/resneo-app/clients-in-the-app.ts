@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Clients and contacts in the app",
   description: "Search, filter and tag your client list from your phone, then open a client to call, message, book, edit and see their records.",
   tags: ["app","mobile","contacts","clients","tags","export","merge","gdpr","documents","household"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Clients and contacts in the app
 
 Your whole client list travels with you. **Contacts** is the third tab along the bottom of the ResNeo app, and it holds the same people as **Contacts** on the web dashboard. Search someone before they reach the desk, tap **Call**, take a booking, or add a note while it is still fresh.
@@ -84,7 +84,7 @@ Below the top card you will find:
 
 **New booking for this client** opens the booking form with this person already filled in, so you go straight to choosing a service and a time.
 
-**Guest bookings** below it is closed until you tap it. Its header counts what is behind it, and opening it splits their visits into **Upcoming** and **Previous**. Tap any visit to open its details without leaving the client.
+**Guest bookings** below it is closed until you tap it. Its header counts what is behind it, and opening it splits their visits into **Upcoming** and **Previous**. Each row ends with how the booking was made: **Online**, **Phone** or **Walk-in**. Tap any visit to open its details without leaving the client.
 
 ## Step 8: More details
 

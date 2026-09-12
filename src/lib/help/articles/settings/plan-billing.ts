@@ -13,7 +13,7 @@ export const article: HelpArticle = {
   title: 'Managing your plan and billing',
   description: 'The Plan tab: your tier and trial, SMS and calendar usage, changing plan, the Stripe portal, and deleting your venue.',
   tags: ['billing', 'subscription', 'sms', 'plan', 'delete venue'],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `
 # Managing your plan and billing
 

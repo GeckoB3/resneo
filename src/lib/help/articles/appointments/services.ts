@@ -20,7 +20,7 @@ export const article: HelpArticle = {
     'overrides',
     'categories',
   ],
-  verified: '2026-09-08',
+  verified: '2026-09-12',
   content: `
 # Appointment services
 
@@ -201,6 +201,10 @@ Unticking a calendar that still has upcoming bookings for this service does not 
 - **Move them to another calendar.** Pick the calendar from the dropdown, which lists the calendars that are switched on and already offer this service. Each booking keeps its date, time and length, so nobody is emailed and nothing is cancelled.
 
 Bookings are never cancelled by this, whichever you choose. If a move cannot go ahead, because the other calendar is already busy at that time, ResNeo says so and leaves that booking where it is for you to sort out.
+
+**Cancel** backs out of the whole thing. Nothing is saved, the calendar keeps the service, and the service form reopens with that calendar ticked again and your other edits still in it.
+
+A booking you leave behind carries on exactly as before. You can still drag it, change its length, or open **Modify** and move it, even though the calendar no longer offers that service to new clients. Only new bookings are stopped.
 
 ## When guests can book this service online
 

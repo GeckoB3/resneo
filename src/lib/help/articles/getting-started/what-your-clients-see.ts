@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "What your clients see when they book",
   description: "A walk through the guest side of ResNeo, from your booking page to the confirmation, and the manage, confirm and pay pages afterwards.",
   tags: ["guest experience","public booking","booking flow","group booking","add-ons","manage booking","confirmation","waitlist","clients"],
-  verified: '2026-09-09',
+  verified: '2026-09-12',
   content: `# What your clients see when they book
 
 You spend your day in the dashboard. Your clients never see it. This article walks the other side of the screen, step by step, so you know exactly what happens after somebody taps your booking link.

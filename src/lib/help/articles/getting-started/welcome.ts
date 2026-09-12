@@ -10,7 +10,7 @@ import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_LIGHT, SMS_INCLUDED_PLUS } from
 export const article: HelpArticle = {
   slug: "welcome",
   helpSection: "gs-start-here",
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   title: "Welcome to ResNeo",
   description: "A friendly introduction to ResNeo and a clear path to taking your first booking.",
   tags: ["overview","introduction","getting started","first booking","setup","basics"],

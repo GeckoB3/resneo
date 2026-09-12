@@ -3,48 +3,52 @@ import type { HelpArticle } from '../../types';
 export const article: HelpArticle = {
   slug: "availability-in-the-app",
   title: "Hours, breaks, leave and blocks in the app",
-  description: "Set weekly working hours, breaks, planned hours and rotas, block out time and book leave from your phone, plus the admin-only Calendars screen.",
-  tags: ["app","mobile","availability","working hours","breaks","leave","blocks","rota","calendars"],
-  verified: '2026-09-06',
+  description: "The four tabs of Availability Settings on your phone: Calendars, Availability, Breaks and Closures & amended hours, plus planned hours, rotas and where one-off blocks live now.",
+  tags: ["app","mobile","availability","working hours","breaks","leave","blocks","rota","calendars","amended hours","closures","tabs","availability settings","block time"],
+  verified: '2026-09-12',
   content: `# Hours, breaks, leave and blocks in the app
 
-Everything about when a calendar can take bookings lives on one screen in the app. Open **More**, then **Calendar availability**, and you land on **Availability**.
+Everything about when a calendar can take bookings lives on one screen in the app. Open **More**, then **Calendar availability**. The screen is headed **Availability Settings** and carries the same four tabs as the web dashboard:
+
+**Calendars** · **Availability** · **Breaks** · **Closures & amended hours**
+
+Admins land on **Calendars**. Everyone else lands on **Availability** and does not see the **Calendars** tab at all.
 
 ## Before you start
 
-- Anyone on your team can open this screen, but you can only change hours, breaks, leave and blocks for the calendars linked to your own account. A colleague's calendar reads as view only, with a line saying so.
-- Admins can change every calendar, and only admins see the **Manage calendars** button in the top right.
-- Working hours are when a calendar *can* take bookings. A time is only bookable where it also falls inside your venue's opening hours, so to open earlier or later you have to widen **More**, then **Business hours**, as well.
-- If your venue has more than one calendar, a row of chips at the top filters the screen. **All** shows everything.
+- Anyone on your team can open this screen, but you can only change hours, breaks and closures for the calendars linked to your own account. A colleague's calendar opens read only, with a line saying so.
+- Admins can change every calendar.
+- **Availability** and **Breaks** share one calendar picker, so whichever calendar you choose on one tab is the calendar you get on the other.
+- Working hours are when a calendar *can* take bookings. A time is only bookable where it also falls inside your venue's opening hours, so to open earlier or later you have to widen **More**, then **Business hours**, as well. Save hours that fall outside your business hours and the app tells you which days, rather than refusing the save.
+- **One-off blocks are not on this screen any more.** Block a slot from the **Calendar** tab, where the time is. See the section near the end.
 
-## Step 1: Set a calendar's weekly working hours
+## The Availability tab: weekly working hours
 
-Under **Working hours**, each calendar has a row with its name and a plain-English summary of the week, for example Mon–Fri 09:00–17:00 · Sat 10:00–14:00. A calendar with nothing set says **No working hours set**.
+Pick the calendar at the top, then edit the week underneath. Everything is on the tab itself; there is no sheet to open.
 
-1. Tap **Edit hours** on the calendar you want.
-2. Each of the seven days has a switch. Turn a day on to open it; turn it off and it reads **Day off**.
-3. Set the start and end time for the day. Your venue's hours for that day are shown just underneath, and turn amber with a warning if you set hours outside them.
-4. Tap **+ Add split** to add a second period on the same day, for a morning and an afternoon with a gap between. Each extra period gets a **Remove** button.
-5. Tap **Copy to other open days** to give every other open day the same hours.
-6. Tap **Save hours**.
+1. Each of the seven days has a switch. Turn a day on to open it; turn it off and it reads **Closed**.
+2. Set the start and end time for the day. Your venue's hours for that day are shown just underneath, and turn amber with a warning if you set hours outside them.
+3. Tap **+ Add split** to add a second period on the same day, for a morning and an afternoon with a gap between. Each extra period gets a **Remove** button.
+4. Tap **Copy to other open days** to give every other open day the same hours.
+5. Tap **Save Working Hours**.
 
-If narrowing the hours would leave bookings you have already taken outside them, the app does not just save. It asks **Save these hours anyway?** and tells you what falls outside. Tap **Save anyway** to go ahead, or close the sheet and fix the bookings first.
+If narrowing the hours would leave bookings you have already taken outside them, the app does not just save. It asks **Save these hours anyway?** and tells you what falls outside. Tap **Save anyway** to go ahead, or close it and fix the bookings first.
 
-## Step 2: Add breaks
+A note headed **How calendar hours and business hours work together** sits on the tab, with a link through to **Business hours**.
 
-Breaks are lunch and anything else that repeats every week.
+## The Breaks tab: lunch and anything else that repeats
 
-1. Tap **Edit breaks** on the calendar.
+1. Check the calendar picker is on the right person.
 2. Tap **+ Add** on a day and set the start and end time.
 3. **Copy Monday to all days** gives every day Monday's breaks.
 4. If you can change more than one calendar, an **Apply to all calendars** switch saves the same breaks to all of them at once. That is usually what you want for a shared lunch break.
 5. Tap **Save breaks**.
 
-> **Good to know:** breaks are not offered for a resource. The line on a resource's row explains it: to keep a resource free at the same time each day, add the break on the staff calendar it appears on.
+> **Good to know:** breaks are not offered for a resource. To keep a resource free at the same time each day, add the break on the staff calendar it appears on.
 
-## Step 3: Plan hours ahead, and set a rota
+## Plan hours ahead, and set a rota
 
-Use this when hours change from a date in the future, or repeat on a pattern, without touching the weeks before it. Tap **Plan hours ahead** on a calendar. (On a colleague's calendar the button reads **View planned hours** and everything is read only.)
+Use this when hours change from a date in the future, or repeat on a pattern, without touching the weeks before it. It sits under **Plan hours ahead** on the **Availability** tab. (On a colleague's calendar it reads **View planned hours** and everything is read only.)
 
 The sheet has three parts.
 
@@ -63,41 +67,47 @@ The sheet has three parts.
 
 Admins with more than one calendar also get **Copy this schedule to other calendars** at the bottom. Switch on the calendars you want, then tap the copy button. It copies every change as saved, past changes included. Each calendar keeps its own standard weekly hours, breaks and days off.
 
-## Step 4: Block out a one-off slot
+## The Closures & amended hours tab: days off, or different hours
 
-Under **Time off & blocks**, tap **Block time**.
+This tab takes one calendar out for a date or a range, or gives it different hours on those dates.
 
-1. Pick the calendar. Admins see a chip per calendar; if you are staff with one calendar, it is chosen for you.
-2. Set the **Date**, then the **Start** and **End** times with the plus and minus buttons. They step in 15 minutes.
-3. Add a **Reason (optional)**.
-4. Tap **Save**.
+Chips at the top choose whose entries you are looking at. Admins may look at any calendar; a staff member sees their own. **All** shows everyone.
 
-Blocks for the next 90 days appear in the **Time blocks** card, each with **Edit** and **Remove**. **Remove** asks you to tap again to confirm.
+Tap **New entry**, or tap dates straight on the month grid to select a range and fill the form from there.
 
-## Step 5: Add leave
+1. Choose the kind: **Closed** (all day, or a window each day) or **Working different hours** (open on these dates with these hours).
+2. Set the dates.
+3. For **Closed**, choose **All day** or **Time window**, then the start and end times. A time window blocks that window on every date in the range.
+4. For **Working different hours**, set the periods for those dates. **Add another period** gives a break in the middle of the day.
+5. Admins creating a new entry also get **Apply to all active calendars**, which saves the same dates on every column at once.
+6. Add **Notes (optional)**, then tap **Add to calendar** (or **Save changes** when editing).
 
-Leave covers whole days or several days at a time. Tap **Add leave**.
+Entries appear under **Upcoming**, with anything finished behind **Past**. Tap one to edit or remove it.
 
-1. Admins creating new leave see **Apply to all practitioners** at the top. Turn it on for a venue-wide closure and the calendar picker disappears.
-2. Otherwise pick the calendar.
-3. Set **From** and **To**.
-4. Choose the type: **Closed**, **Unavailable** or **Other**.
-5. Choose **All day**, or **Time window** and then set **Window start** and **Window end** for part of a day.
-6. Add **Notes (optional)** and tap **Save**.
+Two rules worth knowing, the same as on the web: amended hours will not save on a date the calendar is closed all day, and if the amended hours fall outside your venue's hours, staff can still book them but guests cannot until you amend the venue's hours too.
 
-Leave shows in the **Leave / Unavailability** card, upcoming first, with anything finished tucked behind a **Past** toggle. Each entry has **Edit** and **Remove**.
+> **Good to know:** closures cannot be saved against a resource, so resources are not offered in the picker.
 
-> **Good to know:** leave and blocks cannot be saved against a resource, so resources are not offered in either picker.
+## The team month grid
 
-## The team leave calendar
+The month grid on the **Closures & amended hours** tab shows the whole team's time off a month at a time. Page through the months with the arrows, and read the legend for what each colour means.
 
-The **Team leave** card between the buttons and the lists shows the whole team's time off a month at a time. Switch between **Calendar** and **List**, page through the months with the arrows, and read the legend for what each colour means.
+Tap a day to see who is off. Tap a second day to build a range, then use the form that appears to add an entry with those dates already filled in. Tapping the same day again clears it.
 
-Tap a day to see who is off. Tap a second day to build a range, then tap the **Add leave** button that appears to open the leave form with those dates already filled in. **Clear** drops the range, and tapping the same day again clears it too.
+## Blocking a one-off slot
 
-## Admin only: Manage calendars
+Blocks live on the **Calendar** tab now, not on this screen, because that is where the time is.
 
-Tap the calendar icon in the top right of **Availability** to open **Calendars**. Staff logins do not see it, and the screen says so if they reach it another way.
+1. Open the **Calendar** tab and find the slot.
+2. Tap the empty slot and choose **Block time**.
+3. Set the start and end times and add a **Reason (optional)**.
+4. Save.
+
+Tap the block again later to edit or remove it.
+
+## The Calendars tab (admins only)
+
+The first tab. Staff logins do not see it, and anyone who reaches it another way is sent to **Availability**.
 
 Each calendar is a bookable column on your public page and in the app. Its card gives you:
 
@@ -119,14 +129,16 @@ If two resources on the same column offer overlapping slots, a **Conflict** pill
 | Problem | Likely cause | Fix |
 | --- | --- | --- |
 | A calendar says **View only** | It is not linked to your account | Ask an admin to change it, or to link the calendar to you |
+| I cannot find **Block time** on this screen | Blocks moved to the **Calendar** tab | Open **Calendar**, tap the slot, then **Block time** |
 | I set hours but the times still are not bookable | They fall outside your venue's opening hours | Widen **More**, then **Business hours** as well; the editor shows the venue's hours under each day |
 | The save asked **Save these hours anyway?** | Narrowing the hours leaves bookings outside them | Read what falls outside, then either **Save anyway** or move those bookings first |
 | **+ Add split** has gone from a day | There is no room left in that day for another period | Shorten the last period first |
-| **Edit breaks** is missing on a row | That row is a resource | Add the break on the staff calendar the resource appears on |
-| I cannot choose a resource for leave or a block | Leave and blocks cannot be stored against a resource | Use the staff calendar, or change the resource's weekly hours |
+| The save warned that hours fall outside business hours | The calendar is set to work when the venue is shut | Nothing is lost. Widen **More**, then **Business hours** for those days, or trim the calendar |
+| The **Breaks** tab will not let me edit | The calendar picked is a resource, or is not yours | Pick your own calendar; for a resource, add the break on the staff calendar it appears on |
+| I cannot choose a resource for a closure | Closures cannot be stored against a resource | Use the staff calendar, or change the resource's weekly hours |
 | **Remove** did nothing | It arms first and needs a second tap | Tap **Tap to confirm** within a few seconds |
 | A planned change starts on the wrong day | Changes always start on a Monday | The app moves your date back to that week's Monday; pick the following Monday if you meant later |
-| No **Manage calendars** button | You are signed in as staff, not an admin | Ask an admin |
+| No **Calendars** tab | You are signed in as staff, not an admin | Ask an admin |
 | **Add calendar** is missing | Your plan's calendars are all in use | Deactivate one, or change your plan under **Settings**, then **Plan**, on the web dashboard |
 | Nothing saves and a banner mentions being offline | Your phone has no connection | Reconnect and try again; the app does not queue changes |
 

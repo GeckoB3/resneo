@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Taking payments in person",
   description: "Collect the balance at the end of an appointment with Tap to Pay, a Bluetooth card reader, cash or another method, and handle deposits, card holds and refunds from your phone.",
   tags: ["app","mobile","payments","tap to pay","card reader","stripe","cash","refund","deposit","card hold","in-person"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Taking payments in person
 
 The app can take the money at the end of an appointment. Your client taps their card, you record cash, or you note a bank transfer, and the booking's balance updates on the spot.

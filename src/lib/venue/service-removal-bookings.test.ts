@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   affectedBookingLabel,
+  affectedCalendarIds,
+  affectedServiceIds,
   moveAffectedBookings,
   parseServiceRemovalConfirmation,
   type ServiceRemovalAffectedBooking,
@@ -60,6 +62,29 @@ describe('parseServiceRemovalConfirmation', () => {
 describe('affectedBookingLabel', () => {
   it('names the guest and when they are booked', () => {
     expect(affectedBookingLabel(booking())).toBe('Alex Smith, Wed 14 Oct, 10:00');
+  });
+});
+
+describe('affectedCalendarIds / affectedServiceIds', () => {
+  const confirmation = {
+    message: 'x',
+    total: 3,
+    truncated: false,
+    bookings: [
+      booking(),
+      booking({ id: 'b2' }),
+      booking({ id: 'b3', calendar_id: 'cal-2', service_id: 'svc-2' }),
+    ],
+  };
+
+  it('lists each calendar and service once, so cancelling can put the ticks back', () => {
+    expect(affectedCalendarIds(confirmation)).toEqual(['cal-1', 'cal-2']);
+    expect(affectedServiceIds(confirmation)).toEqual(['svc-1', 'svc-2']);
+  });
+
+  it('has nothing to restore when there is no confirmation open', () => {
+    expect(affectedCalendarIds(null)).toEqual([]);
+    expect(affectedServiceIds(null)).toEqual([]);
   });
 });
 

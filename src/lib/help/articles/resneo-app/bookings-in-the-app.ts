@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "Finding and updating bookings",
   description: "Search, sort and filter the bookings list on your phone, swipe a row to accept or mark a no-show, and use the booking screen to call, reschedule, take payment or message a guest.",
   tags: ["app","mobile","bookings","appointments","search","filter","status","no-show","payment","compliance"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Finding and updating bookings
 
 The **Calendar** tab is your day as a grid. The tab next to it is the same information as a list, which is the quicker way to find one particular booking, work through a run of them, or look across a whole week.
@@ -61,6 +61,8 @@ The bar also has a control to select everything on screen, and one to clear the 
 
 Tap a row to open the booking screen. At the top you get the guest, the time, the status, and badges where they apply: **Guest confirmed**, **Staff confirmed**, **Arrived**, **Deposit pending**, **Deposit failed** and **Linked**.
 
+Under the name sits the **visit summary**, the same block the web dashboard shows: the time span, then the length, the date and when this client last came in, with the status pill and any deposit or card-hold badge beside it. Below that is a row for each service with its name, time, length, its own status and its own price, and for a booking of several services its own **Start** and **Complete**. A single service lists its add-ons and their prices. The bottom of the block is the money: the total, any deposit paid, what has been paid so far, and what is still outstanding, amber when something is owed and green when it is settled.
+
 Under that is a row of round buttons you can scroll sideways:
 
 - **Call** dials the guest's number.
@@ -82,6 +84,8 @@ Below the details are the status buttons. They follow where the booking has got 
 - **Completed**: **Reopen**.
 - **No-show**: **Undo No-Show**.
 
+For a booking of several services there is no single **Start** here. Each service has its own **Start** and **Complete** in the visit summary at the top, so a colour can be finished while the cut has not begun. **Arrived**, **Confirm** and **Take payment** still apply to the whole visit.
+
 **Cancel booking** and **No-show** ask you to confirm. The undo buttons apply straight away, because they put things back rather than changing anything for the guest.
 
 ## Step 7: Money and confirmations
@@ -99,7 +103,7 @@ A cancelled booking that still holds a deposit shows a **Deposit refund** panel 
 
 Further down the booking screen:
 
-- **Details** lists the service, who it is with, the type, the location, the deposit or card hold, the guest's visit count, the source, and when the booking was created. There is a button to copy the booking reference.
+- **Details** lists the service, who it is with, the type, the location, the deposit or card hold, and when the booking was created. The money and the services now live in the visit summary at the top rather than here.
 - **Notes** is for anything the team needs to know.
 - **Compliance** lists any forms or records this booking needs. Each one offers **View record** where you already have one, **Capture now** to fill it in on the spot with the guest in front of you, and **Send link** to email or text the form to them. Choosing **Send link** offers **Email**, **SMS** or **Copy link**. Anything a staff member still has to sign off shows **Awaiting decision**.
 - **Guest history** shows what this guest has booked before.

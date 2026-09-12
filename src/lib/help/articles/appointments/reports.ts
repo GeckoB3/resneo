@@ -4,9 +4,9 @@ export const article: HelpArticle = {
   slug: 'reports',
   helpSection: 'growth',
   title: 'Reports, exports, and the Clients directory',
-  description: 'A reference for every Reports card, what each Export CSV contains, the Appointment performance metrics, the daily booking log email, and the Clients directory.',
-  tags: ['reports', 'analytics', 'csv', 'admin'],
-  verified: '2026-09-06',
+  description: 'A reference for every Reports card, what each Export CSV contains, the Appointment performance metrics, the Revenue tab, the daily booking log email, and the Clients directory.',
+  tags: ['reports', 'analytics', 'csv', 'admin', 'revenue', 'booked revenue', 'no-shows'],
+  verified: '2026-09-12',
   content: `
 # Reports, exports, and the Clients directory
 
@@ -15,7 +15,7 @@ Reports shows how busy you are, what you are taking, where your bookings come fr
 ## Before you start
 
 - Reports is **admin only**. Open **Settings**, then the **Reports** tab. There is no Reports row in the sidebar, and an old \`/dashboard/reports\` address sends you to the same tab.
-- Two tabs sit at the top right of the page: **Overview** and **Clients**.
+- Three tabs sit at the top right of the page: **Overview**, **Revenue** and **Clients**. The last one is named after your word for a client.
 - Everything follows the date range you set, apart from **SMS segments this period** (which follows your billing period) and **Export your data** (which always covers your whole venue).
 - Card names follow the wording your venue uses. This article says "appointment" and "client". If your profile uses "session" and "patient", you will see those words instead.
 - Cards appear only when there is something to show. **By booking type** needs activity in more than one booking type, **Event ticket sales by tier** needs ticket sales, and **Resource utilisation** needs resource bookings.
@@ -89,7 +89,29 @@ This card is built for appointments businesses and is the only one that compares
 
 When ResNeo has a saved reference period, a **Reference period saved** bar names those dates and each figure gains a line such as "Reference no-show rate was 8%". That snapshot refreshes weekly.
 
-## Step 5: The Clients tab
+## Step 5: The Revenue tab
+
+Click **Revenue** beside **Overview**. This tab answers one question: what is on the diary, and whose diary it is on.
+
+**Booked revenue** is the value of every appointment on the diary that has not been cancelled, priced the way the booking panel prices it: the total stored on the booking, else the option the client chose, else that calendar's own price, else the service's list price, plus add-ons. Each service of a multi-service visit counts on its own, so a visit is never counted twice.
+
+This tab keeps its own range, separate from the **Date range** card on **Overview**. Pick **Today**, **This week** (where it opens), **This month**, **Last 30 days** or **Next 30 days**, or click **Custom range** and set your own **From** and **To**. **Show by** groups the periods into **Day**, **Week** or **Month**.
+
+No-shows are reported beside the total rather than quietly dropped. A past date leaves out services marked as a no-show; tick **Include no-shows** to add them back. A future date has no no-shows yet, so it reads as everything booked.
+
+Three tiles sit at the top:
+
+- **Booked revenue** for the range, with a line saying whether it covers past dates, upcoming dates, or both.
+- **No-shows deducted**, or **No-shows included** when the tick box is on, with the number of services behind it.
+- **Appointments counted**. If any of them carry no price at all, the tile says how many, and an amber note repeats it: those services add nothing to the totals.
+
+Below the tiles, a stacked bar chart gives one colour per calendar, and a table repeats the same figures period by period with a **Total** row. **Export CSV** in the card's top right downloads exactly what is on screen.
+
+> **Linked venues:** if another venue has shared full booking detail with you and let you create, edit and cancel, their calendars appear as their own columns with the venue's name underneath, and a line above the chart names the venues included. Only the calendars they scoped the link to are counted.
+
+Where you are is kept in the address, so \`/dashboard/settings?tab=reports&reportsTab=revenue\` is a link straight back to this tab.
+
+## Step 6: The Clients tab
 
 Click **Clients** beside **Overview**. You land on the **Client directory**, which follows the same date range. **Export CSV** in its top right downloads your whole client list.
 

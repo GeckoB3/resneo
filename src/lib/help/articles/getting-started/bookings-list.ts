@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Using the bookings list",
   description: "Your one place to find every booking, open the details, update statuses, and message or tag several guests at once.",
   tags: ["bookings","appointments","list","filter","search","status","bulk actions","tags"],
-  verified: '2026-09-10',
+  verified: '2026-09-12',
   content: `# Using the bookings list
 
 The bookings list is where you find any booking, open it for the detail, change its status, and message or tag several clients at once. It is called **Appointments** in the sidebar, or **Bookings** once you also sell classes, events, or resources.

@@ -5,7 +5,7 @@ export const article: HelpArticle = {
   title: "What you can only do on the web dashboard",
   description: "The app covers your day and the web covers your setup. Here is the short list of jobs that open the web dashboard, and where to read about each one.",
   tags: ["app","mobile","web dashboard","setup","import","classes","tables","plan","stripe","limits"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# What you can only do on the web dashboard
 
 Think of it this way: **the app covers the day, the web covers the setup.**
@@ -18,11 +18,11 @@ When the app meets one of them it does not pretend. It says so plainly, and give
 
 ## The list
 
-### Setting up a brand new venue's diary
+### Nothing about calendars, as it happens
 
-Your first calendars are added on the web. Until a venue has at least one, the app's calendar shows **No practitioners yet** and points you at the web dashboard. Once calendars exist you can add, rename, reorder and pause them from the app.
+Calendars used to be a web job. They are not any more. An admin can add, rename, reorder, pause and delete a bookable calendar from **More**, then **Calendar availability**, then the **Calendars** tab, and set its hours, breaks and closures on the tabs beside it.
 
-Read: [Business hours and calendar hours](/help/getting-started/business-and-calendar-hours)
+Read: [Hours, breaks, leave and blocks in the app](/help/resneo-app/availability-in-the-app), [Business hours and calendar hours](/help/getting-started/business-and-calendar-hours)
 
 ### Building the catalogue for a booking type you have just switched on
 
@@ -62,7 +62,7 @@ Read: [SMS problems](/help/troubleshooting/sms-issues)
 
 ### Class revenue reporting
 
-The app's **Reports** covers your bookings, no-shows, deposits, team and services. Class revenue reporting lives on the web.
+The app's **Reports** covers your bookings, no-shows, cancellations, deposits, team and services, and **Booked revenue**, the value of everything on the diary by day and by calendar. Class revenue reporting is the piece that lives on the web.
 
 Read: [Reports](/help/getting-started/reports)
 
@@ -105,7 +105,7 @@ Either way the dashboard opens in a browser window inside the app, so you can fi
 | --- | --- | --- |
 | A button in the app opens a browser instead of a screen | That job lives on the web | Finish it in the browser window and close it to return |
 | The web dashboard asks you to sign in again | The browser window did not carry your session | Sign in with the same email you use in the app |
-| You cannot find a setting anywhere in the app | It may be one of the web jobs above, or admin only | Use **Search settings** on the **More** tab first, then check this list |
+| You cannot find a setting anywhere in the app | It may be one of the web jobs above, or admin only | Ask **Ask ResNeo** at the top of the **More** tab, then check this list |
 | Everything is read only | A past due or expired subscription | An admin opens **Settings → Plan** on the web |
 | The app says something is not included in your plan | The feature belongs to a higher tier | See [Plans and billing](/help/settings/plan-billing) |
 

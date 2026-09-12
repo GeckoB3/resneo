@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Set up ticketed events",
   description: "Create one-off or repeating ticketed events, set prices and seat limits, show them on your calendar, and check guests in on the day.",
   tags: ["events","tickets","capacity","attendees","check-in","stripe","calendar","scheduling"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Set up ticketed events
 
 Ticketed events are one-off or repeating occasions clients buy a place at, such as a barbering masterclass. You set the date, the capacity, and one or more ticket types.

@@ -17,6 +17,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { ServiceRemovalBookingsDialog } from '@/components/scheduling/ServiceRemovalBookingsDialog';
 import {
+  affectedCalendarIds,
   moveAffectedBookings,
   parseServiceRemovalConfirmation,
   type ServiceRemovalConfirmation,
@@ -1707,8 +1708,20 @@ export function AppointmentServicesView({
         error={serviceRemovalError}
         onCancel={() => {
           const reopenForm = pendingRemoval?.kind === 'service_form';
+          // Backing out means the calendars keep the service. Nothing was saved, so the
+          // form has to drop the unticks it was asking about: leaving them off showed a
+          // removal that never happened, and the next save would ask all over again.
+          const restore = reopenForm ? affectedCalendarIds(serviceRemoval) : [];
           closeServiceRemoval();
-          if (reopenForm) setShowModal(true);
+          if (reopenForm) {
+            if (restore.length > 0) {
+              setForm((prev) => ({
+                ...prev,
+                practitioner_ids: [...new Set([...prev.practitioner_ids, ...restore])],
+              }));
+            }
+            setShowModal(true);
+          }
           void fetchAll();
         }}
         onConfirm={(moves) => void confirmServiceRemoval(moves)}

@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Using the waitlist",
   description: "Let fully booked clients add their name to a waitlist so you can offer them the next free slot.",
   tags: ["waitlist","appointments","offers","bookings","availability","settings","notifications"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Using the waitlist
 
 The waitlist collects clients who want a time you cannot offer yet, so you can fill a gap the moment one appears.

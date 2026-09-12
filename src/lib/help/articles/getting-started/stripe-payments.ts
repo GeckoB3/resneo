@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Connect Stripe to take payments",
   description: "Take card payments from clients by connecting Stripe in two simple steps, with your money going straight to your own bank.",
   tags: ["stripe","payments","connect","card payments","onboarding","settings","subscription","charges enabled"],
-  verified: '2026-09-06',
+  verified: '2026-09-12',
   content: `# Connect Stripe to take payments
 
 Connecting Stripe lets clients pay a deposit or the full price when they book, or leave card details for a no-show fee. Payments go directly to your connected payment account. ResNeo does not hold booking money.

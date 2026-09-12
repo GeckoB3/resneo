@@ -86,7 +86,7 @@ Use this when one person is away or one room is out of use, and the rest of the 
 
 1. Click the first day on the calendar and then the last to select a range, or type the **Start date** and **End date** in the **New entry** form.
 2. Choose **Closed** or **Working different hours** at the top of the form.
-3. For **Closed**: leave **Start time (optional)** and **End time (optional)** blank to block the whole day, or fill both in to block just that window on every date in the range. Choose a **Label (optional)**: **Closed**, **Unavailable** or **Other**.
+3. For **Closed**: leave **Start time (optional)** and **End time (optional)** blank to block the whole day, or fill both in to block just that window on every date in the range. Choose a **Label (optional)**: **Closed**, **Unavailable** or **Other**. The band on your Appointment Calendar says it, for example "Unavailable 09:00 to 13:00". **Other** reads "On leave".
 4. For **Working different hours**: enter the **Open** and **Close** times. These replace the calendar's usual hours on every date in the range, so they also open a day the calendar does not normally work. Use **Add another period** for a gap in the middle of the day. Breaks still apply.
 5. Add a **Notes (optional)** line such as "Annual leave" or "Late opening for the fair".
 6. Admins can tick **Apply to all active calendars** to put the same dates on every active column at once.

@@ -67,6 +67,19 @@ describe('scheduleClosureBlockLabel', () => {
     expect(scheduleClosureBlockLabel('practitioner_leave')).toBe('On leave');
     expect(scheduleClosureBlockLabel('practitioner_closed')).toBe('Calendar unavailable');
   });
+
+  it("reads a calendar closure's Label (R36: it used to say On leave whatever was chosen)", () => {
+    const leave = (leaveType: string | null) =>
+      scheduleClosureBlockLabel('practitioner_leave', { startTime: '09:00', endTime: '22:00', leaveType });
+    expect(leave('annual')).toBe('Closed 09:00 to 22:00');
+    expect(leave('sick')).toBe('Unavailable 09:00 to 22:00');
+    expect(leave('other')).toBe('On leave 09:00 to 22:00');
+    expect(leave(null)).toBe('On leave 09:00 to 22:00');
+    // The Label belongs to closures only.
+    expect(scheduleClosureBlockLabel('venue_closed', { startTime: '09:00', endTime: '10:00', leaveType: 'annual' })).toBe(
+      'Venue closed 09:00 to 10:00',
+    );
+  });
 });
 
 describe('calendarWorkingBoundsForDates', () => {

@@ -101,7 +101,7 @@ If one barber is on holiday but the shop is open, do not use a venue closure. Ad
 2. Admins pick the person or room from the **Calendar** dropdown. Team members see their own calendar.
 3. Click the first day they are away, then the last day, or type the **Start date** and **End date** in the **New entry** form.
 4. Leave **Closed** selected. Leave **Start time (optional)** and **End time (optional)** blank to block the whole day, or fill both in to block just that window on every date in the range.
-5. Pick a **Label (optional)**: **Closed**, **Unavailable** or **Other**. Add a note under **Notes (optional)**, such as "Annual leave".
+5. Pick a **Label (optional)**: **Closed**, **Unavailable** or **Other**. Your calendar shows it on the shaded band, and **Other** reads "On leave". Add a note under **Notes (optional)**, such as "Annual leave".
 6. Admins can tick **Apply to all active calendars** to put the same dates and times on every active calendar at once.
 7. Click **Add to calendar**.
 

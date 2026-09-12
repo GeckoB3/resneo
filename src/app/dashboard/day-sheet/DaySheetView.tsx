@@ -1374,7 +1374,9 @@ export function DaySheetView({
                     const isExpanded = expandedId === b.id;
                     const isTerminalStatus = isTerminal(b.status);
                     const primaryAction = BOOKING_PRIMARY_ACTIONS[b.status as BookingStatus];
-                    const isReturning = b.visit_count > 0;
+                    // The count includes this booking once it is seated or completed (R36).
+                    const priorVisits = b.visit_count - (b.status === 'Seated' || b.status === 'Completed' ? 1 : 0);
+                    const isReturning = priorVisits > 0;
                     const bookingRow: DaySheetBookingRow = { ...b, booking_date: date };
                     const inferredModel = inferBookingRowModel(bookingRow);
                     const isTableBooking = inferredModel === 'table_reservation';
@@ -1432,7 +1434,7 @@ export function DaySheetView({
                                   <Pill variant="neutral" size="sm">{b.area_name}</Pill>
                                 </span>
                               ) : null}
-                              {isReturning ? <Pill variant="warning" size="sm">{ordinal(b.visit_count + 1)} visit</Pill> : null}
+                              {isReturning ? <Pill variant="warning" size="sm">{ordinal(priorVisits + 1)} visit</Pill> : null}
                               {showDepositPendingPill(b) ? (
                                 <Pill variant="warning" size="sm" dot>
                                   <span className="sm:hidden">Deposit</span>

@@ -17,17 +17,29 @@ import type { GuestRecord } from '@/lib/guests';
 import { eraseGuestCompliance } from '@/lib/compliance/gdpr';
 import { enforceBookingCompliance } from '@/lib/compliance/enforce-booking';
 
+/**
+ * Same rule as `applyBookingLifecycleStatusEffects`: the last visit date is the latest
+ * attended day that has arrived, so a walk-in entered for an earlier date does not pull
+ * it backwards, and one entered for a later date does not record a visit yet.
+ */
 async function incrementGuestVisitAfterWalkIn(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   guestId: string,
   visitDate: string,
+  venueToday: string,
 ): Promise<void> {
-  const { data: gv } = await admin.from('guests').select('visit_count').eq('id', guestId).maybeSingle();
+  const { data: gv } = await admin
+    .from('guests')
+    .select('visit_count, last_visit_date')
+    .eq('id', guestId)
+    .maybeSingle();
+  const stored = (gv?.last_visit_date as string | null | undefined) ?? null;
+  const lastVisitDate = visitDate <= venueToday && (!stored || visitDate > stored) ? visitDate : stored;
   await admin
     .from('guests')
     .update({
       visit_count: (gv?.visit_count ?? 0) + 1,
-      last_visit_date: visitDate,
+      last_visit_date: lastVisitDate,
       updated_at: new Date().toISOString(),
     })
     .eq('id', guestId);
@@ -459,7 +471,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }
 
-      await incrementGuestVisitAfterWalkIn(admin, apptGuest.id, today);
+      await incrementGuestVisitAfterWalkIn(admin, apptGuest.id, today, localNow.date);
 
       return NextResponse.json(apptBooking, { status: 201 });
     }
@@ -689,7 +701,7 @@ export async function POST(request: NextRequest) {
       await syncTableStatusesForBooking(admin, booking.id, assignedTableIds, 'Seated', staff.id);
     }
 
-    await incrementGuestVisitAfterWalkIn(admin, walkInGuest.id, today);
+    await incrementGuestVisitAfterWalkIn(admin, walkInGuest.id, today, localNow.date);
 
     return NextResponse.json(booking, { status: 201 });
   } catch (err) {

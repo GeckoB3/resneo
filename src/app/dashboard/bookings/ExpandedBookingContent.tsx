@@ -1322,10 +1322,27 @@ export function ExpandedBookingContent({
       ? `${bookingStartHm}–${bookingEndHm}`
       : bookingStartHm
     : null;
+  // "Last visit" means the guest's previous visit. Once this visit is under way or done it
+  // is counted, and its own day is the stored date, so the line would name this booking as
+  // its own history (R36). Then no date is named, and "First visit" only when this visit is
+  // the only one counted.
+  const thisVisitAttended = [
+    effectiveBooking.status,
+    ...multiServiceVisitSegments
+      .filter((segment) => !segment.booking_date || segment.booking_date === booking.booking_date)
+      .map((segment) => segment.status),
+  ].some((status) => status === 'Seated' || status === 'Completed');
+  const priorVisitCount = Math.max(0, (profileGuest?.visit_count ?? 0) - (thisVisitAttended ? 1 : 0));
+  const lastVisitLabel =
+    previousVisitDate && !(thisVisitAttended && previousVisitDate === booking.booking_date)
+      ? `Last visit ${formatDateNice(previousVisitDate)}`
+      : priorVisitCount === 0
+        ? 'First visit'
+        : null;
   const visitContextLabel = [
     visitTotalMinutes != null && visitTotalMinutes > 0 ? formatDurationMinutesLabel(visitTotalMinutes) : null,
     formatDateNice(booking.booking_date),
-    previousVisitDate ? `Last visit ${formatDateNice(previousVisitDate)}` : 'First visit',
+    lastVisitLabel,
   ]
     .filter(Boolean)
     .join(' · ');

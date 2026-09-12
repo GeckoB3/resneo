@@ -105,6 +105,7 @@ import type { BookingStatus } from '@/lib/table-management/booking-status';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import { collapseMultiServiceVisits } from '@/lib/booking/booking-list-row-schedule';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { getStaffBookingSurfaceTabs } from '@/lib/booking/staff-booking-modal-options';
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
@@ -408,6 +409,8 @@ interface CalendarBlock {
   reason: string | null;
   block_type?: string;
   class_instance_id?: string | null;
+  /** A calendar closure's Label, on `practitioner_leave` stripes (`schedule-closure-blocks`). */
+  leave_type?: string | null;
 }
 
 interface VenueResourceRow {
@@ -561,6 +564,7 @@ function calendarBlockHeading(bl: CalendarBlock, columnName?: string | null): st
       columnName,
       startTime: bl.start_time,
       endTime: bl.end_time,
+      leaveType: bl.leave_type,
     });
   }
   if (isManualEditableBlock(bl)) return 'Time blocked';
@@ -6986,7 +6990,9 @@ export function PractitionerCalendarView({
   const monthDayScheduleCounts = useMemo(
     () =>
       buildMonthDayScheduleCounts(
-        bookingsMatchingFilters,
+        // A day's total counts appointments, and a multi-service visit is one appointment
+        // however many bars its services draw (R36), as on the bookings list and home page.
+        collapseMultiServiceVisits(bookingsMatchingFilters),
         scheduleBlocksInVisibleColumns,
         monthCells,
         'all',

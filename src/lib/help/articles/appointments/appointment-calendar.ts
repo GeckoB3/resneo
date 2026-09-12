@@ -43,7 +43,7 @@ Bands cover the minutes outside someone's working time, and each one says why an
 | **Venue closed 18:00 to 20:00** | Pink | The business is shut, though that calendar would work |
 | **Hannah unavailable 08:00 to 09:00** | Blue | The business is open, but that calendar is not working |
 | **Hannah closed 18:00 to 20:00** | Grey | Both are shut, so the calendar's own closure is named |
-| **On leave 09:00 to 13:00** | Purple | Booked leave |
+| **Closed 09:00 to 13:00** | Purple | A closure added for that calendar. The band shows the closure's Label, so it can also read **Unavailable**, or **On leave** when the Label is **Other** |
 | **Break** | Amber | A recurring break on that calendar |
 | **Linked venue closed** | Grey | A shared column whose own venue is shut |
 

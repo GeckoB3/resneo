@@ -4,6 +4,8 @@ import {
   buildPractitionerScheduleClosureBlocks,
   buildVenueScheduleClosureBlocks,
   closedRangesFromOpenWindows,
+  labelledLeaveForPractitionerOnDate,
+  type PractitionerLeavePeriodInput,
 } from '@/lib/calendar/schedule-closure-blocks';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { WorkingHours } from '@/types/booking-models';
@@ -351,5 +353,84 @@ describe('closure stripes over a grid wider than the hours', () => {
       columnIds: ['col-1'],
     });
     expect(blocks.filter((b) => b.block_type === 'venue_closed')).toEqual([]);
+  });
+});
+
+describe('closure Labels on the diary (R36)', () => {
+  // A Label ("Closed", "Unavailable", "Other") used to be stored, listed, and then dropped
+  // by the diary, which read "On leave" whatever was chosen.
+  const prac = {
+    id: 'p1',
+    is_active: true,
+    working_hours: { '1': [{ start: '09:00', end: '17:00' }] },
+    days_off: [],
+    break_times: [],
+    break_times_by_day: null,
+  };
+  const closure = (
+    leave_type: string,
+    start: string | null,
+    end: string | null,
+  ): PractitionerLeavePeriodInput => ({
+    practitioner_id: 'p1',
+    start_date: '2030-06-03',
+    end_date: '2030-06-03',
+    unavailable_start_time: start,
+    unavailable_end_time: end,
+    leave_type,
+  });
+  const stripes = (leavePeriods: PractitionerLeavePeriodInput[]) =>
+    buildPractitionerScheduleClosureBlocks({
+      practitioners: [prac],
+      leavePeriods,
+      fromDate: '2030-06-03',
+      toDate: '2030-06-03',
+      openingHours: null,
+      gridBounds: { start: 7 * 60, end: 21 * 60 },
+    })
+      .filter((b) => b.block_type === 'practitioner_leave')
+      .map((b) => `${b.leave_type} ${b.start_time}-${b.end_time}`)
+      .sort();
+
+  it('carries the Label of a full-day closure onto its stripe', () => {
+    expect(stripes([closure('annual', null, null)])).toEqual(['annual 07:00-21:00']);
+    expect(stripes([closure('sick', null, null)])).toEqual(['sick 07:00-21:00']);
+  });
+
+  it('keeps differently labelled windows apart, even when they touch', () => {
+    expect(stripes([closure('sick', '10:00', '12:00'), closure('annual', '12:00', '13:00')])).toEqual([
+      'annual 12:00-13:00',
+      'sick 10:00-12:00',
+    ]);
+  });
+
+  it('joins touching windows that share a Label', () => {
+    expect(stripes([closure('sick', '10:00', '12:00'), closure('sick', '12:00', '13:00')])).toEqual([
+      'sick 10:00-13:00',
+    ]);
+  });
+
+  it('names the strongest Label where closures overlap', () => {
+    expect(stripes([closure('other', '10:00', '14:00'), closure('annual', '12:00', '13:00')])).toEqual([
+      'annual 12:00-13:00',
+      'other 10:00-12:00',
+      'other 13:00-14:00',
+    ]);
+    expect(stripes([closure('sick', null, null), closure('annual', null, null)])).toEqual(['annual 07:00-21:00']);
+  });
+
+  it('still clips a window to the hours worked', () => {
+    expect(stripes([closure('annual', '16:00', '18:00')])).toEqual(['annual 16:00-17:00']);
+  });
+
+  it('covers the same minutes as the unlabelled reading', () => {
+    const periods = [closure('other', '10:00', '14:00'), closure('annual', '12:00', '15:30'), closure('sick', '15:00', '16:00')];
+    const labelled = labelledLeaveForPractitionerOnDate('p1', '2030-06-03', periods);
+    expect(labelled.fullDay).toBeNull();
+    expect(labelled.partial.map((r) => `${r.leaveType} ${r.start}-${r.end}`)).toEqual([
+      'other 600-720',
+      'annual 720-930',
+      'sick 930-960',
+    ]);
   });
 });

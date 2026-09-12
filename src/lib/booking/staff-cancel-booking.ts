@@ -11,7 +11,7 @@ import { releaseCardHoldsForBookings } from '@/lib/booking/card-hold-release';
 import { cancelOpenDepositIntentForBookings } from '@/lib/booking/cancel-open-deposit-intent';
 import { classifyDepositRefundFailure } from '@/lib/booking/deposit-refund-convergence';
 import { planSharedDepositRefund } from '@/lib/booking/shared-deposit-refund';
-import { isCascadingVisitGroup } from '@/lib/booking/group-booking-status-sync';
+import { isCascadingVisitGroup } from '@/lib/booking/visit-status-scope';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';

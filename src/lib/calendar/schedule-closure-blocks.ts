@@ -28,6 +28,11 @@ export interface ScheduleClosureCalendarBlock {
   end_time: string;
   reason: string | null;
   block_type: ScheduleClosureBlockType;
+  /**
+   * The Label chosen for a calendar closure (`practitioner_leave_periods.leave_type`), on
+   * `practitioner_leave` stripes only. {@link scheduleClosureBlockLabel} turns it into words.
+   */
+  leave_type?: string | null;
 }
 
 /**
@@ -70,6 +75,8 @@ export interface PractitionerLeavePeriodInput {
   end_date: string;
   unavailable_start_time?: string | null;
   unavailable_end_time?: string | null;
+  /** The closure form's "Label (optional)": `annual` Closed, `sick` Unavailable, `other` Other. */
+  leave_type?: string | null;
 }
 
 type MinuteRange = { start: number; end: number };
@@ -312,6 +319,69 @@ export function leaveForPractitionerOnDate(
   return { fullDay, partial: mergeAdjacentRanges(partial) };
 }
 
+/**
+ * Which label wins where closures with different labels cover the same minutes: the
+ * strongest statement. Anything unrecognised ranks with `other`.
+ */
+function leaveTypeRank(leaveType: string | null | undefined): number {
+  if (leaveType === 'annual') return 0;
+  if (leaveType === 'sick') return 1;
+  return 2;
+}
+
+type LabelledMinuteRange = MinuteRange & { leaveType: string | null };
+
+/**
+ * {@link leaveForPractitionerOnDate} with each closure's Label kept, so the diary can say
+ * what the owner chose. Full-day closures cover the whole day under one label. Part-day
+ * windows are cut where their labels change, so two closures with different labels never
+ * fuse into one stripe; where they overlap, {@link leaveTypeRank} decides.
+ */
+export function labelledLeaveForPractitionerOnDate(
+  practitionerId: string,
+  dateStr: string,
+  leavePeriods: PractitionerLeavePeriodInput[],
+): { fullDay: { leaveType: string | null } | null; partial: LabelledMinuteRange[] } {
+  let fullDay: { leaveType: string | null } | null = null;
+  const windows: LabelledMinuteRange[] = [];
+  for (const row of leavePeriods) {
+    if (row.practitioner_id !== practitionerId) continue;
+    if (dateStr < row.start_date || dateStr > row.end_date) continue;
+    const leaveType = row.leave_type ?? null;
+    if (isFullDayLeave(row)) {
+      if (!fullDay || leaveTypeRank(leaveType) < leaveTypeRank(fullDay.leaveType)) fullDay = { leaveType };
+      continue;
+    }
+    const st = row.unavailable_start_time?.slice(0, 5);
+    const en = row.unavailable_end_time?.slice(0, 5);
+    if (st && en) {
+      const start = timeToMinutes(st);
+      const end = timeToMinutes(en);
+      if (end > start) windows.push({ start, end, leaveType });
+    }
+  }
+
+  const cuts = [...new Set(windows.flatMap((w) => [w.start, w.end]))].sort((a, b) => a - b);
+  const partial: LabelledMinuteRange[] = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const start = cuts[i]!;
+    const end = cuts[i + 1]!;
+    let winner: LabelledMinuteRange | null = null;
+    for (const w of windows) {
+      if (w.start >= end || w.end <= start) continue;
+      if (!winner || leaveTypeRank(w.leaveType) < leaveTypeRank(winner.leaveType)) winner = w;
+    }
+    if (!winner) continue;
+    const last = partial[partial.length - 1];
+    if (last && last.end === start && leaveTypeRank(last.leaveType) === leaveTypeRank(winner.leaveType)) {
+      last.end = end;
+    } else {
+      partial.push({ start, end, leaveType: winner.leaveType });
+    }
+  }
+  return { fullDay, partial };
+}
+
 type PractitionerClosureInput = {
   id: string;
   is_active: boolean;
@@ -343,16 +413,16 @@ export function buildPractitionerScheduleClosureBlocks(params: {
 
     for (const dateStr of enumerateDatesInclusive(fromDate, toDate)) {
       const bounds = gridBounds ?? gridMinuteBounds(dateStr, openingHours, timeZone);
-      const leave = leaveForPractitionerOnDate(prac.id, dateStr, leavePeriods);
+      const leave = labelledLeaveForPractitionerOnDate(prac.id, dateStr, leavePeriods);
       const working = getWorkingRanges(asPractitioner, dateStr);
 
       let closedRanges: MinuteRange[] = [];
-      let leaveRanges: MinuteRange[] = [];
+      let leaveRanges: LabelledMinuteRange[] = [];
 
       if (leave.fullDay) {
         // Recorded leave outranks an implicit day off: it says why, and the
         // day-off boundary would only say the same thing less usefully.
-        leaveRanges = [{ start: bounds.start, end: bounds.end }];
+        leaveRanges = [{ start: bounds.start, end: bounds.end, leaveType: leave.fullDay.leaveType }];
       } else if (working.length === 0) {
         closedRanges = [{ start: bounds.start, end: bounds.end }];
       } else {
@@ -361,11 +431,14 @@ export function buildPractitionerScheduleClosureBlocks(params: {
           // Clip leave to the hours actually worked instead of merging the two
           // sets. The minutes covered are identical to the merged version, so
           // nothing that was greyed stops being greyed; they are now two
-          // non-overlapping sets carrying which is which.
+          // non-overlapping sets carrying which is which. Each labelled window
+          // is clipped on its own so differently labelled closures stay apart.
           const workingInBounds = intersectRanges(working, [
             { start: bounds.start, end: bounds.end },
           ]);
-          leaveRanges = intersectRanges(leave.partial, workingInBounds);
+          leaveRanges = leave.partial.flatMap((window) =>
+            intersectRanges([window], workingInBounds).map((r) => ({ ...r, leaveType: window.leaveType })),
+          );
         }
       }
 
@@ -373,7 +446,10 @@ export function buildPractitionerScheduleClosureBlocks(params: {
         out.push(toScheduleBlock('practitioner_closed', prac.id, dateStr, range, null));
       }
       for (const range of leaveRanges) {
-        out.push(toScheduleBlock('practitioner_leave', prac.id, dateStr, range, null));
+        out.push({
+          ...toScheduleBlock('practitioner_leave', prac.id, dateStr, range, null),
+          leave_type: range.leaveType,
+        });
       }
     }
   }
@@ -396,17 +472,30 @@ function hm(t: string): string {
 }
 
 /**
+ * The words a calendar closure's Label puts on its stripe. `annual` and `sick` read
+ * as their options on the form. `other` reads "On leave", the stripe's wording
+ * from before it followed the Label: "Other 09:00 to 17:00" would explain less.
+ * The app repo draws the same three words (R36).
+ */
+export function leaveStripeLabel(leaveType: string | null | undefined): string {
+  if (leaveType === 'annual') return 'Closed';
+  if (leaveType === 'sick') return 'Unavailable';
+  return 'On leave';
+}
+
+/**
  * The words on a closure stripe. Every stripe says why the minutes are
  * unavailable and which minutes: "Venue closed 18:00 to 20:00" when the
  * calendar would work but the business is shut, "Hannah unavailable 08:00 to
- * 09:00" when the business is open but the calendar is not working.
+ * 09:00" when the business is open but the calendar is not working, and a
+ * calendar closure's own Label ("Closed 09:00 to 13:00") when one was entered.
  */
 export function scheduleClosureBlockLabel(
   blockType: string | undefined,
-  opts?: { columnName?: string | null; startTime?: string; endTime?: string },
+  opts?: { columnName?: string | null; startTime?: string; endTime?: string; leaveType?: string | null },
 ): string {
   const range = opts?.startTime && opts?.endTime ? ` ${hm(opts.startTime)} to ${hm(opts.endTime)}` : '';
-  if (blockType === 'practitioner_leave') return `On leave${range}`;
+  if (blockType === 'practitioner_leave') return `${leaveStripeLabel(opts?.leaveType)}${range}`;
   if (blockType === 'venue_closed') return `Venue closed${range}`;
   if (blockType === 'practitioner_closed') {
     const who = opts?.columnName?.trim() || 'Calendar';

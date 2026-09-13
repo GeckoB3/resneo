@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { bookingModelShortLabel, inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { normaliseGuestNamePart } from '@/lib/guests/name';
+
+/** "First Last" from whichever parts are set, or empty: a file export gets no "Guest" placeholder. */
+function csvGuestName(guest: { first_name?: string | null; last_name?: string | null } | null | undefined): string {
+  return [normaliseGuestNamePart(guest?.first_name), normaliseGuestNamePart(guest?.last_name)]
+    .filter(Boolean)
+    .join(' ');
+}
 
 function escapeCsvCell(value: string | number | boolean | null | undefined): string {
   const str = value == null ? '' : String(value);
@@ -51,7 +59,8 @@ export async function GET(request: NextRequest) {
           practitioner_id,
           appointment_service_id,
           guests (
-            name,
+            first_name,
+            last_name,
             email,
             phone
           )
@@ -68,6 +77,7 @@ export async function GET(request: NextRequest) {
         'Booking ID',
         'Date',
         'Time',
+        'Type',
         'Party Size',
         'Status',
         'Deposit Status',
@@ -112,7 +122,7 @@ export async function GET(request: NextRequest) {
           depositGbp,
           b.stripe_payment_intent_id ?? '',
           b.source ?? '',
-          (guest as { name?: string } | null)?.name ?? '',
+          csvGuestName(guest as { first_name?: string | null; last_name?: string | null } | null),
           (guest as { email?: string } | null)?.email ?? '',
           (guest as { phone?: string } | null)?.phone ?? '',
           b.dietary_notes ?? '',
@@ -140,7 +150,8 @@ export async function GET(request: NextRequest) {
         .from('guests')
         .select(`
           id,
-          name,
+          first_name,
+          last_name,
           email,
           phone,
           visit_count,
@@ -150,7 +161,8 @@ export async function GET(request: NextRequest) {
           tags
         `)
         .eq('venue_id', staff.venue_id)
-        .order('name');
+        .order('last_name', { ascending: true, nullsFirst: false })
+        .order('first_name', { ascending: true, nullsFirst: false });
 
       if (error) {
         console.error('Export guests error:', error);
@@ -186,7 +198,7 @@ export async function GET(request: NextRequest) {
           : '';
         return [
           g.id,
-          g.name ?? '',
+          csvGuestName(g),
           g.email ?? '',
           g.phone ?? '',
           tags,

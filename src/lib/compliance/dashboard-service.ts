@@ -24,13 +24,31 @@ function joinValidity(join: unknown): number | null {
 /**
  * Aggregated data for the venue compliance dashboard (spec §3.5): records expiring
  * soon, upcoming bookings missing a required record, and pending form links.
- * Batch-loads requirements + records (3 queries) and resolves in-memory via the
- * pure resolver — avoids per-booking round-trips.
+ * Batch-loads requirements, bookings and records, and resolves in-memory via the
+ * pure resolver, which avoids per-booking round-trips.
+ *
+ * Every read throws when it fails. The dashboard used to ignore its query errors, so a
+ * broken read rendered "You're all caught up": all three panels asked `guests` for a
+ * `name` column that no longer exists, and the page showed an all-clear from the day it
+ * shipped. An error page is recoverable; a false all-clear on a compliance sweep is not.
  */
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const UPCOMING_BOOKING_WINDOW_DAYS = 14;
 const ACTIVE_BOOKING_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
+/** Bookings read for the window. Read soonest first, so a venue over the cap loses its furthest days. */
+const BOOKINGS_READ_LIMIT = 1000;
+/** Guest ids per records read, which keeps the request URL well inside the API gateway's limit. */
+const GUEST_IDS_PER_RECORDS_READ = 50;
+/** Records read per guest batch. Newest first, so a cap drops old history rather than a current record. */
+const RECORDS_READ_LIMIT = 1000;
+
+/**
+ * The `guests` columns the dashboard embeds. The table has no `name` column: the
+ * first/last name migration (20260810120000) replaced it, and asking for it fails the
+ * whole read with 42703.
+ */
+const GUEST_EMBED_COLUMNS = 'first_name, last_name';
 
 export interface ExpiringRecordRow {
   id: string;
@@ -74,12 +92,16 @@ export interface ComplianceDashboardData {
   awaiting_submission: AwaitingLinkRow[];
 }
 
-type GuestJoin = { first_name?: string | null; last_name?: string | null; name?: string | null } | null;
+type GuestJoin = { first_name?: string | null; last_name?: string | null } | null;
 
-function guestName(g: GuestJoin): string {
+function guestName(g: GuestJoin | GuestJoin[]): string {
   const j = Array.isArray(g) ? g[0] : g;
-  const full = [j?.first_name, j?.last_name].filter(Boolean).join(' ').trim();
-  return full || j?.name?.trim() || 'Guest';
+  const full = [j?.first_name?.trim(), j?.last_name?.trim()].filter(Boolean).join(' ');
+  return full || 'Guest';
+}
+
+function readFailed(what: string, error: { message?: string }): Error {
+  return new Error(`[compliance-dashboard] could not read ${what}: ${error.message ?? 'unknown error'}`);
 }
 
 export async function loadComplianceDashboard(
@@ -103,11 +125,11 @@ export async function loadComplianceDashboard(
   const todayDate = formatYmdInTimezone(now.getTime(), timezone);
   const bookingHorizonDate = addDaysToYmd(todayDate, UPCOMING_BOOKING_WINDOW_DAYS);
 
-  const [expiringRes, awaitingRes, bookingsRes] = await Promise.all([
+  const [expiringRes, awaitingRes, missing_for_bookings] = await Promise.all([
     admin
       .from('compliance_records')
       .select(
-        'id, guest_id, compliance_type_id, expires_at, result, compliance_types!inner(name, validity_period_days), guests!inner(first_name, last_name, name)',
+        `id, guest_id, compliance_type_id, expires_at, result, compliance_types!inner(name, validity_period_days), guests!inner(${GUEST_EMBED_COLUMNS})`,
       )
       .eq('venue_id', venueId)
       .eq('status', 'completed')
@@ -119,21 +141,18 @@ export async function loadComplianceDashboard(
       .limit(200),
     admin
       .from('compliance_form_links')
-      .select('id, guest_id, compliance_type_id, sent_via, sent_at, expires_at, compliance_types!inner(name), guests!inner(first_name, last_name, name)')
+      .select(
+        `id, guest_id, compliance_type_id, sent_via, sent_at, expires_at, compliance_types!inner(name), guests!inner(${GUEST_EMBED_COLUMNS})`,
+      )
       .eq('venue_id', venueId)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
       .order('created_at', { ascending: false })
       .limit(200),
-    admin
-      .from('bookings')
-      .select('id, guest_id, booking_date, booking_time, appointment_service_id, service_item_id, guests(first_name, last_name, name)')
-      .eq('venue_id', venueId)
-      .gte('booking_date', todayDate)
-      .lte('booking_date', bookingHorizonDate)
-      .in('status', ACTIVE_BOOKING_STATUSES)
-      .limit(500),
+    loadMissingForBookings(admin, venueId, { fromDate: todayDate, toDate: bookingHorizonDate, now }),
   ]);
+  if (expiringRes.error) throw readFailed('expiring records', expiringRes.error);
+  if (awaitingRes.error) throw readFailed('pending form links', awaitingRes.error);
 
   const expiring_soon: ExpiringRecordRow[] = (expiringRes.data ?? [])
     // Per-visit records (validity 0) are excluded: they expire the night of the visit by
@@ -167,68 +186,34 @@ export async function loadComplianceDashboard(
     };
   });
 
-  const missing_for_bookings = await resolveMissingForBookings(admin, venueId, bookingsRes.data ?? [], now);
-
   return { today: todayDate, expiring_soon, missing_for_bookings, awaiting_submission };
 }
 
-async function resolveMissingForBookings(
+/** Stricter enforcement wins when one client's form is required twice on the same day. */
+const ENFORCEMENT_RANK: Record<string, number> = { warn_staff: 0, warn_client: 1, block_online: 2, block_all: 3 };
+
+async function loadMissingForBookings(
   admin: SupabaseClient,
   venueId: string,
-  bookingRows: unknown[],
-  now: Date,
+  range: { fromDate: string; toDate: string; now: Date },
 ): Promise<MissingBookingRow[]> {
-  const bookings = bookingRows
-    .map((b) => b as Record<string, unknown>)
-    .filter((b) => b.appointment_service_id || b.service_item_id);
-  if (bookings.length === 0) return [];
-
-  const apptServiceIds = [...new Set(bookings.map((b) => b.appointment_service_id).filter(Boolean))] as string[];
-  const serviceItemIds = [...new Set(bookings.map((b) => b.service_item_id).filter(Boolean))] as string[];
-  const guestIds = [...new Set(bookings.map((b) => b.guest_id).filter(Boolean))] as string[];
-
-  // Batch-load requirements for every involved service (both polymorphic columns).
-  const reqQueries: Array<PromiseLike<{ data: unknown[] | null }>> = [];
-  if (apptServiceIds.length > 0) {
-    reqQueries.push(
-      admin
-        .from('service_compliance_requirements')
-        .select(
-          'id, compliance_type_id, enforcement, lock_period_hours, appointment_service_id, compliance_types!inner(name, is_active, validity_period_days)',
-        )
-        .eq('venue_id', venueId)
-        .in('appointment_service_id', apptServiceIds),
-    );
-  }
-  if (serviceItemIds.length > 0) {
-    reqQueries.push(
-      admin
-        .from('service_compliance_requirements')
-        .select(
-          'id, compliance_type_id, enforcement, lock_period_hours, service_item_id, compliance_types!inner(name, is_active, validity_period_days)',
-        )
-        .eq('venue_id', venueId)
-        .in('service_item_id', serviceItemIds),
-    );
-  }
-  // Venue-wide rows (plan §4) apply to every booking; a service row for the same type wins.
-  reqQueries.push(
-    admin
-      .from('service_compliance_requirements')
-      .select(
-        'id, compliance_type_id, enforcement, lock_period_hours, scope, compliance_types!inner(name, is_active, validity_period_days)',
-      )
-      .eq('venue_id', venueId)
-      .eq('scope', 'venue'),
-  );
-  const reqResults = await Promise.all(reqQueries);
-  const reqRows = reqResults.flatMap((r) => r.data ?? []) as Record<string, unknown>[];
+  // Requirements first: a venue has a handful, and they decide which bookings are worth reading.
+  const { data: reqData, error: reqErr } = await admin
+    .from('service_compliance_requirements')
+    .select(
+      'id, compliance_type_id, enforcement, lock_period_hours, scope, appointment_service_id, service_item_id, compliance_types!inner(name, is_active, validity_period_days)',
+    )
+    .eq('venue_id', venueId);
+  if (reqErr) throw readFailed('requirements', reqErr);
+  const reqRows = (reqData ?? []) as Record<string, unknown>[];
   if (reqRows.length === 0) return [];
 
   // Index requirements by service id (whichever column is set); venue-wide rows aside.
   const reqsByService = new Map<string, ResolverRequirement[]>();
   const venueReqs: ResolverRequirement[] = [];
   const typeIds = new Set<string>();
+  const serviceItemIds = new Set<string>();
+  const apptServiceIds = new Set<string>();
   for (const row of reqRows) {
     type TypeJoin = { name?: string; is_active?: boolean; validity_period_days?: number | null };
     const typeJoin = row.compliance_types as TypeJoin | TypeJoin[] | null;
@@ -245,27 +230,83 @@ async function resolveMissingForBookings(
     };
     typeIds.add(req.compliance_type_id);
     const svcId = (row.appointment_service_id ?? row.service_item_id) as string | null;
+    // Venue-wide rows (plan §4) apply to every booking; a service row for the same type wins.
     if (req.scope === 'venue' || !svcId) {
       venueReqs.push(req);
       continue;
     }
+    if (row.appointment_service_id) apptServiceIds.add(svcId);
+    else serviceItemIds.add(svcId);
     const list = reqsByService.get(svcId) ?? [];
     list.push(req);
     reqsByService.set(svcId, list);
   }
 
-  // Batch-load the guests' records for the involved types.
-  const recordsByGuest = new Map<string, ResolverRecord[]>();
-  if (guestIds.length > 0 && typeIds.size > 0) {
-    const { data: recRows } = await admin
-      .from('compliance_records')
+  // A venue-wide requirement can be missing on any booking. Otherwise only bookings for a
+  // service that carries one can, so read just those (both polymorphic columns).
+  const readBookings = (narrow?: { column: 'appointment_service_id' | 'service_item_id'; ids: Set<string> }) => {
+    let query = admin
+      .from('bookings')
       .select(
-        'id, guest_id, compliance_type_id, status, expires_at, voided_at, captured_at, result, captured_by_staff_id, compliance_types!inner(result_type)',
+        `id, guest_id, booking_date, booking_time, appointment_service_id, service_item_id, guests(${GUEST_EMBED_COLUMNS})`,
       )
       .eq('venue_id', venueId)
-      .in('guest_id', guestIds)
-      .in('compliance_type_id', [...typeIds]);
-    for (const r of (recRows ?? []) as Record<string, unknown>[]) {
+      .gte('booking_date', range.fromDate)
+      .lte('booking_date', range.toDate)
+      .in('status', ACTIVE_BOOKING_STATUSES);
+    if (narrow) query = query.in(narrow.column, [...narrow.ids]);
+    return query
+      .order('booking_date', { ascending: true })
+      .order('booking_time', { ascending: true })
+      .limit(BOOKINGS_READ_LIMIT);
+  };
+  const bookingReads =
+    venueReqs.length > 0
+      ? [readBookings()]
+      : [
+          ...(serviceItemIds.size > 0 ? [readBookings({ column: 'service_item_id', ids: serviceItemIds })] : []),
+          ...(apptServiceIds.size > 0 ? [readBookings({ column: 'appointment_service_id', ids: apptServiceIds })] : []),
+        ];
+
+  const bookingsById = new Map<string, Record<string, unknown>>();
+  for (const res of await Promise.all(bookingReads)) {
+    if (res.error) throw readFailed('upcoming bookings', res.error);
+    const rows = (res.data ?? []) as Record<string, unknown>[];
+    if (rows.length >= BOOKINGS_READ_LIMIT) {
+      console.warn('[compliance-dashboard] upcoming bookings reached the read limit; the furthest days are incomplete', {
+        venueId,
+        limit: BOOKINGS_READ_LIMIT,
+      });
+    }
+    // Bookings without a service are not appointment bookings, so no requirement applies (§5.0).
+    for (const b of rows) {
+      if (b.appointment_service_id || b.service_item_id) bookingsById.set(b.id as string, b);
+    }
+  }
+  const bookings = [...bookingsById.values()];
+  if (bookings.length === 0) return [];
+
+  // Batch-load the guests' records for the involved types.
+  const guestIds = [...new Set(bookings.map((b) => b.guest_id).filter(Boolean))] as string[];
+  const recordReads: Array<PromiseLike<{ data: unknown[] | null; error: { message?: string } | null }>> = [];
+  for (let i = 0; i < guestIds.length; i += GUEST_IDS_PER_RECORDS_READ) {
+    recordReads.push(
+      admin
+        .from('compliance_records')
+        .select(
+          'id, guest_id, compliance_type_id, status, expires_at, voided_at, captured_at, result, captured_by_staff_id, compliance_types!inner(result_type)',
+        )
+        .eq('venue_id', venueId)
+        .in('guest_id', guestIds.slice(i, i + GUEST_IDS_PER_RECORDS_READ))
+        .in('compliance_type_id', [...typeIds])
+        .order('captured_at', { ascending: false })
+        .limit(RECORDS_READ_LIMIT),
+    );
+  }
+  const recordsByGuest = new Map<string, ResolverRecord[]>();
+  for (const res of await Promise.all(recordReads)) {
+    if (res.error) throw readFailed('client records', res.error);
+    for (const r of (res.data ?? []) as Record<string, unknown>[]) {
       const typeJoin = r.compliance_types as { result_type?: string } | { result_type?: string }[] | null;
       const t = Array.isArray(typeJoin) ? typeJoin[0] : typeJoin;
       const rec: ResolverRecord = {
@@ -286,7 +327,10 @@ async function resolveMissingForBookings(
     }
   }
 
-  const out: MissingBookingRow[] = [];
+  // One line per client, day and form. A multi-service visit whose services share a
+  // requirement, or a client booked twice that day, needs the form once, and one record
+  // covers every booking. The earliest booking is kept: it is when the form is due.
+  const byClientDayForm = new Map<string, MissingBookingRow>();
   for (const b of bookings) {
     const svcId = (b.appointment_service_id ?? b.service_item_id) as string;
     const reqs = mergeRequirementsServiceWins(reqsByService.get(svcId) ?? [], venueReqs);
@@ -297,26 +341,38 @@ async function resolveMissingForBookings(
       reqs,
       records,
       bookingDatetime(b.booking_date as string, (b.booking_time as string | null) ?? null),
-      now,
+      range.now,
     );
     for (const r of resolved) {
-      if (r.state === 'missing' || r.state === 'expired') {
-        out.push({
-          booking_id: b.id as string,
-          guest_id: guestId,
-          guest_name: guestName(b.guests as GuestJoin),
-          booking_date: b.booking_date as string,
-          booking_time: (b.booking_time as string | null) ?? null,
-          compliance_type_id: r.requirement.compliance_type_id,
-          compliance_type_name: r.requirement.compliance_type_name,
-          enforcement: r.requirement.enforcement,
-          state: r.state,
-        });
+      if (r.state !== 'missing' && r.state !== 'expired') continue;
+      const row: MissingBookingRow = {
+        booking_id: b.id as string,
+        guest_id: guestId,
+        guest_name: guestName(b.guests as GuestJoin),
+        booking_date: b.booking_date as string,
+        booking_time: (b.booking_time as string | null) ?? null,
+        compliance_type_id: r.requirement.compliance_type_id,
+        compliance_type_name: r.requirement.compliance_type_name,
+        enforcement: r.requirement.enforcement,
+        state: r.state,
+      };
+      const key = `${guestId ?? `booking:${row.booking_id}`}|${row.booking_date}|${row.compliance_type_id}`;
+      const kept = byClientDayForm.get(key);
+      if (!kept) {
+        byClientDayForm.set(key, row);
+        continue;
       }
+      const stricter =
+        (ENFORCEMENT_RANK[row.enforcement] ?? 0) > (ENFORCEMENT_RANK[kept.enforcement] ?? 0)
+          ? row.enforcement
+          : kept.enforcement;
+      const earlier = (row.booking_time ?? '24:00') < (kept.booking_time ?? '24:00') ? row : kept;
+      byClientDayForm.set(key, { ...earlier, enforcement: stricter });
     }
   }
 
   // Soonest bookings first.
-  out.sort((a, b) => `${a.booking_date}${a.booking_time ?? ''}`.localeCompare(`${b.booking_date}${b.booking_time ?? ''}`));
-  return out;
+  return [...byClientDayForm.values()].sort((a, b) =>
+    `${a.booking_date}${a.booking_time ?? ''}`.localeCompare(`${b.booking_date}${b.booking_time ?? ''}`),
+  );
 }

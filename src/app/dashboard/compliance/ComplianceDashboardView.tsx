@@ -59,10 +59,8 @@ export function ComplianceDashboardView() {
     '/api/venue/compliance/dashboard',
     complianceJsonFetcher,
   );
-  // The dashboard route caches per venue for 5 min; after an action, pull a cache-busting
-  // refresh so the actioned item drops off the sweep immediately (not up to 5 min later).
-  const refresh = () =>
-    mutate(() => complianceJsonFetcher('/api/venue/compliance/dashboard?refresh=1'), { revalidate: false });
+  // Re-read after an action so the actioned item drops off the sweep straight away.
+  const refresh = () => mutate();
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [capture, setCapture] = useState<CaptureTarget | null>(null);
@@ -174,7 +172,7 @@ export function ComplianceDashboardView() {
           ) : (
             <ul className="space-y-3">
               {checkIns.map((g) => (
-                <li key={g.booking_id} className="rounded-xl border border-slate-200 bg-white p-3">
+                <li key={g.key} className="rounded-xl border border-slate-200 bg-white p-3">
                   <div className="mb-2 flex items-baseline justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-800">{g.guest_name}</p>
                     <p className="text-xs font-medium text-slate-500">
@@ -204,7 +202,7 @@ export function ComplianceDashboardView() {
                                   guestId: g.guest_id,
                                   typeId: item.compliance_type_id,
                                   typeName: item.compliance_type_name,
-                                  bookingId: g.booking_id,
+                                  bookingId: item.booking_id,
                                 })
                               }
                               className="inline-flex min-h-9 items-center rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 disabled:opacity-50"
@@ -214,7 +212,7 @@ export function ComplianceDashboardView() {
                             <button
                               type="button"
                               disabled={!g.guest_id || sending}
-                              onClick={() => sendLink(g.guest_id, item.compliance_type_id, g.booking_id)}
+                              onClick={() => sendLink(g.guest_id, item.compliance_type_id, item.booking_id)}
                               className="inline-flex min-h-9 items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 disabled:opacity-50"
                             >
                               Send link

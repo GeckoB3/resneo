@@ -3,7 +3,7 @@
 Status: PLAN, not implemented. Companion to `Docs/collective-one-venue-plan.md`, which defines the
 requirements (R1 to R14), the decisions (D1 to D36) and the red-team findings (RT1-1 to RT1-17,
 RT2-1 to RT2-28) this document refers to; read that first. Written 2026-09-13 against `staging` at
-`c6020eb6`; line numbers are anchors at that commit. It is the safety net for the redesign: what exists today and where it is blind, the strategy, every test, the invariants, the rollout gates and the acceptance checklist for the owner.
+`c6020eb6`; line numbers are anchors at that commit plus the two commits the plan's header names (`818ed5a`, `973bd3e`), and the plan's "Reading the citations" note applies here too. Reviewed 2026-09-14 at `c0b5eb0`. It is the safety net for the redesign: what exists today and where it is blind, the strategy, every test, the invariants, the rollout gates and the acceptance checklist for the owner.
 
 ## 1. Existing test infrastructure
 
@@ -14,7 +14,7 @@ RT2-1 to RT2-28) this document refers to; read that first. Written 2026-09-13 ag
 | Vitest 4 | `vitest.config.ts:6-8` | node env, `e2e/**` excluded; 567 test files, 61 use `@vitest-environment happy-dom` |
 | `supabase-fake` | `src/lib/testing/supabase-fake.ts` | read-only, applies real filters, throws on unsupported operators (scheduling parity harness) |
 | `recording-supabase` | `src/lib/testing/recording-supabase.ts` | records table, op, payload, columns, filters; `inject()` PG errors (`:70-92`); realistic empties (`:26-33`); `makeAfterStub()` (`:121-123`); `queryCount()` budgets |
-| Migration column guard | `src/lib/testing/migration-columns.ts` | `columnsMissingFromMigrations(calls)`; UNTRACKED in git today, used by one test (`src/app/api/venue/export/route.test.ts:50`) |
+| Migration column guard | `src/lib/testing/migration-columns.ts` | `columnsMissingFromMigrations(calls)`; committed in `973bd3e` (it was uncommitted while this plan was written), used by one test (`src/app/api/venue/export/route.test.ts:50`) |
 | Compliance fake | `src/lib/compliance/test-utils/fake-supabase.ts` | stateful writes for compliance services |
 | Parity harness | `src/lib/availability/parity/scheduling-world.ts` | one world through every hours consumer, read and write as a pair |
 | Source sweeps | `src/lib/api/customer-api-contract.test.ts`, `src/app/api/mobile-401-contract.test.ts`, `src/lib/availability/schedule-fail-closed-coverage.test.ts` | code vocabulary for account, v1 and venue routes; the app's 401 shapes; fail-closed wrappers |
@@ -41,6 +41,9 @@ RT2-1 to RT2-28) this document refers to; read that first. Written 2026-09-13 ag
 11. **Memos are per process and per route bundle** (`src/lib/linked-accounts/catalogue.ts:740-757`); no performance net beyond a few `queryCount` checks and the 2026-09-05 numbers (collective host form 6.6 s before the fix, catalogue 1.3 s cold and 0.2 s warm after).
 12. **Staging residue changes results**: the archived PPD Patch Test at Light 3 (d1a15afc, created and archived by a live check on 2026-09-06) cannot be deleted because `compliance_audit_events` refuses UPDATE and DELETE, FK actions included (`20261203120000_compliance_records.sql:198-217`); it is the row that makes the staging migration collide. `admin_hard_delete_venue` disables `events_append_only` but not this trigger (`20260518120000_venue_delete_terminate_account_links.sql:103`): deleting a venue with compliance audit events is UNVERIFIED.
 13. **Flag probes are not proof**: environment variables override every appointments flag (`src/lib/feature-flags/resolve.ts:9-16`); Vercel env values are UNVERIFIED.
+14. **No cron or alert coverage at all.** `withCronRunLogging` (`src/lib/platform/cron-log.ts`) and `finalizeCronRun` (`src/lib/cron/finalize-cron-run.ts`) are untested, `cron_runs` is asserted nowhere, and no test proves a cron route refuses an unauthorised caller. This design adds two crons that write into other venues' accounts behind `CRON_SECRET`, a single static token on routes the middleware does not cover (`src/middleware.ts:352`), so the wrapper they depend on needs tests before they ship (OPS-01).
+15. **The only platform-console coverage is auth shape.** Nothing tests what a superuser can see or do, and this design adds a surface that reads every collective's state across venues (OPS-03).
+16. **Nothing stops an em-dash reaching a help article.** The existing copy tests cover booking copy and the assistant's answers, not `src/lib/help/articles/**`, and this project rewrites roughly twenty articles under a rule that forbids them (HLP-01).
 
 ## 2. Strategy
 
@@ -106,7 +109,9 @@ H: PROJ projection-blind fakes; AFTER no-op `after()`; C0 hosted grants; RECUR p
 
 ## 3. Test inventory
 
-113 tests. By layer: route 29, pgtap 26, unit 22, live-staging 6, migration 6, e2e 5, engine-invariant 4, performance 4, security 3, component 3, app-contract 3, manual 2.
+147 tests. By layer: route 44, unit 35, pgtap 28, e2e 6, live-staging 6, migration 6, security 6, engine-invariant 4, performance 4, component 3, app-contract 3, manual 2.
+
+The first 113 came from the first pass. The 34 added by the second pass (OPS, MV, REP, BM, PLAN, SEO, WAIT, FAIR, DIARY, HLP, TERMS-16, CSA-04, DB-10 and SEC-03 to SEC-05) cover the areas it reached that the first did not: operations and alerting, people who work at more than one venue, reporting and attribution, booking models other than appointments, plan tiers and caps, the public page's metadata and waitlist, diary truth, and the help centre's own copy rules. They are detailed in §3.28.
 
 ### 3.1 Index
 
@@ -225,6 +230,40 @@ H: PROJ projection-blind fakes; AFTER no-op `after()`; C0 hosted grants; RECUR p
 | LIVE-02 | live-staging | Soak on staging and 48 h production watch | W9 Migration |
 | MAN-01 | manual | Owner acceptance and legal sign-off | W0 Owed migrations and probes |
 | MAN-02 | manual | Help centre, docs and app handover | W13 Help and docs |
+| OPS-01 | route | Replication and verifier crons authorise, log to `cron_runs` and report errors to Sentry | W18 Operations |
+| OPS-02 | route | The verifier repairs only I3 and I5, audits every repair as its own event type, and alerts on the rest | W18 Operations |
+| OPS-03 | route | Platform collective panel is superuser-only, read-only apart from Retry, audited, and shows no guest contact details | W18 Operations |
+| OPS-04 | unit | Every cron route directory has a `vercel.json` entry, and every entry has a route | WT Test harness |
+| MV-01 | unit | A person with staff rows at two venues resolves to a chooser, never to null | W16 Multi-venue people |
+| MV-02 | route | Staff invite refuses an email that already works at another venue, with the plain reason | W16 Multi-venue people |
+| MV-03 | route | The acting venue is validated against the caller's own staff rows on every venue route | W16 Multi-venue people |
+| MV-04 | e2e | An owner of two venues in one collective signs in once and moves between them | W16 Multi-venue people |
+| REP-01 | unit | `bookings.collective_id` and the collective `source` value are read by every report, filter and export | W17 Reporting |
+| REP-02 | route | Booked revenue breaks down by venue and never blends without naming the venues | W17 Reporting |
+| REP-03 | route | A member sees its own venue only; a host sees no member's guest contact details | W17 Reporting |
+| REP-04 | unit | `buildPriceSummary` reads the snapshot first and agrees with `loadRowTotalResolver` | W1 Booking correctness |
+| REP-05 | route | Narrowing a link does not silently remove a revenue column while membership continues | W17 Reporting |
+| BM-01 | route | Invite and accept refuse a venue with no active appointments model, with the reason | W20 Booking models |
+| BM-02 | route | Removing `unified_scheduling` while in a collective is refused with a coded 409 | W20 Booking models |
+| BM-03 | unit | The redirect leaves a route through for a member's classes, events, tables and resources | W20 Booking models |
+| BM-04 | route | Currency is gated at create, invite and accept, as timezone already is | W20 Booking models |
+| BM-05 | unit | Two venues cannot be told a shared resource is safe: the product says it is unsupported | W20 Booking models |
+| BM-06 | route | A multi-service visit that would span venues is refused with the explanation, before the details step | W20 Booking models |
+| PLAN-01 | unit | Collective eligibility matches `evaluateLinkEligibility`: trials, cancellation windows and comped venues stay in; failed payments and expired plans do not | W7 Lifecycle |
+| PLAN-02 | route | Invite and accept refuse an ineligible venue and say why (CB-31) | W7 Lifecycle |
+| PLAN-03 | unit | A member at its plan's calendar cap shows the cap on both sides, and a host cannot exceed it by assigning calendars | W5 Host Services page |
+| SEO-01 | unit | Every `/book` route has metadata; `/book/c/{slug}` carries a canonical, an Open Graph image and a robots directive | W19 Public identity |
+| SEO-02 | unit | An adopted address and the collective address do not serve two uncanonicalised copies of one page | W19 Public identity |
+| WAIT-01 | route | The synthetic venue publishes the full resolved flag set, and the waitlist works on the collective page | W19 Public identity |
+| FAIR-01 | unit | "Any available" on the collective applies the configured order and does not favour the host | W19 Public identity |
+| DIARY-01 | route | Partner columns are drawn from the resolved schedule, not the weekly template | W21 Diary truth |
+| HLP-01 | unit | No help article contains an em-dash, and no rewritten article still describes sync, Link, Unlink or member-owned prices | W13 Help and docs |
+| TERMS-16 | unit | The month loader applies a per-calendar length once, not twice | W1 Booking correctness |
+| CSA-04 | pgtap | Deleting a calendar that held a live replica's assignment writes an audit row and bumps the revision | W3 Engine |
+| DB-10 | pgtap | Every classified column's entry matches what an apply actually writes | W3 Engine |
+| SEC-03 | security | No identity-bearing compliance answer is returned before a calendar is chosen | W4 Catalogue and booking switch |
+| SEC-04 | security | The engine flag alone is not sufficient authority: the nonce and owner checks refuse a raw SQL write | W3 Engine |
+| SEC-05 | security | New per-calendar and attribution columns are not readable by `anon` | W15 Grants |
 
 ### 3.2 Test infrastructure
 
@@ -1182,6 +1221,82 @@ H: PROJ projection-blind fakes; AFTER no-op `after()`; C0 hosted grants; RECUR p
 - **Expected:** No zero-hit labels for new controls, no em-dashes, figures match the screens, golden eval passes, app team acknowledges handover.
 - **Location:** `src/lib/help/articles/getting-started/linked-venues.ts; scripts/help-label-audit.ts; Docs/MOBILE_API.md`
 
+### 3.28 Added by the second pass
+
+Same format as the sections above. Each of these covers an area the first pass did not reach.
+
+#### OPS-01 Replication and verifier crons authorise, log and report
+- **Layer:** route. **Workstream:** W18 Operations. **Risk:** none named before; **Requirements:** R6, R11.
+- **Pins:** The engine writes into other venues on a schedule and nothing watched it.
+- **Scenario:** Call both cron routes with no `Authorization`, with a wrong secret, and with the right one. Force an apply failure and a read failure. Assert `cron_runs` rows, the Sentry capture with `tags: { cron_job }`, and the ops email.
+- **Expected:** 401 without the secret and no `cron_runs` row; with it, a row carrying duration and the response detail; `{ ok: false }` with a reason and HTTP 200 when the check cannot read what it needs, so the platform does not retry a check that is reporting correctly; `errors > 0` reaches Sentry once.
+- **Location:** `src/app/api/cron/collective-replicate/route.ts; src/app/api/cron/collective-verify/route.ts; src/lib/cron/finalize-cron-run.ts; src/lib/platform/cron-log.ts`
+
+#### OPS-02 The verifier repairs only what it may, and never repairs over evidence
+- **Layer:** route. **Workstream:** W18 Operations. **Risk:** R4 (flag without actor binding).
+- **Pins:** A repair that hides its own cause. The house precedent (`schedule-health`) is read-only on purpose.
+- **Scenario:** Seed one link behind (I3) and one outside an active membership (I5), plus one whose fingerprint differs with `applied_revision = desired_revision` and no audit row (the raw-SQL write shape). Run the verifier.
+- **Expected:** I3 bumped, I5 released, both audited; the third is **not** silently re-applied but written as `unexplained_drift_repaired` carrying the before-image, and alerted. Every other non-zero invariant alerts without repairing.
+- **Location:** `supabase/migrations/<engine>.sql; src/app/api/cron/collective-verify/route.ts`
+
+#### OPS-03 Platform collective panel
+- **Layer:** route. **Workstream:** W18 Operations. **Risk:** R13 (support session indistinguishable from an admin).
+- **Scenario:** Call the panel as anon, as a venue admin, and as a superuser. Use Retry. Read the audit.
+- **Expected:** Refused except for superusers; read-only apart from Retry; the retry writes a platform audit event and a `collective_audit_events` row carrying `actor_support_session_id` and `actor_is_platform_superuser`; no guest contact details in any response.
+- **Location:** `src/app/api/platform/collectives/route.ts; src/lib/platform/audit.ts`
+
+#### OPS-04 Cron registration is complete in both directions
+- **Layer:** unit. **Workstream:** WT Test harness.
+- **Scenario:** Read `vercel.json` and `src/app/api/cron/`; compare the two sets.
+- **Expected:** Equal. Worth having regardless of this project: the two agree only by hand today (25 and 25 at the time of writing).
+- **Location:** `vercel.json; src/app/api/cron/`
+
+#### MV-01 to MV-04 People who work at more than one venue
+- **Layer:** unit (MV-01), route (MV-02, MV-03), e2e (MV-04). **Workstream:** W16. **Requirements:** R9. **Split-brain:** SB-28; **bug:** PB-16.
+- **Pins:** Today a second staff row makes `resolveUniqueStaffRow` return null, `getDashboardStaff` return no venue, and the layout redirect the person into `/signup/business-type`. They are locked out of both dashboards with no message.
+- **Scenarios:** MV-01 resolves a two-venue person to a chooser rather than null. MV-02 invites an email that already works elsewhere. MV-03 sends a request with an acting venue the caller does not work at. MV-04 signs in once as the owner of two venues in one collective and moves between them.
+- **Expected:** MV-01 a chooser with both venues and the person's role at each. MV-02 refused with `staff.invite.otherVenue`, no row created. MV-03 refused: the acting venue is a preference, never an authority, and is validated against the caller's own staff rows on every request. MV-04 no sign-out, and each venue's data is correct and separate.
+- **Location:** `src/lib/venue-auth.ts; src/app/dashboard/layout.tsx; src/app/api/venue/staff/invite/route.ts`
+
+#### REP-01 to REP-05 Reporting and attribution
+- **Layer:** unit (REP-01, REP-04), route (REP-02, REP-03, REP-05). **Workstream:** W17, and W1 for REP-04. **Split-brain:** SB-30, SB-31. **Decision:** D49.
+- **Pins:** `bookings.collective_id` is written by three create paths and read by nothing; Booked revenue already blends every member's takings in both directions with no subtotal; `buildPriceSummary` disagrees with `loadRowTotalResolver` today.
+- **Scenarios:** REP-01 sweeps every report, filter and export for a collective read. REP-02 loads Booked revenue for a host and asserts the per-venue breakdown. REP-03 loads it as a member. REP-04 compares the two price paths on a booking whose service price later changed. REP-05 narrows a link and reloads.
+- **Expected:** REP-01 collective bookings are identifiable everywhere money is counted, and `source` distinguishes a collective-page booking from the venue's own. REP-02 one row per venue, named, plus a total. REP-03 own venue only, collective bookings identified, no other member's figures and no other venue's guest contact details. REP-04 both read the snapshot and agree. REP-05 the column does not silently vanish while membership continues.
+- **Location:** `src/lib/reports/booked-revenue.ts; src/lib/booking/payment-display.ts; src/app/api/venue/export/route.ts`
+
+#### BM-01 to BM-06 Booking models and the appointments-only boundary
+- **Layer:** route (BM-01, BM-02, BM-04, BM-06), unit (BM-03, BM-05). **Workstream:** W20. **Split-brain:** SB-35, SB-36. **Decisions:** D44, D45.
+- **Pins:** The synthetic venue declares one booking model, so a member's classes, events, tables and rooms leave the web when its page redirects, and nothing says so. Currency is gated nowhere.
+- **Scenarios:** BM-01 invites a class-only venue. BM-02 removes `unified_scheduling` from a member in a live collective. BM-03 follows a redirect for a member that also runs classes. BM-04 invites a venue trading in another currency. BM-05 asserts the product's own words about shared resources. BM-06 books a multi-service visit whose segments live at two venues.
+- **Expected:** BM-01 and BM-04 refused with plain reasons. BM-02 coded 409. BM-03 the member's other models keep a route through, and the member was warned before accepting. BM-05 the product states shared resources are unsupported rather than implying they work. BM-06 refused with the explanation shown before the details step, as D28 already does for groups.
+- **Location:** `src/lib/linked-accounts/collective-venue.ts; src/lib/linked-accounts/eligibility.ts; src/app/api/venue/route.ts; src/app/book/[venue-slug]/page.tsx`
+
+#### PLAN-01 to PLAN-03 Plan tiers, eligibility and caps
+- **Layer:** unit (PLAN-01, PLAN-03), route (PLAN-02). **Workstream:** W7, and W5 for PLAN-03. **Decision:** D39. **Bug:** CB-31.
+- **Scenarios:** PLAN-01 evaluates eligibility for a trial, a cancellation window, a comped venue, a failed payment and an expired plan. PLAN-02 invites and accepts an ineligible venue. PLAN-03 assigns calendars at a member that is at its cap (Light 1, Plus 5).
+- **Expected:** PLAN-01 matches `evaluateLinkEligibility` exactly. PLAN-02 refused, with the reason shown. PLAN-03 the cap is visible to both host and member, and a host assigning calendars cannot push a member past it.
+- **Location:** `src/lib/linked-accounts/eligibility.ts; src/lib/plan-limits.ts; src/lib/light-plan.ts`
+
+#### SEO-01, SEO-02, WAIT-01, FAIR-01, DIARY-01 The public page and the diary
+- **Layer:** unit, except WAIT-01 and DIARY-01 (route). **Workstream:** W19, and W21 for DIARY-01. **Split-brain:** SB-33, SB-37, SB-39, SB-40. **Bug:** PB-17. **Decisions:** D43, D48.
+- **Scenarios:** SEO-01 renders every `/book` route and reads its metadata. SEO-02 renders an adopted address and the collective address. WAIT-01 opens the waitlist form on a collective page. FAIR-01 runs "any available" many times across venues. DIARY-01 loads a partner column on a day the partner venue is closed.
+- **Expected:** SEO-01 every route has its own title and description, and `/book/c/{slug}` also has a canonical, an Open Graph image and a robots directive. SEO-02 one canonical, not two copies. WAIT-01 the form renders and the route accepts it. FAIR-01 the configured order applies and the host does not take every contested slot. DIARY-01 the column shows the member closed.
+- **Location:** `src/app/book/**; src/lib/linked-accounts/collective-venue.ts; src/app/api/booking/availability/route.ts; src/app/api/venue/linked-calendar/route.ts`
+
+#### HLP-01 Help copy cannot regress
+- **Layer:** unit. **Workstream:** W13.
+- **Pins:** Nothing stops an em-dash reaching a help article today; the existing copy tests cover booking copy and the assistant's answers only. This project rewrites twenty-odd articles under a rule that forbids them.
+- **Expected:** No article contains U+2014, and no rewritten article still describes sync, Link, Unlink, Re-sync, "in step", "customised", or prices and durations coming from the member venue.
+- **Location:** `src/lib/help/articles/**`
+
+#### TERMS-16, CSA-04, DB-10, SEC-03 to SEC-05
+- **TERMS-16** (unit, W1): the month loader both bakes a per-calendar length into the service and carries it on the link, which is the double-application the day loader fixed and documented at `appointment-engine.ts:1710-1721`. Expect one application. **Location:** `src/lib/availability/appointment-month-availability.ts:805-818`
+- **CSA-04** (pgtap, W3): deleting a calendar that held a live replica's assignment writes a `collective_audit_events` row and bumps the catalogue revision, and invariant I33 returns 0 afterwards.
+- **DB-10** (pgtap, W3): every classified column's registry entry matches what an apply actually writes. DB-07 proves a column is classified; this proves the classification is true of the engine's behaviour, which is the claim that matters. Enumerate from `pg_attribute`; `service_items` has 46 columns today.
+- **SEC-03** (security, W4): no identity-bearing compliance answer before a calendar is chosen. Query the public requirements route with a guest email and no calendar, across a collective whose members hold records for that guest. Expect `identity_known: false` and no per-venue state.
+- **SEC-04** (security, W3): the engine flag alone is not sufficient authority. A raw SQL session that sets the flag but holds neither the nonce nor the owner role is refused by the lock trigger.
+- **SEC-05** (security, W15): `anon` cannot read the new per-calendar and attribution columns. `updated_by_user_id` is an `auth.users` identifier and `public_read_calendar_service_assignments` is `USING (true)` today, so this fails until that policy is dropped and the public catalogue is served through the admin client.
 
 ## 4. Invariants
 
@@ -1299,6 +1414,29 @@ JOIN compliance_types mt ON mt.venue_id=m.venue_id AND mt.slug=ht.slug WHERE mt.
 ```
 P4: copy variants with future bookings and no master variant of the same name and sort order. P5: offerings with no active host source (needs_master), each with the owner's active-or-skip choice.
 
+### Added by the second pass: I33 to I46
+
+Each was checked against I1 to I32 for overlap before being added. I13 covers wrong-venue assignments, I14 covers three cross-venue child cases, I5 covers link scoping and I7 covers duplicate live memberships; none of the following is reachable from those.
+
+| Id | Intent | Why it is needed |
+|---|---|---|
+| I33 | Live replica with no assignment on any calendar of its own venue, while the offering is active | A member can delete its calendar and cascade the assignment away (`calendar_service_assignments.calendar_id ... ON DELETE CASCADE`, `20260430120000:117`), silently withdrawing itself. Nothing else detects an absent assignment |
+| I34 | Service filed under a heading belonging to another venue (`service_items` joined to `service_categories` on differing `venue_id`) | The `ON DELETE SET NULL` FK (`20270202120000:52-54`) has no venue check and I14 does not include this pair |
+| I35 | Add-on option in a different venue from its group | I14 covers `service_addon_groups` and `service_variants`, not `addons` |
+| I36 | Form version in a different venue from its type, and a requirement pointing at a version of another type | Neither is covered |
+| I37 | Legacy provider row whose `member_id` disagrees with its `venue_id`, or with its item's collective | No FK ties them. Must be 0 from Pass B until C2 |
+| I38 | Legacy provider pointing at a service or calendar belonging to another venue | `source_service_id` and `practitioner_id` carry no FK at all |
+| I39 | Booking attributed to a collective its owning venue was never an active member of | `bookings.collective_id` and `collective_service_item_id` carry no FK by design (`20261210120000:163-168`), and §6.15 makes `collective_id` load-bearing for reporting |
+| I40 | Booking whose guest belongs to a different venue | I16 checks the calendar and the service, not the guest, and the collective create rewrites `venue_id` after the guest is resolved |
+| I41 | A replica applied since `:since` with no matching audit row in the same transaction window | Catches an engine-flagged raw SQL write, and a verifier repair filed as an ordinary apply, which is how the flag's lack of actor binding would otherwise erase its own evidence |
+| I42 | Client privileges on the **legacy** collective and service tables, not only the four engine tables: `venue_collectives`, `venue_collective_members`, `collective_service_items`, `collective_service_providers`, `collective_service_categories`, `service_items`, `service_variants`, `addon_groups`, `addons`, `service_addon_groups`, `service_categories`, `calendar_service_assignments`, `compliance_types`, `compliance_type_versions`, `service_compliance_requirements`. Fail on any privilege other than SELECT, and assert that `public_read_calendar_service_assignments` and `public_read_practitioner_services` no longer exist | I24 passes while `anon` holds full DML on every table the engine's correctness actually depends on during Pass B and until C2 |
+| I43 | A venue live in one collective while holding an `invited` row in another | I7 counts `status = 'active'` only, and the live unique index is per `(collective_id, venue_id)`, so it does not prevent this |
+| I44 | Per-calendar terms written by a venue that is neither the calendar's owner nor the collective's host | Guards the new `updated_by_venue_id` and `updated_by_user_id` attribution columns |
+| I45 | A copy still following an origin outside a live shared collective, during the Pass B window | Catches the legacy sync columns' "resumes syncing" behaviour and the member-to-member write path in SB-15 |
+| I46 | A member venue in an active replicas collective whose subscription entitlement is neither active-like nor free-access and which is not marked `catalogue_suspended_at` | Ties member suspension to the canonical entitlement resolver, so a venue on a trial or inside a cancellation window is not suspended and a lapsed one does not keep selling |
+
+**Gate placement.** I33, I34, I35, I36, I39, I40 and I44 join the CI-after-every-scenario set (expect 0). I37, I38 and I45 run from Pass B until C2. I41 and I43 run daily and alert. I42 replaces I24's narrower clause at every `db push`, on each environment. I46 runs daily.
+
 ## 5. Rollout verification
 
 Follows the ritual (staging push, staging code, test, production push, merge, reset staging). "Invariants" = `node scripts/collective-invariants.mjs --env <env>` (new). Production runs override `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SECRET_KEY`. No Playwright and no fixture writes on production, ever.
@@ -1348,9 +1486,11 @@ Gates: C1 on production 7 days; I7 = 0; the migration's DO block raises on any n
 Do this on staging after Pass B, signed in as the host and as a member in two browsers, using the E2E Coll fixture venues (or plus-1 and Light 3 where noted). Tick each box only when you have seen it yourself.
 
 **R1 One venue, separate contacts and bookings**
-- [ ] Open the collective page. Every calendar from both venues is listed under one set of headings.
+- [ ] Open the collective page. Every practitioner calendar from both venues is listed under one set of headings. (Resource and non-practitioner calendars are filtered out by design, so do not expect them.)
 - [ ] Book a member calendar as a guest. The booking appears in the member's diary and contacts, not in yours.
 - [ ] As host staff, open Contacts. The member's new client is not there, and you cannot search the member's clients.
+- [ ] **Open the member's diary from your own account and click one of their bookings.** This is the check that matters, and the Contacts check above passes even when it fails: the Contacts page was never where client details crossed. You should not see the member's client's name, email, phone, notes or documents unless you have deliberately agreed to share client details.
+- [ ] **Open Booked revenue.** You should see the collective broken down by venue, and a member should see only their own. If either of you can see the other's total without having agreed to it, stop: that is the state the product is in today.
 
 **R2 One host, one or more members**
 - [ ] Linked accounts shows exactly one host. Try to invite a venue that already belongs to another collective: you see a clear refusal.
@@ -1381,6 +1521,9 @@ Do this on staging after Pass B, signed in as the host and as a member in two br
 **R9 Member calendars feel like yours**
 - [ ] Book the same service on one of your calendars and one member calendar. Name, length, options, add-ons, forms and price rules match, apart from values you let calendars change.
 - [ ] The confirmation email and the diary show the same service name as the page.
+- [ ] **If you or one of your team works at two venues in the collective, you can sign in once and move between them without signing out.** Today that person cannot sign in at all.
+- [ ] Look at a member's column in your diary on a day that venue is closed. It shows them closed, not open.
+- [ ] Try to move a booking to a calendar at another venue. Whatever the answer, it is the same answer every time and the dialog explains it plainly.
 
 **R10 Member calendar choices sync by themselves**
 - [ ] As the member, untick a service on Calendar Availability and save. The collective page drops that calendar for that service straight away. Tick it again and it returns.
@@ -1408,7 +1551,7 @@ Do this on staging after Pass B, signed in as the host and as a member in two br
 
 ## 7. CI changes
 
-1. **Commit the projection guard first.** `src/lib/testing/migration-columns.ts` and its test are untracked today. Extend it to check insert, update and upsert payload keys and `onConflict` columns, and make it mandatory in every new route test for collective, service, booking and compliance routes (sweep INF-09 enforces `makeAfterStub()` there too).
+1. **Extend the projection guard.** `src/lib/testing/migration-columns.ts` and its test are committed (`973bd3e`); they were uncommitted while this plan was written, so the earlier instruction to commit them first is done. Extend it to check insert, update and upsert payload keys and `onConflict` columns, and make it mandatory in every new route test for collective, service, booking and compliance routes (sweep INF-09 enforces `makeAfterStub()` there too).
 2. **`supabase/scripts/local_baseline_grants.sql`**: add `collective_service_replicas`, `collective_audit_events`, `collective_operations`, `collective_catalogue_revisions` to the exclusion list, and replace the blanket `GRANT USAGE, SELECT ON ALL SEQUENCES` with a loop that skips `collective_%` sequences. Without this CI re-grants what Pass A revokes and the grant assertions pass against a database that exists nowhere (INF-08).
 3. **`rls-pgtap` job** (`.github/workflows/ci.yml:77-131`): add `timeout-minutes: 30`; new pgTAP files run automatically; after `supabase test db` add
    - `bash scripts/db-concurrency/run.sh` (psql sessions against `127.0.0.1:54322`, conductor-driven races CON-01 to CON-04, installs the local `collective_engine_test_point` override);

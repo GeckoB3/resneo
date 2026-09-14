@@ -3,7 +3,7 @@
 Status: PLAN, not implemented. Companion to `Docs/collective-one-venue-plan.md`, which defines the
 requirements (R1 to R14), the decisions (D1 to D36) and the red-team findings (RT1-1 to RT1-17,
 RT2-1 to RT2-28) this document refers to; read that first. Written 2026-09-13 against `staging` at
-`c6020eb6`; line numbers are anchors at that commit. It says exactly what a host, a member and a guest see and can do on every surface, with every string of copy. Where it says "open question", the matching decision in the plan is still to be taken.
+`c6020eb6`; line numbers are anchors at that commit plus the two commits the plan's header names (`818ed5a`, `973bd3e`), and the plan's "Reading the citations" note applies here too. Reviewed 2026-09-14 at `c0b5eb0`, which added the surfaces in §2 items 15 to 17 and the copy they need. It says exactly what a host, a member and a guest see and can do on every surface, with every string of copy. Where it says "open question", the matching decision in the plan is still to be taken.
 
 ## 1. Where each fact is edited
 
@@ -240,7 +240,50 @@ From the host form row, member View dialog or "Edit your settings". Title `value
 - `/embed/{venue}` renders the collective embed in place under the same conditions; new `/embed/c/{slug}` mirrors `EmbedBookingClient` with `frame-ancestors *` and height messages.
 - Old `/book/c/{slug}` after dissolve, 90 days: `DissolvedCollectivePage`: `public.dissolved.title`, `.body`, per listed venue `.book`, `.none`, `.existing`.
 - Guest manage page (`GuestBookingDetailView.tsx:607`): `guest.bookedThrough`. Existing bookings on retired services or calendars that stopped offering the service can still be moved online on the same calendar.
-- Emails: confirmation (`booking-confirmation.ts:114-119`) adds `email.confirm.through`; Book again (`venue-booking-page-link.ts:17-29`) uses the live resolver, and for member-only services `email.bookAgain.call`; waitlist offers (`notify-appointment-waitlist-offer.ts:80-83`) translate the same way.
+- Emails: confirmation (`booking-confirmation.ts:114-119`, which covers the text branch; the HTML preamble at `:87-90` needs the same line) adds `email.confirm.through`; Book again (`venue-booking-page-link.ts:17-29`) uses the live resolver, and for member-only services `email.bookAgain.call`; waitlist offers (`notify-appointment-waitlist-offer.ts:80-83`) translate the same way.
+
+### 15. Collective overview, host admin (new page, `/dashboard/collective`)
+
+Added by the second pass. Items 1 to 14 make **one service** feel like one venue, and do it well. They do not give the host a place to **run** the collective: after the fold its state is spread across the Services banner, each service's calendars section, three manager tabs on the twelfth settings tab, one sentence on a Linked accounts row and a history dialog behind it. A host of four venues cannot answer "which venue is the problem and what is wrong with it" without opening services one at a time. This page is that answer, and it is also where the bulk lane lives, without which the fold makes setup slower than the manager it replaces.
+
+**Where it lives.** Its own sidebar entry under Settings, shown only to admins of a venue in a live collective, labelled with the collective's name (`nav.collective`). The Booking Page tab's manager tabs stay for page design and members; everything about services and calendars links here.
+
+**Header.** `ov.title` (the collective's name), `ov.subtitle`, address with Copy link and Open.
+
+**Health strip**, one card per venue, host first: venue name, role pill, `VenueSyncPill`, and a line, first match only: `ov.venue.upToDate`, `ov.venue.updating`, `ov.venue.settingUp`, `ov.venue.failed` (+ Retry, and `ov.venue.failedDetail`), `ov.venue.hidden` + reason from `svc.cal.warn.*`, `ov.venue.paused`, `ov.venue.lapsed`. Each card shows `ov.venue.counts` ("{n} services, {m} calendars on the page") and links to that venue's rows in the table below. A venue at its plan's calendar cap shows `ov.venue.calendarLimit`.
+
+**What needs you.** A short list, hidden when empty, of only the things the host can act on: `ov.todo.noCalendars` (a service on the page that no calendar offers), `ov.todo.newVenue` (a member joined and its calendars are not chosen on {n} services), `ov.todo.failed`, `ov.todo.noStripe`, `ov.todo.formsOff`. Each row has one button that goes straight to the fix.
+
+**Services and calendars table.** Rows are the offered services in host order, grouped by heading. Columns: service (name, price, length), then one column per venue showing ticked calendars as chips and a `VenueSyncPill`. Cells are editable in place: clicking one opens the same `CollectiveCalendarsSection` group for that venue, so there is one editor, not two. Above it, `ov.filter.*` (all, needs attention, not on the page) and a search box.
+
+**The bulk lane.** This is the part that must not be dropped. Selection checkboxes on service rows and on venue column headers, with `ov.bulk.selected` in a sticky bar and these actions: `ov.bulk.offer`, `ov.bulk.withdraw`, `ov.bulk.addCalendars` (a dialog listing every calendar in the collective grouped by venue, with select-all per venue and `ov.bulk.addCalendars.all`), `ov.bulk.removeCalendars`, `ov.bulk.retry`. One confirmation for the whole selection, listing what changes and at which venues (`ov.bulk.confirm.*`), one save, one `CollectiveSaveSummary`. A bulk change that alters a commercial term still raises `svc.commercial.*` once, for the whole selection, with the per-service `diff.row` lines nested under each service name.
+
+**Preview before you push.** Next to the bulk bar and inside `svc.commercial.*`, `ov.preview.button` opens `ov.preview.title`: a read-only render of what each venue's guests will see afterwards, per venue, including any that would disappear from the page and why (`ov.preview.willHide`). This is the host-side preview items 1 to 11 never provide: today the only previews belong to the member, at accept.
+
+**Recent activity.** The last 20 rows of `CollectiveHistoryDialog`, inline rather than behind a dialog, with a "See all" link. The full history gains two filters the dialog lacks, by venue (`history.filter.venue`) and by date range, and an export (`history.export`), because this is the record a host and a member would use to settle a disagreement about who changed what.
+
+**Empty and first-run.** Before two venues are active: `ov.notLive.title`, `ov.notLive.body`, and a checklist of what is still needed (`ov.notLive.step.*`: invite a venue, they accept, put services on the page, choose calendars). While the page is paused: `ov.paused.*`.
+
+**Undo.** Every host save that reached members shows `ov.undo.offer` in the save summary for 60 seconds ("Put it back"), which restores the master's previous values from the audit trail's before-image and re-applies. After that window the change is history-only. The concept is already accepted in the plan for migration rollback (D30), and a host who mis-types a price and fires a notice to every member currently has no way back at all. See D50.
+
+### 16. Reports (host and member)
+
+- **Booked revenue** (`BookedRevenueSection.tsx`). While in a collective, the figure is broken down: `reports.collective.heading`, one row per venue with its own subtotal, then the total, and a switch `reports.collective.scope` between "The collective" and "{venue} only". Within each, collective-page bookings are separated from the venue's own-page bookings (`reports.collective.viaPage`, `reports.collective.viaOwn`). Footnote `reports.priceNote` explains that figures use the price each booking was made at.
+- **What a member sees.** Its own venue by default, its collective bookings identified, and never another member's figures. If the mesh survives D41, the existing "shared with you through a linked account" wording is replaced by `reports.collective.sharedNote`, which names the venues rather than leaving the reader to guess whose money is in the total.
+- **Exports.** Every booking export gains a column saying whether the booking came through the collective and, for the host, which venue it belongs to. No guest contact details cross a venue boundary in a host-scope export.
+
+### 17. Venue chooser (anyone who works at more than one venue)
+
+Today a second staff row locks a person out of the dashboard entirely (plan SB-28, PB-16): the resolver refuses to pick a venue and the layout redirects them into the signup flow. A collective of two venues under one owner is the ordinary case, so this has to exist before the collective work lands.
+
+- **Shell control**, in the dashboard header beside the venue name: `shell.venue.acting` with `shell.venue.change`. Shown only to people with more than one venue.
+- **Chooser dialog**: `shell.venue.chooser.title`, help `shell.venue.chooser.help`, one row per venue (`shell.venue.chooser.row`, naming the person's role there) with `shell.venue.chooser.collectiveLine` under any venue in a collective. The last venue used is remembered per person and is the default on next sign-in.
+- **Safety.** The chosen venue is a preference, never an authority: every venue route validates the acting venue against the caller's own staff rows on every request. A chooser that could be edited into another venue would be worse than the lockout it replaces.
+- **Invite.** Until the chooser ships, `POST /api/venue/staff/invite` refuses an email that already works at another venue, with `staff.invite.otherVenue`, instead of creating the row that causes the lockout.
+
+### 18. Platform support console (ResNeo staff only)
+
+Not part of the product, but part of running it. The platform area already exists (`src/app/api/platform/*`, superuser auth, its own audit trail) and has no collective view, so a support person asked why a host's price has not reached a member has nothing to answer with. Plan §6.16 defines what it shows. In UI terms: one collective per row, expandable to the member health strip and the link table, with `support.retry` as the only action, and no guest contact details anywhere on it.
 
 ## 3. Copy deck
 
@@ -798,6 +841,87 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `notify.migratedMember.subject`: {host} now manages its services in your account
 - `notify.migratedMember.body`: The services from {host} in your account now follow {host}'s settings. Here is what changed. Bookings already made keep their price.
 
+#### Collective overview (§2 item 15)
+- `nav.collective`: {collective}
+- `ov.title`: {collective}
+- `ov.subtitle`: Everything the collective sells, and how each venue is doing.
+- `ov.venue.upToDate`: Up to date
+- `ov.venue.updating`: Updating now
+- `ov.venue.settingUp`: Setting up {done} of {count} services
+- `ov.venue.failed`: Could not update {count} services
+- `ov.venue.failedDetail`: {reason} We will keep trying. You can also try now.
+- `ov.venue.hidden`: Hidden from guests for {count} services
+- `ov.venue.paused`: Paused
+- `ov.venue.lapsed`: This venue's subscription needs attention, so its calendars are not on the page.
+- `ov.venue.counts`: {services} services, {calendars} calendars on the page
+- `ov.venue.calendarLimit`: On the {plan} plan, {venue} can offer these on {count} calendar. They can add more by changing their plan.
+- `ov.todo.noCalendars`: {service} is on the page but no calendar offers it, so guests cannot book it.
+- `ov.todo.newVenue`: {venue} has joined. Choose their calendars on {count} services.
+- `ov.todo.failed`: {count} services could not be updated at {venue}.
+- `ov.todo.noStripe`: {venue} cannot take card payments yet, so {count} paid services are hidden from guests there.
+- `ov.todo.formsOff`: {venue} has forms switched off, so {count} services that need a form are hidden from guests there.
+- `ov.filter.all`: All services
+- `ov.filter.attention`: Needs attention
+- `ov.filter.offPage`: Not on the page
+- `ov.bulk.selected`: {count} selected
+- `ov.bulk.offer`: Put on the page
+- `ov.bulk.withdraw`: Take off the page
+- `ov.bulk.addCalendars`: Choose calendars
+- `ov.bulk.addCalendars.all`: Every calendar at {venue}
+- `ov.bulk.removeCalendars`: Remove calendars
+- `ov.bulk.retry`: Try these again
+- `ov.bulk.confirm.title`: Save these changes?
+- `ov.bulk.confirm.message`: This changes {count} services at {venueList}.
+- `ov.bulk.confirm.confirm`: Save changes
+- `ov.preview.button`: See what each venue will show
+- `ov.preview.title`: What guests will see
+- `ov.preview.willHide`: This will not be bookable at {venue}, because {reason}.
+- `ov.notLive.title`: Your collective page is not live yet
+- `ov.notLive.body`: Guests will see it once two venues are active and at least one calendar offers a service.
+- `ov.notLive.step.invite`: Invite a venue
+- `ov.notLive.step.accept`: Wait for them to accept
+- `ov.notLive.step.services`: Put services on the page
+- `ov.notLive.step.calendars`: Choose which calendars offer them
+- `ov.paused.title`: Your collective page is paused
+- `ov.paused.body`: Guests are sent to each venue's own booking page while it is paused.
+- `ov.undo.offer`: Put it back
+- `ov.undo.done`: We put {service} back to how it was, at every venue.
+- `ov.undo.expired`: That change is now part of your history, so it cannot be undone here. Edit the service to change it again.
+- `history.filter.venue`: Venue
+- `history.export`: Download this history
+
+#### Reports (§2 item 16)
+- `reports.collective.heading`: {collective}
+- `reports.collective.scope`: Show
+- `reports.collective.viaPage`: Booked on the {collective} page
+- `reports.collective.viaOwn`: Booked on {venue}'s own page
+- `reports.collective.sharedNote`: This total includes takings at {venueList}, shared with you because you are in a collective together.
+- `reports.priceNote`: Figures use the price each booking was made at, so changing a price now does not change what you earned then.
+
+#### Venue chooser (§2 item 17)
+- `shell.venue.acting`: You are working in {venue}.
+- `shell.venue.change`: Change venue
+- `shell.venue.chooser.title`: Which venue do you want to work in?
+- `shell.venue.chooser.help`: You work at more than one venue. Pick the one you want to open. You can change venue at any time from the top of the page.
+- `shell.venue.chooser.row`: {venue}, {role}
+- `shell.venue.chooser.collectiveLine`: Part of {collective}
+- `staff.invite.otherVenue`: {email} already works at another venue on ResNeo. Ask them to sign in and choose this venue, or invite them with a different email address.
+
+#### Booking models and shared resources (§6.14 of the plan)
+- `bm.invite.noAppointments`: {venue} does not offer appointments, so it cannot join a collective yet. A collective page shows appointments only.
+- `bm.join.otherModels`: You also run {modelList}. Those stay on your own booking page and are not shown on the {collective} page.
+- `bm.redirect.otherModels`: Your own booking page now opens the {collective} page. Your {modelList} are still bookable at {link}.
+- `bm.model.locked`: You cannot switch appointments off while {venue} is in a collective, because the collective page needs them.
+- `bm.currency.blocked`: {venue} takes payment in {currency} and the collective uses {hostCurrency}. Every venue in a collective has to use the same currency.
+- `bm.resource.notShared`: Rooms and equipment are not shared between venues. If two venues use the same room, keep it on one venue's calendars only.
+- `bm.visit.sameVenue`: All the services in one visit have to be with the same person, so they are at one venue.
+
+#### Public identity (§2 item 14, added)
+- `public.meta.title`: Book with {collective}
+- `public.meta.description`: Book online with {collective}. {venueCount} venues, one booking page.
+- `public.header.venues`: {venueCount} venues
+- `public.interstitial.waitlist`: {service} is fully booked. Join the waitlist and we will let you know when a time comes up.
+
 ## 4. Lifecycle journeys
 
 Each step names the screen, component and copy ids. "Ask" = the shared `AskConfirmProvider` dialog.
@@ -885,6 +1009,10 @@ Before the switch each member sees "Review the new way {collective} works" and c
 ## 5. Notifications
 
 All venue notices use `notifyVenue` (`src/lib/linked-accounts/notifications.ts:64-116`) with `collective_id` set (null today). Email: venue email plus active admin logins. Bell: `account_link_notifications`, admin-only (`NotificationBell.tsx`), title = subject, body = first paragraph, with `href`. Exact subjects and bodies are the `notify.*` copy.
+
+**The three new preference keys cannot be stored yet.** `prefs.collective.digest`, `prefs.collective.calendars` and `prefs.collective.required` (§2 item 11, `NotificationPrefsCard`) would be rejected on the way in: `PATCH /api/venue/notifications/preferences` validates against a `.strict()` schema with exactly four keys, `cancel`, `reschedule`, `create` and `notes` (`src/app/api/venue/notifications/preferences/route.ts:10-17`), and `resolveLinkedNotificationPrefs` drops anything it does not know. Widening that schema and the resolver is part of W5, not an afterthought, or the preferences card will silently fail to save.
+
+**What guests are told, and what they are not.** Guests are not emailed about joins, leaves, host changes or dissolves, because none of those change their booking. They are told who they are booking with, at the point of booking and in the confirmation. Note that the confirmation change in §2 item 14 lands in two places, not one: the text branch at `booking-confirmation.ts:114-119` and the HTML preamble at `:87-90`.
 
 | # | Trigger | Recipients | Channels | Content | Link | Frequency |
 |---|---|---|---|---|---|---|
@@ -984,3 +1112,22 @@ All venue notices use `notifyVenue` (`src/lib/linked-accounts/notifications.ts:6
 - Should commercial and form change emails to members be mandatory (as specified) or switchable like other notices?
 - Existing collectives: must each current member accept the new terms in the join dialog before the switch (recommended), or is your approval of the drift overwrite enough?
 - Once the app ships consent and read-only copies, should older app builds be refused collective service management with CLIENT_TOO_OLD?
+
+### Added by the second pass
+
+- Where does the switch that puts new collectives into replicas mode live, given flags are stored per venue and a collective spans venues (D37)?
+- Should a person who works at two venues get a chooser, and does that ship before the collective work (D38)? Today they cannot sign in at all.
+- Is a collective priced as it is today, with each venue paying its own subscription and bringing its own calendar cap, or does hosting carry a charge or a member limit (D39)?
+- Does `capacity_per_session` follow the host, or stay each venue's own (D40)? A host cannot know how many chairs a member has.
+- Does joining still require the full mutual link mesh, which forces every pair of members to share client details (D41)? This is the largest gap between R1 as written and the product as built.
+- What do we tell an owner about a guest who books at two member venues and becomes two client records that cannot be merged (D42)?
+- Should the collective page offer a waitlist (D43)? It cannot today, because the synthetic venue publishes only two of its flags.
+- What happens to a member's classes, events, tables and rooms when its own page starts redirecting (D44)? Today they leave the web with no warning.
+- Do we say plainly that two venues cannot share a physical room (D45)? Today the platform will double-book it.
+- Does "you cannot move a booking between venues" stay, with better wording, or does a real cross-venue move get specified (D46)?
+- Does the product warn when one person has a calendar at two venues in the collective and can be booked twice at once (D47)?
+- Who is the canonical page for a member's address once it redirects, and does the collective page get an Open Graph image and a proper title (D48)?
+- What does a host see about the collective's trade, and what does a member see about the others (D49)?
+- Can a host undo a change that has already reached members, and for how long (D50)?
+- May a host schedule a price, payment or form change for a future date (D51)?
+- Does the Collective overview page (§2 item 15) ship with the fold, or after it? If after, the bulk lane has to stay in the combined-page manager until it lands, because without one of the two, setting up a collective gets slower rather than faster.

@@ -109,7 +109,7 @@ H: PROJ projection-blind fakes; AFTER no-op `after()`; C0 hosted grants; RECUR p
 
 ## 3. Test inventory
 
-147 tests. By layer: route 45, unit 35, pgtap 29, e2e 6, live-staging 6, migration 6, security 4, engine-invariant 4, performance 4, component 3, app-contract 3, manual 2.
+147 tests. By layer: route 45, unit 35, pgtap 30, e2e 5, live-staging 6, migration 6, security 4, engine-invariant 4, performance 4, component 3, app-contract 3, manual 2.
 
 The first 113 came from the first pass. The 34 added by the second pass (OPS, MV, REP, BM, PLAN, SEO, WAIT, FAIR, DIARY, HLP, TERMS-16, CSA-04, DB-10 and SEC-03 to SEC-05) cover the areas it reached that the first did not: operations and alerting, people who work at more than one venue, reporting and attribution, booking models other than appointments, plan tiers and caps, the public page's metadata and waitlist, diary truth, and the help centre's own copy rules. They are detailed in §3.28.
 
@@ -234,13 +234,13 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS, MV
 | OPS-02 | route | The verifier repairs only I3 and I5, audits every repair as its own event type, and alerts on the rest | W18 Operations |
 | OPS-03 | route | Platform collective panel is superuser-only, read-only apart from Retry, audited, and shows no guest contact details | W18 Operations |
 | OPS-04 | unit | Every cron route directory has a `vercel.json` entry, and every entry has a route | WT Test harness |
-| MV-01 | unit | A person with staff rows at two venues resolves to a chooser, never to null | W16 Multi-venue people |
+| MV-01 | unit | A person with staff rows at two venues gets an explanation, never a silent redirect into signup | W16 Multi-venue people |
 | MV-02 | route | Staff invite refuses an email that already works at another venue, with the plain reason | W16 Multi-venue people |
-| MV-03 | route | The acting venue is validated against the caller's own staff rows on every venue route | W16 Multi-venue people |
-| MV-04 | e2e | An owner of two venues in one collective signs in once and moves between them | W16 Multi-venue people |
+| LIFE-09 | pgtap | Leaving, removal and dissolve end every client-detail grant in the same transaction | W7 Lifecycle |
+| LIFE-10 | route | Contact search reaches every live member venue, names the owner, and refuses outside the collective | W7 Lifecycle |
 | REP-01 | unit | `bookings.collective_id` and the collective `source` value are read by every report, filter and export | W17 Reporting |
 | REP-02 | route | Booked revenue breaks down by venue and never blends without naming the venues | W17 Reporting |
-| REP-03 | route | A member sees its own venue only; a host sees no member's guest contact details | W17 Reporting |
+| REP-03 | route | Every member's figures are named and subtotalled, and the mutual visibility was consented at join | W17 Reporting |
 | REP-04 | unit | `buildPriceSummary` reads the snapshot first and agrees with `loadRowTotalResolver` | W1 Booking correctness |
 | REP-05 | route | Narrowing a link does not silently remove a revenue column while membership continues | W17 Reporting |
 | BM-01 | route | Invite and accept refuse a venue with no active appointments model, with the reason | W20 Booking models |
@@ -1251,18 +1251,32 @@ Same format as the sections above. Each of these covers an area the first pass d
 - **Expected:** Equal. Worth having regardless of this project: the two agree only by hand today (25 and 25 at the time of writing).
 - **Location:** `vercel.json; src/app/api/cron/`
 
-#### MV-01 to MV-04 People who work at more than one venue
-- **Layer:** unit (MV-01), route (MV-02, MV-03), e2e (MV-04). **Workstream:** W16. **Requirements:** R9. **Split-brain:** SB-28; **bug:** PB-16.
-- **Pins:** Today a second staff row makes `resolveUniqueStaffRow` return null, `getDashboardStaff` return no venue, and the layout redirect the person into `/signup/business-type`. They are locked out of both dashboards with no message.
-- **Scenarios:** MV-01 resolves a two-venue person to a chooser rather than null. MV-02 invites an email that already works elsewhere. MV-03 sends a request with an acting venue the caller does not work at. MV-04 signs in once as the owner of two venues in one collective and moves between them.
-- **Expected:** MV-01 a chooser with both venues and the person's role at each. MV-02 refused with `staff.invite.otherVenue`, no row created. MV-03 refused: the acting venue is a preference, never an authority, and is validated against the caller's own staff rows on every request. MV-04 no sign-out, and each venue's data is correct and separate.
+#### MV-01, MV-02 People who work at more than one venue
+- **Layer:** unit (MV-01), route (MV-02). **Workstream:** W16. **Requirements:** R9. **Split-brain:** SB-28; **bug:** PB-16. **Decision:** D38.
+- **Pins:** Today a second staff row makes `resolveUniqueStaffRow` return null, `getDashboardStaff` return no venue, and the layout redirect the person into `/signup/business-type`. They are locked out of both dashboards with no message. D38 chose to refuse the invite rather than build a venue chooser, so these two tests cover the refusal and the explanation, and nothing tests a switcher.
+- **Scenarios:** MV-01 signs in as a person holding staff rows at two venues. MV-02 invites an email that already works elsewhere.
+- **Expected:** MV-01 a page explaining that this account is linked to more than one venue and who to contact, never the signup flow and never a blank redirect. MV-02 refused with `staff.invite.otherVenue`, no row created, so the lockout cannot be created in the first place.
 - **Location:** `src/lib/venue-auth.ts; src/app/dashboard/layout.tsx; src/app/api/venue/staff/invite/route.ts`
+
+#### LIFE-09 Client access ends with the membership
+- **Layer:** pgtap. **Workstream:** W7. **Requirements:** R1, R13. **Split-brain:** SB-42. **Decision:** D41.
+- **Pins:** The half of D41 that does not exist. Leave, removal and dissolve only flip the membership row (`collectives/[id]/members/route.ts:189,256,280`); no collective route or library function touches `account_links`, so the client-detail grant survives the collective indefinitely.
+- **Scenario:** Build a live collective of three venues with guests and bookings at each. Leave as one member, remove another, then dissolve. After each, attempt every cross-venue read: contact search, guest record, booking detail, compliance records, revenue.
+- **Expected:** Each read refused from the moment the membership ends, in the same transaction, not on the next cron. Every record each venue owns is untouched and complete. A release audit row on both sides. A link that pre-dated the collective is downgraded to its previous grant rather than ended, and a link created for the collective is ended outright.
+- **Location:** `supabase/tests/collective_release_test.sql; src/app/api/venue/collectives/[id]/members/route.ts`
+
+#### LIFE-10 Contact search across the collective
+- **Layer:** route. **Workstream:** W7. **Requirements:** R1, R9. **Decision:** D41.
+- **Pins:** `/api/venue/guests` is scoped to `staff.venue_id` on every query (`route.ts:150,237,285,317`), so there is no cross-venue search today and the owner's "seamlessly" requirement is unmet.
+- **Scenario:** As a member's staff, search Contacts for a guest who has only booked at another member. Repeat for a venue outside the collective, and again after leaving.
+- **Expected:** Found while live, with the owning venue named on the row and on the record. Refused for any venue outside the live collective. Refused after leaving. Editing writes against the owning venue and is audited there; no second guest row is created at the searching venue.
+- **Location:** `src/app/api/venue/guests/route.ts; src/lib/guests/linked-guest-access.ts`
 
 #### REP-01 to REP-05 Reporting and attribution
 - **Layer:** unit (REP-01, REP-04), route (REP-02, REP-03, REP-05). **Workstream:** W17, and W1 for REP-04. **Split-brain:** SB-30, SB-31. **Decision:** D49.
 - **Pins:** `bookings.collective_id` is written by three create paths and read by nothing; Booked revenue already blends every member's takings in both directions with no subtotal; `buildPriceSummary` disagrees with `loadRowTotalResolver` today.
-- **Scenarios:** REP-01 sweeps every report, filter and export for a collective read. REP-02 loads Booked revenue for a host and asserts the per-venue breakdown. REP-03 loads it as a member. REP-04 compares the two price paths on a booking whose service price later changed. REP-05 narrows a link and reloads.
-- **Expected:** REP-01 collective bookings are identifiable everywhere money is counted, and `source` distinguishes a collective-page booking from the venue's own. REP-02 one row per venue, named, plus a total. REP-03 own venue only, collective bookings identified, no other member's figures and no other venue's guest contact details. REP-04 both read the snapshot and agree. REP-05 the column does not silently vanish while membership continues.
+- **Scenarios:** REP-01 sweeps every report, filter and export for a collective read. REP-02 loads Booked revenue for a host and asserts the per-venue breakdown. REP-03 loads it as a member and checks the consent record. REP-04 compares the two price paths on a booking whose service price later changed. REP-05 narrows a link and reloads.
+- **Expected:** REP-01 collective bookings are identifiable everywhere money is counted, and `source` distinguishes a collective-page booking from the venue's own. REP-02 one row per venue, named, plus a total. REP-03 the member sees every venue's figures, because D49 chose mutual visibility, but each is named and subtotalled and the join dialog recorded the agreement: an unlabelled blended total is a fail even though the access is intended. Guest contact details never cross a venue boundary in a figures view. REP-04 both read the snapshot and agree. REP-05 the column does not silently vanish while membership continues.
 - **Location:** `src/lib/reports/booked-revenue.ts; src/lib/booking/payment-display.ts; src/app/api/venue/export/route.ts`
 
 #### BM-01 to BM-06 Booking models and the appointments-only boundary
@@ -1434,8 +1448,9 @@ Each was checked against I1 to I32 for overlap before being added. I13 covers wr
 | I44 | Per-calendar terms written by a venue that is neither the calendar's owner nor the collective's host | Guards the new `updated_by_venue_id` and `updated_by_user_id` attribution columns |
 | I45 | A copy still following an origin outside a live shared collective, during the Pass B window | Catches the legacy sync columns' "resumes syncing" behaviour and the member-to-member write path in SB-15 |
 | I46 | A member venue in an active replicas collective whose subscription entitlement is neither active-like nor free-access and which is not marked `catalogue_suspended_at` | Ties member suspension to the canonical entitlement resolver, so a venue on a trial or inside a cancellation window is not suspended and a lapsed one does not keep selling |
+| I47 | An accepted `account_link` that shares client details between two venues whose shared collective membership has ended, and which was created for that collective | The invariant behind D41 and SB-42. Today leave, removal and dissolve never touch `account_links`, so this count would be non-zero for every collective that has ever ended. It must be 0 from the moment the release ships, and it is the gate on R1's acceptance |
 
-**Gate placement.** I33, I34, I35, I36, I39, I40 and I44 join the CI-after-every-scenario set (expect 0). I37, I38 and I45 run from Pass B until C2. I41 and I43 run daily and alert. I42 replaces I24's narrower clause at every `db push`, on each environment. I46 runs daily.
+**Gate placement.** I33, I34, I35, I36, I39, I40, I44 and I47 join the CI-after-every-scenario set (expect 0). I37, I38 and I45 run from Pass B until C2. I41 and I43 run daily and alert. I42 replaces I24's narrower clause at every `db push`, on each environment. I46 runs daily.
 
 ## 5. Rollout verification
 
@@ -1485,12 +1500,21 @@ Gates: C1 on production 7 days; I7 = 0; the migration's DO block raises on any n
 
 Do this on staging after Pass B, signed in as the host and as a member in two browsers, using the E2E Coll fixture venues (or plus-1 and Light 3 where noted). Tick each box only when you have seen it yourself.
 
-**R1 One venue, separate contacts and bookings**
+**R1 One venue, shared while live, separate on the way out**
+
+The owner settled this on 2026-09-14 (D41, D49). Sharing client details and revenue between members
+is intended while the collective is live. What must be true is that it is explicit, that it is
+seamless, and that it stops when the membership does. These checks are written to that, not to the
+earlier assumption that venues stay walled off.
+
 - [ ] Open the collective page. Every practitioner calendar from both venues is listed under one set of headings. (Resource and non-practitioner calendars are filtered out by design, so do not expect them.)
-- [ ] Book a member calendar as a guest. The booking appears in the member's diary and contacts, not in yours.
-- [ ] As host staff, open Contacts. The member's new client is not there, and you cannot search the member's clients.
-- [ ] **Open the member's diary from your own account and click one of their bookings.** This is the check that matters, and the Contacts check above passes even when it fails: the Contacts page was never where client details crossed. You should not see the member's client's name, email, phone, notes or documents unless you have deliberately agreed to share client details.
-- [ ] **Open Booked revenue.** You should see the collective broken down by venue, and a member should see only their own. If either of you can see the other's total without having agreed to it, stop: that is the state the product is in today.
+- [ ] Book a member calendar as a guest. The booking appears in the member's diary and contacts, and the client record belongs to the member, not to you.
+- [ ] **As host staff, search Contacts for a client who has only ever booked at a member venue.** You should find them, and the record should say plainly which venue owns it. This is the seamless half, and it does not exist today.
+- [ ] Open that client from your own account. You should see the full record, including notes, documents and compliance records. Edit something, and check the change is visible to the owning venue and recorded against them.
+- [ ] **Open Booked revenue.** You should see every venue's figures, each one named, with its own subtotal and a total. A single blended number with no venues named is a fail even though the access itself is intended.
+- [ ] Check that the join dialog said all of this before you agreed to it, and that your agreement was recorded. Nobody should discover shared client access or shared revenue after the fact.
+- [ ] **Now leave the collective, or dissolve it, and try all of the above again.** You should keep every record you own, in full, and lose access to everyone else's immediately: no contact search, no client records, no revenue figures, no partner bookings. The other venues should lose access to yours in the same moment. **This is the check that matters most, and it fails today: nothing in the product ends the client-detail grant when a membership ends.**
+- [ ] If either venue had a link before the collective existed, check it is still there afterwards, unchanged. Joining a collective must not quietly destroy an arrangement two venues already had.
 
 **R2 One host, one or more members**
 - [ ] Linked accounts shows exactly one host. Try to invite a venue that already belongs to another collective: you see a clear refusal.

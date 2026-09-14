@@ -78,7 +78,7 @@ one venue even after everything above is fixed:
   runbook in the design, and the platform support console has no collective view, so the first
   report of a stuck replica would come from the host.
 
-In total: 41 split-brain cases (§3), 40 collective bugs, 6 of them high severity, and 19 platform
+In total: 42 split-brain cases (§3), 40 collective bugs, 6 of them high severity, and 19 platform
 bugs found on the way (§4).
 
 **What we recommend.** Host-managed replicas with one truth per fact (§5, §6). The host's own
@@ -117,43 +117,26 @@ verifier and every deploy step, rollback drills, and an acceptance checklist wri
 6. **The staging migration list (D21)**, corrected in §7: Light 3 has forms switched off and no
    Stripe account, so some of what the earlier draft promised would not happen there.
 
-Added by the second pass, and at least as urgent as most of the above:
-
-7. **Does joining still mean sharing your clients (D41)?** Today it does, and it is not optional:
-   membership forces a full mutual link mesh, which the database turns into mandatory client-detail
-   sharing between every pair of members, and Booked revenue already shows each member every other
-   member's takings. That is the largest gap between R1 as you wrote it and the product as built,
-   and it belongs in the same conversation as D9.
-8. **Can one person run two venues in the collective (D38)?** Today they cannot sign in at all. A
-   collective of two venues under one owner is the likeliest collective there is.
-9. **What happens to a member's classes, events and tables (D44)?** The collective page is
-   appointments only, and nothing in the product says so, so a member can lose that trade from the
-   web the day redirects begin.
-10. **How is a collective priced (D39)?** Each venue pays its own subscription and brings its own
-    calendar cap, while the page pools them. That is either the point of the feature or an
-    arbitrage against the tier ladder, and it is your call, not an engineering one.
-
-Four more need you but are less urgent: what you tell owners about guests who book at two members
-(D42), what a host and a member each see in reports (D49), whether a host can undo a change that
-has already reached members (D50), and whether a price rise can be scheduled for a future date
-(D51). The other seven the second pass raised have obvious answers and are marked in §11.4 as ones
-the team should simply take.
+The eight the second pass raised (D38, D39, D41, D42, D44, D49, D50, D51) were answered on
+2026-09-14 and are recorded in §11.4. Three of those answers change work described elsewhere in
+this document, so read §11.4 before §6.5, §6.7 or §9.
 
 ## 0.1 What actually matters
 
-This document lists 41 split-brain cases, 59 bugs, 51 decisions and 147 tests. That is the right
+This document lists 42 split-brain cases, 59 bugs, 51 decisions and 147 tests. That is the right
 level of detail for someone building it and the wrong level for someone deciding whether to. Six
 things change the shape of the work. Everything else is execution.
 
-1. **Decide whether joining still means sharing your clients (D41).** It does today, and it is not
-   optional: the mesh of links membership requires makes every member's client records readable by
-   every other member, and Booked revenue already shows each of them the others' takings. If the
-   answer is no, that is a change to the lifecycle, the staff booking authority and the reports,
-   and it is cheaper to decide now than to unpick later.
-2. **Fix multi-venue people before anything else (D38, W16).** One person with a login at two
-   venues cannot use ResNeo at all today. Two venues under one owner is the likeliest collective
-   there is, so this gates whether the feature is usable by its best customers. It is a live bug,
-   it has nothing to do with the engine, and it can start immediately.
+1. **Make shared client access end when the membership does (D41).** Sharing while the collective
+   is live is intended and stays. What does not exist is the ending: leaving, removal and dissolve
+   only flip the membership row, so a departed member keeps reading its former partners' client
+   records indefinitely. Releasing the links in the same transaction that ends the membership is
+   the single most important correction in this document, because everything else about client
+   data is working as the owner wants.
+2. **Fix the silent lockout, then stop (D38, W16).** A person who works at two venues cannot sign
+   in at all today, and the invite route creates that state without warning. The decision is to
+   refuse the invite with a clear message rather than build a venue chooser, so W16 is now small.
+   It is still a live bug and still starts immediately.
 3. **Say out loud that the collective page is appointments only (D44).** It is, structurally, and
    the product never mentions it. A member that also runs classes or tables loses that trade from
    the web the day its page starts redirecting.
@@ -462,8 +445,8 @@ eight maps; severity is the highest any auditor assigned.
 | SB-28 | One person works at two venues in the collective and is given a login at each | One account that reaches both | `resolveUniqueStaffRow` refuses implicit venue selection, so they are redirected to `/signup/business-type` and locked out of both dashboards, with no message and no chooser. There is no venue switcher in the product | High | `src/lib/venue-auth.ts:55-65,330-332`; `src/app/dashboard/layout.tsx:89-93`; `supabase/migrations/20260301000003_create_staff.sql:14` |
 | SB-29 | A host staff member created a service before the collective existed, and the host puts it on the page | Only host admins control what the collective sells | The same seven `staff_may_customize_*` flags gate a non-admin's edits to the service row itself, and a staff-created service stores all seven as true, so the creator keeps the right to rewrite the master | High | `appointment-services/route.ts:91-99,420-446,918,939-945,1256-1262` |
 | SB-30 | Anyone opens a report or an export and looks for collective bookings | Bookings taken through the collective are identifiable | `bookings.collective_id` is written by three create paths and read by no report, export or metric; `source` has no collective value either, so the collective flow records `booking_page`. Collective trade is invisible everywhere money is counted | High | `20260919120000_linked_accounts.sql:149-150`; `20270118120000_bookings_account_safe.sql:42`; `create/route.ts:135` |
-| SB-31 | A host, or a member, opens Booked revenue | Your own venue's money, or the collective's with the venues named | Because the collective forces a full mutual link mesh, the report already blends every member's calendars into one total, symmetrically, with no per-venue subtotal, labelled only "shared with you through a linked account". Narrowing a link to create-only silently drops the whole column while membership continues | High | `reports/booked-revenue.ts:83-85,300,316-317`; `collectives.ts:507-512`; `BookedRevenueSection.tsx:331-340,361-366` |
-| SB-32 | A guest books at two member venues on the same collective page | One client record for one business | Two guest rows in two venues, and `merge_guests` refuses a cross-venue pair, so the split is permanent. Visit counts, tags, notes and loyalty are halved from the guest's point of view | Medium | `guests` scoping per venue; `merge_guests` cross-venue refusal |
+| SB-31 | A host, or a member, opens Booked revenue | The collective's money, with each venue named | Because the collective forces a full mutual link mesh, the report blends every member's calendars into one total, symmetrically, with no per-venue subtotal, labelled only "shared with you through a linked account". D49 keeps the mutual visibility but requires it to be named, broken down by venue and consented to at join, so what is left to fix is the presentation and the consent, not the access. Narrowing a link still silently drops the whole column while membership continues | Medium | `reports/booked-revenue.ts:83-85,300,316-317`; `collectives.ts:507-512`; `BookedRevenueSection.tsx:331-340,361-366` |
+| SB-32 | A guest books at two member venues on the same collective page | One client record for one business | Two guest rows in two venues, and `merge_guests` refuses a cross-venue pair, so the split is permanent. Visit counts, tags, notes and loyalty are halved from the guest's point of view. D42 accepts this and covers it in the help centre only, with no product UI | Low | `guests` scoping per venue; `merge_guests` cross-venue refusal |
 | SB-33 | A guest wants to join the waitlist from the collective page | The same waitlist the member's own page offers | The synthetic venue hand-builds two resolved flags and omits `waitlist_v2`, and the waitlist route has no collective branch, so the form never renders. Waitlist offer links also lose their query string on redirect | Medium | `collective-venue.ts:174-179` vs `venue-public-feature-flags.ts:34-42`; `api/booking/appointment-waitlist/route.ts:42-54`; `book/[venue-slug]/page.tsx:16-19` |
 | SB-34 | A guest unsubscribes from marketing after booking through the collective | They stop hearing from the business they booked | Consent and unsubscribe are per venue guest row, so opting out at one member leaves every other member free to send. Marketing emails carry no unsubscribe link at all, and `createMarketingUnsubscribeUrl` is dead code | High | `send-marketing-contact-message.ts:97-104`; `marketing-unsubscribe.ts` |
 | SB-35 | A member that also runs classes, events, tables or resources joins, and its own page starts redirecting | Its whole business keeps its online channel | The combined page is appointments only: the synthetic venue is built with `booking_model: 'unified_scheduling'` and a single active model, and the catalogue reads only services and practitioner calendars. The redirect fires before the member's own page is built, so its other models leave the web entirely (only `/embed/{slug}` survives) | High | `collective-venue.ts:163-165`; `catalogue.ts:69-84`; `appointment-catalog.ts:214-216`; `book/[venue-slug]/page.tsx:16-19`; `embed/[venue-slug]/page.tsx:16-17` |
@@ -473,6 +456,7 @@ eight maps; severity is the highest any auditor assigned.
 | SB-39 | A host looks at a member's column in the diary to see when they are free | The member's real hours | Partner columns are drawn from `working_hours` alone, so the header line, the grey stripes and the working-hours filter ignore schedule periods, rotas, days off, amended hours, leave, the partner venue's opening hours and its closures. The host is shown a member as open all day on a day that business is shut | High | `linked-calendar/route.ts:182-207`; `practitioners/route.ts:34-61` already returns what is needed |
 | SB-40 | A guest picks "Any available" on the collective page | A fair spread across the venues offering it | The collective branch returns before the flags block, so `any_available_practitioner_config` (priority or random, and the host's calendar order) never runs, and the bridge takes a first-wins dedupe over a list hard-coded host first. The host is handed every contested slot, permanently | High | `booking/availability/route.ts:577-611` vs `:613`; `collective-booking-bridge.ts:287-292`; `collective-venue.ts:586-596` |
 | SB-41 | Staff try to move a booking to a calendar at another venue in the collective | It moves, as it would within one venue | The drag is refused and the dialog explains that the calendars "are on different ResNeo accounts". The offered path is rebook then cancel: a new booking id, the service picked again by hand, a cancellation and a confirmation both sent to the guest, and the deposit and card hold abandoned | High | `PractitionerCalendarView.tsx:6180-6212,9325,5016-5053` |
+| SB-42 | A member leaves the collective, or the collective is dissolved | Each venue keeps its own clients and stops seeing everyone else's | Leave, removal and dissolve only flip the membership row; no collective route or library function touches `account_links`, so the accepted link and its client-detail grant survive indefinitely. A departed member keeps reading its former partners' client records, including contact details, notes, documents and compliance records. This is the half of D41 that does not exist | High | `collectives/[id]/members/route.ts:189,256,280`; no `account_links` writer in `src/lib/linked-accounts/collectives.ts` or any collective route |
 
 ---
 
@@ -948,12 +932,31 @@ with no assignment at its own venue.
 - A registry test lists every writer of the service tables (the red team's inventory) and fails
   when a new writer appears without a guard or an allowlist entry.
 
-**Staff authority and contacts** (D17, RT2-12, RT2-13). Collective staff booking is authorised by
-collective role, audited in the collective booking audit, stamps the acting venue, and notifies
-the owning venue. When the chosen calendar belongs to another venue, the staff form clears any
-picked contact and asks for the client's details to be typed ("This client will be added to
-{venue}'s contacts."), unless the arrangement explicitly shares client details. Pairwise links
-created only for the collective are offered for downgrade at migration and on leave.
+**Staff authority and contacts** (D17 as amended by D41, RT2-12, RT2-13). Collective staff booking
+is authorised by collective role, audited in the collective booking audit, stamps the acting venue,
+and notifies the owning venue.
+
+Contacts work differently from the first pass's recommendation, because D41 settled the question it
+was hedging. Inside a live collective, shared client access **is** the arrangement, so the staff
+form does not clear a picked contact and does not force details to be typed. It searches across
+every active member venue, shows the owning venue on every result, and writes the booking against
+the record that already exists rather than creating a second one at the acting venue. The typed
+details rule survives only outside a live collective, where a pairwise link may or may not share
+client details.
+
+Two consequences follow, and both are new work:
+
+- **The contact search has to reach across venues.** `/api/venue/guests` is scoped to
+  `staff.venue_id` on every query (`route.ts:150,237,285,317`), so today there is no cross-venue
+  search at all: a partner's client is reachable only per guest, through a shared diary booking.
+  The list, the search and the contact picker all need an explicit "in this collective" scope, with
+  the owning venue named on every row and a hard refusal for any venue outside the live collective.
+- **Ownership still never moves.** A record found this way belongs to its own venue, is edited
+  under that venue's name, and is counted in that venue's reports. The collective grants access,
+  not ownership, which is what makes the release on leave (§6.7) both possible and sufficient.
+
+Pairwise links created only for the collective are still offered for downgrade at migration. On
+leave they are not downgraded but released outright: see §6.7.
 
 **Host staff and the creator exception.** The seven `staff_may_customize_*` flags gate two
 different things, and the second one is a hole in host control. Besides saying what a calendar
@@ -1074,16 +1077,32 @@ excludes them, otherwise CI re-grants what the migration revokes;
 - **Member ticks or unticks** its own calendars on Calendar Availability; the page follows at once;
   the host is told. Diff writes with `expected_service_ids` stop a stale dialog erasing the host's
   change.
-- **Leave, removal, link-cascade removal.** The status trigger releases links in the same
+- **Leave, removal, link-cascade removal.** The status trigger releases replica links in the same
   transaction (locks lift, managed library objects become the member's own). After commit: photos
   are copied as objects into the member's storage (RT1-15); for a member without charges-capable
   Stripe, released services that take payment have their payment rule set to none, with the old
   values audited and a "Review your services" checklist (RT2-9); adoption of the member's address
   is cleared; notices go to live members only. Replica identities are kept so a re-join can offer
   "Reconnect your previous services" (RT2-27).
-- **Dissolve.** Releases every member in one transaction, archives offerings, and old
-  `/book/c/{slug}` links show a neutral page listing each former venue's own booking page for 90
-  days (members can opt out) instead of a 404 or a redirect to the host (RT2-22, D25).
+- **Client access ends with the membership** (D41). This is new, and it is the half of D41 that
+  does not exist today. The same transaction that sets a membership to `left` or `removed` also
+  ends that venue's `account_links` with every other member, so the client-detail grant stops at
+  the moment the membership does. Today nothing does this: leave, removal and dissolve only flip
+  the membership row (`collectives/[id]/members/route.ts:189,256,280`), and no collective route or
+  library function touches `account_links` at all, so a departed member keeps reading its former
+  partners' client records indefinitely. Each venue keeps every record it owns, in full. What it
+  loses is the ability to read anyone else's. The release is audited on both sides, and the leave
+  and removal dialogs say plainly what stops: "You will no longer be able to see {venueList}'s
+  clients or bookings, and they will no longer see yours. Everything in your own account stays
+  exactly as it is."
+  A link that existed before the collective and was not created for it is downgraded to whatever
+  it was rather than ended, so joining a collective cannot silently destroy an arrangement two
+  venues already had. The migration records which links it created for this purpose so that
+  "created for the collective" is knowable later, rather than guessed.
+- **Dissolve.** Releases every member in one transaction, ends the client-detail grants exactly as
+  a leave does, archives offerings, and old `/book/c/{slug}` links show a neutral page listing each
+  former venue's own booking page for 90 days (members can opt out) instead of a 404 or a redirect
+  to the host (RT2-22, D25).
 - **Host transfer.** A request that the candidate's admin accepts with consent; members get notice
   and a free-leave window (RT2-23); refused while any link is behind. `collective_transfer_host`
   re-keys every `replica_of_*` mapping at every member, sets mappings on the old host's former
@@ -1259,6 +1278,12 @@ The app is a full client of these endpoints. Changes are additive, and errors ke
   also carries a collective video blurb (`src/lib/emails/welcome-email.ts:36-40`).
   `Docs/Resneo_Unified_Booking_Functionality.md` was checked and makes no collective claims, so it
   needs nothing.
+- **Two articles the 2026-09-14 decisions now require.** D42 is help-centre only, so the split
+  client record has to be explained somewhere a guest-facing question can be answered from: what
+  happens when the same person books at two venues in the collective, why each venue keeps its own
+  record, and what a member sees. And D41's shape needs saying in the member's own words: while the
+  collective is live your partners can see your clients and you can see theirs, the records stay
+  yours, and the access ends the day the membership does.
 - **Nothing stops an em-dash reaching a help article.** The existing copy tests cover booking copy
   and the assistant's answers only. Since this project rewrites twenty-odd articles under a rule
   that forbids them, add the sweep (HLP-01) before the rewriting starts, not after.
@@ -1536,17 +1561,19 @@ never meet, see the migration deploy notes).
 
 ### 8.0 What the second pass found, tiered
 
-The second pass added fourteen split-brain cases, four platform bugs and fifteen decisions. They
+The second pass added fifteen split-brain cases, four platform bugs and fifteen decisions. They
 are not equally important, and a list that does not say so is not much use. Each is tiered here
 once, and the tier is the thing to act on; the entries in §3, §4 and §11 carry the detail.
+Re-tiered on 2026-09-14 against the owner's answers in §11.4.
 
 **Tier 1, fix first.** Live today, independent of the engine, and cheap. These can start alongside
 W1 and W2.
 
 | Finding | Why first | Where |
 |---|---|---|
-| SB-28, PB-16 | One person with a login at two venues cannot use the dashboard at all, and the invite route creates that state without warning. Gates whether a collective of two venues under one owner is usable | W16 |
-| SB-31 | Booked revenue already shows every member every other member's takings, in one blended figure, with no venue named. Nobody agreed to that | W17 |
+| SB-42 | Leaving or dissolving never ends the client-detail grant, so a departed member keeps reading its former partners' client records indefinitely. The half of D41 that does not exist, and the most important single correction in this document | W7 |
+| SB-28, PB-16 | One person with a login at two venues is locked out of both dashboards, and the invite route creates that state silently. D38 makes the fix a refusal with a clear message rather than a venue chooser, so this is now small | W16 |
+| SB-31 | Booked revenue blends every member's takings into one unlabelled total. D49 keeps the mutual visibility, so what is left is presentation and consent: name the venues, break the figure down, agree it at join | W17 |
 | SB-39 | Partner diary columns are drawn from the weekly template, so a host sees a member as open on a day that business is shut, and books into it. The data needed is already returned by another endpoint | W21 |
 | SB-15 | One member's ordinary service save writes into a second member's venue, with no host involved. Narrow conditions, but wrong enough to fix before anything else writes cross-venue | W1 |
 | PB-19 | The bookings export is not admin-gated while returning every guest's email and phone. One line | W15 |
@@ -1564,6 +1591,8 @@ W1 and W2.
 | SB-35, currency gate | Appointments-only stated in the product, and currency gated the way timezone already is | W20 |
 | SB-37, PB-17 | Canonicals and page metadata. Real, but nobody is harmed while it waits | W19 |
 | SB-29 | Offered masters become admin-only to edit whoever created them. One guard | W5 |
+| Cross-venue contact search (D41) | The second half of the owner's requirement. `/api/venue/guests` is venue-scoped on every query, so shared access today is per guest through a shared diary rather than anything searchable | W7 |
+| Booking-model forward compatibility (D44) | An entity discriminator on offerings and providers, and a real booking-model list on the synthetic venue. Changes no behaviour now, and is the difference between adding classes later and rewriting for them | W20 |
 | SEC-03 | A pre-booking form should file at the venue that will hold the booking. Falls out of RT2-2 | W4 |
 
 **Tier 3, recorded so nobody builds it.** Deliberate non-action. Each is written down because the
@@ -1571,13 +1600,15 @@ next reader would otherwise rediscover it and propose work.
 
 | Finding | The decision |
 |---|---|
-| SB-32, duplicate contacts across member venues | Accepted. Ownership never moves, so the same guest booking two members is two records, and the merge tool refuses cross-venue pairs. Say so plainly rather than implying histories join (D42) |
+| SB-32, duplicate contacts across member venues | Accepted, and covered in the help centre only. No product UI, no banner, no warning at join: help articles and customer service handle it (D42) |
 | SB-36, two venues sharing a physical room | Not supported. Say so in the product. A cross-venue resource is a platform change, not a collective one (D45) |
 | SB-38, one practitioner with a calendar at two venues | Warn, do not model. Flag two calendars in a collective sharing a name and email; a person identity above the venue is out of scope (D47) |
 | SB-41, moving a booking between venues | Stays refused. Ownership never moves, per §6.1. Rewrite the dialog so it stops offering a lossy rebook-and-cancel workaround (D46) |
 | The engine flag's actor binding | Dropped as a security measure. Anyone holding the connection string has already won, so a nonce defends nothing. The audit half is kept and is the point: see §6.4 |
 | The public requirements route | Not a finding. §6.6 records why, so it is not raised a third time |
 | PB-18, marketing email has no unsubscribe link | Real and platform-wide, and nothing to do with collectives. Raised here only because this review found it; it belongs in its own piece of work |
+| A venue chooser for multi-venue people | Not building it (D38). The invite refuses instead, so a person running two venues in a collective keeps two logins. Recorded because it is the obvious thing to propose next |
+| Scheduling a future price change | Not planned (D51). Changes apply straight away |
 
 ### 8.1 Fix now, on today's model
 
@@ -1638,7 +1669,7 @@ Effort is relative (S small, M medium, L large) and assumes one engineer familia
 | W4 | Derived catalogue and booking switch: exclusions, fingerprint freshness, compliance serving, collective booking audit | M | W1, W3 |
 | W5 | Host Services page, offerings routes, collective calendars section, per-calendar values for hosts, notices | M | W3, W4 |
 | W6 | Member locks and member UI: guards, error codes, Services sections, Calendar Availability groups, add-ons, categories, compliance | M | W3 |
-| W7 | Lifecycle: join with consent and choices, adoption review, release follow-ups, dissolve page, host transfer with re-keying, venue deletion, reconcile off renders, exclusivity | L | W3, W6 |
+| W7 | Lifecycle: join with consent and choices, adoption review, release follow-ups, dissolve page, host transfer with re-keying, venue deletion, reconcile off renders, exclusivity, **ending client access with the membership** (SB-42, D41) and **cross-venue contact search while live** (D41) | L | W3, W6 |
 | W8 | Five per-calendar fields end to end | M | W2, D5 |
 | W9 | Migrate existing collectives: survey, rehearsal, dry run, apply, rollback, residue | M | W4 to W7 live |
 | W10 | Booking pages and links: redirect conditions, translation, interstitial, `/embed/c/{slug}`, trader line, one live-collective resolver, dissolved page | M | W4, D3 |
@@ -1647,8 +1678,8 @@ Effort is relative (S small, M medium, L large) and assumes one engineer familia
 | W13 | Help centre, spec, PRD, docs index | M | W5 to W11 |
 | W14 | C1 code removal, then C2 contract | S | W9 on both environments |
 | W15 | Grants hardening (anon writes on service tables, anon read of assignments) | S | live grant check |
-| W16 | Multi-venue people: a venue chooser in the dashboard shell, an acting-venue cookie validated on every request against the caller's own staff rows, the invite route's cross-venue check and copy, and the redirect that today sends multi-venue staff into signup (SB-28, PB-16, D38) | M | none |
-| W17 | Reporting and attribution: read `bookings.collective_id`, a collective value for `source`, per-venue breakdown in Booked revenue, collective filters and export columns, and `buildPriceSummary` on the snapshot (SB-30, SB-31, D49) | M | W1 |
+| W16 | Multi-venue people: the invite route refuses an email that already works at another venue, with a plain message, and the silent redirect into signup is replaced by one that says what happened and who to contact. No venue chooser (D38), so this is small | S | none |
+| W17 | Reporting and attribution: read `bookings.collective_id`, a collective value for `source`, per-venue breakdown and venue names in Booked revenue, the mutual-visibility consent at join, collective filters and export columns, and `buildPriceSummary` on the snapshot (SB-30, SB-31, D49) | M | W1 |
 | W18 | Operations: the two crons, the verifier and its repairs, alert thresholds, and the platform support console's collective panel (§6.16) | M | W3 |
 | W19 | Public identity and reach: metadata and canonicals on `/book/c/{slug}` and every member page, the waitlist on the synthetic venue, the full resolved flag set, "any available" fairness and order (SB-33, SB-37, SB-40, PB-17, D43, D48) | M | W10 |
 | W20 | Booking models and eligibility: appointments-only gates at invite and accept, the refusal to drop `unified_scheduling` while in a collective, the member warnings, the "also runs" line, and the currency gate that does not exist (§6.14, D44, D45) | S | W7 |
@@ -1675,8 +1706,8 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
   nothing tests the cron wrapper this design's two new crons depend on, nothing tests the platform
   console, and nothing stops an em-dash reaching a help article, on a project that rewrites about
   twenty of them.
-- **147 tests across layers**: 35 unit and sweep, 45 route, 3 component, 29 pgTAP, 4 engine
-  concurrency, 6 migration, 3 app-contract, 6 end-to-end, 6 live-staging, 4 performance,
+- **147 tests across layers**: 35 unit and sweep, 45 route, 3 component, 30 pgTAP, 4 engine
+  concurrency, 6 migration, 3 app-contract, 5 end-to-end, 6 live-staging, 4 performance,
   4 security, 2 manual. Key groups: the terms resolver and price snapshot (TERMS, PRICE),
   assignment writes (CSA), engine objects, locks and convergence (DB, ENG, REV), real two-connection
   races (CON), the derived catalogue and forms (CAT, CMP), guards (GRD), lifecycle (LIFE), migration
@@ -1691,7 +1722,7 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
   both refusing and allowing; deterministic race points; randomised convergence (50 rounds in CI,
   1,000 nightly).
 - **Invariants** in one service-role function, run identically by pgTAP, the daily verifier, the
-  migration script and every deploy step (I1 to I46 and the dry-run checks P1 to P5). I33 to I46
+  migration script and every deploy step (I1 to I47 and the dry-run checks P1 to P5). I33 to I47
   were added by the second pass and cover, among others, a member silently withdrawing a calendar
   by deleting it, an applied replica with no audit row, and client privileges on the legacy tables
   that I24 never looked at.
@@ -1796,18 +1827,63 @@ here to be recorded, not deliberated: the team should take them, write down what
 on. Eight genuinely need you, because they are commercial, legal or about what the product
 promises. Do not let the first group consume attention that belongs to the second.
 
-#### Needs you
+#### Decided by the owner, 2026-09-14
 
-| id | Decision | Recommended |
+All eight are settled. The answers are recorded here as taken, with what each one changes.
+
+| id | Decision | Answer |
 |---|---|---|
-| D38 | A person who works at more than one venue in a collective. Today a second staff row locks them out of both dashboards (SB-28, PB-16) | **Ship a venue chooser before the collective work lands, defaulting to the last venue used, and refuse the invite with a plain explanation until it exists. Venues under one owner are the ordinary collective, not an edge case** |
-| D39 | How a collective is priced, given each venue keeps its own subscription and its own calendar cap (Light 1, Plus 5) while the collective page pools them | **Settle before launch: accept the pooling as the point of the feature, or add a per-collective charge, or cap member count. Member count is already known and eligibility is already evaluated per venue, so all three are buildable** |
-| D41 | Whether a collective still requires the full mutual `create_edit_cancel` link mesh, which the database CHECK turns into mandatory client-detail sharing between every pair of members | **No. Authorise collective staff booking by collective role (already the design in §6.5) and drop the mesh requirement, so joining stops forcing every member to expose its clients to every other. Offer existing meshes for downgrade at migration. This is the largest single gap between R1 as written and the product as built** |
-| D42 | The same guest booking two member venues becomes two client records, and `merge_guests` refuses cross-venue pairs, so the split is permanent | **Accept the split for this release, because ownership never moves, but say so: the guest sees one business, each venue keeps its own record, and a future collective-wide client view is a separate piece of work. Do not silently let owners believe histories are joined** |
-| D44 | A member that also runs classes, events, tables or rooms, whose own page starts redirecting | **Appointments only this release, stated in the product: refuse a venue with no active appointments model at invite, warn before accept and before redirects begin, refuse removal of the model while in a collective, and keep a route through for the member's other models rather than deleting them from the web** |
-| D49 | What a host can see about the collective's trade, and what a member can see about others | **The host sees the collective's bookings and revenue broken down by venue, never a member's client contact details. A member sees its own venue, with its collective bookings identified. Fix today's accidental symmetry first: Booked revenue already shows every member every other member's takings (SB-31)** |
-| D50 | Whether a host can undo a change that has already reached members. Today there is no reversal at all: a mis-typed price saves, applies at every venue and emails every member, and the only related control is Withdraw, which is destructive | **Yes, for 60 seconds after the save, restoring the master's before-image from the audit trail and re-applying. The before-image already has to exist for migration rollback (D30), so the concept is accepted; this only extends it to ordinary edits** |
-| D51 | Whether host price, payment or form changes may carry a future effective date, so a rise can be co-ordinated across venues | **Raised but not designed in the first pass, and it is table stakes for an appointments business. If it ships, it needs its own state, copy, notice variant and tests, so decide before W5 rather than during it** |
+| D38 | A person who works at more than one venue in a collective | **No venue chooser. Refuse the invite instead.** A person who already works at another venue cannot be invited, and is told plainly to use a different email address. The silent lockout (SB-28, PB-16) is still fixed, because it is a live bug: what changes is that the fix is a refusal with a clear message, not a switcher. The owner accepts that someone running two venues in a collective needs two logins |
+| D39 | How a collective is priced, given each venue keeps its own subscription and calendar cap | **Accept the pooling. It is the point of the feature.** No per-collective charge, no member cap, no minimum tier to host. Nothing to build |
+| D41 | Whether joining still means sharing client details | **Shared while the collective is live, and it ends when the membership does.** See the amended wording below: this is not the status quo, and two parts of it do not exist yet |
+| D42 | The same guest booking two member venues becomes two client records, permanently | **Accept, and explain it in the help centre only.** No product UI, no banner, no warning at join. A minor issue that help articles and customer service can cover |
+| D44 | A member that also runs classes, events, tables or rooms | **Appointments only for now, stated in the product, and built so other models can be added later.** The guards, warnings and refusals in §6.14 all stand. The forward-compatibility requirement is new: see below |
+| D49 | What a host sees about the collective's trade, and what a member sees about others | **Full mutual visibility, made explicit and consented at join.** Every member sees every other member's figures, as today, but named and broken down by venue rather than blended into one unlabelled total, and agreed to rather than discovered |
+| D50 | Whether a host can undo a change that has already reached members | **Yes, 60 seconds.** "Put it back" in the save summary, restoring the master's before-image from the audit trail and re-applying |
+| D51 | Whether host changes may carry a future effective date | **Not planned.** Changes apply straight away. Remove it from the open questions rather than carrying it as phase two |
+
+**D41 in full, because the answer is not one of the options offered.** The owner's requirement is:
+joining shares access to contact details, including every part of a client record; the record still
+belongs to the venue that owns it; members can use and interact with each other's contacts and
+bookings seamlessly; and when the collective ends, the owner keeps the record and everyone else
+loses access.
+
+That is neither the status quo nor the recommended option. Checked against the code, two of the
+four parts are missing today:
+
+- **Access does not end.** Leaving, being removed and dissolving only flip the membership row's
+  status (`collectives/[id]/members/route.ts:189,256,280`). Nothing in
+  `src/lib/linked-accounts/collectives.ts` or any collective route touches `account_links`, so the
+  accepted link and its client-detail grant survive the collective indefinitely. A member that
+  leaves today keeps reading its former partners' client records. This is the requirement's
+  sharpest half and it is a bug to fix, not a default to keep.
+- **It is not seamless.** There is no cross-venue contact search: `/api/venue/guests` is scoped to
+  `staff.venue_id` on every query (`route.ts:150,237,285,317`). Access today is per guest, reached
+  through a shared diary booking, not a list anyone can search. Making it seamless is new work.
+
+So D41 as decided means three things:
+
+1. **Keep the sharing while the collective is live**, and say so plainly at join, with recorded
+   consent. The disclosure names what a partner venue can see: name, contact details, visit
+   history, tags, notes, documents and compliance records.
+2. **Build the seamless part**: a member's staff can search and open another member's contacts
+   while the collective is live, with the owning venue named on every record.
+3. **End it with the membership**: leave, removal and dissolve release the links in the same
+   transaction that ends the membership, so access stops at once. The records stay with their
+   owner, untouched.
+
+This replaces the earlier recommendation to drop the link mesh. It also overrides **D17**, which
+said a member's staff must type a client's details when booking on another venue's calendar: inside
+a live collective the sharing is the arrangement, so the contact picker works across member venues
+and the typed-details rule applies only where no live collective exists.
+
+**D44's forward-compatibility requirement.** Appointments only is a scope decision for this
+release, not a permanent shape. Two things make the later work an addition rather than a rewrite,
+and both are cheap now and expensive later: give the offering and provider records an entity
+discriminator, so a row can say what kind of bookable thing it points at rather than being an
+untyped service id (`20261210120000_combined_booking_page.sql:105-132` has no such column today);
+and keep the synthetic venue's booking model list a genuine list rather than the hard-coded single
+value it is now (`collective-venue.ts:163-165`). Neither changes behaviour in this release.
 
 #### The team can take these
 

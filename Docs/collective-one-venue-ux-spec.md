@@ -1115,19 +1115,29 @@ All venue notices use `notifyVenue` (`src/lib/linked-accounts/notifications.ts:6
 
 ### Added by the second pass
 
+Eight of these were answered on 2026-09-14 and have moved into the plan's §11.4 as taken decisions:
+D38 (no venue chooser, refuse the invite), D39 (pooling accepted), D41 (client access shared while
+live and ended with the membership), D42 (duplicate contacts, help centre only), D44 (appointments
+only, built so more can be added), D49 (mutual visibility, named and consented), D50 (60-second
+undo) and D51 (no scheduled changes). What they change in this document is listed under each page.
+
+Still open:
+
 - Where does the switch that puts new collectives into replicas mode live, given flags are stored per venue and a collective spans venues (D37)?
-- Should a person who works at two venues get a chooser, and does that ship before the collective work (D38)? Today they cannot sign in at all.
-- Is a collective priced as it is today, with each venue paying its own subscription and bringing its own calendar cap, or does hosting carry a charge or a member limit (D39)?
 - Does `capacity_per_session` follow the host, or stay each venue's own (D40)? A host cannot know how many chairs a member has.
-- Does joining still require the full mutual link mesh, which forces every pair of members to share client details (D41)? This is the largest gap between R1 as written and the product as built.
-- What do we tell an owner about a guest who books at two member venues and becomes two client records that cannot be merged (D42)?
 - Should the collective page offer a waitlist (D43)? It cannot today, because the synthetic venue publishes only two of its flags.
-- What happens to a member's classes, events, tables and rooms when its own page starts redirecting (D44)? Today they leave the web with no warning.
 - Do we say plainly that two venues cannot share a physical room (D45)? Today the platform will double-book it.
 - Does "you cannot move a booking between venues" stay, with better wording, or does a real cross-venue move get specified (D46)?
 - Does the product warn when one person has a calendar at two venues in the collective and can be booked twice at once (D47)?
 - Who is the canonical page for a member's address once it redirects, and does the collective page get an Open Graph image and a proper title (D48)?
-- What does a host see about the collective's trade, and what does a member see about the others (D49)?
-- Can a host undo a change that has already reached members, and for how long (D50)?
-- May a host schedule a price, payment or form change for a future date (D51)?
 - Does the Collective overview page (§2 item 15) ship with the fold, or after it? If after, the bulk lane has to stay in the combined-page manager until it lands, because without one of the two, setting up a collective gets slower rather than faster.
+
+### What the 2026-09-14 decisions change in this document
+
+- **§2 item 13, the staff form.** `staff.contact.otherVenue` and `staff.contact.searchOther` are retired. Inside a live collective the picker searches every member venue, names the owning venue on each result, and books against the record that already exists. Details are typed only outside a live collective.
+- **§2 item 16, Reports.** `reports.collective.scope` stays, but a member sees every venue's figures too, not only its own. `reports.collective.sharedNote` becomes the standing explanation rather than a fallback, and names the venues.
+- **§2 item 17, the venue chooser.** Not built. Delete the section's chooser copy and keep only `staff.invite.otherVenue`, plus a new `shell.venue.locked` for the person who is already in the broken state: "This account is linked to more than one venue, so we cannot tell which one to open. Please contact support and we will sort it out."
+- **§4 J3, the join dialog.** The disclosure must now say what a partner venue can see (name, contact details, visit history, tags, notes, documents and compliance records) and that every member can see every other member's takings, and record agreement to both. New ids `join.means.clients` and `join.means.revenue`.
+- **§4 J7 and J9, leave and dissolve.** Both gain a line saying what access ends: "You will no longer be able to see {venueList}'s clients or bookings, and they will no longer see yours. Everything in your own account stays exactly as it is." New id `leave.body.access`.
+- **§2 item 1, the host Services page.** `ov.undo.offer` and the 60-second window are confirmed by D50 and no longer marked pending.
+- **Nothing for D42.** No product copy, no banner, no warning at join. The help centre covers it.

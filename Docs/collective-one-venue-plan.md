@@ -68,7 +68,7 @@ one venue even after everything above is fixed:
   refuse to resolve a venue at all and redirects the person into the signup flow. A collective of
   two venues under one owner, the most likely collective there is, cannot be run from one login.
 - **The collective page is appointments only.** The synthetic venue declares a single booking model,
-  so a member that also runs classes, events, tables or rooms loses those from the web the moment
+  so a member that also runs classes, events or bookable rooms loses those from the web the moment
   its own page starts redirecting. Nothing in the product says so.
 - **Guests are split in two and cannot be put back.** The same person booking two member venues
   becomes two client records, and the merge tool refuses cross-venue pairs. Marketing consent is per
@@ -138,8 +138,8 @@ things change the shape of the work. Everything else is execution.
    refuse the invite with a clear message rather than build a venue chooser, so W16 is now small.
    It is still a live bug and still starts immediately.
 3. **Say out loud that the collective page is appointments only (D44).** It is, structurally, and
-   the product never mentions it. A member that also runs classes or tables loses that trade from
-   the web the day its page starts redirecting.
+   the product never mentions it. A member that also runs classes or bookable rooms loses that trade
+   from the web the day its page starts redirecting.
 4. **Get the money right before anything propagates (W1).** The price snapshot, one resolver and
    per-calendar values are the difference between "the host changed a price" and "every past
    booking silently repriced". This was already the first pass's top workstream and remains it.
@@ -449,7 +449,7 @@ eight maps; severity is the highest any auditor assigned.
 | SB-32 | A guest books at two member venues on the same collective page | One client record for one business | Two guest rows in two venues, and `merge_guests` refuses a cross-venue pair, so the split is permanent. Visit counts, tags, notes and loyalty are halved from the guest's point of view. D42 accepts this and covers it in the help centre only, with no product UI | Low | `guests` scoping per venue; `merge_guests` cross-venue refusal |
 | SB-33 | A guest wants to join the waitlist from the collective page | The same waitlist the member's own page offers | The synthetic venue hand-builds two resolved flags and omits `waitlist_v2`, and the waitlist route has no collective branch, so the form never renders. Waitlist offer links also lose their query string on redirect | Medium | `collective-venue.ts:174-179` vs `venue-public-feature-flags.ts:34-42`; `api/booking/appointment-waitlist/route.ts:42-54`; `book/[venue-slug]/page.tsx:16-19` |
 | SB-34 | A guest unsubscribes from marketing after booking through the collective | They stop hearing from the business they booked | Consent and unsubscribe are per venue guest row, so opting out at one member leaves every other member free to send. Marketing emails carry no unsubscribe link at all, and `createMarketingUnsubscribeUrl` is dead code | High | `send-marketing-contact-message.ts:97-104`; `marketing-unsubscribe.ts` |
-| SB-35 | A member that also runs classes, events, tables or resources joins, and its own page starts redirecting | Its whole business keeps its online channel | The combined page is appointments only: the synthetic venue is built with `booking_model: 'unified_scheduling'` and a single active model, and the catalogue reads only services and practitioner calendars. The redirect fires before the member's own page is built, so its other models leave the web entirely (only `/embed/{slug}` survives) | High | `collective-venue.ts:163-165`; `catalogue.ts:69-84`; `appointment-catalog.ts:214-216`; `book/[venue-slug]/page.tsx:16-19`; `embed/[venue-slug]/page.tsx:16-17` |
+| SB-35 | A member that also runs classes, events or bookable resources joins, and its own page starts redirecting | Its whole business keeps its online channel | The combined page is appointments only: the synthetic venue is built with `booking_model: 'unified_scheduling'` and a single active model, and the catalogue reads only services and practitioner calendars. The redirect fires before the member's own page is built, so its other models leave the web entirely (only `/embed/{slug}` survives) | High | `collective-venue.ts:163-165`; `catalogue.ts:69-84`; `appointment-catalog.ts:214-216`; `book/[venue-slug]/page.tsx:16-19`; `embed/[venue-slug]/page.tsx:16-17` |
 | SB-36 | Two venues in a collective share a physical room and each puts it on a calendar | The room cannot be booked twice at once | `unified_calendars.venue_id` is NOT NULL and resources are pinned to one venue by the API but not by the database, and nothing compares across venues, so the shared room is silently double-booked | Medium | `venue/resources/route.ts:191-196`; `20260504120000:9-12` |
 | SB-37 | The collective adopts a member's booking address | One address for one storefront | `/book/c/{slug}` and `/book/{adopted}` then serve byte-identical pages with no canonical between them, and `/book/{venue}/{calendar}` and `/embed/{venue}` never check the claim at all, so sibling URLs serve different identities | Medium | `resolveCombinedSlugClaim` callers; `book/[venue-slug]/[practitioner-slug]/page.tsx`; `embed/[venue-slug]/page.tsx:16-17` |
 | SB-38 | One practitioner works at two venues in the collective and has a calendar at each | They cannot be booked twice at the same time | There is no cross-venue person: `unified_calendars` is venue-scoped, `staff` is one row per venue, every availability read is venue-scoped, and the only conflict checker is venue-scoped and resource-only. The same human is silently double-booked | High | `unified_calendars` venue scoping; `staff` per venue; `collective-booking-bridge.ts:202-262` |
@@ -1378,12 +1378,14 @@ trade without warning.
   through `fetchAppointmentCatalog` and filters out every calendar whose type is not
   `practitioner` (`catalogue.ts:69-84`, `appointment-catalog.ts:214-216`). Provider rows carry
   one untyped `source_service_id` with no entity discriminator
-  (`20261210120000_combined_booking_page.sql:105-132`), so classes, events, resources and tables
-  cannot be added without a schema change.
-- Eligibility does not know this. `isLinkFeatureVenue` refuses only restaurant and table-product
-  tiers (`eligibility.ts:36-41`), so a class-only or resource-only venue is "eligible", counts
-  towards the two-eligible-members gate that makes the page live (`collectives.ts:946,978-981`),
-  and contributes nothing.
+  (`20261210120000_combined_booking_page.sql:105-132`), so classes, events and resources cannot be
+  added without a schema change.
+- Eligibility does not know this. `isLinkFeatureVenue` (`eligibility.ts:36-41`) refuses only the
+  restaurant and table-product tiers, which is legacy protection rather than a live constraint:
+  restaurants are no longer a booking model and no venue is on one. What it does **not** refuse is
+  a class-only or resource-only venue, which is therefore "eligible", counts towards the
+  two-eligible-members gate that makes the page live (`collectives.ts:946,978-981`), and
+  contributes nothing to it.
 - A member admin can remove `unified_scheduling` from its own venue at any time through
   `PATCH /api/venue` (`route.ts:403-446`, whose only guard is future bookings) and silently empty
   its contribution, with no notice to the host.
@@ -1400,7 +1402,7 @@ trade without warning.
    what the collective is not carrying.
 
 **What does not ship, and is not pretended.** Classes, courses, passes, credits, memberships,
-events, tables and shared rooms stay per venue. Class commerce in particular is venue-scoped at
+events and shared rooms stay per venue. Class commerce in particular is venue-scoped at
 every layer, including payment identity on that venue's connected account, so a pass bought at
 the host cannot be spent at a member. Shared physical resources are worse than unsupported: two
 venues can each put the same real room on a calendar and the platform will double-book it
@@ -1862,7 +1864,7 @@ All eight are settled. The answers are recorded here as taken, with what each on
 | D39 | How a collective is priced, given each venue keeps its own subscription and calendar cap | **Accept the pooling. It is the point of the feature.** No per-collective charge, no member cap, no minimum tier to host. Nothing to build |
 | D41 | Whether joining still means sharing client details | **Shared while the collective is live, and it ends when the membership does.** See the amended wording below: this is not the status quo, and two parts of it do not exist yet |
 | D42 | The same guest booking two member venues becomes two client records, permanently | **Accept, and explain it in the help centre only.** No product UI, no banner, no warning at join. A minor issue that help articles and customer service can cover |
-| D44 | A member that also runs classes, events, tables or rooms | **Appointments only for now, stated in the product, and built so other models can be added later.** The guards, warnings and refusals in §6.14 all stand. The forward-compatibility requirement is new: see below |
+| D44 | A member that also runs classes, events or bookable rooms | **Appointments only for now, stated in the product, and built so other models can be added later.** The guards, warnings and refusals in §6.14 all stand. The forward-compatibility requirement is new: see below |
 | D49 | What a host sees about the collective's trade, and what a member sees about others | **Full mutual visibility, made explicit and consented at join.** Every member sees every other member's figures, as today, but named and broken down by venue rather than blended into one unlabelled total, and agreed to rather than discovered |
 | D50 | Whether a host can undo a change that has already reached members | **Yes, 60 seconds.** "Put it back" in the save summary, restoring the master's before-image from the audit trail and re-applying |
 | D51 | Whether host changes may carry a future effective date | **Not planned.** Changes apply straight away. Remove it from the open questions rather than carrying it as phase two |

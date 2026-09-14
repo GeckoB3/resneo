@@ -245,7 +245,7 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS, MV
 | REP-05 | route | Narrowing a link does not silently remove a revenue column while membership continues | W17 Reporting |
 | BM-01 | route | Invite and accept refuse a venue with no active appointments model, with the reason | W20 Booking models |
 | BM-02 | route | Removing `unified_scheduling` while in a collective is refused with a coded 409 | W20 Booking models |
-| BM-03 | unit | The redirect leaves a route through for a member's classes, events, tables and resources | W20 Booking models |
+| BM-03 | unit | The redirect leaves a route through for a member's classes, events and resources | W20 Booking models |
 | BM-04 | route | Currency is gated at create, invite and accept, as timezone already is | W20 Booking models |
 | BM-05 | unit | Two venues cannot be told a shared resource is safe: the product says it is unsupported | W20 Booking models |
 | BM-06 | route | A multi-service visit that would span venues is refused with the explanation, before the details step | W20 Booking models |
@@ -1287,7 +1287,7 @@ Same format as the sections above. Each of these covers an area the first pass d
 
 #### BM-01 to BM-06 Booking models and the appointments-only boundary
 - **Layer:** route (BM-01, BM-02, BM-04, BM-06), unit (BM-03, BM-05). **Workstream:** W20. **Split-brain:** SB-35, SB-36. **Decisions:** D44, D45.
-- **Pins:** The synthetic venue declares one booking model, so a member's classes, events, tables and rooms leave the web when its page redirects, and nothing says so. Currency is gated nowhere.
+- **Pins:** The synthetic venue declares one booking model, so a member's classes, events and bookable rooms leave the web when its page redirects, and nothing says so. Currency is gated nowhere.
 - **Scenarios:** BM-01 invites a class-only venue. BM-02 removes `unified_scheduling` from a member in a live collective. BM-03 follows a redirect for a member that also runs classes. BM-04 invites a venue trading in another currency. BM-05 asserts the product's own words about shared resources. BM-06 books a multi-service visit whose segments live at two venues.
 - **Expected:** BM-01 and BM-04 refused with plain reasons. BM-02 coded 409. BM-03 the member's other models keep a route through, and the member was warned before accepting. BM-05 the product states shared resources are unsupported rather than implying they work. BM-06 refused with the explanation shown before the details step, as D28 already does for groups.
 - **Location:** `src/lib/linked-accounts/collective-venue.ts; src/lib/linked-accounts/eligibility.ts; src/app/api/venue/route.ts; src/app/book/[venue-slug]/page.tsx`

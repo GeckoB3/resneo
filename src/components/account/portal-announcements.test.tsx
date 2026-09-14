@@ -145,7 +145,10 @@ describe('a forced failure is announced with role="alert"', () => {
   it('payment methods', async () => {
     installFailingApi(PAYLOADS.paymentMethods, 'Could not start setup');
     withToast(<AccountPaymentMethodsSection />);
-    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'v1' } });
+    // The select renders before its venues load. Choosing 'v1' before that option exists leaves the
+    // value empty, so Add card never appears: on a slow CI runner that race failed this test.
+    await screen.findByRole('option', { name: 'The Wharf' });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'v1' } });
     (await screen.findByRole('button', { name: 'Add card' })).click();
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not start setup'));
   });

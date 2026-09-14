@@ -238,7 +238,7 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS-01 
 | MV-02 | route | Staff invite refuses an email that already works at another venue, with the plain reason | W16 Multi-venue people |
 | LIFE-09 | pgtap | Leaving, removal and dissolve end the collective's own access and leave every account link untouched | W7 Lifecycle |
 | LIFE-10 | route | Contact search reaches every live member venue, names the owner, and refuses outside the collective | W7 Lifecycle |
-| REP-01 | unit | `bookings.collective_id` and the collective `source` value are read by every report, filter and export | W17 Reporting |
+| REP-01 | unit | `bookings.collective_id` is read by every report, filter and export (no collective `source` value, D55) | W17 Reporting |
 | REP-02 | route | Booked revenue breaks down by venue and never blends without naming the venues | W17 Reporting |
 | REP-03 | route | Every member's figures are named and subtotalled, and the mutual visibility was consented at join | W17 Reporting |
 | REP-04 | unit | `buildPriceSummary` reads the snapshot first and agrees with `loadRowTotalResolver` | W1 Booking correctness |
@@ -1371,7 +1371,7 @@ Same format as the sections above. Each of these covers an area the first pass d
 - **Layer:** unit (REP-01, REP-04), route (REP-02, REP-03, REP-05). **Workstream:** W17, and W1 for REP-04. **Split-brain:** SB-30, SB-31. **Decision:** D49.
 - **Pins:** `bookings.collective_id` is written by three create paths and read by nothing; Booked revenue already blends every member's takings in both directions with no subtotal; `buildPriceSummary` disagrees with `loadRowTotalResolver` today.
 - **Scenarios:** REP-01 sweeps every report, filter and export for a collective read. REP-02 loads Booked revenue for a host and asserts the per-venue breakdown. REP-03 loads it as a member and checks the consent record. REP-04 compares the two price paths on a booking whose service price later changed. REP-05 narrows an account link and reloads.
-- **Expected:** REP-01 collective bookings are identifiable everywhere money is counted, and `source` distinguishes a collective-page booking from the venue's own. REP-02 one row per venue, named, plus a total. REP-03 the member sees every venue's figures, because D49 chose mutual visibility, but each is named and subtotalled and the join dialog recorded the agreement: an unlabelled blended total is a fail even though the access is intended. Guest contact details never cross a venue boundary in a figures view. REP-04 both read the snapshot and agree. REP-05 the column does not silently vanish while membership continues.
+- **Expected:** REP-01 collective bookings are identifiable everywhere money is counted, and `collective_id` distinguishes a collective-page booking from the venue's own (`source` keeps its values, D55). REP-02 one row per venue, named, plus a total. REP-03 the member sees every venue's figures, because D49 chose mutual visibility, but each is named and subtotalled and the join dialog recorded the agreement: an unlabelled blended total is a fail even though the access is intended. Guest contact details never cross a venue boundary in a figures view. REP-04 both read the snapshot and agree. REP-05 the column does not silently vanish while membership continues.
 - **Location:** `src/lib/reports/booked-revenue.ts; src/lib/booking/payment-display.ts; src/app/api/venue/export/route.ts`
 
 #### REP-06 Reports after the end

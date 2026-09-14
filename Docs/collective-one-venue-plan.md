@@ -1842,9 +1842,10 @@ links, not off the collective.
 
 - **Make collective trade visible.** `bookings.collective_id` already exists
   (`20260919120000_linked_accounts.sql:149-150`) and is written by the create paths; nothing reads
-  it. Add it to the report filters and to every export, and give `source` a collective value so
-  "booked on the collective page" is distinguishable from a booking the member took on its own
-  page. Without this, no acceptance question about the collective's performance can be answered.
+  it. Add it to the report filters and to every export, and read it to tell "booked on the
+  collective page" apart from a booking the member took on its own page. Without this, no
+  acceptance question about the collective's performance can be answered. `source` gets no
+  collective value (D55): `collective_id` is the attribution.
 - **Fix the accidental symmetry first.** Booked revenue reaches other venues through
   `loadAccessibleLinkedVenueIds` and `grantAllowsRevenueReporting`
   (`reports/booked-revenue.ts:83-85,316-317`), and membership forces a full mutual mesh
@@ -2093,8 +2094,8 @@ that environment (step 3); the production list exists only once steps 1 and 3 ha
    `collective_audit_events` (as `migration_applied` rows targeted at each venue, carrying the
    archived rows in `changes.before`), so history survives the drop. Copies at former members that
    still follow a dissolved collective's host are detached (`independent`) with an audit row.
-   Bookings carrying a `collective_id` and `source = 'booking_page'` are backfilled to the
-   collective source value, so the reporting in §6.15 shows the collective's real history.
+   Bookings keep their `source`; their `collective_id` already carries the collective's history
+   for the reporting in §6.15 (D55), so no source backfill runs.
 
 **Pass A go conditions the migration depends on.** A migration is not runnable on an environment
 until: `venues.stripe_charges_enabled` has been backfilled for every venue with a Stripe account,
@@ -2272,7 +2273,7 @@ Effort is relative (S small, M medium, L large) and assumes one engineer familia
 | W14 | C1 code removal, then C2 contract | S | W9 on both environments |
 | W15 | Grants hardening (anon writes on service tables, anon read of assignments) | S | live grant check |
 | W16 | Multi-venue people: the invite route refuses an email that already works at another venue, with a plain message, and the silent redirect into signup is replaced by one that says what happened and who to contact. No venue chooser (D38), so this is small | S | none |
-| W17 | Reporting and attribution: read `bookings.collective_id`, a collective value for `source`, per-venue breakdown and venue names in Booked revenue, the mutual-visibility consent at join, collective filters and export columns, and `buildPriceSummary` on the snapshot (SB-30, SB-31, D49) | M | W1a, W7 (the join dialog's consent, REP-03) |
+| W17 | Reporting and attribution: read `bookings.collective_id` (no collective value for `source`, D55), per-venue breakdown and venue names in Booked revenue, the mutual-visibility consent at join, collective filters and export columns, and `buildPriceSummary` on the snapshot (SB-30, SB-31, D49) | M | W1a, W7 (the join dialog's consent, REP-03) |
 | W18 | Operations: the two crons, the verifier and its repairs, alert thresholds, and the platform support console's collective panel (§6.16) | M | W3 |
 | W19 | Public identity and reach: metadata and canonicals on `/book/c/{slug}` and every member page, the waitlist on the synthetic venue, the full resolved flag set, "any available" fairness and order (SB-33, SB-37, SB-40, PB-17, D43, D48) | M | W10 |
 | W20 | Booking models and eligibility: appointments-only gates at invite and accept, the member warnings, the "also runs" line, `entity_type` and the real model list (§6.14, D44, D45). The currency gate and the booking-model lock are W7's; BM-02's lock test is kept here only as a reference | S | W7 |
@@ -2456,6 +2457,7 @@ All nine are settled. The answers are recorded here as taken, with what each one
 | D44 | A member that also runs classes, events or bookable rooms | **Appointments only for now, stated in the product, and built so other models can be added later.** The guards, warnings and refusals in §6.14 all stand. The forward-compatibility requirement is new: see below |
 | D49 | What a host sees about the collective's trade, and what a member sees about others | **Full mutual visibility, made explicit and consented at join.** Every member sees every other member's figures, as today, but named and broken down by venue rather than blended into one unlabelled total, and agreed to rather than discovered |
 | D50 | Whether a host can undo a change that has already reached members | **Yes, 60 seconds.** "Put it back" in the save summary, restoring the master's before-image from the audit trail and re-applying |
+| D55 | Whether `bookings.source` gets a collective value (§6.15). Decided 2026-09-14 | **No.** `bookings.collective_id` is the attribution: Booked revenue, the bookings list, its "Booked through" filter and the bookings export all read it (W17). About 29 checks in the web code treat `booking_page` as a public source to decide deposits, whether an email is required and form checks; a new value would have to be added to every one, a missed one would change what a guest is charged, and the mobile app would receive a value it does not know. No source backfill runs in Pass A |
 | D51 | Whether host changes may carry a future effective date | **Not planned.** Changes apply straight away. Remove it from the open questions rather than carrying it as phase two |
 | D52 | What "reverting to their own services" means for the host's services in a member's account when the member leaves or the collective dissolves. Decided 2026-09-14 | **They stay, as ordinary services the member owns.** The owner's words: they were real services the member was offering, and it is highly likely they would want to continue offering them. So release lifts the lock and changes nothing else: the released service keeps its settings, its calendar choices and its bookings, and appears on the member's own page once that page is showing again. Nothing is parked, retired or deleted at release. Where the member kept a same-named original separate at join (the D1 default, parked while live under D2), both stay active and the released one carries `svc.member.card.cameFrom` ("Came from {host}") for 30 days so the two are telling apart; the member decides what to do with the pair, and nothing decides for them |
 

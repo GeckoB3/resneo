@@ -109,7 +109,7 @@ H: PROJ projection-blind fakes; AFTER no-op `after()`; C0 hosted grants; RECUR p
 
 ## 3. Test inventory
 
-147 tests. By layer: route 45, unit 35, pgtap 30, e2e 5, live-staging 6, migration 6, security 4, engine-invariant 4, performance 4, component 3, app-contract 3, manual 2.
+153 tests. By layer: route 47, unit 35, pgtap 30, component 7, e2e 5, live-staging 6, migration 6, security 4, engine-invariant 4, performance 4, app-contract 3, manual 2.
 
 The first 113 came from the first pass. The 34 added by the second pass (OPS, MV, REP, BM, PLAN, SEO, WAIT, FAIR, DIARY, HLP, TERMS-16, CSA-04, DB-10 and SEC-03 to SEC-05) cover the areas it reached that the first did not: operations and alerting, people who work at more than one venue, reporting and attribution, booking models other than appointments, plan tiers and caps, the public page's metadata and waitlist, diary truth, and the help centre's own copy rules. They are detailed in §3.28.
 
@@ -264,6 +264,12 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS, MV
 | SEC-03 | route | A pre-booking form files at the venue that will hold the booking | W4 Catalogue and booking switch |
 | SEC-04 | pgtap | Drift the engine cannot explain is audited and alerted, not quietly repaired | W3 Engine |
 | SEC-05 | security | New per-calendar and attribution columns are not readable by `anon` | W15 Grants |
+| UI-C-01 | component | The create wizard surfaces every server refusal inside the step that caused it | W16 Multi-venue people |
+| UI-C-02 | component | The collective row's pill describes the page, not the membership row | W5 Host Services page |
+| UI-C-03 | component | A member's service view renders values, never disabled inputs | W6 Member locks and UI |
+| UI-C-04 | route | The services grid chunks bulk operations and reports a result per venue | W5 Host Services page |
+| UI-C-05 | component | The join disclosure names the member's own address and records consent | W7 Lifecycle |
+| UI-C-06 | route | D3 is reachable: a member's own page actually hands over, and a screen sets it | W10 Booking pages and links |
 
 ### 3.2 Test infrastructure
 
@@ -1310,6 +1316,17 @@ Same format as the sections above. Each of these covers an area the first pass d
 - **DB-10** (pgtap, W3): every classified column's registry entry matches what an apply actually writes. DB-07 proves a column is classified; this proves the classification is true of the engine's behaviour, which is the claim that matters. Enumerate from `pg_attribute`; `service_items` has 46 columns today.
 - **SEC-03** (route, W4): a pre-booking form files at the venue that will hold the booking. On "any available", complete an inline form and then let the booking land on a calendar at a different venue. Expect the record at the booking's own venue, not at whichever venue happened to be first in the merge. Not a privacy test: the merged answer is deliberately less precise than each member's own page already is, and the single-venue exposure is an accepted platform decision (see plan §6.6, "What this is not").
 - **SEC-04** (pgtap, W3): drift the engine cannot explain is kept, not tidied away. Change a replica by hand behind the engine flag, the way an engineer fixing something in the SQL editor would, then run the verifier. Expect an `unexplained_drift_repaired` audit row carrying the before-image, and an alert, rather than an ordinary apply row. I41 returns 0 afterwards. This is not a test that the flag keeps anyone out: it does not, and §6.4 says why it should not try.
+#### UI-C-01 to UI-C-06 The collective's screens
+
+Added by the UI review, 2026-09-14. Six screens carry the owner's requirements, and each has one test that fails today.
+
+- **UI-C-01** (component, W16): every refusal from the create route renders inside the wizard step that caused it, with a link back where the cause belongs to an earlier step. Today the dialog's catch hands the message to the parent panel, which renders behind the still-open dialog, so all ten refusals are invisible and the button merely stops spinning (CB-41). Assert each of the ten.
+- **UI-C-02** (component, W5): the row shows "waiting for venues" while fewer than two are active, "no services yet" when two are active but nothing is on the page, and "live" only when the public page actually serves. Today it shows a green "Active" pill from the instant of creation while the page serves its unavailable state (CB-42). Also assert the member line counts and names the same set (CB-43).
+- **UI-C-03** (component, W6): the member's service view contains no `disabled` form control for a host-managed field, renders each value as text with empties written out in words ("No deposit", "No forms"), and presents the member's own editable controls as ordinary live inputs. The rule under test is that a disabled form is rendered only when the artefact is itself a form, which is why the managed compliance form uses the renderer's preview mode and passes.
+- **UI-C-04** (route, W5): a bulk change across 5 venues and 40 services is split into chunks under the 200-operation cap (CB-44) and returns a per-operation envelope, so a partial failure is reported per venue rather than as success. Today `set_providers` skips failures and returns `{ ok: true }` unless every one failed (CB-45). Assert that failed cells stay staged and that Retry re-sends only those.
+- **UI-C-05** (component, W7): the join disclosure shows the member's real booking address and the collective's, states that client records and takings are shared while the collective runs and that the sharing ends with the membership, and refuses to submit without a recorded `consent_version`. Assert the invitation email no longer claims data stays separate (CB-51).
+- **UI-C-06** (route, W10): a screen writes `solo_page_behavior`, and a member's own page hands over when the D3 conditions hold. Today the column defaults to `keep_live`, no screen writes it, and the sidebar already hides "Your Booking Page" as though it had handed over (CB-47). Assert the host's own page hands over too.
+
 - **SEC-05** (security, W15): `anon` cannot read the new per-calendar and attribution columns. `updated_by_user_id` is an `auth.users` identifier and `public_read_calendar_service_assignments` is `USING (true)` today, so this fails until that policy is dropped and the public catalogue is served through the admin client.
 
 ## 4. Invariants

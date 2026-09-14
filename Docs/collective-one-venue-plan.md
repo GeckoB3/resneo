@@ -78,7 +78,7 @@ one venue even after everything above is fixed:
   runbook in the design, and the platform support console has no collective view, so the first
   report of a stuck replica would come from the host.
 
-In total: 42 split-brain cases (§3), 43 collective bugs, 7 of them high severity, and 19 platform
+In total: 42 split-brain cases (§3), 53 collective bugs, 11 of them high severity, and 19 platform
 bugs found on the way (§4).
 
 **What we recommend.** Host-managed replicas with one truth per fact (§5, §6). The host's own
@@ -98,7 +98,7 @@ six deploy passes (owed migrations, expand, migrate existing collectives, switch
 remove old code, contract) across 21 workstreams, the largest being the booking correctness work,
 the engine and the lifecycle (§8). Two of the six added by the second pass, multi-venue people
 (W16) and reporting (W17), carry live bugs and start immediately rather than waiting on the engine.
-Testing is designed as the safety net: 147 tests including
+Testing is designed as the safety net: 153 tests including
 database-level convergence and real two-connection race tests, SQL invariants run by CI, a daily
 verifier and every deploy step, rollback drills, and an acceptance checklist written for you (§9 and
 `Docs/collective-one-venue-test-plan.md`).
@@ -513,6 +513,16 @@ every venue.
 | CB-41 | Creating a collective fails silently. The dialog's catch hands the message to the parent panel, which renders it inside `SectionCard.Body` behind the still-open dialog, so all ten server refusals (address taken, name taken, name on hold, not eligible, already in a collective, plan) are invisible: the button simply stops spinning | High | Yes | `VenueCollectivesPanel.tsx:532-534` rendering at `:149-151`; refusals in `collectives/route.ts:30-163` |
 | CB-42 | The collective row shows a green "Active" pill from the moment of creation, while the public page serves its unavailable state until two members are active. "Active" describes the membership row's status column, not the page, and it is the first thing a new host reads | Medium | Yes | `VenueCollectivesPanel.tsx:307-309`; `collectives.ts:872,946,978-981` |
 | CB-43 | The collective row's member line counts only active members but names invited ones too, so a new collective reads "1 active member, Riverside Clinic, Northside Studio" | Low | Yes | `VenueCollectivesPanel.tsx:312-316`; `collectives.ts:327-333,438` |
+| CB-44 | The catalogue's `ops` array is capped at 200, so a realistic collective setup (5 venues, 40 services, roughly 800 to 1,600 operations) is refused outright with "Invalid request". Any bulk action has to chunk, and nothing in the current design says so | Medium | Yes | `src/lib/linked-accounts/validation.ts:337-354` |
+| CB-45 | `set_providers` swallows per-operation failures: it skips a failed op with `continue` and returns `{ ok: true }` unless every single one failed, so a host is told a bulk change succeeded when part of it did not. `addCalendarToOffering` already builds a structured error per op, so the envelope is the missing piece, not the information | High | Yes | `collectives/[id]/catalogue/route.ts:767,784-786`; errors built at `:228-237` |
+| CB-46 | A host can strip a calendar that has upcoming bookings and is never told, while a member doing the same is stopped with a 409 and shown the bookings. The protection exists; it is only wired to one side | Medium | Yes | `catalogue/route.ts:726-736,739-751` against `AppointmentAvailabilitySettings.tsx:819-844` |
+| CB-47 | **D3 is not implemented and cannot be reached.** `solo_page_behavior` defaults to `keep_live`, is read by the redirect resolver and is settable over the API, but **no screen anywhere writes it**. So nothing is superseded today except at an adopted address, and the host's own page is never superseded at all. Meanwhile the sidebar already hides "Your Booking Page" once two members are active, so the normal case is a live own page its owner can no longer find | High | Yes | `collectives.ts:397`; `catalogue.ts:634`; `members/route.ts:318`; no writer in `src/components` or `src/app/dashboard`; sidebar `collectives.ts:886` |
+| CB-48 | The host previews a page that differs from the one guests get. `collective-settings-to-preview-public.ts:40-52` hard-codes address, phone, website and opening hours to null, currency to GBP and `booking_paused` to false, while the live page fills all of them from the host. The client already holds the real values in `collective.hostContact`, and the single-venue preview passes them properly | Medium | Yes | `collective-settings-to-preview-public.ts:40-52` against `collective-venue.ts:151-170` and `venue-settings-to-preview-public.ts:21-23,43-45` |
+| CB-49 | Share and embed is never rendered on the collective scope at all: it sits in the `else` branch. Where the QR is reachable it encodes the collective address but prints the venue's name and names the file after the venue slug | Medium | Yes | `SettingsView.tsx:1638-1686`; `WidgetSection.tsx:146,182,186` |
+| CB-50 | A collective's address can never be changed after creation. The PATCH accepts name, config, logo, cover, slug strategy and adopted venue, but never `slug`, while the page name is freely editable, so the name and the address drift apart permanently | Medium | Yes | `collectives/[id]/route.ts:74-200` |
+| CB-51 | **The invitation email tells a joining venue the opposite of the truth about its data.** Its only description of the arrangement reads "A venue collective is a combined public booking page that shows your services alongside other linked venues, under shared branding. Your booking and client data stay fully separate." Both halves are wrong: under D3 the collective page replaces the member's page rather than sitting alongside it, and membership forces a full mutual link mesh whose grant is exactly what carries client-record access and revenue reporting, which D41 now keeps deliberately. This is the one sentence a member reads about their data before agreeing | High | Yes | `notifications.ts:436-442`; `collectives.ts:501-512`; `reports/booked-revenue.ts:83-85,316-317` |
+| CB-52 | Accepting an invitation publishes more than the member knows. Accept defaults `visible_practitioner_ids` and `visible_service_ids` to `[]`, and empty means **all** (`visiblePractitioners.length === 0 ? true`), so one unconfirmed click puts every calendar and every service the venue has onto a public page it does not control. No screen ever showed them which | High | Yes | `collectives/[id]/members/route.ts:244-247`; `collectives.ts:988-1000` |
+| CB-53 | The first venue invited cannot see the page it is being asked to join: the "View combined booking page" link is gated on two active members, and a fresh collective has exactly one | Low | Yes | `VenueCollectivesPanel.tsx:317`; `collectives.ts:438` |
 
 ### 4.2 Platform bugs found on the way (every venue)
 
@@ -624,7 +634,7 @@ amended design. Detail that belongs to one audience lives in the two companion d
 
 - `Docs/collective-one-venue-ux-spec.md`: the page-by-page specification, the "where is this
   edited" matrix, every string of copy, the lifecycle journeys and the notifications.
-- `Docs/collective-one-venue-test-plan.md`: the full test inventory (147 tests), the invariant
+- `Docs/collective-one-venue-test-plan.md`: the full test inventory (153 tests), the invariant
   SQL, the rollout gates and the owner's acceptance checklist.
 
 ### 6.1 Principles
@@ -1145,11 +1155,23 @@ calendar work out of the combined-page manager and into the Services page, which
 service, one screen, one place the reach is explained. But the manager it replaces has real bulk
 actions (per-venue and global select-all when adding, link-all and unlink-all, "Match categories
 from your venues") and the specification as first written replaces them with a single "Choose
-services for the page" dialog. Counted out for a realistic setup, ten services across three venues
-with two calendars each, that turns roughly 72 interactions and one save into roughly 101
-interactions and ten saves, because every calendar assignment now goes through a per-service
-dialog. The fold is correct and the bulk lane has to land with it, not after it: see the
-specification's Collective overview page, which is where the bulk lane lives.
+services for the page" dialog. Counted properly, the regression depends entirely on the starting state,
+which the first version of this paragraph left out:
+
+| Starting state | Today's manager | The fold, with no bulk lane |
+|---|---|---|
+| Services exist only at the host | 47 interactions, 2 saves | 77 to 81, 11 to 20 saves |
+| Members already have some of them | 67 to 70, 2 saves | 77 to 81, 11 to 20 saves |
+| Every venue already shares the menu | **6 interactions, 1 save** | 77 to 81, 11 to 20 saves |
+
+So "roughly 72 versus 101" is fair for the middle case only, and the earlier save count was too
+kind: the offer switch is its own PATCH, so it is up to 20 saves, not ten. Two things matter more
+than the arithmetic. Twenty of those 72 interactions are the link question firing once per
+**calendar** rather than once per venue, which is a defect in today's manager rather than a cost of
+keeping it. And the real regression is the bottom row: today's best case is six interactions,
+because the manager can see that a member already offers a service, while the fold has no best case
+at all, because nothing in it knows. The fold is correct and the bulk lane has to land with it, not
+after it: see the specification's services grid.
 
 ### 6.9 Public pages and links
 
@@ -1709,7 +1731,7 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
   nothing tests the cron wrapper this design's two new crons depend on, nothing tests the platform
   console, and nothing stops an em-dash reaching a help article, on a project that rewrites about
   twenty of them.
-- **147 tests across layers**: 35 unit and sweep, 45 route, 3 component, 30 pgTAP, 4 engine
+- **153 tests across layers**: 35 unit and sweep, 47 route, 7 component, 30 pgTAP, 4 engine
   concurrency, 6 migration, 3 app-contract, 5 end-to-end, 6 live-staging, 4 performance,
   4 security, 2 manual. Key groups: the terms resolver and price snapshot (TERMS, PRICE),
   assignment writes (CSA), engine objects, locks and convergence (DB, ENG, REV), real two-connection

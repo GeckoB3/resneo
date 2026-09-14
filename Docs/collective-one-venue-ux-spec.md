@@ -72,6 +72,36 @@ Stale calendar sets return 409 `STALE_RESOURCE` (`cal.stale.*`); the overrides r
 | Communications templates, reminders | Each venue; owning venue's templates apply | That venue's admins | none | none | Differ by calendar's venue (open question) |
 | Notification preferences | Each venue, `NotificationPrefsCard` | That venue's admins | Own | Own | n/a |
 
+## 1.5 Where the collective lives: navigation
+
+Added 2026-09-14, because the owner asked that the menus be as clear and sensible as possible, and because the first draft specified pages without saying how anyone reaches them.
+
+**Today.** The sidebar is built from `BASE_NAV_ITEMS` (`DashboardSidebar.tsx:47-56`, assembled `:257-370`): an appointments admin sees Home, Appointments, Appointment Calendar, New Appointment, Contacts, Compliance, Services, Waitlist, Calendar Availability, Settings, then one or two external booking links (`:552-578`). Settings holds exactly twelve tabs (`SettingsView.tsx:110-172`), and collective work lives in tabs 4 and 12, the two ends of the strip.
+
+Click counts today: create 5; invite 6 or 7 by two different routes to the same panel; edit the page 2; choose services 3 plus a tick each; leave 4. And **"is a member up to date" is not answerable in any bounded number of clicks**: the only signal is one badge per service per calendar inside the manager's Services and calendars tab (`CombinedPageManager.tsx:2221-2290`), up to sixty badges with no filter. A member admin has no sync signal at all.
+
+**The judgement.** The case for leaving it in Settings is real: it is configuration rather than daily operation, most venues are in no collective and none is in more than one, a conditional sidebar entry makes the menu change shape under the user, and two clicks to the page editor is already a record worth protecting. The case against is that this redesign changes behaviour on **eight of the twelve settings tabs** and four sidebar destinations. A thing that changes the meaning of eight settings tabs is not a setting; it is a mode the whole dashboard is in, and a mode needs somewhere you can go and ask what it is doing. The bulk lane settles it: a table with a sticky selection bar, filters and search cannot live at depth four on a 343px content column, and nesting it there is how it quietly gets dropped.
+
+**The split, by question rather than by object:**
+
+| The user is asking | Where it lives | Why |
+|---|---|---|
+| "How does my booking page look, and what do guests see?" | **Settings, Booking Page** (unchanged) | Under D3 the collective page **is** the venue's booking page. Splitting the page guests see across two areas would be worse than today. The scope switch already frames the combined page and the own page as two views of one thing, which is the right model. Two clicks preserved exactly |
+| "Who is in this, and is it working?" | A new top-level area, **Collective** | Health, the services-by-venue grid, the bulk lane, venues and invitations, history |
+| "Which other venues share a diary with me?" | **Settings, Linked accounts** (unchanged) | Account links outlive collectives and are a different relationship |
+
+**The sidebar entry.** Label `nav.collective` ("Collective"), fixed, with the collective's name on a second line so the label never moves while the name varies. Placed immediately after Services, because that is what it most changes. Shown to admins of a venue in a live collective, and to members as well as hosts: a member's shop front is now the collective page, so hiding the area from them would be the same mistake the sidebar already makes (below). Settings stays at twelve tabs.
+
+**Tabs inside it.** Host: Overview, Services, Venues, History. Member: Overview, Services, History. The Services tab is the grid and bulk lane specified in item 16 below; Overview is the health strip and "what needs you"; Venues is membership, invitations and hosting; History is the audit trail with its own filters and export.
+
+**Three sidebar defects to fix while in there**, all live today and none collective-specific in cause:
+
+1. `DashboardSidebar.tsx:489-491` matches `/dashboard/calendar-availability` with `startsWith('/dashboard/calendar')`, so two nav items highlight at once on every appointments venue.
+2. The sidebar hides "Your Booking Page" once two members are active (`collectives.ts:886`), but a member's own page only actually hands over when `solo_page_behavior = 'redirect'` (`catalogue.ts:634`), which defaults to `keep_live` and **has no UI anywhere**. So today's normal case is a live own page its owner can no longer find in the nav. D3 settles the behaviour; the nav has to follow it rather than pre-empt it.
+3. `/dashboard/linked-calendar` has no inbound link at all; the control that looks like its door points at `/dashboard/calendar` (`LinkedAccountsSection.tsx:456-463`).
+
+**Breadcrumbs and titles.** Every collective screen states whose thing is being edited in its `PageHeader`: the collective's name as the title on collective screens, the venue's name as an eyebrow on venue screens that a collective changes (Services, Calendar Availability). A host editing a service that is on the page must never have to infer which of the two they are changing.
+
 ## 2. Pages
 
 ### 0. Conventions on every page
@@ -120,7 +150,19 @@ Stale calendar sets return 409 `STALE_RESOURCE` (`cal.stale.*`); the overrides r
 
 **Add from another venue.** Secondary header button `svc.addFrom.button` (host admins, at least one member). Dialog `svc.addFrom.title`, help `svc.addFrom.help`, select `svc.addFrom.venueLabel`, radio list of that venue's own services (name, length, price), empty `svc.addFrom.empty`, note `svc.addFrom.adoptNote`, confirm `svc.addFrom.confirm`, done `svc.addFrom.done`; member gets `N26`.
 
-**Edit service dialog, offered service** (`Dialog` 1481-1639):
+**The editor becomes a page, not a dialog** (decided 2026-09-14). `AppointmentServiceFormFields` already holds about twenty blocks and twenty-four fields in one flat column (`:103`), inside a dialog capped at `max-w-4xl` (`AppointmentServicesView.tsx:1481-1639`). This design adds the heaviest section yet, a per-venue calendars list. Four reasons to move it to `/dashboard/appointment-services/[serviceId]`: it is already past the size a dialog can carry; the spec already needs `?service={id}` deep links, which a page gives for free; sub-editors (add-on group, compliance requirement, per-calendar values) currently stack dialogs on dialogs; and a page can have honest save semantics, where today Compliance writes immediately under a footer that says "Save Changes". Ten named sections, collapsed to summaries when untouched, with the seven `staff_may_customize_*` flags moved inside "Where it is sold" so the permission sits next to the thing it governs.
+
+**One tint rule.** Exactly one visual treatment means "this reaches other businesses", used on every section that does and nowhere else. Today's proposal spreads per-venue failure across three places with three Retry buttons; all per-venue health moves to a single collective strip at the top of the page, which owns the only Retry.
+
+**A constraint the spec never stated, and must.** `PATCH /api/venue/appointment-services` replaces calendar assignments wholesale (`route.ts:1394-1401`), and `preservedOutsideScope` is empty for admins (`:1376-1379`). So a host sending one combined `practitioner_ids` list would **delete every member venue's assignments**. That is the concrete reason the spec sends `collective_calendars { add, remove }` as a diff rather than a set, and it should be written down next to the payload rather than left as an unexplained choice.
+
+**Five of the seven per-calendar chips cannot be true yet.** `calendar_service_assignments` holds only `custom_duration_minutes` and `custom_price_pence` (`20260430120000_unified_scheduling_engine.sql:114-121`) and the GET returns the other five as hard-coded null (`route.ts:680-684`). So `svc.cal.chip.*` and four columns of "Compare values" are specified against columns D5 has yet to build. Either the chips ship with D5 or this screen ships with two of them.
+
+**The save moment, in four tiers**, so that "this reaches other businesses" is unmissable once rather than noise the host learns to dismiss: an ambient reach line in the editor; a live summary of what is dirty; a confirmation driven by the actual diff, raised only for commercial and form changes; and the D50 undo with a visible countdown. The undo must not live in the red error slot at the top of a scrolled list, which is where the first draft put the save summary.
+
+**Card states, simplified.** The header currently reaches eleven objects. One state line per card, not three, and the two switches (Active, and On the page) must not be visually identical, because one of them retires the service at every member.
+
+**Edit service, offered service** (the sections below apply to the page; anchors are the dialog they replace, `Dialog` 1481-1639):
 - `description` = `reach.host.master` (not offered: `reach.host.ownOnly`). Footer left text `svc.form.footerReach`.
 - Category help (146-148): `svc.form.categoryHelp.host`.
 - Add-ons (`AddonGroupsSection.tsx:170-187`): `svc.form.addons.reach`; `AddonGroupEditor` opened here shows `addons.editor.reach` when the group is used on the page.
@@ -202,6 +244,19 @@ Host: cards (319-408) used on the page get `CollectivePill` and `reach.library.a
 From the host form row, member View dialog or "Edit your settings". Title `values.title`; description `reach.calendar.values`; host editing another venue adds `values.hostEditingMember`. One input per permission that is on, each with `values.standard` and `values.useStandard`. Footer `values.cancel`, `values.save`. Inline errors `values.error.cardHoldFloor`, `values.error.notOffered`. Admins are no longer refused.
 
 ### 10. Settings, Booking Page tab (`SettingsView.tsx:1629-1690`)
+
+**Rewritten 2026-09-14.** The owner asked for this screen specifically: "professional, clear and well laid out". Today it is none of those, for reasons that are structural rather than cosmetic.
+
+**It is three levels of tabs deep**: the Settings tab strip, then the scope tabs, then the manager's own tabs. And it has **five different save models on one screen**: 850ms autosave for branding, save-on-blur for the page name, save-on-change-with-a-full-reload for the address radios, a staged sticky bar for calendars, and immediate save-per-click for everything else. The house `SettingsSaveStrip` is already mounted on the same page and the collective path does not use it.
+
+**The proposed shape: one column, seven sections, no nested tabs, two named save lanes.** Sections in order: Identity (name, logo, cover), Address, Look (branding, tabs, About, gallery), Who is on it (a read-only summary linking to the Collective area), Guests (what a guest is asked, sign-in, marketing), Share and embed, Danger (dissolve, or leave). A sticky preview rail sits alongside from `lg:` and collapses to a "Preview" button below. **Save lane one, "looks":** autosave, for anything cosmetic. **Save lane two, "consequences":** confirm-then-save, for anything a guest's booking depends on, including the address. Nothing on this screen saves silently if it changes what a guest can do.
+
+**What should become the collective's own, rather than following the host.** The product already argues this against itself: the manager currently tells the host that the inherited opening hours "do not decide availability" and that a calendar elsewhere "can be open outside the hours shown here". Address, phone and opening hours should belong to the collective, because they are the collective's shop front and the host's are frequently wrong for it. Currency, timezone, wording and the two flow flags keep following the host. Deposit and cancellation terms following the host while the booking lands at a member is a promise the page cannot keep, and needs settling alongside D32.
+
+**The member's view of this tab** is read-only, and it is where D3 is explained: which page guests reach, that it is the collective's, who hosts it, and what happens to their own address. `SettingsView.tsx:1643-1647` currently tells every venue on the own-page scope that collective guests do not use this page, which D3 makes false and which must be rewritten.
+
+**Four defects to fix here**, logged as plan CB-47 to CB-50: D3 has no UI at all and defaults to off, so nothing is superseded today; the preview hard-codes address, phone, hours and currency to placeholder values while the live page fills them from the host, so the host previews a page guests never see; Share and embed is not rendered on the collective scope at all, and where the QR is reachable it prints the venue's name over the collective's address; and the collective's address can never be changed after creation while its name can, so the two drift apart permanently.
+
 - Scope switch (`CombinedPageNotice.tsx:29-93`): description `bp.switch.host`/`bp.switch.member`; tabs `bp.switch.tab.combined`, `bp.switch.tab.own`; `OwnPageStatusLine` `bp.status.redirecting` or `bp.status.showing` + `bp.reason.*`. Leaving with unsaved changes asks `bp.leaveStaged.*` (replaces 1166).
 - Host, collective scope (`CombinedPageScopeContent.tsx`): description `bp.combined.host.description`; manager tabs Page, Services, Members. Page: `HostInheritedSettingsNote` last paragraph (1216-1220) `bp.inherited.prices`; photos note `bp.page.photos`. Services: new read-only `CollectiveServicesOverview` replaces `HostCatalogue`, `VenueServicesPicker`, `ItemCard`, `CalendarAssignment`, `CalendarRow`, link and unlink buttons and `CopySyncStatus` (1446-2340, removed) and the sticky save bar (767-783): title `bp.overview.title`, help `bp.overview.help`, rows by host heading (name, price or `bp.overview.from`, length, calendar chips by venue, `VenueSyncPill`), link `bp.overview.edit` to `/dashboard/appointment-services?service={masterId}` (the view opens that dialog from `?service=`, also fixing `AddonsLibraryView.tsx:366`); button `bp.overview.choose` opens `bp.overview.choose.title` with help `.help`, checkboxes, confirm `.confirm`, empty `.empty`; empty overview `bp.overview.empty`. Members: rows with role pill, `VenueSyncPill`, `bp.members.history`, `bp.members.askToHost`, Remove; invited rows `bp.members.cancelInvite`; ineligible venues disabled with `la.create.ineligible.*`; dissolve button `dissolve.button`.
 - Own scope: remove note 1642-1647. Redirecting: SectionCard `bp.own.redirecting.title`/`.body`, `BookingPageSection` and `WidgetSection` in `<fieldset disabled>`. Showing: `bp.own.showing.body`, editable.
@@ -254,11 +309,11 @@ From the host form row, member View dialog or "Edit your settings". Title `value
 - Guest manage page (`GuestBookingDetailView.tsx:607`): `guest.bookedThrough`. Existing bookings on retired services or calendars that stopped offering the service can still be moved online on the same calendar.
 - Emails: confirmation (`booking-confirmation.ts:114-119`, which covers the text branch; the HTML preamble at `:87-90` needs the same line) adds `email.confirm.through`; Book again (`venue-booking-page-link.ts:17-29`) uses the live resolver, and for member-only services `email.bookAgain.call`; waitlist offers (`notify-appointment-waitlist-offer.ts:80-83`) translate the same way.
 
-### 15. Collective overview, host admin (new page, `/dashboard/collective`)
+### 15. The Collective area (new, `/dashboard/collective`)
 
 Added by the second pass. Items 1 to 14 make **one service** feel like one venue, and do it well. They do not give the host a place to **run** the collective: after the fold its state is spread across the Services banner, each service's calendars section, three manager tabs on the twelfth settings tab, one sentence on a Linked accounts row and a history dialog behind it. A host of four venues cannot answer "which venue is the problem and what is wrong with it" without opening services one at a time. This page is that answer, and it is also where the bulk lane lives, without which the fold makes setup slower than the manager it replaces.
 
-**Where it lives.** Its own sidebar entry under Settings, shown only to admins of a venue in a live collective, labelled with the collective's name (`nav.collective`). The Booking Page tab's manager tabs stay for page design and members; everything about services and calendars links here.
+**Where it lives.** Its own top-level sidebar entry, per §1.5: label `nav.collective` fixed, the collective's name on a second line, placed after Services, shown to admins of any venue in a live collective, members included. Tabs: Overview, Services, Venues, History for a host; Overview, Services, History for a member. Page design stays in Settings, Booking Page, because under D3 the collective page **is** the venue's booking page and splitting it across two areas would be worse than today.
 
 **Header.** `ov.title` (the collective's name), `ov.subtitle`, address with Copy link and Open.
 
@@ -266,9 +321,17 @@ Added by the second pass. Items 1 to 14 make **one service** feel like one venue
 
 **What needs you.** A short list, hidden when empty, of only the things the host can act on: `ov.todo.noCalendars` (a service on the page that no calendar offers), `ov.todo.newVenue` (a member joined and its calendars are not chosen on {n} services), `ov.todo.failed`, `ov.todo.noStripe`, `ov.todo.formsOff`. Each row has one button that goes straight to the fix.
 
-**Services and calendars table.** Rows are the offered services in host order, grouped by heading. Columns: service (name, price, length), then one column per venue showing ticked calendars as chips and a `VenueSyncPill`. Cells are editable in place: clicking one opens the same `CollectiveCalendarsSection` group for that venue, so there is one editor, not two. Above it, `ov.filter.*` (all, needs attention, not on the page) and a search box.
+**The Services tab: a grid, not a list.** This is the owner's "page for adjusting services offered", and at realistic scale it has to be a matrix. Staging today is 21 services across 4 calendars, but the design target is 40 services across 5 venues: 200 cells, and 1,000 to 1,200 service-and-calendar pairs underneath them. That number settles two things.
 
-**The bulk lane.** This is the part that must not be dropped. Selection checkboxes on service rows and on venue column headers, with `ov.bulk.selected` in a sticky bar and these actions: `ov.bulk.offer`, `ov.bulk.withdraw`, `ov.bulk.addCalendars` (a dialog listing every calendar in the collective grouped by venue, with select-all per venue and `ov.bulk.addCalendars.all`), `ov.bulk.removeCalendars`, `ov.bulk.retry`. One confirmation for the whole selection, listing what changes and at which venues (`ov.bulk.confirm.*`), one save, one `CollectiveSaveSummary`. A bulk change that alters a commercial term still raises `svc.commercial.*` once, for the whole selection, with the per-service `diff.row` lines nested under each service name.
+**Columns are venues, not calendars.** Five columns fit; forty do not. Each cell summarises that venue's calendars for that service in three states (all, some, none) and opens a popover to edit them, which is `CollectiveCalendarsSection` scoped to one venue group. Rows are services in the host's own order, grouped by heading.
+
+**Why a matrix rather than a list.** Only at this scale does the argument bite, and it is worth recording so nobody simplifies it back. The host's real questions are column questions: "is Riverside carrying everything?", "which services has nobody picked up?". A list answers those only by opening forty rows. Divergence between venues is the defect this whole project exists to remove, and a matrix renders divergence directly while a list hides it. And a bulk lane needs a rectangle: a list can express "these rows" but not "these rows at these venues".
+
+**Selection and bulk actions.** Select whole rows, whole columns, or both; actions apply where they cross. `ov.bulk.selected` in a sticky bar, with `ov.bulk.offer`, `ov.bulk.withdraw`, `ov.bulk.addCalendars` (with `ov.bulk.addCalendars.all` per venue), `ov.bulk.removeCalendars` and `ov.bulk.retry`. Changes stage rather than apply, so the confirmation can list exactly what changes and at which venues (`ov.bulk.confirm.*`), and one save reports per-venue results. **Cells that fail stay staged and stay selected**, so Retry re-sends only those.
+
+Two server changes are prerequisites, not polish, and both are logged as plan CB-44 and CB-45: the `ops` array is capped at 200 while a full setup is 800 to 1,600 operations, so the client must chunk; and `set_providers` currently skips failed operations and returns success unless every one failed, so "one save reports per-venue results" is unimplementable until it returns a per-operation envelope. The structured per-op error already exists; only the envelope is missing.
+
+**Division of labour, stated once so the two screens never drift.** The grid owns *which* services are on the page and *which calendars at which venues* offer them, in bulk, across everything. The Services page edit screen owns *what a service is*: its name, price, length, options, add-ons, forms and the rest, one service at a time, with its own per-venue calendar section for the single-service case. Neither duplicates the other's job. Item 10's read-only `CollectiveServicesOverview` and its `bp.overview.choose` button are **removed**, because they would be a third control for "put a service on the page"; a card linking here replaces them.
 
 **Preview before you push.** Next to the bulk bar and inside `svc.commercial.*`, `ov.preview.button` opens `ov.preview.title`: a read-only render of what each venue's guests will see afterwards, per venue, including any that would disappear from the page and why (`ov.preview.willHide`). This is the host-side preview items 1 to 11 never provide: today the only previews belong to the member, at accept.
 
@@ -284,14 +347,9 @@ Added by the second pass. Items 1 to 14 make **one service** feel like one venue
 - **What a member sees.** Its own venue by default, its collective bookings identified, and never another member's figures. If the mesh survives D41, the existing "shared with you through a linked account" wording is replaced by `reports.collective.sharedNote`, which names the venues rather than leaving the reader to guess whose money is in the total.
 - **Exports.** Every booking export gains a column saying whether the booking came through the collective and, for the host, which venue it belongs to. No guest contact details cross a venue boundary in a host-scope export.
 
-### 17. Venue chooser (anyone who works at more than one venue)
+### 17. Venue chooser: not built
 
-Today a second staff row locks a person out of the dashboard entirely (plan SB-28, PB-16): the resolver refuses to pick a venue and the layout redirects them into the signup flow. A collective of two venues under one owner is the ordinary case, so this has to exist before the collective work lands.
-
-- **Shell control**, in the dashboard header beside the venue name: `shell.venue.acting` with `shell.venue.change`. Shown only to people with more than one venue.
-- **Chooser dialog**: `shell.venue.chooser.title`, help `shell.venue.chooser.help`, one row per venue (`shell.venue.chooser.row`, naming the person's role there) with `shell.venue.chooser.collectiveLine` under any venue in a collective. The last venue used is remembered per person and is the default on next sign-in.
-- **Safety.** The chosen venue is a preference, never an authority: every venue route validates the acting venue against the caller's own staff rows on every request. A chooser that could be edited into another venue would be worse than the lockout it replaces.
-- **Invite.** Until the chooser ships, `POST /api/venue/staff/invite` refuses an email that already works at another venue, with `staff.invite.otherVenue`, instead of creating the row that causes the lockout.
+Specified in an earlier draft, then removed by D38 on 2026-09-14. The owner chose to refuse the invite rather than build a switcher, so a person who already works at another venue cannot be invited and is told to use a different email address. What remains is the refusal copy `staff.invite.otherVenue`, and one new string for anyone already in the broken state: `shell.venue.locked`, "This account is linked to more than one venue, so we cannot tell which one to open. Please contact support and we will sort it out." The silent redirect into the signup flow is still a bug to fix (plan SB-28, PB-16); it is the message that changes, not the fact that it needs one.
 
 ### 18. Platform support console (ResNeo staff only)
 
@@ -962,18 +1020,27 @@ New component `src/components/linked-accounts/collective/CreateCollectiveDialog.
 Booking Page, Members, "Invite a venue" (ineligible venues disabled with reasons). Sent row shows "(invited)" and `bp.members.cancelInvite`. Invitee gets `N1`.
 
 #### J3. Accept: disclosure, consent, choices (member admin)
-1. `N1` opens Linked accounts; `la.row.invitation.review` opens `JoinCollectiveDialog` (size lg, `join.step`).
-2. Step 1 `join.step.means`: `join.means.1` to `.7`; warnings `join.warn.noStripe`, `join.warn.formsOn`; blocks (Next disabled, alert) `join.block.timezone`, `.currency`, `.otherCollective`.
-3. Step 2 `join.step.services`:
-   - Same-name services (never auto-matched): `join.services.addNew` (default) or `join.services.useMine`. "Use my" expands `AdoptServiceReview`: mapping table (`join.map.yours`, `join.map.theirs`, select per member option defaulted by name, `join.map.keepOld`), before and after table (`join.map.preview.now`, `.after`; Price, Length, Deposit, Online payment, Forms), `join.services.useMine.note`. Adopted services' bookings are snapshotted and their options mapped in the same step.
-   - Re-joining: former copies first, `join.services.reconnect` (default).
-   - Member-only services: `join.services.keep` (default), `.ask` (sends `N28`), `.pause`, help `join.services.own.help`.
-4. Step 3 `join.step.forms` (only if the member holds a form from the same library template, active or archived): `join.forms.useExisting` (default) or `.useTheirs`, `join.forms.note`.
-5. Step 4 `join.step.check`: `join.summary.*`, required checkbox `join.consent`, link `join.terms`, button `join.confirm`. Request carries `consent_version` and choices.
-6. `join.progress` (8 s), then `join.done.title`, `.body`, `join.done.cta` to `/dashboard/calendar-availability?tab=team`; slower: `join.progress.slow`, dialog may close, row `la.row.setup`.
-7. Member Services: cards `svc.member.card.settingUp`, then `.noCalendars`; Booking Page `bp.reason.settingUp`, then `bp.reason.noCalendars`. Host `N3`; host form group shows `svc.cal.warn.settingUp` until converged.
-8. App accept without consent: 409 `join.error.consent`.
-Guests: nothing changes until a converged service is on one of the member's calendars and the page is live; then its own links redirect with ids translated.
+
+Rewritten 2026-09-14 to the owner's requirement that "the non-hosts should be told that they are giving control of their booking page to the host and given appropriate info".
+
+**What it replaces.** Today accepting is effectively one click from a row, with no disclosure, no choices and no recorded consent. Worse, the one sentence a member reads about their data before agreeing is false in both halves (plan CB-51): the invitation email says the collective shows their services "alongside" other venues, which D3 makes wrong because it replaces their page, and that "your booking and client data stay fully separate", which is wrong today and stays wrong under D41 because membership is exactly what shares client records and revenue. That email is rewritten with this journey.
+
+**The principle.** These are small business owners who want to join, not sign a contract. The disclosure has to be complete and plain without being frightening: say what changes, show it concretely against their own venue rather than in the abstract, and never bury a consequence in a clause. Anything they can decide, let them decide here rather than discover later.
+
+**Step 1, what this means.** `join.step.means`, with the existing `join.means.*` lines rewritten around three headings rather than a flat list:
+- **Your booking page.** Show their actual address (`/book/{their-slug}`) and what it will do: guests who go there will land on the collective's page. Name the collective's address. This is the sentence the owner asked for, and it must name real URLs, because "your page will redirect" does not land the way seeing your own address does.
+- **Your services.** The host sets what is sold and what it costs. Their own services that are not on the collective page stay theirs, and step 2 decides what happens to each.
+- **Your clients and your figures.** While the collective runs, the other venues can see their client records, and they can see the others'. Everyone can see everyone's takings. All of it stops the day the membership ends, and each venue keeps every record it owns. This is D41 and D49 stated plainly; it is the part today's email denies.
+
+Warnings stay as they are (`join.warn.noStripe`, `join.warn.formsOn`) and blocks still stop the step (`join.block.timezone`, `.currency`, `.otherCollective`).
+
+**Step 2, your services.** Unchanged in shape from the earlier draft: same-name services choose "Add the host's as new" or the reviewed adoption, member-only services choose keep, ask or pause, re-joiners see their former copies first.
+
+**Step 3, your forms.** Unchanged, and shown only when the member holds a form from the same library template.
+
+**Step 4, check and join.** The summary, then a single required checkbox and the recorded `consent_version`. The checkbox text names the two things that are hardest to reverse: the booking page and the client sharing.
+
+**After.** `join.progress`, then `join.done.*` with a next step to Calendar Availability. The status line on their Booking Page tab (item 10) is where this is restated every time they visit, so consent is not a thing that happened once and vanished.
 
 #### J4. Offer a service (host admin)
 1. Card switch `svc.card.onPageSwitch`, Add service checkbox `svc.add.onPageCheckbox`, or Booking Page, Services, `bp.overview.choose`.

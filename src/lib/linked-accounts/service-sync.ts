@@ -218,27 +218,33 @@ async function loadVariants(admin: SupabaseClient, venueId: string, serviceId: s
   return (data ?? []) as Row[];
 }
 
-/** Both venues are active members of one live collective. */
-export async function venuesShareLiveCollective(admin: SupabaseClient, venueA: string, venueB: string): Promise<boolean> {
-  if (venueA === venueB) return true;
+/**
+ * The origin's venue HOSTS a live collective in which the copy's venue is an active member.
+ *
+ * Only the host's services may write into another venue. The gate used to ask only whether the
+ * two venues shared a live collective, and an offering's origin falls back to a member's service
+ * when the host offers no calendar for it, so one member's ordinary save could rewrite a second
+ * member's service with no host involved (SB-15, Docs/collective-one-venue-plan.md).
+ */
+export async function originHostsLiveCollectiveWith(
+  admin: SupabaseClient,
+  originVenueId: string,
+  copyVenueId: string,
+): Promise<boolean> {
+  if (originVenueId === copyVenueId) return false;
   const { data, error } = await admin
     .from('venue_collective_members')
-    .select('collective_id, venue_id, venue_collectives!inner(status)')
-    .in('venue_id', [venueA, venueB])
+    .select('collective_id, venue_collectives!inner(status, host_venue_id)')
+    .eq('venue_id', copyVenueId)
     .eq('status', 'active')
-    .eq('venue_collectives.status', 'active');
+    .eq('venue_collectives.status', 'active')
+    .eq('venue_collectives.host_venue_id', originVenueId)
+    .limit(1);
   if (error) {
     console.error('[service-sync] membership read failed:', error.message);
     return false;
   }
-  const byCollective = new Map<string, Set<string>>();
-  for (const row of (data ?? []) as Array<{ collective_id: string; venue_id: string }>) {
-    const set = byCollective.get(row.collective_id) ?? new Set<string>();
-    set.add(row.venue_id);
-    byCollective.set(row.collective_id, set);
-  }
-  for (const set of byCollective.values()) if (set.has(venueA) && set.has(venueB)) return true;
-  return false;
+  return (data ?? []).length > 0;
 }
 
 /** Copies still following this origin. Empty on a database without the sync columns. */
@@ -334,7 +340,7 @@ export async function syncCopiesOfService(
     if (!origin) return result;
     const originVariants = await loadVariants(admin, origin.venue_id as string, originServiceId);
     for (const copy of copies) {
-      const live = await venuesShareLiveCollective(admin, origin.venue_id as string, copy.venue_id as string);
+      const live = await originHostsLiveCollectiveWith(admin, origin.venue_id as string, copy.venue_id as string);
       if (!live) {
         result.skipped += 1;
         continue;
@@ -375,8 +381,10 @@ export async function syncOneCopy(
   }
   const origin = await loadService(admin, originId);
   if (!origin) return { ok: false, error: 'The origin service no longer exists.' };
-  const live = await venuesShareLiveCollective(admin, origin.venue_id as string, copy.venue_id as string);
-  if (!live) return { ok: false, error: 'The two venues no longer share a live collective.' };
+  const live = await originHostsLiveCollectiveWith(admin, origin.venue_id as string, copy.venue_id as string);
+  if (!live) {
+    return { ok: false, error: 'Only a service at the collective’s host can update another venue’s copy.' };
+  }
   const originVariants = await loadVariants(admin, origin.venue_id as string, originId);
   const ok = await applyShapeToCopy(admin, origin, originVariants, copy);
   if (!ok) return { ok: false, error: 'The copy could not be fully updated. Check the venue’s service and try again.' };
@@ -403,8 +411,10 @@ export async function linkCopyToOrigin(
   const origin = await loadService(admin, originServiceId);
   if (!origin) return { ok: false, error: 'The original service no longer exists.' };
   if (copy.venue_id === origin.venue_id) return { ok: false, error: 'Both services belong to the same venue.' };
-  const live = await venuesShareLiveCollective(admin, origin.venue_id as string, copy.venue_id as string);
-  if (!live) return { ok: false, error: 'The two venues do not share a live collective.' };
+  const live = await originHostsLiveCollectiveWith(admin, origin.venue_id as string, copy.venue_id as string);
+  if (!live) {
+    return { ok: false, error: 'A copy can only follow a service at the host of a live collective it belongs to.' };
+  }
   const { error: linkErr } = await admin
     .from('service_items')
     .update({ synced_from_service_id: originServiceId, sync_state: 'linked' })

@@ -1780,7 +1780,7 @@ same ids. The recommended default is in bold.
 |---|---|---|
 | D1 | A joining member's same-named service | **A new host-managed copy; "Use mine" only through the reviewed adoption** |
 | D2 | Member-only services while in a collective | **Kept for bookings the member's team makes, not bookable online; the member chooses at accept** |
-| D3 | Own booking pages while the collective is live | **Redirect to the collective page only when it is live, the member's copies are ready and one of its calendars is listed; the host's own page too** |
+| D3 | Own booking pages while the collective is live | **DECIDED 2026-09-14. The collective page is the venue's booking page for as long as it is in the collective, and it supersedes every member's own page, the host's included.** The conditions in §6.9 (live, converged, at least one calendar listed) are a safety net so a redirect can never send a guest to a page that cannot take their booking, not a softening of the rule. Whenever those conditions hold, which is the normal state, the own page hands over |
 | D4 | Who may set per-calendar values | **Calendar staff within the flags, that venue's admins, and host admins** |
 | D5 | Build the five missing per-calendar fields | **Yes** |
 | D6 | Turning a staff permission off | **Clear stored price, deposit, length and buffer values with an ask and a notice; ignore colour** |

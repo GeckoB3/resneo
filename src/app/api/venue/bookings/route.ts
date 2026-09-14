@@ -80,7 +80,6 @@ import {
   resolveOverrideCollectiveTarget,
 } from '@/lib/booking/staff-availability-override';
 import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
-import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 
@@ -1051,36 +1050,12 @@ export async function POST(request: NextRequest) {
         serviceId: appointment_service_id,
       });
 
-      // Combined booking (collective): the offering's own price and length stand
-      // in for the source service's base terms, applied BEFORE the variant and
-      // add-ons so whatever staff choose on top still stacks, exactly as the
-      // public create does. No-op for an ordinary booking.
             if (staffOverride) {
         // The loader reads the calendar's assigned services only; the override
-        // may book any active service of the venue on any calendar. Added before
-        // the collective's length is applied, so an unassigned offering gets it.
+        // may book any active service of the venue on any calendar, at its own terms.
         const present = await ensureOverrideServiceInInput(admin, appointmentInput, venueId, appointment_service_id);
         if (!present) {
           return NextResponse.json({ error: 'Service not found' }, { status: 404 });
-        }
-      }
-      let collectiveOverride: Awaited<ReturnType<typeof resolveCollectiveServiceOverride>> = null;
-      if (collectiveAttribution) {
-        collectiveOverride = await resolveCollectiveServiceOverride(admin, {
-          collectiveId: collectiveAttribution.collectiveId,
-          collectiveServiceItemId: collectiveAttribution.offeringId,
-          venueId,
-          sourceServiceId: appointment_service_id,
-          practitionerId: practitioner_id,
-        });
-        if (collectiveOverride?.durationMinutes != null) {
-          const oidx = appointmentInput.services.findIndex((s) => s.id === appointment_service_id);
-          if (oidx >= 0) {
-            appointmentInput.services[oidx] = {
-              ...appointmentInput.services[oidx]!,
-              duration_minutes: collectiveOverride.durationMinutes,
-            };
-          }
         }
       }
 
@@ -1241,12 +1216,6 @@ export async function POST(request: NextRequest) {
       if (!svc) {
         return NextResponse.json({ error: 'Service not available with this practitioner' }, { status: 400 });
       }
-      // The collective's price is the offering's BASE price; a chosen variant carries
-      // its own price and replaces it, as on a venue's own page.
-      const svcForCharge =
-        collectiveOverride?.pricePence != null && !chosenVariant
-          ? { ...svc, price_pence: collectiveOverride.pricePence }
-          : svc;
             if (staffWalkIn && !staffOverride) {
         // Walk-ins are taken "regardless": once the front desk hits Start Appointment
         // Now, the decision is final. So they may be booked past opening hours / outside
@@ -1300,7 +1269,7 @@ export async function POST(request: NextRequest) {
         practitioner_name: practRow?.name ?? null,
         appointment_service_name: svc?.name ?? null,
         appointment_price_display:
-          svcForCharge?.price_pence != null ? `£${(svcForCharge.price_pence / 100).toFixed(2)}` : null,
+          svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
       };
 
       // Booking duration. `svc.duration_minutes` already includes the add-on extension
@@ -1337,7 +1306,7 @@ export async function POST(request: NextRequest) {
 
       const online = svc
         ? resolveAppointmentServiceOnlineChargeWithAddons({
-            svc: svcForCharge,
+            svc,
             addons_total_price_pence: chosenAddonTotals.total_price_pence,
           })
         : null;

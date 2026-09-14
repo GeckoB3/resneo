@@ -58,7 +58,7 @@ import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-c
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
-import { resolveCollectiveServiceOverride } from '@/lib/linked-accounts/collective-booking-override';
+import { resolveCollectiveServiceAttribution } from '@/lib/linked-accounts/collective-booking-override';
 import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
@@ -341,11 +341,10 @@ export async function POST(request: NextRequest) {
 
       // Inject phantom bookings from earlier people in this group (overlap checks)
       input.phantomBookings = [...phantoms];
-      // Combined page: the offering's effective price and duration on this
-      // calendar stand in for the source service's base terms, applied before
-      // the variant and add-ons as the single-booking route does.
-      const collectiveOverride = collectiveId
-        ? await resolveCollectiveServiceOverride(supabase, {
+      // Combined page: which offering this person booked. Attribution only; each
+      // person is sized and charged at their calendar's own terms (CB-02).
+      const collectiveAttribution = collectiveId
+        ? await resolveCollectiveServiceAttribution(supabase, {
             collectiveId,
             collectiveServiceItemId: collectiveOfferingByPerson.get(i) ?? null,
             venueId: venue_id,
@@ -353,18 +352,6 @@ export async function POST(request: NextRequest) {
             practitionerId: person.practitioner_id,
           })
         : null;
-      if (collectiveOverride) {
-        const oidx = input.services.findIndex((s) => s.id === person.appointment_service_id);
-        if (oidx >= 0) {
-          input.services[oidx] = {
-            ...input.services[oidx]!,
-            ...(collectiveOverride.durationMinutes != null
-              ? { duration_minutes: collectiveOverride.durationMinutes }
-              : {}),
-            ...(collectiveOverride.pricePence != null ? { price_pence: collectiveOverride.pricePence } : {}),
-          };
-        }
-      }
 
       let chosenVariant = null as Awaited<ReturnType<typeof loadActiveVariantForService>>;
       if (person.service_variant_id) {
@@ -589,7 +576,7 @@ export async function POST(request: NextRequest) {
         addon_snapshots: personAddonSnapshots,
         addons_total_price_pence: personAddonTotals.total_price_pence,
         addons_total_duration_minutes: personAddonTotals.total_duration_minutes,
-        collective_service_item_id: collectiveOverride ? collectiveOverride.collectiveServiceItemId : null,
+        collective_service_item_id: collectiveAttribution ? collectiveAttribution.collectiveServiceItemId : null,
       });
 
       phantoms.push({

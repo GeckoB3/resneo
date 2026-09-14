@@ -297,6 +297,7 @@ function targetCatalogue(services: Array<{ id: string; name: string; calendars: 
     ),
     calendars: new Map([[CAL_B, { name: 'Chair B' }]]),
     serviceCalendars: new Map(services.map((s) => [s.id, s.calendars])),
+    calendarServiceTerms: new Map(),
     serviceList: [],
     calendarList: [{ id: CAL_B, name: 'Chair B' }],
   };

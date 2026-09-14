@@ -22,6 +22,20 @@ import {
 } from './collectives';
 import { evaluateLinkEligibility } from './eligibility';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
+import type { ProcessingTimeBlock } from '@/types/booking-models';
+
+/** One calendar's own terms for one service: its custom price and length, else the service's. */
+export interface CalendarServiceTerms {
+  durationMinutes: number | null;
+  pricePence: number | null;
+  /** The processing pattern fitted to this calendar's length. */
+  processingBlocks: ProcessingTimeBlock[];
+}
+
+/** Key for `VenueCatalogueData.calendarServiceTerms`. */
+export function calendarServiceTermsKey(calendarId: string, serviceId: string): string {
+  return `${calendarId}:${serviceId}`;
+}
 
 /**
  * A venue's bookable catalogue, resolved MODEL-AGNOSTICALLY (plan §16 follow-up).
@@ -34,7 +48,11 @@ import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog'
  * expects (it maps them per model).
  */
 export interface VenueCatalogueData {
-  /** serviceId → name/duration/price/description (deduped across calendars). */
+  /**
+   * serviceId → name/duration/price/description (deduped across calendars). Price and length
+   * here are a SUMMARY for labels: the lowest price and the shortest length any calendar
+   * offers it at. Never charge or reserve from them; use `calendarServiceTerms` (CB-01).
+   */
   services: Map<
     string,
     {
@@ -53,6 +71,11 @@ export interface VenueCatalogueData {
   calendars: Map<string, { name: string }>;
   /** serviceId → calendarIds that offer it (for the availability fan-out). */
   serviceCalendars: Map<string, string[]>;
+  /**
+   * `calendarId:serviceId` → that calendar's own terms. A calendar's custom price and length
+   * belong to that calendar only; the page used to apply the first calendar's to all of them.
+   */
+  calendarServiceTerms: Map<string, CalendarServiceTerms>;
   /** ordered list of services for the builder. */
   serviceList: {
     id: string;
@@ -64,6 +87,12 @@ export interface VenueCatalogueData {
   }[];
   /** ordered list of calendars for the builder. */
   calendarList: { id: string; name: string }[];
+}
+
+function lowerOf(a: number | null, b: number | null): number | null {
+  if (a == null) return b;
+  if (b == null) return a;
+  return Math.min(a, b);
 }
 
 export async function loadVenueCatalogueData(
@@ -95,6 +124,7 @@ export async function loadVenueCatalogueData(
   >();
   const calendars = new Map<string, { name: string }>();
   const serviceCalendars = new Map<string, string[]>();
+  const calendarServiceTerms = new Map<string, CalendarServiceTerms>();
   const serviceOrder: string[] = [];
   const calendarOrder: string[] = [];
   for (const p of practitioners) {
@@ -103,7 +133,14 @@ export async function loadVenueCatalogueData(
       calendarOrder.push(p.id);
     }
     for (const s of p.services) {
-      if (!services.has(s.id)) {
+      // `p.services` is already merged with THIS calendar's assignment.
+      calendarServiceTerms.set(calendarServiceTermsKey(p.id, s.id), {
+        durationMinutes: s.duration_minutes ?? null,
+        pricePence: s.price_pence ?? null,
+        processingBlocks: s.processing_time_blocks ?? [],
+      });
+      const existing = services.get(s.id);
+      if (!existing) {
         services.set(s.id, {
           name: s.name,
           durationMinutes: s.duration_minutes ?? null,
@@ -113,6 +150,9 @@ export async function loadVenueCatalogueData(
           category: s.category ?? null,
         });
         serviceOrder.push(s.id);
+      } else {
+        existing.durationMinutes = lowerOf(existing.durationMinutes, s.duration_minutes ?? null);
+        existing.pricePence = lowerOf(existing.pricePence, s.price_pence ?? null);
       }
       const cals = serviceCalendars.get(s.id) ?? [];
       if (!cals.includes(p.id)) cals.push(p.id);
@@ -123,6 +163,7 @@ export async function loadVenueCatalogueData(
     services,
     calendars,
     serviceCalendars,
+    calendarServiceTerms,
     serviceList: serviceOrder.map((id) => ({ id, ...services.get(id)! })),
     calendarList: calendarOrder.map((id) => ({ id, name: calendars.get(id)!.name })),
   };
@@ -396,8 +437,10 @@ export async function loadCatalogueForManagement(
   const memberSources: CatalogueMemberSource[] = [];
   const serviceIndex = new Map<string, SourceServiceRecord>(); // `${venueId}:${serviceId}`
   const practitionerNameById = new Map<string, string>(); // `${venueId}:${calendarId}`
+  const termsByVenue = new Map<string, VenueCatalogueData['calendarServiceTerms']>();
   for (const venueId of memberVenueIds) {
     const data = await loadVenueCatalogueData(admin, venueId);
+    termsByVenue.set(venueId, data.calendarServiceTerms);
     for (const s of data.serviceList) {
       serviceIndex.set(`${venueId}:${s.id}`, {
         name: s.name,
@@ -490,6 +533,10 @@ export async function loadCatalogueForManagement(
       const sourceServiceId = raw.source_service_id as string;
       const source = serviceIndex.get(`${venueId}:${sourceServiceId}`);
       const practitionerId = (raw.practitioner_id as string | null) ?? null;
+      // A calendar-pinned provider shows that calendar's own price and length (CB-01).
+      const pinnedTerms = practitionerId
+        ? termsByVenue.get(venueId)?.get(calendarServiceTermsKey(practitionerId, sourceServiceId)) ?? null
+        : null;
       const view: CatalogueProviderView = {
         id: raw.id as string,
         itemId,
@@ -503,8 +550,8 @@ export async function loadCatalogueForManagement(
           : null,
         // Each venue owns its service's price/duration (set on /dashboard/appointment-services);
         // the combined page never overrides them — it just maps service names → calendars.
-        effectivePricePence: source?.pricePence ?? null,
-        effectiveDurationMinutes: source?.durationMinutes ?? null,
+        effectivePricePence: pinnedTerms ? pinnedTerms.pricePence : source?.pricePence ?? null,
+        effectiveDurationMinutes: pinnedTerms ? pinnedTerms.durationMinutes : source?.durationMinutes ?? null,
         status: raw.status as ProviderStatus,
         // Source live = service still active, and (if pinned) practitioner still active.
         sourceLive:
@@ -887,6 +934,9 @@ async function loadPublicCombinedCatalogueUncached(
         if (!pr) continue; // pinned calendar inactive/removed → not bookable
         practName = pr.name;
       }
+      const pinnedTerms = practitionerId
+        ? venueData[venueId]!.calendarServiceTerms.get(calendarServiceTermsKey(practitionerId, sourceServiceId)) ?? null
+        : null;
       const itemId = raw.item_id as string;
       const prevMin = minSourceSortByItem.get(itemId);
       if (prevMin === undefined || source.sortOrder < prevMin) {
@@ -900,10 +950,12 @@ async function loadPublicCombinedCatalogueUncached(
         practitionerId,
         practitionerName: practName,
         sourceServiceId,
-        // Price/duration are the owning venue's own service settings — never a
-        // collective-level override. "from" price = the lowest of these across calendars.
-        pricePence: source.pricePence,
-        durationMinutes: source.durationMinutes,
+        // The owning venue's own terms, never a collective-level override. A provider pinned
+        // to one calendar carries that calendar's price and length; a venue-wide one carries
+        // the lowest across its calendars, for the "from" price. Each calendar's own terms
+        // are applied per calendar when the page is built (collective-venue.ts).
+        pricePence: pinnedTerms ? pinnedTerms.pricePence : source.pricePence,
+        durationMinutes: pinnedTerms ? pinnedTerms.durationMinutes : source.durationMinutes,
       };
       const list = providersByItem.get(itemId) ?? [];
       list.push(view);

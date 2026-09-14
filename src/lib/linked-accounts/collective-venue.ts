@@ -19,6 +19,7 @@ import type { VenuePublic } from '@/components/booking/types';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import {
+  calendarServiceTermsKey,
   invalidatePublicCombinedCatalogueMemo,
   loadPublicCombinedCatalogue,
   loadVenueCatalogueData,
@@ -29,7 +30,7 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
-import { parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
+import { canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 import type {
   AppointmentCatalogAddonGroup,
@@ -359,6 +360,9 @@ async function loadCollectiveAppointmentCatalogUncached(
         buffer: number;
         deposit: number | null;
         processing: ProcessingTimeBlock[];
+        /** The service's own length and price, for a calendar that is not assigned it. */
+        durationMinutes: number | null;
+        pricePence: number | null;
         paymentRequirement: ClassPaymentRequirement;
         cancellationNoticeHours: number;
       }
@@ -385,17 +389,23 @@ async function loadCollectiveAppointmentCatalogUncached(
         admin
           .from(venueIsUnified[venueId] ? 'service_items' : 'appointment_services')
           .select(
-            'id, buffer_minutes, deposit_pence, processing_time_blocks, payment_requirement, cancellation_notice_hours',
+            'id, duration_minutes, price_pence, buffer_minutes, deposit_pence, processing_time_blocks, payment_requirement, cancellation_notice_hours',
           )
           .in('id', ids),
       ]);
       variantsByVenue[venueId] = variantMap;
       addonsByVenue[venueId] = addonMap;
       for (const r of metaRows.data ?? []) {
+        const canon = canonicalServiceShape({
+          durationMinutes: (r.duration_minutes as number | null) ?? 0,
+          processingBlocks: parseProcessingTimeBlocksFromDb(r.processing_time_blocks),
+        });
         metaByVenue[venueId].set(r.id as string, {
           buffer: (r.buffer_minutes as number) ?? 0,
           deposit: (r.deposit_pence as number | null) ?? null,
-          processing: parseProcessingTimeBlocksFromDb(r.processing_time_blocks),
+          processing: canon.processingBlocks,
+          durationMinutes: r.duration_minutes == null ? null : canon.durationMinutes,
+          pricePence: (r.price_pence as number | null) ?? null,
           paymentRequirement:
             ((r as { payment_requirement?: ClassPaymentRequirement | null })
               .payment_requirement as ClassPaymentRequirement | null) ?? 'none',
@@ -453,6 +463,9 @@ async function loadCollectiveAppointmentCatalogUncached(
         const entry = ensure(calendarId, name, provider.venueId);
         if (entry.services.some((s) => s.id === item.id)) continue; // calendar already lists this offering
         const meta = metaByVenue[provider.venueId]?.get(provider.sourceServiceId);
+        // This calendar's own price and length (its custom values, else the service's). The
+        // provider's own figures are a summary across calendars and must not be charged (CB-01).
+        const terms = data.calendarServiceTerms.get(calendarServiceTermsKey(calendarId, provider.sourceServiceId));
         // Mirror the single-venue catalog's card-hold passthrough: 'card_hold'
         // reaches the guest only when a positive fee exists (service or variant
         // level); otherwise it degrades to 'none', matching what the create route
@@ -470,9 +483,9 @@ async function loadCollectiveAppointmentCatalogUncached(
           id: item.id,
           name: item.name,
           description: item.description,
-          duration_minutes: provider.durationMinutes ?? 0,
+          duration_minutes: (terms ? terms.durationMinutes : provider.durationMinutes) ?? 0,
           buffer_minutes: meta?.buffer ?? 0,
-          price_pence: provider.pricePence,
+          price_pence: terms ? terms.pricePence : provider.pricePence,
           deposit_pence: meta?.deposit ?? null,
           payment_requirement: paymentRequirement,
           // `catalogue.items` is already sorted (host display_order → member venue
@@ -483,7 +496,7 @@ async function loadCollectiveAppointmentCatalogUncached(
             meta?.cancellationNoticeHours ?? DEFAULT_CANCELLATION_NOTICE_HOURS,
           variants: activeVariants(provider.venueId, provider.sourceServiceId).map(variantToCatalog),
           addon_groups: addonGroups(provider.venueId, provider.sourceServiceId),
-          processing_time_blocks: meta?.processing ?? [],
+          processing_time_blocks: terms ? terms.processingBlocks : meta?.processing ?? [],
           any_available: anyAvailableByItem.get(item.id) ?? true,
           source_service_id: provider.sourceServiceId,
         });
@@ -524,9 +537,10 @@ async function loadCollectiveAppointmentCatalogUncached(
             id: item.id,
             name: item.name,
             description: item.description,
-            duration_minutes: provider.durationMinutes ?? 0,
+            // Not assigned here, so the override books the service's own terms.
+            duration_minutes: meta?.durationMinutes ?? provider.durationMinutes ?? 0,
             buffer_minutes: meta?.buffer ?? 0,
-            price_pence: provider.pricePence,
+            price_pence: meta ? meta.pricePence : provider.pricePence,
             deposit_pence: meta?.deposit ?? null,
             payment_requirement: paymentRequirement,
             sort_order: itemIndex,

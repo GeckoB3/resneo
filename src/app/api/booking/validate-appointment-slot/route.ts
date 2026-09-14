@@ -106,7 +106,6 @@ export async function POST(request: NextRequest) {
      * page, and with it the confirm step, because `validateMultiServiceChain`
      * calls this endpoint once per segment.
      */
-    let collectiveDurationOverride: number | null = null;
     const isCollective = await isCollectiveId(supabase, venue_id);
     if (isCollective) {
       const target = staffOverride
@@ -128,9 +127,6 @@ export async function POST(request: NextRequest) {
       }
       venue_id = target.venueId;
       service_id = target.sourceServiceId;
-      // The collective may sell the offering at its own length; reserve that, not
-      // the source service's, or the slot is checked against the wrong span.
-      collectiveDurationOverride = target.durationMinutes;
     }
 
     if (staffOverride) {
@@ -206,21 +202,6 @@ export async function POST(request: NextRequest) {
       const present = await ensureOverrideServiceInInput(supabase, input, venue_id, service_id);
             if (!present) {
         return NextResponse.json({ ok: false, error: 'Service not found' });
-      }
-    }
-
-    /**
-     * Applied before the variant and add-on adjustments below, mirroring the
-     * create route: the collective's effective duration replaces the source
-     * service's, and anything chosen on top of it still stacks.
-     */
-    if (collectiveDurationOverride != null) {
-      const idx = input.services.findIndex((s) => s.id === service_id);
-      if (idx >= 0) {
-        input.services[idx] = {
-          ...input.services[idx]!,
-          duration_minutes: collectiveDurationOverride,
-        };
       }
     }
 

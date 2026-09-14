@@ -230,21 +230,19 @@ export async function POST(request: NextRequest) {
     /**
      * Combined booking page (plan §22): `venue_id` is the collective and every
      * `service_id` is an OFFERING id. Each segment resolves, through its
-     * calendar, to the owning venue and that venue's source service, carrying
-     * the collective's own length. The single-booking `create` route and
+     * calendar, to the owning venue and that venue's source service, at that
+     * calendar's own price and length (CB-02). The single-booking `create` route and
      * `validate-appointment-slot` already did this; this one did not, so a
      * visit of two or more services on a combined page failed with
      * "Venue not found" once the picker let guests choose several at once.
      */
     type SegmentEntry = (typeof rawServices)[number] & {
       collective_service_item_id: string | null;
-      collective_duration_override: number | null;
     };
     let venue_id = requestedVenueId;
     let services: SegmentEntry[] = rawServices.map((s) => ({
       ...s,
       collective_service_item_id: null,
-      collective_duration_override: null,
     }));
     let collectiveIdFromVenue: string | null = null;
     if (await isCollectiveId(supabase, requestedVenueId)) {
@@ -273,7 +271,6 @@ export async function POST(request: NextRequest) {
           ...s,
           service_id: target.sourceServiceId,
           collective_service_item_id: s.service_id,
-          collective_duration_override: target.durationMinutes,
         });
       }
       services = resolved;
@@ -399,16 +396,6 @@ export async function POST(request: NextRequest) {
         const present = await ensureOverrideServiceInInput(supabase, input, venue_id, seg.service_id);
         if (!present) {
           return NextResponse.json({ error: 'Service not found' }, { status: 404 });
-        }
-      }
-
-      // The collective may sell the offering at its own length; reserve that,
-      // not the source service's. Applied before the variant and add-ons, so
-      // anything chosen on top still stacks.
-      if (seg.collective_duration_override != null) {
-        const ovIdx = input.services.findIndex((s) => s.id === seg.service_id);
-        if (ovIdx >= 0) {
-          input.services[ovIdx] = { ...input.services[ovIdx]!, duration_minutes: seg.collective_duration_override };
         }
       }
 

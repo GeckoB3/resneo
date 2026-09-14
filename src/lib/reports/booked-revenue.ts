@@ -72,7 +72,7 @@ export interface BookedRevenueReport {
 const UNASSIGNED_KEY = 'unassigned';
 
 const BOOKING_SELECT =
-  'id, venue_id, calendar_id, booking_date, status, group_booking_id, booking_total_price_pence, addons_total_price_pence, service_variant_id, service_item_id, appointment_service_id, practitioner_id';
+  'id, venue_id, calendar_id, booking_date, status, group_booking_id, booking_total_price_pence, service_price_snapshot_pence, addons_total_price_pence, service_variant_id, service_item_id, appointment_service_id, practitioner_id';
 
 type RevenueBookingRow = VisitBookingRow & {
   booking_date: string;

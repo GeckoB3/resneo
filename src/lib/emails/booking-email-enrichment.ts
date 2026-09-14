@@ -60,6 +60,8 @@ export type BookingAnchorRow = {
   calendar_id: string | null;
   service_item_id: string | null;
   service_variant_id: string | null;
+  /** The service line's price when booked (20270212120000); preferred to the live catalogue. */
+  service_price_snapshot_pence?: number | null;
   group_booking_id: string | null;
   guest_id: string | null;
   person_label: string | null;
@@ -204,11 +206,13 @@ async function resolveAppointmentLabels(
     // (mirrors booking-time pricing so reminders match the original confirmation).
     const basePrice = (link as { custom_price_pence?: number | null } | null)?.custom_price_pence ?? si?.price_pence ?? null;
     const merged = applyVariantOverrides(si?.name ?? null, basePrice, variant);
+    // A reminder quotes the price that was agreed, not whatever the catalogue says today.
+    const agreed = typeof row.service_price_snapshot_pence === 'number' ? row.service_price_snapshot_pence : merged.price;
     return {
       practitionerName: uc?.name ?? null,
       serviceName: merged.name,
-      appointmentPriceDisplay: priceDisplayFromPence(merged.price),
-      servicePricePence: merged.price,
+      appointmentPriceDisplay: priceDisplayFromPence(agreed),
+      servicePricePence: agreed,
     };
   }
 
@@ -250,7 +254,7 @@ export async function enrichBookingEmailForAppointment(
   const { data: row, error } = await supabase
     .from('bookings')
     .select(
-      'booking_model, booking_date, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, group_booking_id, guest_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
+      'booking_model, booking_date, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_price_snapshot_pence, group_booking_id, guest_id, person_label, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode',
     )
     .eq('id', bookingId)
     .maybeSingle();
@@ -279,7 +283,7 @@ export async function enrichBookingEmailForAppointment(
     const { data: allSiblings } = await supabase
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, person_label',
+        'id, booking_date, booking_time, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_price_snapshot_pence, person_label',
       )
       .eq('group_booking_id', anchor.group_booking_id)
       .eq('guest_id', anchor.guest_id)
@@ -425,9 +429,11 @@ export async function enrichBookingEmailForAppointment(
           const overridePence = csaOverrideMap.get(`${cid}:${iid}`) ?? null;
           const basePrice = overridePence ?? it?.price_pence ?? null;
           const merged = applyVariantOverrides(it?.name ?? null, basePrice, variant);
+          const snapshot = s.service_price_snapshot_pence as number | null;
+          const agreed = typeof snapshot === 'number' ? snapshot : merged.price;
           serviceNameLine = merged.name ?? 'Treatment';
-          priceDisplay = priceDisplayFromPence(merged.price);
-          servicePence = merged.price;
+          priceDisplay = priceDisplayFromPence(agreed);
+          servicePence = agreed;
         }
 
         // Person subtotal = service + variant + their add-ons. Shown only when add-ons

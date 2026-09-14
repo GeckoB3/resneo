@@ -413,3 +413,17 @@ describe('toPaymentDisplayBooking', () => {
     expect(buildPriceSummary(toPaymentDisplayBooking({ id: 'bk-1' }))).toEqual([]);
   });
 });
+
+describe('buildPriceSummary: the agreed price (REP-04)', () => {
+  it("shows the price the booking was made at, not the option's price today", () => {
+    const rows = buildPriceSummary({
+      id: 'b1',
+      service_variant_name: 'Long hair',
+      service_variant_price_pence: 4000,
+      service_price_snapshot_pence: 3000,
+      addons_total_price_pence: 500,
+    });
+    expect(rows.find((r) => r.key === 'service')?.pence).toBe(3000);
+    expect(rows.find((r) => r.key === 'total')?.pence).toBe(3500);
+  });
+});

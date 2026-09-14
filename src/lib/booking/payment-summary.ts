@@ -20,8 +20,18 @@ export type BookingPaymentState =
 /** The booking columns the total resolver reads. */
 export interface BookingTotalInputs {
   booking_total_price_pence?: number | null;
+  /**
+   * The service line's price when the booking was made (20270212120000). Preferred to the live
+   * `service_variant_price_pence`, so a later catalogue edit never rewrites what was agreed.
+   */
+  service_price_snapshot_pence?: number | null;
   service_variant_price_pence?: number | null;
   addons_total_price_pence?: number | null;
+}
+
+/** A usable snapshot: a finite, non-negative number. Null means "not recorded", not "free". */
+function snapshotPence(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 /**
@@ -35,10 +45,12 @@ export function resolveBookingTotalPence(b: BookingTotalInputs): number | null {
   if (typeof b.booking_total_price_pence === 'number' && b.booking_total_price_pence > 0) {
     return b.booking_total_price_pence;
   }
+  const snapshot = snapshotPence(b.service_price_snapshot_pence);
   const variant =
-    typeof b.service_variant_price_pence === 'number' && Number.isFinite(b.service_variant_price_pence)
+    snapshot ??
+    (typeof b.service_variant_price_pence === 'number' && Number.isFinite(b.service_variant_price_pence)
       ? b.service_variant_price_pence
-      : 0;
+      : 0);
   const addons =
     typeof b.addons_total_price_pence === 'number' && Number.isFinite(b.addons_total_price_pence)
       ? b.addons_total_price_pence
@@ -50,6 +62,7 @@ export function resolveBookingTotalPence(b: BookingTotalInputs): number | null {
 /** Row shape {@link resolveBookingTotalPenceFromRow} reads off a bookings row. */
 export interface BookingRowForTotal {
   booking_total_price_pence?: number | null;
+  service_price_snapshot_pence?: number | null;
   service_variant_id?: string | null;
   addons_total_price_pence?: number | null;
   venue_id?: string | null;
@@ -167,6 +180,15 @@ export async function resolveBookingTotalPenceFromRow(
     return booking.booking_total_price_pence;
   }
 
+  // The price agreed at booking time needs no catalogue read at all.
+  if (snapshotPence(booking.service_price_snapshot_pence) != null) {
+    return resolveBookingTotalPence({
+      booking_total_price_pence: booking.booking_total_price_pence ?? null,
+      service_price_snapshot_pence: booking.service_price_snapshot_pence,
+      addons_total_price_pence: booking.addons_total_price_pence ?? null,
+    });
+  }
+
   let variantPricePence: number | null = null;
   if (booking.service_variant_id) {
     let query = admin
@@ -275,6 +297,7 @@ export interface VisitBookingRow {
   calendar_id?: string | null;
   practitioner_id?: string | null;
   booking_total_price_pence?: number | null;
+  service_price_snapshot_pence?: number | null;
   service_variant_id?: string | null;
   /**
    * Names captured at booking time. A line only has a variant name when the
@@ -312,6 +335,7 @@ export function visitAnchorFromBooking(
     venue_id: anchor.venueId,
     group_booking_id: str(booking.group_booking_id),
     booking_total_price_pence: num(booking.booking_total_price_pence),
+    service_price_snapshot_pence: num(booking.service_price_snapshot_pence),
     service_variant_id: str(booking.service_variant_id),
     // Carried so the anchor can label its own visit line; without these it was
     // the one row in a visit that fell back to the word "Service".
@@ -431,7 +455,9 @@ export async function loadRowTotalResolver(
   for (const [id, price] of opts?.presetVariantPrices ?? []) variantPrices.set(id, price);
   const needPrice = rows
     .filter(
-      (r) => !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0),
+      (r) =>
+        !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0) &&
+        snapshotPence(r.service_price_snapshot_pence) == null,
     )
     .map((r) => r.service_variant_id)
     .filter((v): v is string => typeof v === 'string' && !variantPrices.has(v));
@@ -482,6 +508,7 @@ export async function loadRowTotalResolver(
   const unpricedRows = rows.filter(
     (r) =>
       !(typeof r.booking_total_price_pence === 'number' && r.booking_total_price_pence > 0) &&
+      snapshotPence(r.service_price_snapshot_pence) == null &&
       !(r.service_variant_id && (variantPrices.get(r.service_variant_id) ?? 0) > 0),
   );
   for (const src of SERVICE_PRICE_SOURCES) {
@@ -547,6 +574,7 @@ export async function loadRowTotalResolver(
   const rowTotal = (r: VisitBookingRow): number | null =>
     resolveBookingTotalPence({
       booking_total_price_pence: r.booking_total_price_pence ?? null,
+      service_price_snapshot_pence: r.service_price_snapshot_pence ?? null,
       service_variant_price_pence: basePrice(r),
       addons_total_price_pence: r.addons_total_price_pence ?? null,
     });
@@ -579,7 +607,7 @@ export async function loadVisitPaymentPicture(
     let q = admin
       .from('bookings')
       .select(
-        'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
+        'id, venue_id, group_booking_id, booking_total_price_pence, service_price_snapshot_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence, status',
       )
       .eq('group_booking_id', groupId);
     // Never let a group id reach across venues.
@@ -702,7 +730,7 @@ export async function recomputeBookingPaymentSummary(
   const { data: bookingData, error: bookingErr } = await admin
     .from('bookings')
     .select(
-      'id, venue_id, group_booking_id, booking_total_price_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
+      'id, venue_id, group_booking_id, booking_total_price_pence, service_price_snapshot_pence, service_variant_id, service_name_snapshot, service_variant_name_snapshot, service_item_id, appointment_service_id, calendar_id, practitioner_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
     )
     .eq('id', bookingId)
     .maybeSingle();

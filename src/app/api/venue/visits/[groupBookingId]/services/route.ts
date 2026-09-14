@@ -739,6 +739,7 @@ export async function PATCH(
         ) {
           const previousTotal = await resolveBookingTotalPenceFromRow(admin, {
             booking_total_price_pence: row.booking_total_price_pence as number | null,
+            service_price_snapshot_pence: row.service_price_snapshot_pence as number | null,
             service_variant_id: row.service_variant_id as string | null,
             addons_total_price_pence: row.addons_total_price_pence as number | null,
             venue_id: scopeVenueId,

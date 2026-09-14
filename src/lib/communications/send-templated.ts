@@ -577,7 +577,7 @@ export async function sendPaymentReceiptEmail(params: {
     .select(
       'id, guest_id, guest_email, booking_date, booking_time, party_size, booking_model, ' +
         'group_booking_id, service_item_id, appointment_service_id, calendar_id, practitioner_id, ' +
-        'booking_total_price_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
+        'booking_total_price_pence, service_price_snapshot_pence, service_variant_id, addons_total_price_pence, deposit_status, deposit_amount_pence',
     )
     .eq('id', bookingId)
     .maybeSingle();

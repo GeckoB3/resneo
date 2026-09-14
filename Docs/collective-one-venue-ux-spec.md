@@ -1,49 +1,51 @@
 # Venue collectives as one venue: page-by-page specification
 
 Status: PLAN, not implemented. Companion to `Docs/collective-one-venue-plan.md`, which defines the
-requirements (R1 to R14), the decisions (D1 to D51) and the red-team findings (RT1-1 to RT1-17,
+requirements (R1 to R14), the decisions (D1 to D54) and the red-team findings (RT1-1 to RT1-17,
 RT2-1 to RT2-28) this document refers to; read that first. Written 2026-09-13 against `staging` at
-`c6020eb6`; line numbers are anchors at that commit plus the two commits the plan's header names (`818ed5a`, `973bd3e`), and the plan's "Reading the citations" note applies here too. Reviewed 2026-09-14 at `c0b5eb0`, which added the surfaces in §2 items 15 to 17 and the copy they need. It says exactly what a host, a member and a guest see and can do on every surface, with every string of copy. Where it says "open question", the matching decision in the plan is still to be taken.
+`c6020eb6`; line numbers are anchors at that commit plus the two commits the plan's header names (`818ed5a`, `973bd3e`), and the plan's "Reading the citations" note applies here too. Reviewed 2026-09-14 at `c0b5eb0`, which added the surfaces in §2 items 15 to 17 and the copy they need, and aligned the same day with the plan's settled decisions; the "Calls:" line under each item names the routes it uses by their number in plan Appendix E. It says exactly what a host, a member and a guest see and can do on every surface, with every string of copy. Where it says "open question", the matching decision in the plan is still to be taken.
 
 ## 1. Where each fact is edited
 
-Rule for every row: one stored truth, one screen that edits it (or one shared dialog opened from two labelled doors), and every other surface shows the same value read-only with the owner named. "Host admin" = admin of the host venue; "member admin" = admin of a non-host venue; "staff" = non-admin linked to the calendar. Ids refer to the copy deck.
+Rule for every row: one stored truth, one screen that edits it (or one shared dialog opened from labelled doors), and every other surface shows the same value read-only with the owner named. The one deliberate exception is which calendars offer a service (B): one store and one engine function behind several doors, all listed there. "Host admin" = admin of the host venue; "member admin" = admin of a non-host venue; "staff" = non-admin linked to the calendar. Ids refer to the copy deck.
 
-#### A. Service definition (host master; each member holds a locked copy)
+#### A. Service definition (host master; each member holds a locked replica)
 
 | Fact | Edited in, while in a live collective | Who may edit | Host surfaces show | Member surfaces show | Guests and combined page show |
 |---|---|---|---|---|---|
-| Name, description | Host Services page, Edit service dialog (`AppointmentServicesView.tsx:1481-1639`, `AppointmentServiceFormFields.tsx:106-126`) | Host admins | Card title; `Collective` pill when offered | "From {host}" card; read-only View dialog (`svc.member.view.*`); same name in Calendar Availability | Same name on `/book/c/{slug}`, emails, diary, `service_name_snapshot` |
-| Heading assigned to a service | Host Edit service, Category select (`AppointmentServiceFormFields.tsx:128-150`) | Host admins | Grouping | Grouped under the same heading, locked | Same heading |
+| Name, description | Host Services page, the service page (`/dashboard/appointment-services/[serviceId]`, item 1; today's dialog is `AppointmentServicesView.tsx:1481-1639`, fields `AppointmentServiceFormFields.tsx:106-126`) | Host admins | Card title; `Collective` pill when offered | "From {host}" card; `MemberServiceView` (`svc.member.view.*`); same name in Calendar Availability | Same name on `/book/c/{slug}`, emails, diary, `service_name_snapshot` |
+| Heading assigned to a service | Host service page, Category select (`AppointmentServiceFormFields.tsx:128-150`) | Host admins | Grouping | Grouped under the same heading, locked | Same heading |
 | Heading names and order | Host Services, Categories tab (`ServiceCategoriesManager.tsx`) | Host admins | `Collective` pill on headings used by offered services | `From {host}` pill; Rename and Delete disabled (`cat.member.lockedTooltip`); reorder only changes member's own lists | Host names and order |
 | Service order on the page | Host Services drag and arrows (`AppointmentServicesView.tsx:1114-1193`) | Host admins | Hint `svc.reorder.hint.host` | "From {host}" list follows host order, no drag handle | Host order |
-| Length, buffer, processing periods, start-time grid, service schedule | Host Edit service | Host admins | Form | Locked in View dialog | Every calendar, unless a calendar value applies |
-| Price; payment rule; deposit or no-show fee | Host Edit service, with commercial change ask (`svc.commercial.*`) | Host admins | Form; save summary | Locked; immediate email `N6` | Price per calendar; `public.price.from` when calendars differ |
-| Options (variants) and their prices | Host Edit service (`AppointmentServiceFormFields.tsx:194-544`) | Host admins | Form | Locked | Same options on every calendar |
-| Cancellation notice, advance window, min notice, same-day | Host Edit service (`AppointmentServiceFormFields.tsx:677-732`) | Host admins | Form | Locked | Same rules |
-| Add-ons linked to a service | Host Edit service, Add-ons section (`AddonGroupsSection.tsx`) | Host admins | `svc.form.addons.reach` | Locked list | Same add-ons |
+| Length, buffer, processing periods, start-time grid, service schedule | Host service page | Host admins | Form | Locked in `MemberServiceView` | Every calendar, unless a calendar value applies |
+| Price; payment rule; deposit or no-show fee | Host service page, with commercial change ask (`svc.commercial.*`) | Host admins | Form; save summary | Locked; immediate email `N6` | Price per calendar; `public.price.from` when calendars differ |
+| Options (variants) and their prices | Host service page (`AppointmentServiceFormFields.tsx:194-544`) | Host admins | Form | Locked | Same options on every calendar |
+| Cancellation notice, advance window, min notice, same-day | Host service page (`AppointmentServiceFormFields.tsx:677-732`) | Host admins | Form | Locked | Same rules |
+| Add-ons linked to a service | Host service page, Add-ons section (`AddonGroupsSection.tsx`) | Host admins | `svc.form.addons.reach` | Locked list | Same add-ons |
 | Add-on group settings and options | Host Add-ons tab or inline group editor (`AddonsLibraryView.tsx`, `AddonGroupEditor.tsx`) | Host admins | `Collective` pill, `reach.library.addonGroup` | "From {host}" section, View only; hidden from pickers on member-only services | Same options |
-| Forms required for a service | Host Edit service, `ComplianceRequirementsEditor`, or host Settings, Compliance, Requirements | Host admins | `svc.form.compliance.reach` | Locked rows `comp.req.member.replicaRow` | Forms asked on every calendar (owning venue's copy of the form) |
+| Forms required for a service | Host service page, `ComplianceRequirementsEditor`, or host Settings, Compliance, Requirements | Host admins | `svc.form.compliance.reach` | Locked rows `comp.req.member.replicaRow` | Forms asked on every calendar (the owning venue's managed form) |
 | Form content and versions | Host Settings, Compliance, Templates and types, `/dashboard/compliance-types/[id]/edit` | Host admins | `comp.editor.host.banner` | Managed form View only, `From {host}` pill | Same form |
 | Forms for all bookings | Each venue's Settings, Compliance, Requirements, "All bookings" | That venue's admins | Host rows also reach members (`comp.req.host.allBookings`) | Member rows apply to its own services and on top of host services (`comp.req.member.allBookings`) | Both sets asked at the member |
-| Location type | Host Edit service | Host admins | Form | Locked | Same |
-| Online meeting link, joining information | Each venue on its own copy: host in Edit service (`svc.form.location.linkLabel`), member in View dialog | That venue's admins | Host value | Member value | Link of the booked calendar's venue |
-| Colour | Host Edit service | Host admins | Form | Locked | Diary colour |
-| Staff permission flags (`staff_may_customize_*`) | Host Edit service, "Optional overrides per calendar" (`AppointmentServiceFormFields.tsx:877-922`) | Host admins | `svc.form.staffMay.reach`; name and description flags disabled on offered services (open question) | Locked; decide what member staff and admins may set | n/a |
+| Location type | Host service page | Host admins | Form | Locked | Same |
+| Online meeting link, joining information | Each venue on its own row: host on the service page (`svc.form.location.linkLabel`), member in `MemberServiceView` (D11) | That venue's admins | Host value | Member value | Link of the booked calendar's venue |
+| Capacity per session (`capacity_per_session`) | Each venue on its own row: host on the service page, member in `MemberServiceView` (D40, venue-controlled) | That venue's admins | Host value | Member value: a new replica takes the host's value once, and no later update overwrites it | The booked calendar's venue's capacity |
+| Pre-appointment instructions (`pre_appointment_instructions`) | Each venue on its own row: host on the service page, member in `MemberServiceView` (D53, venue-controlled, because it describes the venue the guest visits) | That venue's admins | Host value | Member value, seeded from the host's when the replica is created and then the member's own | The booked calendar's venue's instructions, in its confirmations and reminders |
+| Colour | Host service page | Host admins | Form | Locked | Diary colour |
+| Staff permission flags (`staff_may_customize_*`) | Host service page, "Where it is sold" section (today "Optional overrides per calendar", `AppointmentServiceFormFields.tsx:877-922`) | Host admins | `svc.form.staffMay.reach`; name and description flags off on offered services (D29, the design's default). D29 is the recommended default and is awaiting the owner's confirmation; if it is overturned, the items listed in plan §11.2 under D29 change. | Locked; member admins and staff set per-calendar values only within the flags the host leaves on (§1 B) | n/a |
 | Active (visible to guests) | Host card switch (`AppointmentServicesView.tsx:1426-1454`) or form toggle | Host admins | Ask `svc.deactivate.*` when offered | `Turned off by {host}`; no switch | Hidden everywhere |
-| On the collective page | Host card switch `svc.card.onPageSwitch`, Add service checkbox, or Booking Page, Services, the Collective area's grid (item 15) | Host admins | `Collective` pill | New "From {host}" card, or moves to "No longer offered by {host}" | Appears once a calendar offers it |
-| Delete service | Host Services (blocked while offered, `svc.delete.blocked.*`) | Host admins | Blocked dialog | Copies have no Delete | n/a |
-| Service photo | Host Booking Page tab, Page, services photos (writes host service photo) | Host admins | Page editor | None; copies arrive on leave | Host photo for every calendar |
+| On the collective page | Host card switch `svc.card.onPageSwitch` (item 1), the Add service checkbox `svc.add.onPageCheckbox`, or the grid's `ov.bulk.offer` (item 15) | Host admins | `Collective` pill | New "From {host}" card, or moves to "No longer offered by {host}" | Appears once a calendar offers it |
+| Delete service | Host Services (blocked while offered, `svc.delete.blocked.*`) | Host admins | Blocked dialog | Replicas have no Delete | n/a |
+| Service photo | Host Booking Page tab, Page, services photos (writes host service photo) | Host admins | Page editor | None; copies of the photos arrive at release (D20) | Host photo for every calendar |
 
-Server backstops for table A: a member write that changes a locked field returns 409 `COLLECTIVE_MANAGED_SERVICE`; managed add-on groups `COLLECTIVE_MANAGED_ADDON_GROUP`; managed forms `COLLECTIVE_MANAGED_COMPLIANCE_TYPE`; deleting an offered service `COLLECTIVE_OFFERED_SERVICE`. Member saves of calendars and the online link pass. The old catalogue route maps `create_item` to offer, `archive_item` to withdraw, heading actions to `COLLECTIVE_HEADINGS_FOLLOW_SERVICES`.
+Server backstops for table A: a member write that changes a locked field returns 409 `COLLECTIVE_MANAGED_SERVICE`; managed add-on groups `COLLECTIVE_MANAGED_ADDON_GROUP`; managed forms `COLLECTIVE_MANAGED_COMPLIANCE_TYPE`; deleting an offered service `COLLECTIVE_OFFERED_SERVICE`. Member saves of calendars and of the venue-controlled columns (`online_meeting_url`, `online_meeting_info`, `capacity_per_session`, `pre_appointment_instructions`) pass. The old catalogue route maps `create_item` to offer, `archive_item` to withdraw, heading actions to `COLLECTIVE_HEADINGS_FOLLOW_SERVICES`.
 
 #### B. Calendars
 
 | Fact | Edited in | Who may edit | Host surfaces show | Member surfaces show | Guests show |
 |---|---|---|---|---|---|
-| Host calendar offers a service | Host Edit service calendars; host Calendar Availability, Edit calendar; host staff "Offer on your calendars" | Host admins; host staff for own calendars | Ticks and pills | Not shown | Listed under the service |
-| Member calendar offers a collective service (one record, two labelled doors) | Member Calendar Availability, Edit calendar, "From {host}" group; member View dialog; member staff card toggles; AND host Edit service, `CollectiveCalendarsSection` | Member admins and staff (own calendars); host admins | Tick under the member venue with `svc.cal.lastChanged` | Tick with `svc.cal.lastChanged`; `N11` when the host changed it | Listed straight away |
-| Per-calendar values (length, buffer, price, deposit, colour; name and description only on services not on the page) | `CalendarServiceValuesDialog`, from the calendar row (host form, member View dialog) or "Edit your settings" (staff) | Calendar staff within flags; that venue's admins; host admins for any calendar | Value chips; "Compare values" table | Same chips; `N14` when the host changed one | That calendar's values |
+| Host calendar offers a service | Host service page calendars; host Calendar Availability, Edit calendar; host staff "Offer on your calendars" | Host admins; host staff for own calendars | Ticks and pills | Not shown | Listed under the service |
+| Member calendar offers a collective service | One store, `calendar_service_assignments`, behind six doors, every one of which writes through the engine's `collective_set_calendar_offering` (and `collective_set_calendar_values` for the row's values), never directly: member Calendar Availability, Edit calendar, "From {host}" group (item 8); `MemberServiceView`, "Your calendars that offer this service" (item 3); member staff card toggles (item 4); the host service page's `CollectiveCalendarsSection` (item 1); the grid's cell popover and its bulk lane (item 15) | Member admins and staff (own calendars); host admins | Tick under the member venue with `svc.cal.lastChanged` | Tick with `svc.cal.lastChanged`; `N11` when the host changed it | Listed straight away |
+| Per-calendar values (length, buffer, price, deposit, colour; name and description only on services not on the page) | One component, `CalendarServiceValuesDialog` (the generalised `StaffServiceOverrideModal`, copy `values.*`, item 9), opened from the calendar row on the host service page, from `MemberServiceView`, from "Edit values" on Calendar Availability (item 8) or from "Edit your settings" on a staff card (items 2 and 4) | Calendar staff within flags; that venue's admins; host admins for any calendar | Value chips; "Compare values" table | Same chips; `N14` when the host changed one | That calendar's values |
 | Calendar hours, breaks, closures, amended hours | Owning venue's Calendar Availability | Owning venue admins and linked staff | Diary only | Editable | Slots |
 | Calendar name, active, delete, booking link segment | Owning venue's Calendar Availability (`BookableCalendarsPanel.tsx`) | Owning venue admins | Name updates in host form | Warnings `cal.edit.active.warn`, `cal.delete.collectiveLine` | Calendar leaves the page when inactive |
 
@@ -58,10 +60,10 @@ Stale calendar sets return 412 `STALE_RESOURCE` (`cal.stale.*`); the overrides r
 | Header opening hours | Host Settings, Business hours | Host admins | `reach.settings.hostHours` | Read-only | About tab |
 | Any available, staff-first | Host Settings, Booking Settings (`FeatureFlagsSection.tsx`) | Host admins | `reach.settings.hostFlag` | none | Page behaviour |
 | Guest sign-in requirement | Each venue's Booking Settings (`RequireAccountLoginSection.tsx`) | Each venue's admins | `reach.settings.hostFlag` | `reach.settings.memberLogin` | Asked if any venue requires it (open question) |
-| Members: invite, cancel invite, remove | Host Booking Page, Members tab (`MembersSection`) | Host admins | Members list with health | Linked accounts row | Calendars appear or leave |
-| Host transfer | Host Members, `bp.members.askToHost`; candidate accepts in Linked accounts | Host admin asks; candidate admin accepts | `la.row.hostMoveScheduled` | `N21`, row line | Header switches on the date |
-| End the collective | Host Members, `dissolve.button` | Host admins | Row "Ended" | `N19`, review panel | Dissolved page |
-| Leave | Member Linked accounts row | Member admins | `N16` | Review panel | Member's own page returns |
+| Members: invite, cancel invite, remove | Collective area, Venues tab (item 15; hosts only) | Host admins | Venue rows with health and the actions | Linked accounts row; the Booking Page tab's read-only "Who is on it" summary | Calendars appear or leave |
+| Host transfer | Collective area, Venues tab, `bp.members.askToHost`; the candidate accepts from its Linked accounts row (`transfer.review`) | Host admin asks; candidate admin accepts | `la.row.hostMoveScheduled` | `N21`, row line | Header switches on the date |
+| End the collective | Collective area, Venues tab, `dissolve.button` | Host admins | Row "Ended" | `N19`, review panel | Dissolved page |
+| Leave | Member Linked accounts row (`LeaveCollectiveDialog`, J7); item 10's Leaving section only links here | Member admins | `N16` | Review panel | Member's own page returns |
 | Timezone | Locked while live (`VenueProfileSection.tsx:511-533`) | Nobody | `profile.timezone.locked` | Same | n/a |
 | Currency | Not editable; must match at invite | Nobody | n/a | n/a | n/a |
 | Stripe connection | Each venue's Settings, Payments | That venue's admins | Warnings in host form | `payments.member.note` | Calendars without card payments hidden online for paid services |
@@ -69,7 +71,7 @@ Stale calendar sets return 412 `STALE_RESOURCE` (`cal.stale.*`); the overrides r
 | Own booking page settings | Each venue's Booking Page, "Your own page"; read-only while redirecting (`bp.own.redirecting.*`) | That venue's admins when showing | Status line | Status line | Redirect or own page |
 | Embed and QR | Booking Page, Share and embed (`WidgetSection.tsx`) | Each venue's admins | Collective snippet `/embed/c/{slug}` | Same | Collective page |
 | Clients, bookings, payments, compliance records, waitlist | Owning venue only | Owning venue | Partner bookings per D17 as amended by D41 (edit and cancel rights stand; typed client details do not apply inside a live collective) (`staff.detail.onlyOwner`) | Own | Owning venue's manage page |
-| Communications templates, reminders | Each venue; owning venue's templates apply | That venue's admins | none | none | Differ by calendar's venue (open question) |
+| Communication policies (`venues.communication_policies`), reminders | Each venue; the owning venue's policies apply | That venue's admins | none | none | Differ by calendar's venue (open question) |
 | Notification preferences | Each venue, `NotificationPrefsCard` | That venue's admins | Own | Own | n/a |
 
 ## 1.5 Where the collective lives: navigation
@@ -90,9 +92,9 @@ Click counts today: create 5; invite 6 or 7 by two different routes to the same 
 | "Who is in this, and is it working?" | A new top-level area, **Collective** | Health, the services-by-venue grid, the bulk lane, venues and invitations, history |
 | "Which other venues share a diary with me?" | **Settings, Linked accounts** (unchanged) | Account links outlive collectives and are a different relationship |
 
-**The sidebar entry.** Label `nav.collective` ("Collective"), fixed, with the collective's name on a second line so the label never moves while the name varies. Placed immediately after Services, because that is what it most changes. Shown to admins of a venue in a live collective, and to members as well as hosts: a member's shop front is now the collective page, so hiding the area from them would be the same mistake the sidebar already makes (below). Settings stays at twelve tabs.
+**The sidebar entry.** Label `nav.collective` ("Collective"), fixed, with the collective's name (`nav.collective.name`) on a second line so the label never moves while the name varies. Placed immediately after Services, because that is what it most changes. Shown to admins of a venue in a live collective, and to members as well as hosts: a member's shop front is now the collective page, so hiding the area from them would be the same mistake the sidebar already makes (below). Settings stays at twelve tabs.
 
-**Tabs inside it.** Host: Overview, Services, Venues, History. Member: Overview, Services, History. The Services tab is the grid and bulk lane specified in item 16 below; Overview is the health strip and "what needs you"; Venues is membership, invitations and hosting; History is the audit trail with its own filters and export.
+**Tabs inside it.** Host: Overview, Services, Venues, History. Member: Overview, Services, History. The Services tab is the grid and bulk lane specified in item 15 below; Overview is the health strip and "what needs you"; Venues (hosts only) is the one home for membership: invite, cancel an invitation, remove a member, hosting request and transfer, and End the collective, while Leave stays on a member's Linked accounts row; History is the audit trail with its own filters and export.
 
 **Three sidebar defects to fix while in there**, all live today and none collective-specific in cause:
 
@@ -108,9 +110,10 @@ Click counts today: create 5; invite 6 or 7 by two different routes to the same 
 
 **0.1 Badges** (`Pill`, `src/components/ui/dashboard/Pill.tsx`), one meaning each, in new `src/components/linked-accounts/collective/CollectivePills.tsx`:
 - `CollectivePill`: brand, dot, `common.pill.collective`, sr-only `common.srOnly.collective`. Host only: offered services, and headings, add-on groups and forms they use.
-- `FromHostPill`: info, lock icon (aria-hidden), `common.pill.fromHost`. Member only: copies, managed headings, groups, forms.
+- `FromHostPill`: info, lock icon (aria-hidden), `common.pill.fromHost`. Member only: replicas, managed headings, groups, forms.
 - `OnlyAtVenuePill`: neutral, `common.pill.onlyAt`. Both roles: services not on the page.
-- `VenueSyncPill`: `Up to date` (success), `Updating` and `Setting up` (info, dot), `Could not update` (danger), `Hidden at {venue}` (warning), `Paused` (warning). Text always carries the state.
+- `VenueSyncPill`, one label per status from the service GET (`up_to_date`, `updating`, `setting_up`, `failed`, `hidden`, `paused`): `common.pill.upToDate` (success), `common.pill.updating` and `common.pill.settingUp` (info, dot), `common.pill.couldNotUpdate` (danger), `svc.card.hiddenAt` (warning), `common.pill.paused` (warning). Text always carries the state.
+- `RetiredPill`: neutral, `common.pill.retired`. Member only: a replica the host took off the page (item 3).
 
 **0.2 Reach lines.** New `EditReachNote` renders fixed sentences from `src/lib/linked-accounts/collective-copy.ts` (the only home of these strings; unit test fails on U+2014 and unfilled placeholders). Rule: every control that writes a fact other venues see shows its reach line in the same visual group, and every dialog that saves such a fact repeats it as the dialog description. `formatVenueList`: "A", "A and B", "A, B and C", then "A, B and {n} more".
 
@@ -118,11 +121,11 @@ Click counts today: create 5; invite 6 or 7 by two different routes to the same 
 
 **0.4 Data.** `CollectiveContextProvider` in `src/app/dashboard/layout.tsx` (already loads `collectiveBookingLinks` at :188) supplies `{ collectiveId, name, slug, role, hostVenueName, venues[{id,name,isHost,status,sync}], pageLive, ownPageRedirecting, ownPageReason }` from the one live-collective resolver that also drives redirects, sidebar and email links. GET `/api/venue/appointment-services` adds `collective` per service and `collective_calendars` (host admins).
 
-**0.5 Errors.** Codes are additive in `API_ERROR_CODES`, prose stays in `error`, shown inline (role="alert") in the dialog that caused them: `COLLECTIVE_MANAGED_SERVICE` (`svc.member.error.managed`), `COLLECTIVE_OFFERED_SERVICE` (`svc.delete.error409`), `COLLECTIVE_MANAGED_ADDON_GROUP` (`addons.error.managed`), `COLLECTIVE_MANAGED_COMPLIANCE_TYPE` (`comp.type.error.managed`), `COLLECTIVE_CONSENT_REQUIRED` (`join.error.consent`), `COLLECTIVE_SERVICE_UPDATING` (`staff.error.updating`; public `public.error.updating`), `COLLECTIVE_TIMEZONE_LOCKED` (`profile.timezone.error`), `COLLECTIVE_COMPLIANCE_REQUIRED` (`comp.general.error.locked`), `STALE_RESOURCE` at 412, reusing the existing code and status (`svc.stale.*`, `cal.stale.*`, app prose `cal.stale.apiProse`).
+**0.5 Errors.** Codes are additive in `API_ERROR_CODES`, prose stays in `error`, shown inline (role="alert") in the dialog that caused them: `COLLECTIVE_MANAGED_SERVICE` (`svc.member.error.managed`), `COLLECTIVE_OFFERED_SERVICE` (`svc.delete.error409`), `COLLECTIVE_MANAGED_ADDON_GROUP` (`addons.error.managed`), `COLLECTIVE_MANAGED_COMPLIANCE_TYPE` (`comp.type.error.managed`), `COLLECTIVE_CONSENT_REQUIRED` (`join.error.consent`), `COLLECTIVE_SERVICE_UPDATING` (`staff.error.updating`; public `public.error.updating`), `COLLECTIVE_TIMEZONE_LOCKED` (`profile.timezone.error`), `COLLECTIVE_COMPLIANCE_REQUIRED` (`comp.general.error.locked`), `STALE_RESOURCE` at 412, reusing the existing code and status (`src/lib/booking/guest-actions/types.ts:182`; `svc.stale.*`, `cal.stale.*`, app prose `cal.stale.apiProse`), `COLLECTIVE_UNDO_EXPIRED` at 410 (`ov.undo.expired`), `COLLECTIVE_BOOKING_MODEL_LOCKED` (`bm.model.locked`), `COLLECTIVE_CURRENCY_MISMATCH` (`bm.currency.blocked`), `COLLECTIVE_LINKS_BEHIND` (`transfer.ask.blockedBehind`) and `COLLECTIVE_TRANSFER_PENDING`. The one list, including the engine's six codes, is contract 21 in plan Appendix E and lands in `src/lib/api/error-codes.ts` in W2. Under each item below, a "Calls:" line names the routes that item uses by their contract number in plan Appendix E.
 
 ### 1. Services page, host admin (`/dashboard/appointment-services`, `AppointmentServicesView.tsx`)
 
-**Banner.** Under `TabBar` (1047-1056), on all tabs, `CollectiveServicesBanner variant="host"` (SectionCard, brand tint like `CombinedPageScopeSwitch`): `svc.host.banner.title`, `svc.host.banner.body`, link `svc.host.banner.viewPage`. A venue behind: amber line `svc.host.banner.behind` + `svc.host.banner.retry` (POST `/api/venue/collectives/[id]/replicas/retry`). No member yet: body `svc.host.banner.invitedOnly`. Loading: one skeleton line. Not in a collective: no banner.
+**Banner.** Under `TabBar` (1047-1056), on all tabs, `CollectiveServicesBanner variant="host"` (SectionCard, brand tint like `CombinedPageScopeSwitch`): `svc.host.banner.title`, `svc.host.banner.body`, link `svc.host.banner.viewPage`. A venue behind: amber line `svc.host.banner.behind`, linking to the Collective area's Overview (item 15); the banner carries no Retry, because the only Retry for a service is on that service page's collective strip (below) and the only per-venue one is on the Overview. No member yet: body `svc.host.banner.invitedOnly`. Loading: one skeleton line. Not in a collective: no banner.
 
 **Filter.** Segmented control `svc.filter.label`: `svc.filter.all` (default), `svc.filter.onPage`, `svc.filter.onlyHere`, kept in `?show=`. Other than All: reorder off, hint `svc.filter.reorderOff`.
 
@@ -133,12 +136,12 @@ Click counts today: create 5; invite 6 or 7 by two different routes to the same 
 | Not on the page | existing | none | Active switch; `svc.card.onPageSwitch` off; Edit; Delete |
 | On the page, up to date | `CollectivePill` | calendar pills: own `{calendar}`, others `svc.card.calendarPillOther`, same style | Active; page switch on; Edit; Delete (blocked dialog) |
 | A venue updating or setting up | + `svc.card.updatingAt` | polls every 5 s, up to 60 s | as above |
-| A venue failed | + danger `svc.card.failedAt` | `svc.card.failedDetail` + Retry | as above |
+| A venue failed | + danger `svc.card.failedAt` | `svc.card.failedDetail`, whose `{reason}` is `sync.reason.busy`, `sync.reason.subscription` or `sync.reason.unknown`; no Retry on the card: opening the service lands on its collective strip, which has it | as above |
 | Hidden at a venue (no card payments, forms off, paused) | + warning `svc.card.hiddenAt` | reason from `svc.cal.warn.*` | as above |
 | On the page, turned off | `CollectivePill` + Inactive | `svc.card.inactiveOffered` | as above |
 | On the page, no calendar anywhere | `CollectivePill` | `svc.card.noCalendars` | as above |
 
-**On the page switch** (new `role="switch"`, Active switch markup, host admins only; host staff see the pill). Off to on: ask `svc.offer.title`/`svc.offer.message`, body `svc.offer.body.calendars` + per venue `svc.offer.body.noStripe`, `svc.offer.body.formsOff`, confirm `svc.offer.confirm`. Pending: disabled, `aria-busy`. Done: `CollectiveSaveSummary` `svc.offer.done` + `svc.offer.chooseCalendars` (opens Edit service at calendars). On to off: ask `svc.withdraw.title`/`svc.withdraw.message`, body `svc.withdraw.body.host`, confirm `svc.withdraw.confirm` (destructive); done `svc.withdraw.done`. Error `svc.offer.error`.
+**On the page switch** (new `role="switch"`, Active switch markup, host admins only; host staff see the pill). Off to on: ask `svc.offer.title`/`svc.offer.message`, body `svc.offer.body.calendars` + per venue `svc.offer.body.noStripe`, `svc.offer.body.formsOff`, confirm `svc.offer.confirm`. Pending: disabled, `aria-busy`. Done: `CollectiveSaveSummary` `svc.offer.done` + `svc.offer.chooseCalendars` (opens the service page at its calendars section). On to off: ask `svc.withdraw.title`/`svc.withdraw.message`, body `svc.withdraw.body.host`, confirm `svc.withdraw.confirm` (destructive); done `svc.withdraw.done`. Error `svc.offer.error`.
 
 **Active switch** (1426-1454), offered service: off asks `svc.deactivate.*` (destructive); on shows `svc.activate.done`.
 
@@ -154,6 +157,8 @@ Click counts today: create 5; invite 6 or 7 by two different routes to the same 
 
 **One tint rule.** Exactly one visual treatment means "this reaches other businesses", used on every section that does and nowhere else. Today's proposal spreads per-venue failure across three places with three Retry buttons; all per-venue health moves to a single collective strip at the top of the page, which owns the only Retry.
 
+**The collective strip.** At the top of the service page, one strip: the reach line (`reach.host.master`), one line per venue reusing the Overview's health lines (`ov.venue.*`, item 15) scoped to this service, and the page's only Retry, labelled `svc.host.banner.retry`, which sends this service's `link_ids` to `POST /api/venue/collectives/[id]/replicas/retry`. Every other place that reports a failure (the card, the calendars section, the save summary) links or scrolls to this strip rather than carrying a second Retry.
+
 **Why a diff, stated so it is never merged away.** A member calendar's assignment points at that venue's replica, not at the master, and the master's `practitioner_ids` may only name the host's own calendars (the server answers 400 for any other, `route.ts:1335-1339`). So member calendars need their own channel, and it carries intent (add, remove) rather than a picture, because the member edits the same rows from its own Calendar Availability page and a picture taken before that edit would undo it. The server resolves each entry to the replica at that venue through `collective_set_calendar_offering` (plan §6.7); it never merges member calendars into `practitioner_services` or `practitioner_ids`, which the app sends back as a whole set. (An earlier draft said a host's combined list would delete member assignments. It would not: the wholesale delete at `route.ts:1394` is scoped to the master's id, and member rows carry the replica's, so the two never meet. The diff is right for the reason above.)
 
 **Five of the seven per-calendar chips cannot be true yet.** `calendar_service_assignments` holds only `custom_duration_minutes` and `custom_price_pence` (`20260430120000_unified_scheduling_engine.sql:114-121`) and the GET returns the other five as hard-coded null (`route.ts:680-684`). So `svc.cal.chip.*` and four columns of "Compare values" are specified against columns D5 has yet to build. Either the chips ship with D5 or this screen ships with two of them.
@@ -162,62 +167,68 @@ Click counts today: create 5; invite 6 or 7 by two different routes to the same 
 
 **Card states, simplified.** The header currently reaches eleven objects. One state line per card, not three, and the two switches (Active, and On the page) must not be visually identical, because one of them retires the service at every member.
 
-**Edit service, offered service** (the sections below apply to the page; anchors are the dialog they replace, `Dialog` 1481-1639):
+**The service page, offered service** (anchors are the dialog it replaces, `Dialog` 1481-1639):
 - `description` = `reach.host.master` (not offered: `reach.host.ownOnly`). Footer left text `svc.form.footerReach`.
 - Category help (146-148): `svc.form.categoryHelp.host`.
 - Add-ons (`AddonGroupsSection.tsx:170-187`): `svc.form.addons.reach`; `AddonGroupEditor` opened here shows `addons.editor.reach` when the group is used on the page.
 - Location, Online (807-841): `svc.form.location.linkLabel`, `svc.form.location.infoLabel`, help `svc.form.location.linkHelp`.
 - Active toggle: `svc.form.active.reach`.
-- Staff permissions (877-922): `svc.form.staffMay.reach`; Display name and Description disabled with `svc.form.staffMay.nameLocked` (pending decision).
+- Staff permissions (877-922), inside "Where it is sold": `svc.form.staffMay.reach`; Display name and Description disabled with `svc.form.staffMay.nameLocked` (D29, the design's default). D29 is the recommended default and is awaiting the owner's confirmation; if it is overturned, the items listed in plan §11.2 under D29 change.
 - Calendars: `CollectiveCalendarsSection` replaces `calendarsSection` (1516-1616).
 - Compliance (1628-1637): `svc.form.compliance.reach`; per member with its own all-bookings forms `svc.form.compliance.alsoAskedAt`.
 
 **`CollectiveCalendarsSection`** (`src/components/linked-accounts/collective/CollectiveCalendarsSection.tsx`):
-- Heading `svc.cal.heading`, help `svc.cal.help.collective`. One group per venue, host first (`svc.cal.venueYou`), members A to Z; group header h4 + `VenueSyncPill`; warnings when true: `svc.cal.warn.noStripe`, `.formsOff`, `.suspended`, `.settingUp`, `.failed` (+ Retry).
+- Heading `svc.cal.heading`, help `svc.cal.help.collective`. One group per venue, host first (`svc.cal.venueYou`), members A to Z; group header h4 + `VenueSyncPill`; warnings when true: `svc.cal.warn.noStripe`, `.formsOff`, `.suspended`, `.settingUp`, `.failed` (no Retry here: the strip above owns it).
 - Row identical for every venue: checkbox (label calendar name, `aria-label` "{calendar} at {venue}"), chips `svc.cal.chip.*`, `svc.cal.editValues` when saved as ticked and any permission is on, `svc.cal.lastChanged` (changes in last 30 days), markers `svc.cal.notSaved.add`/`.remove`.
 - Lingering links: host as today (1564-1590); other venues `svc.cal.inactiveOther` + Remove link. Add calendar and Calendar availability link only in the host group (1525-1557). Empty member group `svc.cal.noCalendars`. Loading: two skeleton rows per group.
 - Disclosure `svc.cal.compare`: table Calendar, Venue, Length, Buffer, Price, Deposit; blank cells `svc.cal.compare.standard`.
 
 **Save flow, host admin.**
 1. Existing client validation.
-2. Offered and any of price, deposit or fee, payment rule, length, buffer, cancellation notice, options, add-on prices or lengths, forms changed: ask `svc.commercial.title`/`.message`; body lines `diff.row`, then `svc.commercial.bookingsKept`, `svc.commercial.membersTold`; if a permission was switched off while calendars hold values, heading `svc.commercial.clearValues.heading` + rows `.row`; confirm `svc.commercial.confirm`. Cancel returns to the form with edits.
-3. PATCH carries `expected_updated_at` and `collective_calendars { add, remove }`.
+2. Offered and any of price, deposit or fee, payment rule, length, buffer, cancellation notice, options, add-on prices or lengths, forms changed: ask `svc.commercial.title`/`.message`; body lines `diff.row` (labels `diff.price`, `diff.deposit`, `diff.noShowFee`, `diff.payment`, `diff.length`, `diff.buffer`, `diff.cancellation`, `diff.options`, `diff.addons`, `diff.forms`; an emptied value reads `diff.none`), then `svc.commercial.bookingsKept`, `svc.commercial.membersTold`; if a permission was switched off while calendars hold values, heading `svc.commercial.clearValues.heading` + rows `.row`; confirm `svc.commercial.confirm`. Cancel returns to the form with edits.
+3. PATCH carries `expected_updated_at`, `collective_calendars { add, remove }` and the `X-ResNeo-Client` header (a missing header is permitted permanently; it only marks the edit for `N27`).
 4. 412 `STALE_RESOURCE`: ask `svc.stale.*`; confirm reloads the service.
 5. 409 affected bookings: `ServiceRemovalBookingsDialog`; own groups unchanged; other-venue groups show `svc.removal.otherVenue.row` (no name, status or move select) and `svc.removal.otherVenue.note`; top line `svc.removal.collectiveLine`.
-6. 200: dialog closes; `CollectiveSaveSummary` (aria-live) in the error slot (1075-1080): `svc.save.allDone`, `svc.save.pending` (polls up to 60 s), `svc.save.failed` + `svc.save.retry`, per calendar `svc.save.calendarFailed`.
+6. 200: the page stays open; `CollectiveSaveSummary` renders under the page header in a `role="status"` region (`aria-live="polite"`), never in the error slot (1075-1080), from the response's `collective_sync`: `svc.save.allDone`; `svc.save.pending` (polls the service GET every 5 s, up to 60 s); `svc.save.failed`, whose `svc.save.retry` scrolls to the strip's Retry rather than being a second one; per calendar `svc.save.calendarFailed`. A save that reached members also shows `ov.undo.offer` with a 60-second countdown (D50): it sends the response's `audit_event_id` to `POST /api/venue/collectives/[id]/undo`, which restores the master's before-image from `collective_audit_events`, bumps revisions like any master write, writes `master_change_undone` and sends `N6` again with the "put back" wording; success shows `ov.undo.done`, and after the window the route answers 410 `COLLECTIVE_UNDO_EXPIRED` and the summary shows `ov.undo.expired`.
 
 **Empty.** Existing `EmptyState` (1085-1102) plus `svc.host.emptyCollective`.
 
+Calls: the service `GET` with `collective` per service and, for host admins, `collective_calendars` (contract 5); `PATCH /api/venue/appointment-services` with `expected_updated_at` and `collective_calendars { add, remove }`, answering `collective_sync` or 412 `STALE_RESOURCE` (contract 4); `POST /api/venue/collectives/[id]/offerings` and `DELETE .../offerings/[itemId]` for the switch (contract 1); `POST .../replicas/retry` for the strip (contract 2); `POST .../undo` (contract 14).
+
 ### 2. Services page, host staff
-Pills read-only. "Offer on your calendars" (1347-1378) unchanged plus `reach.staff.toggles` for offered services. `StaffServiceOverrideModal`: help (225-229) `override.help.collective`; "Venue default" hints (242, 266) become `override.standard`; Name and Description never render for offered services.
+Pills read-only. "Offer on your calendars" (1347-1378) unchanged plus `reach.staff.toggles` for offered services. "Edit your settings" opens `CalendarServiceValuesDialog` (item 9) in place of `StaffServiceOverrideModal`: its description is `reach.calendar.values`, the "Venue default" hints (242, 266) become `values.standard`, and Name and Description never render for offered services (D29).
 
 ### 3. Services page, member admin
 Subtitle `svc.member.subtitle`. Banner `CollectiveServicesBanner variant="member"`: `svc.member.banner.title`, `.body`, link `svc.member.banner.leave`.
 
 Sections (h2 + count): (1) `svc.member.section.fromHost`, caption `.fromHostCaption`, grouped by host headings in host order, no drag; (2) `svc.member.section.retired` as closed `<details>`, caption `.retiredCaption`, hidden when empty; (3) `svc.member.section.own`, caption `.ownCaption`, today's full cards.
 
-Copy card: `FromHostPill`, variants, compliance, `common.pill.turnedOffByHost` when inactive. No Active switch, no Delete (`DashboardEntityRowActions showDelete={false}`, new `editLabel` = `svc.member.card.view`). One body line, first match: `svc.member.card.settingUp`; `.updating`; `.failed`; `.noStripe` + `.connectStripe` (Settings, Payments); `.formsOff` + `.turnOn`; `.noCalendars` + `.chooseCalendars`.
+Replica card ("From {host}"): `FromHostPill`, variants, compliance, `common.pill.turnedOffByHost` when inactive, `common.pill.retired` in the retired section. No Active switch, no Delete (`DashboardEntityRowActions showDelete={false}`, new `editLabel` = `svc.member.card.view`). One body line, first match: `svc.member.card.settingUp`; `.updating`; `.failed`; `.noStripe` + `.connectStripe` (Settings, Payments); `.formsOff` + `.turnOn`; `.noCalendars` + `.chooseCalendars`.
 
-Own card: `OnlyAtVenuePill`; action `svc.member.card.suggest` asks `svc.member.suggest.*`. Add service description `svc.member.add.help`.
+Own card: `OnlyAtVenuePill`; action `svc.member.card.suggest` asks `svc.member.suggest.*`; its editor's description is `reach.member.ownOnly`. Add service description `svc.member.add.help`.
 
-**View dialog (copy), rewritten 2026-09-14.** The earlier version wrapped the whole service form in `<fieldset disabled>`. That is replaced, for a reason worth stating as a rule: **render a disabled form only when the artefact is itself a form.** A disabled form shows the controls for choosing a value rather than the value; disabled controls have no WCAG contrast floor, which contradicts this document's own accessibility bar; repeating `sectionLocked` down twelve sections breaks convention 0.2, which says the lock is explained once per group; and because the three editable fields cannot live inside a disabled fieldset, live and dead controls end up interleaved. (The rule also decides the compliance case: viewing a managed form uses `ComplianceFormRenderer`'s existing `preview` mode, because a form is a form; a disabled `ComplianceFormBuilder` is not.)
+**`MemberServiceView` (the service from {host}), rewritten 2026-09-14.** The earlier version wrapped the whole service form in `<fieldset disabled>`. That is replaced, for a reason worth stating as a rule: **render a disabled form only when the artefact is itself a form.** A disabled form shows the controls for choosing a value rather than the value; disabled controls have no WCAG contrast floor, which contradicts this document's own accessibility bar; repeating a "Set by {host}" label down twelve sections breaks convention 0.2, which says the lock is explained once per group; and because the three editable fields cannot live inside a disabled fieldset, live and dead controls end up interleaved. (The rule also decides the compliance case: viewing a managed form uses `ComplianceFormRenderer`'s existing `preview` mode, because a form is a form; a disabled `ComplianceFormBuilder` is not.)
 
 New `MemberServiceView`, in three zones, top to bottom:
 
-1. **At a glance.** Title = the service name, `FromHostPill`, `ManagedServiceBanner` with `svc.member.view.lastUpdated` and a `VenueSyncPill`. A short summary strip: price, length, deposit, what the guest is asked for. This is what a member actually needs most days, and today it takes opening a form to find.
-2. **Your settings**, a brand-tinted panel holding everything the member may change, so the editable surface is found in one place rather than hunted for among locked fields: which of their calendars offer it (`svc.member.view.calendarsHeading`, help `.calendarsHelp`), their per-calendar values (`svc.member.view.valuesHeading`, help `.valuesHelp`, rows with chips and `svc.cal.editValues`), their online meeting link and joining information (`svc.member.view.linkLabel`, `svc.form.location.infoLabel`), and `capacity_per_session`, which D40 makes venue-controlled and which the §1 table omitted.
+1. **At a glance.** Title = the service name, `FromHostPill`, `ManagedServiceBanner` (`reach.member.replica`) with `svc.member.view.lastUpdated` and a `VenueSyncPill`. A short summary strip: price, length, deposit, what the guest is asked for. This is what a member actually needs most days, and today it takes opening a form to find.
+2. **Your settings**, a brand-tinted panel holding everything the member may change, so the editable surface is found in one place rather than hunted for among locked fields: which of their calendars offer it (`svc.member.view.calendarsHeading`, help `.calendarsHelp`), their per-calendar values (`svc.member.view.valuesHeading`, help `.valuesHelp`, rows with chips and `svc.cal.editValues`), their online meeting link and joining information (`svc.member.view.linkLabel`, `svc.form.location.infoLabel`), their capacity per session (`capacity_per_session`, venue-controlled under D40) and their pre-appointment instructions (`pre_appointment_instructions`, venue-controlled under D53, with the form's existing label).
 3. **What {host} has set**, as definition-list blocks with humanised values, never disabled inputs: the service itself, options, add-ons, forms, when it can be booked, and where. Empty values are written out ("No deposit", "No forms") rather than shown as a dash, so nothing reads as missing data.
 
-Footer `svc.member.view.close`, `svc.member.view.save` (enabled when changed). Retired copies add `svc.member.view.retiredNote`. PATCH sends only `online_meeting_url`, `online_meeting_info`, `capacity_per_session` and the calendar change as a diff: `expected_calendar_ids` (the rows as loaded) with `calendars { add, remove }`, so a stale save answers 412 `STALE_RESOURCE`, asks `svc.stale.*` and reloads the calendars only. Each calendar row shows `svc.cal.lastChanged` when {host} changed it in the last 30 days.
+Footer `svc.member.view.close`, `svc.member.view.save` (enabled when changed). Retired replicas add `svc.member.view.retiredNote`. The member PATCH allowlist is `practitioner_ids` (the full-set shape older builds send, which the server diffs), `online_meeting_url`, `online_meeting_info`, `capacity_per_session` and `pre_appointment_instructions`; anything else answers 409 `COLLECTIVE_MANAGED_SERVICE`. The web view sends the calendar change as a diff: `expected_calendar_ids` (the rows as loaded) with `calendars { add, remove }`, so a stale save answers 412 `STALE_RESOURCE`, asks `svc.stale.*` and reloads the calendars only. Each calendar row shows `svc.cal.lastChanged` when {host} changed it in the last 30 days.
 
 **A "What needs you" strip** at the top of the member's Services page mirrors the host's `ov.todo.*`: card payments not connected, forms switched off, a service on the page with none of their calendars chosen. Same shape both sides, so the two roles learn one pattern.
 
 **Section order.** Retired moves from second to last, so a dead section never sits between two live ones.
 
-Adoption review (`N26`, `?adopt={itemId}`): `svc.member.adopt.title`/`.message`, choices `.useMine` (opens `AdoptServiceReview`, J3) and `.keepSeparate`.
+**After a release (D52).** A service that came from {host} stays active as the member's own. Where it shares a name with a service the member kept separate at join, its card carries `svc.member.card.cameFrom` for 30 days and the review panel lists the pair (`review.sameName`); there is no merge action.
+
+Adoption review (`N26`, `?adopt={itemId}`): `svc.member.adopt.title`/`.message`, choices `.useMine` (opens `AdoptServiceReview`, J3) and `.keepSeparate`. No answer after 14 days is "Keep mine separate", with a reminder at day 7 (plan §6.7).
+
+Calls: the service `GET` (contract 5); `PATCH /api/venue/appointment-services` with the member allowlist above and the calendar diff (contract 4); `POST /api/venue/collectives/[id]/suggestions { service_id }` for "Suggest to {host}" and `POST .../adoptions/[itemId] { choice, option_map }` for the adoption review (contract 10).
 
 ### 4. Services page, member staff
-Copy cards read-only; "Offer on your calendars" and "Edit your settings" stay (flags from the copy) with `reach.staff.toggles`; override help `override.help.member`, hints `override.standard`.
+Replica cards read-only; "Offer on your calendars" and "Edit your settings" stay (flags from the replica) with `reach.staff.toggles`; "Edit your settings" opens `CalendarServiceValuesDialog` (item 9) with `values.help.member` under its description and `values.standard` hints.
 
 ### 5. Categories tab (`ServiceCategoriesManager.tsx`)
 Host: description (313-315) `cat.host.description`; headings used on the page get `CollectivePill`; delete message (484-487) `cat.host.deleteOnPage` when relevant. Member: `cat.member.description`; managed headings `FromHostPill`, Rename and Delete disabled with tooltip and sr-only `cat.member.lockedTooltip`; reorder allowed.
@@ -228,7 +239,7 @@ Host: cards (319-408) used on the page get `CollectivePill` and `reach.library.a
 ### 7. Compliance
 - Templates and types (`ComplianceSettingsSection.tsx:59-196`): host rows used on the page `CollectivePill` + `comp.types.host.onPage`; member managed rows `FromHostPill`, Edit becomes `comp.types.member.view`, Archive hidden, Duplicate title `comp.types.member.duplicateHelp`; own form accepting host records `comp.types.member.acceptsRecords`.
 - Type editor: host `comp.editor.host.banner`; member managed read-only `comp.editor.member.banner`.
-- Requirements (`ServiceRequirementsPanel.tsx`): All bookings adds `comp.req.host.allBookings` or `comp.req.member.allBookings`; member copy rows read-only `comp.req.member.replicaRow`, no Add. `AddRequirementDialog` on member-only services omits managed forms.
+- Requirements (`ServiceRequirementsPanel.tsx`): All bookings adds `comp.req.host.allBookings` or `comp.req.member.allBookings`; member replica rows read-only `comp.req.member.replicaRow`, no Add. `AddRequirementDialog` on member-only services omits managed forms.
 - General (363-377): locked checkbox with `comp.general.lockedMember` or `comp.general.lockedHost`.
 
 ### 8. Calendar Availability (`AppointmentAvailabilitySettings.tsx`, `BookableCalendarsPanel.tsx`)
@@ -236,16 +247,19 @@ Host: cards (319-408) used on the page get `CollectivePill` and `reach.library.a
 - Card Services chips (473-494) in labelled groups: host `cal.card.group.onPage`, `cal.card.group.onlyAt`; member `cal.card.group.fromHost`, `cal.card.group.onlyAt`.
 - Booking link row (649-725), while redirecting: editor stays, preview and Copy use `/book/c/{slug}?calendar={segment}`, note `cal.link.redirectNote`.
 - Remove calendar dialog (880-919): `cal.delete.collectiveLine`; host told (`N13`).
-- Edit calendar dialog (1164-1365): under "Active (bookable)" (1216-1225) `cal.edit.active.warn`. "Appointment services" (1227-1252) grouped: host `cal.card.group.onPage` (help `cal.edit.services.groupOnPage.help`) then `cal.card.group.onlyAt` (help `.groupOnlyAt.help`); member `cal.card.group.fromHost` (help `reach.member.calendarTicks`) then `cal.card.group.onlyAt`. Inactive services end their group with `cal.edit.services.turnedOff`; retired copies only while ticked, `cal.edit.services.retired`, uncheckable; paid copies without Stripe `cal.edit.services.noStripe`.
-- Save sends `expected_service_ids`, and four rules make that hold: the dialog's list comes from the venue's own services GET, which now carries `collective` per service, and `expected_service_ids` is the full set of that calendar's rows as loaded, retired and turned-off services included, never the visible checkboxes; the services PUT is sent only when the picker was changed, so a rename or an active toggle on its own never touches the services and never meets `cal.stale.*`, and a 412 for an untouched picker is refetched and retried once without asking; the server refuses ticking a retired copy (`cal.edit.services.retired` is a rule, not only a label) and refuses service ids that are not this venue's own; and the compare-and-write is one transaction on the server, not three round trips.
+- Edit calendar dialog (1164-1365): under "Active (bookable)" (1216-1225) `cal.edit.active.warn`. "Appointment services" (1227-1252) grouped: host `cal.card.group.onPage` (help `cal.edit.services.groupOnPage.help`) then `cal.card.group.onlyAt` (help `cal.edit.services.groupOnlyAt.help`); member `cal.card.group.fromHost` (help `reach.member.calendarTicks`) then `cal.card.group.onlyAt`. Inactive services end their group with `cal.edit.services.turnedOff`; retired replicas only while ticked, `cal.edit.services.retired`, uncheckable; paid replicas without Stripe `cal.edit.services.noStripe`.
+- Save sends `expected_service_ids`, and four rules make that hold: the dialog's list comes from the venue's own services GET, which now carries `collective` per service, and `expected_service_ids` is the full set of that calendar's rows as loaded, retired and turned-off services included, never the visible checkboxes; the services PUT is sent only when the picker was changed, so a rename or an active toggle on its own never touches the services and never meets `cal.stale.*`, and a 412 for an untouched picker is refetched and retried once without asking; the server refuses ticking a retired replica (`cal.edit.services.retired` is a rule, not only a label) and refuses service ids that are not this venue's own; and the compare-and-write is one transaction on the server, not three round trips.
 - Each service saved as ticked, where {host} has any per-calendar permission on, shows `cal.edit.services.editValues` ("Edit values"), which opens `CalendarServiceValuesDialog` for this calendar and service (item 9). Unsaved ticks show nothing until saved. The card's Services list shows the same value chips as `svc.cal.chip.*`. This is the fourth door to per-calendar values, and the only one where the calendar rather than the service is the subject.
 - `svc.cal.lastChanged` appears under a ticked service in the "From {host}" group when {host} made the last change to that row in the last 30 days, so a member sees who chose this (D15). The same line appears in the member's service view.
 - Staff: unchanged, and this is a decision rather than an omission. Non-admin staff choose services from the Services page card ("Offer on your calendars"), which saves through the same calendar-side route and tells {host} (N12); it has no "stop offering" ask, and it meets the same affected-bookings dialog.
-- Adds: flash `cal.flash.added`/`addedMany`. Removals without bookings: ask `cal.stopOffering.*` (member adds `.hostTold`). With bookings: removal dialog with `svc.removal.collectiveLine`, no second ask. 409 stale: refetch, keep dialog, ask `cal.stale.*`.
-- Staff: unchanged.
+- Adds: flash `cal.flash.added` / `cal.flash.addedMany`. Removals without bookings: ask `cal.stopOffering.*` (member adds `.hostTold`). With bookings: removal dialog with `svc.removal.collectiveLine`, no second ask. 412 `STALE_RESOURCE`: refetch, keep the dialog, ask `cal.stale.*`.
+
+Calls: `PUT /api/venue/practitioner-services` with `expected_service_ids`, answering `{ success, added, removed }` or 412 `STALE_RESOURCE` (contract 11).
 
 ### 9. `CalendarServiceValuesDialog` (generalised `StaffServiceOverrideModal`)
-From the host form row, member View dialog or "Edit your settings". Title `values.title`; description `reach.calendar.values`; host editing another venue adds `values.hostEditingMember`. One input per permission that is on, each with `values.standard` and `values.useStandard`. Footer `values.cancel`, `values.save`. Inline errors `values.error.cardHoldFloor`, `values.error.notOffered`. Admins are no longer refused.
+One component for every door: the calendar row on the host service page (item 1), `MemberServiceView` (item 3), "Edit values" on Calendar Availability (item 8) and "Edit your settings" on a staff card (items 2 and 4). Today's `StaffServiceOverrideModal` is `src/app/dashboard/appointment-services/StaffServiceOverrideModal.tsx`. Title `values.title`; description `reach.calendar.values`; host editing another venue adds `values.hostEditingMember`; member staff see `values.help.member`. One input per permission that is on, each with `values.standard` and `values.useStandard`; Name and Description never appear for a service on the page (D29). Footer `values.cancel`, `values.save`. Inline errors `values.error.cardHoldFloor`, `values.error.notOffered`. Admins are no longer refused.
+
+Calls: `PATCH /api/venue/practitioner-service-overrides` (admins and all seven fields) for a calendar at the caller's own venue; a host admin editing a member calendar uses `PUT /api/venue/collectives/[id]/calendar-values { calendar_id, service_id, values }`, which calls `collective_set_calendar_values` (contract 12).
 
 ### 10. Settings, Booking Page tab (`SettingsView.tsx:1629-1690`)
 
@@ -253,23 +267,23 @@ From the host form row, member View dialog or "Edit your settings". Title `value
 
 **It is three levels of tabs deep**: the Settings tab strip, then the scope tabs, then the manager's own tabs. And it has **five different save models on one screen**: 850ms autosave for branding, save-on-blur for the page name, save-on-change-with-a-full-reload for the address radios, a staged sticky bar for calendars, and immediate save-per-click for everything else. The house `SettingsSaveStrip` is already mounted on the same page and the collective path does not use it.
 
-**The proposed shape: one column, seven sections, no nested tabs, two named save lanes.** Sections in order: Identity (name, logo, cover), Address, Look (branding, tabs, About, gallery), Who is on it (a read-only summary linking to the Collective area), Guests (what a guest is asked, sign-in, marketing), Share and embed, Danger (dissolve, or leave). A sticky preview rail sits alongside from `lg:` and collapses to a "Preview" button below. **Save lane one, "looks":** autosave, for anything cosmetic. **Save lane two, "consequences":** confirm-then-save, for anything a guest's booking depends on, including the address. Nothing on this screen saves silently if it changes what a guest can do.
+**The proposed shape: one column, seven sections, no nested tabs, two named save lanes.** Sections in order: Identity (name, logo, cover), Page address, Look (branding, tabs, About, gallery), Who is on it (a read-only summary of the venues linking to the Collective area's Venues tab), Guests (what a guest is asked, sign-in, marketing), Share and embed, Leaving. The seventh section is read-only: a member sees `bp.leaving.member` ("To leave {collective}, go to Settings, Linked accounts.") and the host sees `bp.leaving.host` ("To end {collective}, go to Collective, Venues."), each a link to the screen that holds the control, because Leave lives on the Linked accounts row (J7) and End the collective on the Venues tab (J9). A sticky preview rail sits alongside from `lg:` and collapses to a "Preview" button below. **Save lane one, "looks":** autosave, for anything cosmetic. **Save lane two, "consequences":** confirm-then-save, for anything a guest's booking depends on, including the page address. Nothing on this screen saves silently if it changes what a guest can do.
 
-**What should become the collective's own, rather than following the host.** The product already argues this against itself: the manager currently tells the host that the inherited opening hours "do not decide availability" and that a calendar elsewhere "can be open outside the hours shown here". Address, phone and opening hours should belong to the collective, because they are the collective's shop front and the host's are frequently wrong for it. Currency, timezone, wording and the two flow flags keep following the host. Deposit and cancellation terms following the host while the booking lands at a member is a promise the page cannot keep, and needs settling alongside D32.
+**What follows the host.** The page shows the host's address, phone and opening hours (§1 C). Giving the collective its own is recorded in plan §8.0 Tier 3 and not built. Currency, timezone, wording and the two flow flags follow the host too. Service-level deposit and cancellation notice are part of the service and reach the member with it (§6.2); venue-level deposit settings are D32.
 
-**The member's view of this tab** is read-only, and it is where D3 is explained: which page guests reach, that it is the collective's, who hosts it, and what happens to their own address. `SettingsView.tsx:1643-1647` currently tells every venue on the own-page scope that collective guests do not use this page, which D3 makes false and which must be rewritten.
+**The member's view of this tab** is read-only, and it is where D3 is explained: which page guests reach, that it is the collective's, who hosts it, and what happens to their own page address. `SettingsView.tsx:1643-1647` currently tells every venue on the own-page scope that collective guests do not use this page, which D3 makes false and which must be rewritten.
 
-**Four defects to fix here**, logged as plan CB-47 to CB-50: D3 has no UI at all and defaults to off, so nothing is superseded today; the preview hard-codes address, phone, hours and currency to placeholder values while the live page fills them from the host, so the host previews a page guests never see; Share and embed is not rendered on the collective scope at all, and where the QR is reachable it prints the venue's name over the collective's address; and the collective's address can never be changed after creation while its name can, so the two drift apart permanently.
+**Four defects to fix here**, logged as plan CB-47 to CB-50: D3 has no UI at all and defaults to off, so nothing is superseded today; the preview hard-codes address, phone, hours and currency to placeholder values while the live page fills them from the host, so the host previews a page guests never see; Share and embed is not rendered on the collective scope at all, and where the QR is reachable it prints the venue's name over the collective's address; and the collective's page address can never be changed after creation while its name can, so the two drift apart permanently.
 
-- Scope switch (`CombinedPageNotice.tsx:29-93`): description `bp.switch.host`/`bp.switch.member`; tabs `bp.switch.tab.combined`, `bp.switch.tab.own`; `OwnPageStatusLine` `bp.status.redirecting` or `bp.status.showing` + `bp.reason.*`. Leaving with unsaved changes asks `bp.leaveStaged.*` (replaces 1166).
-- Host, collective scope (`CombinedPageScopeContent.tsx`): description `bp.combined.host.description`; manager tabs Page, Services, Members. Page: `HostInheritedSettingsNote` last paragraph (1216-1220) `bp.inherited.prices`; photos note `bp.page.photos`. Services: `HostCatalogue`, `VenueServicesPicker`, `ItemCard`, `CalendarAssignment`, `CalendarRow`, the link and unlink buttons, `CopySyncStatus` (1446-2340) and the sticky save bar (767-783) are removed. In their place a single card, `bp.services.card` ("Services and calendars are managed in the Collective area"), with a count line `bp.services.count` and a link `bp.services.open` to `/dashboard/collective?tab=services`. There is no second control here for putting a service on the page: that job belongs to the grid (item 15) and the Services page (item 1), and a third door would drift. Members: moved to the Collective area's Venues tab (§1.5). The Booking Page tab keeps a read-only count and a link.
+- Scope switch (`CombinedPageNotice.tsx:29-93`): description `bp.switch.host`/`bp.switch.member`; tabs `bp.switch.tab.combined`, `bp.switch.tab.own`; `OwnPageStatusLine` `bp.status.redirecting` or `bp.status.showing` + `bp.reason.*`. A venue that also runs classes, events or bookable rooms adds `bm.redirect.otherModels` to the status line, where `{link}` is its own page address `/book/{slug}`: that page keeps serving those tabs, and only its appointments tab becomes a card that links to the collective page (item 14). Leaving with unsaved changes asks `bp.leaveStaged.*` (replaces 1166).
+- Host, collective scope (`CombinedPageScopeContent.tsx`): description `bp.combined.host.description`; one column, the seven sections above, no manager tabs. Identity, Page address and Look keep today's fields; `HostInheritedSettingsNote` last paragraph (1216-1220) becomes `bp.inherited.prices`; photos note `bp.page.photos`. Who is on it: the venues with their status pills and a link to the Venues tab, no actions. Services are not a section: `HostCatalogue`, `VenueServicesPicker`, `ItemCard`, `CalendarAssignment`, `CalendarRow`, the link and unlink buttons, `CopySyncStatus` (1446-2340) and the sticky save bar (767-783) are removed, and directly under the scope switch a single card, `bp.services.card` ("Services and calendars are managed in the Collective area"), carries a count line `bp.services.count` and a link `bp.services.open` to `/dashboard/collective?tab=services`. There is no control here for putting a service on the page: that job belongs to the grid (item 15) and the Services page (item 1), and a third door would drift. Leaving: `bp.leaving.host`.
 - Own scope: remove note 1642-1647. Redirecting: SectionCard `bp.own.redirecting.title`/`.body`, `BookingPageSection` and `WidgetSection` in `<fieldset disabled>`. Showing: `bp.own.showing.body`, editable.
-- Member, collective scope (`CombinedPageMemberSummary` 880-983): intro (935-939) `bp.memberSummary.intro`; `OwnPageStatusLine`; address row; calendars with `bp.memberSummary.hiddenReason.*`; empty (959-962) `bp.memberSummary.empty`; footer (973-979) `bp.memberSummary.leave`.
+- Member, collective scope (`CombinedPageMemberSummary` 880-983): intro (935-939) `bp.memberSummary.intro`; `OwnPageStatusLine`; address row; calendars with `bp.memberSummary.hiddenReason.*`; empty (959-962) `bp.memberSummary.empty`; the footer (973-979) is the member's Leaving section: `bp.memberSummary.leave`, then the link `bp.leaving.member`.
 - Share and embed (`WidgetSection.tsx:204-235`), live: no target select; snippet frames `/embed/c/{slug}`; note `bp.widget.collectiveOnly`; QR encodes `/book/c/{slug}`, image label the collective name, file `resneo-qr-{slug}.png` (fixes 164-190).
 
 ### 11. Settings, Linked accounts (`VenueCollectivesPanel.tsx`)
-- Header (125) `la.panel.description`; amber note (158-167) `la.create.eligibleNote`.
-- `CreateCollectiveModal` (382-544): explainer (473-477) `la.create.explainer`; invite rows disabled with `la.create.ineligible.*`, warning `la.create.warn.noStripe`; toast `la.create.done`.
+- Header (125) `la.panel.description`, which now also says what is shared while the collective runs (D41). The amber eligibility note (158-167) goes: J1's step 2 explains each venue's eligibility in place.
+- Create: `CreateCollectiveModal` (382-544) is superseded by `CreateCollectiveDialog` (J1), which carries every string of the create flow (`create.*`) and of the row afterwards (`row.*`).
 - `CollectiveRow` (247-380):
 
 | State | Pills | Line | Actions |
@@ -277,78 +291,98 @@ From the host form row, member View dialog or "Edit your settings". Title `value
 | Invited | Member, Invitation pending | none | `la.row.invitation.review` (`JoinCollectiveDialog`), Decline (ask `decline.*`) |
 | Setting up | Member, Setting up | `la.row.setup` | View page, `la.row.history`, Leave |
 | Active member | Member, Active | `la.row.health.upToDate`/`.updating`/`.failed` | View page, History, Leave (`LeaveCollectiveDialog`) |
-| Host | Host, Active | `la.row.hostHealth` | Manage combined page (Booking Page tab), History |
-| Host move scheduled | + Hosting moving | `la.row.hostMoveScheduled` | host `transfer.cancel` |
+| Host | Host, Active | `la.row.hostHealth` | Manage the page (Booking Page tab), Venues (Collective area), History |
+| Host move scheduled | + Hosting moving | `la.row.hostMoveScheduled` | none here: the host cancels (`transfer.cancel`) on the Venues tab |
 | Hosting request | + Request | `la.row.hostRequest` | `transfer.review`, Decline |
 | Paused | Paused | `la.row.paused` | `la.row.takeOver`, Leave |
 | Left or ended | Left or Dissolved | `la.row.ended`; after dissolve toggle `la.row.listOnOldPage` (90 days) | none |
 
-- `ReviewYourServicesPanel` after leave or removal, on this tab and the Services page, until dismissed (J7).
-- `CollectiveHistoryDialog`: `history.title`, filter `history.filter.*`, rows "{time}: {sentence}" from `history.*`, actor `history.actorWithPerson`, empty `history.empty`, skeleton rows, `history.more`.
+Every membership action a host takes (invite, cancel an invitation, remove, ask to host, cancel a move, end) lives on the Collective area's Venues tab (item 15), so the host row here summarises and links. A member's own answers stay on its row: review or decline an invitation, `transfer.review`, `la.row.takeOver` and Leave.
+
+- `ReviewYourServicesPanel` after leave or removal, on this tab and the Services page, until dismissed (J7): `review.prices`, `review.link`, `review.stripe`, `review.library`, `review.photos.*`, `review.sameName` (D52), `review.unparked`, `review.dismiss`. The "Your previous settings" panel after a migration (`review.previous.*`, J12) uses the same shell.
+- `CollectiveHistoryDialog`: `history.title`, filter `history.filter.*`, rows "{time}: {sentence}" from `history.*` (one sentence per audit event type, including `history.inviteWithdrawn`, `history.inviteExpired`, `history.masterChangeUndone` and `history.migrationValueReplaced`), actor `history.actorWithPerson`, empty `history.empty`, skeleton rows, `history.more`. A member sees rows aimed at its venue or the whole collective.
 - `NotificationPrefsCard` (107-127): Collective group `prefs.collective.digest`, `prefs.collective.calendars` (default on) and `prefs.collective.required`.
 
+Calls: members `PATCH` `accept` (contract 6), `leave` (contract 7), `offer_host`, `accept_host`, `cancel_host_transfer`, `take_over_hosting` (contract 8) and `configure { list_on_old_page }` (contract 9); `GET /api/venue/collectives/[id]/history` (contract 3); notification preferences with `collective_digest` and `collective_calendars` (contract 15).
+
 ### 12. Other surfaces
-- Profile (`VenueProfileSection.tsx:511-533`): timezone disabled with `profile.timezone.locked`; host contact fields `reach.settings.hostProfile`.
+- Profile (`VenueProfileSection.tsx:511-533`): timezone disabled with `profile.timezone.locked`, and `PATCH /api/venue` refuses a change with `COLLECTIVE_TIMEZONE_LOCKED` (`profile.timezone.error`); host contact fields `reach.settings.hostProfile`.
 - Business hours (`OpeningHoursSection.tsx:123-127`): host `reach.settings.hostHours`.
 - Booking Settings: host Any available and Staff-first rows (`FeatureFlagsSection.tsx`) `reach.settings.hostFlag`; sign-in (`RequireAccountLoginSection.tsx`) `reach.settings.memberLogin` or `reach.settings.hostFlag`.
+- Booking model (Settings, Booking Settings): while the venue is in a live collective the control that would switch appointments off is disabled with `bm.model.locked`, and `PATCH /api/venue` answers `COLLECTIVE_BOOKING_MODEL_LOCKED`; a currency change that would break the match answers `COLLECTIVE_CURRENCY_MISMATCH` with `bm.currency.blocked`.
+- Resources (rooms and equipment): while in a live collective the page opens with the note `bm.resource.notShared` (D45): nothing is shared between venues.
 - Payments (`StripeConnectSection.tsx`): `payments.member.note`.
 - Delete venue (`DeleteVenueSection.tsx:86-127`): `delete.host` or `delete.member`.
 - Import (`ImportHub.tsx:180-197`): Undo asks `import.undo.*`; result `import.undo.kept`; failures inline, not `alert`.
 - Booked revenue (`BookedRevenueSection.tsx:356-365`): footnote `reports.priceNote`.
-- Sidebar (`DashboardSidebar.tsx:552-578`): "Your Booking Page" only while the own page shows, which under D3 means only when the collective page is not live for this venue; the collective entry is `nav.collective` (§1.5), not a second booking-page link. Fix the active-state defect at `:489-491` in the same change.
+- Sidebar (`DashboardSidebar.tsx:552-578`): "Your Booking Page" only while the own page shows, which under D3 means only when the collective page is not live for this venue; the collective entry is `nav.collective` with `nav.collective.name` beneath it (§1.5), not a second booking-page link. Fix the active-state defect at `:489-491` in the same change.
+
+Calls: `PATCH /api/venue` refusals `COLLECTIVE_TIMEZONE_LOCKED`, `COLLECTIVE_BOOKING_MODEL_LOCKED` and `COLLECTIVE_CURRENCY_MISMATCH` (contract 19).
 
 ### 13. Diary and staff booking
 - Partner columns in the collective (`PractitionerCalendarView.tsx:7587-7599`): "Linked · {venue}" becomes `diary.column.venue` in own-column slate style, title `diary.column.title`.
 - Routing (graft 5, open question 1): own columns open the own form (server leaves own calendars out of `staff-collective` `calendar_ids`; `collectiveTargetFor` 3232-3240); partner columns, New and Walk-in open the collective form; `LinkedCalendarView.tsx:863` opens the collective form for partners.
 - Heading (`StaffSurfaceBookingModal.tsx:79`): `staff.modal.heading.collective`. Own form member-only services tagged `staff.service.onlyAt`. Collective calendar picker secondary line `public.calendar.venue`.
-- Contacts (`DetailsStep.tsx:459`, `StaffGuestContactFields`), rewritten for D41: inside a live collective the picker searches every active member venue, shows the owning venue on each result (`staff.contact.ownerLine`), and books against the record that already exists; it never clears a picked contact and never asks for details to be typed. Outside a live collective the earlier rule applies: a calendar at another venue clears any picked contact and shows `staff.contact.otherVenue`, and search reaches a partner only where the link shares client details.
-- Deposit toggle at a venue without card payments: disabled, `staff.deposit.noStripe`. Groups limited to the first person's venue, `staff.group.sameVenue`. Copy behind: `staff.error.updating`, times refresh.
-- Partner booking detail: `staff.detail.bookedWith`; edit and cancel per D17, else `staff.detail.onlyOwner`.
+- Contacts (`DetailsStep.tsx:459`, `StaffGuestContactFields`), per D41: inside a live collective the picker searches every live member venue, shows the owning venue on each result (`staff.contact.ownerLine`), and books against the record that already exists; it never clears a picked contact and never asks for details to be typed. Outside a live collective, or after leaving, the search reaches this venue's own clients only (the collective scope answers 403).
+- Deposit toggle at a venue without card payments: disabled, `staff.deposit.noStripe`. Groups limited to the first person's venue, `staff.group.sameVenue`. Replica behind: `staff.error.updating`, times refresh.
+- Partner booking detail: `staff.detail.bookedWith`; edit and cancel per D17 as amended by D41, else `staff.detail.onlyOwner`.
+- Moving a booking (D46): the move select lists calendars at the booking's own venue only; a move to a calendar at another venue is refused, and the dialog says why with `move.otherVenue.title` and `move.otherVenue.body`, offering no rebook-then-cancel path.
+- One person at two venues (D47): when two calendars in the live collective share a normalised name and email, the staff booking form (and the collective page's staff-side warning) shows `clash.samePerson` to whoever books second; the booking is not blocked and nothing is modelled.
+
+Calls: `GET /api/venue/guests?scope=collective&q=`, whose rows carry `owner_venue_id` and `owner_venue_name`; 403 outside a live collective (contract 16).
 
 ### 14. Public pages
-- `/book/c/{slug}` (`collective-page-view.tsx`, `BookPublicLayout`): `public.price.from` when prices differ; "Who would you like to see?" (`AppointmentBookingFlow.tsx:4369`) shows `public.calendar.venue` under every calendar; `DetailsStep` (674-681) shows `public.trader` above consents, marketing label `public.marketing.collective`, unticked; payment step `public.payment.payee`; `ConfirmationStep` `public.confirmation.through`; Any available with inline forms `public.forms.anyAvailable` (forms collected once the calendar is fixed); groups `public.group.sameVenue`; refusal while a copy updates `public.error.updating`, back to times. Not live, paused or lapsed: existing `CollectiveUnavailable` (98-103).
-- `/book/{venue}` and `/book/{venue}/{calendar}` (`src/app/book/[venue-slug]/page.tsx:13-32`, `[practitioner-slug]/page.tsx:29-47`): 307 to `/book/c/{slug}` only when the page is live, all that venue's copies have converged and one of its calendars is listed; query kept, `service_id` translated to the offering, calendar segment to `?calendar=`. A member-only `service_id` shows `MemberOnlyServiceInterstitial`: `public.interstitial.title`, `.body` or `.noPhone`, button `.cta`.
+- `/book/c/{slug}` (`collective-page-view.tsx`, `BookPublicLayout`): `<title>` `public.meta.title` and meta description `public.meta.description`, and the page is canonical for every address that hands over to it (D48); header line `public.header.venues`; `public.price.from` when prices differ; "Who would you like to see?" (`AppointmentBookingFlow.tsx:4369`) shows `public.calendar.venue` under every calendar; the multi-service visit step keeps every service in one visit with one person, so at one venue, and says so with `bm.visit.sameVenue`; `DetailsStep` (674-681) shows `public.trader` above consents, marketing label `public.marketing.collective`, unticked; payment step `public.payment.payee`; `ConfirmationStep` `public.confirmation.through`; Any available with inline forms `public.forms.anyAvailable` (forms collected once the calendar is fixed); groups `public.group.sameVenue`; a fully booked service whose owning venue runs a waitlist offers `public.interstitial.waitlist` (D43); refusal while a replica updates `public.error.updating`, back to times. Not live, paused or lapsed: existing `CollectiveUnavailable` (98-103).
+- `/book/{venue}` and `/book/{venue}/{calendar}` (`src/app/book/[venue-slug]/page.tsx:13-32`, `[practitioner-slug]/page.tsx:29-47`): 307 to `/book/c/{slug}` only when the page is live and one of that venue's calendars is listed and, for a member, all its replicas have converged; the host's own page hands over on the same rule without the convergence condition, because it has no replicas (D3), and shows its own services again while the page is paused. Query kept, `service_id` translated to the offering, calendar segment to `?calendar=`. A venue with another active booking model (classes, events, resources) keeps its own page serving those tabs; its appointments tab becomes a card linking to the collective page, and appointment deep links (`/book/{slug}/{calendar}`, `?service=`) redirect (`resolveBookingPageTabs`, called at `src/components/booking/BookPublicPageContent.tsx:258`). A member-only `service_id` shows `MemberOnlyServiceInterstitial`: `public.interstitial.title`, `.body` or `.noPhone`, button `.cta`.
 - `/embed/{venue}` renders the collective embed in place under the same conditions; new `/embed/c/{slug}` mirrors `EmbedBookingClient` with `frame-ancestors *` and height messages.
 - Old `/book/c/{slug}` after dissolve, 90 days: `DissolvedCollectivePage`: `public.dissolved.title`, `.body`, per listed venue `.book`, `.none`, `.existing`.
 - Guest manage page (`GuestBookingDetailView.tsx:607`): `guest.bookedThrough`. Existing bookings on retired services or calendars that stopped offering the service can still be moved online on the same calendar.
 - Emails: confirmation (`booking-confirmation.ts:114-119`, which covers the text branch; the HTML preamble at `:87-90` needs the same line) adds `email.confirm.through`; Book again (`venue-booking-page-link.ts:17-29`) uses the live resolver, and for member-only services `email.bookAgain.call`; waitlist offers (`notify-appointment-waitlist-offer.ts:80-83`) translate the same way.
 
+Calls: none new; `/embed/c/[slug]` and the dissolved page are pages, not APIs (contract 20).
+
 ### 15. The Collective area (new, `/dashboard/collective`)
 
 Added by the second pass. Items 1 to 14 make **one service** feel like one venue, and do it well. They do not give the host a place to **run** the collective: after the fold its state is spread across the Services banner, each service's calendars section, three manager tabs on the twelfth settings tab, one sentence on a Linked accounts row and a history dialog behind it. A host of four venues cannot answer "which venue is the problem and what is wrong with it" without opening services one at a time. This page is that answer, and it is also where the bulk lane lives, without which the fold makes setup slower than the manager it replaces.
 
-**Where it lives.** Its own top-level sidebar entry, per §1.5: label `nav.collective` fixed, the collective's name on a second line, placed after Services, shown to admins of any venue in a live collective, members included. Tabs: Overview, Services, Venues, History for a host; Overview, Services, History for a member. Page design stays in Settings, Booking Page, because under D3 the collective page **is** the venue's booking page and splitting it across two areas would be worse than today.
+**Where it lives.** Its own top-level sidebar entry, per §1.5: label `nav.collective` fixed, the collective's name (`nav.collective.name`) on a second line, placed after Services, shown to admins of any venue in a live collective, members included. Tabs: Overview, Services, Venues, History for a host; Overview, Services, History for a member. Page design stays in Settings, Booking Page, because under D3 the collective page **is** the venue's booking page and splitting it across two areas would be worse than today.
 
 **Header.** `ov.title` (the collective's name), `ov.subtitle`, address with Copy link and Open.
 
-**Health strip**, one card per venue, host first: venue name, role pill, `VenueSyncPill`, and a line, first match only: `ov.venue.upToDate`, `ov.venue.updating`, `ov.venue.settingUp`, `ov.venue.failed` (+ Retry, and `ov.venue.failedDetail`), `ov.venue.hidden` + reason from `svc.cal.warn.*`, `ov.venue.paused`, `ov.venue.lapsed`. Each card shows `ov.venue.counts` ("{n} services, {m} calendars on the page") and links to that venue's rows in the table below. A venue at its plan's calendar cap shows `ov.venue.calendarLimit`.
+**Health strip**, one card per venue, host first: venue name, role pill, `VenueSyncPill`, and a line, first match only: `ov.venue.upToDate`, `ov.venue.updating`, `ov.venue.settingUp`, `ov.venue.failed` (+ Retry, contract 2, and `ov.venue.failedDetail`), `ov.venue.hidden` + reason from `svc.cal.warn.*`, `ov.venue.paused`, `ov.venue.lapsed`. Each card shows `ov.venue.counts` ("{n} services, {m} calendars on the page") and links to that venue's rows in the table below. A venue at its plan's calendar cap shows `ov.venue.calendarLimit`.
 
 **What needs you.** A short list, hidden when empty, of only the things the host can act on: `ov.todo.noCalendars` (a service on the page that no calendar offers), `ov.todo.newVenue` (a member joined and its calendars are not chosen on {n} services), `ov.todo.failed`, `ov.todo.noStripe`, `ov.todo.formsOff`. Each row has one button that goes straight to the fix.
+
+**The Venues tab (hosts only).** One row per venue and per open invitation: name, role pill, `VenueSyncPill`, the health line from the strip above, and the membership actions, which have no other home: "Invite a venue" at the top (ineligible venues disabled with the reasons J1 uses, `bm.invite.noAppointments` and `bm.currency.blocked` among them); on a pending row "(invited)" and `bp.members.cancelInvite`; on a member row Remove (J8) and `bp.members.askToHost` (J10), with `transfer.cancel` while a move is scheduled; `bp.members.history`, opening the History tab filtered to that venue; and `dissolve.button` at the foot (J9). A member's Leave is not here: it lives on its Linked accounts row (J7), and a member does not see this tab. The three `bp.members.*` ids keep their names from the earlier Members tab.
 
 **The Services tab: a grid, not a list.** This is the owner's "page for adjusting services offered", and at realistic scale it has to be a matrix. Staging today is 21 services across 4 calendars, but the design target is 40 services across 5 venues: 200 cells, and 1,000 to 1,200 service-and-calendar pairs underneath them. That number settles two things.
 
 **Columns are venues, not calendars.** Five columns fit; forty do not. Each cell summarises that venue's calendars for that service in three states (all, some, none) and opens a popover to edit them, which is `CollectiveCalendarsSection` scoped to one venue group. Rows are services in the host's own order, grouped by heading.
 
+**Filter and search.** Above the grid, a segmented control: `ov.filter.all` (default), `ov.filter.attention` (rows with a failed, hidden or no-calendar cell) and `ov.filter.offPage` (the host's services not yet on the page, so they can be put on in bulk), plus a search box on the service name. The selection survives a filter change.
+
 **Why a matrix rather than a list.** Only at this scale does the argument bite, and it is worth recording so nobody simplifies it back. The host's real questions are column questions: "is Riverside carrying everything?", "which services has nobody picked up?". A list answers those only by opening forty rows. Divergence between venues is the defect this whole project exists to remove, and a matrix renders divergence directly while a list hides it. And a bulk lane needs a rectangle: a list can express "these rows" but not "these rows at these venues".
 
 **Selection and bulk actions.** Select whole rows, whole columns, or both; actions apply where they cross. `ov.bulk.selected` in a sticky bar, with `ov.bulk.offer`, `ov.bulk.withdraw`, `ov.bulk.addCalendars` (with `ov.bulk.addCalendars.all` per venue), `ov.bulk.removeCalendars` and `ov.bulk.retry`. Changes stage rather than apply, so the confirmation can list exactly what changes and at which venues (`ov.bulk.confirm.*`), and one save reports per-venue results. **Cells that fail stay staged and stay selected**, so Retry re-sends only those.
 
-Two server changes are prerequisites, not polish, and both are logged as plan CB-44 and CB-45: the `ops` array is capped at 200 while a full setup is 800 to 1,600 operations, so the client must chunk; and `set_providers` currently skips failed operations and returns success unless every one failed, so "one save reports per-venue results" is unimplementable until it returns a per-operation envelope. The structured per-op error already exists; only the envelope is missing.
+**What the bulk lane calls.** Saving sends `POST /api/venue/collectives/[id]/bulk { ops: [{ op: 'offer'|'withdraw'|'assign'|'unassign'|'retry', service_id, venue_id?, calendar_id? }] }`, at most 200 operations per call, so the client chunks a full setup (800 to 1,600 operations) and shows progress per chunk; the response is a per-operation envelope, `{ results: [{ index, ok, code?, message? }] }`, which is what "one save reports per-venue results" needs, and each op runs the engine's offer, withdraw and calendar functions (contract 13). The legacy manager's 200-op cap on `set_providers` and its swallowed failures are logged as plan CB-44 and CB-45; they are fixes to today's manager, not prerequisites of the grid.
 
-**Division of labour, stated once so the two screens never drift.** The grid owns *which* services are on the page and *which calendars at which venues* offer them, in bulk, across everything. The Services page edit screen owns *what a service is*: its name, price, length, options, add-ons, forms and the rest, one service at a time, with its own per-venue calendar section for the single-service case. Neither duplicates the other's job. Item 10's read-only `CollectiveServicesOverview` and its the Collective area's grid (item 15) button are **removed**, because they would be a third control for "put a service on the page"; a card linking here replaces them.
+**Division of labour, stated once so the two screens never drift.** The grid owns *which* services are on the page and *which calendars at which venues* offer them, in bulk, across everything. The Services page edit screen owns *what a service is*: its name, price, length, options, add-ons, forms and the rest, one service at a time, with its own per-venue calendar section for the single-service case. Neither duplicates the other's job. The Booking Page tab has no control for putting a service on the page: its Services section is the single card `bp.services.card` that links here (item 10), because a third door would drift.
 
-**Preview before you push.** Next to the bulk bar and inside `svc.commercial.*`, `ov.preview.button` opens `ov.preview.title`: a read-only render of what each venue's guests will see afterwards, per venue, including any that would disappear from the page and why (`ov.preview.willHide`). This is the host-side preview items 1 to 11 never provide: today the only previews belong to the member, at accept.
+**Preview before you push.** Next to the bulk bar and inside `svc.commercial.*`, `ov.preview.button` (`POST .../bulk/preview` with the staged body, contract 13) opens `ov.preview.title`: a read-only render of what each venue's guests will see afterwards, per venue, including any that would disappear from the page and why (`ov.preview.willHide`). This is the host-side preview items 1 to 11 never provide: today the only previews belong to the member, at accept.
 
-**Recent activity.** The last 20 rows of `CollectiveHistoryDialog`, inline rather than behind a dialog, with a "See all" link. The full history gains two filters the dialog lacks, by venue (`history.filter.venue`) and by date range, and an export (`history.export`), because this is the record a host and a member would use to settle a disagreement about who changed what.
+**Recent activity.** The last 20 rows of `CollectiveHistoryDialog`, inline rather than behind a dialog, with a "See all" link. The full history gains two filters the dialog lacks, by venue (`history.filter.venue`) and by date range, and an export (`history.export`), because this is the record a host and a member would use to settle a disagreement about who changed what. It reads `GET /api/venue/collectives/[id]/history?filter=&venue_id=&from=&to=&cursor=&limit=50`, and `?format=csv` for the export (contract 3).
 
 **Empty and first-run.** Before two venues are active: `ov.notLive.title`, `ov.notLive.body`, and a checklist of what is still needed (`ov.notLive.step.*`: invite a venue, they accept, put services on the page, choose calendars). While the page is paused: `ov.paused.*`.
 
-**Undo.** Every host save that reached members shows `ov.undo.offer` in the save summary for 60 seconds ("Put it back"), which restores the master's previous values from the audit trail's before-image and re-applies. After that window the change is history-only. The concept is already accepted in the plan for migration rollback (D30), and a host who mis-types a price and fires a notice to every member currently has no way back at all. See D50.
+**Undo.** Every host save that reached members shows `ov.undo.offer` ("Put it back") in its save summary for 60 seconds (item 1). It sends the save's `audit_event_id` to `POST /api/venue/collectives/[id]/undo`; the engine restores the master's before-image from `collective_audit_events`, bumps revisions like any master write, writes `master_change_undone` (History: `history.masterChangeUndone`) and sends `N6` again with the "put back" wording. Success shows `ov.undo.done`; after the window the route answers 410 `COLLECTIVE_UNDO_EXPIRED` and the summary shows `ov.undo.expired`, because the change is then history only. The concept is already accepted in the plan for migration rollback (D30), and a host who mis-types a price and fires a notice to every member currently has no way back at all. See D50.
+
+Calls: contracts 1 (offer and withdraw), 2 (Retry on the health strip, per venue), 3 (History), 13 (bulk and preview) and 14 (undo); the Venues tab's membership actions use the members `PATCH` (contracts 6 to 9).
 
 ### 16. Reports (host and member)
 
 - **Booked revenue** (`BookedRevenueSection.tsx`). While in a collective, the figure is broken down: `reports.collective.heading`, one row per venue with its own subtotal, then the total, and a switch `reports.collective.scope` between "The collective" and "{venue} only". Within each, collective-page bookings are separated from the venue's own-page bookings (`reports.collective.viaPage`, `reports.collective.viaOwn`). Footnote `reports.priceNote` explains that figures use the price each booking was made at.
-- **What a member sees**, per D49 (mutual visibility, named and consented). Its own venue by default, its collective bookings identified, and every other member's figures too, each named and subtotalled, never blended. The existing "shared with you through a linked account" wording is replaced by `reports.collective.sharedNote`, which names the venues. The join dialog recorded agreement to this (J3), and the figures view never carries another venue's guest contact details.
+- **What a member sees**, per D49 (mutual visibility, named and consented). `reports.collective.scope` stays, and a member sees every venue's figures too, not only its own: each named and subtotalled, never blended, with its own collective bookings identified. `reports.collective.sharedNote` is the standing explanation rather than a fallback, and names the venues; it replaces the existing "shared with you through a linked account" wording. The join dialog recorded agreement to this (J3), and the figures view never carries another venue's guest contact details. After the membership ends a venue sees its own rows only, with the "via {collective}" filter kept for its own bookings; there is no frozen view of the other venues.
 - **Exports.** Every booking export gains a column saying whether the booking came through the collective and, for the host, which venue it belongs to. No guest contact details cross a venue boundary in a host-scope export.
 
 ### 17. Venue chooser: not built
@@ -357,7 +391,9 @@ Specified in an earlier draft, then removed by D38 on 2026-09-14. The owner chos
 
 ### 18. Platform support console (ResNeo staff only)
 
-Not part of the product, but part of running it. The platform area already exists (`src/app/api/platform/*`, superuser auth, its own audit trail) and has no collective view, so a support person asked why a host's price has not reached a member has nothing to answer with. Plan §6.16 defines what it shows. In UI terms: one collective per row, expandable to the member health strip and the link table, with `support.retry` as the only action, and no guest contact details anywhere on it.
+Not part of the product, but part of running it. The platform area already exists (`src/app/api/platform/*`, superuser auth, its own audit trail) and has no collective view, so a support person asked why a host's price has not reached a member has nothing to answer with. Plan §6.16 defines what it shows. In UI terms: one collective per row, expandable to the member health strip and the link table, with `support.retry` ("Retry this update") as the only action, and no guest contact details anywhere on it.
+
+Calls: `GET /api/platform/collectives`; `POST /api/platform/collectives/[id]/links/[linkId]/retry` (contract 17). The crons it watches are `GET /api/cron/collective-replicate` (every 5 minutes) and `GET /api/cron/collective-verify` (daily) (contract 18).
 
 ## 3. Copy deck
 
@@ -445,7 +481,7 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `svc.addFrom.confirm`: Copy and add to the page
 - `svc.addFrom.done`: {service} is on the {collective} page. We have asked {venue} whether to use its own {service} for it.
 
-**Edit service dialog, offered service (AppointmentServiceFormFields.tsx, AddonGroupEditor.tsx)**
+**The service page, offered service (AppointmentServiceFormFields.tsx, AddonGroupEditor.tsx)**
 - `svc.form.categoryHelp.host`: The heading this service is listed under on the {collective} page. Manage headings on the Categories tab.
 - `svc.form.staffMay.reach`: These apply to every calendar that offers this service, including calendars at {venueList}.
 - `svc.form.staffMay.nameLocked`: Not available for services on the {collective} page, so guests see the same name and description on every calendar.
@@ -476,7 +512,7 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `svc.save.retry`: Retry now
 - `svc.save.calendarFailed`: {calendar} at {venue} could not be changed: {reason}.
 - `sync.reason.busy`: {venue} was busy. We will try again in a moment.
-- `sync.reason.subscription`: {venue}'s subscription is paused.
+- `sync.reason.subscription`: {venue}'s subscription has lapsed.
 - `sync.reason.unknown`: something went wrong on our side
 - `svc.stale.title`: {service} changed while you were editing
 - `svc.stale.message`: Someone saved a change to {service} after you opened it. Reload it to see the latest version, then make your change again.
@@ -497,17 +533,12 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `svc.cal.inactiveOther`: (not available: calendar turned off at {venue})
 - `svc.cal.warn.noStripe`: {venue} cannot take card payments yet, so guests cannot book its calendars for this service online. Its team can still book it.
 - `svc.cal.warn.formsOff`: {venue} has forms switched off, so its calendars are hidden for this service until it turns them on.
-- `svc.cal.warn.suspended`: {venue} is paused on the {collective} page, so its calendars are hidden.
+- `svc.cal.warn.suspended`: {venue}'s subscription has lapsed, so its calendars are hidden from the {collective} page until it is put right.
 - `svc.cal.warn.settingUp`: Setting up at {venue}. Its calendars can take bookings once this finishes.
 - `svc.cal.warn.failed`: Could not update at {venue}: {reason}.
 - `svc.removal.collectiveLine`: {calendar} also stops offering {service} on the {collective} page.
 - `svc.removal.otherVenue.row`: {date}, {time} on {calendar}
 - `svc.removal.otherVenue.note`: These bookings stay with {venue}. Only {venue} can move them.
-
-**StaffServiceOverrideModal**
-- `override.help.collective`: Changes apply only to {calendar}. They show wherever {calendar} is booked, including the {collective} page.
-- `override.help.member`: Changes apply only to {calendar}. {host} decides which settings you can change.
-- `override.standard`: Standard for this service: {value}
 
 **Services page, member**
 - `svc.member.subtitle`: Services from {host} are managed by {host}. You choose which of your calendars offer them.
@@ -530,6 +561,7 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `svc.member.card.turnOn`: Turn on
 - `svc.member.card.noCalendars`: None of your calendars offer this yet.
 - `svc.member.card.chooseCalendars`: same as `svc.offer.chooseCalendars`
+- `svc.member.card.cameFrom`: Came from {host}
 - `svc.member.card.suggest`: Suggest to {host}
 - `svc.member.suggest.title`: Suggest {service} for {collective}?
 - `svc.member.suggest.message`: {host} is asked to add {service} to the {collective} page. If {host} adds it, {host} controls it from then on, and you choose whether your {service} is used for it.
@@ -537,7 +569,6 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `svc.member.suggest.done`: Suggestion sent to {host}.
 - `svc.member.add.help`: New services are only at {venue}. Clients cannot book them online while you are part of {collective}. Your team can still book them.
 - `svc.member.view.lastUpdated`: Last updated from {host} {relativeTime}
-- `svc.member.view.sectionLocked`: Set by {host}
 - `svc.member.view.calendarsHeading`: Your calendars that offer this service
 - `svc.member.view.calendarsHelp`: When you save, ticked calendars offer {service} on the {collective} page.
 - `svc.member.view.valuesHeading`: Values for your calendars
@@ -614,6 +645,7 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 **CalendarServiceValuesDialog**
 - `values.title`: {service} on {calendar}
 - `values.hostEditingMember`: {venue} is told about this change.
+- `values.help.member`: {host} decides which values you can change here. They apply to {calendar} only.
 - `values.standard`: Standard: {value}
 - `values.useStandard`: Use the standard value
 - `values.save`: Save values
@@ -639,29 +671,23 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `bp.own.redirecting.title`: Your own page is not showing
 - `bp.own.redirecting.body`: While {collective} is live, guests who visit /book/{slug} are sent to the {collective} page. These settings are kept for when you leave or {collective} ends, and can't be changed until then.
 - `bp.own.showing.body`: Guests who visit /book/{slug} can book your calendars there for now.
-- `bp.combined.host.description`: Set up the {collective} page here: its design and its members. Services and their calendars are managed on your Services page.
+- `bp.combined.host.description`: Set up the {collective} page here: how it looks and what guests are asked. Services, calendars and venues are managed in the Collective area.
 - `bp.inherited.prices`: Prices, lengths, deposits and cancellation notice come from your services. Each calendar can have its own values where you allow it.
 - `bp.page.photos`: Photos come from your services and show for every calendar.
-- `bp.members.history`: History
-- `bp.members.askToHost`: Ask to host
-- `bp.members.cancelInvite`: Cancel invitation
+- `bp.services.card`: Services and calendars are managed in the Collective area
+- `bp.services.count`: {services} services on the page, offered by {calendars} calendars at {venues} venues
+- `bp.services.open`: Open the Collective area
 - `bp.memberSummary.intro`: {host} hosts {collective} and manages its booking page: the services on it, their prices and forms, headings, photos and branding. You choose which of your calendars offer each service on Calendar Availability. Working hours and closures for your calendars stay yours.
 - `bp.memberSummary.hiddenReason.noStripe`: Hidden for {services}: card payments are not set up
 - `bp.memberSummary.hiddenReason.formsOff`: Hidden for {services}: forms are switched off
 - `bp.memberSummary.empty`: None of your calendars offer a service on the {collective} page yet. Choose services for your calendars on Calendar Availability.
-- `bp.memberSummary.leave`: To stop taking part, leave {collective} under Linked accounts.
+- `bp.memberSummary.leave`: You can leave {collective} at any time. Your services, calendars, clients and bookings stay yours.
+- `bp.leaving.member`: To leave {collective}, go to Settings, Linked accounts.
+- `bp.leaving.host`: To end {collective}, go to Collective, Venues.
 - `bp.widget.collectiveOnly`: While {collective} is live, your website widget and QR code open the {collective} page.
 
 **Settings, Linked accounts (VenueCollectivesPanel.tsx)**
-- `la.panel.description`: A venue collective runs two or more linked venues as one business with one booking page. The host manages the services, and each venue keeps its own clients and bookings.
-- `la.create.eligibleNote`: To create a collective, you need an active link with each venue you invite that shares full calendar details. Open the link under Active links and choose Edit permissions.
-- `la.create.explainer`: When a venue joins, {venue} sets up the services you put on the page in that venue's account and controls them. Each venue keeps its own clients, bookings and payments.
-- `la.create.ineligible.otherCollective`: Already part of another collective
-- `la.create.ineligible.currency`: Uses {currency}, not {yourCurrency}
-- `la.create.ineligible.timezone`: In {timezone}, not {yourTimezone}
-- `la.create.ineligible.plan`: Their plan does not include collectives
-- `la.create.warn.noStripe`: Has not connected Stripe. It can join, but guests cannot book its calendars online for services that take a payment.
-- `la.create.done`: Collective created. Invitations sent to {venueList}.
+- `la.panel.description`: A venue collective runs two or more linked venues as one business with one booking page. The host manages the services, and each venue keeps its own clients and bookings. While the collective runs, the venues can see each other's client records and takings.
 - `la.row.invitation.review`: Review invitation
 - `la.row.setup`: Setting up {done} of {count} services from {host}.
 - `la.row.health.upToDate`: {count} services from {host}. Up to date.
@@ -678,6 +704,66 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `decline.title`: Decline the invitation to {collective}?
 - `decline.message`: {host} is told. You can be invited again later.
 - `decline.confirm`: Decline
+- `invite.closed`: This invitation is no longer open.
+
+**Create wizard (J1, CreateCollectiveDialog.tsx) and the row afterwards**
+- `create.title`: Create a collective
+- `create.step`: Step {n} of 4
+- `create.what.title`: What a collective is
+- `create.what.1`: Two or more venues sell their appointments on one booking page, as one business.
+- `create.what.2`: The host puts services on that page and sets their prices, deposits and forms for every venue.
+- `create.what.3`: Each venue keeps its own calendars, clients, bookings and payments.
+- `create.what.host`: {venue} will be the host.
+- `create.name.label`: Collective name
+- `create.name.help`: Guests see this name on the booking page and in their emails.
+- `create.address.preview`: {origin}/book/c/{slug}
+- `create.address.checking`: Checking this address…
+- `create.address.free`: This address is free.
+- `create.address.taken`: That address is taken. Try another.
+- `create.address.format`: Use lower-case letters, numbers and hyphens only.
+- `create.disabled.address`: Choose a free address to continue.
+- `create.venues.ok`: Can join
+- `create.venues.pill.noPayments`: No card payments
+- `create.venues.warn.noStripe`: {venue} has not connected Stripe. It can join, but guests cannot book its calendars online for services that take a payment.
+- `create.venues.pill.cannotJoin`: Cannot join yet
+- `create.venues.blocked.otherCollective`: Already part of another collective
+- `create.venues.blocked.timezone`: In {timezone}, not {yourTimezone}
+- `create.venues.blocked.currency`: Uses {currency}, not {yourCurrency}
+- `create.venues.blocked.plan`: Their plan does not include collectives
+- `create.venues.blocked.permissions`: Your link with {venue} does not share full calendar details yet.
+- `create.venues.fixPermissions`: Change the link's permissions
+- `create.venues.selected`: {count} venues selected
+- `create.venues.empty.title`: No venues to invite yet
+- `create.venues.empty.body`: You can invite venues you have an active link with. Set one up under Active links first.
+- `create.changes.title`: What changes when {collective} starts
+- `create.changes.intro`: Here is what happens for you and for each venue you invite, once two venues are in.
+- `create.changes.address.note`: Guests who visit any of these addresses land on the {collective} page.
+- `create.changes.address.when`: This starts once two venues are in and at least one calendar offers a service. Until then, every page stays as it is.
+- `create.changes.services.title`: The services come from you
+- `create.changes.services.body`: Services you put on the page are set up in each venue's account, with your prices, deposits and forms. You change them for every venue at once.
+- `create.changes.owns.title`: Each venue keeps what is its own
+- `create.changes.owns.body`: Its calendars, working hours, clients, bookings and payments stay with that venue. Clients pay the venue they book with.
+- `create.changes.clients.title`: Venues can see each other's clients and takings
+- `create.changes.clients.body`: While {collective} runs, every venue in it can see the others' client records and takings, each named. This stops for a venue the day it leaves.
+- `create.changes.ending`: Any venue can leave at any time, and you can end {collective} at any time. Every venue keeps its services, calendars, clients and bookings.
+- `create.changes.ack`: I understand what changes for {venue} and for the venues I invite.
+- `create.changes.help`: Read more about collectives
+- `create.check.role`: Host
+- `create.check.notLive`: The {collective} page is not live yet. It goes live once an invited venue accepts and at least one calendar offers a service.
+- `create.check.emailPreview`: What {venueList} will read
+- `create.cta.create`: Create and send invitations
+- `create.cta.creating`: Creating…
+- `create.done.title`: {collective} is created
+- `create.done.body`: Invitations are on their way to {venueList}. The page goes live once a venue accepts and a calendar offers a service.
+- `create.done.copy`: Copy address
+- `create.done.cta`: Go to Collective
+- `create.done.later`: Do this later
+- `create.toast.done`: {collective} created. Invitations sent to {venueList}.
+- `row.pill.waiting`: Waiting for venues
+- `row.pill.noServices`: Nothing on the page yet
+- `row.pill.live`: Live
+- `row.members.line`: {activeCount} venues in and {invitedCount} invited: {venueList}
+- `row.notLive.reason`: Not live yet: {reason}
 
 **JoinCollectiveDialog and AdoptServiceReview**
 - `join.title` and `join.confirm`: Join {collective}
@@ -687,11 +773,11 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `join.means.2`: Clients pay you, through your own Stripe account, at the prices {host} sets.
 - `join.means.3`: You choose which of your calendars offer each service. Your working hours and closures stay yours.
 - `join.means.4`: Your clients and bookings stay yours.
-- `join.means.5`: While you are part of {collective}, guests who visit your own booking page are sent to the {collective} page.
+- `join.means.5`: While you are part of {collective}, guests who visit your own page, {ownAddress}, land on the {collective} page at {collectiveAddress}.
 - `join.means.6`: Services only at {venue} stay yours to edit, but clients cannot book them online while you are part of {collective}. Your team can still book them.
 - `join.means.7`: You can leave at any time. You keep every service and booking.
 - `join.warn.noStripe`: You have not connected Stripe. {count} services on the page take a deposit, full payment or card hold, so guests cannot book those with you online until you connect it.
-- `join.warn.formsOn`: Some services ask for forms. Joining turns on compliance records for your venue, and they stay on while you are part of {collective}.
+- `join.warn.formsOn`: Some services ask for forms. Your calendars can offer those only while compliance records are switched on for your venue, and once on they stay on while you are part of {collective}. We do not switch them on for you.
 - `join.block.timezone`: You cannot join because your venue is in {yourTimezone} and {collective} is in {timezone}. Change your timezone under Profile first.
 - `join.block.currency`: You cannot join because your venue uses {yourCurrency} and {collective} uses {currency}.
 - `join.block.otherCollective`: Your venue is already part of {otherCollective}. Leave it before joining another.
@@ -711,16 +797,16 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `join.services.own.help`: Clients cannot book these online while you are part of {collective}. Your team can still book them.
 - `join.services.keep`: Keep for bookings your team makes
 - `join.services.ask`: Ask {host} to add it to {collective}
-- `join.services.pause`: Pause it
+- `join.services.pause`: Park it (hidden from everyone until you leave)
 - `join.forms.useExisting`: Use my existing {form}, so records my clients already gave still count
 - `join.forms.useTheirs`: Use {host}'s version as a separate form
 - `join.forms.note`: Either way, {host} decides which forms its services ask for.
 - `join.summary.setup`: {count} services from {host} will be set up in your account.
 - `join.summary.useMine`: {count} of your services will be used for services from {host}.
 - `join.summary.keep`: {count} of your services will be kept for team bookings.
-- `join.summary.pause`: {count} of your services will be paused.
-- `join.summary.formsOn`: Compliance records will be turned on.
-- `join.consent`: I have read what joining means, and I agree to {host} managing these services for {venue}.
+- `join.summary.pause`: {count} of your services will be parked until you leave {collective}.
+- `join.summary.formsOn`: Compliance records need to be on for {count} services that ask for forms.
+- `join.consent`: I understand that guests who visit {venue}'s booking page will be sent to the {collective} page, that {host} manages the services on it for {venue}, and that the venues in {collective} can see each other's clients and takings while it runs.
 - `join.terms`: Read the collective terms
 - `join.back` / `join.next` / `join.cancel`: Back / Next / Cancel
 - `join.progress`: Setting up {count} services from {host}…
@@ -736,8 +822,6 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `leave.body.services`: {count} services from {host} become your own services, with the settings they have now.
 - `leave.body.noStripe`: {count} of them take a payment online. You have not connected Stripe, so they stop taking payments online until you do.
 - `leave.body.bookings`: Bookings made through the {collective} page stay with you.
-- `leave.body.link`: Also change my link with {host} to calendar viewing only
-- `leave.body.linkHelp`: This link was set up so {collective} could work. You can change it again under Active links.
 - `leave.body.lastMember`: {collective} needs at least two venues, so it ends when you leave.
 - `leave.confirm`: Leave {collective}
 - `review.title`: You left {collective}. Review your services
@@ -749,6 +833,8 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `review.photos.copying`: Copying photos from {host}…
 - `review.photos.done`: Photos copied
 - `review.photos.failed`: Some photos could not be copied.
+- `review.sameName`: You now have two services called {service}: yours, and the one that came from {host}. Both are active. Rename or turn off the one you do not need.
+- `review.unparked`: {count} services you parked are bookable again.
 - `review.dismiss`: Done
 - `remove.title`: Remove {venue} from {collective}?
 - `remove.message`: {venue} keeps every service, calendar and booking, and its own booking page comes back. Its calendars leave the {collective} page straight away.
@@ -790,9 +876,23 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `history.memberJoined` / `.memberLeft` / `.memberRemoved`: {venue} joined / {venue} left / {actor} removed {venue}
 - `history.hostTransferOffered` / `.hostTransferred` / `.dissolved`: {actor} asked {venue} to host / {venue} became host / {actor} ended {collective}
 - `history.driftRepaired`: A difference in {service} at {venue} was fixed
+- `history.inviteWithdrawn`: {actor} withdrew the invitation to {venue}
+- `history.inviteExpired`: The invitation to {venue} expired
+- `history.masterChangeUndone`: {actor} put {service} back to how it was
+- `history.migrationValueReplaced`: {host}'s {field} for {service} replaced yours at {venue}: {before} to {after}
 - `prefs.collective.digest`: Email me a daily summary of other changes to {collective} services
 - `prefs.collective.calendars`: Email me when another venue changes which of our calendars offer a service
 - `prefs.collective.required`: Emails about prices, payments and forms always come, because they change what your clients pay or fill in.
+
+**Migration review (J12, Decision C)**
+- `review.previous.title`: Your previous settings
+- `review.previous.body`: When {collective} moved to its new set-up, {host}'s settings replaced some of yours on services from {host}. Here is what changed, so you can ask {host} for anything you need back. This list stays for 90 days.
+- `review.previous.row`: {service}: {field} was {before}, now {after}
+- `review.previous.kept`: {service}: your {field} of {value} is kept for {calendars}. {host} can change it from the service.
+- `review.previous.dismiss`: Done
+- `migrate.offering.title`: {service}: the page says something different from the service
+- `migrate.offering.usePage`: Use the page's name and description
+- `migrate.offering.useService`: Use the service's name and description
 
 **Other settings and dashboard**
 - `profile.timezone.locked`: You cannot change your timezone while you are part of {collective}, because every venue in it uses the same timezone.
@@ -804,21 +904,20 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `import.undo.message`: Records this import created are removed.
 - `import.undo.confirm`: Undo import
 - `import.undo.kept`: {count} services were kept because they are part of {collective}: {services}.
-- `reports.priceNote`: Figures use the price each booking was made at, so later price changes do not change past figures.
-- `sidebar.collectiveLink`: {collective} booking page
 
 **Diary and staff booking (PractitionerCalendarView.tsx, StaffSurfaceBookingModal.tsx, StaffGuestContactFields)**
 - `diary.column.venue`: {venue}
 - `diary.column.title`: {calendar} at {venue}, part of {collective}
 - `staff.modal.heading.collective`: New booking in {collective}
 - `staff.service.onlyAt`: same as `common.pill.onlyAt`
-- `staff.contact.otherVenue`: This client will be added to {venue}'s contacts.
-- `staff.contact.searchOther`: Search {venue}'s clients
 - `staff.deposit.noStripe`: Card payments are not set up at {venue}, so take payment in person.
 - `staff.group.sameVenue`: For a group booking, everyone needs to be booked at the same place. Book the others separately.
 - `staff.error.updating`: This service is being updated at {venue}. Please try again in a moment.
 - `staff.detail.bookedWith`: Booked with {venue}
 - `staff.detail.onlyOwner`: Only {venue} can change this booking.
+- `move.otherVenue.title`: This booking cannot be moved to {venue}
+- `move.otherVenue.body`: Bookings stay with the venue they were made at, because that venue holds the client's record and any payment. You can move it to any calendar at {ownVenue}.
+- `clash.samePerson`: {calendar} at {venue} looks like the same person as {otherCalendar} at {otherVenue}, who already has a booking at this time.
 
 **Public pages, guest manage page, guest emails**
 - `public.calendar.venue`: {venue}
@@ -828,6 +927,7 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `public.marketing.collective`: Send me offers and news from {business} by email.
 - `public.confirmation.through`: Booked with {business} through {collective}.
 - `public.forms.anyAvailable`: Once we have matched you with someone, we will ask for any forms they need.
+- `public.group.sameVenue`: Everyone in a group booking is seen at the same place. To book with more than one venue, make a separate booking for each.
 - `public.error.updating`: This service has just been updated. Please choose your time again.
 - `public.interstitial.title`: Book {service} with {venue}
 - `public.interstitial.body`: {venue} takes bookings for {service} by phone. Call {phone} to book.
@@ -844,7 +944,7 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 
 **Venue notices: email subject and first paragraph (N numbers in notifications)**
 - `notify.invite.subject`: {host} invited you to join {collective}
-- `notify.invite.body`: {host} has invited {venue} to join {collective}, so your calendars and theirs work as one business with one booking page. If you join, {host} manages the services on the page, including their prices and forms, and clients pay you directly. You keep your clients and bookings, and you can leave at any time.
+- `notify.invite.body`: {host} has invited {venue} to join {collective}, so your calendars and theirs work as one business with one booking page. If you join, {host} manages the services on the page, including their prices and forms, and clients pay you directly. Each venue keeps its own clients and bookings, and while the collective runs the venues can see each other's client records and takings. You can leave at any time.
 - `notify.invite.cta`: Review invitation
 - `notify.joined.subject`: {venue} joined {collective}
 - `notify.joined.body`: Your services on the {collective} page are being set up at {venue}. Choose which of its calendars offer each service on your Services page, or let {venue} choose.
@@ -876,13 +976,13 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `notify.valuesCleared.subject`: Custom values for {service} were cleared
 - `notify.valuesCleared.body`: {host} no longer lets calendars set their own {field} for {service}. {calendars} now use the standard value, {value}.
 - `notify.left.subject`: {venue} left {collective}
-- `notify.left.body`: {venue}'s calendars are no longer on the {collective} page. It keeps the services it had from you as its own services.
+- `notify.left.body`: {venue}'s calendars are no longer on the {collective} page. It keeps the services it had from you as its own services. Access to each other's clients and figures has ended.
 - `notify.removed.subject`: You are no longer part of {collective}
-- `notify.removed.body`: {host} removed {venue} from {collective}. You keep every service, calendar and booking. Services from {host} are now yours to edit, and your own booking page is back.
+- `notify.removed.body`: {host} removed {venue} from {collective}. You keep every service, calendar and booking. Services from {host} are now yours to edit, and your own booking page is back. Access to each other's clients and figures has ended.
 - `notify.linkEnded.subject`: {venue} left {collective} because a link ended
 - `notify.linkEnded.body`: The link between {venue} and {host} ended, so {venue} is no longer part of {collective}. It keeps every service, calendar and booking.
 - `notify.dissolved.subject`: {collective} has ended
-- `notify.dissolved.body`: Every venue keeps its services, calendars, clients and bookings. Your own booking page is back.
+- `notify.dissolved.body`: Every venue keeps its services, calendars, clients and bookings. Your own booking page is back. Access to each other's clients and figures has ended.
 - `notify.review.cta`: Review your services
 - `notify.hostRequest.subject`: {host} asked you to host {collective}
 - `notify.hostRequest.body`: If you accept, you manage the services on the {collective} page for every venue, including their prices and forms.
@@ -904,9 +1004,22 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `notify.migratedHost.body`: The services on the {collective} page are now managed from your Services page, and every change reaches {venueList}. We brought their copies into line with yours.
 - `notify.migratedMember.subject`: {host} now manages its services in your account
 - `notify.migratedMember.body`: The services from {host} in your account now follow {host}'s settings. Here is what changed. Bookings already made keep their price.
+- `notify.pageBooking.subject`: New booking with {venue} on the {collective} page
+- `notify.pageBooking.body`: A guest booked {service} with {calendar} at {venue} for {date}. {venue} holds the booking and the client's details.
+- `notify.migrateSoon.subject`: {collective} moves to its new set-up on {date}
+- `notify.migrateSoon.body`: From {date}, the services from {host} in your account follow {host}'s settings automatically. Review what changes for you before then. If you would rather not, you can leave {collective} before {date} and keep everything as it is.
+- `notify.inviteWithdrawn.subject`: {host} withdrew the invitation to {collective}
+- `notify.inviteWithdrawn.body`: {host} has withdrawn its invitation for {venue} to join {collective}. Nothing has changed in your account, and {host} can invite you again later.
+- `notify.inviteExpired.subject`: The invitation to {collective} has expired
+- `notify.inviteExpired.body`: The invitation for {venue} to join {collective} was not answered within 30 days, so it has closed. {host} can send a new one.
+- `notify.suspended.subject`: Your calendars are hidden from the {collective} page
+- `notify.suspended.body`: {venue}'s subscription needs attention, so its calendars are hidden from the {collective} page and guests cannot book them there. They come back as soon as the subscription is put right. Bookings already made are not changed.
+- `notify.resumed.subject`: Your calendars are back on the {collective} page
+- `notify.resumed.body`: {venue}'s subscription is active again, so its calendars are back on the {collective} page.
 
 #### Collective overview (§2 item 15)
-- `nav.collective`: {collective}
+- `nav.collective`: Collective
+- `nav.collective.name`: {collective}
 - `ov.title`: {collective}
 - `ov.subtitle`: Everything the collective sells, and how each venue is doing.
 - `ov.venue.upToDate`: Up to date
@@ -953,6 +1066,9 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `ov.undo.expired`: That change is now part of your history, so it cannot be undone here. Edit the service to change it again.
 - `history.filter.venue`: Venue
 - `history.export`: Download this history
+- `bp.members.cancelInvite`: Cancel invitation
+- `bp.members.askToHost`: Ask to host
+- `bp.members.history`: History
 
 #### Reports (§2 item 16)
 - `reports.collective.heading`: {collective}
@@ -963,18 +1079,17 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `reports.priceNote`: Figures use the price each booking was made at, so changing a price now does not change what you earned then.
 
 #### Multi-venue people (§2 item 17, D38: no chooser)
-- `staff.invite.otherVenue`: {email} already works at another venue on ResNeo. Ask them to sign in and choose this venue, or invite them with a different email address.
+- `staff.invite.otherVenue`: {email} is already linked to another ResNeo venue, so we cannot add them here. Invite them with a different email address.
 - `shell.venue.locked`: This account is linked to more than one venue, so we cannot tell which one to open. Please contact support and we will sort it out.
 
 #### Join and leave, added for D41 and D49
 - `join.means.clients`: While you are in {collective}, the other venues can see your clients' records, and you can see theirs. Every record stays with the venue it belongs to. This stops the day you leave.
 - `join.means.revenue`: Every venue in {collective} can see every other venue's takings, each named. This also stops the day you leave.
-- `leave.body.access`: You will no longer be able to see {venueList}'s clients or bookings, and they will no longer see yours. Everything in your own account stays exactly as it is.
+- `leave.body.access`: You will no longer be able to see {venueList}'s clients or bookings, and they will no longer see yours. Everything in your own account stays.
 - `staff.contact.ownerLine`: {venue}'s client
 
 #### Calendar Availability, added
 - `cal.edit.services.editValues`: Edit values
-- `cal.edit.services.lastChanged`: Last changed by {venue}, {date}
 
 #### Booking models and shared resources (§6.14 of the plan)
 - `bm.invite.noAppointments`: {venue} does not offer appointments, so it cannot join a collective yet. A collective page shows appointments only.
@@ -990,6 +1105,9 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `public.meta.description`: Book online with {collective}. {venueCount} venues, one booking page.
 - `public.header.venues`: {venueCount} venues
 - `public.interstitial.waitlist`: {service} is fully booked. Join the waitlist and we will let you know when a time comes up.
+
+#### Platform support console (§2 item 18)
+- `support.retry`: Retry this update
 
 ## 4. Lifecycle journeys
 

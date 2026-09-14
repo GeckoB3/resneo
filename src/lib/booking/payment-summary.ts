@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { calendarPricePence, type CalendarAssignmentValues } from '@/lib/booking/calendar-service-terms';
 
 /**
  * In-person payments (Tap to Pay / Terminal) — booking payment summary helpers.
@@ -142,8 +143,8 @@ async function loadServicePricePence(
           serviceId,
         });
       }
-      const override = (data as { custom_price_pence?: number | null } | null)?.custom_price_pence;
-      if (typeof override === 'number' && Number.isFinite(override)) return override;
+      const own = calendarPricePence(null, data as CalendarAssignmentValues | null);
+      if (own != null) return own;
     }
 
     let query = admin.from(src.serviceTable).select('price_pence').eq('id', serviceId);
@@ -532,8 +533,8 @@ export async function loadRowTotalResolver(
         console.error(`[payment-summary] visit ${src.overrideTable} load failed:`, error.message);
       }
       for (const o of (data ?? []) as Array<Record<string, unknown>>) {
-        const price = o.custom_price_pence;
-        if (typeof price !== 'number' || !Number.isFinite(price)) continue;
+        const price = calendarPricePence(null, o as CalendarAssignmentValues);
+        if (price == null) continue;
         overridePrices.set(`${String(o[src.ownerCol])}|${String(o[src.serviceCol])}`, price);
       }
     }

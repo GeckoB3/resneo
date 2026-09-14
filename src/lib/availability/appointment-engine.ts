@@ -58,6 +58,7 @@ import {
   blockSourcesFromVenueRow,
 } from '@/lib/availability/blocked-range-models';
 import { VENUE_WIDE_BLOCK_SELECT } from '@/lib/availability/venue-wide-blocks-fetch';
+import { calendarDurationMinutes, calendarPricePence } from '@/lib/booking/calendar-service-terms';
 
 // Types
 
@@ -1518,13 +1519,11 @@ export function serviceItemRowToEngineService(
   venueId: string,
   custom?: { custom_duration_minutes?: number | null; custom_price_pence?: number | null } | null,
 ): AppointmentService {
-  const customDur = custom?.custom_duration_minutes;
-  const customPrice = custom?.custom_price_pence;
   const canon = canonicalServiceShape({
     durationMinutes: s.duration_minutes as number,
     processingBlocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
   });
-  const effectiveDuration = (customDur ?? canon.durationMinutes) as number;
+  const effectiveDuration = calendarDurationMinutes(canon.durationMinutes, custom);
   /**
    * A calendar's `custom_duration_minutes` shortens the service without
    * touching its processing pattern, so the catalogue's blocks can fall
@@ -1547,7 +1546,7 @@ export function serviceItemRowToEngineService(
     buffer_minutes: (s.buffer_minutes as number) ?? 0,
     processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
     processing_time_blocks: fittedBlocks,
-    price_pence: (customPrice ?? s.price_pence) as number | null,
+    price_pence: calendarPricePence(s.price_pence as number | null, custom),
     payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
     deposit_pence: (s.deposit_pence as number | null) ?? null,
     colour: (s.colour as string) ?? '#3B82F6',

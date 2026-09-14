@@ -12,6 +12,7 @@ import type {
 import { formatDepositAmount } from '@/lib/emails/templates/base-template';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import { resolveBookingCoreDurationMinutes } from '@/lib/booking/booking-core-duration';
+import { calendarPricePence, type CalendarAssignmentValues } from '@/lib/booking/calendar-service-terms';
 
 function priceDisplayFromPence(pricePence: number | null | undefined): string | null {
   if (pricePence == null) return null;
@@ -180,7 +181,7 @@ async function resolveAppointmentLabels(
     // service price, then a chosen variant replaces both. Without the override here,
     // reminders/re-sends show the base price while the original confirmation (which is
     // built from the booking-time price) shows the practitioner's price.
-    const basePrice = (link as { custom_price_pence?: number | null } | null)?.custom_price_pence ?? svc?.price_pence ?? null;
+    const basePrice = calendarPricePence(svc?.price_pence, link as CalendarAssignmentValues | null);
     const merged = applyVariantOverrides(svc?.name ?? null, basePrice, variant);
     return {
       practitionerName: pr?.name ?? null,
@@ -204,7 +205,7 @@ async function resolveAppointmentLabels(
     ]);
     // Per-calendar price override replaces the base price, then the variant replaces both
     // (mirrors booking-time pricing so reminders match the original confirmation).
-    const basePrice = (link as { custom_price_pence?: number | null } | null)?.custom_price_pence ?? si?.price_pence ?? null;
+    const basePrice = calendarPricePence(si?.price_pence, link as CalendarAssignmentValues | null);
     const merged = applyVariantOverrides(si?.name ?? null, basePrice, variant);
     // A reminder quotes the price that was agreed, not whatever the catalogue says today.
     const agreed = typeof row.service_price_snapshot_pence === 'number' ? row.service_price_snapshot_pence : merged.price;
@@ -371,7 +372,7 @@ export async function enrichBookingEmailForAppointment(
         (psLinks ?? []).map(
           (l: { practitioner_id: string; service_id: string; custom_price_pence: number | null }) => [
             `${l.practitioner_id}:${l.service_id}`,
-            l.custom_price_pence,
+            l as CalendarAssignmentValues,
           ],
         ),
       );
@@ -379,7 +380,7 @@ export async function enrichBookingEmailForAppointment(
         (csaLinks ?? []).map(
           (l: { calendar_id: string; service_item_id: string; custom_price_pence: number | null }) => [
             `${l.calendar_id}:${l.service_item_id}`,
-            l.custom_price_pence,
+            l as CalendarAssignmentValues,
           ],
         ),
       );
@@ -417,8 +418,7 @@ export async function enrichBookingEmailForAppointment(
         if (pid && sid) {
           practitionerNameLine = prMap.get(pid) ?? 'Staff';
           const sv = svMap.get(sid);
-          const overridePence = psOverrideMap.get(`${pid}:${sid}`) ?? null;
-          const basePrice = overridePence ?? sv?.price_pence ?? null;
+          const basePrice = calendarPricePence(sv?.price_pence, psOverrideMap.get(`${pid}:${sid}`));
           const merged = applyVariantOverrides(sv?.name ?? null, basePrice, variant);
           serviceNameLine = merged.name ?? 'Treatment';
           priceDisplay = priceDisplayFromPence(merged.price);
@@ -426,8 +426,7 @@ export async function enrichBookingEmailForAppointment(
         } else if (cid && iid) {
           practitionerNameLine = calMap.get(cid) ?? 'Staff';
           const it = itemMap.get(iid);
-          const overridePence = csaOverrideMap.get(`${cid}:${iid}`) ?? null;
-          const basePrice = overridePence ?? it?.price_pence ?? null;
+          const basePrice = calendarPricePence(it?.price_pence, csaOverrideMap.get(`${cid}:${iid}`));
           const merged = applyVariantOverrides(it?.name ?? null, basePrice, variant);
           const snapshot = s.service_price_snapshot_pence as number | null;
           const agreed = typeof snapshot === 'number' ? snapshot : merged.price;

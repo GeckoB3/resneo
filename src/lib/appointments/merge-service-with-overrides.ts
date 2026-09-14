@@ -1,5 +1,6 @@
 import type { AppointmentService, PractitionerService } from '@/types/booking-models';
 import { fitProcessingBlocksToDuration } from '@/lib/appointments/processing-time';
+import { calendarDurationMinutes, calendarPricePence } from '@/lib/booking/calendar-service-terms';
 
 /**
  * Effective service definition for a practitioner: venue defaults plus optional
@@ -10,7 +11,7 @@ export function mergeAppointmentServiceWithPractitionerLink(
   link: PractitionerService | null | undefined,
 ): AppointmentService {
   if (!link) return base;
-  const duration = link.custom_duration_minutes ?? base.duration_minutes;
+  const duration = calendarDurationMinutes(base.duration_minutes, link);
   return {
     ...base,
     name: link.custom_name ?? base.name,
@@ -27,7 +28,7 @@ export function mergeAppointmentServiceWithPractitionerLink(
             fromDurationMinutes: base.duration_minutes,
             toDurationMinutes: duration,
           }).blocks,
-    price_pence: link.custom_price_pence ?? base.price_pence,
+    price_pence: calendarPricePence(base.price_pence, link),
     deposit_pence: link.custom_deposit_pence ?? base.deposit_pence,
     colour: link.custom_colour ?? base.colour,
   };

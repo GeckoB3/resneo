@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DbMappingRow } from '@/lib/import/apply-mappings';
+import { calendarDurationMinutes, calendarPricePence } from '@/lib/booking/calendar-service-terms';
 
 /** True when the booking CSV mapping wires `targetField` to a column (or split part). */
 export function isBookingImportFieldMapped(mappings: DbMappingRow[], targetField: string): boolean {
@@ -42,8 +43,8 @@ export async function fetchUnifiedServiceCommercialDefaults(
   const base = si as { duration_minutes: number; price_pence: number | null; deposit_pence: number | null };
 
   return {
-    durationMinutes: row?.custom_duration_minutes ?? base.duration_minutes,
-    pricePence: row?.custom_price_pence ?? base.price_pence,
+    durationMinutes: calendarDurationMinutes(base.duration_minutes, row),
+    pricePence: calendarPricePence(base.price_pence, row),
     depositPence: base.deposit_pence,
   };
 }
@@ -78,8 +79,8 @@ export async function fetchPractitionerServiceCommercialDefaults(
   const base = svc as { duration_minutes: number; price_pence: number | null; deposit_pence: number | null };
 
   return {
-    durationMinutes: row?.custom_duration_minutes ?? base.duration_minutes,
-    pricePence: row?.custom_price_pence ?? base.price_pence,
+    durationMinutes: calendarDurationMinutes(base.duration_minutes, row),
+    pricePence: calendarPricePence(base.price_pence, row),
     depositPence: row?.custom_deposit_pence ?? base.deposit_pence,
   };
 }

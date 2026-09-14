@@ -35,6 +35,7 @@ import {
   resetVisitScheduledComms,
   visitCancellationFields,
 } from '@/lib/booking/visit-write-shared';
+import { calendarDurationMinutes, type CalendarAssignmentValues } from '@/lib/booking/calendar-service-terms';
 
 /** The statuses that put a service on the calendar; see the schedule route. */
 const SCHEDULED_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
@@ -323,11 +324,10 @@ export async function PATCH(
         String(usesServiceItems ? a.service_item_id : a.service_id),
       ),
     );
-    const customDurationByService = new Map<string, number>();
+    const assignmentByService = new Map<string, CalendarAssignmentValues>();
     for (const a of (assignRes.data ?? []) as Array<Record<string, unknown>>) {
       const sid = String(usesServiceItems ? a.service_item_id : a.service_id);
-      const custom = a.custom_duration_minutes;
-      if (typeof custom === 'number' && Number.isFinite(custom)) customDurationByService.set(sid, custom);
+      assignmentByService.set(sid, a as CalendarAssignmentValues);
     }
 
     const catalogue = new Map<string, CatalogueServiceForVisit>();
@@ -339,8 +339,7 @@ export async function PATCH(
         name: String(svc.name ?? 'Service'),
         // A calendar's own length for the service wins, the way every other
         // appointment path resolves it.
-        durationMinutes:
-          customDurationByService.get(id) ?? Number(svc.duration_minutes ?? 30),
+        durationMinutes: calendarDurationMinutes(Number(svc.duration_minutes ?? 30), assignmentByService.get(id)),
         bufferMinutes: Math.max(0, Number(svc.buffer_minutes ?? 0)),
         // The wait after the service (processing past its end), which the next
         // service in the visit stands behind along with the buffer. A variant

@@ -66,7 +66,7 @@ Model R with the red-team amendments: revision-based replica links (`desired_rev
 | live-staging | service-role scripts on fixtures; read-only probes on plus-1 | hosted grants, pooler, timings |
 | performance | Vitest query counts (blocking); local and staging timing (deploy gates) | no N+1, trigger overhead, apply and drain, staff form, public availability |
 | security | pgTAP, PostgREST contract, live grant checks | no client path into engine tables, sequences, functions or the flag; no guest PII in audit rows, notices or anonymous reads |
-| manual | owner, device with app 1.1.0, solicitor | acceptance R1 to R14, legal text, help accuracy |
+| manual | owner, device with app 1.1.0 | acceptance R1 to R14, legal text as reviewed (D9), help accuracy |
 
 ### Risk codes
 
@@ -1304,7 +1304,7 @@ The migration follows D54, decided 2026-09-14: the host's values apply to every 
 
 - **Layer:** manual. **Workstream:** W0 Owed migrations and probes. **Requirements:** R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11,R12,R13,R14.
 - **Pins:** RT2-14; D9; D21
-- **Scenario:** Owner walks the acceptance checklist on staging after Pass B; solicitor reviews consent text, price control, trader identity and data roles before build.
+- **Scenario:** Owner walks the acceptance checklist on staging after Pass B. Counsel's review of the consent text, price control, trader identity and data roles is complete (D9, 2026-09-14), so the checklist confirms the built text matches what was reviewed.
 - **Expected:** Every box ticked and signed with date; consent version recorded; any failed box blocks production Pass B.
 - **Location:** `Docs/release-notes/collective-replicas.md`
 

@@ -1307,7 +1307,7 @@ All venue notices use `notifyVenue` (`src/lib/linked-accounts/notifications.ts:6
 
 ## 7. Open questions
 
-Each bullet still needs the owner. The decision rows in plan §11.2 are recommendations awaiting the owner unless marked decided; of those rows D3, D29 and D54 are marked decided, so the five bullets removed on 2026-09-14 are the ones D41, D51, D34 (now N32), D29 and D54 answered.
+Each bullet still needs the owner. The decision rows in plan §11.2 are recommendations awaiting the owner unless marked decided; of those rows D3, D29 and D54 are marked decided, so the six bullets removed on 2026-09-14 are the ones D41, D51, D34 (now N32), D29, D54 and D27 (counsel complete, D9) answered.
 
 - Graft 5 routes a member's own diary columns to its own staff form, which lists replicas and member-only services together. On 2026-09-05 you asked that, with two or more venues in a collective, the staff form lists the combined page's offerings only. With own booking pages redirecting (D3), member-only services would otherwise have no way to be booked. May the own-column form return, or should member-only services stay unbookable from the diary?
 - Should services only at one venue (host or member) lose online booking while the collective is live, as this spec assumes from D2 and D3, or keep a separate online route?
@@ -1323,7 +1323,6 @@ Each bullet still needs the owner. The decision rows in plan §11.2 are recommen
 - Should a member's own 'All bookings' forms also be asked on services from the host (as specified), and may members add their own service-level forms to replicas?
 - Are online meeting links and joining information set by each venue for its own calendars (as specified), or copied from the host?
 - Venue-level settings that still differ per venue (guest self-reschedule, waitlist, reminders and communication policies, deposit settings, booking rules, sign-in requirement): which should the host control, which must match at accept, and which stay per venue with a 'Different at {venue}' note?
-- Legal: are host prices enforced or recommended prices members may vary per calendar, and do you approve the trader line on the details, payment and confirmation steps and an unticked marketing consent on collective pages (and on every booking page)?
 - May a venue without charges-capable Stripe join a collective that offers paid services, with its calendars hidden online for those services (as specified)?
 - May a member re-add one of its calendars that the host removed from a service (D15)? This spec allows it and shows 'Last changed by' on both sides.
 - Should members be able to reorder the 'From {host}' list for their own staff lists? This spec hides reordering there and follows the host's order.

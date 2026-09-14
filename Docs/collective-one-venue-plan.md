@@ -110,10 +110,10 @@ verifier and every deploy step, rollback drills, and an acceptance checklist wri
 
 **What we need from you** (§11). Most urgent:
 
-1. **Legal counsel before build (D9, D27).** A host setting prices and terms that independent
-   businesses charge through their own Stripe accounts carries competition, employment-status,
-   consumer-information and data-protection questions. The design can treat host prices as
-   enforced or as recommended.
+1. **Legal counsel (D9, D27): complete.** The owner recorded counsel as complete on 2026-09-14.
+   Host prices apply everywhere unless the host turns on the per-calendar price permission for a
+   service (D27, through D4 and D29); the consent text, the trader line and the unticked
+   marketing consent stand as designed.
 2. **Member-only services (D2)**: kept for the bookings the member's team makes, not bookable
    online, chosen at accept. When own pages redirect (D3) is decided and is no longer on this list.
 3. **Whether host transfer ships first time (D12).** D29 (one name and description everywhere)
@@ -1689,7 +1689,7 @@ Both reviews, with evidence and inventories, are summarised in Appendix A.
 | RT2-11 | High | Group bookings across member venues refused | Same-venue limit shown up front, or split groups (D28) |
 | RT2-12 | High | Staff authority without account links loses audit, notices and edit rights | Collective booking audit and defined rights (§6.5; D17 as amended by D41) |
 | RT2-13 | High | The staff form copies one venue's client into another | The picker searches every live member venue, names the owning venue and books against the existing record; a picked contact is cleared only outside a live collective (§6.5; D41) |
-| RT2-14 | High | Legal exposure in the model itself | Counsel before build; trader line; unticked consent (§6.9; D9) |
+| RT2-14 | High | Legal exposure in the model itself | Counsel complete (D9, 2026-09-14); trader line; unticked consent (§6.9) |
 | RT2-15 | Medium | Stripe exclusion checks only an account id and hides staff calendars | Store charges readiness; public audience only (§6.6) |
 | RT2-16 | Medium | Some columns must not copy (meeting links, arrival text, add-on costs) | Column classification (§6.3; D11) |
 | RT2-17 | Medium | Per-calendar values: no host write path; display and charge differ | `collective_set_calendar_values`; catalogue carries all seven values; name and description delegation off for offered services (D29) |
@@ -2167,7 +2167,7 @@ Effort is relative (S small, M medium, L large) and assumes one engineer familia
 
 | # | Workstream | Effort | Depends on |
 |---|---|---|---|
-| W0 | Owner decisions, legal counsel, production survey | S | none |
+| W0 | Owner decisions (D2 and D12 remain), production survey, the D31 owed-migrations pass | S | none |
 | W1 | Booking correctness on today's model, in two parts under one id. W1a, starting now: one resolver over today's two custom columns, per-calendar price and length in the catalogue, base-price override removed, variant-aware availability, chain windows, price snapshot with settling readers, staff actor stamps, Stripe readiness (`stripe_charges_enabled` and its backfill). W1b, after W15 and W8: the resolver over all seven per-calendar fields, with the deposit path and the card-hold floor | L | W0 (D4, D6); W1b also W15, W8 |
 | W2 | Calendar assignment hardening: both assignment writers (`PUT practitioner-services` and the `practitioner_ids` half of `PATCH appointment-services`) become diff writes inside one transaction, with `expected_service_ids` and `expected_calendar_ids`, stable row ids, every custom and attribution column preserved across an unrelated save, own-venue checks on service and calendar ids, the 24-hour rule for clients without expected ids, and `service_items.updated_at` with `expected_updated_at` on the Services page. W8, CSA-01 to CSA-03, D15 and SEC-05 depend on this landing first. It is the first of the four edits to `PATCH appointment-services`, which land in the order W2, W8, W6, W5 | M | none |
 | W3 | Engine schema and functions dark, in two parts under one id. W3a, first and its own deliverable: the column registry `collective_column_classes`, seeded and classified for all eight tables (D53, D40), with its enumerating pgTAP test (DB-07, DB-10), and `service-duplication.ts` reading it. Then the engine: tables, revisions, dirty and lock triggers, apply, claims, verifier, grants, pgTAP and concurrency harness, reading the registry | L | Pass 0 |
@@ -2262,7 +2262,7 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | An engine defect writes wrong prices, deposits or forms into many member accounts | Medium | High | Per-collective switch; dry runs with column diffs; pgTAP convergence and idempotency; fingerprint verifier; audit with before and after values; staging soak |
-| Host-set prices charged by independent businesses create legal exposure (competition, employment status, consumer information, data roles) | Medium | High | Counsel before build; recorded consent; trader line; members may leave at any time and keep everything |
+| Host-set prices charged by independent businesses create legal exposure (competition, employment status, consumer information, data roles) | Medium | High | Counsel complete (D9); recorded consent; trader line; members may leave at any time and keep everything |
 | A forgotten write path hits a lock and returns 500 | Medium | Medium | Writer registry test; route guards with coded 409s; dedicated SQLSTATE |
 | Replication lag lets a guest see stale terms | Medium | Medium | Fingerprint omission on public paths; staff refusal while behind; snapshot freezes what was charged |
 | Members lose their online channel through redirects | Medium | High | Redirect only when live, converged and listed; status line on the Booking Page tab |
@@ -2291,8 +2291,8 @@ same ids. The recommended default is in bold.
 
 | id | Decision | Recommended |
 |---|---|---|
-| D9 | Brief a solicitor on the model itself: one business setting prices and terms that independent businesses charge through their own Stripe accounts (competition, employment status, the information guests must see about who they are booking with, data controller roles), and approve the consent text | **Yes, before build** |
-| D27 | Are host prices enforced, or recommended prices that calendars may vary within the host's permissions? | **Follow counsel; the design supports both through the per-calendar price permission** |
+| D9 | Brief a solicitor on the model itself: one business setting prices and terms that independent businesses charge through their own Stripe accounts (competition, employment status, the information guests must see about who they are booking with, data controller roles), and approve the consent text | **COMPLETE 2026-09-14.** The owner recorded counsel as complete; the consent text, trader line and unticked marketing consent stand as designed |
+| D27 | Are host prices enforced, or recommended prices that calendars may vary within the host's permissions? | **DECIDED 2026-09-14, with D9 and D29: host prices apply everywhere unless the host turns on the per-calendar price permission for that service (D4).** The design supports both through the same permission, so nothing changes shape |
 | D18 | One live collective per venue, as host or member, enforced in the database | **Yes** |
 | D31 | Ship production's owed migrations as their own deploy pass before this work | **Yes** |
 

@@ -135,3 +135,15 @@ describe('GET /api/venue/export?type=bookings', () => {
     expect(cell('Created At')).toBe('2026-09-01T09:00:00Z');
   });
 });
+
+describe('GET /api/venue/export: who may export (PB-19)', () => {
+  it.each(['guests', 'bookings'] as const)('refuses the %s export to non-admin staff before reading anything', async (type) => {
+    const rec = makeRecordingDb();
+    mockStaff.mockResolvedValue({ id: 'staff-2', venue_id: VENUE, email: 'team@example.com', role: 'staff', db: rec.db });
+
+    const res = await GET(new NextRequest(`http://localhost/api/venue/export?type=${type}`));
+
+    expect(res.status).toBe(403);
+    expect(rec.calls).toEqual([]);
+  });
+});

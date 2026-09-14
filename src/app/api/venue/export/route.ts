@@ -34,6 +34,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get('type');
 
+    // Both exports carry every client's email and phone, and the only screen that offers them
+    // (Settings, Reports) is admin-only (PB-19).
+    if ((type === 'bookings' || type === 'guests') && !requireAdmin(staff)) {
+      return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+    }
+
     if (type === 'bookings') {
       const { data: bookings, error } = await staff.db
         .from('bookings')
@@ -143,9 +149,6 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === 'guests') {
-      if (!requireAdmin(staff)) {
-        return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
-      }
       const { data: guests, error } = await staff.db
         .from('guests')
         .select(`

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { bookingModelShortLabel, inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { normaliseGuestNamePart } from '@/lib/guests/name';
 
@@ -64,6 +65,7 @@ export async function GET(request: NextRequest) {
           service_item_id,
           practitioner_id,
           appointment_service_id,
+          collective_id,
           guests (
             first_name,
             last_name,
@@ -79,6 +81,32 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch bookings' }, { status: 500 });
       }
 
+      /**
+       * The collective each booking was made through (REP-01, SB-30). `collective_id` has no
+       * foreign key to embed through, so names are read separately, with the service client:
+       * a venue that has left a collective can no longer read the collective row under RLS, and
+       * its own bookings must still say where they came from (REP-06). Only the ids on this
+       * venue's own bookings are looked up, and only the name is read.
+       */
+      const collectiveIds = [
+        ...new Set(
+          (bookings ?? [])
+            .map((b) => (b as { collective_id?: string | null }).collective_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+      const collectiveNames = new Map<string, string>();
+      if (collectiveIds.length > 0) {
+        const { data: collectiveRows, error: collectiveErr } = await getSupabaseAdminClient()
+          .from('venue_collectives')
+          .select('id, name')
+          .in('id', collectiveIds);
+        if (collectiveErr) console.error('Export bookings collective names failed:', collectiveErr.message);
+        for (const c of collectiveRows ?? []) {
+          collectiveNames.set(c.id as string, (c.name as string | null) ?? 'Collective');
+        }
+      }
+
       const headers = [
         'Booking ID',
         'Date',
@@ -90,6 +118,7 @@ export async function GET(request: NextRequest) {
         'Deposit Amount (£)',
         'Stripe Payment Intent',
         'Source',
+        'Booked Through Collective',
         'Guest Name',
         'Guest Email',
         'Guest Phone',
@@ -128,6 +157,7 @@ export async function GET(request: NextRequest) {
           depositGbp,
           b.stripe_payment_intent_id ?? '',
           b.source ?? '',
+          row.collective_id ? collectiveNames.get(row.collective_id as string) ?? 'Collective' : '',
           csvGuestName(guest as { first_name?: string | null; last_name?: string | null } | null),
           (guest as { email?: string } | null)?.email ?? '',
           (guest as { phone?: string } | null)?.phone ?? '',

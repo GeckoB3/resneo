@@ -4,6 +4,10 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/supabase/venue-route-client', () => ({
   createVenueRouteClient: vi.fn(async () => ({})),
 }));
+const serviceDb = vi.hoisted(() => ({ current: null as unknown }));
+vi.mock('@/lib/supabase', () => ({
+  getSupabaseAdminClient: () => serviceDb.current,
+}));
 vi.mock('@/lib/venue-auth', () => ({
   getVenueStaff: vi.fn(),
   requireAdmin: (staff: { role?: string } | null) => staff !== null && staff.role === 'admin',
@@ -19,6 +23,7 @@ const mockStaff = vi.mocked(getVenueStaff);
 
 async function runExport(type: 'guests' | 'bookings', responder?: Responder) {
   const rec = makeRecordingDb(responder);
+  serviceDb.current = rec.db;
   const staff: VenueStaff = { id: 'staff-1', venue_id: VENUE, email: 'owner@example.com', role: 'admin', db: rec.db };
   mockStaff.mockResolvedValue(staff);
   const res = await GET(new NextRequest(`http://localhost/api/venue/export?type=${type}`));
@@ -133,6 +138,31 @@ describe('GET /api/venue/export?type=bookings', () => {
     expect(cell('Guest Name')).toBe('Ann Lee');
     expect(cell('Guest Email')).toBe('ann@example.com');
     expect(cell('Created At')).toBe('2026-09-01T09:00:00Z');
+  });
+});
+
+describe('GET /api/venue/export?type=bookings: collective trade (REP-01)', () => {
+  it('names the collective a booking was made through, and leaves other bookings blank', async () => {
+    const base = {
+      booking_date: '2026-09-20', booking_time: '10:00:00', party_size: 1, status: 'Booked', deposit_status: null,
+      deposit_amount_pence: null, stripe_payment_intent_id: null, source: 'booking_page', dietary_notes: null,
+      occasion: null, created_at: '2026-09-01T09:00:00Z', calendar_id: 'cal-1', service_item_id: 'svc-1', guests: null,
+    };
+    const { rec, res } = await runExport('bookings', (call) => {
+      if (call.table === 'bookings') {
+        return { data: [{ ...base, id: 'b1', collective_id: 'col-1' }, { ...base, id: 'b2', collective_id: null }] };
+      }
+      if (call.table === 'venue_collectives') return { data: [{ id: 'col-1', name: 'High Street' }] };
+      return undefined;
+    });
+    expect(res.status).toBe(200);
+    const [headers, first, second] = await csvRows(res);
+    const col = headers!.indexOf('Booked Through Collective');
+    expect(col).toBeGreaterThan(-1);
+    expect(first![col]).toBe('High Street');
+    expect(second![col]).toBe('');
+    expect(first).toHaveLength(headers!.length);
+    expect(columnsMissingFromMigrations(rec.calls)).toEqual([]);
   });
 });
 

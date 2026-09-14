@@ -33,7 +33,7 @@ import { redactBookingPiiFields } from '@/lib/linked-accounts/redact-booking-pii
  *   Cancelled bookings are excluded from this view by default; pass `status=Cancelled` to opt in.
  */
 const BOOKINGS_LIST_SELECT_FULL =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, collective_id, addons_total_price_pence, addons_total_duration_minutes, location_type, client_address_line1, client_address_line2, client_address_city, client_address_postcode';
 
 /**
  * Hard ceiling on rows returned by the otherwise-unbounded query shapes
@@ -44,7 +44,7 @@ const BOOKINGS_LIST_MAX_ROWS = 1000;
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, addons_total_price_pence, addons_total_duration_minutes';
+  'id, booking_date, booking_time, party_size, booking_model, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, guest_first_name, guest_last_name, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, service_variant_id, service_name_snapshot, service_variant_name_snapshot, processing_time_blocks, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id, collective_id, addons_total_price_pence, addons_total_duration_minutes';
 
 export async function GET(request: NextRequest) {
   try {
@@ -323,6 +323,31 @@ export async function GET(request: NextRequest) {
         : { data: [] as { id: string; name: string }[] };
     const areaNameById = new Map((areaRows ?? []).map((a: { id: string; name: string }) => [a.id, a.name]));
 
+    /**
+     * The collective each booking was made through (W17, REP-01). No foreign key to embed, so the
+     * names are read separately with the service client: a venue that has left the collective can
+     * no longer read its row under RLS, and its own bookings should still say where they came from
+     * (REP-06). Only the name is read.
+     */
+    const collectiveIdsOnRows = [
+      ...new Set(
+        rawRows
+          .map((r) => r.collective_id as string | null | undefined)
+          .filter((cid): cid is string => typeof cid === 'string' && cid.trim() !== ''),
+      ),
+    ];
+    const collectiveNameById = new Map<string, string>();
+    if (collectiveIdsOnRows.length > 0) {
+      const { data: collectiveRows, error: collectiveErr } = await getSupabaseAdminClient()
+        .from('venue_collectives')
+        .select('id, name')
+        .in('id', collectiveIdsOnRows);
+      if (collectiveErr) console.error('[bookings/list] collective names failed:', collectiveErr.message);
+      for (const c of collectiveRows ?? []) {
+        collectiveNameById.set(c.id as string, (c.name as string | null) ?? 'Collective');
+      }
+    }
+
     const calendarIds = [
       ...new Set(
         rawRows
@@ -428,6 +453,8 @@ export async function GET(request: NextRequest) {
         person_label: r.person_label ?? null,
         area_id: aid ?? null,
         area_name: aid ? areaNameById.get(aid) ?? null : null,
+        collective_id: (r.collective_id as string | null | undefined) ?? null,
+        collective_name: r.collective_id ? collectiveNameById.get(r.collective_id as string) ?? 'Collective' : null,
         location_type: r.location_type ?? null,
         // A client's home address is contact PII: gated like email/phone (§5.2).
         client_address_line1: canSeeLinkedPii ? (r.client_address_line1 ?? null) : null,

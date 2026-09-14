@@ -51,6 +51,9 @@ export interface RegistryAppointment {
   /** Shared id for multi-service visits and group dining bookings. */
   group_booking_id?: string | null;
   person_label?: string | null;
+  /** The collective whose booking page this booking was made through, when it was. */
+  collective_id?: string | null;
+  collective_name?: string | null;
   service_variant_name?: string | null;
   booking_addon_labels?: string[];
   /**

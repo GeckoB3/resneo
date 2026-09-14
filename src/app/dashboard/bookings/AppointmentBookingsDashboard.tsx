@@ -310,8 +310,15 @@ function filterRegistryAppointments(
   searchQuery: string,
   primary: BookingModel,
   enabledModels: BookingModel[],
+  /** 'all', 'none' (not through any collective page), or a collective id. */
+  collectiveFilter: 'all' | 'none' | string = 'all',
 ): RegistryAppointment[] {
   let result = list;
+  if (collectiveFilter === 'none') {
+    result = result.filter((b) => !b.collective_id);
+  } else if (collectiveFilter !== 'all') {
+    result = result.filter((b) => b.collective_id === collectiveFilter);
+  }
   if (practitionerFilter !== 'all') {
     result = result.filter((b) => {
       const inferred = inferRegistryModel(b);
@@ -389,6 +396,7 @@ export function AppointmentBookingsDashboard({
   const [statusKey, setStatusKey] = useState<string>('All');
   const [practitionerFilter, setPractitionerFilter] = useState<'all' | string>(defaultPractitionerFilter);
   const [serviceFilter, setServiceFilter] = useState<'all' | string>('all');
+  const [collectiveFilter, setCollectiveFilter] = useState<'all' | 'none' | string>('all');
   const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -803,8 +811,9 @@ export function AppointmentBookingsDashboard({
         '',
         primaryBookingModel,
         enabledModels,
+        collectiveFilter,
       ),
-    [bookings, practitionerFilter, serviceFilter, primaryBookingModel, enabledModels],
+    [bookings, practitionerFilter, serviceFilter, primaryBookingModel, enabledModels, collectiveFilter],
   );
 
   const filteredBookings = useMemo(() => {
@@ -888,6 +897,7 @@ export function AppointmentBookingsDashboard({
       '',
       primaryBookingModel,
       enabledModels,
+      collectiveFilter,
     );
     if (modelFilter !== 'all') reg = reg.filter((b) => inferRegistryModel(b) === modelFilter);
     if (viewMode === 'day' && timeRangeFilterActive) {
@@ -900,6 +910,7 @@ export function AppointmentBookingsDashboard({
     allStatusBookings,
     practitionerFilter,
     serviceFilter,
+    collectiveFilter,
     primaryBookingModel,
     enabledModels,
     modelFilter,
@@ -1715,6 +1726,18 @@ export function AppointmentBookingsDashboard({
     );
   }
 
+  /** The collectives this venue's loaded bookings were made through, for the "Booked through" filter. */
+  const collectiveChoices = (() => {
+    const byId = new Map<string, string>();
+    for (const b of allStatusBookings) {
+      if (b.collective_id && !byId.has(b.collective_id)) byId.set(b.collective_id, b.collective_name ?? 'Collective');
+    }
+    if (collectiveFilter !== 'all' && collectiveFilter !== 'none' && !byId.has(collectiveFilter)) {
+      byId.set(collectiveFilter, 'Collective');
+    }
+    return [...byId.entries()].map(([id, name]) => ({ id, name }));
+  })();
+
   const showOwnBookingsInList = sourceScope === 'all' || sourceScope === 'own';
   const showLinkedBookingsInList = sourceScope === 'all' || sourceScope === 'linked';
   const listLoading =
@@ -1724,6 +1747,7 @@ export function AppointmentBookingsDashboard({
     (statusKey !== 'All' ? 1 : 0) +
     (practitionerFilter !== 'all' ? 1 : 0) +
     (serviceFilter !== 'all' ? 1 : 0) +
+    (collectiveFilter !== 'all' ? 1 : 0) +
     (modelFilter !== 'all' ? 1 : 0) +
     (timeRangeFilterActive ? 1 : 0);
 
@@ -1839,6 +1863,24 @@ export function AppointmentBookingsDashboard({
             ))}
           </select>
         </label>
+        {collectiveChoices.length > 0 ? (
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Booked through</span>
+            <select
+              value={collectiveFilter}
+              onChange={(e) => setCollectiveFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            >
+              <option value="all">Any page</option>
+              {collectiveChoices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+              <option value="none">Not through a collective</option>
+            </select>
+          </label>
+        ) : null}
       </div>
       <div>
         <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
@@ -1864,6 +1906,7 @@ export function AppointmentBookingsDashboard({
             setStatusKey('All');
             setPractitionerFilter(defaultPractitionerFilter);
             setServiceFilter('all');
+            setCollectiveFilter('all');
             setModelFilter('all');
             setStartHourOverride(null);
             setEndHourOverride(null);

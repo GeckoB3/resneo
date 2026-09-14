@@ -78,6 +78,8 @@ import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
 
 interface Service {
   id: string;
+  /** Echoed back as `expected_updated_at` so a save made from a stale copy is refused (412). */
+  updated_at?: string | null;
   /** Staff row id of the creator; non-admins may edit/delete only when this matches their staff id. */
   created_by_staff_id?: string | null;
   name: string;
@@ -149,7 +151,7 @@ type ServicesPageTab = 'services' | 'categories' | 'addons';
  * `acknowledge_affected_bookings` once the operator has chosen what happens to them.
  */
 type PendingServiceRemoval =
-  | { kind: 'calendar_links'; calendarId: string; serviceIds: string[] }
+  | { kind: 'calendar_links'; calendarId: string; serviceIds: string[]; expectedServiceIds: string[] }
   | { kind: 'service_form'; payload: Record<string, unknown> };
 
 function servicesPageTabFromParam(raw: string | null): ServicesPageTab {
@@ -258,6 +260,10 @@ export function AppointmentServicesView({
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** What the open edit form was loaded from, sent back so the server can refuse a stale save. */
+  const [editingBaseline, setEditingBaseline] = useState<{ updatedAt: string | null; calendarIds: string[] } | null>(
+    null,
+  );
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
   /** Services whose active flag is being flipped from the card, so the switch can lock while it saves. */
@@ -596,6 +602,7 @@ export function AppointmentServicesView({
   async function putCalendarServiceLinks(
     calendarId: string,
     serviceIds: string[],
+    expectedServiceIds: string[],
     acknowledge: boolean,
   ): Promise<'saved' | 'needs_confirmation'> {
     const res = await fetch(
@@ -605,14 +612,22 @@ export function AppointmentServicesView({
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practitioner_id: calendarId, service_ids: serviceIds }),
+        body: JSON.stringify({
+          practitioner_id: calendarId,
+          service_ids: serviceIds,
+          expected_service_ids: expectedServiceIds,
+        }),
       },
     );
     if (res.ok) return 'saved';
     const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (res.status === 412) {
+      // Someone else changed this calendar's services: reload so the next attempt starts from theirs.
+      void fetchAll();
+    }
     const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(data) : null;
     if (confirmation) {
-      openServiceRemoval({ kind: 'calendar_links', calendarId, serviceIds }, confirmation);
+      openServiceRemoval({ kind: 'calendar_links', calendarId, serviceIds, expectedServiceIds }, confirmation);
       return 'needs_confirmation';
     }
     throw new Error(data.error ?? 'Failed to update service allocation');
@@ -627,7 +642,7 @@ export function AppointmentServicesView({
       const nextServiceIds = nextEnabled
         ? Array.from(new Set([...baseline, serviceId]))
         : baseline.filter((id) => id !== serviceId);
-      if ((await putCalendarServiceLinks(calendarId, nextServiceIds, false)) === 'needs_confirmation') {
+      if ((await putCalendarServiceLinks(calendarId, nextServiceIds, explicit, false)) === 'needs_confirmation') {
         return;
       }
       await fetchAll();
@@ -672,7 +687,12 @@ export function AppointmentServicesView({
         }
       }
       if (pendingRemoval.kind === 'calendar_links') {
-        await putCalendarServiceLinks(pendingRemoval.calendarId, pendingRemoval.serviceIds, true);
+        await putCalendarServiceLinks(
+          pendingRemoval.calendarId,
+          pendingRemoval.serviceIds,
+          pendingRemoval.expectedServiceIds,
+          true,
+        );
       } else {
         await patchServicePayload(pendingRemoval.payload, true);
         setShowModal(false);
@@ -715,6 +735,7 @@ export function AppointmentServicesView({
       practitioner_ids: defaultCalendarIds,
     });
     setEditingId(null);
+    setEditingBaseline(null);
     setError(null);
     setShowAddCalendarModal(false);
     setNewCalendarName('');
@@ -788,6 +809,7 @@ export function AppointmentServicesView({
       online_meeting_info: svc.online_meeting_info ?? '',
     });
     setEditingId(svc.id);
+    setEditingBaseline({ updatedAt: svc.updated_at ?? null, calendarIds: svcLinks });
     setError(null);
     setShowAddCalendarModal(false);
     setNewCalendarName('');
@@ -936,7 +958,14 @@ export function AppointmentServicesView({
       setError(built.error);
       return;
     }
-    const { payload } = built;
+    const payload =
+      editingId && editingBaseline
+        ? {
+            ...built.payload,
+            ...(editingBaseline.updatedAt ? { expected_updated_at: editingBaseline.updatedAt } : {}),
+            expected_calendar_ids: editingBaseline.calendarIds,
+          }
+        : built.payload;
 
     setSaving(true);
     setError(null);

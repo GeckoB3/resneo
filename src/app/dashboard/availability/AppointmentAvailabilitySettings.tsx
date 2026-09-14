@@ -241,6 +241,8 @@ export function AppointmentAvailabilitySettings({
    * cannot trigger false-positive time-window validation (e.g. experience-events PATCH).
    */
   const [snapshotClassIds, setSnapshotClassIds] = useState<string[]>([]);
+  /** The calendar's services as the dialog loaded them: sent back so a stale save is refused. */
+  const [snapshotServiceIds, setSnapshotServiceIds] = useState<string[]>([]);
   const [snapshotResourceIds, setSnapshotResourceIds] = useState<string[]>([]);
   const [snapshotEventIds, setSnapshotEventIds] = useState<string[]>([]);
   const [classTypes, setClassTypes] = useState<ClassTypeRow[]>([]);
@@ -259,7 +261,11 @@ export function AppointmentAvailabilitySettings({
    * attempt with the list so this dialog can show it and offer to move them instead.
    */
   const [serviceRemoval, setServiceRemoval] = useState<ServiceRemovalConfirmation | null>(null);
-  const [pendingServiceLinks, setPendingServiceLinks] = useState<{ calendarId: string; serviceIds: string[] } | null>(null);
+  const [pendingServiceLinks, setPendingServiceLinks] = useState<{
+    calendarId: string;
+    serviceIds: string[];
+    expectedServiceIds: string[];
+  } | null>(null);
   const [serviceRemovalFailures, setServiceRemovalFailures] = useState<ServiceRemovalMoveFailure[]>([]);
   const [serviceRemovalError, setServiceRemovalError] = useState<string | null>(null);
   const [serviceRemovalSaving, setServiceRemovalSaving] = useState(false);
@@ -532,6 +538,7 @@ export function AppointmentAvailabilitySettings({
     setFormName('');
     setFormActive(true);
     setFormServiceIds([]);
+    setSnapshotServiceIds([]);
     setFormClassIds([]);
     setFormResourceIds([]);
     setFormEventIds([]);
@@ -584,6 +591,7 @@ export function AppointmentAvailabilitySettings({
     }
     const serviceIds = links.filter((l) => l.practitioner_id === p.id).map((l) => l.service_id);
     setFormServiceIds(serviceIds);
+    setSnapshotServiceIds([...serviceIds]);
 
     const types = assoc?.classTypes ?? classTypes;
     const classIds = types.filter((ct) => classTypeUsesCalendarColumn(ct, p.id)).map((ct) => ct.id);
@@ -791,7 +799,25 @@ export function AppointmentAvailabilitySettings({
       }
       }
 
-      const linkResult = await putServiceLinks(editingPracId, formServiceIds, false);
+      // A rename or an active toggle on its own never touches the services, so it can never
+      // meet a stale refusal for a list the operator did not change.
+      const servicesChanged =
+        formServiceIds.length !== snapshotServiceIds.length ||
+        formServiceIds.some((id) => !snapshotServiceIds.includes(id));
+      const linkResult = servicesChanged
+        ? await putServiceLinks(editingPracId, formServiceIds, snapshotServiceIds, false)
+        : 'saved';
+      if (linkResult === 'stale') {
+        const latest = await loadCalendarServiceIds(editingPracId);
+        if (latest) {
+          setFormServiceIds(latest);
+          setSnapshotServiceIds(latest);
+        }
+        await fetchData();
+        throw new Error(
+          `Someone changed ${formName.trim() || 'this calendar'}'s services while this was open. We have loaded the latest list. Check it and save again.`,
+        );
+      }
       if (linkResult === 'needs_confirmation') {
         // Everything else on the calendar has saved; only the service list is waiting on
         // the operator's choice. Close this form so the two dialogs never stack, and
@@ -819,8 +845,9 @@ export function AppointmentAvailabilitySettings({
   async function putServiceLinks(
     calendarId: string,
     serviceIds: string[],
+    expectedServiceIds: string[],
     acknowledge: boolean,
-  ): Promise<'saved' | 'needs_confirmation'> {
+  ): Promise<'saved' | 'needs_confirmation' | 'stale'> {
     const res = await fetch(
       acknowledge
         ? '/api/venue/practitioner-services?acknowledge_affected_bookings=true'
@@ -828,20 +855,35 @@ export function AppointmentAvailabilitySettings({
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practitioner_id: calendarId, service_ids: serviceIds }),
+        body: JSON.stringify({
+          practitioner_id: calendarId,
+          service_ids: serviceIds,
+          expected_service_ids: expectedServiceIds,
+        }),
       },
     );
     if (res.ok) return 'saved';
+    if (res.status === 412) return 'stale';
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(body) : null;
     if (confirmation) {
-      setPendingServiceLinks({ calendarId, serviceIds });
+      setPendingServiceLinks({ calendarId, serviceIds, expectedServiceIds });
       setServiceRemovalFailures([]);
       setServiceRemovalError(null);
       setServiceRemoval(confirmation);
       return 'needs_confirmation';
     }
     throw new Error(body.error ?? 'Failed to sync service links for this calendar.');
+  }
+
+  /** One calendar's service ids as stored now, or null when they could not be loaded. */
+  async function loadCalendarServiceIds(calendarId: string): Promise<string[] | null> {
+    const res = await fetch('/api/venue/appointment-services');
+    if (!res.ok) return null;
+    const data = (await res.json()) as { practitioner_services?: PractitionerServiceLink[] };
+    const links = (data.practitioner_services ?? []) as PractitionerServiceLink[];
+    setPLinks(links);
+    return links.filter((l) => l.practitioner_id === calendarId).map((l) => l.service_id);
   }
 
   /** The operator has seen the affected bookings: move the ones they chose, then save. */
@@ -863,7 +905,16 @@ export function AppointmentAvailabilitySettings({
           return;
         }
       }
-      await putServiceLinks(pendingServiceLinks.calendarId, pendingServiceLinks.serviceIds, true);
+      const replay = await putServiceLinks(
+        pendingServiceLinks.calendarId,
+        pendingServiceLinks.serviceIds,
+        pendingServiceLinks.expectedServiceIds,
+        true,
+      );
+      if (replay === 'stale') {
+        await fetchData();
+        throw new Error("Someone else changed this calendar's services. Close this and open the calendar again.");
+      }
       closeServiceRemoval();
       flash(
         moves.length > 0

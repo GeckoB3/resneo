@@ -42,6 +42,12 @@ import {
   validateProcessingTimeBlocks,
 } from '@/lib/appointments/processing-time';
 import { normalizeBookingStartForStorage } from '@/lib/appointments/booking-interval';
+import {
+  sameIdSet,
+  setServiceCalendarAssignments,
+  STALE_SERVICE_MESSAGE,
+} from '@/lib/venue/calendar-service-assignment-writes';
+import { apiError } from '@/lib/api/error-codes';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -1160,9 +1166,15 @@ export async function PATCH(request: NextRequest) {
       practitioner_ids: rawPractitionerIds,
       variants: variantsRaw,
       addon_group_links: addonLinksRaw,
+      expected_updated_at: rawExpectedUpdatedAt,
+      expected_calendar_ids: rawExpectedCalendarIds,
       ...rest
     } = body;
     const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
+    // Both optional: a client that sends them gets 412 STALE_RESOURCE instead of overwriting a
+    // change made after it loaded the service. Older app builds send neither.
+    const expectedUpdatedAt = typeof rawExpectedUpdatedAt === 'string' ? rawExpectedUpdatedAt : null;
+    const expectedCalendarIds = normalizePractitionerIdsInput(rawExpectedCalendarIds) ?? null;
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
     const acknowledgeAffectedBookings =
       request.nextUrl.searchParams.get('acknowledge_affected_bookings') === 'true';
@@ -1263,6 +1275,13 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
+      if (
+        expectedUpdatedAt !== null &&
+        Date.parse(expectedUpdatedAt) !== Date.parse(String((serviceRow as { updated_at?: string }).updated_at))
+      ) {
+        return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+      }
+
       const customCoherent = assertPatchCustomAvailabilityCoherent({
         patch: parsed.data,
         currentRow: serviceRow as Record<string, unknown>,
@@ -1351,6 +1370,9 @@ export async function PATCH(request: NextRequest) {
       if (requestedManagedCalendarIds !== undefined) {
         const currentLinks = (existingLinks ?? []) as Array<Record<string, unknown>>;
         const currentCalendarIds = currentLinks.map((r) => r.calendar_id as string);
+        if (expectedCalendarIds !== null && !sameIdSet(currentCalendarIds, expectedCalendarIds)) {
+          return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+        }
         const currentManagedIds =
           staff.role === 'admin'
             ? currentCalendarIds
@@ -1373,32 +1395,7 @@ export async function PATCH(request: NextRequest) {
           }
         }
 
-        const preservedOutsideScope =
-          staff.role === 'admin'
-            ? []
-            : currentLinks.filter((r) => !managedScope?.ok || !managedScope.managedCalendarIds.includes(r.calendar_id as string));
-        const preserveByCalendar = new Map(currentLinks.map((r) => [r.calendar_id as string, r] as const));
-        const finalLinks = [
-          ...preservedOutsideScope,
-          ...requestedManagedCalendarIds.map((calendarId) => {
-            const prev = preserveByCalendar.get(calendarId);
-            return {
-              calendar_id: calendarId,
-              service_item_id: id,
-              custom_duration_minutes: (prev?.custom_duration_minutes as number | null | undefined) ?? null,
-              custom_price_pence: (prev?.custom_price_pence as number | null | undefined) ?? null,
-            };
-          }),
-        ];
-
-        await admin.from('calendar_service_assignments').delete().eq('service_item_id', id);
-        if (finalLinks.length > 0) {
-          const { error: linkErr } = await admin.from('calendar_service_assignments').insert(finalLinks);
-          if (linkErr) {
-            console.error('PATCH /api/venue/appointment-services calendar_service_assignments failed:', linkErr);
-            return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
-          }
-        }
+        // The write itself runs after every validation below (PB-05), as an atomic diff.
       }
 
       if (parsed.data.payment_requirement !== undefined) {
@@ -1502,20 +1499,24 @@ export async function PATCH(request: NextRequest) {
 
       let savedRow = serviceRow as Record<string, unknown>;
       if (Object.keys(updatePayload).length > 0) {
-        let saved = await admin
-          .from('service_items')
-          .update(updatePayload)
-          .eq('id', id)
-          .eq('venue_id', staff.venue_id)
-          .select()
-          .single();
+        const updateServiceRow = (values: Record<string, unknown>) => {
+          let q = admin.from('service_items').update(values).eq('id', id).eq('venue_id', staff.venue_id);
+          // The exact check, in the same statement as the write: the early check above compares
+          // at millisecond precision and cannot close the gap between reading and writing.
+          if (expectedUpdatedAt !== null) q = q.eq('updated_at', expectedUpdatedAt);
+          return q.select().maybeSingle();
+        };
+        let saved = await updateServiceRow(updatePayload);
         if (saved.error && 'sync_state' in updatePayload && isMissingSyncColumnError(saved.error)) {
           // Database without the sync columns: save the rest as before.
           const { sync_state: _omit, ...rest } = updatePayload;
-          saved = await admin.from('service_items').update(rest).eq('id', id).eq('venue_id', staff.venue_id).select().single();
+          saved = await updateServiceRow(rest);
         }
         const { data, error } = saved;
 
+        if (!error && !data) {
+          return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+        }
         if (error) {
           console.error('PATCH /api/venue/appointment-services (service_items) failed:', error);
           return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
@@ -1523,6 +1524,30 @@ export async function PATCH(request: NextRequest) {
         savedRow = (data as Record<string, unknown>) ?? savedRow;
       } else if (requestedManagedCalendarIds === undefined && !variantsProvided && !addonLinksProvided) {
         return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+      }
+
+      if (requestedManagedCalendarIds !== undefined) {
+        const written = await setServiceCalendarAssignments(admin, {
+          venueId: staff.venue_id,
+          serviceItemId: id as string,
+          calendarIds: requestedManagedCalendarIds,
+          scopeCalendarIds:
+            staff.role === 'admin' ? null : managedScope?.ok ? managedScope.managedCalendarIds : [],
+          expectedCalendarIds,
+        });
+        if (!written.ok) {
+          if (written.reason === 'stale') {
+            return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+          }
+          if (written.reason === 'not_at_venue' || written.reason === 'outside_scope') {
+            return NextResponse.json(
+              { error: 'You can only change service links on calendars at your venue that you manage.' },
+              { status: 403 },
+            );
+          }
+          console.error('PATCH /api/venue/appointment-services calendar_service_assignments failed:', written.message);
+          return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
+        }
       }
 
       let savedVariants: Awaited<ReturnType<typeof replaceServiceVariants>> | null = null;

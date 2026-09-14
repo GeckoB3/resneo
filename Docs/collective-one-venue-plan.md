@@ -133,6 +133,43 @@ Added by the second pass, and at least as urgent as most of the above:
     calendar cap, while the page pools them. That is either the point of the feature or an
     arbitrage against the tier ladder, and it is your call, not an engineering one.
 
+Four more need you but are less urgent: what you tell owners about guests who book at two members
+(D42), what a host and a member each see in reports (D49), whether a host can undo a change that
+has already reached members (D50), and whether a price rise can be scheduled for a future date
+(D51). The other seven the second pass raised have obvious answers and are marked in §11.4 as ones
+the team should simply take.
+
+## 0.1 What actually matters
+
+This document lists 41 split-brain cases, 59 bugs, 51 decisions and 147 tests. That is the right
+level of detail for someone building it and the wrong level for someone deciding whether to. Six
+things change the shape of the work. Everything else is execution.
+
+1. **Decide whether joining still means sharing your clients (D41).** It does today, and it is not
+   optional: the mesh of links membership requires makes every member's client records readable by
+   every other member, and Booked revenue already shows each of them the others' takings. If the
+   answer is no, that is a change to the lifecycle, the staff booking authority and the reports,
+   and it is cheaper to decide now than to unpick later.
+2. **Fix multi-venue people before anything else (D38, W16).** One person with a login at two
+   venues cannot use ResNeo at all today. Two venues under one owner is the likeliest collective
+   there is, so this gates whether the feature is usable by its best customers. It is a live bug,
+   it has nothing to do with the engine, and it can start immediately.
+3. **Say out loud that the collective page is appointments only (D44).** It is, structurally, and
+   the product never mentions it. A member that also runs classes or tables loses that trade from
+   the web the day its page starts redirecting.
+4. **Get the money right before anything propagates (W1).** The price snapshot, one resolver and
+   per-calendar values are the difference between "the host changed a price" and "every past
+   booking silently repriced". This was already the first pass's top workstream and remains it.
+5. **Ship the bulk lane with the fold, not after it (§6.8).** Moving service and calendar work onto
+   the Services page is right. Doing it without the bulk actions the old manager had turns a
+   ten-service, three-venue setup from about 72 interactions into about 101.
+6. **Give the engine somewhere to be watched from (§6.16).** Two crons, a handful of alerts and a
+   support panel. Small, and the difference between finding out from a dashboard and finding out
+   from the host.
+
+Everything below is tiered in §8.0 into what to fix before building, what to fix while building,
+and what is recorded deliberately so that nobody builds it.
+
 ---
 
 ## 1. What the owner asked for
@@ -750,16 +787,22 @@ unclassified column, so a future venue-scoped column can never be copied silentl
 3. Engine functions are `VOLATILE`, SECURITY DEFINER, service-role only, and carry a function-level
    `SET resneo.collective_engine = 'on'`, which Postgres restores on exit (a `set_config` call would
    leak to the end of the transaction, RT1-7).
-   **The flag alone is a bare capability, and that is not enough.** As written, anyone holding the
+   **The flag is not a security boundary, and should not be built as one.** Anyone holding the
    database connection string (the Studio SQL editor, `psql`, a `pg_cron` job, a migration, CI's
    `SUPABASE_DB_URL`) can `SET LOCAL resneo.collective_engine = 'on'` and write any replica at any
-   venue. Audit rows are written by the engine functions, so a direct write leaves none; the
-   fingerprint then differs, I3 flags the link as drifted, and the daily verifier repairs it by
-   overwriting with the master's values and files it as an ordinary apply. The evidence destroys
-   itself. So the lock trigger requires three things together, not one: the flag, a per-transaction
-   nonce the engine sets and clears, and `current_user` equal to the functions' owner. And the
-   verifier writes drift it cannot explain as its own audit type, `unexplained_drift_repaired`,
-   carrying the before-image, and alerts on it rather than absorbing it.
+   venue. That is worth stating plainly, and then leaving alone: someone with the connection string
+   can already write any row in any table, so hardening the flag defends against an attacker who
+   has already won. The flag's job is to let the engine through its own locks, not to keep anyone
+   out.
+   **The operational consequence does matter, and it is about evidence, not attackers.** The
+   ordinary case is one of your own engineers fixing something by hand in the SQL editor. Audit
+   rows are written by the engine functions, so that write leaves none. The fingerprint then
+   differs, I3 flags the link as drifted, and the daily verifier repairs it by overwriting with the
+   master's values and files it as an ordinary apply. So a legitimate manual fix disappears without
+   trace, and if a host and a member later disagree about who changed a price there is nothing to
+   look at. The fix is one behaviour, not a lock: the verifier writes drift it cannot explain as
+   its own audit type, `unexplained_drift_repaired`, carrying the before-image, and alerts on it
+   rather than absorbing it. I41 reports the same condition.
    **`SET search_path = public` is not hardening.** It leaves `pg_temp` searched first for
    relation names, and this repository has the habit already: 81 of 85 `SET search_path` clauses
    use the unhardened form, and existing definer functions reference tables unqualified, for
@@ -861,15 +904,20 @@ check, so a direct PostgREST insert links a member's own service to a host-manag
 route guard and hidden picker do not reach that path. The same venue-consistency composite FK that
 I13 and I15 currently only report on should be added for real.
 
-**"Unless the write is an FK cascade" cannot be implemented, and has been removed above.**
-PostgreSQL gives a trigger no reliable way to tell a referential action from a user write;
-`pg_trigger_depth()` is the only approximation and it fires for every other trigger-driven write
-too, so the exemption would be either impossible or far wider than intended. It is also
-member-reachable: `service_items.category_id REFERENCES service_categories(id) ON DELETE SET NULL`
-(`20270202120000:52-54`), so a member deleting one of their own unmanaged headings issues an RI
-update against a locked replica. Replace the blanket exemption with an enumerated allowance,
-checked by column: a diff confined to `category_id` becoming NULL, and nothing else. DB-03 gains a
-case proving a member's own heading delete cannot change any other column of a locked replica.
+**"Unless the write is an FK cascade" is under-specified, and has been removed above.** It is not
+a hole so much as a clause nobody can act on: PostgreSQL gives a trigger no reliable way to tell a
+referential action from a user write, and `pg_trigger_depth()`, the nearest approximation, fires
+for every other trigger-driven write too. So whoever builds it will either find it impossible or
+implement it as "any nested write", which is much wider than intended, and the difference will not
+be visible in review. Decide what it means before the trigger is written.
+
+The case that makes it concrete is small and benign, which is why it is worth naming:
+`service_items.category_id REFERENCES service_categories(id) ON DELETE SET NULL`
+(`20270202120000:52-54`), so a member deleting one of their own unmanaged headings issues a
+referential update against a locked replica. Nothing harmful follows from that particular write.
+The point is only that the exemption has to be an enumerated allowance rather than a blanket one:
+a diff confined to `category_id` becoming NULL, and nothing else. DB-03 gains a case proving a
+member's own heading delete cannot change any other column of a locked replica.
 
 **A member can still withdraw a calendar silently, by deleting it.**
 `calendar_service_assignments.calendar_id REFERENCES unified_calendars(id) ON DELETE CASCADE`
@@ -1486,6 +1534,51 @@ never meet, see the migration deploy notes).
 
 ## 8. Delivery plan
 
+### 8.0 What the second pass found, tiered
+
+The second pass added fourteen split-brain cases, four platform bugs and fifteen decisions. They
+are not equally important, and a list that does not say so is not much use. Each is tiered here
+once, and the tier is the thing to act on; the entries in §3, §4 and §11 carry the detail.
+
+**Tier 1, fix first.** Live today, independent of the engine, and cheap. These can start alongside
+W1 and W2.
+
+| Finding | Why first | Where |
+|---|---|---|
+| SB-28, PB-16 | One person with a login at two venues cannot use the dashboard at all, and the invite route creates that state without warning. Gates whether a collective of two venues under one owner is usable | W16 |
+| SB-31 | Booked revenue already shows every member every other member's takings, in one blended figure, with no venue named. Nobody agreed to that | W17 |
+| SB-39 | Partner diary columns are drawn from the weekly template, so a host sees a member as open on a day that business is shut, and books into it. The data needed is already returned by another endpoint | W21 |
+| SB-15 | One member's ordinary service save writes into a second member's venue, with no host involved. Narrow conditions, but wrong enough to fix before anything else writes cross-venue | W1 |
+| PB-19 | The bookings export is not admin-gated while returning every guest's email and phone. One line | W15 |
+
+**Tier 2, fix while building.** Part of the work, sequenced by their workstream.
+
+| Finding | Tier-2 because | Where |
+|---|---|---|
+| The lock-order inversion (§6.4) | Cheap to prevent while the engine is designed, unpleasant to diagnose after | W3 |
+| The FK-cascade exemption (§6.5) | Not a hole so much as an under-specified clause. Decide what it means before writing the trigger | W3 |
+| The anon-readable assignments table (§2.2) | Only becomes a problem when the new columns land, so fix it in the same pass that adds them | W15, before W8 |
+| Calendar deletion silently withdrawing a member (§6.5, I33) | Falls out of making assignments the only truth | W3 |
+| SB-30 | Collective trade is invisible in every report because `collective_id` is read by nothing | W17 |
+| SB-33, SB-40 | The waitlist is missing and "any available" favours the host, both because the synthetic venue publishes only two of its flags | W19 |
+| SB-35, currency gate | Appointments-only stated in the product, and currency gated the way timezone already is | W20 |
+| SB-37, PB-17 | Canonicals and page metadata. Real, but nobody is harmed while it waits | W19 |
+| SB-29 | Offered masters become admin-only to edit whoever created them. One guard | W5 |
+| SEC-03 | A pre-booking form should file at the venue that will hold the booking. Falls out of RT2-2 | W4 |
+
+**Tier 3, recorded so nobody builds it.** Deliberate non-action. Each is written down because the
+next reader would otherwise rediscover it and propose work.
+
+| Finding | The decision |
+|---|---|
+| SB-32, duplicate contacts across member venues | Accepted. Ownership never moves, so the same guest booking two members is two records, and the merge tool refuses cross-venue pairs. Say so plainly rather than implying histories join (D42) |
+| SB-36, two venues sharing a physical room | Not supported. Say so in the product. A cross-venue resource is a platform change, not a collective one (D45) |
+| SB-38, one practitioner with a calendar at two venues | Warn, do not model. Flag two calendars in a collective sharing a name and email; a person identity above the venue is out of scope (D47) |
+| SB-41, moving a booking between venues | Stays refused. Ownership never moves, per §6.1. Rewrite the dialog so it stops offering a lossy rebook-and-cancel workaround (D46) |
+| The engine flag's actor binding | Dropped as a security measure. Anyone holding the connection string has already won, so a nonce defends nothing. The audit half is kept and is the point: see §6.4 |
+| The public requirements route | Not a finding. §6.6 records why, so it is not raised a third time |
+| PB-18, marketing email has no unsubscribe link | Real and platform-wide, and nothing to do with collectives. Raised here only because this review found it; it belongs in its own piece of work |
+
 ### 8.1 Fix now, on today's model
 
 These bugs hurt today, do not depend on the redesign, and several are prerequisites for it:
@@ -1582,9 +1675,9 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
   nothing tests the cron wrapper this design's two new crons depend on, nothing tests the platform
   console, and nothing stops an em-dash reaching a help article, on a project that rewrites about
   twenty of them.
-- **147 tests across layers**: 35 unit and sweep, 45 route, 3 component, 28 pgTAP, 4 engine
+- **147 tests across layers**: 35 unit and sweep, 45 route, 3 component, 29 pgTAP, 4 engine
   concurrency, 6 migration, 3 app-contract, 6 end-to-end, 6 live-staging, 4 performance,
-  5 security, 2 manual. Key groups: the terms resolver and price snapshot (TERMS, PRICE),
+  4 security, 2 manual. Key groups: the terms resolver and price snapshot (TERMS, PRICE),
   assignment writes (CSA), engine objects, locks and convergence (DB, ENG, REV), real two-connection
   races (CON), the derived catalogue and forms (CAT, CMP), guards (GRD), lifecycle (LIFE), migration
   (MIG), public pages (PUB), the app's real payloads from build 1.1.0 (APP), security, performance
@@ -1627,7 +1720,7 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
 | Members resist losing control of member-only services | Medium | Medium | Choices at accept; team bookings stay; clear labelling; leave at any time |
 | Trigger overhead on hot service tables | Low | Low | Early exit for venues outside replicas collectives; performance budgets |
 | A host save deadlocks against a concurrent apply, because the dirty triggers sit outside the stated lock order | Medium | Medium | Triggers bump revisions only, in id order, and never touch the master afterwards; the apply reads the master without a row lock; CON-03 covers the pair (§6.4) |
-| Someone with the database connection string writes a replica behind the engine flag, and the daily verifier then repairs over the evidence | Low | High | Flag plus per-transaction nonce plus owner check; the verifier files unexplained drift as its own audit type with the before-image and alerts; I41 (§6.4, §6.16) |
+| A manual fix made in the SQL editor leaves no audit row, and the daily verifier then repairs over it, so a legitimate change disappears without trace | Medium | Medium | The verifier files unexplained drift as its own audit type with the before-image and alerts, rather than absorbing it; I41, SEC-04 (§6.4, §6.16) |
 | The new per-calendar and attribution columns land on a table `anon` can read in full, including an `auth.users` identifier | Medium | High | Drop `public_read_calendar_service_assignments` and serve the public catalogue through the admin client before those columns ship; SEC-05, I42 (§2.2) |
 | A guest's pre-booking form files at one venue and they are booked at another, so the venue that needs the record does not hold it | Medium | Medium | Collect inline forms once the calendar is fixed, as RT2-2 already requires; name the receiving venue where a form must come first; SEC-03 (§6.6) |
 | A member loses its classes, events or table bookings from the web when redirects begin | Medium | High | Appointments-only stated in the product, warnings before accept and before redirects, and a route through for the other models; D44 (§6.14) |
@@ -1698,23 +1791,37 @@ These come from the areas the first pass did not reach: reporting, operations, p
 more than one venue, booking models other than appointments, guest identity across venues, and the
 public page's life outside the booking flow. Ids continue from D36 so nothing is renumbered.
 
+They are split by who actually has to decide. Seven of the fifteen have an obvious answer and are
+here to be recorded, not deliberated: the team should take them, write down what it took, and move
+on. Eight genuinely need you, because they are commercial, legal or about what the product
+promises. Do not let the first group consume attention that belongs to the second.
+
+#### Needs you
+
 | id | Decision | Recommended |
 |---|---|---|
-| D37 | Where the switch that puts new collectives into replicas mode lives. Flags today are per venue (`venues.feature_flags`, a closed six-key registry read per venue) and a collective spans venues, so there is no answer to "which venue's flag decides" | **A platform-level setting on the platform console, audited, deciding only what value new collectives are created with. `venue_collectives.service_model` stays the per-collective truth. Do not add a seventh key to `APPOINTMENTS_FEATURE_FLAG_KEYS`** |
 | D38 | A person who works at more than one venue in a collective. Today a second staff row locks them out of both dashboards (SB-28, PB-16) | **Ship a venue chooser before the collective work lands, defaulting to the last venue used, and refuse the invite with a plain explanation until it exists. Venues under one owner are the ordinary collective, not an edge case** |
 | D39 | How a collective is priced, given each venue keeps its own subscription and its own calendar cap (Light 1, Plus 5) while the collective page pools them | **Settle before launch: accept the pooling as the point of the feature, or add a per-collective charge, or cap member count. Member count is already known and eligibility is already evaluated per venue, so all three are buildable** |
-| D40 | `capacity_per_session` on a collective service, where a member's room is smaller than the host's | **Venue-controlled, with the host's value as the starting point at join. A host cannot know another business's room size, and overbooking a member's room is a failure the guest experiences** |
 | D41 | Whether a collective still requires the full mutual `create_edit_cancel` link mesh, which the database CHECK turns into mandatory client-detail sharing between every pair of members | **No. Authorise collective staff booking by collective role (already the design in §6.5) and drop the mesh requirement, so joining stops forcing every member to expose its clients to every other. Offer existing meshes for downgrade at migration. This is the largest single gap between R1 as written and the product as built** |
 | D42 | The same guest booking two member venues becomes two client records, and `merge_guests` refuses cross-venue pairs, so the split is permanent | **Accept the split for this release, because ownership never moves, but say so: the guest sees one business, each venue keeps its own record, and a future collective-wide client view is a separate piece of work. Do not silently let owners believe histories are joined** |
-| D43 | The waitlist on the collective page, which cannot appear today because the synthetic venue publishes only two resolved flags | **Publish the full resolved flag set on the synthetic venue and give the waitlist route a collective branch, so a guest can wait for the collective the way they can wait for a venue. Without it the page is worse than the member's own page it replaces** |
 | D44 | A member that also runs classes, events, tables or rooms, whose own page starts redirecting | **Appointments only this release, stated in the product: refuse a venue with no active appointments model at invite, warn before accept and before redirects begin, refuse removal of the model while in a collective, and keep a route through for the member's other models rather than deleting them from the web** |
+| D49 | What a host can see about the collective's trade, and what a member can see about others | **The host sees the collective's bookings and revenue broken down by venue, never a member's client contact details. A member sees its own venue, with its collective bookings identified. Fix today's accidental symmetry first: Booked revenue already shows every member every other member's takings (SB-31)** |
+| D50 | Whether a host can undo a change that has already reached members. Today there is no reversal at all: a mis-typed price saves, applies at every venue and emails every member, and the only related control is Withdraw, which is destructive | **Yes, for 60 seconds after the save, restoring the master's before-image from the audit trail and re-applying. The before-image already has to exist for migration rollback (D30), so the concept is accepted; this only extends it to ordinary edits** |
+| D51 | Whether host price, payment or form changes may carry a future effective date, so a rise can be co-ordinated across venues | **Raised but not designed in the first pass, and it is table stakes for an appointments business. If it ships, it needs its own state, copy, notice variant and tests, so decide before W5 rather than during it** |
+
+#### The team can take these
+
+Recorded for the record. Each has one sensible answer and no commercial or legal content.
+
+| id | Decision | Take this |
+|---|---|---|
+| D37 | Where the switch that puts new collectives into replicas mode lives. Flags today are per venue (`venues.feature_flags`, a closed six-key registry read per venue) and a collective spans venues, so there is no answer to "which venue's flag decides" | **A platform-level setting on the platform console, audited, deciding only what value new collectives are created with. `venue_collectives.service_model` stays the per-collective truth. Do not add a seventh key to `APPOINTMENTS_FEATURE_FLAG_KEYS`** |
+| D40 | `capacity_per_session` on a collective service, where a member's room is smaller than the host's | **Venue-controlled, with the host's value as the starting point at join. A host cannot know another business's room size, and overbooking a member's room is a failure the guest experiences** |
+| D43 | The waitlist on the collective page, which cannot appear today because the synthetic venue publishes only two resolved flags | **Publish the full resolved flag set on the synthetic venue and give the waitlist route a collective branch, so a guest can wait for the collective the way they can wait for a venue. Without it the page is worse than the member's own page it replaces** |
 | D45 | Two venues sharing one physical room or piece of equipment | **Not supported, and said so plainly, until a cross-venue resource exists. Today each venue can put the same real room on a calendar and the platform will double-book it (SB-36)** |
 | D46 | Moving a booking to a calendar at another venue in the collective | **Keep it refused, and rewrite the dialog to say why without offering the lossy rebook-then-cancel path. A true cross-venue move transfers ownership, which §6.1 forbids, so specify it as its own project if it is wanted** |
 | D47 | One practitioner with a calendar at two venues, who can be booked twice at the same moment (SB-38) | **Warn, do not model, this release: flag two calendars in a collective that share a name and email, and show the clash to whoever books second. A person identity above the venue is a platform change, not a collective one** |
 | D48 | Search engines and link previews for the collective page and members' pages, which have no canonical, no Open Graph image and, on `/book/{venue}`, no metadata at all (PB-17) | **Give `/book/c/{slug}` full metadata and make it canonical for any address it has adopted; give member pages their own metadata and a canonical pointing at whichever page actually serves them. Do this in the same workstream as the redirects, because they answer the same question** |
-| D49 | What a host can see about the collective's trade, and what a member can see about others | **The host sees the collective's bookings and revenue broken down by venue, never a member's client contact details. A member sees its own venue, with its collective bookings identified. Fix today's accidental symmetry first: Booked revenue already shows every member every other member's takings (SB-31)** |
-| D50 | Whether a host can undo a change that has already reached members. Today there is no reversal at all: a mis-typed price saves, applies at every venue and emails every member, and the only related control is Withdraw, which is destructive | **Yes, for 60 seconds after the save, restoring the master's before-image from the audit trail and re-applying. The before-image already has to exist for migration rollback (D30), so the concept is accepted; this only extends it to ordinary edits** |
-| D51 | Whether host price, payment or form changes may carry a future effective date, so a rise can be co-ordinated across venues | **Raised but not designed in the first pass, and it is table stakes for an appointments business. If it ships, it needs its own state, copy, notice variant and tests, so decide before W5 rather than during it** |
 
 ---
 

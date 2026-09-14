@@ -31,7 +31,7 @@ Rule for every row: one stored truth, one screen that edits it (or one shared di
 | Capacity per session (`capacity_per_session`) | Each venue on its own row: host on the service page, member in `MemberServiceView` (D40, venue-controlled) | That venue's admins | Host value | Member value: a new replica takes the host's value once, and no later update overwrites it | The booked calendar's venue's capacity |
 | Pre-appointment instructions (`pre_appointment_instructions`) | Each venue on its own row: host on the service page, member in `MemberServiceView` (D53, venue-controlled, because it describes the venue the guest visits) | That venue's admins | Host value | Member value, seeded from the host's when the replica is created and then the member's own | The booked calendar's venue's instructions, in its confirmations and reminders |
 | Colour | Host service page | Host admins | Form | Locked | Diary colour |
-| Staff permission flags (`staff_may_customize_*`) | Host service page, "Where it is sold" section (today "Optional overrides per calendar", `AppointmentServiceFormFields.tsx:877-922`) | Host admins | `svc.form.staffMay.reach`; name and description flags off on offered services (D29, the design's default). D29 is the recommended default and is awaiting the owner's confirmation; if it is overturned, the items listed in plan §11.2 under D29 change. | Locked; member admins and staff set per-calendar values only within the flags the host leaves on (§1 B) | n/a |
+| Staff permission flags (`staff_may_customize_*`) | Host service page, "Where it is sold" section (today "Optional overrides per calendar", `AppointmentServiceFormFields.tsx:877-922`) | Host admins | `svc.form.staffMay.reach`; name and description flags off on offered services (D29, decided 2026-09-14: one name and description everywhere; calendars vary price, length, buffer, deposit and colour within the flags). | Locked; member admins and staff set per-calendar values only within the flags the host leaves on (§1 B) | n/a |
 | Active (visible to guests) | Host card switch (`AppointmentServicesView.tsx:1426-1454`) or form toggle | Host admins | Ask `svc.deactivate.*` when offered | `Turned off by {host}`; no switch | Hidden everywhere |
 | On the collective page | Host card switch `svc.card.onPageSwitch` (item 1), the Add service checkbox `svc.add.onPageCheckbox`, or the grid's `ov.bulk.offer` (item 15) | Host admins | `Collective` pill | New "From {host}" card, or moves to "No longer offered by {host}" | Appears once a calendar offers it |
 | Delete service | Host Services (blocked while offered, `svc.delete.blocked.*`) | Host admins | Blocked dialog | Replicas have no Delete | n/a |
@@ -173,7 +173,7 @@ Click counts today: create 5; invite 6 or 7 by two different routes to the same 
 - Add-ons (`AddonGroupsSection.tsx:170-187`): `svc.form.addons.reach`; `AddonGroupEditor` opened here shows `addons.editor.reach` when the group is used on the page.
 - Location, Online (807-841): `svc.form.location.linkLabel`, `svc.form.location.infoLabel`, help `svc.form.location.linkHelp`.
 - Active toggle: `svc.form.active.reach`.
-- Staff permissions (877-922), inside "Where it is sold": `svc.form.staffMay.reach`; Display name and Description disabled with `svc.form.staffMay.nameLocked` (D29, the design's default). D29 is the recommended default and is awaiting the owner's confirmation; if it is overturned, the items listed in plan §11.2 under D29 change.
+- Staff permissions (877-922), inside "Where it is sold": `svc.form.staffMay.reach`; Display name and Description disabled with `svc.form.staffMay.nameLocked` (D29, decided 2026-09-14).
 - Calendars: `CollectiveCalendarsSection` replaces `calendarsSection` (1516-1616).
 - Compliance (1628-1637): `svc.form.compliance.reach`; per member with its own all-bookings forms `svc.form.compliance.alsoAskedAt`.
 
@@ -223,7 +223,7 @@ Footer `svc.member.view.close`, `svc.member.view.save` (enabled when changed). R
 
 **After a release (D52).** A service that came from {host} stays active as the member's own. Where it shares a name with a service the member kept separate at join, its card carries `svc.member.card.cameFrom` for 30 days and the review panel lists the pair (`review.sameName`); there is no merge action.
 
-**After a migration (Decision C).** When an existing collective switches to this model, the member's Services page shows a "Your previous settings" panel for 90 days (`review.previous.title`, `.body`, `.row`, `.kept`, `.dismiss`; J12). Where a member's value differed from {host}'s and has a per-calendar home, it lives on as that calendar's per-calendar value: where {host}'s permission for that field is on, the kept value applies and nothing a guest pays changes on switch day; where it is off, {host}'s price applies from the switch date, the member is told which services this affects (`N33`), the previous value is kept and shown in "Your previous settings", and {host} is asked in the dry-run review whether to switch the permission on.
+**After a migration (D54).** When an existing collective switches to this model, the services from {host} simply appear here as locked replicas with {host}'s values, exactly as they would after a join. There is no review panel and no notice: the owner tells the venues in person. History carries one line, `history.migrationApplied`, and every booking already made keeps its price.
 
 Adoption review (`N26`, `?adopt={itemId}`): `svc.member.adopt.title`/`.message`, choices `.useMine` (opens `AdoptServiceReview`, J3) and `.keepSeparate`. No answer after 14 days is "Keep mine separate", with a reminder at day 7 (plan §6.7).
 
@@ -301,8 +301,8 @@ Calls: `PATCH /api/venue/practitioner-service-overrides` (admins and all seven f
 
 Every membership action a host takes (invite, cancel an invitation, remove, ask to host, cancel a move, end) lives on the Collective area's Venues tab (item 15), so the host row here summarises and links. A member's own answers stay on its row: review or decline an invitation, `transfer.review`, `la.row.takeOver` and Leave.
 
-- `ReviewYourServicesPanel` after leave or removal, on this tab and the Services page, until dismissed (J7): `review.prices`, `review.link`, `review.stripe`, `review.library`, `review.photos.*`, `review.sameName` (D52), `review.unparked`, `review.dismiss`. The "Your previous settings" panel after a migration (`review.previous.*`, J12) uses the same shell.
-- `CollectiveHistoryDialog`: `history.title`, filter `history.filter.*`, rows "{time}: {sentence}" from `history.*` (one sentence per audit event type, including `history.inviteWithdrawn`, `history.inviteExpired`, `history.masterChangeUndone` and `history.migrationValueReplaced`), actor `history.actorWithPerson`, empty `history.empty`, skeleton rows, `history.more`. A member sees rows aimed at its venue or the whole collective.
+- `ReviewYourServicesPanel` after leave or removal, on this tab and the Services page, until dismissed (J7): `review.prices`, `review.link`, `review.stripe`, `review.library`, `review.photos.*`, `review.sameName` (D52), `review.unparked`, `review.dismiss`.
+- `CollectiveHistoryDialog`: `history.title`, filter `history.filter.*`, rows "{time}: {sentence}" from `history.*` (one sentence per audit event type, including `history.inviteWithdrawn`, `history.inviteExpired`, `history.masterChangeUndone` and `history.migrationApplied`), actor `history.actorWithPerson`, empty `history.empty`, skeleton rows, `history.more`. A member sees rows aimed at its venue or the whole collective.
 - `NotificationPrefsCard` (107-127): Collective group `prefs.collective.digest`, `prefs.collective.calendars` (default on) and `prefs.collective.required`.
 
 Calls: members `PATCH` `accept` (contract 6), `leave` (contract 7), `offer_host`, `accept_host`, `cancel_host_transfer`, `take_over_hosting` (contract 8) and `configure { list_on_old_page }` (contract 9); `GET /api/venue/collectives/[id]/history` (contract 3); notification preferences with `collective_digest` and `collective_calendars` (contract 15).
@@ -881,20 +881,11 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `history.inviteWithdrawn`: {actor} withdrew the invitation to {venue}
 - `history.inviteExpired`: The invitation to {venue} expired
 - `history.masterChangeUndone`: {actor} put {service} back to how it was
-- `history.migrationValueReplaced`: {host}'s {field} for {service} replaced yours at {venue}: {before} to {after}
+- `history.migrationApplied`: {host}'s settings now apply to the services from {host} in your account. Bookings already made keep their price.
 - `prefs.collective.digest`: Email me a daily summary of other changes to {collective} services
 - `prefs.collective.calendars`: Email me when another venue changes which of our calendars offer a service
 - `prefs.collective.required`: Emails about prices, payments and forms always come, because they change what your clients pay or fill in.
 
-**Migration review (J12, Decision C)**
-- `review.previous.title`: Your previous settings
-- `review.previous.body`: When {collective} moved to its new set-up, {host}'s settings replaced some of yours on services from {host}. Here is what changed, so you can ask {host} for anything you need back. This list stays for 90 days.
-- `review.previous.row`: {service}: {field} was {before}, now {after}
-- `review.previous.kept`: {service}: your {field} of {value} stays in place for {calendars}, because {host} lets each calendar set its own.
-- `review.previous.dismiss`: Done
-- `migrate.offering.title`: {service}: the page says something different from the service
-- `migrate.offering.usePage`: Use the page's name and description
-- `migrate.offering.useService`: Use the service's name and description
 
 **Other settings and dashboard**
 - `profile.timezone.locked`: You cannot change your timezone while you are part of {collective}, because every venue in it uses the same timezone.
@@ -1002,14 +993,8 @@ Placeholders in {braces}; `{venueList}` uses `formatVenueList`. Singular shown; 
 - `notify.adopt.body`: {host} has put {service} on the {collective} page. Choose whether to use your own {service} for it, so its calendars and bookings stay as they are.
 - `notify.oldApp.subject`: {service} was changed from an older ResNeo app
 - `notify.oldApp.body`: Someone changed {service} from a version of the ResNeo app that cannot show which venues a change reaches. Check the service to make sure the change is what you meant.
-- `notify.migratedHost.subject`: {collective} now runs from your Services page
-- `notify.migratedHost.body`: The services on the {collective} page are now managed from your Services page, and every change reaches {venueList}. We brought their copies into line with yours.
-- `notify.migratedMember.subject`: {host} now manages its services in your account
-- `notify.migratedMember.body`: The services from {host} in your account now follow {host}'s settings. Here is what changed. Bookings already made keep their price.
 - `notify.pageBooking.subject`: New booking with {venue} on the {collective} page
 - `notify.pageBooking.body`: A guest booked {service} with {calendar} at {venue} for {date}. {venue} holds the booking and the client's details.
-- `notify.migrateSoon.subject`: {collective} moves to its new set-up on {date}
-- `notify.migrateSoon.body`: From {date}, the services from {host} in your account follow {host}'s settings automatically. {count} of them will use {host}'s {fields} instead of yours from that date; the rest keep your values for your calendars. Review what changes for you before then. If you would rather not, you can leave {collective} before {date} and keep everything as it is.
 - `notify.inviteWithdrawn.subject`: {host} withdrew the invitation to {collective}
 - `notify.inviteWithdrawn.body`: {host} has withdrawn its invitation for {venue} to join {collective}. Nothing has changed in your account, and {host} can invite you again later.
 - `notify.inviteExpired.subject`: The invitation to {collective} has expired
@@ -1216,11 +1201,11 @@ The service page, Save: ask `svc.commercial.*` with `diff.row` ("Price: £25.00 
 Guests: new bookings pay the new price on calendars without their own price; existing bookings, balances, reminders and revenue keep the booked price.
 
 #### J12. Existing collective moves to the new model
-Rewritten 2026-09-14 to Decision C (plan §7): the switch is non-destructive and is awaiting the owner's confirmation. No member re-consents through the join dialog; a member gets a review window, kept values and a record of anything replaced.
-1. **Before the switch.** No less than 14 days before the switch date every member admin gets `N33`, linking to a review panel on its Services page. Per service from {host} it lists three things. First, values that differ from {host}'s and have a per-calendar home (price and length now; buffer, deposit and colour once D5 lands), which are written as per-calendar values on every calendar of the member that offers the service: where {host}'s permission for that field is on, the kept value applies and nothing a guest pays changes on switch day (`review.previous.kept`); where it is off, {host}'s price applies from the switch date, the member is told which services this affects (`N33`), the previous value is kept and shown in "Your previous settings" (`review.previous.row`), and {host} is asked in the dry-run review whether to switch the permission on. Second, values with no per-calendar home (payment rule, location, flags, heading, name, description, add-on links, forms), where {host}'s wins and the member's previous value is recorded as a `migration_value_replaced` audit row (`review.previous.row`). Third, its member-only services with the three D2 choices and a bulk "Ask {host} to add these" (`join.services.ask`, pluralised), stated plainly as a loss of online trade the member is choosing. Nothing is switched on at the member: a form-bearing service is bookable on its calendars only once its compliance records are on, and the panel says so. A member may leave before the date (J7, a legacy leave: nothing changes shape). Silence does not block the switch.
-2. **The host's review.** The dry-run report lists every kept value per service for the host to confirm, asks, for each kept value whose permission is off, whether to switch that permission on, and lists every offering whose page copy differs from the master: under `migrate.offering.title` the host chooses `migrate.offering.usePage` (written into the master) or `migrate.offering.useService`; no answer means the page's, so the public page does not change under existing links.
-3. **After the switch.** Host `N29`; every member `N30`, listing what was kept and what was replaced. The member's Services page shows the "Your previous settings" panel for 90 days: `review.previous.title`, `review.previous.body`, one `review.previous.row` per replaced value (from `collective_audit_events` rows of type `migration_value_replaced`, which History shows as `history.migrationValueReplaced`), one `review.previous.kept` per kept value, `review.previous.dismiss`. Rollback (D30) restores what the migration recorded where the member has not edited the value since.
-Guests: nothing a guest pays changes on switch day wherever a kept value applies; where {host}'s price applies instead, the member knew from `N33`.
+Rewritten 2026-09-14 to D54 (plan §7): the owner tells both venues in person, and the product sends nothing and shows no review.
+1. **Before the switch.** Nothing in the product. The operator's dry run lists every value that will change and the owner signs it (D21). A venue that does not want the new arrangement leaves through today's Leave before the switch, which is a legacy leave and loses nothing.
+2. **At the switch.** {host}'s values apply to every service on the collective: each member's copies become locked replicas with {host}'s values (item 3). Stored per-calendar values on member calendars stay where they are and apply only while {host}'s permission for that field is on. Member-only services stay as they are, kept for the bookings the member's team makes (D2). No compliance flag changes.
+3. **After the switch.** The member's Services page shows the services from {host} as locked replicas; History carries `history.migrationApplied`. No panel, no notice. Rollback (D30) restores what the migration recorded where the member has not edited the value since.
+Guests: every booking already made keeps its calendar, service, price and manage links; bookings made after the switch use {host}'s values.
 
 #### What guests with existing bookings see
 
@@ -1273,11 +1258,11 @@ All venue notices use `notifyVenue` (`src/lib/linked-accounts/notifications.ts:6
 | N26 | Host copies a member's service | That member | Email, bell | `notify.adopt.*` | Adoption review | Once; reminder at day 7; "Keep mine separate" is applied after 14 days without an answer |
 | N27 | Master edited from an app build without `X-ResNeo-Client` | Host | Email | `notify.oldApp.*` | Service page | Once per service per day |
 | N28 | Member chose "Ask {host} to add it" at join | Host | Email, bell | `notify.suggestion.*` | As N25 | Once per service |
-| N29 | Existing collective switched to the new model (Decision C) | Host | Email, bell | `notify.migratedHost.*` + the dry run's kept and replaced values per venue | Services page | Once |
-| N30 | Same | Every member | Email, bell | `notify.migratedMember.*` + per-service kept values and replaced values | Member Services, "Your previous settings" panel (J12) | Once |
+| N29 | Existing collective switched to the new model (host) | Not sent (D54: the owner tells the venues in person) | none | none | none | never |
+| N30 | Existing collective switched to the new model (member) | Not sent (D54) | none | none | none | never |
 | N31 | Staff create, move or cancel a booking on another venue's calendar through the collective form | Owning venue | Bell always; email per existing categories | Existing `notifyCrossVenueBookingWrite` copy with actor person and venue from the collective audit (D17 as amended by D41) | Diary day | Per booking |
 | N32 | A guest books a member calendar on the collective page (D34) | Host admins | Bell; not switchable | `notify.pageBooking.*`, with no client contact details | Collective area, Overview | Per booking |
-| N33 | An existing collective will switch to the new model (Decision C, J12) | Every member admin | Email, bell | `notify.migrateSoon.*`, naming the services where {host}'s value will apply, linking to the review panel | Review panel (J12) | Once, no less than 14 days before the switch |
+| N33 | An existing collective will switch to the new model | Not sent (D54: added on 2026-09-14 and withdrawn the same day) | none | none | none | never |
 | N34 | Host withdraws an invitation | Invitee admins | Email; not switchable | `notify.inviteWithdrawn.*`: the invitation was withdrawn and nothing has changed for the venue | Linked accounts | Once |
 | N35 | An invitation expires (30 days) | Invitee and host admins | Bell | `notify.inviteExpired.*` | Invitee: Linked accounts; host: Collective area, Venues | Once |
 | N36 | A member's subscription lapses (`suspended_at` set) | That member's admins | Email, bell | `notify.suspended.*`: its calendars are hidden from the collective page until the subscription resumes; after 30 days suspended the member is removed (N17) | Settings, Subscription | Once |
@@ -1322,12 +1307,11 @@ All venue notices use `notifyVenue` (`src/lib/linked-accounts/notifications.ts:6
 
 ## 7. Open questions
 
-Each bullet still needs the owner. The decision rows in plan §11.2 are recommendations awaiting the owner unless marked decided; of those rows only D3 is marked decided, and no bullet here rested on D3 alone, so the four bullets removed on 2026-09-14 are the ones D41, D51, D34 (now N32) and Decision C answered.
+Each bullet still needs the owner. The decision rows in plan §11.2 are recommendations awaiting the owner unless marked decided; of those rows D3, D29 and D54 are marked decided, so the five bullets removed on 2026-09-14 are the ones D41, D51, D34 (now N32), D29 and D54 answered.
 
 - Graft 5 routes a member's own diary columns to its own staff form, which lists replicas and member-only services together. On 2026-09-05 you asked that, with two or more venues in a collective, the staff form lists the combined page's offerings only. With own booking pages redirecting (D3), member-only services would otherwise have no way to be booked. May the own-column form return, or should member-only services stay unbookable from the diary?
 - Should services only at one venue (host or member) lose online booking while the collective is live, as this spec assumes from D2 and D3, or keep a separate online route?
 - At accept, which default should a member's other services get: 'Keep for bookings your team makes' (recommended), 'Ask the host to add it', or 'Park it'?
-- Name and description delegation on offered services (D29): this document disables those two permissions so the page, emails and booking records always show one name. D29 is the recommended default and is awaiting the owner's confirmation; if it is overturned, the items listed in plan §11.2 under D29 change.
 - When the host turns a staff permission off, should stored per-calendar values be cleared (recommended for length, buffer, price and deposit, with an ask and a notice) or ignored until the permission returns? Colour would only be ignored.
 - While a member's replica is updating, should a booking on that member's calendar be refused ('This service has just been updated. Please choose your time again.') or accepted at the previous terms?
 - Price snapshot backfill scope: all past and future bookings (needed for 'Bookings already made keep the price they were booked with' to hold in reports and balances) or future bookings only?
@@ -1365,6 +1349,6 @@ D37, D40, D43, D45, D46, D47 and D48 are taken by the team, with the answers rec
 - **§2 item 17, the venue chooser.** Not built. The chooser copy is gone; what remains is `staff.invite.otherVenue`, reworded to tell the person plainly to use a different email address, and `shell.venue.locked` for the person who is already in the broken state: "This account is linked to more than one venue, so we cannot tell which one to open. Please contact support and we will sort it out."
 - **§4 J3, the join dialog.** The disclosure says what a partner venue can see (name, contact details, visit history, tags, notes, documents and compliance records) and that every member can see every other member's takings, and `join.consent` records agreement to both alongside the page handover. Ids `join.means.clients` and `join.means.revenue`.
 - **§4 J7, J8 and J9: leave, remove and end.** Each dialog carries `leave.body.access`: "You will no longer be able to see {venueList}'s clients or bookings, and they will no longer see yours. Everything in your own account stays." J7 has no link checkbox: account links the collective created end with the membership (D41).
-- **§4 J12 and §5 N33: existing collectives.** Decision C: a review window with `N33` before and `N30` after, kept per-calendar values, a "Your previous settings" panel (`review.previous.*`) and the host's page-copy review (`migrate.offering.*`). No re-consent gate.
-- **§5.** `N32` (D34: the host is told of collective-page bookings on member calendars, without contact details) and `N33` to `N37` are new rows; `N16`, `N17` and `N19` say that access to each other's clients and figures has ended.
+- **§4 J12 and §5 N29, N30, N33: existing collectives.** D54 (decided 2026-09-14): the host's values apply at the switch and every existing booking is protected; no review window, no notices, no panel. N29, N30 and N33 are marked not sent.
+- **§5.** `N32` (D34: the host is told of collective-page bookings on member calendars, without contact details) and `N34` to `N37` are new rows (N33 was added and then withdrawn by D54); `N16`, `N17` and `N19` say that access to each other's clients and figures has ended.
 - **Nothing for D42.** No product copy, no banner, no warning at join. The help centre covers it.

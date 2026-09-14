@@ -116,12 +116,10 @@ verifier and every deploy step, rollback drills, and an acceptance checklist wri
    enforced or as recommended.
 2. **Member-only services (D2)**: kept for the bookings the member's team makes, not bookable
    online, chosen at accept. When own pages redirect (D3) is decided and is no longer on this list.
-3. **Name and description delegation on offered services (D29)**, Decision A: the design is
-   written to the recommended default, off, and awaits your confirmation (§11.2).
-4. **The migration package for existing collectives (D54)**, Decision C: §7 is written to the
-   non-destructive package recommended on 2026-09-14 and awaits your confirmation. Each
-   environment's dry-run report is still yours to sign (D21, §11.3).
-5. **Whether host transfer ships first time (D12).**
+3. **Whether host transfer ships first time (D12).** D29 (one name and description everywhere)
+   and D54 (the host's values apply when an existing collective migrates) were decided on
+   2026-09-14 and are no longer on this list; each environment's dry-run report is still yours to
+   sign (D21, §11.3).
 
 Everything else in §11 carries a recommended default that the team is building to. The nine the
 second pass raised (D38, D39, D41, D42, D44, D49, D50, D51, D52) were answered on 2026-09-14 and
@@ -1905,27 +1903,34 @@ person.
 
 ## 7. Migrating existing collectives
 
-The migration mechanics below follow the non-destructive package recommended on 2026-09-14 and are
-awaiting the owner's confirmation (Decision C). They are written so that no member value is
-overwritten where a per-calendar home exists, and every value with no home is recorded where the
-member can see it. The package is D54 in §11.3. The algorithm the script runs is Appendix G
-(migration script); the tables it writes are Appendix C (engine DDL); the functions it calls are
-Appendix D (engine functions); the column classes it reads are Appendix F (column registry).
+**Decided 2026-09-14 (D54).** One live collective exists today, between two accounts, and the
+owner will tell both venues in person what is happening. So the migration is deliberately simple:
+**the host's values apply to every service on the collective at the point of migration, and every
+existing booking is protected.** There is no member review window, no notice before or after the
+switch, no "Your previous settings" panel, and no member value carried over as a per-calendar
+value. Before-images are still recorded, because rollback (D30) needs them, and the dry run still
+lists every value that will change, because the owner signs it (D21). The algorithm the script
+runs is Appendix G (migration script); the tables it writes are Appendix C (engine DDL); the
+functions it calls are Appendix D (engine functions); the column classes it reads are Appendix F
+(column registry).
 
 Every collective that exists today is `legacy_copies` until it is migrated, one at a time, by a
 script that runs only after the new code is live in that environment (backfill and dual-write must
 never meet, see the migration deploy notes). Two rules govern the script, and both come from the
-owner: **a member must not lose data, and must see the change as an upgrade.** In practice that
-means: nothing a member set is overwritten while the design has a live home for it; nothing a
-member set is overwritten before the member has been shown it and given a choice, with a lossless
-way out; everything that is overwritten is kept, in the member's own account, where the member can
-see it and act on it; and nothing that belongs to the venue rather than to the service (a
-compliance flag, a heading name, an add-on group, a per-calendar value) is changed at all.
+owner: **existing bookings are untouched, and the switch is smooth enough that any small
+difference on the collective page can be tidied afterwards by editing the master.** In practice
+that means: every booking keeps its calendar, its service, its price snapshot, its terms and its
+manage links, because a booking's price was fixed when it was made (§6.6, D7) and nothing about a
+booking row changes except a missing snapshot being filled in; nothing is deleted; each member's
+copies become replicas of the host's masters carrying the host's values; what belongs to the venue
+rather than to the service (the compliance flag, the member's own add-on groups and headings,
+member-only services, stored per-calendar values on the member's calendars) is not changed; and
+everything the host's values replace is written to `collective_audit_events` as a before-image for
+rollback, not shown to the member as a panel.
 
 **Production is unsurveyed.** Everything below that names a venue or a number was read on staging
-(§2.10). The list of what a migration would change is per environment and is produced by the dry
-run in that environment (step 3); the production list, and with it the "no member value is
-overwritten" claim for production, exists only once steps 1 and 3 have run there.
+(§2.10). The list of what a migration changes is per environment and is produced by the dry run in
+that environment (step 3); the production list exists only once steps 1 and 3 have run there.
 
 0. **Classify the pairwise account links.** For each pair of members, record on the `account_links`
    row whether it was created for the collective: an account link created after the invitation was
@@ -1947,77 +1952,55 @@ overwritten" claim for production, exists only once steps 1 and 3 have run there
    archived same-slug form, options, bookings, and every state step 1 lists), then dry run, apply,
    invariants, rollback, re-apply.
 3. **Dry run** `scripts/collective-replicas-migrate.mjs --collective <id> --dry-run`. The report has
-   three audiences. For the operator: planned masters and replica links, adoptions, collisions,
-   bookings to snapshot, invariants, and the link classifications of step 0. For the host: per
-   offering, the page copy that differs from the master and a choice for each, "Use the page's"
-   (the offering's name, description and photo are written into the master and the host's service
-   photo) or "Use the service's" (the master stands), where the default when the host does not
-   answer is "Use the page's", so the public page does not change under existing links; per
-   collective heading, the host heading it maps to or the managed heading that will be created;
-   the page order, kept as the host's sort order or discarded; and, per service, every member value
-   the package keeps as a per-calendar value, with the question whether to switch the matching
-   per-calendar permission on for those services, because a kept value applies only while it is
-   on. For each member: per copy and column, the value now and the value after, marked *kept as
-   your calendar's value*, *replaced by {host}'s* or *unchanged*; calendars that will be added to
-   or removed from the page; services that will be hidden from guests and why; the switch date,
-   which is the date its own page hands over; its member-only services and their three choices;
-   and whether compliance records would be needed, with the statement that the migration will not
-   switch them on.
-4. **Owner signature, then the members' review window.** The owner approves the operator's report
-   by its hash (`--approved-report`) and the host completes its choices from step 3. Every current
-   member is then told, in the product and by email (N33, NOT-01), no less than 14 days before the
-   switch date, which of its values are kept, which of its services would take the host's value
-   because the host's permission for that field is off, and the switch date; it then opens "Review
-   the new way {collective} works": the join dialog with the migration's choices, one per
-   differing value where the design has a home (keep mine as my calendar's value, the default; or
-   take {host}'s), one per member-only service (keep, ask, park), with a bulk "Ask {host} to add
-   these" for all at once, one per inactive copy (keep off, put back), the forms step with any
-   same-template form pre-selected and the compliance flag left as the member set it, and a
-   recorded consent. Every step carries "Leave {collective} instead", which runs the legacy leave
-   with the member's copies set `independent` and loses nothing: a pre-switch leave is a legacy
-   leave, and nothing changes shape. A member that does not respond by the date gets the
-   preserving defaults. Silence does not block the switch, and the switch overwrites nobody who
-   was not shown.
-5. **Apply**, per collective, in this order: snapshot every booking on masters and copies; write the
-   host's step 3 choices into masters and host photos; set masters; set `service_model =
-   'migrating'`, in which the legacy catalogue keeps serving, member locks are on, engine applies
-   run, and the "behind" hide is suspended; create replica links (`provenance = 'migrated'`); write
-   every member's kept values as per-calendar values on every calendar of that member that offers
-   the service (price and length now; buffer, deposit and colour once D5 has landed), switching no
-   permission on. Where the host's permission for that field is on, the kept value applies and
-   nothing a guest pays changes on switch day; where it is off, the host's value applies from the
-   switch date, the member was told which services this affects in its review window (N33), the
-   previous value is kept and shown in "Your previous settings", and the host was asked in the
-   dry-run review whether to switch the permission on for those services (MIG-05); map copy options
-   to master options by name and sort order; adopt managed forms in the §6.4 order without changing any
-   venue's compliance flag; adopt a same-shape member add-on group as the managed group rather than
-   creating a second; create managed headings rather than renaming a member's own; create missing
-   assignments; write one `migration_value_replaced` audit row per replaced value to
-   `collective_audit_events`, targeted at the member, carrying the before-image (the copy's row,
-   its option rows, its add-on links, its requirement rows and the three sync columns), and one
-   `migration_applied` row per collective; drain replica link by replica link outside the migration
-   function (so no statement timeout holds locks); then, and only when every replica link has
-   converged, set `service_model = 'replicas'`, at which point the derived rule in §6.9 hands each
-   member's own page over. Never clear a per-calendar value, never change `is_active` against a
-   member's "keep off", never flip a venue flag.
+   two audiences. For the operator: planned masters and replica links, adoptions, collisions,
+   bookings to snapshot, invariants, and the link classifications of step 0. For the owner, who
+   signs it: per offering, any page copy (name, description, photo, heading, order) that differs
+   from the master, because the master stands and the page shows the master's wording from the
+   switch, so the host edits the master beforehand if it prefers the page's; per collective
+   heading, the host heading it maps to or the managed heading that will be created; per member
+   and copy, every column that takes the host's value, before and after; calendars that will be
+   added to or removed from the page; services that will be hidden from guests and why (no Stripe,
+   forms off); each member's member-only services, which default to "kept for the bookings your
+   team makes" (D2) and can be changed later on that member's Services page; and whether
+   compliance records would be needed at a member, with the statement that the migration switches
+   nothing on.
+4. **Owner signature.** The owner approves the report by its hash (`--approved-report`) and tells
+   the venues in person. Nothing is sent from the product and there is no review window; a venue
+   that does not want the new arrangement leaves before the switch through today's Leave, which is
+   a legacy leave and loses nothing.
+5. **Apply**, per collective, in this order: snapshot every booking on masters and copies (a safety
+   re-run of the Pass A backfill, D7, which must report 0 rows on a clean Pass A); set masters
+   (creating the host service active where only members provide the offering, D36); set
+   `service_model = 'migrating'`, in which the legacy catalogue keeps serving, member locks are on,
+   engine applies run, and the "behind" hide is suspended; create replica links
+   (`provenance = 'migrated'`) and record, in one `migration_applied` audit row per member, the
+   before-image of every copy (its row, option rows, add-on links, requirement rows and the three
+   sync columns) and of every provider row; map copy options to master options by name and sort
+   order (an option with future bookings and no match is kept inactive and mapped to nothing, P4);
+   adopt managed forms in the §6.4 order without changing any venue's compliance flag; adopt a
+   same-shape member add-on group as the managed group rather than creating a second; create
+   managed headings rather than renaming a member's own; create missing assignments; then drain
+   replica link by replica link outside the migration function (so no statement timeout holds
+   locks), which is what writes the host's values onto every copy; and, only when every replica
+   link has converged, set `service_model = 'replicas'`, at which point the derived rule in §6.9
+   hands each member's own page over. Never write or clear a per-calendar value, never change a
+   member-only service's `is_active`, never flip a venue flag.
 6. **Verify by invariant, never by row counts**: I1 to I3, I5, I8, I10 to I16, I23, I32 and I45 all
-   0; every booking total unchanged; no offering field differs from its master except as the host
-   chose; each member's catalogue diff equals what its review showed; every member has at least one
-   calendar still on the page, or was told which disappear and why.
+   0; every booking total unchanged and no booking row changed except a filled snapshot; every
+   replica's fingerprint equals its master's; the catalogue diff equals the signed report; every
+   member has at least one calendar still on the page, or the report said which disappear and why.
 7. **Rollback** until code removal restores what step 5 recorded, not what the database happens to
    hold now: the provider snapshot (ids, overrides, approval, status, `created_at`), the copies'
    rows, option rows and states, add-on links, requirement rows, the compliance types' prior
-   archived state and mappings, the three sync columns, `legacy_copies`, and the masters'
-   before-images where step 5 wrote into them. Before-images are applied only where the member has
-   not edited the value since (the freshness rule: `updated_at` unchanged); a value edited since is
-   left alone and listed. Per-calendar values written by step 5 stay in place, since they were the
-   member's values and the legacy path honours them. Bookings and their snapshots are never touched
-   (D30). One `migration_rolled_back` audit row per collective.
-8. **The member's account afterwards.** For 90 days the member's Services page shows "Your previous
-   settings": each `migration_value_replaced` row, with "Apply as my calendar's value" where the
-   master's permission allows and "Ask {host}" otherwise; the same rows sit in the member's History.
-   N30 is the after-notice and says what changed, what was kept as calendar values, which calendars
-   are hidden and why, and where the previous settings are.
+   archived state and mappings, the three sync columns and `legacy_copies`. Before-images are
+   applied only where the member has not edited the value since (the freshness rule: `updated_at`
+   unchanged); a value edited since is left alone and listed. Per-calendar values are never touched
+   in either direction. Bookings and their snapshots are never touched (D30). One
+   `migration_rolled_back` audit row per collective.
+8. **The member's account afterwards.** The services from the host appear on the member's Services
+   page as locked replicas with the host's values, exactly as they would after a join; History
+   carries one line (`history.migrationApplied`); nothing else is shown or sent. Anything the
+   owner then wants different on the collective page is an ordinary edit to the master.
 9. **Residue.** Before C2, the dissolved collective's provider rows, its offerings' dead columns and
    every collective's provider overrides and approval history are exported to
    `collective_audit_events` (as `migration_applied` rows targeted at each venue, carrying the
@@ -2030,28 +2013,23 @@ overwritten" claim for production, exists only once steps 1 and 3 have run there
 until: `venues.stripe_charges_enabled` has been backfilled for every venue with a Stripe account,
 before the hide rule in §6.6 ships; every MGR-01 shim, the combined-page manager fold, the 24-hour
 `STALE_RESOURCE` rule and the accept consent gate are proven to condition on
-`service_model = 'replicas'`; the rehearsal has shown a member's review with the preserving
-defaults, a member leaving before the switch with its copies detached, a rollback restoring the
-provider snapshot and the sync columns, and the per-member catalogue diff equal to the review; and
-no member loses every calendar from the page (MIG-05, MIG-06, and I48, which counts legacy
-collectives reachable by a shimmed catalogue action, a handover decision or a consent refusal,
-expected 0 until C1).
+`service_model = 'replicas'`; the rehearsal has shown every booking untouched through apply and
+rollback, a legacy leave before the switch losing nothing, a rollback restoring the provider
+snapshot and the sync columns, and the catalogue diff equal to the signed report; and no member
+loses every calendar from the page (MIG-05, MIG-06, and I48, which counts legacy collectives
+reachable by a shimmed catalogue action, a handover decision or a consent refusal, expected 0
+until C1).
 
-**What the staging collective (plus-1) will need decided** (the corrected D21 list), restated under
-the package:
+**What the staging collective (plus-1) will show in its dry run** (the corrected D21 list, under
+D54):
 
-- Light 3's Haircut at 10.00 becomes a per-calendar price on each Light 3 calendar that offers it.
-  If the host's price permission for Haircut is on, it applies and Light 3's guests keep paying
-  10.00 on switch day; if it is off, the host's 25.00 applies from the switch date, Light 3 is told
-  so in its review window (N33), the 10.00 is kept in "Your previous settings", and the dry-run
-  review asks the host whether to switch the permission on for Haircut. Length and buffer are
-  already in step; the deposit follows the same rule once D5 lands.
-- Senior (65+ Yrs) takes the host's card hold, because the payment rule has no per-calendar home;
-  Light 3's previous value is recorded as `migration_value_replaced` and shown in its account. Light
-  3 cannot take a card hold, so its calendars are hidden for that service until Stripe is connected
-  (below).
-- The 3 locations, the staff flags and the 16 headings change to the host's; the previous values
-  are in Light 3's History and its "Your previous settings" panel for 90 days. The 16 copies are
+- Light 3's Haircut at 10.00 takes the host's 25.00 for bookings made after the switch. Every
+  booking already made at 10.00 keeps 10.00, because its price was snapshotted when it was made.
+  Length and buffer are already in step; the deposit follows the host's once D5 lands.
+- Senior (65+ Yrs) takes the host's card hold. Light 3 cannot take a card hold, so its calendars
+  are hidden for that service until Stripe is connected (below); the previous payment rule is in
+  the before-image for rollback.
+- The 3 locations, the staff flags and the 16 headings change to the host's. The 16 copies are
   re-filed under managed headings created at Light 3, not by renaming Light 3's own.
 - Light 3 has forms switched off, and the migration does not switch them on. The host's PPD patch
   test on Root Tint is not asked for there until Light 3 chooses to switch compliance records on,
@@ -2060,6 +2038,9 @@ the package:
   audit events are append-only) is adopted as the managed form when it does.
 - Light 3 has no Stripe account, so its calendars are hidden from guests for the 3 paid offerings
   until it connects Stripe. This happens in Pass A, not Pass B, and Light 3 is told then.
+- Light 3's 10 member-only services stay as they are, kept for the bookings its team makes (D2);
+  they leave Light 3's own online page when it hands over (D3), and Light 3 can ask the host to add
+  any of them from its Services page.
 - Light 3's 10 member-only services lose online booking when its page hands over. Its review offers
   the three D2 choices with "Ask {host} to add these" for all ten at once; the switch date is set so
   Light 3 can act first. This is a loss of online trade the member is choosing, and the review says
@@ -2196,7 +2177,7 @@ Effort is relative (S small, M medium, L large) and assumes one engineer familia
 | W7 | Lifecycle: the create wizard (UI-C-01), join with consent and choices, adoption review, host-initiated adoption, release follow-ups, dissolve page, host transfer with re-keying and the transfer window, venue deletion, reconcile off renders, exclusivity, the currency gate and the booking-model lock on `PATCH /api/venue` (BM-04, TERMS-15), **ending client access with the membership** (SB-42, D41) and **cross-venue contact search while live** (D41) | L | W3, W6 |
 | W7a | SB-42 on today's model (DL7): end the created-for-collective `account_links` at leave, removal and dissolve (`collectives/[id]/members/route.ts:189,280` and `collectives/[id]/route.ts:259-263`), a status write plus an account-link write, with no engine dependency (LIFE-14) | S | none |
 | W8 | Five per-calendar fields end to end; the second edit to `PATCH appointment-services`, keeping the five columns in the assignment rows across a save | M | W2, W15, D5 |
-| W9 | Migrate existing collectives: survey, rehearsal, dry run, member review window, apply, rollback, residue (§7, D54) | M | W3 (W3a), W4 to W7 live |
+| W9 | Migrate existing collectives: survey, rehearsal, dry run, owner signature, apply, rollback, residue (§7, D54) | M | W3 (W3a), W4 to W7 live |
 | W10 | Booking pages and links: redirect conditions for members and the host (§6.9), translation (which reads `collective_service_items.master_service_id`, W3), interstitial, `/embed/c/{slug}`, trader line, one live-collective resolver, dissolved page. Before the engine lands, rewrite the dissolve comment at `src/lib/linked-accounts/collectives.ts:550-552`, which says every venue's own services are "already pristine" on dissolve (copies exist, so it never was true), and the Leave dialog copy at `src/components/linked-accounts/VenueCollectivesPanel.tsx:365`, "Your own booking page is unaffected.", which D3 makes false | M | W3, W4, D3 |
 | W11 | Combined-page manager fold and catalogue compatibility shims; the bulk lane calls the engine's offer and calendar functions through `POST /api/venue/collectives/[id]/bulk` and `.../bulk/preview`, so CB-44 and CB-45 are fixes to today's manager, not prerequisites of the grid | S | W5 |
 | W12 | Mobile contract, `MOBILE_API.md`, handover; the app's leave copy, which mirrors `VenueCollectivesPanel.tsx:365` in telling a member its own page is unaffected, is rewritten with W10's, before the engine lands | M | W5 to W7 |
@@ -2250,8 +2231,8 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
   (same-name pairs after leave), LIFE-12 (invitation withdrawal and expiry), LIFE-13 (the paused
   state and the transfer window), LIFE-14 (W7a's interim account-link release), REP-06 (reports
   after the end), DIARY-02 and DIARY-03 (D47 and D46, in W21), PUB-05 (other booking models keep
-  the own page), MIG-05 and MIG-06 (the member review and the rollback) and NOT-01 (the new
-  notification group: N32, N33, N36, N37). By pass: 113 from the first, 34 from the second, 6 from
+  the own page), MIG-05 and MIG-06 (bookings protected, and the host's values at the switch) and NOT-01 (the
+  new notification group: N32, N36, N37). By pass: 113 from the first, 34 from the second, 6 from
   the UI review, 4 from the verification pass and 13 from the consistency pass, 170 in all.
 - **Engine testing inside Postgres**: every apply returns write counts, so a second apply must
   write nothing; columns and unique indexes are enumerated rather than listed; every lock is tested
@@ -2343,7 +2324,7 @@ same ids. The recommended default is in bold.
 | D25 | Old collective links after dissolving | **A neutral page listing former venues for 90 days** |
 | D26 | Cross-venue removal dialogs | **Dates, times and calendars at other venues, never client names** |
 | D28 | Group bookings across member venues | **Limit a group to the first person's venue, explained before the details step; split groups later if wanted** |
-| D29 | Name and description delegation on offered services | **Off, so page, emails and booking records show one name.** D29 is the recommended default and is awaiting the owner's confirmation; if it is overturned, the items listed in plan §11.2 under D29 change. If overturned: the collective page becomes calendar-first for renamed services, bookings gain `service_name_snapshot` of the per-calendar name, TERMS-13 and CSA-03 gain the offered case, and N6 gains a rename notice. CSA-03 and TERMS-13 test both the offered and the not-offered case, so overturning it changes an expectation, not the coverage |
+| D29 | Name and description delegation on offered services | **Off, so page, emails and booking records show one name.** DECIDED 2026-09-14, kept as written: calendars may vary price, length, buffer, deposit and colour within the host's permissions; name and description are one everywhere. CSA-03 and TERMS-13 test both the offered and the not-offered case |
 | D32 | Venue-level settings (self-reschedule, waitlist, reminders, deposit settings, booking rules, sign-in) | **Decide per setting: host-controlled, must match at accept, or "Different at {venue}"** |
 | D33 | Staff bookings while a member's replica is updating | **Refuse with "This service is being updated. Please try again in a moment."** |
 | D34 | Alert the host to collective-page bookings on member calendars | **Yes, without client contact details** |
@@ -2356,7 +2337,7 @@ same ids. The recommended default is in bold.
 | D21 | Approve the staging overwrite list in §7 (corrected) and the production list after its dry run | **Review the dry-run report and sign it** |
 | D30 | Should rollback restore members' before-images | **Yes; store before-images during the migration** |
 | D36 | Offerings that only members provide (no host service) | **Create the host service active so member calendars stay bookable, with a report** |
-| D54 | Confirm the non-destructive migration package for existing collectives (§7, Decision C): a 14-day member review window with preserving defaults and a lossless pre-switch leave; member values kept as per-calendar values where a home exists, applying wherever the host's permission for that field is on, and otherwise recorded, shown to the member and put to the host in the dry-run review; values with no home replaced by the host's and recorded as `migration_value_replaced` where the member can see them for 90 days; the host's per-offering choice on page copy, defaulting to the page's; the D2 choices with a bulk ask; no compliance flag flipped; before-images in `collective_audit_events` | **Confirm the package as written in §7. It is written to the recommended default and is awaiting the owner's confirmation** |
+| D54 | How an existing collective moves to the new model (§7) | **DECIDED 2026-09-14. The host's values apply to every service on the collective at the point of migration, and every existing booking is protected: calendar, service, price snapshot, terms and manage links untouched.** No review window, no notice before or after, no "Your previous settings" panel and no member value carried over: the owner tells the venues in person. Before-images are still recorded for rollback (D30) and the dry-run report is still signed (D21) |
 
 ### 11.4 Added by the second forensic pass (2026-09-14)
 
@@ -2368,7 +2349,8 @@ They are split by who actually has to decide. Eight of the seventeen recorded he
 have an obvious answer and are here to be recorded, not deliberated: the team should take them,
 write down what it took, and move on. Nine genuinely need you, because they are commercial, legal
 or about what the product promises (D52 was decided in conversation on 2026-09-14 and is recorded
-below; D54, the migration package, is in §11.3 and is still with you). Do not let the first group
+below; D54, the migration of existing collectives, was decided the same way and is in §11.3). Do
+not let the first group
 consume attention that belongs to the second.
 
 #### Decided by the owner, 2026-09-14
@@ -2674,7 +2656,7 @@ CREATE TABLE IF NOT EXISTS public.collective_audit_events (
     'host_transfer_requested', 'host_transfer_cancelled', 'host_transferred',
     'collective_paused', 'collective_resumed', 'collective_dissolved',
     'adoption_requested', 'adoption_answered', 'suggestion_made',
-    'migration_value_replaced', 'migration_applied', 'migration_rolled_back',
+    'migration_applied', 'migration_rolled_back',
     'photo_copied', 'photo_copy_failed', 'payment_rule_downgraded'))
 );
 CREATE INDEX IF NOT EXISTS collective_audit_events_collective
@@ -3052,8 +3034,8 @@ with a new name and no migration.
 `replica_applied` carries `{ writes: { <table>: n } }` and the revision;
 `replica_failed` `{ error_code, error, attempts }`; `unexplained_drift_repaired` the replica-side
 projection as `before`; `values_changed`, `calendar_assigned` and `calendar_unassigned` the
-assignment row; `migration_value_replaced` the member's previous value as `before` and the host's
-as `after`, one row per column; `member_joined` `{ before: { account_links: [{ link_id, low_grants_*,
+assignment row; `migration_applied` the member's copies and provider rows as `before`, one row per
+member (D54, D30); `member_joined` `{ before: { account_links: [{ link_id, low_grants_*,
 high_grants_* }] } }` so the release can restore a pre-existing link's grants; `payment_rule_downgraded`
 the service's previous `payment_requirement` and `deposit_pence`.
 
@@ -3161,7 +3143,7 @@ transaction (PRICE-10); otherwise a `created` link with `replica_service_id NULL
 `progress.paused_service_ids`. `form_choices` `use_existing` marks the member's type as the
 adoption target (managed, `accepts_records_from_type_id` = itself, unarchived) so the first apply
 adopts it; `use_theirs` leaves the apply to create one. The venue's compliance flag is not touched
-(Decision C item 7). Create the missing pairwise `account_links` with every other active member
+(D54; the flag is the venue's). Create the missing pairwise `account_links` with every other active member
 flagged `created_for_collective_id` (DL6), and record the grants of any pre-existing link the mesh
 upgrades in `member_joined`'s `changes.before`. Audit `member_joined` and one `adoption_answered`
 per adoption; bump; insert the `join` operation (`idempotency_key = 'join:' || p_member_id`). The
@@ -3484,9 +3466,8 @@ that stop being copied.
 `scripts/collective-replicas-migrate.mjs` follows the conventions of
 `scripts/seed-e2e-smoke-venue.mjs:15,24-31` (`dotenv` from `.env.local`, `createClient` with
 `SUPABASE_SECRET_KEY`) and gets an npm entry beside `check:table-grants` (`package.json:12`). The
-algorithm below is §7 as the register's Decision C package describes it, one collective at a time,
-with the two rules at its head: nothing a member set is overwritten where a per-calendar home
-exists, and every value with no home is recorded where the member can see it.
+algorithm below is §7 under D54, one collective at a time, with the two rules at its head: existing
+bookings are untouched, and the host's values apply to every service at the switch.
 
 **CLI and fence.** `--collective <uuid>` (required) with exactly one of `--survey`, `--dry-run`,
 `--apply --approved-report <sha256>`, `--rollback [--restore-stale <service_id>]...`, and `--env
@@ -3533,10 +3514,8 @@ at `host_venue_id`: exactly one is the master; more is P1 and stops the run; non
 D36 the apply creates the host service active from the earliest active provider's service (by
 provider `created_at`), copying the registry's host columns with `created_by_staff_id NULL` and
 `sort_order` appended, before any link is made. Where the offering's curated page copy differs from
-the master (Decision C item 5) the report lists it and the host chooses per offering: "use the
-page's" writes the offering's name, description and photo into the master and the host's service
-photo; "use the service's" keeps the master; no answer means "use the page's", so nothing changes
-under existing links.
+the master the report lists it (`page_copy`); the master stands, and the host edits the master
+before the switch if it prefers the page's wording (D54).
 
 **Link creation.** Per (offering, active non-host member): the member's copy is the
 `source_service_id` of its active providers for the item (two items sharing one copy is P2); no
@@ -3544,25 +3523,20 @@ provider means `replica_service_id NULL` and the engine creates the row. Every l
 `provenance = 'migrated'`, `desired_revision 1`, `applied_revision 0`. The copy's three sync
 columns are recorded in the before-image and then cleared (I23).
 
-**The Decision C steps, in order.** (1) The owner signs the operator's report; the host completes
-its choices. (2) N33 goes to every member admin, email and bell, no less than 14 days before the
-dated switch, linking to "Review the new way {collective} works": `JoinCollectiveDialog` with the
-migration's choices, preserving defaults, a recorded consent, and "Leave {collective} instead" on
-every step (a pre-switch leave is a legacy leave with copies detached, lossless). Silence does not
-block the switch. (3) Kept per-calendar values: where the member's value differs from the host's
-and a home exists (price and length now; buffer, deposit and colour after D5), the value is written
-as the custom value on every calendar of that member that offers the service, with the migration as
-`updated_by_venue_id`; the permission is not switched on, so a kept value under a flag that is off
-is stored but inert until the host turns the flag on, and the report lists every kept value for the
-host's per-service confirmation. (4) Where no home exists (payment rule, location, flags, heading,
-name, description, add-on links, forms) the host's value wins and one `migration_value_replaced`
-row per column, targeted at the member, carries `before` and `after`; the member's History and
-"Your previous settings" show them for 90 days with "Apply as my calendar's value" where the flag
-allows and "Ask {host}" otherwise. (5) Member-only services: the three D2 choices, with a bulk "Ask
-{host} to add these", and the report says plainly that online booking of these ends when the page
-hands over. (6) The member's compliance flag is left as it is; the migration switches nothing on;
-form-bearing offerings are bookable at the member only once forms are on. (7) Legacy pairwise links
-are classified by creation date: created after the invitation (`venue_collective_members.created_at`
+**The D54 steps, in order.** (1) The owner signs the operator's report and tells the venues in
+person; nothing is sent from the product and there is no review window (a venue that wants out
+leaves beforehand through today's Leave, a legacy leave that loses nothing). (2) No per-calendar
+value is written or cleared: the host's values apply to every replicated column at the switch, and
+stored per-calendar values on member calendars stay where they are, applying only while the host's
+permission for that field is on. (3) Every copy's previous row, option rows, add-on links,
+requirement rows and sync columns, and every provider row, are recorded in one `migration_applied`
+row per member (`changes.before`) for rollback; no per-value rows are written and nothing is shown
+to the member. (4) Member-only services stay as they are, kept for the bookings the member's team
+makes (D2); the member can ask the host to add any of them later from its Services page, and the
+report says plainly that online booking of these ends when the member's page hands over (D3).
+(5) The member's compliance flag is left as it is; the migration switches nothing on; form-bearing
+offerings are bookable at the member only once forms are on. (6) Legacy pairwise links are
+classified by creation date: created after the invitation (`venue_collective_members.created_at`
 of the invited row) and up to one day after `joined_at` are "created for the collective"
 (`created_for_collective_id` written), listed for the owner, default "created for"; earlier links
 stay `NULL`.
@@ -3578,9 +3552,9 @@ service_item_id IN (masters and copies) AND service_price_snapshot_pence IS NULL
 fallback trigger's order. Pass A's D7 backfill already covers every appointment booking, so this is
 a safety re-run and must report 0 rows on a clean Pass A.
 
-**Forms.** The migration adopts nothing. It records each member's `form_choices` (same-template
-types pre-selected) by marking the chosen member type as the adoption target, exactly as
-`collective_join_member` does, and the first apply performs the §6.4 order.
+**Forms.** The migration adopts nothing itself. It marks each member's same-template type, where
+one exists, as the adoption target, exactly as `collective_join_member` does, and the first apply
+performs the §6.4 order; no venue's compliance flag changes.
 
 **Assignments (I4).** Each active provider with `practitioner_id` set and no assignment gets one
 (`calendar_id = practitioner_id`, `service_item_id = source_service_id`); a provider with
@@ -3590,21 +3564,20 @@ reported.
 
 **Apply, switch and drain.** One `collective_operations` row, `kind = 'migrate'`,
 `idempotency_key = 'migrate:' || collective_id`, `progress = { phase, report_hash, done_links,
-before_images_written }`. In one transaction under the engine flag: snapshots; the host's page-copy
-choices into masters; masters set; `service_model = 'migrating'` (the legacy catalogue keeps
-serving, member locks are on, engine applies run, the "behind" hide is suspended); links created;
-kept values written; options mapped; form choices recorded; a same-shape member add-on group
-adopted as the managed group rather than duplicated; managed headings created rather than a
-member's own renamed; missing assignments created; the `migration_value_replaced` rows; one
+before_images_written }`. In one transaction under the engine flag: snapshots; masters set;
+`service_model = 'migrating'` (the legacy catalogue keeps serving, member locks are on, engine
+applies run, the "behind" hide is suspended); links created; options mapped; adoption targets
+marked; a same-shape member add-on group adopted as the managed group rather than duplicated;
+managed headings created rather than a member's own renamed; missing assignments created; one
 `migration_applied` row per member carrying the full before-image (the copy row, its option rows,
-add-on links, requirement rows, the three sync columns, the provider rows with ids, overrides,
-approval, status and `created_at`, and the master's before-image where step 5 wrote into it) and,
-after the drain, the `updated_at` of every row it wrote. Then, outside any transaction, one
-`collective_apply_replica(link, NULL, NULL, 'inline')` per link in id order, `done_links` appended
-after each, resumable after a kill (MIG-02). When every link has converged, `service_model =
-'replicas'` in its own statement; the own-page handover then follows from the derived rule (T18),
-and N29 and N30 go out from the report's per-member section. Never clear a per-calendar value,
-never change `is_active` against a member's "keep off", never flip a venue flag.
+add-on links, requirement rows, the three sync columns, and the provider rows with ids, overrides,
+approval, status and `created_at`) and, after the drain, the `updated_at` of every row it wrote.
+Then, outside any transaction, one `collective_apply_replica(link, NULL, NULL, 'inline')` per link
+in id order, which is what writes the host's values onto each copy, `done_links` appended after
+each, resumable after a kill (MIG-02). When every link has converged, `service_model = 'replicas'`
+in its own statement; the own-page handover then follows from the derived rule (T18). No notice
+is sent (D54). Never write or clear a per-calendar value, never change a member-only service's
+`is_active`, never flip a venue flag.
 
 **Verify.** `collective_invariant_report(p_since, p_collective_id)`: I1 to I3, I5, I8, I10 to I16,
 I23, I32, I33 and I45 all 0; every booking total unchanged, checked as
@@ -3620,8 +3593,7 @@ links, requirement rows, the compliance types' prior archived state and mappings
 columns, `legacy_copies`, and the masters' before-images where written. The freshness rule: a
 before-image is applied only where the row's `updated_at` still equals the value recorded after the
 drain; a row changed since is skipped, listed, and restored only with `--restore-stale <service_id>`,
-which the owner confirms per service. Per-calendar values written by step 3 stay, since they were
-the member's values and the legacy path honours them. Links are released directly (`released_at`,
+which the owner confirms per service. Per-calendar values are never touched in either direction. Links are released directly (`released_at`,
 under the flag, `migration_rolled_back` per member) without ending any account link, because those
 existed under the legacy model. Bookings and their snapshots are never touched. `--apply` again
 converges (MIG-03).
@@ -3640,28 +3612,25 @@ UTF-8 bytes, printed by `--dry-run` and required verbatim by `--approved-report`
 ```
 { collective, generated_at, code_version, service_model, p1, p2, p3, p4, p5, checks: { <name>: { count, sample_ids } },
   masters: [{ item_id, master_service_id, created_from_service_id | null }],
-  page_copy: [{ item_id, differs: [column], host_choice: 'page' | 'service' }],
+  page_copy: [{ item_id, differs: [column] }],
   links: [{ item_id, venue_id, copy_service_id | null,
-            kept_values: [{ calendar_id, column, value, permission_on }],
             replaced: [{ column, before, after }],
             options: [{ copy_variant_id, master_variant_id | null, rule, has_bookings }] }],
-  member_only: [{ venue_id, service_id, choice }], forms: [{ venue_id, host_type_id, choice, my_type_id | null }],
+  member_only: [{ venue_id, service_id }], forms: [{ venue_id, host_type_id, adopts_type_id | null }],
   account_links: [{ link_id, classification }], assignments_to_create, bookings_to_snapshot,
   collisions: [...], invariants_before: { <invariant>: count } }
 ```
 
-The operator reads the whole document; the host reads `page_copy` and `kept_values`; each member
-reads its own `links` entries, `member_only` and `forms`, marked kept, changed by {host}, or
-unchanged; N29 and N30 render from the same sections.
+The operator and the owner read the whole document; nothing is rendered to members (D54).
 
 **Pass A go conditions (before any production migration).** `venues.stripe_charges_enabled`
 backfilled from Stripe for every venue with a connected account before the hide rule ships; every
 MGR-01 shim, the manager fold, the 24-hour `STALE_RESOURCE` rule and the accept consent gate proven
-to condition on `service_model = 'replicas'` (I48 = 0); the staging rehearsal has shown a member's
-review with the preserving defaults, a pre-switch leave with copies detached, a rollback restoring
-the provider snapshot, the sync columns, add-on links, option states and compliance type states
-exactly, and the per-member catalogue diff equal to the review; and no member loses every calendar
-from the page.
+to condition on `service_model = 'replicas'` (I48 = 0); the staging rehearsal has shown every booking
+untouched through apply and rollback, a legacy leave before the switch losing nothing, a rollback
+restoring the provider snapshot, the sync columns, add-on links, option states and compliance type
+states exactly, and the catalogue diff equal to the signed report; and no member loses every
+calendar from the page.
 
 ## Appendix H. Component contracts
 

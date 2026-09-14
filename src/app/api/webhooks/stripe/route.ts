@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
+import { recordStripeChargesEnabled } from '@/lib/stripe/charges-enabled';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import {
@@ -733,16 +734,10 @@ export async function POST(request: NextRequest) {
     } else if (event.type === 'account.updated') {
       const account = event.data.object as Stripe.Account;
       if (account.id) {
-        const { data: venue } = await supabase
-          .from('venues')
-          .select('id')
-          .eq('stripe_connected_account_id', account.id)
-          .maybeSingle();
-        if (venue) {
-          // Log the status change. The StripeConnectSection UI fetches live
-          // status from Stripe on each load, so no DB columns needed here.
-          console.log(`[Stripe] account.updated for venue ${venue.id}: charges_enabled=${account.charges_enabled}, details_submitted=${account.details_submitted}`);
-        }
+        // The Settings card still reads live status from Stripe; server rules that cannot
+        // (the combined page's payment readiness) read the stored answer.
+        await recordStripeChargesEnabled(supabase, account.id, account.charges_enabled);
+        console.log(`[Stripe] account.updated for ${account.id}: charges_enabled=${account.charges_enabled}, details_submitted=${account.details_submitted}`);
       }
     } else if (
       event.type === 'customer.subscription.created' ||

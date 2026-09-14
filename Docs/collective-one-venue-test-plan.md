@@ -1,7 +1,7 @@
 # Venue collectives as one venue: testing plan
 
 Status: PLAN, not implemented. Companion to `Docs/collective-one-venue-plan.md`, which defines the
-requirements (R1 to R14), the decisions (D1 to D36) and the red-team findings (RT1-1 to RT1-17,
+requirements (R1 to R14), the decisions (D1 to D51) and the red-team findings (RT1-1 to RT1-17,
 RT2-1 to RT2-28) this document refers to; read that first. Written 2026-09-13 against `staging` at
 `c6020eb6`; line numbers are anchors at that commit plus the two commits the plan's header names (`818ed5a`, `973bd3e`), and the plan's "Reading the citations" note applies here too. Reviewed 2026-09-14 at `c0b5eb0`. It is the safety net for the redesign: what exists today and where it is blind, the strategy, every test, the invariants, the rollout gates and the acceptance checklist for the owner.
 
@@ -109,9 +109,9 @@ H: PROJ projection-blind fakes; AFTER no-op `after()`; C0 hosted grants; RECUR p
 
 ## 3. Test inventory
 
-153 tests. By layer: route 47, unit 35, pgtap 30, component 7, e2e 5, live-staging 6, migration 6, security 4, engine-invariant 4, performance 4, app-contract 3, manual 2.
+157 tests. By layer: route 49, unit 35, pgtap 30, component 9, e2e 5, live-staging 6, migration 6, security 4, engine-invariant 4, performance 4, app-contract 3, manual 2.
 
-The first 113 came from the first pass. The 34 added by the second pass (OPS, MV, REP, BM, PLAN, SEO, WAIT, FAIR, DIARY, HLP, TERMS-16, CSA-04, DB-10 and SEC-03 to SEC-05) cover the areas it reached that the first did not: operations and alerting, people who work at more than one venue, reporting and attribution, booking models other than appointments, plan tiers and caps, the public page's metadata and waitlist, diary truth, and the help centre's own copy rules. They are detailed in §3.28.
+The first 113 came from the first pass. The 34 added by the second pass (OPS, MV, REP, BM, PLAN, SEO, WAIT, FAIR, DIARY, HLP, TERMS-16, CSA-04, DB-10 and SEC-03 to SEC-05), the 6 added by the UI review (UI-C-01 to UI-C-06) and the 4 added by the verification pass (CSA-05 to CSA-08) cover the areas it reached that the first did not: operations and alerting, people who work at more than one venue, reporting and attribution, booking models other than appointments, plan tiers and caps, the public page's metadata and waitlist, diary truth, and the help centre's own copy rules. They are detailed in §3.28.
 
 ### 3.1 Index
 
@@ -260,6 +260,10 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS, MV
 | HLP-01 | unit | No help article contains an em-dash, and no rewritten article still describes sync, Link, Unlink or member-owned prices | W13 Help and docs |
 | TERMS-16 | unit | The month loader applies a per-calendar length once, not twice | W1 Booking correctness |
 | CSA-04 | pgtap | Deleting a calendar that held a live replica's assignment writes an audit row and bumps the revision | W3 Engine |
+| CSA-05 | route | The cross-venue assignment writer refuses everything it must, and I13 is a constraint | W5 Host Services page |
+| CSA-06 | route | One function behind three host surfaces, with a per-operation envelope | W5 Host Services page |
+| CSA-07 | component | "Last changed by" is true on both sides and survives an unrelated save | W5 Host Services page |
+| CSA-08 | component | Per-calendar values are reachable from the calendar page | W8 Per-calendar fields |
 | DB-10 | pgtap | Every classified column's entry matches what an apply actually writes | W3 Engine |
 | SEC-03 | route | A pre-booking form files at the venue that will hold the booking | W4 Catalogue and booking switch |
 | SEC-04 | pgtap | Drift the engine cannot explain is audited and alerted, not quietly repaired | W3 Engine |
@@ -538,20 +542,18 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS, MV
 ### 3.6 Calendar assignments
 
 #### CSA-01: Calendar assignment saves are diffs with ownership and error checks
+- **Layer:** route. **Workstream:** W2 Calendar assignments. **Risk:** RT1-12; PB-03; PB-08. **Requirements:** R10.
+- **Pins:** Both writers delete every row and re-insert today, so ids churn and per-calendar values vanish on every save
+- **Scenario:** PUT practitioner-services with `expected_service_ids` equal to the current set, adding one, removing one, keeping one; the same PATCH appointment-services with `expected_calendar_ids`; foreign service ids on the PUT and foreign calendar ids on the PATCH; a retired replica id in the add set; injected delete error.
+- **Expected:** Only the removed row deleted and only the added row inserted; the kept row keeps its id, all seven custom values and its `updated_*` columns; the added row carries the caller's venue and user; foreign ids 403 on both routes; retired replica 409 `COLLECTIVE_SERVICE_RETIRED`; injected error 500 with no partial write on either route.
+- **Location:** `src/app/api/venue/practitioner-services/route.test.ts; src/app/api/venue/appointment-services/route.assignments.test.ts`
 
-- **Layer:** route. **Workstream:** W2 Calendar assignments. **Requirements:** R5,R10.
-- **Pins:** RT1-12
-- **Scenario:** PUT practitioner-services adding one, removing one, keeping one; foreign service_ids; injected delete error.
-- **Expected:** Only the removed row deleted, kept rows keep id and all seven custom values; foreign ids 403; injected error 500 with no partial write.
-- **Location:** `src/app/api/venue/practitioner-services/route.test.ts`
-
-#### CSA-02: Stale full-set PUT cannot erase the host's assignment
-
-- **Layer:** route. **Workstream:** W2 Calendar assignments. **Requirements:** R5,R10.
-- **Pins:** RT1-12; RT2-19
-- **Scenario:** expected_service_ids mismatch; old-app PUT without expected ids that removes a row the host engine wrote 2 h ago.
-- **Expected:** 409 STALE_RESOURCE 'Someone else changed this calendar's services. Refresh and try again.'; own removals and requires_confirmation still work.
-- **Location:** `src/app/api/venue/practitioner-services/route.stale.test.ts`
+#### CSA-02: Stale full-set saves cannot erase the host's assignment
+- **Layer:** route. **Workstream:** W2 Calendar assignments. **Risk:** RT1-12; RT2-19. **Requirements:** R10, R11.
+- **Pins:** PB-04; a diff alone does not fix the race, expected ids do
+- **Scenario:** `expected_service_ids` mismatch on the PUT; `expected_calendar_ids` mismatch on the PATCH; old-app PUT and old-app PATCH without expected ids that remove a row the host function wrote 2 h ago, and again for a row written 25 h ago; a rename-only save from the Edit calendar dialog while the host adds a row.
+- **Expected:** 412 `STALE_RESOURCE` "Someone else changed this calendar's services. Refresh and try again." on both routes; the 2 h row survives the old-app saves and the 25 h row does not, and the loss is audited; own removals and requires_confirmation still work; the rename-only save sends no services PUT and meets no 412.
+- **Location:** `src/app/api/venue/practitioner-services/route.stale.test.ts; src/app/api/venue/appointment-services/route.stale-calendars.test.ts; src/app/dashboard/availability/AppointmentAvailabilitySettings.collective.test.tsx`
 
 #### CSA-03: All seven per-calendar values stored, gated and writable by the right people
 
@@ -774,7 +776,7 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS, MV
 - **Layer:** engine-invariant. **Workstream:** W4 Catalogue and booking switch. **Requirements:** R5,R9,R10.
 - **Pins:** RT1-12; RT1-1; double booking
 - **Scenario:** Member diff PUT versus host engine insert on the same row; booking create during an apply; combined page and own page booking the same member calendar slot.
-- **Expected:** No 23505 surfaced, both intents kept; booking priced on new terms or 409 COLLECTIVE_SERVICE_UPDATING, never stale after fresh; exactly one slot claim wins.
+- **Expected:** No 23505 surfaced; the host's row survives in both interleavings; when the member's write lands first both rows exist, and when the engine lands first the member's save answers 412 `STALE_RESOURCE` and nothing is written; No 23505 surfaced, both intents kept; booking priced on new terms or 409 COLLECTIVE_SERVICE_UPDATING, never stale after fresh; exactly one slot claim wins.
 - **Location:** `supabase/concurrency/assignment_and_booking_races.sql`
 
 ### 3.11 Derived catalogue
@@ -1239,14 +1241,14 @@ Same format as the sections above. Each of these covers an area the first pass d
 - **Location:** `src/app/api/cron/collective-replicate/route.ts; src/app/api/cron/collective-verify/route.ts; src/lib/cron/finalize-cron-run.ts; src/lib/platform/cron-log.ts`
 
 #### OPS-02 The verifier repairs only what it may, and never repairs over evidence
-- **Layer:** route. **Workstream:** W18 Operations. **Risk:** R4 (flag without actor binding).
+- **Layer:** route. **Workstream:** W18 Operations. **Risk:** none named before; the engine flag's audit gap in plan §6.4.
 - **Pins:** A repair that hides its own cause. The house precedent (`schedule-health`) is read-only on purpose.
 - **Scenario:** Seed one link behind (I3) and one outside an active membership (I5), plus one whose fingerprint differs with `applied_revision = desired_revision` and no audit row (the raw-SQL write shape). Run the verifier.
 - **Expected:** I3 bumped, I5 released, both audited; the third is **not** silently re-applied but written as `unexplained_drift_repaired` carrying the before-image, and alerted. Every other non-zero invariant alerts without repairing.
 - **Location:** `supabase/migrations/<engine>.sql; src/app/api/cron/collective-verify/route.ts`
 
 #### OPS-03 Platform collective panel
-- **Layer:** route. **Workstream:** W18 Operations. **Risk:** R13 (support session indistinguishable from an admin).
+- **Layer:** route. **Workstream:** W18 Operations. **Risk:** none named before; the support-session attribution gap in plan §6.3.
 - **Scenario:** Call the panel as anon, as a venue admin, and as a superuser. Use Retry. Read the audit.
 - **Expected:** Refused except for superusers; read-only apart from Retry; the retry writes a platform audit event and a `collective_audit_events` row carrying `actor_support_session_id` and `actor_is_platform_superuser`; no guest contact details in any response.
 - **Location:** `src/app/api/platform/collectives/route.ts; src/lib/platform/audit.ts`
@@ -1266,7 +1268,7 @@ Same format as the sections above. Each of these covers an area the first pass d
 
 #### LIFE-09 Client access ends with the membership
 - **Layer:** pgtap. **Workstream:** W7. **Requirements:** R1, R13. **Split-brain:** SB-42. **Decision:** D41.
-- **Pins:** The half of D41 that does not exist. Leave, removal and dissolve only flip the membership row (`collectives/[id]/members/route.ts:189,256,280`); no collective route or library function touches `account_links`, so the client-detail grant survives the collective indefinitely.
+- **Pins:** The half of D41 that does not exist. Leave, removal and dissolve only flip the membership row (`collectives/[id]/members/route.ts:189,280`; dissolve at `collectives/[id]/route.ts:259-263`); no collective route or library function touches `account_links`, so the client-detail grant survives the collective indefinitely.
 - **Scenario:** Build a live collective of three venues with guests and bookings at each. Leave as one member, remove another, then dissolve. After each, attempt every cross-venue read: contact search, guest record, booking detail, compliance records, revenue.
 - **Expected:** Each read refused from the moment the membership ends, in the same transaction, not on the next cron. Every record each venue owns is untouched and complete. A release audit row on both sides. A link that pre-dated the collective is downgraded to its previous grant rather than ended, and a link created for the collective is ended outright.
 - **Location:** `supabase/tests/collective_release_test.sql; src/app/api/venue/collectives/[id]/members/route.ts`
@@ -1313,14 +1315,18 @@ Same format as the sections above. Each of these covers an area the first pass d
 #### TERMS-16, CSA-04, DB-10, SEC-03 to SEC-05
 - **TERMS-16** (unit, W1): the month loader both bakes a per-calendar length into the service and carries it on the link, which is the double-application the day loader fixed and documented at `appointment-engine.ts:1710-1721`. Expect one application. **Location:** `src/lib/availability/appointment-month-availability.ts:805-818`
 - **CSA-04** (pgtap, W3): deleting a calendar that held a live replica's assignment writes a `collective_audit_events` row and bumps the catalogue revision, and invariant I33 returns 0 afterwards.
-- **DB-10** (pgtap, W3): every classified column's registry entry matches what an apply actually writes. DB-07 proves a column is classified; this proves the classification is true of the engine's behaviour, which is the claim that matters. Enumerate from `pg_attribute`; `service_items` has 46 columns today.
+- **CSA-05** (route and pgtap, W5): the cross-venue writer refuses everything it must. `collective_set_calendar_offering` called as a member admin; as the host for a calendar at a venue that has left; at a venue in a different collective; for a calendar not at the named venue; for an inactive calendar; for an offering whose replica at that venue does not exist; in a legacy-mode collective; and as the host for a valid calendar, add then remove, with an upcoming booking at the member. Expect `COLLECTIVE_NOT_HOST`, `COLLECTIVE_VENUE_NOT_MEMBER`, `COLLECTIVE_CALENDAR_NOT_AT_VENUE`, `COLLECTIVE_REPLICA_NOT_READY` and the legacy 409 with no row written; the valid add upserts the (calendar, replica) row with the host's venue and user in `updated_by_*`, an audit row with before-image, a revision bump and N11; the removal answers the affected-bookings 409 built with the member's venue id and replica id, `guest_name` null, no move action; I13 as a constraint refuses a direct insert pairing a calendar with another venue's service. **Location:** `supabase/tests/collective_set_calendar_offering_test.sql; src/app/api/venue/appointment-services/route.host.test.ts`
+- **CSA-06** (route, W5 and W11): one function behind three host surfaces. The same member calendar added through `PATCH appointment-services collective_calendars`, through the offerings PUT and through the catalogue `set_providers` shim; a bulk change with one failing cell. Expect an identical row, audit and notice from all three; the shim returns a per-operation envelope and the failing cell alone is reported (CB-44, CB-45); a registry test lists every caller of `collective_set_calendar_offering` and fails on any other writer of another venue's assignment rows. **Location:** `src/app/api/venue/collectives/[id]/catalogue/route.shims.test.ts; src/lib/linked-accounts/assignment-writers.registry.test.ts`
+- **CSA-07** (component and route, W5 and W6): "Last changed by" is true on both sides (D15). Host adds M1; member renames M1 and saves; member unticks and re-ticks M1; host removes M1; 31 days pass. Expect that after the rename the row still names the host and keeps its id; after the re-tick it names the member and the host gets N12; the host's `CollectiveCalendarsSection` row, the member's Edit calendar dialog and the member's service view all show `svc.cal.lastChanged` with the same venue and date; the line disappears after 30 days; no `updated_by_user_id` reaches any client payload. **Location:** `src/app/dashboard/availability/AppointmentAvailabilitySettings.collective.test.tsx; src/components/linked-accounts/collective/CollectiveCalendarsSection.test.tsx`
+- **CSA-08** (component and route, W8): per-calendar values from the calendar page. An admin opens Edit calendar, ticks a service, saves, reopens and uses "Edit values"; the same for an unsaved tick; a member admin on a replica whose master has price on and length off. Expect the link only for saved ticks on services with a permission on; the dialog opens pre-selected to this calendar and service; the unsaved tick shows no link; the member sees a price input and no length input; the save lands on the existing row without changing its id; the card's Services list shows the chip. **Location:** `src/app/dashboard/availability/AppointmentAvailabilitySettings.values.test.tsx; src/app/api/venue/practitioner-service-overrides/route.admin.test.ts`
+- **DB-10** (pgtap, W3): every classified column's registry entry matches what an apply actually writes. DB-07 proves a column is classified; this proves the classification is true of the engine's behaviour, which is the claim that matters. Enumerate from `pg_attribute`; `service_items` has 45 columns today.
 - **SEC-03** (route, W4): a pre-booking form files at the venue that will hold the booking. On "any available", complete an inline form and then let the booking land on a calendar at a different venue. Expect the record at the booking's own venue, not at whichever venue happened to be first in the merge. Not a privacy test: the merged answer is deliberately less precise than each member's own page already is, and the single-venue exposure is an accepted platform decision (see plan §6.6, "What this is not").
 - **SEC-04** (pgtap, W3): drift the engine cannot explain is kept, not tidied away. Change a replica by hand behind the engine flag, the way an engineer fixing something in the SQL editor would, then run the verifier. Expect an `unexplained_drift_repaired` audit row carrying the before-image, and an alert, rather than an ordinary apply row. I41 returns 0 afterwards. This is not a test that the flag keeps anyone out: it does not, and §6.4 says why it should not try.
 #### UI-C-01 to UI-C-06 The collective's screens
 
 Added by the UI review, 2026-09-14. Six screens carry the owner's requirements, and each has one test that fails today.
 
-- **UI-C-01** (component, W16): every refusal from the create route renders inside the wizard step that caused it, with a link back where the cause belongs to an earlier step. Today the dialog's catch hands the message to the parent panel, which renders behind the still-open dialog, so all ten refusals are invisible and the button merely stops spinning (CB-41). Assert each of the ten.
+- **UI-C-01** (component, W16): every refusal from the create route renders inside the wizard step that caused it, with a link back where the cause belongs to an earlier step. Today the dialog's catch hands the message to the parent panel, which renders behind the still-open dialog, so all nine refusals and the 500 are invisible and the button merely stops spinning (CB-41). Assert each of the nine and the 500.
 - **UI-C-02** (component, W5): the row shows "waiting for venues" while fewer than two are active, "no services yet" when two are active but nothing is on the page, and "live" only when the public page actually serves. Today it shows a green "Active" pill from the instant of creation while the page serves its unavailable state (CB-42). Also assert the member line counts and names the same set (CB-43).
 - **UI-C-03** (component, W6): the member's service view contains no `disabled` form control for a host-managed field, renders each value as text with empties written out in words ("No deposit", "No forms"), and presents the member's own editable controls as ordinary live inputs. The rule under test is that a disabled form is rendered only when the artefact is itself a form, which is why the managed compliance form uses the renderer's preview mode and passes.
 - **UI-C-04** (route, W5): a bulk change across 5 venues and 40 services is split into chunks under the 200-operation cap (CB-44) and returns a per-operation envelope, so a partial failure is reported per venue rather than as success. Today `set_providers` skips failures and returns `{ ok: true }` unless every one failed (CB-45). Assert that failed cells stay staged and that Retry re-sends only those.
@@ -1445,7 +1451,7 @@ JOIN compliance_types mt ON mt.venue_id=m.venue_id AND mt.slug=ht.slug WHERE mt.
 ```
 P4: copy variants with future bookings and no master variant of the same name and sort order. P5: offerings with no active host source (needs_master), each with the owner's active-or-skip choice.
 
-### Added by the second pass: I33 to I46
+### Added by the second pass: I33 to I47
 
 Each was checked against I1 to I32 for overlap before being added. I13 covers wrong-venue assignments, I14 covers three cross-venue child cases, I5 covers link scoping and I7 covers duplicate live memberships; none of the following is reachable from those.
 
@@ -1562,7 +1568,7 @@ earlier assumption that venues stay walled off.
 **R9 Member calendars feel like yours**
 - [ ] Book the same service on one of your calendars and one member calendar. Name, length, options, add-ons, forms and price rules match, apart from values you let calendars change.
 - [ ] The confirmation email and the diary show the same service name as the page.
-- [ ] **If you or one of your team works at two venues in the collective, you can sign in once and move between them without signing out.** Today that person cannot sign in at all.
+- [ ] **If you try to invite someone who already works at another venue, you are told plainly and nothing is created.** D38 chose not to build a venue chooser, so a person running two venues keeps two logins; what must be true is that the product says so rather than locking them out, which is what happens today.
 - [ ] Look at a member's column in your diary on a day that venue is closed. It shows them closed, not open.
 - [ ] Try to move a booking to a calendar at another venue. Whatever the answer, it is the same answer every time and the dialog explains it plainly.
 

@@ -49,6 +49,34 @@ export async function resolveStaffOverrideActor(
   request: NextRequest,
   target: { venueId: string; collectiveId?: string | null },
 ): Promise<StaffOverrideActor> {
+  return resolveStaffBookingActor(admin, request, target, {
+    signedOut: 'Override availability is for signed-in staff only.',
+    forbidden: 'You cannot override availability for that venue.',
+  });
+}
+
+export const STAFF_SOURCE_SIGNED_OUT_ERROR = 'Phone and walk-in bookings are for signed-in staff only.';
+export const STAFF_SOURCE_FORBIDDEN_ERROR = 'You cannot take bookings for that venue.';
+
+/**
+ * The signed-in staff member behind a staff-source (`phone` / `walk-in`) booking on the
+ * public visit and group create routes, and whether they may book at `venueId`: their own
+ * venue, a member of the collective the booking is routed through, or a venue they hold
+ * create access to through an account link.
+ *
+ * CB-23: those routes are anonymous, and a staff source waives the deposit and turns
+ * compliance into warnings. Without this check anyone could post `source: 'phone'` and
+ * book a paid service for nothing. CB-26: the answer is also what stamps the actor.
+ */
+export async function resolveStaffBookingActor(
+  admin: SupabaseClient,
+  request: NextRequest,
+  target: { venueId: string; collectiveId?: string | null },
+  messages: { signedOut: string; forbidden: string } = {
+    signedOut: STAFF_SOURCE_SIGNED_OUT_ERROR,
+    forbidden: STAFF_SOURCE_FORBIDDEN_ERROR,
+  },
+): Promise<StaffOverrideActor> {
   let staff: VenueStaff | null = null;
   let userId: string | null = null;
   try {
@@ -62,7 +90,7 @@ export async function resolveStaffOverrideActor(
     staff = null;
   }
   if (!staff) {
-    return { ok: false, status: 401, error: 'Override availability is for signed-in staff only.' };
+    return { ok: false, status: 401, error: messages.signedOut };
   }
   if (staff.venue_id === target.venueId) return { ok: true, staff, via: 'own' };
   if (target.collectiveId) {
@@ -73,7 +101,7 @@ export async function resolveStaffOverrideActor(
   }
   const linked = await resolveLinkedStaffCreateScope(admin, staff.venue_id, target.venueId, userId);
   if (linked.ok) return { ok: true, staff, via: 'linked' };
-  return { ok: false, status: 403, error: 'You cannot override availability for that venue.' };
+  return { ok: false, status: 403, error: messages.forbidden };
 }
 
 /**

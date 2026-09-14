@@ -58,6 +58,7 @@ import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-c
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
+import { resolveStaffBookingActor, type StaffOverrideActor } from '@/lib/booking/staff-availability-override';
 import { resolveCollectiveServiceAttribution } from '@/lib/linked-accounts/collective-booking-override';
 import { nextResponseIfPublicBookingBlockedForRequest } from '@/lib/booking/light-plan-public-block';
 import { nextResponseIfVenueRequiresAccountLoginForBooking } from '@/lib/booking/require-account-login-for-public-booking';
@@ -236,6 +237,17 @@ export async function POST(request: NextRequest) {
         person.appointment_service_id = target.sourceServiceId;
       }
       if (owningVenueId) venue_id = owningVenueId;
+    }
+
+    // A staff source waives deposits and softens compliance, so it needs a staff member who
+    // may book here (CB-23), and that staff member is stamped on every row (CB-26).
+    let staffActor: Extract<StaffOverrideActor, { ok: true }> | null = null;
+    if (source === 'phone' || source === 'walk-in') {
+      const actor = await resolveStaffBookingActor(supabase, request, { venueId: venue_id, collectiveId });
+      if (!actor.ok) {
+        return NextResponse.json({ error: actor.error }, { status: actor.status });
+      }
+      staffActor = actor;
     }
 
     const { data: venue, error: venueErr } = await supabase
@@ -811,6 +823,9 @@ export async function POST(request: NextRequest) {
         booking_model: useUnifiedBookingRows ? 'unified_scheduling' : 'practitioner_appointment',
         status: hasPaymentStep ? 'Pending' : 'Booked',
         source,
+        created_by_staff_id: staffActor?.staff.id ?? null,
+        created_by_linked_venue_id:
+          staffActor && staffActor.staff.venue_id !== venue_id ? staffActor.staff.venue_id : null,
         guest_email: guest.email,
         dietary_notes: dietary_notes?.trim() || null,
         guest_first_name: guestFirst,

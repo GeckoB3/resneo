@@ -33,7 +33,9 @@ import {
   prefixWarnings,
   recordAvailabilityOverrideEvent,
   resolveOverrideCollectiveTarget,
+  resolveStaffBookingActor,
   resolveStaffOverrideActor,
+  type StaffOverrideActor,
 } from '@/lib/booking/staff-availability-override';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
 import { MAX_SERVICES_PER_VISIT } from '@/lib/booking/service-chain';
@@ -278,14 +280,18 @@ export async function POST(request: NextRequest) {
       collectiveIdFromVenue = requestedVenueId;
     }
     const effectiveCollectiveId = collectiveIdFromVenue ?? collective_id ?? null;
-    if (staffOverride) {
-      const actor = await resolveStaffOverrideActor(supabase, request, {
-        venueId: venue_id,
-        collectiveId: collectiveIdFromVenue,
-      });
+    // A staff source waives deposits and softens compliance, so it needs a staff member who
+    // may book here (CB-23), and that staff member is stamped on every row (CB-26).
+    let staffActor: Extract<StaffOverrideActor, { ok: true }> | null = null;
+    if (source === 'phone' || source === 'walk-in') {
+      const target = { venueId: venue_id, collectiveId: collectiveIdFromVenue };
+      const actor = staffOverride
+        ? await resolveStaffOverrideActor(supabase, request, target)
+        : await resolveStaffBookingActor(supabase, request, target);
       if (!actor.ok) {
         return NextResponse.json({ error: actor.error }, { status: actor.status });
       }
+      staffActor = actor;
     }
 
     const { data: venue, error: venueErr } = await supabase
@@ -907,6 +913,9 @@ export async function POST(request: NextRequest) {
         booking_model: useUnifiedBookingRows ? 'unified_scheduling' : 'practitioner_appointment',
         status: hasPaymentStep ? 'Pending' : 'Booked',
         source,
+        created_by_staff_id: staffActor?.staff.id ?? null,
+        created_by_linked_venue_id:
+          staffActor && staffActor.staff.venue_id !== venue_id ? staffActor.staff.venue_id : null,
         guest_email: guest.email,
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,

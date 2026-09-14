@@ -631,7 +631,7 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS-01 
 - **Layer:** pgtap. **Workstream:** W3 Engine. **Requirements:** R4,R9.
 - **Pins:** RT1-10; RT2-16
 - **Scenario:** Compare pg_attribute of service_items, service_variants, addon_groups, addons, compliance_types, compliance_type_versions, requirements, service_categories with collective_column_classes; add a scratch column; apply a master with meeting link, arrival text, option cost.
-- **Expected:** Unclassified column fails; the meeting link and `pre_appointment_instructions` are venue columns (D11, D53), seeded from the master when the replica is created and never overwritten by an apply, as is `capacity_per_session` (D40); `online_unmet_message` is a host column (D53); `cost_to_business_pence` follows its registry class (RT2-16).
+- **Expected:** Unclassified column fails; `pre_appointment_instructions` is a venue column (D53), seeded from the master when the replica is created and never overwritten by an apply, as is `capacity_per_session` (D40); the meeting link and joining information are `not_copied` (D11), so a member never receives the host's meeting room; `online_unmet_message` is a host column (D53); `cost_to_business_pence` follows its registry class (RT2-16).
 - **Location:** `supabase/tests/collective_column_classes_test.sql`
 
 #### DB-08: Revision table bumps from every source; name hold untouched

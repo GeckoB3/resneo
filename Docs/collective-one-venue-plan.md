@@ -3516,8 +3516,8 @@ four; `derived` covers the seven columns below that no copy produces.
 | 34 | `created_by_staff_id` | not_copied | NULL at the replica; drives the creator exception (§6.5) |
 | 35 | `processing_time_blocks` | host | canonical shape (`20270208120000`) |
 | 36 | `location_type` | host | D11 |
-| 37 | `online_meeting_url` | venue | D11 |
-| 38 | `online_meeting_info` | venue | D11 |
+| 37 | `online_meeting_url` | not_copied | D11: never written from another venue. As `venue` it would be seeded from the master, which puts the host's meeting room link on a member's service (built as W3a, 2026-09-14) |
+| 38 | `online_meeting_info` | not_copied | D11, as row 37 |
 | 39 | `booking_interval_minutes` | host | |
 | 40 | `booking_minute_marks` | host | |
 | 41 | `booking_start_times` | host | |
@@ -3563,10 +3563,12 @@ four; `derived` covers the seven columns below that no copy produces.
 words as columns: running it today lists `or` for `addon_groups` and `and` for
 `compliance_types`, so DB-07 enumerates from `pg_attribute` as the test plan says and never from
 the guard. Second, `SERVICE_COLUMNS_NOT_COPIED` (`src/lib/linked-accounts/service-duplication.ts:48-60`)
-names eleven columns, so today's copy path carries `online_meeting_url`, `online_meeting_info`,
-`capacity_per_session` and `pre_appointment_instructions` from one business to another; making it
-read the registry (W3a) changes live behaviour in Pass A, and the dry run must show the four columns
-that stop being copied.
+named eleven columns, so the copy path carried `online_meeting_url`, `online_meeting_info` and
+`addons.cost_to_business_pence` from one business to another. W3a (migration `20270211120000`,
+built 2026-09-14) makes it read the registry and copy only `host`, `venue` and `derived` columns:
+the meeting link, joining information and add-on cost stop travelling, `capacity_per_session` and
+`pre_appointment_instructions` are still seeded (D40, D53), and a column the registry does not
+know is left behind. The dry run must show the columns that stop being copied.
 
 ## Appendix G. Migration script
 

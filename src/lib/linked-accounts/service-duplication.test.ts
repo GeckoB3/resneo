@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeSupabase } from '@/lib/compliance/test-utils/fake-supabase';
+import { resetColumnRegistryCache } from './column-classes';
 import { ppdPatchTestTemplate } from '@/lib/compliance/library/templates/ppd-patch-test';
 
 vi.mock('./catalogue', async (importOriginal) => ({
@@ -79,8 +82,22 @@ function hostServiceRow(overrides: Row = {}): Row {
   };
 }
 
+/** The column registry exactly as its migration seeds it, so these tests cannot drift from it. */
+function registryRows(): Row[] {
+  const sql = readFileSync(
+    join(process.cwd(), 'supabase/migrations/20270211120000_collective_column_classes.sql'),
+    'utf8',
+  );
+  return [...sql.matchAll(/\(\s*'([a-z_]+)',\s*'([a-z_]+)',\s*'([a-z_]+)',/g)].map((m) => ({
+    table_name: m[1],
+    column_name: m[2],
+    class: m[3],
+  }));
+}
+
 function seedDb(opts: { offering?: Row; hostService?: Row; targetExtra?: Record<string, Row[]> } = {}) {
   return new FakeSupabase({
+    collective_column_classes: registryRows(),
     venue_collectives: [{ id: COLLECTIVE, host_venue_id: HOST }],
     collective_service_items: [
       {
@@ -289,13 +306,14 @@ const rowsFor = (db: FakeSupabase, table: string, venueId: string) =>
   (db.tables[table] ?? []).filter((r) => r.venue_id === venueId);
 
 beforeEach(() => {
+  resetColumnRegistryCache();
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 describe('loadOfferingTemplate', () => {
-  it("takes the host's own service as the origin and carries every column except identity", async () => {
+  it("takes the host's own service as the origin and carries the columns the registry lets travel", async () => {
     const db = seedDb();
     const tpl = await loadOfferingTemplate(db.asClient(), ITEM);
     expect(tpl).not.toBeNull();
@@ -326,11 +344,11 @@ describe('loadOfferingTemplate', () => {
       booking_minute_marks: [0, 30],
       booking_start_times: ['10:00', '13:00'],
       location_type: 'online',
-      online_meeting_url: 'https://meet.example/cut',
-      online_meeting_info: 'Link sent the day before.',
     });
-    // ...except what belongs to the origin row itself.
+    // ...except what belongs to the origin row itself, and what each venue sets for itself (D11).
     for (const key of [
+      'online_meeting_url',
+      'online_meeting_info',
       'id',
       'venue_id',
       'name',
@@ -354,6 +372,8 @@ describe('loadOfferingTemplate', () => {
     expect(tpl!.addonGroups[0]!.group).toMatchObject({ name: 'Finish', selection_type: 'single', max_select: 1 });
     // Archived options stay behind; live ones come along in order.
     expect(tpl!.addonGroups[0]!.addons.map((a) => a.name)).toEqual(['Blow dry', 'Straighten']);
+    // What an option costs the host stays at the host (plan §6.2).
+    expect(tpl!.addonGroups[0]!.addons[0]).not.toHaveProperty('cost_to_business_pence');
     expect(tpl!.complianceRequirements).toHaveLength(1);
     expect(tpl!.complianceRequirements[0]!.requirement).toMatchObject({
       enforcement: 'block_online',
@@ -412,8 +432,12 @@ describe('ensureServiceForCalendar', () => {
     // Every copied column matches the origin exactly.
     for (const [key, value] of Object.entries(origin)) {
       if (['id', 'venue_id', 'sort_order', 'category_id', 'created_by_staff_id', 'created_at', 'updated_at'].includes(key)) continue;
+      if (key === 'online_meeting_url' || key === 'online_meeting_info') continue;
       expect(copy[key], key).toEqual(value);
     }
+    // The member sets its own meeting link and joining information (D11); the host's never arrive.
+    expect(copy.online_meeting_url ?? null).toBeNull();
+    expect(copy.online_meeting_info ?? null).toBeNull();
 
     // The heading is created at Member B and the copy filed under it.
     const bCategories = rowsFor(db, 'service_categories', MEMBER_B);
@@ -619,5 +643,23 @@ describe('ensureServiceForCalendar', () => {
     expect(copy).toMatchObject({ venue_id: MEMBER_B, duration_minutes: 30, price_pence: null, item_type: 'service' });
     // The offering's own heading still applies.
     expect(rowsFor(db, 'service_categories', MEMBER_B).map((c) => c.name)).toEqual(['Colour services']);
+  });
+});
+
+describe('the column registry', () => {
+  it('leaves a column nobody has classified behind, rather than copying it between venues', async () => {
+    const db = seedDb({ hostService: hostServiceRow({ zz_new_venue_secret: 'not for other venues' }) });
+
+    const tpl = await loadOfferingTemplate(db.asClient(), ITEM);
+
+    expect(tpl!.columns).not.toHaveProperty('zz_new_venue_secret');
+    expect(tpl!.columns).toHaveProperty('description');
+  });
+
+  it('refuses to build a copy when the registry cannot be read', async () => {
+    const db = seedDb();
+    delete db.tables.collective_column_classes;
+
+    await expect(loadOfferingTemplate(db.asClient(), ITEM)).rejects.toThrow(/registry/);
   });
 });

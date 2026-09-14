@@ -159,6 +159,18 @@ async function main() {
     );
   }
 
+  // -- collective_column_classes (W3a) -----------------------------------------
+  // Service role only: the registry decides which columns travel between businesses, and
+  // hosted defaults grant client roles on new tables whatever the migration revoked.
+  for (const role of ['anon', 'authenticated']) {
+    const row = grant('collective_column_classes', role);
+    check(
+      `collective_column_classes: ${role} holds nothing`,
+      row === null,
+      `live: ${fmt(row)}. The column registry is service-role only.`,
+    );
+  }
+
   // -- user_devices (P0-13) --------------------------------------------------
   // The audience column is added by migration 20270121120000, and the client
   // writes it through the session client under RLS. A relation-wide grant

@@ -22,13 +22,21 @@ vi.mock('@/lib/booking/entity-booking-window', () => ({
 }));
 
 import { loadCollectiveAppointmentCatalog } from './collective-venue';
-import { attachVenueClockToAppointmentInput } from '@/lib/availability/appointment-engine';
+import { attachVenueClockToAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
+import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
+import { prepareChainSegments } from '@/lib/availability/appointment-chain-server';
+import { loadActiveVariantForService } from '@/lib/venue/service-variants';
 import {
   isGuestBookingDateAllowed,
   isStaffWalkInBookingDateAllowed,
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
-import { loadCollectiveDayAvailability, resolveCombinedBookingTarget } from './collective-booking-bridge';
+import {
+  loadCollectiveChainDayAvailability,
+  loadCollectiveDayAvailability,
+  loadCollectiveMonthAvailableDates,
+  resolveCombinedBookingTarget,
+} from './collective-booking-bridge';
 
 const COL = 'col-1';
 const OWNER = 'venue-owner';
@@ -103,5 +111,95 @@ describe('loadCollectiveDayAvailability', () => {
     expect(vi.mocked(isStaffWalkInBookingDateAllowed)).toHaveBeenCalledWith('2026-09-06', WINDOW, 'Europe/London');
     expect(vi.mocked(isGuestBookingDateAllowed)).not.toHaveBeenCalled();
     expect(result.practitioners[0]?.slots).toEqual([]);
+  });
+});
+
+/** CB-08: the chosen option's buffer and processing reach the engine, not just its length. */
+describe('collective availability applies the whole option (CB-08)', () => {
+  const variant = {
+    id: 'var-1',
+    name: 'Long',
+    duration_minutes: 45,
+    buffer_minutes: 15,
+    price_pence: 3000,
+    deposit_pence: null,
+    processing_time_blocks: [{ start_minute: 15, duration_minutes: 15 }],
+    is_active: true,
+  };
+
+  beforeEach(() => {
+    vi.mocked(loadActiveVariantForService).mockResolvedValue(variant as never);
+  });
+
+  it('day: the engine sees the option length, buffer and processing, and slots carry its price', async () => {
+    vi.mocked(computeAppointmentAvailability).mockImplementationOnce(
+      () => ({ practitioners: [{ id: 'cal-1', slots: [{ start_time: '10:00', service_id: 'src-1', duration_minutes: 45, price_pence: 3000 }] }] }) as never,
+    );
+    const result = await loadCollectiveDayAvailability(admin(), {
+      collectiveId: COL,
+      offeringId: 'offering-1',
+      calendarId: 'cal-1',
+      anyAvailable: false,
+      date: '2026-09-06',
+      variantId: 'var-1',
+    });
+    const input = vi.mocked(computeAppointmentAvailability).mock.calls[0]![0] as unknown as {
+      services: Array<{ duration_minutes: number; buffer_minutes: number; processing_time_blocks: unknown }>;
+    };
+    expect(input.services[0]).toMatchObject({
+      duration_minutes: 45,
+      buffer_minutes: 15,
+      processing_time_blocks: [{ start_minute: 15, duration_minutes: 15 }],
+    });
+    expect(result.practitioners[0]?.slots[0]).toMatchObject({ duration_minutes: 45, price_pence: 3000 });
+  });
+
+  it('day: a calendar whose service has no such option offers nothing', async () => {
+    vi.mocked(loadActiveVariantForService).mockResolvedValue(null);
+    const result = await loadCollectiveDayAvailability(admin(), {
+      collectiveId: COL,
+      offeringId: 'offering-1',
+      calendarId: 'cal-1',
+      anyAvailable: false,
+      date: '2026-09-06',
+      variantId: 'var-other',
+    });
+    expect(result.practitioners[0]?.slots).toEqual([]);
+    expect(vi.mocked(computeAppointmentAvailability)).not.toHaveBeenCalled();
+  });
+
+  it("month: passes the option row as the venue's own month route does, not a bare length", async () => {
+    vi.mocked(computeAppointmentAvailableDatesInMonth).mockResolvedValue(['2026-09-07']);
+    const out = await loadCollectiveMonthAvailableDates(admin(), {
+      collectiveId: COL,
+      offeringId: 'offering-1',
+      calendarId: 'cal-1',
+      anyAvailable: false,
+      year: 2026,
+      month: 9,
+      variantId: 'var-1',
+    });
+    expect(vi.mocked(computeAppointmentAvailableDatesInMonth)).toHaveBeenCalledWith(
+      expect.anything(), OWNER, 'cal-1', 'src-1', 2026, 9,
+      expect.objectContaining({ variantOverride: variant, additionalAddonMinutes: 0, customDurationMinutes: null }),
+    );
+    expect(out.available_dates).toEqual(['2026-09-07']);
+  });
+});
+
+/** CB-09: a combined-page visit keeps each service's own booking window. */
+describe('loadCollectiveChainDayAvailability booking windows (CB-09)', () => {
+  it('asks for the per-service window and sends no collective length override', async () => {
+    vi.mocked(prepareChainSegments).mockResolvedValue({ ok: false, kind: 'not_offered' });
+    await loadCollectiveChainDayAvailability(admin(), {
+      collectiveId: COL,
+      chain: [{ service_id: 'offering-1' }] as never,
+      calendarId: 'cal-1',
+      anyAvailable: false,
+      date: '2026-09-06',
+    });
+    const call = vi.mocked(prepareChainSegments).mock.calls[0]![0];
+    expect(call.bookingModel).toBe('unified_scheduling');
+    expect(call.segments).toEqual([{ serviceId: 'src-1', variantId: null, addonIds: [], customDurationMinutes: null }]);
   });
 });

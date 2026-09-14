@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import {
+  getVenueStaff,
+  requireAdmin,
+  staffEmailAtOtherVenueMessage,
+  staffMembershipElsewhere,
+} from '@/lib/venue-auth';
+import { apiError } from '@/lib/api/error-codes';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
@@ -149,6 +155,14 @@ export async function POST(request: NextRequest) {
     const existingAuthUser = existingUsers?.users?.find(
       (u) => u.email?.toLowerCase() === normalisedEmail,
     );
+
+    // Before touching the auth user: a refused request must not have reset anyone's password.
+    if (await staffMembershipElsewhere(admin, staff.venue_id, normalisedEmail, existingAuthUser?.id)) {
+      return NextResponse.json(
+        apiError(staffEmailAtOtherVenueMessage(normalisedEmail), 'STAFF_EMAIL_AT_OTHER_VENUE'),
+        { status: 409 },
+      );
+    }
 
     if (existingAuthUser) {
       authUserId = existingAuthUser.id;

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import {
+  getVenueStaff,
+  requireAdmin,
+  staffEmailAtOtherVenueMessage,
+  staffMembershipElsewhere,
+} from '@/lib/venue-auth';
+import { apiError } from '@/lib/api/error-codes';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
 import { deliverStaffAccessLinkEmail } from '@/lib/staff-invite-email';
@@ -133,6 +139,13 @@ export async function POST(request: NextRequest) {
 
     if (existing) {
       return NextResponse.json({ error: 'This email is already a staff member for this venue' }, { status: 409 });
+    }
+
+    if (await staffMembershipElsewhere(admin, staff.venue_id, normalisedEmail)) {
+      return NextResponse.json(
+        apiError(staffEmailAtOtherVenueMessage(normalisedEmail), 'STAFF_EMAIL_AT_OTHER_VENUE'),
+        { status: 409 },
+      );
     }
 
     const trimmedName = name?.trim();

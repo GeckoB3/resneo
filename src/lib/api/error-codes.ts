@@ -82,6 +82,14 @@ export const API_ERROR_CODES = [
   /** Downgrade blocked: too many active staff for the light plan. */
   'LIGHT_DOWNGRADE_STAFF',
 
+  // ── Team members ────────────────────────────────────────────────────────
+  /**
+   * The email already works at another venue. One login at two venues cannot
+   * open either dashboard, so the invite is refused rather than creating that
+   * state (collective plan D38).
+   */
+  'STAFF_EMAIL_AT_OTHER_VENUE',
+
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',
   'NOT_FOUND',

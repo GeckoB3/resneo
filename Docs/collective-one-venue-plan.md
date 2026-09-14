@@ -114,14 +114,12 @@ verifier and every deploy step, rollback drills, and an acceptance checklist wri
    Host prices apply everywhere unless the host turns on the per-calendar price permission for a
    service (D27, through D4 and D29); the consent text, the trader line and the unticked
    marketing consent stand as designed.
-2. **Member-only services (D2)**: kept for the bookings the member's team makes, not bookable
-   online, chosen at accept. When own pages redirect (D3) is decided and is no longer on this list.
-3. **Whether host transfer ships first time (D12).** D29 (one name and description everywhere)
-   and D54 (the host's values apply when an existing collective migrates) were decided on
-   2026-09-14 and are no longer on this list; each environment's dry-run report is still yours to
-   sign (D21, §11.3).
+2. **Nothing else.** D2 (member-only services kept for the team's bookings, chosen at accept)
+   and D12 (host transfer ships in the first release) were confirmed on 2026-09-14, after D3,
+   D29 and D54 the same day. What remains for you is operational: signing each environment's
+   dry-run report before its collective migrates (D21, §11.3).
 
-Everything else in §11 carries a recommended default that the team is building to. The nine the
+Every row in §11 is now decided, and the team builds to it. The nine the
 second pass raised (D38, D39, D41, D42, D44, D49, D50, D51, D52) were answered on 2026-09-14 and
 are recorded in §11.4. Three of those answers change work described elsewhere in
 this document, so read §11.4 before §6.5, §6.7 or §9.
@@ -1324,7 +1322,7 @@ excludes them, otherwise CI re-grants what the migration revokes;
   `active`, no new status value, DL9); while paused a member may Leave or Take over, and the
   take-over runs `collective_transfer_host` with no 14-day wait; after 30 days paused the
   collective ends through `collective_dissolve`. LIFE-13 covers the paused state and the transfer
-  window. Owner decision whether transfer ships in the first release (D12).
+  window. Transfer ships in the first release (D12, decided 2026-09-14).
 - **Member lapse.** The subscription cron that already handles link expiry
   (`src/app/api/cron/account-link-maintenance/route.ts`) sets `venue_collective_members.suspended_at`
   when the member's subscription lapses and clears it when it resumes (N36, N37; NOT-01). While
@@ -2167,7 +2165,7 @@ Effort is relative (S small, M medium, L large) and assumes one engineer familia
 
 | # | Workstream | Effort | Depends on |
 |---|---|---|---|
-| W0 | Owner decisions (D2 and D12 remain), production survey, the D31 owed-migrations pass | S | none |
+| W0 | Production survey and the D31 owed-migrations pass (every owner decision is taken) | S | none |
 | W1 | Booking correctness on today's model, in two parts under one id. W1a, starting now: one resolver over today's two custom columns, per-calendar price and length in the catalogue, base-price override removed, variant-aware availability, chain windows, price snapshot with settling readers, staff actor stamps, Stripe readiness (`stripe_charges_enabled` and its backfill). W1b, after W15 and W8: the resolver over all seven per-calendar fields, with the deposit path and the card-hold floor | L | W0 (D4, D6); W1b also W15, W8 |
 | W2 | Calendar assignment hardening: both assignment writers (`PUT practitioner-services` and the `practitioner_ids` half of `PATCH appointment-services`) become diff writes inside one transaction, with `expected_service_ids` and `expected_calendar_ids`, stable row ids, every custom and attribution column preserved across an unrelated save, own-venue checks on service and calendar ids, the 24-hour rule for clients without expected ids, and `service_items.updated_at` with `expected_updated_at` on the Services page. W8, CSA-01 to CSA-03, D15 and SEC-05 depend on this landing first. It is the first of the four edits to `PATCH appointment-services`, which land in the order W2, W8, W6, W5 | M | none |
 | W3 | Engine schema and functions dark, in two parts under one id. W3a, first and its own deliverable: the column registry `collective_column_classes`, seeded and classified for all eight tables (D53, D40), with its enumerating pgTAP test (DB-07, DB-10), and `service-duplication.ts` reading it. Then the engine: tables, revisions, dirty and lock triggers, apply, claims, verifier, grants, pgTAP and concurrency harness, reading the registry | L | Pass 0 |
@@ -2301,7 +2299,7 @@ same ids. The recommended default is in bold.
 | id | Decision | Recommended |
 |---|---|---|
 | D1 | A joining member's same-named service | **A new host-managed replica; "Use mine" only through the reviewed adoption** |
-| D2 | Member-only services while in a collective | **Kept for bookings the member's team makes, not bookable online; the member chooses at accept** |
+| D2 | Member-only services while in a collective | **DECIDED 2026-09-14. Kept for bookings the member's team makes, not bookable online; the member chooses at accept** |
 | D3 | Own booking pages while the collective is live | **DECIDED 2026-09-14. The collective page is the venue's booking page for as long as it is in the collective, and it supersedes every member's own page, the host's included.** The conditions in §6.9 (live, converged, at least one calendar listed) are a safety net so a redirect can never send a guest to a page that cannot take their booking, not a softening of the rule. Whenever those conditions hold, which is the normal state, the own page hands over |
 | D4 | Who may set per-calendar values | **Calendar staff within the flags, that venue's admins, and host admins** |
 | D5 | Build the five missing per-calendar fields | **Yes** |
@@ -2310,7 +2308,7 @@ same ids. The recommended default is in bold.
 | D8 | Payments | **Members collect on their own Stripe accounts; calendars without charges-capable Stripe are hidden from guests for paid services** |
 | D10 | Compliance | **Forms must be on at members with form-bearing offerings; a member's existing records of the same library form count; member venue-wide forms apply on top; host venue-wide forms apply to every collective service** |
 | D11 | Location, meeting link and joining information | **Location follows the host; meeting link and joining information are per venue** |
-| D12 | Host transfer | **A request with consent, notice and free leave; decide whether it ships in the first release** |
+| D12 | Host transfer | **DECIDED 2026-09-14. A request with consent, notice and free leave, and it ships in the first release**, because the paused state's take-over (D35) runs through the same function |
 | D13 | Taking a service off the collective page | **Member replicas retire (inactive, calendar choices kept, restored if re-offered)** |
 | D14 | Deleting a host service that is on the collective page | **Blocked until it is taken off the page** |
 | D15 | May a member re-add a calendar the host removed | **Yes, with "Last changed by" on both sides and a notice** |

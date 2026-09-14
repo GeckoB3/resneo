@@ -1307,16 +1307,14 @@ All venue notices use `notifyVenue` (`src/lib/linked-accounts/notifications.ts:6
 
 ## 7. Open questions
 
-Each bullet still needs the owner. The decision rows in plan §11.2 are recommendations awaiting the owner unless marked decided; of those rows D3, D29 and D54 are marked decided, so the six bullets removed on 2026-09-14 are the ones D41, D51, D34 (now N32), D29, D54 and D27 (counsel complete, D9) answered.
+No bullet below still needs the owner: every decision row in plan §11.2 is marked decided. The eight bullets removed on 2026-09-14 are the ones D41, D51, D34 (now N32), D29, D54, D27 (counsel complete, D9), D2 and D12 answered; what is left is the reasoning behind decisions the owner has already taken, kept for the record.
 
 - Graft 5 routes a member's own diary columns to its own staff form, which lists replicas and member-only services together. On 2026-09-05 you asked that, with two or more venues in a collective, the staff form lists the combined page's offerings only. With own booking pages redirecting (D3), member-only services would otherwise have no way to be booked. May the own-column form return, or should member-only services stay unbookable from the diary?
 - Should services only at one venue (host or member) lose online booking while the collective is live, as this spec assumes from D2 and D3, or keep a separate online route?
-- At accept, which default should a member's other services get: 'Keep for bookings your team makes' (recommended), 'Ask the host to add it', or 'Park it'?
 - When the host turns a staff permission off, should stored per-calendar values be cleared (recommended for length, buffer, price and deposit, with an ask and a notice) or ignored until the permission returns? Colour would only be ignored.
 - While a member's replica is updating, should a booking on that member's calendar be refused ('This service has just been updated. Please choose your time again.') or accepted at the previous terms?
 - Price snapshot backfill scope: all past and future bookings (needed for 'Bookings already made keep the price they were booked with' to hold in reports and balances) or future bookings only?
 - Should group bookings be limited to calendars at the first person's venue (as specified), or split into linked bookings per venue with separate payments?
-- Host transfer: move hosting 14 days after the new host accepts (as specified), or require every member to re-consent first? Should transfer ship in the first release at all?
 - If the host stops being a member through a link change, should the page pause until a member takes over (as specified, ending after 30 days), or keep today's automatic transfer?
 - After a collective ends, should old links show a page listing former venues (as specified, each venue can switch its listing off) or redirect to the former host's page (D25)?
 - Should the host still be able to adopt a member's own page address for the collective page (PageAddressSection), given own pages now redirect? If kept, must that member agree?

@@ -14,7 +14,7 @@ const service = {
   duration_minutes: 60,
   buffer_minutes: 10,
   deposit_pence: 1000,
-  processing_time_blocks: [{ start_minute: 40, duration_minutes: 20 }],
+  processing_time_blocks: [{ id: 'b1', start_minute: 40, duration_minutes: 20 }],
 };
 const assignment = { custom_price_pence: 2200, custom_duration_minutes: 50 };
 const option = {

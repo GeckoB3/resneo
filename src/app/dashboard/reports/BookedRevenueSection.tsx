@@ -7,6 +7,7 @@ import type {
   BookedRevenueGrain,
   BookedRevenuePreset,
   BookedRevenueReport,
+  BookedRevenueVenueCell,
 } from '@/lib/reports/booked-revenue';
 import { formatPence } from '@/lib/booking/payment-display';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -105,6 +106,17 @@ function netPence(cell: BookedRevenueCell | undefined, includeNoShows: boolean):
   return cell.booked_pence + (includeNoShows ? cell.no_show_pence : 0);
 }
 
+/** The part of a venue's net figure booked through the collective's page. */
+function collectiveNetPence(cell: BookedRevenueVenueCell | undefined, includeNoShows: boolean): number {
+  if (!cell) return 0;
+  return cell.collective_booked_pence + (includeNoShows ? cell.collective_no_show_pence : 0);
+}
+
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 function downloadCsv(filename: string, rows: string[][]) {
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -155,6 +167,12 @@ export function BookedRevenueSection({
   const columns = data?.columns ?? [];
   const ownColumns = columns.filter((c) => !c.linked);
   const linkedColumns = columns.filter((c) => c.linked);
+  // Older responses carry no venue list; fall back to "no breakdown" rather than failing.
+  const venues = data?.venues ?? [];
+  const collective = data?.collective ?? null;
+  const collectiveVenueNames = venues.filter((v) => v.access === 'collective').map((v) => v.venue_name);
+  const linkVenueNames = venues.filter((v) => v.access === 'link').map((v) => v.venue_name);
+  const showVenueBreakdown = venues.length > 1 || collective != null;
   const colourFor = useCallback((index: number) => BAR_COLOURS[index % BAR_COLOURS.length]!, []);
 
   const chartData = useMemo(() => {
@@ -209,6 +227,18 @@ export function BookedRevenueSection({
       (totalNet / 100).toFixed(2),
       (data.totals.no_show_pence / 100).toFixed(2),
     ]);
+    if (showVenueBreakdown) {
+      rows.push([]);
+      rows.push(['Venue', 'Booked revenue', collective ? `Through ${collective.name}` : 'Through a collective page']);
+      for (const v of venues) {
+        const cell = data.totals.by_venue?.[v.venue_id];
+        rows.push([
+          v.venue_name,
+          (netPence(cell, includeNoShows) / 100).toFixed(2),
+          (collectiveNetPence(cell, includeNoShows) / 100).toFixed(2),
+        ]);
+      }
+    }
     downloadCsv(`booked-revenue-${data.from}-${data.to}-${data.grain}.csv`, [header, ...rows]);
     onExportNotice('success', 'Booked revenue CSV download started - check your downloads folder.');
   };
@@ -358,11 +388,81 @@ export function BookedRevenueSection({
                   service list, so {unpriced === 1 ? 'it adds' : 'they add'} nothing to these totals.
                 </p>
               ) : null}
-              {linkedColumns.length > 0 ? (
+              {collective && collectiveVenueNames.length > 0 ? (
+                <p className="mb-2 text-sm text-slate-500">
+                  Includes {listNames(collectiveVenueNames)}, members of {collective.name} with you. Every member of a
+                  collective sees each member&apos;s booked revenue, venue by venue.
+                </p>
+              ) : null}
+              {linkVenueNames.length > 0 ? (
+                <p className="mb-4 text-sm text-slate-500">
+                  Includes calendars from {listNames(linkVenueNames)}, shared with you through a linked account.
+                </p>
+              ) : linkedColumns.length > 0 && venues.length === 0 ? (
                 <p className="mb-4 text-sm text-slate-500">
                   Includes calendars from {[...new Set(linkedColumns.map((c) => c.venue_name))].join(', ')}, shared
                   with you through a linked account.
                 </p>
+              ) : null}
+
+              {showVenueBreakdown ? (
+                <div className="mb-6 overflow-x-auto rounded-xl ring-1 ring-slate-200">
+                  <table className="min-w-full text-sm">
+                    <caption className="sr-only">Booked revenue by venue</caption>
+                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">Venue</th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right">Booked revenue</th>
+                        {collective ? (
+                          <th className="whitespace-nowrap px-3 py-2 text-right">Through {collective.name}</th>
+                        ) : null}
+                        <th className="whitespace-nowrap px-3 py-2 text-right">{bookingWord}s</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {venues.map((v) => {
+                        const cell = data.totals.by_venue?.[v.venue_id];
+                        const count = cell ? cell.booked_count + (includeNoShows ? cell.no_show_count : 0) : 0;
+                        return (
+                          <tr key={v.venue_id}>
+                            <td className="px-3 py-2 font-medium text-slate-800">
+                              {v.venue_name}
+                              {v.access === 'own' ? (
+                                <span className="ml-1.5 text-xs font-normal text-slate-400">(you)</span>
+                              ) : null}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700">
+                              {money(netPence(cell, includeNoShows))}
+                            </td>
+                            {collective ? (
+                              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700">
+                                {money(collectiveNetPence(cell, includeNoShows))}
+                              </td>
+                            ) : null}
+                            <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-700">{count}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-900">
+                      <tr>
+                        <td className="px-3 py-2">Total</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(totalNet)}</td>
+                        {collective ? (
+                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                            {money(
+                              venues.reduce(
+                                (sum, v) => sum + collectiveNetPence(data.totals.by_venue?.[v.venue_id], includeNoShows),
+                                0,
+                              ),
+                            )}
+                          </td>
+                        ) : null}
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{totalCount}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               ) : null}
 
               <div className="mb-6 h-72">

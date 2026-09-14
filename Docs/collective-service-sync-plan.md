@@ -1,6 +1,11 @@
 # Keeping members' service copies in step with the origin: plan and status
 
-Status: IMPLEMENTED on the `staging` working tree (written and built 2026-09-09, baseline
+Status: SUPERSEDED in design by `Docs/collective-one-venue-plan.md`, which replaces one-way
+shape sync with host-managed replicas written by an audited engine. This document remains the
+accurate as-built record of what runs today, so read it to understand current behaviour, and
+read the one-venue plan before building anything new. Sync is retired in that plan's Pass C1.
+
+Previously: IMPLEMENTED on the `staging` working tree (written and built 2026-09-09, baseline
 `7807cf08` plus the amended-hours and canonical-shape work). Migration `20270209120000`
 owed to both databases; the code tolerates its absence.
 

@@ -58,9 +58,8 @@ every collective edit reaches fewer places than the person making it expects.
   collective after its venue leaves; dissolving 404s every old link; the collective embed is
   refused on external sites.
 - **Leaving does not give control back.** Copies stay linked and resume syncing if the venues ever
-  share a collective again, and the client-detail sharing that joining sets up, which is the
-  intended arrangement while the collective is live (D41), never ends when the membership does
-  (SB-42).
+  share a collective again. (The account links underneath a collective, and the client access they
+  grant, rightly carry on after it: D41.)
 
 The second forensic pass (2026-09-14) added five more, all of which stop a collective feeling like
 one venue even after everything above is fixed:
@@ -100,7 +99,7 @@ are resolved in §6 (table in §6.13).
 
 **What it takes.** A first pass of fixes that are worth doing on today's model anyway (§8.1), then
 seven deploy passes (owed migrations, two expand passes, migrate existing collectives, switch new
-collectives, remove old code, contract) across 23 workstreams (W0 to W21, plus W7a), the largest
+collectives, remove old code, contract) across 22 workstreams (W0 to W21), the largest
 being the booking correctness work, the engine and the lifecycle (§8). Two of the six added by the second pass, multi-venue people
 (W16) and reporting (W17), carry live bugs and start immediately rather than waiting on the engine.
 Testing is designed as the safety net: 170 tests including
@@ -114,12 +113,25 @@ verifier and every deploy step, rollback drills, and an acceptance checklist wri
    Host prices apply everywhere unless the host turns on the per-calendar price permission for a
    service (D27, through D4 and D29); the consent text, the trader line and the unticked
    marketing consent stand as designed.
-2. **Nothing else.** D2 (member-only services kept for the team's bookings, chosen at accept)
-   and D12 (host transfer ships in the first release) were confirmed on 2026-09-14, after D3,
-   D29 and D54 the same day. What remains for you is operational: signing each environment's
-   dry-run report before its collective migrates (D21, §11.3).
+2. **D41 revised (2026-09-14, later the same day).** A collective is extra functionality on top of
+   full-access account links and never changes them; leaving or ending it affects only the
+   collective. §6.5, §6.7, §7 and §11.4 are rewritten to that, and W7a is withdrawn.
+3. **The three points the readiness review left open were answered the same day** (2026-09-14):
+   - **Venues in a collective offer only the collective's services (D2 and graft 5 revised).** While
+     a venue is live in a collective, every appointment service it has that is not on the page is
+     parked: derived from state, never stored, and lifted the moment the venue leaves. Every diary
+     column opens the collective form. A service that only one venue or calendar offers can still be
+     added to the page, so nothing is lost, and existing bookings on a parked service stay fully
+     manageable (§6.6).
+   - **Venue-level settings (D32 decided).** Guest sign-in, guest self-reschedule, the waitlist on
+     the page, "Any available" and the staff-first flow follow the host; communication policies and
+     in-person payments stay with each venue, and the host sees "Different at {venue}" (§6.10).
+   - **Adopting a member's page address.** The member venue's admin must confirm before the host
+     adopts it; until then the collective keeps its own address (§6.9).
+   What remains is operational: signing each environment's dry-run report before its collective
+   migrates (D21, §11.3).
 
-Every row in §11 is now decided, and the team builds to it. The nine the
+Every row in §11 is decided, and the team builds to it. The nine the
 second pass raised (D38, D39, D41, D42, D44, D49, D50, D51, D52) were answered on 2026-09-14 and
 are recorded in §11.4. Three of those answers change work described elsewhere in
 this document, so read §11.4 before §6.5, §6.7 or §9.
@@ -130,12 +142,12 @@ This document lists 42 split-brain cases, 72 bugs, 54 decisions and 170 tests. T
 level of detail for someone building it and the wrong level for someone deciding whether to. Six
 things change the shape of the work. Everything else is execution.
 
-1. **Make shared client access end when the membership does (D41).** Sharing while the collective
-   is live is intended and stays. What does not exist is the ending: leaving, removal and dissolve
-   only flip the membership row, so a departed member keeps reading its former partners' client
-   records indefinitely. Releasing the links in the same transaction that ends the membership is
-   the single most important correction in this document, because everything else about client
-   data is working as the owner wants.
+1. **Leave account links alone (D41, owner, 2026-09-14).** A collective is extra functionality on
+   top of account links with full access. Joining requires those links, and nothing the collective
+   does (join, leave, removal, dissolve, host transfer, migration) creates, narrows or ends one. A
+   venue that leaves keeps full access to create, edit and cancel bookings for the venues it is
+   linked with. An earlier version of this item said the opposite; it is withdrawn, and with it the
+   interim workstream W7a and the `account_links.created_for_collective_id` column.
 2. **Fix the silent lockout, then stop (D38, W16).** A person who works at two venues cannot sign
    in at all today, and the invite route creates that state without warning. The decision is to
    refuse the invite with a clear message rather than build a venue chooser, so W16 is now small.
@@ -273,10 +285,10 @@ and heading. And "this calendar offers this service" is stored twice: in
 - Create, invite and accept require every pair of members to hold an accepted link with full
   calendar detail and create/edit/cancel both ways, and the `account_links` CHECK allows that only
   with client details shared (`src/lib/linked-accounts/catalogue.ts:172-201`,
-  `20260919120000_linked_accounts.sql:69-79`). Joining a collective therefore shares every member's
-  client list with every other member, which the owner has confirmed is intended while the
-  collective is live (D41); what is missing is the ending, because leaving never revokes it
-  (SB-42, §6.7).
+  `20260919120000_linked_accounts.sql:69-79`). Every pair of members therefore already shares
+  client details through its account link before the collective exists. That is the foundation the
+  owner wants (D41): the collective sits on top of the links, and leaving or dissolving it never
+  touches them (SB-42, withdrawn).
 - Accepting an invitation gives the venue nothing. Services arrive only when the host later
   ticks one of its calendars in the manager.
 - Leave and removal flip the membership row. Reconcile then marks the venue's providers
@@ -380,7 +392,9 @@ and heading. And "this calendar offers this service" is stored twice: in
   calendar price with the base duration; visit creates use the first calendar's duration.
 - Staff inside a live collective get the offerings-only collective form from every entry point,
   including their own diary columns, so member-only services cannot be booked from the diary
-  while the member's own page still sells them.
+  while the member's own page still sells them. Under D2 as revised on 2026-09-14 the
+  offerings-only form is the intended behaviour; what changes is that services not on the page stop
+  being sold anywhere else too, because they are parked (§6.6).
 - Money, guest records, compliance and comms belong to the owning venue. A member without Stripe
   is offered for paid offerings and the guest is refused at the final step (live on staging).
 
@@ -444,7 +458,7 @@ eight maps; severity is the highest any auditor assigned.
 | SB-22 | Member leaves, or is removed | Its own page and services back | Copies stay linked and dormant; an adopted address keeps serving the collective; the Leave dialog says the own page is unaffected | High | `catalogue.ts:616-626`; `VenueCollectivesPanel.tsx:357-369` |
 | SB-23 | Host transfer | Mastership moves | Copies still follow the old host; the page's address, hours and rules switch at once; the confirmation mentions none of it | Medium | `members/route.ts:151-174`; `collective-venue.ts:88-172` |
 | SB-24 | Reducing a link's write grant | A booking-permission tweak | Both venues' calendars silently vanish from the page while both stay members | Medium | `collectives.ts:627-645` |
-| SB-25 | Staff book from the diary | The calendar's services | Every column, including own columns, opens the offerings-only form; member-only services cannot be booked there | Medium | `collective-staff-scope.ts:133-156`; `PractitionerCalendarView.tsx:9188-9195` |
+| SB-25 | Staff book from the diary | The calendar's services | Every column, including own columns, opens the offerings-only form; member-only services cannot be booked there. **Resolved by D2 as revised 2026-09-14:** the offerings-only form is kept as the intended behaviour, and services not on the page are parked everywhere, so the diary and the own page no longer disagree | Medium | `collective-staff-scope.ts:133-156`; `PractitionerCalendarView.tsx:9188-9195` |
 | SB-26 | Receptionist picks a known client in the collective staff form | That venue's client | Search covers the acting venue, but the client is written into the calendar's venue | Medium | `DetailsStep.tsx:253,457-459`; `venue/bookings/route.ts:345-358` |
 | SB-27 | Five definitions of "live collective" | One answer | Settings, staff form, sidebar, emails, widget and cross-suggestion disagree when a member lapses | Medium | `collective-staff-scope.ts:77-114`; `collectives.ts:824-841,873-886` |
 | SB-28 | One person works at two venues in the collective and is given a login at each | One account that reaches both | `resolveUniqueStaffRow` refuses implicit venue selection, so they are redirected to `/signup/business-type` and locked out of both dashboards, with no message and no chooser. There is no venue switcher in the product | High | `src/lib/venue-auth.ts:55-65,330-332`; `src/app/dashboard/layout.tsx:89-93`; `supabase/migrations/20260301000003_create_staff.sql:16` |
@@ -461,7 +475,7 @@ eight maps; severity is the highest any auditor assigned.
 | SB-39 | A host looks at a member's column in the diary to see when they are free | The member's real hours | Partner columns are drawn from `working_hours` alone, so the header line, the grey stripes and the working-hours filter ignore schedule periods, rotas, days off, amended hours, leave, the partner venue's opening hours and its closures. The host is shown a member as open all day on a day that business is shut | High | `linked-calendar/route.ts:182-207`; `practitioners/route.ts:34-61` already returns schedule periods, the rota, days off and amended hours |
 | SB-40 | A guest picks "Any available" on the collective page | A fair spread across the venues offering it | The collective branch returns before the flags block, so `any_available_practitioner_config` (priority or random, and the host's calendar order) never runs, and the bridge takes a first-wins dedupe over a list hard-coded host first. The host is handed every contested slot, permanently | High | `booking/availability/route.ts:577-611` vs `:613`; `collective-booking-bridge.ts:287-292`; `collective-venue.ts:586-596` |
 | SB-41 | Staff try to move a booking to a calendar at another venue in the collective | It moves, as it would within one venue | The drag is refused and the dialog explains that the calendars "are on different ResNeo accounts". The offered path is rebook then cancel: a new booking id, the service picked again by hand, a cancellation and a confirmation both sent to the guest, and the deposit and card hold abandoned | High | `PractitionerCalendarView.tsx:6180-6212,9325,5016-5053` |
-| SB-42 | A member leaves the collective, or the collective is dissolved | Each venue keeps its own clients and stops seeing everyone else's | Leave, removal and dissolve only flip the membership row; no collective route or library function touches `account_links`, so the accepted link and its client-detail grant survive indefinitely. A departed member keeps reading its former partners' client records, including contact details, notes, documents and compliance records. This is the half of D41 that does not exist | High | `collectives/[id]/members/route.ts:189,280` and `collectives/[id]/route.ts:259-263`; no `account_links` writer in `src/lib/linked-accounts/collectives.ts` or any collective route |
+| SB-42 | A member leaves the collective, or the collective is dissolved | **Withdrawn 2026-09-14 (D41): not a defect.** The owner's rule is that a collective is extra functionality on top of account links with full access, and ending or leaving it changes only the collective | Leave, removal and dissolve flip the membership row and touch no `account_links` row, so each account link and everything it grants (client records, bookings, and create, edit and cancel at the other venue) carries on after the collective. That is correct and must stay. It was first logged here as a High defect in the belief that the owner wanted access to end | n/a | `collectives/[id]/members/route.ts:189,280` and `collectives/[id]/route.ts:259-263`; create, invite and accept require the full account-link mesh first, through `checkCombinedEligibility` (`collectives/route.ts:138`, `members/route.ts:123,228`) |
 
 ---
 
@@ -625,8 +639,11 @@ Grafted from Option B:
    takes the host's currency (`collective-venue.ts:170`), so a member trading in another currency
    would have its prices relabelled rather than converted. That is a money bug, not a tidiness
    one, and it is the half of this gate that does not exist yet.
-5. **Diary routing**: a member's own columns open its own staff form (replicas are its own rows,
-   so they are already there), and partner columns open the collective form.
+5. **Diary routing (REVISED 2026-09-14, D2)**: every diary column, the venue's own and its
+   partners', plus New and Walk-in, opens the collective staff form, which lists the collective's
+   offerings only. The routing first grafted here (own columns to the venue's own staff form, so
+   member-only services stayed bookable from the diary) is withdrawn: a service that is not on the
+   page is parked while the venue is live (§6.6).
 
 ---
 
@@ -671,6 +688,8 @@ amended design. Detail that belongs to one audience lives in the two companion d
 | Which calendar offers a service | `calendar_service_assignments` at the calendar's venue. The only store; `collective_service_providers` is dropped in C2 | Host admins for any calendar in the collective; each venue for its own calendars |
 | Per-calendar values: length, buffer, price, deposit, colour (and name and description on services not on the collective page) | Assignment custom columns, applied only while the master's permission flag is on | Calendar staff within the flags, that venue's admins, and host admins (D4) |
 | Offering on the collective page | `collective_service_items.master_service_id`; everything shown is derived from the master | Host admins: "Show on the {collective} page" on the Services page |
+| Which services a venue can take new bookings for while live | Derived, never stored: the collective's offerings (masters on the page at the host, replicas at a member); every other appointment service is parked (D2, §6.6) | Nobody directly: putting a service on the page, taking it off, or leaving decides it |
+| Staff bookings only (`is_bookable_online`) | The master (host-controlled column, Appendix F) | Host admins, on the service page (`svc.form.staffOnly.label`) |
 | Page identity: name, page address, branding, tabs, About, gallery, team | `venue_collectives` and its `booking_page_config`; the host's address, phone and opening hours, labelled as the host's (a collective-owned set is Tier 3, §8.0) | Host admins, Booking Page tab, collective scope |
 | Calendar hours, breaks, closures, leave | The calendar's own venue | That venue |
 | Bookings, guests, payments, compliance records, waitlist | The owning venue | The owning venue |
@@ -715,7 +734,7 @@ FROM PUBLIC, anon, authenticated` on each table and its sequences; DDL in Append
     venue admin in everything downstream: `getVenueStaff` returns the apparent staff row with
     `support` metadata attached and nothing obliged to read it (`venue-auth.ts:236-266`). For a
     dispute about who raised a member's price, "the host's admin" and "a platform engineer signed
-    in as the host's admin" is the entire question. Add `actor_support_session_id` and
+    in as the host's admin" is the entire question. Add `support_session_id` and
     `actor_is_platform_superuser`, populated from that metadata, and cross-reference
     `support_audit_events`, which is append-only and already records a reason.
   - **Record system actors.** Every cron-driven apply writes an event with `actor_type = 'system'`
@@ -752,13 +771,12 @@ rather than a pairwise link (RT2-12).
   `venue_collectives_adopt_requires_venue` CHECK, which conflicts with its own `ON DELETE SET NULL`.
 - `venue_collective_members`: add `suspended_at`, `consent_version`, `consented_at`,
   `consented_by_user_id`; an AFTER UPDATE OF status trigger calls `collective_release_member`
-  whenever a membership stops being active, which releases the venue's replica links, unmanages
-  its library objects and ends the collective-created `account_links`, all in the same
-  transaction (RT1-4; this is the answer to DB-04's question of what that statement's transaction
-  covers).
-- `account_links`: add `created_for_collective_id` (nullable FK, no cascade), set by accept and by
-  the migration on every account link the collective created, so the release knows which account
-  links to end and which to restore to their prior grant (D41, §6.7).
+  whenever a membership stops being active, which releases the venue's replica links and unmanages
+  its library objects in the same transaction (RT1-4; this is the answer to DB-04's question of
+  what that statement's transaction covers). It never writes `account_links` (D41).
+- `account_links`: unchanged. No column is added and no engine function writes the table (D41). An
+  earlier draft added `created_for_collective_id` so the release could end links; that is
+  withdrawn.
 - Children get identity mappings, `ON DELETE NO ACTION` with engine-managed cleanup rather than
   SET NULL (RT2-4): `service_variants.replica_of_variant_id`;
   `addon_groups.managed_by_collective_id` and `replica_of_addon_group_id`;
@@ -1079,14 +1097,16 @@ Two consequences follow, and both are new work:
   The list, the search and the contact picker all need an explicit "in this collective" scope, with
   the owning venue named on every row and a hard refusal for any venue outside the live collective.
 - **Ownership still never moves.** A record found this way belongs to its own venue, is edited
-  under that venue's name, and is counted in that venue's reports. The collective grants access,
-  not ownership, which is what makes the release on leave (§6.7) both possible and sufficient.
+  under that venue's name, and is counted in that venue's reports. The access itself comes from
+  the account link, not from the collective.
 
-Nothing is offered for downgrade, at migration or at any other time: under D41 sharing is the
-arrangement while the collective is live, and the release on leave (§6.7) is what ends it. What
-the migration does is record which pairwise account links were created for the collective
-(`account_links.created_for_collective_id`, §7 step 0), so the release knows which to end and
-which to restore.
+Nothing is offered for downgrade, at migration or at any other time, and nothing is ended when a
+membership ends: the account links belong to the venues, not to the collective (D41). What ends
+with the membership is the collective's own functionality: the "in this collective" contact
+search scope, the collective staff form and the collective view of the reports. Everything an
+account link grants on its own (a partner's bookings in the diary, create, edit and cancel at the
+other venue, per-guest access through a shared booking, linked revenue) carries on exactly as it
+does for any two linked venues.
 
 **Host staff and the creator exception.** The seven `staff_may_customize_*` flags gate two
 different things, and the second one is a hole in host control. Besides saying what a calendar
@@ -1147,6 +1167,33 @@ excludes them, otherwise CI re-grants what the migration revokes;
   cannot take charges for paid services, members with compliance switched off for services with
   forms, suspended members, behind replicas. Staff keep those calendars with a note ("Card
   payments are not set up at {venue}, so take payment in person.").
+- **Parked services (D2, revised 2026-09-14).** While a venue is live in a collective (its
+  membership `active` and not suspended, the collective `active`, not paused, in replicas mode and
+  live, as the one live-collective resolver answers it), its bookable appointment catalogue is the
+  collective's offerings only: at the host, the masters of active offerings; at a member, the
+  replicas of its live replica links. Every other appointment service at that venue is parked: not
+  listed or bookable in any staff form, diary, walk-in flow, availability read or public page, and
+  refused by every create route. That includes a master whose offering the host withdrew, a
+  member's same-named service kept separate at join (D1) and any service created while live (a
+  venue may still create and edit its own services; they are simply parked). Parking is derived
+  from state, exactly like D3's redirect rule: no `is_active` change, no stored list, nothing
+  written at join or release, so it lifts by itself the moment the membership ends, the member is
+  suspended, the page pauses or the collective dissolves. It does not wait on convergence or
+  listing, so a service never flickers between parked and bookable while a replica catches up.
+  Existing bookings on a parked service stay fully manageable: view, staff modify within the same
+  service, cancel, guest self-reschedule, payments, reminders and reports all work as before, so
+  the exclusion sits where a service is offered for a new booking and never on a path that serves an
+  existing one. Classes, events and resources are untouched (§6.14).
+- **Staff bookings only (`is_bookable_online`).** `service_items.is_bookable_online` (default true,
+  `20260430120000_unified_scheduling_engine.sql:104`) is read nowhere in the booking path today: its
+  only reader is the anon RLS policy at `:398`, which the admin-client public path bypasses. W4 wires
+  it: a service with `is_bookable_online = false` appears in the staff form (the collective staff
+  form, for an offered service) but not on any public page, public availability read or public
+  create route. The host sets it on the service page ("Staff bookings only",
+  `svc.form.staffOnly.label`); it is host-class in the column registry (Appendix F), so replicas
+  follow. Honouring the column changes behaviour on every venue, not only in collectives, so the W0
+  production survey counts rows with `is_bookable_online = false` first and reports them before W4
+  ships.
 - **Price snapshot, read where money is settled** (RT2-1). The snapshot is the first fallback
   after a stored total in `resolveBookingTotalPence`, `resolveBookingTotalPenceFromRow` and
   `loadRowTotalResolver`, and is selected by the visit payment picture, the charge route, booking
@@ -1201,24 +1248,29 @@ excludes them, otherwise CI re-grants what the migration revokes;
   member then chooses, per same-named service, "Add the host's as new" (default) or "Use mine",
   which opens a reviewed adoption: option mapping, before and after preview of price, length,
   deposit, payment rule and forms, and snapshots of that service's bookings in the same
-  transaction (RT2-20). Member-only services: "Keep for bookings your team makes" (default), "Ask
-  the host to add it", or "Pause it" (RT2-10; this document calls that state *parked*, so that
-  "paused" keeps one meaning, the page after the host leaves). A member holding a form from the
+  transaction (RT2-20). Member-only services: "Park it until I leave" (default) or "Ask the host to
+  add it" (RT2-10; D2 as revised on 2026-09-14). Parking is derived (§6.6), so choosing it writes
+  nothing; "Ask" sends N28. The earlier third choice, "Keep for bookings your team makes", was
+  withdrawn on 2026-09-14. (This document calls the state *parked*, so that "paused" keeps one
+  meaning, the page after the host leaves.) A member holding a form from the
   same library template chooses "Use your existing form" (default). Forms must be switched on at
   the member for form-bearing offerings to be bookable at its calendars (D10, RT2-6, §6.6), and the
   join dialog says so; the product never flips the member's compliance flag itself, at join or at
-  migration (§7). Accept also creates any pairwise account link the mesh is missing, flagged
-  `created_for_collective_id`, so a re-form is one invitation and one acceptance (DL6). New replica
+  migration (§7). Accept still requires the full account-link mesh, as today, and creates or changes
+  no account link (D41, DL6); because leaving and dissolving leave the links in place, a re-form is
+  one invitation and one acceptance anyway. New replica
   links start behind and stay out of the catalogue until they converge (RT1-11).
 - **Offer or withdraw a service** from the host's Services page. Withdrawing retires replicas
-  (inactive, calendar choices kept, reactivated on re-offer); guests can still move their existing
+  (inactive, calendar choices kept, reactivated on re-offer), and the host's master stays active but
+  is parked while the collective is live (D2, §6.6); guests can still move their existing
   bookings on retired replicas online (RT2-27). Deleting an offered master is refused.
 - **Host-initiated adoption, "Add from another venue".** The host picks a member's service on its
   own Services page. The engine copies it into a new host master (the registry's host-controlled
   columns), offers it, and records a pending adoption for that member. The member is asked
   (`svc.member.adopt.*`, N26) to choose "Use mine", in which case its service becomes the replica
   with its options mapped, or "Keep mine separate", in which case a new replica is created and the
-  member's own service stays as a member-only service under D2. No answer after 14 days defaults
+  member's own service stays its own and is parked while the member is live (D2). No answer after
+  14 days defaults
   to "Keep mine separate", with a reminder at day 7. The route is
   `POST /api/venue/collectives/[id]/offerings { source_venue_id, source_service_id }` and the
   answer `POST .../adoptions/[itemId] { choice, option_map }` (Appendix E); test OFF-06.
@@ -1263,8 +1315,9 @@ excludes them, otherwise CI re-grants what the migration revokes;
   released service stays** (D52): it was a real service the member was offering, so it keeps its
   settings, calendar choices and bookings. Active ones stay active and are listed on the member's
   own page once that page shows; ones the host had retired stay inactive, listed with the member's
-  other inactive services (DL2); member-only services parked at join are un-parked and named in the
-  review panel (`review.unparked`, DL3). Nothing is deleted at release. Where the member kept a same-named original
+  other inactive services (DL2); services that were parked while the venue was live are bookable
+  again at once, because parking is derived and ends with the membership, and the review panel
+  names them (`review.unparked`, DL3). Nothing is deleted at release. Where the member kept a same-named original
   separate at join (the D1 default), both stay active, the released one carries
   `svc.member.card.cameFrom` ("Came from {host}") for 30 days, and the review panel lists the pairs
   (`review.sameName`) with no merge action, because a merge is Tier 3 (LIFE-11). The library
@@ -1280,35 +1333,31 @@ excludes them, otherwise CI re-grants what the migration revokes;
   members only. Replica link rows are kept, so a re-join can offer "Reconnect your previous
   services" (RT2-27): the reconnect is offered by the same host only, and is reviewed like an
   adoption when the member changed the released service in between (DL5).
-- **Client access ends with the membership** (D41). This is new, and it is the half of D41 that
-  does not exist today. `collective_release_member`, called by the status trigger in the same
-  transaction that sets a membership to `left` or `removed`, also ends that venue's
-  collective-created `account_links` with every other member of the collective, so the
-  client-detail grant stops at the moment the membership does (which answers DB-04's question of
-  what the status statement's transaction covers). Today nothing does this: leave, removal and
-  dissolve only flip the membership row (`collectives/[id]/members/route.ts:189,280` and
-  `collectives/[id]/route.ts:259-263`), and no collective route or library function touches
-  `account_links` at all, so a departed member keeps reading its former partners' client records
-  indefinitely. Each venue keeps every record it owns, in full. What it loses is the ability to
-  read anyone else's. The release is audited on both sides, and the leave and removal dialogs say
-  plainly what stops: "You will no longer be able to see {venueList}'s clients or bookings, and
-  they will no longer see yours. Everything in your own account stays exactly as it is."
-  An account link that existed before the collective and was not created for it
-  (`created_for_collective_id IS NULL`) is restored to its recorded prior grant rather than ended,
-  so joining a collective cannot silently destroy an arrangement two venues already had. Accept and
-  the migration record which account links were created for the collective (§7 step 0), so
-  "created for the collective" is knowable later rather than guessed. The Leave dialog offers no
-  link choice (DL12): the release covers every other member, and `leave.body.access` says so.
+- **Account links are untouched** (D41, owner, 2026-09-14). A collective is extra functionality on
+  top of account links with full access, so leaving, removal and dissolve change only the
+  collective. `collective_release_member` never writes `account_links`, and neither does any other
+  engine function or collective route. After the membership ends, the venue's account links, and
+  everything they grant, carry on exactly as they did before and during the collective: seeing a
+  partner's bookings in the diary, creating, editing and cancelling bookings at the partner venue,
+  per-guest access through a shared booking, and linked revenue where the link grants it. What stops
+  is the collective's own functionality: the collective page, the collective staff form, the "in
+  this collective" contact search scope (§6.5) and the collective view of the reports (§6.15). The
+  leave and removal dialogs say so (`leave.body.access`), and offer no link choice (DL12), because
+  managing an account link stays on Linked accounts, where it always was. Today's code already
+  behaves this way: leave, removal and dissolve only flip the membership row
+  (`collectives/[id]/members/route.ts:189,280` and `collectives/[id]/route.ts:259-263`). The
+  reverse direction is unchanged too: ending or narrowing an account link below the full-access
+  mesh still removes the member, as the link-cascade removal above describes.
 - **Dissolve.** Runs `collective_dissolve`, the one path shared by the host's DELETE and both crons
   (host lapse at day 30, D22; paused at day 30, D35). It releases every member in one transaction
-  through the same status trigger as a leave, ends the client-detail grants exactly as a leave
-  does, sets open invitations `removed`, archives offerings, and old `/book/c/{slug}` links show a
+  through the same status trigger as a leave, leaves every account link as it is, sets open
+  invitations `removed`, archives offerings, and old `/book/c/{slug}` links show a
   neutral page listing each former venue's own booking page for 90 days (members can opt out)
   instead of a 404 or a redirect to the host (RT2-22, D25). The same host may reclaim the old
   address early for a re-formed collective, and the neutral page then redirects there (DL4). After
-  the end, each venue's reports show its own rows only, the strict D41 reading, with the "via
-  {collective}" filter kept for the venue's own bookings and no frozen view of other venues (DL11,
-  §6.15; REP-06).
+  the end, the collective view of the reports goes; each venue keeps the "via {collective}" filter
+  for its own bookings, and what it sees of other venues follows its account links, as for any
+  linked venues (DL11, §6.15; REP-06).
 - **Host transfer.** A request that the candidate's admin accepts with consent; members get notice
   and a free-leave window (RT2-23). The window has rules: the host may cancel until the day; the
   candidate may decline; a candidate that leaves cancels it; a second request while one is pending
@@ -1384,7 +1433,7 @@ visible as a pending item until it is.
 |---|---|---|---|---|---|
 | (none) | invited | Host admin, at create or later | Exclusivity, currency, timezone, plan, booking-model and multi-venue-person checks | Invitation | Invitee (N1) |
 | invited | removed | Invitee declines; the host withdraws the invitation; the invitation is 30 days old (cron) | Status only | | Host (N2) on decline; the invitee's admins on withdrawal (N34; the invitation link shows `invite.closed`); invitee and host on expiry (N35), after the N1 reminder at day 7 |
-| invited | active | Invitee admin accepts with `consent_version` | Status, `joined_at`, consent; one replica link per active offering, `provenance` `created`, `adopted` or `reconnected`; adoptions and reconnects snapshot their bookings; forms adopted; missing pairwise account links created and flagged `created_for_collective_id` (DL6), pre-existing ones left with it null so the release knows what to restore | Applies drain; N4 when converged | Host and members (N3) |
+| invited | active | Invitee admin accepts with `consent_version` | Status, `joined_at`, consent; one replica link per active offering, `provenance` `created`, `adopted` or `reconnected`; adoptions and reconnects snapshot their bookings; forms adopted; no account link created or changed (the full mesh is a precondition, D41) | Applies drain; N4 when converged | Host and members (N3) |
 | active | left | Member admin leaves; the host ends the collective | The release (below) | Release follow-ups | Host and members (N16), or N19 |
 | active | removed | Host admin removes; a link change breaks the mesh (cron or link route, never a render) | The release | Release follow-ups | The venue (N17 or N18) and the host |
 | active | active, suspended | The member's subscription lapses (cron) | `suspended_at`; nothing else; replicas stay locked and in step; the member is hidden from the page and its own page shows | | The member (N36) |
@@ -1401,17 +1450,17 @@ clear `managed_by_collective_id` on the venue's managed headings, groups and for
 `replica_of_*` to null; keep `accepts_records_from_type_id`, whose FK is `ON DELETE SET NULL`;
 **every released service stays as it is** (D52), active ones active and retired ones inactive
 (DL2), with `svc.member.card.cameFrom` for 30 days on any that shares a name with a service the
-member kept separate at join; un-park member-only services parked at join (DL3); lift the
+member kept separate at join; nothing to un-park, because parking is derived and ends with the
+membership (DL3); lift the
 compliance "locked on" flag; reset `adopted_venue_id` and `slug_strategy` if this venue's address
 was adopted, because the adopt claim never checks membership and a follow-up job would leave the
 departed member serving the page in the meantime; set the payment rule to none on released paid
 services at a venue without charges-capable Stripe, audited as `payment_rule_downgraded` (RT2-9);
-end every `account_links` row between this venue and every other member that the collective
-created, and restore a pre-existing one to its recorded prior grant (D41, DL12); one
-`member_released` audit row per side. **After commit**, as `collective_operations` jobs: copy
+one `member_released` audit row per side. **Never inside the release:** any write to
+`account_links` (D41). **After commit**, as `collective_operations` jobs: copy
 photos as objects (the released service keeps the host's photo URL until the copy lands; after the
 last retry the photo is cleared and `review.photos.failed` names it); queue the review checklist
-(prices, same-name pairs, Stripe, library pairs, photos, un-parked services); send the notices.
+(prices, same-name pairs, Stripe, library pairs, photos, services no longer parked); send the notices.
 Nothing a guest can book against waits for a follow-up job, which is why a member's own page can
 show from the first request after the release commits (§6.9).
 
@@ -1428,16 +1477,16 @@ membership is `active` and not suspended.
 **What today's code does with the host's own row at dissolve is inconsistent**, and the design
 picks: the route path sets it `left` (`collectives/[id]/route.ts:259-263`) while the reconcile
 path leaves it `active` (`collectives.ts:536-554`). The host's row goes `left` like everyone's, so
-one release trigger ends the host's client-detail account links too (DL10).
+one release trigger handles every venue the same way (DL10).
 
-**Former partners hold more than read access today.** `linked_venue_can_delete_bookings`
+**Former partners keep what their account link grants, by design.** `linked_venue_can_delete_bookings`
 (`20260919120000_linked_accounts.sql:593-599`) and the guest-document delete scope
-(`src/lib/guests/linked-guest-access.ts:85-87`) give a former partner delete rights over a
-departed member's bookings and client documents, for as long as the account link survives, which
-today is forever (SB-42). D41's release ends that; until W7 lands, the interim fix is to end the
-created-for-collective account links at leave, removal and dissolve on today's model, which is a
-status write plus an account-link write and needs none of the engine. That is W7a (DL7), shipped alongside W1a
-and W2 and tested by LIFE-14.
+(`src/lib/guests/linked-guest-access.ts:85-87`) give a linked venue rights over the other venue's
+bookings and client documents for as long as the account link lasts, and a collective ending does
+not end the link. That is the owner's rule (D41): a venue that leaves a collective can still make,
+edit and cancel bookings for the venues it is linked with. An earlier draft treated this as a
+defect (SB-42) and planned an interim workstream, W7a, to end the links; both are withdrawn. LIFE-14
+now guards the opposite: that leave, removal and dissolve leave every account link untouched.
 
 ### 6.8 Pages at a glance
 
@@ -1445,12 +1494,12 @@ Full detail, states and copy: `Docs/collective-one-venue-ux-spec.md`.
 
 | Page | Host | Member |
 |---|---|---|
-| Services | Banner "You host {collective}"; a "Collective" pill on offered services; the "Show on the {collective} page" switch (`svc.card.onPageSwitch`); the service page (`/dashboard/appointment-services/[serviceId]`, a page rather than a dialog) lists every venue's calendars in groups with per-calendar values and per-venue update status, and one collective strip at the top owns the only Retry; a price or form change asks first and lists what changes; the save summary and the 60-second "Put it back" (D50) render under the page header in a status region, never in the error slot; "Add from another venue" (§6.7); Delete blocked while offered | Three sections, "From {host}" (locked; `MemberServiceView` shows values, never disabled inputs; calendar choices and venue-controlled fields editable, and per-calendar values through the values dialog with `values.help.member`), "Only at {venue}" and "Retired" last, with a "What needs you" strip; status lines ("Setting up", "Updating", "Hidden because card payments are not set up") |
-| Calendar Availability | Services grouped "On the {collective} page" and "Only at {venue}"; unticking a collective service asks first | Groups "From {host}" and "Only at {venue}"; ticking a replica puts that calendar on the page at once; unticking asks first and tells the host |
+| Services | Banner "You host {collective}"; a "Collective" pill on offered services; the "Show on the {collective} page" switch (`svc.card.onPageSwitch`); the service page (`/dashboard/appointment-services/[serviceId]`, a page rather than a dialog) lists every venue's calendars in groups with per-calendar values and per-venue update status, and one collective strip at the top owns the only Retry; a price or form change asks first and lists what changes; the save summary and the 60-second "Put it back" (D50) render under the page header in a status region, never in the error slot; "Add from another venue" (§6.7); Delete blocked while offered; services not on the page carry a "Parked" pill (D2); Add service's "Show on the {collective} page" checkbox is ticked by default; "Staff bookings only" (`svc.form.staffOnly.label`) on the service page | Three sections, "From {host}" (locked; `MemberServiceView` shows values, never disabled inputs; calendar choices and venue-controlled fields editable, and per-calendar values through the values dialog with `values.help.member`), "Parked while you are part of {collective}" (the member's own services, editable, not bookable while live, D2) and "Retired" last, with a "What needs you" strip; status lines ("Setting up", "Updating", "Hidden because card payments are not set up") |
+| Calendar Availability | Services grouped "On the {collective} page" and "Parked"; unticking a collective service asks first | Groups "From {host}" and "Parked"; ticking a replica puts that calendar on the page at once; unticking asks first and tells the host |
 | Booking Page tab | Page design for the collective in one column with seven sections and no nested tabs, per the specification's item 10: identity, page address, look, guests, share and embed, "Who is on it" (a read-only summary linking to the Collective area's Venues tab) and "Leaving" (read-only: "To end {collective}, go to Collective, Venues."). The page shows the host's address, phone and opening hours (specification §1 C; a collective-owned set is Tier 3, §8.0). The Services section is the single card `bp.services.card`, `bp.services.count`, `bp.services.open`, linking to the Collective area; own page read-only with a status line | Read-only summary of the collective page and its own calendars there; "Leaving" says "To leave {collective}, go to Settings, Linked accounts."; a status line, `bp.status.redirecting` ("Guests who visit your own booking page are sent to the {collective} page.") or `bp.status.showing` ("Your own page is showing because {reason}.") |
 | Linked accounts | Account links, and the host's own `CollectiveRow` (specification item 11) showing update health and the hosting state (`la.row.hostHealth`, `la.row.hostRequest`, `la.row.hostMoveScheduled`, `la.row.paused`); every membership action (invite, cancel an invitation, remove a member, hosting request and transfer, End the collective) lives on the Collective area's Venues tab, not here | Its `CollectiveRow` with the Join dialog (disclosure, choices, consent), a hosting request to review, the Leave dialog (`LeaveCollectiveDialog`, the only home of Leave), the review panel after leaving, "List on the old page" after a dissolve, and history |
 | Add-ons, Categories, Compliance | "Collective" pills and reach lines on items used by offered services | Managed items "From {host}", view only, hidden from pickers on its own services |
-| Diary | Member columns styled like own columns with a venue label; they open the collective form | Own columns open its own staff form (replicas and member-only services); partner columns open the collective form |
+| Diary | Member columns styled like own columns with a venue label; every column, own and member, plus New and Walk-in, opens the collective form | Every column, own and partner, plus New and Walk-in, opens the collective form (graft 5 revised 2026-09-14, D2; own columns no longer open the own form) |
 | Combined-page manager | Removed as a separate surface. Page design stays in Settings, Booking Page (§1.5 of the specification); putting a service on the page is the Services page switch `svc.card.onPageSwitch` or the Collective area grid's `ov.bulk.offer`, calendars are the grid or the service page, and members and health are the Venues and Overview tabs. The Booking Page tab's Services section is the single card (`bp.services.card`, `bp.services.count`, `bp.services.open`) that links there; there is no read-only overview and no `bp.overview.*` | Read-only summary of the page and its own calendars on the Booking Page tab, rewritten copy |
 | Collective area (new, `nav.collective`) | An area with tabs, shown to hosts and members, with its own sidebar entry after Services, per the specification's §1.5. Host tabs: Overview (per-venue health, what needs you, the undo), Services (the grid and bulk lane, through `POST /api/venue/collectives/[id]/bulk`), Venues (invite, cancel an invitation, remove, hosting request and transfer, End the collective), History | Overview, Services and History, because under D3 the collective page is the member's shop front too; Leave stays on Linked accounts |
 | Reports | Booked revenue with every venue's figures named and subtotalled, the collective's own bookings separated from own-page bookings (§6.15, D49); guest contact details never appear in a figures view | Every venue's figures, named and subtotalled, with its own collective bookings identified (D49); the same rule on contact details |
@@ -1502,8 +1551,17 @@ after it: see the specification's services grid.
   and appointment deep links (`/book/{slug}/{calendar}`, `?service=`) redirect. `{link}` in
   `bm.redirect.otherModels` is the venue's own page address, `/book/{slug}` (D44, §6.14; PUB-05).
 - Redirects keep the guest's place: `service_id` is translated to the offering, the calendar
-  segment to `?calendar=`, and dates and times are kept. A link for a member-only service shows an
-  interstitial with the venue's phone number instead of dead-ending (RT2-22, RT2-10).
+  segment to `?calendar=`, and dates and times are kept. A link for a parked service redirects to
+  the collective page's service list, so it never dead-ends (RT2-22, RT2-10; D2 as revised on
+  2026-09-14, which withdrew the phone-number interstitial).
+- **Adopting a member's page address** (decided 2026-09-14). The host may ask to use a member's page
+  address for the collective page, but a member venue admin must confirm first. The request is
+  recorded (`address_adoption_requested`) and the member's admins get N38;
+  `venue_collectives.adopted_venue_id` and `slug_strategy` are written only when one of them
+  confirms (`address_adopted`, History `history.addressAdopted`). Until then the collective keeps
+  its own address. The release still resets an adoption when that venue leaves (§6.7), and an
+  adoption already in place when an existing collective migrates stays as it is and is listed in
+  the dry-run report.
 - A new `/embed/c/{slug}` fixes the refused combined-page embed (CB-06); the QR code encodes the
   collective page and is named after the collective.
 - Guests see who they are booking with: "You are booking with {member business name},
@@ -1516,11 +1574,31 @@ after it: see the specification's services grid.
 Service rows are not the only thing guests experience. Guest self-reschedule, the waitlist,
 messaging and reminder timing, deposit settings, booking rules, the account sign-in
 requirement, in-person payments, opening hours and closures, timezone and the Stripe account are
-all per venue (RT2-25; staging already differs on the waitlist). For each the owner decides one of
-three treatments (D32): host-controlled for collective bookings, must match at accept, or differs
-per venue with a "Different at {venue}" note wherever the host sees it. Timezone must match, and
-currency must too, though nothing enforces currency today (§5.4 "Grafted from Option B" item 4);
-opening hours, closures and Stripe stay per venue by nature.
+all per venue (RT2-25; staging already differs on the waitlist). **D32, decided 2026-09-14**, gives
+each setting one of two treatments:
+
+- **Host controls.** The host's setting applies to every venue in the collective, and to the
+  collective page, while it is live. A member sees its own setting read-only with
+  `reach.settings.setByHost` ("{host} sets this for {collective}..."); nothing is written to the
+  member's row, and its own value applies again from the moment it leaves.
+- **Each venue.** The venue keeps its own setting, and the host sees `reach.settings.differentAt`
+  ("Different at {venueList}") wherever it looks at that setting.
+
+| Setting | Stored in | Treatment |
+|---|---|---|
+| Guest sign-in requirement | `venues.require_account_login_for_bookings` | Host controls. The collective page uses the host's value only, replacing today's OR across members (SB-18) |
+| Guest self-reschedule | `guest_self_reschedule` feature flag | Host controls (not "must match at join") |
+| Waitlist on the page | `waitlist_v2` feature flag | Host controls whether the collective page offers it; waitlist entries and offers still belong to the venue whose calendar it is (D43) |
+| "Any available" and the staff-first flow | `any_available_practitioner`, `staff_first_booking_flow` feature flags | Host controls, as the specification has said since its first draft |
+| Communication policies: confirmations, reminders, cancellation and payment messages | `venues.communication_policies` | Each venue; messages follow the booked calendar's venue |
+| SMS availability | The plan tier and a billing card, not a setting | Each venue, by nature |
+| In-person payments | `venues.in_person_payments_enabled` | Each venue |
+| Compliance records, class commerce | `compliance_records_enabled`, `class_commerce_enabled` feature flags | Each venue (D10; D44) |
+| Booking window, cancellation notice, deposits | Per-service columns for appointments (`20260508130000_per_entity_booking_rules.sql`; `service_items.deposit_pence`) | Nothing to decide: the host already controls them through the master. The venue-level `booking_rules` and `deposit_config` columns govern table reservations, not appointments |
+
+No setting is "must match at accept": the third treatment D32 first offered is not needed. Timezone
+must match, and currency must too, though nothing enforces currency today (§5.4 "Grafted from
+Option B" item 4); opening hours, closures and Stripe stay per venue by nature.
 
 Three corrections to that inventory from the second pass, because a list that names the wrong
 thing cannot be worked through:
@@ -1528,14 +1606,14 @@ thing cannot be worked through:
 - **"Message templates" do not exist.** `PATCH /api/venue/communication-templates` is a tombstone
   returning 410 with "Legacy template endpoint has been replaced by communication policies". The
   real store is `venues.communication_policies`, a jsonb column with a NOT NULL default, read by
-  `src/lib/communications/send-templated.ts`. D32 applies to communication policies, per lane and
-  channel.
+  `src/lib/communications/send-templated.ts`. D32 leaves communication policies with each venue,
+  per lane and channel.
 - **SMS is missing from the list, and it is not a setting.** Whether a venue can send SMS at all
   turns on its plan tier and a billing card, not on anything an owner can toggle, so a collective
   can contain one venue that texts its guests and one that does not, with no treatment available
   beyond telling the host.
 - **The list also owes booking models.** Which models a venue runs is the largest per-venue
-  difference of all and is what §6.14 is about; D32's three treatments do not apply to it, because
+  difference of all and is what §6.14 is about; D32's treatments do not apply to it, because
   the collective page can only carry one.
 
 ### 6.11 Mobile app contract
@@ -1550,8 +1628,9 @@ The app is a full client of these endpoints. Changes are additive, and errors ke
 - Old builds: calendar-only saves of replicas pass (the guard compares normalised projections); real
   edits get a readable 409; the one-tap accept gets `COLLECTIVE_CONSENT_REQUIRED`; a stale full-set
   calendar toggle that would remove an assignment another venue made in the last 24 hours gets
-  412 `STALE_RESOURCE`; the diary's own columns open the own form because `staff-collective`
-  `calendar_ids` omits own calendars.
+  412 `STALE_RESOURCE`; `staff-collective` `calendar_ids` includes the venue's own calendars, so an
+  old build opens the collective form from every column, own ones included (D2 as revised on
+  2026-09-14; the earlier omission, which sent own columns to the own form, is withdrawn).
 - The catalogue builder's sync and link actions become coded answers
   (`COLLECTIVE_REPLICAS_ALWAYS_FOLLOW` for unlink, no-op success for sync).
 - One error-code list, added to `src/lib/api/error-codes.ts` in W2 (today it holds no collective
@@ -1561,7 +1640,8 @@ The app is a full client of these endpoints. Changes are additive, and errors ke
   `COLLECTIVE_UNDO_EXPIRED`, `COLLECTIVE_LEGACY_MODEL`, `COLLECTIVE_BOOKING_MODEL_LOCKED`,
   `COLLECTIVE_CURRENCY_MISMATCH`, §6.7's `COLLECTIVE_NOT_HOST`, `COLLECTIVE_VENUE_NOT_MEMBER`,
   `COLLECTIVE_CALENDAR_NOT_AT_VENUE` and `COLLECTIVE_REPLICA_NOT_READY` (409s the routes
-  pre-check and the function raises as defence in depth), and the engine's six (§6.4). The full
+  pre-check and the function raises as defence in depth), `COLLECTIVE_SERVICE_RETIRED` (409, a
+  calendar save that ticks a retired replica, CSA-01), and the engine's six (§6.4). The full
   route contracts, including
   the new bulk, undo, history and calendar-values routes, are Appendix E (API contracts).
 - Handover to the app team: consent sheet, read-only replica cards, host collective calendars list,
@@ -1601,7 +1681,8 @@ The app is a full client of these endpoints. Changes are additive, and errors ke
 
 - Rewrite: `getting-started/linked-venues`, both services articles, `appointments/calendar-setup`,
   booking widget, public booking page, deposits, importing data, and the app's availability and
-  venue settings articles; add a new article on running services as one collective. No em-dashes.
+  venue settings articles; add a new article on running services as one collective, which explains
+  parked services and "Staff bookings only". No em-dashes.
 - Amend the linked accounts spec §1, §2, §7.1 to §7.8, §8.7, §10.2, §13 and §15.6, PRD §3.10 and
   its glossary; mark `Docs/collective-service-sync-plan.md` superseded; update the Docs index; add
   service and assignment rows to `Docs/api-venue-permissions-matrix.md`; record the host-write
@@ -1643,9 +1724,10 @@ The app is a full client of these endpoints. Changes are additive, and errors ke
 - **Two articles the 2026-09-14 decisions now require.** D42 is help-centre only, so the split
   client record has to be explained somewhere a guest-facing question can be answered from: what
   happens when the same person books at two venues in the collective, why each venue keeps its own
-  record, and what a member sees. And D41's shape needs saying in the member's own words: while the
-  collective is live your partners can see your clients and you can see theirs, the records stay
-  yours, and the access ends the day the membership does.
+  record, and what a member sees. And D41's shape needs saying in the member's own words: a
+  collective is built on your account links, the client and booking access those links give you is
+  theirs rather than the collective's, the records stay with the venue that owns them, and leaving
+  or ending the collective changes the booking page, not the links.
 - **Nothing stops an em-dash reaching a help article.** The existing copy tests cover booking copy
   and the assistant's answers only. Since this project rewrites twenty-odd articles under a rule
   that forbids them, add the sweep (HLP-01) before the rewriting starts, not after.
@@ -1683,7 +1765,7 @@ Both reviews, with evidence and inventories, are summarised in Appendix A.
 | RT2-7 | High | Managed form slug collision | As RT1-3 |
 | RT2-8 | High | Old app builds could join without consent | Consent version required (§6.7) |
 | RT2-9 | High | A no-Stripe leaver republishes paid services that fail at checkout | Payment rule downgraded with audit and a review checklist (§6.7) |
-| RT2-10 | High | No coherent policy for member-only services | Choices at accept, labelled sections, interstitial links (§6.7, §6.9; D2) |
+| RT2-10 | High | No coherent policy for member-only services | Revised 2026-09-14: services not on the page are parked while the venue is live, derived and lifted at leave; "Park it until I leave" or "Ask the host to add it" at accept; a link to a parked service lands on the collective page's service list (§6.6, §6.7, §6.9; D2) |
 | RT2-11 | High | Group bookings across member venues refused | Same-venue limit shown up front, or split groups (D28) |
 | RT2-12 | High | Staff authority without account links loses audit, notices and edit rights | Collective booking audit and defined rights (§6.5; D17 as amended by D41) |
 | RT2-13 | High | The staff form copies one venue's client into another | The picker searches every live member venue, names the owning venue and books against the existing record; a picked contact is cleared only outside a live collective (§6.5; D41) |
@@ -1769,8 +1851,8 @@ links, not off the collective.
   (`collectives.ts:507-512`), so today every member sees every other member's revenue in one
   blended total with no venue subtotal and only the words "shared with you through a linked
   account" to explain it (`BookedRevenueSection.tsx:331-340,361-366`). That is almost certainly
-  not what any of them agreed to. D41 keeps the mesh while the collective is live and D49 keeps
-  the mutual visibility, so what changes is presentation and consent: the report breaks the figure
+  not what any of them agreed to. D41 keeps the mesh (it belongs to the account links, not the
+  collective) and D49 keeps the mutual visibility, so what changes is presentation and consent: the report breaks the figure
   down by venue, names each venue, subtotals it, and the visibility is agreed at join rather than
   discovered.
 - **What the host gets.** A collective view of Booked revenue: one row per venue, one total, the
@@ -1780,9 +1862,9 @@ links, not off the collective.
   allows in the contact search.
 - **What a member gets.** Every venue's figures, named and subtotalled (D49), with its own
   collective bookings identified within its own, so it can see what the collective brings. After
-  the membership ends it sees its own rows only (the strict D41 reading), with the "via
-  {collective}" filter kept for the venue's own bookings and no frozen view of other venues
-  (DL11, §6.7; REP-06).
+  the membership ends the collective view goes and the "via {collective}" filter is kept for the
+  venue's own bookings; any other venue's figures it still sees come from its account links'
+  own revenue grant, exactly as for any linked venues (D41, DL11, §6.7; REP-06).
 - **Read the snapshot, everywhere money is shown.** §6.6 lists the settling readers. One more
   belongs on that list and is easy to miss because it is staff-facing rather than guest-facing:
   `buildPriceSummary` (`src/lib/booking/payment-display.ts:160-230`), rendered by
@@ -1922,7 +2004,9 @@ manage links, because a booking's price was fixed when it was made (§6.6, D7) a
 booking row changes except a missing snapshot being filled in; nothing is deleted; each member's
 copies become replicas of the host's masters carrying the host's values; what belongs to the venue
 rather than to the service (the compliance flag, the member's own add-on groups and headings,
-member-only services, stored per-calendar values on the member's calendars) is not changed; and
+member-only services, stored per-calendar values on the member's calendars) is not changed, except
+that a member-only service the owner chooses to add to the page becomes the replica of a master
+copied from it, so its values stay the same; and
 everything the host's values replace is written to `collective_audit_events` as a before-image for
 rollback, not shown to the member as a panel.
 
@@ -1930,13 +2014,11 @@ rollback, not shown to the member as a panel.
 (§2.10). The list of what a migration changes is per environment and is produced by the dry run in
 that environment (step 3); the production list exists only once steps 1 and 3 have run there.
 
-0. **Classify the pairwise account links.** For each pair of members, record on the `account_links`
-   row whether it was created for the collective: an account link created after the invitation was
-   sent and up to one day after acceptance is "created for" (`created_for_collective_id` set); one
-   that pre-dates the invitation is pre-existing (`created_for_collective_id` null). The dry run lists
-   every classification for the owner's review, default "created for". Nothing is offered for
-   downgrade: under D41 sharing is the arrangement while the collective is live, and the release on
-   leave (§6.7) is what ends it.
+0. **Account links are not touched.** The migration reads `account_links` only to confirm the full
+   mesh still holds (a pair that has fallen below it is reported, because today's reconcile would
+   already have removed that member). It classifies, writes and ends nothing there (D41). An
+   earlier version of this step classified links as "created for the collective" so the release
+   could end them; that is withdrawn.
 1. **Survey production read-only first**: owed migrations, offerings with no host source (P5),
    ambiguous masters (P1), member services backing two offerings (P2), form slug collisions (P3),
    copy options with future bookings and no matching master option (P4), Stripe readiness, forms
@@ -1945,21 +2027,26 @@ that environment (step 3); the production list exists only once steps 1 and 3 ha
    no same-named host heading; non-null provider overrides and non-approved provider rows;
    member-inactive copies; copies whose add-on links resolve to member-owned groups; stored
    per-calendar values under a flag the host has off; member assignments on copies that are not
-   providers; and `synced_from_service_id = id` rows.
+   providers; `synced_from_service_id = id` rows; and
+   `service_items` rows with `is_bookable_online = false` at any venue, because W4 starts honouring
+   that column everywhere (§6.6).
 2. **Rehearse on staging fixtures** (`e2e-coll-*` venues built with plus-1's shape: drift, an
    archived same-slug form, options, bookings, and every state step 1 lists), then dry run, apply,
    invariants, rollback, re-apply.
 3. **Dry run** `scripts/collective-replicas-migrate.mjs --collective <id> --dry-run`. The report has
    two audiences. For the operator: planned masters and replica links, adoptions, collisions,
-   bookings to snapshot, invariants, and the link classifications of step 0. For the owner, who
+   bookings to snapshot, invariants, and the account-link mesh check of step 0. For the owner, who
    signs it: per offering, any page copy (name, description, photo, heading, order) that differs
    from the master, because the master stands and the page shows the master's wording from the
    switch, so the host edits the master beforehand if it prefers the page's; per collective
    heading, the host heading it maps to or the managed heading that will be created; per member
    and copy, every column that takes the host's value, before and after; calendars that will be
    added to or removed from the page; services that will be hidden from guests and why (no Stripe,
-   forms off); each member's member-only services, which default to "kept for the bookings your
-   team makes" (D2) and can be changed later on that member's Services page; and whether
+   forms off); each member's member-only services, each with the owner's choice (D2 as revised on
+   2026-09-14): "add to the page", in which case the member's service is copied into a new host
+   master through "Add from another venue" and the member's own service is adopted as its replica,
+   so its settings, calendars and bookings do not change, or "park", in which case it stays exactly
+   as it is and is parked from the switch; any page address already adopted, left as it is; and whether
    compliance records would be needed at a member, with the statement that the migration switches
    nothing on.
 4. **Owner signature.** The owner approves the report by its hash (`--approved-report`) and tells
@@ -1968,10 +2055,12 @@ that environment (step 3); the production list exists only once steps 1 and 3 ha
    a legacy leave and loses nothing.
 5. **Apply**, per collective, in this order: snapshot every booking on masters and copies (a safety
    re-run of the Pass A backfill, D7, which must report 0 rows on a clean Pass A); set masters
-   (creating the host service active where only members provide the offering, D36); set
+   (creating the host service active where only members provide the offering, D36, and a master
+   copied from each member-only service the owner chose to add to the page); set
    `service_model = 'migrating'`, in which the legacy catalogue keeps serving, member locks are on,
    engine applies run, and the "behind" hide is suspended; create replica links
-   (`provenance = 'migrated'`) and record, in one `migration_applied` audit row per member, the
+   (`provenance = 'migrated'`, or `adopted` for a member-only service added to the page, whose
+   bookings are snapshotted first) and record, in one `migration_applied` audit row per member, the
    before-image of every copy (its row, option rows, add-on links, requirement rows and the three
    sync columns) and of every provider row; map copy options to master options by name and sort
    order (an option with future bookings and no match is kept inactive and mapped to nothing, P4);
@@ -2036,17 +2125,18 @@ D54):
   audit events are append-only) is adopted as the managed form when it does.
 - Light 3 has no Stripe account, so its calendars are hidden from guests for the 3 paid offerings
   until it connects Stripe. This happens in Pass A, not Pass B, and Light 3 is told then.
-- Light 3's 10 member-only services stay as they are, kept for the bookings its team makes (D2);
-  they leave Light 3's own online page when it hands over (D3), and Light 3 can ask the host to add
-  any of them from its Services page.
-- Light 3's 10 member-only services lose online booking when its page hands over. Its review offers
-  the three D2 choices with "Ask {host} to add these" for all ten at once; the switch date is set so
-  Light 3 can act first. This is a loss of online trade the member is choosing, and the review says
-  so plainly.
-- The host reviews each of the offerings whose page copy differs from its service and chooses which
-  wins; where it does not answer, the page's copy is written into the master.
-- The one pairwise account link between Plus 1 Staging and Light 3 is classified by its creation
-  date against the invitation and listed for the owner's review.
+- Light 3's 10 member-only services each carry the owner's choice in the signed report (D2 as
+  revised on 2026-09-14): "add to the page", which copies Light 3's service into a new host master
+  and adopts Light 3's own service as its replica, so its settings, calendars and bookings do not
+  change; or "park", which leaves it exactly as it is and parks it from the switch until Light 3
+  leaves or the host adds it later. Existing bookings on a parked service stay fully manageable, and
+  the report says plainly which services stop taking new bookings. (This replaces the earlier
+  bullets, which kept them for Light 3's team and offered a member review; both withdrawn.)
+- The report lists each offering whose page copy differs from its service. The master stands (D54):
+  from the switch the page shows the master's wording, so the host edits the master beforehand if it
+  prefers the page's.
+- The one account link between Plus 1 Staging and Light 3 is checked for full access and left
+  exactly as it is, before, during and after the switch (D41).
 - The dissolved collective's residue (33 active providers, 2 pending rows, 11 legacy null-calendar
   rows) is exported to the audit table before C2; nothing is deleted until then.
 
@@ -2068,7 +2158,6 @@ W1 and W2.
 
 | Finding | Why first | Where |
 |---|---|---|
-| SB-42 | Leaving or dissolving never ends the client-detail grant, so a departed member keeps reading its former partners' client records indefinitely. The half of D41 that does not exist, and the most important single correction in this document | W7a now, on today's model (DL7); W7 for the engine's release |
 | SB-28, PB-16 | One person with a login at two venues is locked out of both dashboards, and the invite route creates that state silently. D38 makes the fix a refusal with a clear message rather than a venue chooser, so this is now small | W16 |
 | SB-31 | Booked revenue blends every member's takings into one unlabelled total. D49 keeps the mutual visibility, so what is left is presentation and consent: name the venues, break the figure down, agree it at join | W17 |
 | SB-39 | Partner diary columns are drawn from the weekly template, so a host sees a member as open on a day that business is shut, and books into it. The data needed is already returned by another endpoint | W21 |
@@ -2089,7 +2178,7 @@ W1 and W2.
 | Currency gate, booking-model lock | Currency gated the way timezone already is, and `unified_scheduling` cannot be dropped while in a collective; both edit `PATCH /api/venue` and belong to one workstream (BM-04, TERMS-15) | W7 |
 | SB-37, PB-17 | Canonicals and page metadata. Real, but nobody is harmed while it waits | W19 |
 | SB-29 | Offered masters become admin-only to edit whoever created them. One guard | W5 |
-| Cross-venue contact search (D41) | The second half of the owner's requirement. `/api/venue/guests` is venue-scoped on every query, so shared access today is per guest through a shared diary rather than anything searchable | W7 |
+| Cross-venue contact search (D41) | Makes the client access the account links already give easy to use inside a live collective; it is a collective feature, so it ends with the membership while the links carry on. `/api/venue/guests` is venue-scoped on every query, so shared access today is per guest through a shared diary rather than anything searchable | W7 |
 | Booking-model forward compatibility (D44) | An entity discriminator on `collective_service_items` (`entity_type`, §6.3; never on provider rows, which C2 drops), and a real booking-model list on the synthetic venue. Changes no behaviour now, and is the difference between adding classes later and rewriting for them | W20 |
 | SEC-03 | A pre-booking form should file at the venue that will hold the booking. Falls out of RT2-2 | W4 |
 
@@ -2108,6 +2197,7 @@ next reader would otherwise rediscover it and propose work.
 | A venue chooser for multi-venue people | Not building it (D38). The invite refuses instead, so a person running two venues in a collective keeps two logins. Recorded because it is the obvious thing to propose next |
 | Scheduling a future price change | Not planned (D51). Changes apply straight away |
 | A collective-owned address, phone and opening hours | Not built. The page shows the host's (specification §1 C, item 12, and §6.2); recorded here because an earlier draft of item 10 proposed giving the collective its own |
+| SB-42, account links outliving a collective | Correct, and must stay (D41, owner, 2026-09-14). A collective sits on top of account links with full access; leaving, removal and dissolve change only the collective, and a venue that leaves keeps full create, edit and cancel access with the venues it is linked with. Recorded because an earlier draft called it the most important defect in this document and planned W7a to end the links |
 
 ### 8.1 Fix now, on today's model
 
@@ -2121,7 +2211,7 @@ and W2 below cover most of them.
 | Pass | What | Classification |
 |---|---|---|
 | 0 | Ship production's owed migrations on their own (service categories, collective policy recursion fix, schedule periods, canonical processing shape, sync columns), with their invariants | Expand plus data backfills |
-| A1 | Booking correctness, live: price snapshot and backfill, the resolver over today's two custom columns, base-price override removed, actor stamps, Stripe readiness and its backfill, `service_items.updated_at`, the assignment diff writes (W1's first part, W1a, and W2), the interim account-link release (W7a) and the column registry (W3's first part, W3a) | Expand |
+| A1 | Booking correctness, live: price snapshot and backfill, the resolver over today's two custom columns, base-price override removed, actor stamps, Stripe readiness and its backfill, `service_items.updated_at`, the assignment diff writes (W1's first part, W1a, and W2) and the column registry (W3's first part, W3a) | Expand |
 | A2 | Engine dark: engine schema and functions (W3), the five per-calendar columns after the grants hardening (W15, then W8), unique indexes once I7 = 0 | Expand |
 | B | Migrate existing collectives, per environment, after code A is live there and the Pass A go conditions in §7 hold | Data |
 | Flag | Switch new collectives to replicas after a 7-day clean soak | Configuration |
@@ -2165,21 +2255,20 @@ Effort is relative (S small, M medium, L large) and assumes one engineer familia
 
 | # | Workstream | Effort | Depends on |
 |---|---|---|---|
-| W0 | Production survey and the D31 owed-migrations pass (every owner decision is taken) | S | none |
+| W0 | Production survey and the D31 owed-migrations pass (every owner decision is taken); the survey counts `service_items` rows with `is_bookable_online = false` at every venue before W4 starts honouring the column (§6.6) | S | none |
 | W1 | Booking correctness on today's model, in two parts under one id. W1a, starting now: one resolver over today's two custom columns, per-calendar price and length in the catalogue, base-price override removed, variant-aware availability, chain windows, price snapshot with settling readers, staff actor stamps, Stripe readiness (`stripe_charges_enabled` and its backfill). W1b, after W15 and W8: the resolver over all seven per-calendar fields, with the deposit path and the card-hold floor | L | W0 (D4, D6); W1b also W15, W8 |
 | W2 | Calendar assignment hardening: both assignment writers (`PUT practitioner-services` and the `practitioner_ids` half of `PATCH appointment-services`) become diff writes inside one transaction, with `expected_service_ids` and `expected_calendar_ids`, stable row ids, every custom and attribution column preserved across an unrelated save, own-venue checks on service and calendar ids, the 24-hour rule for clients without expected ids, and `service_items.updated_at` with `expected_updated_at` on the Services page. W8, CSA-01 to CSA-03, D15 and SEC-05 depend on this landing first. It is the first of the four edits to `PATCH appointment-services`, which land in the order W2, W8, W6, W5 | M | none |
 | W3 | Engine schema and functions dark, in two parts under one id. W3a, first and its own deliverable: the column registry `collective_column_classes`, seeded and classified for all eight tables (D53, D40), with its enumerating pgTAP test (DB-07, DB-10), and `service-duplication.ts` reading it. Then the engine: tables, revisions, dirty and lock triggers, apply, claims, verifier, grants, pgTAP and concurrency harness, reading the registry | L | Pass 0 |
-| W4 | Derived catalogue and booking switch: exclusions, fingerprint freshness, compliance serving, collective booking audit | M | W1, W3 |
-| W5 | Host Services page (the service page, not a dialog), offerings routes, collective calendars section, per-calendar values for hosts, the D50 undo, notices (with the new notification group NOT-01: N32, N33, N36, N37); the fourth edit to `PATCH appointment-services` (`collective_calendars`, `collective_sync`, inline apply), after W6's guard | M | W3, W4, W6 |
-| W6 | Member locks and member UI: guards (the projection guard is the third edit to `PATCH appointment-services` and runs before the assignment diff write), error codes, Services sections, `MemberServiceView`, Calendar Availability groups, add-ons, categories, compliance | M | W3, W8 |
-| W7 | Lifecycle: the create wizard (UI-C-01), join with consent and choices, adoption review, host-initiated adoption, release follow-ups, dissolve page, host transfer with re-keying and the transfer window, venue deletion, reconcile off renders, exclusivity, the currency gate and the booking-model lock on `PATCH /api/venue` (BM-04, TERMS-15), **ending client access with the membership** (SB-42, D41) and **cross-venue contact search while live** (D41) | L | W3, W6 |
-| W7a | SB-42 on today's model (DL7): end the created-for-collective `account_links` at leave, removal and dissolve (`collectives/[id]/members/route.ts:189,280` and `collectives/[id]/route.ts:259-263`), a status write plus an account-link write, with no engine dependency (LIFE-14) | S | none |
+| W4 | Derived catalogue and booking switch: exclusions, fingerprint freshness, compliance serving, collective booking audit; the parked-service exclusion from every listing, availability read and create route for new bookings, never from a path that serves an existing booking (D2, §6.6); every diary column, New and Walk-in opening the collective form, with `staff-collective` `calendar_ids` including the venue's own calendars (graft 5 revised); and `is_bookable_online` wired on every venue (staff forms list it, public pages, public availability and public creates do not) | M | W1, W3 |
+| W5 | Host Services page (the service page, not a dialog), offerings routes, collective calendars section, per-calendar values for hosts, the "Parked" pill and filter, "Staff bookings only" and the Add service checkbox ticked by default, the D50 undo, notices (with the new notification group NOT-01: N32, N33, N36, N37); the fourth edit to `PATCH appointment-services` (`collective_calendars`, `collective_sync`, inline apply), after W6's guard | M | W3, W4, W6 |
+| W6 | Member locks and member UI: guards (the projection guard is the third edit to `PATCH appointment-services` and runs before the assignment diff write), error codes, Services sections (including "Parked while you are part of {collective}"), `MemberServiceView`, Calendar Availability groups, add-ons, categories, compliance | M | W3, W8 |
+| W7 | Lifecycle: the create wizard (UI-C-01), join with consent and choices (park or ask for each member-only service), adoption review, host-initiated adoption, release follow-ups, dissolve page, host transfer with re-keying and the transfer window, venue deletion, reconcile off renders, exclusivity, the currency gate and the booking-model lock on `PATCH /api/venue` (BM-04, TERMS-15), a guard that no lifecycle path writes `account_links` (D41, LIFE-09, LIFE-14) and **cross-venue contact search while live** (D41) | L | W3, W6 |
 | W8 | Five per-calendar fields end to end; the second edit to `PATCH appointment-services`, keeping the five columns in the assignment rows across a save | M | W2, W15, D5 |
 | W9 | Migrate existing collectives: survey, rehearsal, dry run, owner signature, apply, rollback, residue (§7, D54) | M | W3 (W3a), W4 to W7 live |
-| W10 | Booking pages and links: redirect conditions for members and the host (§6.9), translation (which reads `collective_service_items.master_service_id`, W3), interstitial, `/embed/c/{slug}`, trader line, one live-collective resolver, dissolved page. Before the engine lands, rewrite the dissolve comment at `src/lib/linked-accounts/collectives.ts:550-552`, which says every venue's own services are "already pristine" on dissolve (copies exist, so it never was true), and the Leave dialog copy at `src/components/linked-accounts/VenueCollectivesPanel.tsx:365`, "Your own booking page is unaffected.", which D3 makes false | M | W3, W4, D3 |
+| W10 | Booking pages and links: redirect conditions for members and the host (§6.9), translation (which reads `collective_service_items.master_service_id`, W3), a link to a parked service landing on the collective page's service list (the interstitial is withdrawn, D2), address adoption only after the member's admin confirms (§6.9, N38), `/embed/c/{slug}`, trader line, one live-collective resolver, dissolved page. Before the engine lands, rewrite the dissolve comment at `src/lib/linked-accounts/collectives.ts:550-552`, which says every venue's own services are "already pristine" on dissolve (copies exist, so it never was true), and the Leave dialog copy at `src/components/linked-accounts/VenueCollectivesPanel.tsx:365`, "Your own booking page is unaffected.", which D3 makes false | M | W3, W4, D3 |
 | W11 | Combined-page manager fold and catalogue compatibility shims; the bulk lane calls the engine's offer and calendar functions through `POST /api/venue/collectives/[id]/bulk` and `.../bulk/preview`, so CB-44 and CB-45 are fixes to today's manager, not prerequisites of the grid | S | W5 |
-| W12 | Mobile contract, `MOBILE_API.md`, handover; the app's leave copy, which mirrors `VenueCollectivesPanel.tsx:365` in telling a member its own page is unaffected, is rewritten with W10's, before the engine lands | M | W5 to W7 |
-| W13 | Help centre, spec, PRD, docs index | M | W5 to W11 |
+| W12 | Mobile contract, `MOBILE_API.md`, handover, including every diary column opening the collective form in old builds (APP-03); the app's leave copy, which mirrors `VenueCollectivesPanel.tsx:365` in telling a member its own page is unaffected, is rewritten with W10's, before the engine lands | M | W5 to W7 |
+| W13 | Help centre, spec, PRD, docs index, including parked services, "Staff bookings only" and D32's host-controlled settings | M | W5 to W11 |
 | W14 | C1 code removal, then C2 contract | S | W9 on both environments |
 | W15 | Grants hardening (anon writes on service tables, anon read of assignments) | S | live grant check |
 | W16 | Multi-venue people: the invite route refuses an email that already works at another venue, with a plain message, and the silent redirect into signup is replaced by one that says what happened and who to contact. No venue chooser (D38), so this is small | S | none |
@@ -2194,9 +2283,10 @@ W16 in particular is a prerequisite for the product being usable by the most lik
 all, two venues under one owner, and every journey in the specification is written as though it
 were already solved.
 
-Critical path: W0, Pass 0, W3 (W3a first), W4, W6, W7, W9, W14. W1a, W2, W3a, W7a, W16 and W17
-start immediately: they fix live bugs (W7a ends the client-detail grant that today outlives the
-membership, SB-42) and must be in place before any price can propagate. W1b waits for W15 and W8.
+Critical path: W0, Pass 0, W3 (W3a first), W4, W6, W7, W9, W14. W1a, W2, W3a, W16 and W17
+start immediately: they fix live bugs and must be in place before any price can propagate. W1b
+waits for W15 and W8. (W7a, an interim workstream to end account links at leave, was withdrawn on
+2026-09-14 by D41.)
 W10 and W11 run alongside W5 to W7.
 
 ---
@@ -2223,11 +2313,13 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
   BM, PLAN, SEO, WAIT, FAIR, DIARY and HLP groups plus TERMS-16, CSA-04, DB-10, SEC-03 to SEC-05,
   LIFE-09 and LIFE-10, covering operations and alerting, people who work at more than one venue,
   reporting and attribution, booking models other than appointments, plan tiers and caps, the
-  public page's metadata and waitlist, diary truth, help copy, and D41's release and search. The
+  public page's metadata and waitlist, diary truth, help copy, and D41 (account links untouched by
+  every lifecycle path; the collective contact search). The
   UI review added UI-C-01 to UI-C-06, the verification pass CSA-05 to CSA-08, and the consistency
   pass of 2026-09-14 thirteen more: OFF-05 (the undo), OFF-06 (host-initiated adoption), LIFE-11
   (same-name pairs after leave), LIFE-12 (invitation withdrawal and expiry), LIFE-13 (the paused
-  state and the transfer window), LIFE-14 (W7a's interim account-link release), REP-06 (reports
+  state and the transfer window), LIFE-14 (today's leave, removal and dissolve routes leave account
+  links untouched; repurposed 2026-09-14 when D41 withdrew W7a), REP-06 (reports
   after the end), DIARY-02 and DIARY-03 (D47 and D46, in W21), PUB-05 (other booking models keep
   the own page), MIG-05 and MIG-06 (bookings protected, and the host's values at the switch) and NOT-01 (the
   new notification group: N32, N36, N37). By pass: 113 from the first, 34 from the second, 6 from
@@ -2268,7 +2360,7 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
 | Old app builds confuse users with refusals | High | Low | Readable prose; normalised guards; consent refusal; handover |
 | Future data migrations fail on replica rows | Medium | Medium | Documented engine bypass plus a CI migration lint |
 | Production differs from staging (owed migrations, duplicates, collisions) | Medium | Medium | Pass 0; read-only production survey; invariants before each push |
-| Members resist losing control of member-only services | Medium | Medium | Choices at accept; team bookings stay; clear labelling; leave at any time |
+| Members resist losing control of member-only services | Medium | Medium | Any service one venue offers can be added to the page; "Ask the host to add it" at accept; parking is derived and lifts the moment a member leaves; existing bookings stay manageable; clear labelling; leave at any time (D2) |
 | Trigger overhead on hot service tables | Low | Low | Early exit for venues outside replicas collectives; performance budgets |
 | A host save deadlocks against a concurrent apply, because the dirty triggers sit outside the stated lock order | Medium | Medium | Triggers bump revisions only, in id order, and never touch the master afterwards; the apply reads the master without a row lock; CON-03 covers the pair (§6.4) |
 | A manual fix made in the SQL editor leaves no audit row, and the daily verifier then repairs over it, so a legitimate change disappears without trace | Medium | Medium | The verifier files unexplained drift as its own audit type with the before-image and alerts, rather than absorbing it; I41, SEC-04 (§6.4, §6.16) |
@@ -2298,8 +2390,8 @@ same ids. The recommended default is in bold.
 
 | id | Decision | Recommended |
 |---|---|---|
-| D1 | A joining member's same-named service | **A new host-managed replica; "Use mine" only through the reviewed adoption** |
-| D2 | Member-only services while in a collective | **DECIDED 2026-09-14. Kept for bookings the member's team makes, not bookable online; the member chooses at accept** |
+| D1 | A joining member's same-named service | **A new host-managed replica; "Use mine" only through the reviewed adoption.** The member's own service kept separate is parked while the member is live (D2) and both stay active after it leaves (D52) |
+| D2 | Member-only services while in a collective | **REVISED 2026-09-14 (later the same day). Venues in a live collective offer only the collective's services. Every other appointment service at the host or a member is parked: not bookable in any staff form, diary, walk-in flow or public page, derived from state rather than stored, and lifted the moment the venue leaves or the collective ends. Existing bookings on a parked service stay fully manageable.** The owner's words: offering both collective services and their own is overly complicated, and a service that only one venue or calendar offers can still be added to the collective, so nothing is lost. At accept a member parks (default) or asks the host to add each; every diary column opens the collective form (graft 5 revised); `is_bookable_online` gives the host staff-only offerings (§6.6). The earlier answer, "kept for bookings the member's team makes, not bookable online", is withdrawn |
 | D3 | Own booking pages while the collective is live | **DECIDED 2026-09-14. The collective page is the venue's booking page for as long as it is in the collective, and it supersedes every member's own page, the host's included.** The conditions in §6.9 (live, converged, at least one calendar listed) are a safety net so a redirect can never send a guest to a page that cannot take their booking, not a softening of the rule. Whenever those conditions hold, which is the normal state, the own page hands over |
 | D4 | Who may set per-calendar values | **Calendar staff within the flags, that venue's admins, and host admins** |
 | D5 | Build the five missing per-calendar fields | **Yes** |
@@ -2313,7 +2405,7 @@ same ids. The recommended default is in bold.
 | D14 | Deleting a host service that is on the collective page | **Blocked until it is taken off the page** |
 | D15 | May a member re-add a calendar the host removed | **Yes, with "Last changed by" on both sides and a notice** |
 | D16 | A member replica that is behind | **Hidden from guests at once for that service; staff bookings refused with a retry message; host and member told after 15 minutes; ops paged after 60** |
-| D17 | Staff authority and client details | **Collective role authorises staff booking.** The two other clauses of the original recommendation, that client details are typed for another venue's calendar and that mesh links are offered for downgrade, are overridden by D41 (§11.4): inside a live collective the picker searches every member venue and books against the existing record, and account links are released at the end, never downgraded |
+| D17 | Staff authority and client details | **Collective role authorises staff booking.** The two other clauses of the original recommendation, that client details are typed for another venue's calendar and that mesh links are offered for downgrade, are overridden by D41 (§11.4): inside a live collective the picker searches every member venue and books against the existing record, and account links are never downgraded, released or ended by anything the collective does |
 | D19 | Collective page headings and order | **Follow the host's Services page; the separate collective headings are retired** |
 | D20 | Photos | **The host's service photos; a member receives its own copies of the photo objects when it leaves** |
 | D22 | Host subscription lapse | **Page paused; dissolve after 30 days** |
@@ -2323,7 +2415,7 @@ same ids. The recommended default is in bold.
 | D26 | Cross-venue removal dialogs | **Dates, times and calendars at other venues, never client names** |
 | D28 | Group bookings across member venues | **Limit a group to the first person's venue, explained before the details step; split groups later if wanted** |
 | D29 | Name and description delegation on offered services | **Off, so page, emails and booking records show one name.** DECIDED 2026-09-14, kept as written: calendars may vary price, length, buffer, deposit and colour within the host's permissions; name and description are one everywhere. CSA-03 and TERMS-13 test both the offered and the not-offered case |
-| D32 | Venue-level settings (self-reschedule, waitlist, reminders, deposit settings, booking rules, sign-in) | **Decide per setting: host-controlled, must match at accept, or "Different at {venue}"** |
+| D32 | Venue-level settings (self-reschedule, waitlist, reminders, deposit settings, booking rules, sign-in) | **DECIDED 2026-09-14, per setting (table in §6.10).** Host controls (the host's setting applies to every venue while live; a member sees its own read-only, and it applies again after leaving): guest sign-in (the host's value only, replacing today's OR), guest self-reschedule, the waitlist on the page, "Any available" and the staff-first flow. Each venue, with "Different at {venue}" shown to the host: communication policies, SMS availability and in-person payments. Booking window, cancellation notice and deposits need no decision: for appointments they are per-service columns the host already controls. Nothing is "must match at accept" |
 | D33 | Staff bookings while a member's replica is updating | **Refuse with "This service is being updated. Please try again in a moment."** |
 | D34 | Alert the host to collective-page bookings on member calendars | **Yes, without client contact details** |
 | D35 | A link change removes the host | **Pause the page and let a member take over hosting** |
@@ -2359,43 +2451,45 @@ All nine are settled. The answers are recorded here as taken, with what each one
 |---|---|---|
 | D38 | A person who works at more than one venue in a collective | **No venue chooser. Refuse the invite instead.** A person who already works at another venue cannot be invited, and is told plainly to use a different email address. The silent lockout (SB-28, PB-16) is still fixed, because it is a live bug: what changes is that the fix is a refusal with a clear message, not a switcher. The owner accepts that someone running two venues in a collective needs two logins |
 | D39 | How a collective is priced, given each venue keeps its own subscription and calendar cap | **Accept the pooling. It is the point of the feature.** No per-collective charge, no member cap, no minimum tier to host. Nothing to build |
-| D41 | Whether joining still means sharing client details | **Shared while the collective is live, and it ends when the membership does.** See the amended wording below: this is not the status quo, and two parts of it do not exist yet |
+| D41 | Whether joining still means sharing client details | **REVISED 2026-09-14. A collective is extra functionality on top of account links with full access, and never changes them.** Client details are shared because the account links share them, before, during and after the collective. Leaving, removal and dissolve affect only the collective (its page, staff form, contact search scope and report view); a venue that leaves can still make, edit and cancel bookings for the venues it is linked with. See the wording below. The earlier answer, "shared while live and ended with the membership", is withdrawn |
 | D42 | The same guest booking two member venues becomes two client records, permanently | **Accept, and explain it in the help centre only.** No product UI, no banner, no warning at join. A minor issue that help articles and customer service can cover |
 | D44 | A member that also runs classes, events or bookable rooms | **Appointments only for now, stated in the product, and built so other models can be added later.** The guards, warnings and refusals in §6.14 all stand. The forward-compatibility requirement is new: see below |
 | D49 | What a host sees about the collective's trade, and what a member sees about others | **Full mutual visibility, made explicit and consented at join.** Every member sees every other member's figures, as today, but named and broken down by venue rather than blended into one unlabelled total, and agreed to rather than discovered |
 | D50 | Whether a host can undo a change that has already reached members | **Yes, 60 seconds.** "Put it back" in the save summary, restoring the master's before-image from the audit trail and re-applying |
 | D51 | Whether host changes may carry a future effective date | **Not planned.** Changes apply straight away. Remove it from the open questions rather than carrying it as phase two |
-| D52 | What "reverting to their own services" means for the host's services in a member's account when the member leaves or the collective dissolves. Decided 2026-09-14 | **They stay, as ordinary services the member owns.** The owner's words: they were real services the member was offering, and it is highly likely they would want to continue offering them. So release lifts the lock and changes nothing else: the released service keeps its settings, its calendar choices and its bookings, and appears on the member's own page once that page is showing again. Nothing is parked, retired or deleted at release. Where the member kept a same-named original separate at join (the D1 default), both stay active and the released one carries `svc.member.card.cameFrom` ("Came from {host}") for 30 days so the two are telling apart; the member decides what to do with the pair, and nothing decides for them |
+| D52 | What "reverting to their own services" means for the host's services in a member's account when the member leaves or the collective dissolves. Decided 2026-09-14 | **They stay, as ordinary services the member owns.** The owner's words: they were real services the member was offering, and it is highly likely they would want to continue offering them. So release lifts the lock and changes nothing else: the released service keeps its settings, its calendar choices and its bookings, and appears on the member's own page once that page is showing again. Nothing is parked, retired or deleted at release. Where the member kept a same-named original separate at join (the D1 default, parked while live under D2), both stay active and the released one carries `svc.member.card.cameFrom` ("Came from {host}") for 30 days so the two are telling apart; the member decides what to do with the pair, and nothing decides for them |
 
-**D41 in full, because the answer is not one of the options offered.** The owner's requirement is:
-joining shares access to contact details, including every part of a client record; the record still
-belongs to the venue that owns it; members can use and interact with each other's contacts and
-bookings seamlessly; and when the collective ends, the owner keeps the record and everyone else
-loses access.
+**D41 in full, as revised by the owner on 2026-09-14.** The owner's words: a venue collective is
+additional functionality on top of an account link with full access. Ending or leaving a collective
+should only affect the functioning of the collective booking page and the rest of the collective. A
+venue that leaves can still be linked with other venues and have full access to making, editing and
+cancelling bookings for another venue, and that must remain.
 
-That is neither the status quo nor the recommended option. Checked against the code, two of the
-four parts are missing today:
-
-- **Access does not end.** Leaving, being removed and dissolving only flip the membership row's
-  status (`collectives/[id]/members/route.ts:189,280` and `collectives/[id]/route.ts:259-263`). Nothing in
-  `src/lib/linked-accounts/collectives.ts` or any collective route touches `account_links`, so the
-  accepted account link and its client-detail grant survive the collective indefinitely. A member that
-  leaves today keeps reading its former partners' client records. This is the requirement's
-  sharpest half and it is a bug to fix, not a default to keep.
-- **It is not seamless.** There is no cross-venue contact search: `/api/venue/guests` is scoped to
-  `staff.venue_id` on every query (`route.ts:150,237,285,317`). Access today is per guest, reached
-  through a shared diary booking, not a list anyone can search. Making it seamless is new work.
+Checked against the code, the account-link half already behaves this way and must be kept:
+create, invite and accept require every pair of venues to hold a full-access account link first
+(`checkCombinedEligibility`, `collectives/route.ts:138`, `members/route.ts:123,228`), and leaving,
+removal and dissolve only flip the membership row's status (`collectives/[id]/members/route.ts:189,280`
+and `collectives/[id]/route.ts:259-263`), touching no `account_links` row.
 
 So D41 as decided means three things:
 
-1. **Keep the sharing while the collective is live**, and say so plainly at join, with recorded
-   consent. The disclosure names what a partner venue can see: name, contact details, visit
-   history, tags, notes, documents and compliance records.
-2. **Build the seamless part**: a member's staff can search and open another member's contacts
-   while the collective is live, with the owning venue named on every record.
-3. **End it with the membership**: leave, removal and dissolve release the account links in the
-   same transaction that ends the membership, so access stops at once. The records stay with their
-   owner, untouched.
+1. **The account links are the foundation, and the collective never writes them.** No lifecycle
+   function, engine function, migration step or route in this project creates, narrows, releases or
+   ends an account link. Ending or narrowing a link below full access still removes that member
+   from the collective, as today; the reverse never happens.
+2. **Say plainly at join what the links already share.** The disclosure names what a linked venue
+   can see (name, contact details, visit history, tags, notes, documents and compliance records),
+   says that this comes from the account links, and says that leaving the collective does not
+   change it: the links are managed on Linked accounts.
+3. **Build the seamless part as a collective feature**: while the collective is live, a member's
+   staff can search and open another member's contacts, with the owning venue named on every
+   record. That search scope, the collective staff form and the collective report view end with
+   the membership; what the account links grant on their own carries on.
+
+The first version of this answer ("shared while live, and it ends when the membership does") was
+based on a misreading of what the owner wanted. It produced SB-42, the release step that ended
+links, the `created_for_collective_id` column, the link classification in §7 and workstream W7a.
+All are withdrawn.
 
 This replaces the earlier recommendation to drop the link mesh. It also overrides **D17**, which
 said a member's staff must type a client's details when booking on another venue's calendar: inside
@@ -2407,7 +2501,7 @@ D34 (the host alert "without client contact details", N32), RT1-17 ("no guest na
 venues"), §6.7's affected-bookings check "without client names", §6.11's rule that the
 affected-bookings payload must not carry client names for another venue's bookings, and the OFF,
 CAT and UI-H tests all deliberately minimise client names in dialogs, notices and payloads, even
-though D41 lets venues see each other's client records while the collective is live. That is on
+though the account links let venues see each other's client records. That is on
 purpose: a venue that wants a client's details opens the record through the contact search, where
 the owning venue is named; a notice or a refusal dialog is not the place for them.
 
@@ -2436,16 +2530,16 @@ Recorded for the record. Each has one sensible answer and no commercial or legal
 | D48 | Search engines and link previews for the collective page and members' pages, which have no canonical, no Open Graph image and, on `/book/{venue}`, no metadata at all (PB-17) | **Give `/book/c/{slug}` full metadata and make it canonical for any address it has adopted; give member pages their own metadata and a canonical pointing at whichever page actually serves them. Do this in the same workstream as the redirects, because they answer the same question** |
 | D53 | The two column-registry classes still marked undecided: `pre_appointment_instructions` and `online_unmet_message` (§6.3) | **`pre_appointment_instructions` is venue-controlled, seeded from the master at creation, because it describes the venue the guest visits; `online_unmet_message` is host-controlled, because it belongs to the form definition.** Recorded in `collective_column_classes` (Appendix F) |
 | DL2 | Retired replicas at release (§6.7) | **Stay inactive**, listed with the member's other inactive services |
-| DL3 | Member-only services parked at join, at release | **Un-parked automatically**, named in the review panel |
+| DL3 | Services parked while live, at release | **REVISED 2026-09-14 (D2). Nothing to un-park:** parking is derived and ends with the membership, so they are bookable again at once, and the review panel names them. The join job's `paused_service_ids` and the release's un-pause step are withdrawn |
 | DL4 | The old page address after a dissolve | **The same host may reclaim it early for a re-formed collective**, and the neutral page then redirects there; the name hold follows the same rule |
 | DL5 | Reconnect at re-join | **Same host only**, and reviewed like an adoption when the member changed the released service in between |
-| DL6 | The account-link mesh at re-join | **Accept creates the missing pairwise links**, flagged `created_for_collective_id`, so a re-form is one invitation and one acceptance |
-| DL7 | The interim fix for SB-42 on today's model | **Ship it as W7a**, alongside W1a and W2: end the created-for-collective account links at leave, removal and dissolve now, with no engine dependency |
+| DL6 | The account-link mesh at re-join | **REVISED 2026-09-14 (D41). Accept requires the full mesh, as today, and creates no links.** Leaving and dissolving leave the links in place, so a re-form is still one invitation and one acceptance |
+| DL7 | The interim fix for SB-42 on today's model | **WITHDRAWN 2026-09-14 (D41).** SB-42 is not a defect, so there is nothing to fix and no W7a |
 | DL8 | Invitation expiry | **30 days**, status `removed`, the N1 reminder at day 7, N35 on expiry |
 | DL9 | The paused state | **A flag on `active` (`paused_at`)**, not a fourth status value, so every "status = active" reader keeps working |
-| DL10 | The host's own row at dissolve | **Goes `left` like everyone's**, so one release trigger ends the host's client-detail account links too |
-| DL11 | Reports after the end (settled here, not as r3-05 recommended) | **Own rows only**, the strict D41 reading, with the "via {collective}" filter kept for the venue's own bookings; no frozen view of other venues |
-| DL12 | A link choice in the Leave dialog | **No choice**; the release covers every other member, and `leave.body.access` says so |
+| DL10 | The host's own row at dissolve | **Goes `left` like everyone's**, so one release trigger handles every venue the same way; no account link is touched (D41) |
+| DL11 | Reports after the end (settled here, not as r3-05 recommended; revised 2026-09-14 by D41) | **The collective view goes**, with the "via {collective}" filter kept for the venue's own bookings and no frozen collective view; what a venue still sees of other venues' figures follows its account links' own revenue grant, as for any linked venues |
+| DL12 | A link choice in the Leave dialog | **No choice**, because leaving never touches account links; `leave.body.access` says so and points to Linked accounts for managing them |
 
 ---
 
@@ -2496,6 +2590,19 @@ Recorded for the record. Each has one sensible answer and no commercial or legal
   DL2 to DL12, workstream W7a and the parts W1a, W1b and W3a, invariant I48 and thirteen tests
   (170 in all), rewrote §7 to the non-destructive migration package, and made the three documents
   use one vocabulary (Appendix B).
+- **Round five, the readiness review of 2026-09-14.** One reader over all three documents, checked
+  against the code before building. It found that the D41 release could not work, because create,
+  invite and accept require the full account-link mesh before the invitation (so no link was ever
+  "created for the collective"). The owner then revised D41: a collective sits on top of account
+  links and never changes them. SB-42, DL7, W7a, the `created_for_collective_id` column and the §7
+  link classification were withdrawn; LIFE-09, LIFE-14 and I47 were repurposed to guard the
+  opposite (170 tests and 38 invariants unchanged). It also settled three naming contradictions in
+  Appendix C (`collective_service_item_id`, `replica_service_id` `ON DELETE SET NULL`,
+  `support_session_id`), added `COLLECTIVE_SERVICE_RETIRED` to the one code list, and rewrote the
+  specification's §7 as answers, leaving three points open (§0). The owner and the team answered
+  all three later the same day: D2 revised (venues offer only the collective's services, the rest
+  parked), D32 decided per setting, and a member's admin must confirm before its page address is
+  adopted.
 
 ## Appendix B. Glossary
 
@@ -2507,7 +2614,7 @@ Recorded for the record. Each has one sensible answer and no commercial or legal
 | Replica | The locked row for that service in a member's account, written only by the engine; "the service from {host}" in copy. Not a "copy" (below) |
 | Copy | Reserved for the legacy shape: a `linked` or `customised` service copy made by today's manager (§2, §4, §7). Never the new replica |
 | Replica link | A `collective_service_replicas` row: the engine's record that this member holds a replica of this offering, with its revisions, fingerprint and `released_at`. The bare word "link" is not used for it in new text |
-| Account link | An `account_links` row: the pairwise grant between two venues. `created_for_collective_id` says whether the collective created it. The bare word "link" is not used for it in new text |
+| Account link | An `account_links` row: the pairwise grant between two venues. A collective requires a full-access account link between every pair of its venues and never changes one (D41). The bare word "link" is not used for it in new text |
 | Provenance | The replica link's `provenance` column: `created`, `adopted`, `migrated` or `reconnected`. "Origin" keeps its legacy meaning, the `synced_from_service_id` a copy follows |
 | Derived provider | A catalogue entry computed from assignments, one per calendar that offers the service (§6.6). The `collective_service_providers` table is dropped in C2 |
 | Offering | The collective page's record that a master is on the page |
@@ -2516,14 +2623,14 @@ Recorded for the record. Each has one sensible answer and no commercial or legal
 | Engine | The database functions that write replicas and cross-venue assignments |
 | Revision | The counter that says a replica has changes to apply |
 | Converged | A replica whose applied revision equals its desired revision and whose fingerprint matches the master |
-| Release | The bundle `collective_release_member` runs when a membership stops being active: replica links released (`released_at`), locks lifted, managed objects unmanaged, adoption cleared, collective-created account links ended, the payment rule downgraded where needed, all in one transaction; photos and notices after commit (§6.7) |
+| Release | The bundle `collective_release_member` runs when a membership stops being active: replica links released (`released_at`), locks lifted, managed objects unmanaged, adoption cleared, the payment rule downgraded where needed, and no account link touched (D41), all in one transaction; photos and notices after commit (§6.7) |
 | Behind | A replica link whose `applied_revision` is below its `desired_revision` (I3b): the engine's normal state between a host save and the apply |
 | Drift | A replica link marked current whose fingerprint differs from the expected fingerprint (I3): never lag, always audited as `unexplained_drift_repaired` and alerted |
 | Retired | Only a replica after the host withdraws its offering: inactive, calendar choices kept. Schema that goes in C2 is "dropped"; surfaces, tests and strings that go are "removed" |
 | Suspended | A member whose subscription has lapsed (`suspended_at`): hidden from the page, its own page showing, its replicas still locked |
 | Paused | The page after the host leaves or lapses (`paused_at` on an active collective): members may leave or take over; 30 days to a dissolve |
 | Booking paused | The host's `booking_paused` flag, which pauses bookings on the collective page without pausing the collective |
-| Parked | The member-only service choice at join ("Pause it" in the dialog): kept for the team's own bookings, not bookable online, un-parked at release |
+| Parked | An appointment service at a venue that is live in a collective but is not one of the collective's offerings there (at the host, not the master of an active offering; at a member, not a live replica). Not listed or bookable for a new booking anywhere, while existing bookings on it stay fully manageable. Derived from state, never stored, and lifted the moment the membership ends, the member is suspended, the page pauses or the collective dissolves (D2, §6.6). "Park it until I leave" is the join dialog's name for it. Revised 2026-09-14: it no longer means kept for the team's own bookings |
 | Managed | An engine-written member-side library object (heading, add-on group, form) carrying `managed_by_collective_id` |
 | Locked | Refused by a BEFORE trigger while the collective is live. A route-level refusal with no database lock is "cannot be changed while live" |
 | Page address | The booking URL, `/book/c/{slug}` or `/book/{slug}`. "Address" alone is the physical one |
@@ -2561,7 +2668,7 @@ second reading, with the widening ALTER in C.2 and the two cautions that come wi
 CREATE TABLE IF NOT EXISTS public.collective_service_replicas (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   collective_id        uuid NOT NULL REFERENCES public.venue_collectives (id) ON DELETE CASCADE,
-  item_id              uuid NOT NULL REFERENCES public.collective_service_items (id) ON DELETE CASCADE,
+  collective_service_item_id uuid NOT NULL REFERENCES public.collective_service_items (id) ON DELETE CASCADE,
   member_id            uuid NOT NULL REFERENCES public.venue_collective_members (id) ON DELETE CASCADE,
   venue_id             uuid NOT NULL REFERENCES public.venues (id) ON DELETE CASCADE,
   -- NULL until the first apply creates the member's row (I2 allows 15 minutes).
@@ -2591,7 +2698,7 @@ CREATE TABLE IF NOT EXISTS public.collective_service_replicas (
 );
 -- T19: one live link per (offering, venue); released rows stay for the audit and the reconnect.
 CREATE UNIQUE INDEX IF NOT EXISTS collective_service_replicas_live_pair
-  ON public.collective_service_replicas (item_id, venue_id) WHERE released_at IS NULL;
+  ON public.collective_service_replicas (collective_service_item_id, venue_id) WHERE released_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS collective_service_replicas_service_unique
   ON public.collective_service_replicas (replica_service_id)
   WHERE replica_service_id IS NOT NULL AND released_at IS NULL;
@@ -2654,6 +2761,7 @@ CREATE TABLE IF NOT EXISTS public.collective_audit_events (
     'host_transfer_requested', 'host_transfer_cancelled', 'host_transferred',
     'collective_paused', 'collective_resumed', 'collective_dissolved',
     'adoption_requested', 'adoption_answered', 'suggestion_made',
+    'address_adoption_requested', 'address_adopted',
     'migration_applied', 'migration_rolled_back',
     'photo_copied', 'photo_copy_failed', 'payment_rule_downgraded'))
 );
@@ -2704,8 +2812,9 @@ REVOKE ALL ON TABLE public.collective_column_classes FROM PUBLIC, anon, authenti
 
 `collective_operations` has one runner: the route that creates a job runs it once inline after
 commit, and `collective-replicate` retries anything still `pending` or `running` past its lease.
-The join job carries the member's choices in `progress` (`paused_service_ids`, `form_choices`),
-which is where the release reads what to un-pause (DL3); `release_followup` carries the photo
+The join job carries the member's choices in `progress` (`form_choices`); it holds no service
+list, because parking is derived (D2, DL3; `paused_service_ids` was withdrawn on 2026-09-14);
+`release_followup` carries the photo
 copies and their retry count; `notice` holds one-off reminders keyed by subject and day
 (`notice:invite:<member_id>:7`), so no reminder column is needed on any table.
 
@@ -2746,8 +2855,7 @@ ALTER TABLE public.calendar_service_assignments
   ADD CONSTRAINT calendar_service_assignments_custom_colour_len
     CHECK (custom_colour IS NULL OR char_length(custom_colour) <= 20);
 
--- D41: which pairwise links the collective created. No FK: the collective may be gone when it is read.
-ALTER TABLE public.account_links ADD COLUMN IF NOT EXISTS created_for_collective_id uuid;
+-- D41: account_links is not altered. (An earlier draft added created_for_collective_id; withdrawn 2026-09-14.)
 
 ALTER TABLE public.venue_collectives
   ADD COLUMN IF NOT EXISTS service_model text NOT NULL DEFAULT 'legacy_copies',
@@ -2896,10 +3004,11 @@ for a member or `collective_dissolve` for a host before
 `terminate_account_links_for_venue_deletion`, because a cascade fires no status trigger, and
 because the children's `replica_of_*` are `NO ACTION`: a host's `service_items` cannot be deleted
 while a member's variants still point at them, and the dissolve is what clears the pointers.
-`accepts_records_from_type_id` is `SET NULL` and survives release. One consequence of the plan's
-`NO ACTION` on `replica_service_id`: a member deleting a released service it now owns (D52) must
-have the service DELETE route null `replica_service_id` on that service's released link rows in
-the same transaction; the reconnect offer then has nothing to reconnect, which is right.
+`accepts_records_from_type_id` is `SET NULL` and survives release. `replica_service_id` is
+`ON DELETE SET NULL` (§6.3 and C.1): a member deleting a released service it now owns (D52) nulls
+the pointer on that service's released link rows automatically, and the reconnect offer then has
+nothing to reconnect, which is right. A live replica cannot reach that path, because the lock
+trigger refuses its delete (`RN001`).
 
 ## Appendix D. Engine functions
 
@@ -2958,9 +3067,11 @@ nine (`COLLECTIVE_MANAGED_SERVICE`, `COLLECTIVE_OFFERED_SERVICE`, `COLLECTIVE_MA
 at 412, `src/lib/booking/guest-actions/types.ts:182`); `COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE`,
 `COLLECTIVE_REPLICAS_ALWAYS_FOLLOW`, `COLLECTIVE_HEADINGS_FOLLOW_SERVICES`,
 `COLLECTIVE_LINKS_BEHIND`, `COLLECTIVE_TRANSFER_PENDING`, `COLLECTIVE_UNDO_EXPIRED` (410),
-`COLLECTIVE_LEGACY_MODEL`, `COLLECTIVE_BOOKING_MODEL_LOCKED`, `COLLECTIVE_CURRENCY_MISMATCH`; and
-`COLLECTIVE_HOST_CHANGE_REFUSED` and `COLLECTIVE_SYNC_COLUMNS_LOCKED` from the six. The four §6.7
-codes are the plan's and not contract 21's; the lead adds them or folds them into prose.
+`COLLECTIVE_LEGACY_MODEL`, `COLLECTIVE_BOOKING_MODEL_LOCKED`, `COLLECTIVE_CURRENCY_MISMATCH`,
+`COLLECTIVE_SERVICE_RETIRED`; §6.7's four, `COLLECTIVE_NOT_HOST`, `COLLECTIVE_VENUE_NOT_MEMBER`,
+`COLLECTIVE_CALENDAR_NOT_AT_VENUE` and `COLLECTIVE_REPLICA_NOT_READY`; and
+`COLLECTIVE_HOST_CHANGE_REFUSED` and `COLLECTIVE_SYNC_COLUMNS_LOCKED` from the six. This is the
+same list as §6.11.
 
 **Backoff.** `v_backoff := (ARRAY[1, 5, 30, 120, 360])[LEAST(attempts, 5)]` minutes, so the sixth
 and every later attempt waits six hours. N5 goes to the host and member after three failures or
@@ -3033,8 +3144,7 @@ with a new name and no migration.
 `replica_failed` `{ error_code, error, attempts }`; `unexplained_drift_repaired` the replica-side
 projection as `before`; `values_changed`, `calendar_assigned` and `calendar_unassigned` the
 assignment row; `migration_applied` the member's copies and provider rows as `before`, one row per
-member (D54, D30); `member_joined` `{ before: { account_links: [{ link_id, low_grants_*,
-high_grants_* }] } }` so the release can restore a pre-existing link's grants; `payment_rule_downgraded`
+member (D54, D30); `member_joined` `{ after: { consent_version, choices } }`; `payment_rule_downgraded`
 the service's previous `payment_requirement` and `deposit_pence`.
 
 ### D.1 The functions
@@ -3136,14 +3246,13 @@ adoption and needs the member's choice (DL5); `same_name_choices` `use_mine` set
 `replica_service_id` to the member's service, `provenance = 'adopted'`, writes
 `replica_of_variant_id` from `option_map`, and snapshots that service's bookings in the same
 transaction (PRICE-10); otherwise a `created` link with `replica_service_id NULL`.
-`own_service_choices`: `keep` does nothing; `ask` writes `suggestion_made` and the route sends N28;
-`pause` sets the member's own service inactive and records the id in the join job's
-`progress.paused_service_ids`. `form_choices` `use_existing` marks the member's type as the
+`own_service_choices`: `park` (the default) writes nothing, because parking is derived (§6.6);
+`ask` writes `suggestion_made` and the route sends N28. (`keep`, `pause` and
+`progress.paused_service_ids` were withdrawn on 2026-09-14.) `form_choices` `use_existing` marks the member's type as the
 adoption target (managed, `accepts_records_from_type_id` = itself, unarchived) so the first apply
 adopts it; `use_theirs` leaves the apply to create one. The venue's compliance flag is not touched
-(D54; the flag is the venue's). Create the missing pairwise `account_links` with every other active member
-flagged `created_for_collective_id` (DL6), and record the grants of any pre-existing link the mesh
-upgrades in `member_joined`'s `changes.before`. Audit `member_joined` and one `adoption_answered`
+(D54; the flag is the venue's). No `account_links` row is created or changed: the invite checks
+already required the full mesh, and the function re-checks it under the lock (D41, DL6). Audit `member_joined` and one `adoption_answered`
 per adoption; bump; insert the `join` operation (`idempotency_key = 'join:' || p_member_id`). The
 route runs applies inline within its budget and answers 202 with `operation_id` when the budget is
 hit; N3 goes to the host and members after commit; N4 to the member when its last link converges,
@@ -3151,13 +3260,13 @@ sent by whichever apply completes it (route or cron).
 
 **`collective_release_member(p_member_id, p_reason text, p_actor_venue_id, p_actor_user_id, p_now) RETURNS jsonb`**
 `p_reason` is `'left'`, `'removed'`, `'link_ended'`, `'suspended_expired'`, `'dissolved'` or
-`'venue_deleted'`; returns `{ links_released, account_links_ended, account_links_restored,
-unpaused: [service_id], downgraded: [service_id], operation_id }`. Exclusive lock; idempotent: a
+`'venue_deleted'`; returns `{ links_released,
+unparked: [service_id], downgraded: [service_id], operation_id }`. Exclusive lock; idempotent: a
 membership already released returns zeros. When the row is the host's and the collective is not
 being dissolved (a link change removed the host), the collective is paused instead: `paused_at`,
 `paused_reason = 'host_left'`, `collective_paused`, N23 with a reminder at day 23 through a
 `notice` job; the members' links stay locked and in step because their own memberships are still
-active, and only the account-link step below runs for the host. Otherwise, in the transaction, in
+active, and nothing else runs for the host. Otherwise, in the transaction, in
 this order (T22's one list):
 set `status` (`left` for the member's own leave and for dissolve, `removed` otherwise) and
 `left_at` unless the trigger path already did; `released_at = p_now` on the member's live links
@@ -3165,14 +3274,10 @@ set `status` (`left` for the member's own leave and for dissolve, `removed` othe
 variants, groups, options, headings, types, versions and requirements, keeping
 `accepts_records_from_type_id`; every released service stays exactly as it is (D52), active ones
 active and retired ones inactive (DL2), with `svc.member.card.cameFrom` derived from the audit row
-for 30 days; un-pause the services in the join job's `progress.paused_service_ids` and name them
-(DL3); the compliance "locked on" guard lifts by absence of the membership; reset
-`adopted_venue_id` and `slug_strategy` when this venue's address was adopted; end every
-`account_links` row between this venue and every other member where `created_for_collective_id`
-is this collective (`status = 'revoked'`, `termination_reason = 'collective_membership_ended'`,
-`terminated_at`; a proposal on today's `link_status` vocabulary), and restore the grants recorded
-in `member_joined` on any pre-existing link (`created_for_collective_id IS NULL`) the mesh had
-upgraded; set `payment_requirement = 'none'` on released services that take payment when
+for 30 days; nothing to un-park, because parking ends with the membership, and `unparked` names
+the member's services that were not on the page at release (DL3); the compliance "locked on" guard lifts by absence of the membership; reset
+`adopted_venue_id` and `slug_strategy` when this venue's address was adopted; leave every
+`account_links` row exactly as it is (D41); set `payment_requirement = 'none'` on released services that take payment when
 `venues.stripe_charges_enabled IS NOT TRUE`, one `payment_rule_downgraded` row each; while
 `collective_service_providers` exists (Pass B to C1), set the member's provider rows to
 `'removed'`; two `member_released` rows, one targeted at the member and one at the host; bump;
@@ -3255,7 +3360,7 @@ Every route follows the repository's shape: a Next handler under `src/app/api/`,
 | 4 | Host service save | `PATCH /api/venue/appointment-services` | gains `expected_updated_at` (the row's `updated_at` as loaded, compared as an exact timestamptz) and `collective_calendars { add: [{ calendar_id, venue_id }], remove: [...] }` | gains `collective_sync` | 412 `STALE_RESOURCE`; 409 `COLLECTIVE_MANAGED_SERVICE` on a replica | Host admin; member admin for venue-class columns only |
 | 5 | Services GET | `GET /api/venue/appointment-services` | | per service `collective`; host admins `collective_calendars` (below) | | Any staff |
 | 6 | Accept | `PATCH /api/venue/collectives/[id]/members` `action: 'accept'` | gains `consent_version`, `same_name_choices`, `own_service_choices`, `form_choices` (below) | 200, or 202 `{ operation_id }` | 409 `COLLECTIVE_CONSENT_REQUIRED` | Invitee admin |
-| 7 | Leave | same route, `action: 'leave'` | no link option (DL12) | `{ review: { prices, sameName, stripe, library, photos, unpaused } }` | | Member admin |
+| 7 | Leave | same route, `action: 'leave'` | no link option (DL12) | `{ review: { prices, sameName, stripe, library, photos, unparked } }` | | Member admin |
 | 8 | Host transfer | same route, actions `offer_host { venueId }`, `accept_host { consent_version }`, `cancel_host_transfer`, `take_over_hosting { consent_version }` | | 200 | 409 `COLLECTIVE_LINKS_BEHIND`, `COLLECTIVE_TRANSFER_PENDING` | Host admin; candidate admin |
 | 9 | Dissolved listing | same route, `configure { list_on_old_page }` after dissolve | | 200 | | Former member admin |
 | 10 | Suggest; answer an adoption | `POST /api/venue/collectives/[id]/suggestions { service_id }`; `POST .../adoptions/[itemId] { choice: 'use_mine' or 'keep_separate', option_map }` | | 201; 200 | 409 `COLLECTIVE_LEGACY_MODEL` | Member admin |
@@ -3275,7 +3380,7 @@ Every route follows the repository's shape: a Next handler under `src/app/api/`,
 categories? }` (`appointment-services/route.ts:713-720,771-777`). Each service gains:
 
 ```
-collective: null | { role: 'master' | 'replica' | 'retired', collective_id, collective_name, host_venue_name,
+collective: null | { role: 'master' | 'replica' | 'retired' | 'parked', collective_id, collective_name, host_venue_name,
   item_id, locked_fields: string[], delegated_fields: string[],
   status: 'up_to_date' | 'updating' | 'setting_up' | 'failed' | 'hidden' | 'paused', status_reason,
   last_applied_at, hidden_reasons: [{ venue_id, reason: 'no_stripe' | 'forms_off' | 'suspended' | 'behind' }] }
@@ -3300,8 +3405,8 @@ nulls (`route.ts:680-684`). `status` is one enum, defined once in
 T18). For `accept`: `consent_version`, a non-empty string; `same_name_choices`, an optional array
 of `{ item_id: uuid, choice: 'add_new' | 'use_mine', my_service_id?: uuid, option_map?: [{
 my_variant_id: uuid, host_variant_id: uuid | null }] }` where `use_mine` requires `my_service_id`;
-`own_service_choices`, an optional array of `{ service_id: uuid, choice: 'keep' | 'ask' | 'pause'
-}`; `form_choices`, an optional array of `{ host_type_id: uuid, choice: 'use_existing' |
+`own_service_choices`, an optional array of `{ service_id: uuid, choice: 'ask' | 'park' }`, where a
+member-only service left out is `park` (D2 as revised 2026-09-14 removed `keep` and renamed `pause`); `form_choices`, an optional array of `{ host_type_id: uuid, choice: 'use_existing' |
 'use_theirs', my_type_id?: uuid }` where `use_existing` requires `my_type_id`. A missing
 `consent_version` answers 409 `COLLECTIVE_CONSENT_REQUIRED` before any read. Today's accept writes
 `status: 'active'` at `members/route.ts:242` and returns `finish()` at `250`; it becomes one call to
@@ -3354,6 +3459,10 @@ p_job => 'retry', p_support_session_id => <session>)` and writes a platform audi
 - `DELETE /api/venue/collectives/[id]`: today flips rows at `route.ts:259-263`; it becomes
   `collective_dissolve`. The dissolve slug rewrite there ends: the address is kept for the neutral
   page.
+- `PATCH /api/venue/collectives/[id]`: an `adopted_venue_id` change no longer writes. It records
+  `address_adoption_requested` and sends N38 to that venue's admins; one of them confirms with the
+  members `PATCH` `action: 'confirm_address_adoption'`, which writes `adopted_venue_id` and
+  `slug_strategy` and `address_adopted` (§6.9).
 - `src/app/embed/` holds `[venue-slug]` and `layout.tsx` only; `/embed/c/[slug]` is new.
 
 ## Appendix F. Column registry
@@ -3393,7 +3502,7 @@ four; `derived` covers the seven columns below that no copy produces.
 | 14 | `colour` | host | |
 | 15 | `sort_order` | venue | the member's own list order; the page follows the master's; dirty triggers skip it |
 | 16 | `is_active` | derived | master active AND offering active |
-| 17 | `is_bookable_online` | host | |
+| 17 | `is_bookable_online` | host | "Staff bookings only" (`svc.form.staffOnly.label`); read nowhere in the booking path today, wired in W4 on every venue (§6.6) |
 | 18 | `created_at` | not_copied | |
 | 19 | `updated_at` | not_copied | maintained by the new trigger |
 | 20 to 26 | `staff_may_customize_name`, `_description`, `_duration`, `_buffer`, `_price`, `_deposit`, `_colour` | host | D29 is a rule of the apply, not a class: name and description are forced `false` on the master when it is offered and copied as such, so a replica never delegates them |
@@ -3504,8 +3613,10 @@ links resolve to member-owned groups; stored per-calendar values under a flag th
 member assignments on copies that are not providers; `synced_from_service_id = id` rows; copies
 following an origin outside this collective (I45); providers with `practitioner_id IS NULL` (the
 "all calendars" mode, `20261210120000_combined_booking_page.sql:113`); dissolved residue counts;
-Stripe readiness per venue; forms flags and the `FEATURE_FLAG_*` environment overrides; I7; and the
-legacy account links classified by date (below).
+Stripe readiness per venue; forms flags and the `FEATURE_FLAG_*` environment overrides; I7; and
+any member pair whose account link has fallen below the full-access mesh (read only, D41); an
+adopted page address (listed, left as it is); and `service_items` rows with
+`is_bookable_online = false` (W0, §6.6).
 
 **Master selection.** Per active offering, the distinct `source_service_id` among active providers
 at `host_venue_id`: exactly one is the master; more is P1 and stops the run; none is P5, and under
@@ -3529,15 +3640,16 @@ stored per-calendar values on member calendars stay where they are, applying onl
 permission for that field is on. (3) Every copy's previous row, option rows, add-on links,
 requirement rows and sync columns, and every provider row, are recorded in one `migration_applied`
 row per member (`changes.before`) for rollback; no per-value rows are written and nothing is shown
-to the member. (4) Member-only services stay as they are, kept for the bookings the member's team
-makes (D2); the member can ask the host to add any of them later from its Services page, and the
-report says plainly that online booking of these ends when the member's page hands over (D3).
+to the member. (4) Each member-only service carries the owner's `choice` in the signed report (D2
+as revised 2026-09-14): `add_to_page` copies the member's service into a new host master (the
+registry's host columns, as "Add from another venue" does), offers it, and adopts the member's own
+service as its replica (`provenance = 'adopted'`, options mapped one to one, its bookings
+snapshotted first), so its settings, calendars and bookings do not change; `park` leaves it exactly
+as it is, and it is parked from the switch because parking is derived (§6.6). The report says
+plainly which services stop taking new bookings.
 (5) The member's compliance flag is left as it is; the migration switches nothing on; form-bearing
-offerings are bookable at the member only once forms are on. (6) Legacy pairwise links are
-classified by creation date: created after the invitation (`venue_collective_members.created_at`
-of the invited row) and up to one day after `joined_at` are "created for the collective"
-(`created_for_collective_id` written), listed for the owner, default "created for"; earlier links
-stay `NULL`.
+offerings are bookable at the member only once forms are on. (6) Account links are read to
+confirm the full mesh and never written (D41).
 
 **Option mapping precedence.** Exact normalised name first; then unmatched copy variants to
 unmatched master variants by `sort_order` position; the rest with future bookings are kept,
@@ -3564,7 +3676,8 @@ reported.
 `idempotency_key = 'migrate:' || collective_id`, `progress = { phase, report_hash, done_links,
 before_images_written }`. In one transaction under the engine flag: snapshots; masters set;
 `service_model = 'migrating'` (the legacy catalogue keeps serving, member locks are on, engine
-applies run, the "behind" hide is suspended); links created; options mapped; adoption targets
+applies run, the "behind" hide is suspended); links created, including the `adopted` links for
+member-only services chosen `add_to_page`, with their masters copied first; options mapped; adoption targets
 marked; a same-shape member add-on group adopted as the managed group rather than duplicated;
 managed headings created rather than a member's own renamed; missing assignments created; one
 `migration_applied` row per member carrying the full before-image (the copy row, its option rows,
@@ -3614,8 +3727,8 @@ UTF-8 bytes, printed by `--dry-run` and required verbatim by `--approved-report`
   links: [{ item_id, venue_id, copy_service_id | null,
             replaced: [{ column, before, after }],
             options: [{ copy_variant_id, master_variant_id | null, rule, has_bookings }] }],
-  member_only: [{ venue_id, service_id }], forms: [{ venue_id, host_type_id, adopts_type_id | null }],
-  account_links: [{ link_id, classification }], assignments_to_create, bookings_to_snapshot,
+  member_only: [{ venue_id, service_id, choice: 'add_to_page' | 'park' }], forms: [{ venue_id, host_type_id, adopts_type_id | null }],
+  mesh_gaps: [{ venue_id, other_venue_id }], assignments_to_create, bookings_to_snapshot,
   collisions: [...], invariants_before: { <invariant>: count } }
 ```
 
@@ -3654,7 +3767,7 @@ only withdraw, deactivate, delete, leave, remove and dissolve keep the default; 
 | `MemberServiceView` (T5) | `{ service, collective, calendars, onSave(diff) }` | contract 5 per service; the "what the guest is asked for" strip needs `requirements` on the same GET (new field, `[{ type_name, enforcement }]`) | values, never disabled inputs; PATCH sends only `online_meeting_url`, `online_meeting_info`, `capacity_per_session` and `calendars { add, remove }` with `expected_calendar_ids`; 412 reloads calendars only |
 | `CalendarServiceValuesDialog` (item 9) | `{ calendarId, venueId, service, flags, values, onSaved }`; generalises `StaffServiceOverrideModal` (`src/app/dashboard/appointment-services/StaffServiceOverrideModal.tsx:52-61` props, exported at `64`) | contract 12: the overrides PATCH for own calendars, the collective PUT when `venueId` is not the caller's | the "standard" value is the master's, hidden for name and description on offered services (D29); the floor and flag errors render inline from the 400 body |
 | Services grid (item 15) | `{ rows: services in host order by heading, columns: venues, cells: { state: 'all' | 'some' | 'none', calendars } , selection, staged, onCommit }` | contract 5 for rows and cells; contract 13 for commit and preview; the health strip from contract 3 and `collective_calendars.sync` | chunk at 200; failed cells stay staged and selected; the cell popover is `CollectiveCalendarsSection` with `scope` |
-| `CollectivePills` | `CollectivePill`, `FromHostPill`, `OnlyAtVenuePill`, `VenueSyncPill { status }` | `collective.status` (contract 5) | the status enum lives in `src/lib/linked-accounts/replicas/status.ts` and nowhere else |
+| `CollectivePills` | `CollectivePill`, `FromHostPill`, `ParkedPill`, `VenueSyncPill { status }` | `collective.status` (contract 5) | the status enum lives in `src/lib/linked-accounts/replicas/status.ts` and nowhere else |
 | `EditReachNote` | `{ id: keyof CollectiveCopy, params }` | `CollectiveContextProvider` (`venues`) through `formatVenueList` | strings only from `src/lib/linked-accounts/collective-copy.ts` |
 | `CollectiveSaveSummary` | `{ sync: collective_sync, onRetry, onUndo }` | the PATCH response (contract 4, `audit_event_id`); polling by re-reading contract 5 every 5 s up to 60 s | renders under the page header in a `role="status"` region (T4); the undo posts `audit_event_id` to contract 14 and hides at 60 s |
 | `AskConfirmProvider` | context `useAskConfirm(): (message, confirmLabel, opts?: { body, destructive }) => Promise<boolean>` | extracted from `CombinedPageManager.tsx:72-117`, rendering the primitive `ConfirmDialog` | `destructive` defaults to `false` in the hook (the primitive's default is the other way) |
@@ -3667,5 +3780,4 @@ only withdraw, deactivate, delete, leave, remove and dissolve keep the default; 
 | `ReviewYourServicesPanel` | `{ review, onDismiss }` | contract 7's `review` | dismissal stored per viewer in `localStorage` |
 | `AdoptServiceReview` | `{ item, myService, optionMap, onAnswer }` | contract 10 (adoptions) | the map defaults to name matches; unmapped options shown as "kept, not offered" |
 | `DissolvedCollectivePage` | `{ collective, venues: [{ name, slug, listed }] }` | server render from `venue_collectives` (`dissolved_at`, 90 days) and `list_on_old_page` | no redirect, no 404 |
-| `MemberOnlyServiceInterstitial` | `{ venue: { name, phone }, service }` | the redirect module's translation result | shows the phone number, never dead-ends |
 | `OwnPageStatusLine` | `{ redirecting, reason }` | `CollectiveContextProvider` | text from `bp.status.*` and `bp.reason.*` exactly as the deck defines them (T25) |

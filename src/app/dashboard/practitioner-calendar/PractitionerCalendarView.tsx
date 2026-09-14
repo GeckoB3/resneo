@@ -14,6 +14,7 @@ import {
   visitTouchingEdges,
 } from '@/lib/calendar/visit-siblings';
 import {
+  calendarAvailableRangesOnDate,
   calendarHasAvailableHoursOnDate,
   calendarWorksOnDate,
 } from '@/lib/calendar/calendar-works-on-date';
@@ -58,7 +59,7 @@ import {
   LinkedBookingDetailModal,
 } from '@/components/linked-accounts/LinkedCalendarView';
 import { linkedNewBookingButtonClass } from '@/components/linked-accounts/linked-accounts-ui';
-import type { LinkedVenueCalendar, LinkedBooking, LinkedResource } from '@/lib/linked-accounts/calendar';
+import type { LinkedVenueCalendar, LinkedBooking, LinkedPractitioner, LinkedResource } from '@/lib/linked-accounts/calendar';
 import {
   linkedBookingToGridBooking,
   linkedColumnKey,
@@ -318,8 +319,34 @@ interface LinkedColumn {
   practitionerName: string;
   practitionerActive: boolean;
   workingHours?: WorkingHours;
+  /** The owner's schedule and hours context; absent from an older feed. */
+  schedule?: LinkedPractitioner['schedule'];
+  hours?: LinkedVenueCalendar['hours'];
   visibility: LinkedVenueCalendar['visibility'];
   action: LinkedVenueCalendar['action'];
+}
+
+/**
+ * A linked column's open minutes on `dateYmd`, resolved exactly as the owner's own diary
+ * resolves them: schedule periods, rota, days off and per-date hours, minus leave, within the
+ * owner venue's opening hours and closures (SB-39). Null when the feed predates `schedule`.
+ */
+function linkedColumnOpenRanges(col: LinkedColumn, dateYmd: string): Array<{ start: number; end: number }> | null {
+  if (!col.schedule || !col.hours) return null;
+  return calendarAvailableRangesOnDate({
+    practitioner: { id: col.practitionerId, ...col.schedule } as unknown as Parameters<
+      typeof calendarAvailableRangesOnDate
+    >[0]['practitioner'],
+    dateYmd,
+    leavePeriods: col.hours.leavePeriods,
+    openingHours: col.hours.openingHours,
+    venueWideBlocks: col.hours.venueWideBlocks,
+  });
+}
+
+function linkedColumnHoursLine(col: LinkedColumn, dateYmd: string): string {
+  const open = linkedColumnOpenRanges(col, dateYmd);
+  return open ? formatResolvedHoursLineForDate(open, null) : formatWorkingHoursLineForDate(col.workingHours, dateYmd, col.venueTimezone);
 }
 
 type DayGridColumn =
@@ -4615,6 +4642,8 @@ export function PractitionerCalendarView({
           practitionerName: p.name,
           practitionerActive: p.isActive,
           workingHours: p.workingHours,
+          schedule: p.schedule,
+          hours: v.hours,
           visibility: v.visibility,
           action: v.action,
         });
@@ -4630,11 +4659,13 @@ export function PractitionerCalendarView({
         ? linkedColumns
         : linkedColumns.filter((c) => new Set(visibleLinkedColumnIds).has(c.key));
     if (!workingHoursFilterActive) return chosen;
-    // A linked column carries its owner's weekly template only (no rota or days
-    // off), read in the owner venue's timezone as its header line is.
-    return chosen.filter((c) =>
-      calendarWorksOnDate({ working_hours: c.workingHours ?? null }, date, c.venueTimezone),
-    );
+    // Resolved as the owner resolves its own columns; the weekly template only for an older feed.
+    return chosen.filter((c) => {
+      const open = linkedColumnOpenRanges(c, date);
+      return open
+        ? open.length > 0
+        : calendarWorksOnDate({ working_hours: c.workingHours ?? null }, date, c.venueTimezone);
+    });
   }, [linkedColumns, visibleLinkedColumnIds, workingHoursFilterActive, date]);
 
   /** Read-only linked columns (time_only or view-only full_details). */
@@ -7577,11 +7608,7 @@ export function PractitionerCalendarView({
                   </tr>
                 ))}
                 {visibleLinkedColumns.map((col) => {
-                  const linkedHoursLine = formatWorkingHoursLineForDate(
-                    col.workingHours,
-                    date,
-                    col.venueTimezone,
-                  );
+                  const linkedHoursLine = linkedColumnHoursLine(col, date);
                   return (
                   <tr key={col.key} className="border-b border-slate-100 transition-colors hover:bg-slate-50/70">
                     <td className="sticky left-0 bg-white/95 px-3 py-2 shadow-[4px_0_14px_rgba(15,23,42,0.035)]">
@@ -7832,11 +7859,7 @@ export function PractitionerCalendarView({
                       );
                     }
                     const linkedCol = col.column;
-                    const linkedHoursLine = formatWorkingHoursLineForDate(
-                      linkedCol.workingHours,
-                      date,
-                      linkedCol.venueTimezone,
-                    );
+                    const linkedHoursLine = linkedColumnHoursLine(linkedCol, date);
                     return (
                       <div
                         key={`hdr-${linkedCol.key}`}
@@ -7894,11 +7917,7 @@ export function PractitionerCalendarView({
                     </div>
                   ) : null}
                   {readOnlyLinkedColumns.map((col) => {
-                    const linkedHoursLine = formatWorkingHoursLineForDate(
-                      col.workingHours,
-                      date,
-                      col.venueTimezone,
-                    );
+                    const linkedHoursLine = linkedColumnHoursLine(col, date);
                     return (
                     <div
                       key={`hdr-${col.key}`}
@@ -7969,6 +7988,7 @@ export function PractitionerCalendarView({
                       ? (buildLinkedColumnClosureBlocks({
                           columnId: pracId,
                           workingHours: linkedCol.workingHours,
+                          openRanges: linkedColumnOpenRanges(linkedCol, date),
                           dateYmd: date,
                           timeZone: linkedCol.venueTimezone || venueTimezone,
                           gridStartHour: startHour,

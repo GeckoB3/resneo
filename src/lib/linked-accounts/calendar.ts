@@ -3,6 +3,9 @@
 import type { LinkActionLevel, LinkGrant } from './types';
 import type { WorkingHours } from '@/types/booking-models';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
+import type { CalendarScheduleRow } from '@/lib/availability/calendar-hours';
+import type { PractitionerLeavePeriodInput } from '@/lib/calendar/schedule-closure-blocks';
 
 /**
  * Map a booking row onto a calendar column id — mirrors native
@@ -65,6 +68,20 @@ export interface LinkedPractitioner {
   isActive: boolean;
   /** Per-day template from the owner venue's calendar availability settings. */
   workingHours?: WorkingHours;
+  /**
+   * Everything the owner's own diary resolves hours from (schedule periods, rota, days off,
+   * per-date overrides, breaks). Absent from older responses; readers fall back to `workingHours`.
+   */
+  schedule?: CalendarScheduleRow;
+}
+
+/** The owner venue's own hours context, so a linked column is drawn as the owner draws it. */
+export interface LinkedVenueHours {
+  openingHours: OpeningHours | null;
+  /** Venue-wide closures and amended hours (`availability_blocks` with no service). */
+  venueWideBlocks: AvailabilityBlock[];
+  /** Leave on the linked calendars, over the requested range. */
+  leavePeriods: PractitionerLeavePeriodInput[];
 }
 
 export interface LinkedBooking {
@@ -328,4 +345,6 @@ export interface LinkedVenueCalendar {
   bookings: LinkedBooking[];
   /** Event/class occurrence shells — full_details links only. */
   scheduleBlocks?: ScheduleBlockDTO[];
+  /** The owner venue's opening hours, closures and leave. Absent from older responses. */
+  hours?: LinkedVenueHours;
 }

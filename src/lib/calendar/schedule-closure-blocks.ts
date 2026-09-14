@@ -129,22 +129,30 @@ function workingPeriodsForDay(wh: WorkingHours, dow: number): TimeRange[] {
 export function buildLinkedColumnClosureBlocks(params: {
   columnId: string;
   workingHours: WorkingHours | null | undefined;
+  /**
+   * The owner's resolved open minutes for the date (`calendarAvailableRangesOnDate`). When
+   * given, it wins over `workingHours`, which is only the weekly template and so shows a
+   * calendar open on a day its venue is closed or it is on leave.
+   */
+  openRanges?: MinuteRange[] | null;
   dateYmd: string;
   timeZone: string;
   gridStartHour: number;
   gridEndHour: number;
 }): ScheduleClosureCalendarBlock[] {
-  const { columnId, workingHours, dateYmd, timeZone, gridStartHour, gridEndHour } = params;
+  const { columnId, workingHours, openRanges, dateYmd, timeZone, gridStartHour, gridEndHour } = params;
   const boundsStart = gridStartHour * 60;
   const boundsEnd = gridEndHour * 60;
   if (boundsEnd <= boundsStart) return [];
   const dow = getDayOfWeekForYmdInTimezone(dateYmd, timeZone);
-  const open: MinuteRange[] = workingPeriodsForDay(workingHours ?? {}, dow)
-    .map((p) => ({
-      start: timeToMinutes((p.start ?? '').slice(0, 5)),
-      end: timeToMinutes((p.end ?? '').slice(0, 5)),
-    }))
-    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start);
+  const open: MinuteRange[] =
+    openRanges ??
+    workingPeriodsForDay(workingHours ?? {}, dow)
+      .map((p) => ({
+        start: timeToMinutes((p.start ?? '').slice(0, 5)),
+        end: timeToMinutes((p.end ?? '').slice(0, 5)),
+      }))
+      .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start);
   return closedRangesFromOpenWindows(open, boundsStart, boundsEnd).map((r, i) => ({
     id: `linked-closed:${columnId}:${dateYmd}:${i}`,
     practitioner_id: null,

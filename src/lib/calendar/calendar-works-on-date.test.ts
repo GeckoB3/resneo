@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { calendarHasAvailableHoursOnDate, calendarWorksOnDate } from './calendar-works-on-date';
+import { calendarAvailableRangesOnDate, calendarHasAvailableHoursOnDate, calendarWorksOnDate } from './calendar-works-on-date';
+import { buildLinkedColumnClosureBlocks } from './schedule-closure-blocks';
 import type { AvailabilityBlock } from '@/types/availability';
 import type { Practitioner } from '@/types/booking-models';
 
@@ -131,5 +132,55 @@ describe('calendarHasAvailableHoursOnDate (own columns)', () => {
         venueWideBlocks: [closedDay(THU, { start: '08:00', end: '18:00' })],
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * SB-39: a linked column used the owner's weekly template alone, so a host saw a partner calendar
+ * open on a day that business was closed, or that person was on leave. The ranges below are what
+ * the header line, the closed stripes and the working-hours filter now read.
+ */
+describe('calendarAvailableRangesOnDate (linked columns)', () => {
+  const base = { dateYmd: THU, leavePeriods: [], openingHours: null, venueWideBlocks: [] };
+  const H = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+  it('returns the working hours on an ordinary day', () => {
+    expect(calendarAvailableRangesOnDate({ ...base, practitioner: practitioner() })).toEqual([
+      { start: H('09:00'), end: H('17:00') },
+    ]);
+  });
+
+  it("is empty on a day the owner venue is closed, though the template has hours", () => {
+    expect(
+      calendarAvailableRangesOnDate({ ...base, practitioner: practitioner(), venueWideBlocks: [closedDay(THU)] }),
+    ).toEqual([]);
+  });
+
+  it('removes partial leave and follows a per-date amended hours override', () => {
+    const leavePeriods = [
+      { practitioner_id: 'cal-1', start_date: THU, end_date: THU, unavailable_start_time: '09:00', unavailable_end_time: '12:00' },
+    ];
+    expect(calendarAvailableRangesOnDate({ ...base, practitioner: practitioner(), leavePeriods })).toEqual([
+      { start: H('12:00'), end: H('17:00') },
+    ]);
+    const amended = practitioner({
+      availability_exceptions: { [THU]: { periods: [{ start: '10:00', end: '14:00' }] } },
+    } as unknown as Partial<Practitioner>);
+    expect(calendarAvailableRangesOnDate({ ...base, practitioner: amended })).toEqual([
+      { start: H('10:00'), end: H('14:00') },
+    ]);
+  });
+
+  it('draws the whole grid closed for a linked column with no open minutes', () => {
+    const blocks = buildLinkedColumnClosureBlocks({
+      columnId: 'col',
+      workingHours: { '4': [{ start: '09:00', end: '17:00' }] },
+      openRanges: [],
+      dateYmd: THU,
+      timeZone: TZ,
+      gridStartHour: 8,
+      gridEndHour: 20,
+    });
+    expect(blocks.map((b) => [b.start_time, b.end_time])).toEqual([['08:00', '20:00']]);
   });
 });

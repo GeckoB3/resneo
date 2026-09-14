@@ -20,6 +20,7 @@ import {
   attachVenueClockToAppointmentInput,
   computeAppointmentAvailability,
   mapRowToAppointmentBooking,
+  serviceItemRowToEngineService,
   validateAppointmentCustomInterval,
   type AppointmentBooking,
   type AppointmentEngineInput,
@@ -742,6 +743,43 @@ async function buildLegacyPractitionerMonthInputFactory({
   };
 }
 
+/**
+ * One calendar's services for the month engine, shaped exactly as the day loader
+ * (`fetchCalendarAppointmentInput`) shapes them: the calendar's own length and price
+ * baked into the service once, through the same mapper, with the processing pattern
+ * canonicalised and fitted to that length.
+ *
+ * The link rows deliberately carry NO custom length (TERMS-16). This loader used to
+ * bake it into the service AND carry it on the link, so the engine's merge applied it a
+ * second time and reverted any length set on top of it: a chosen option's length and the
+ * add-on minutes both fell back to the calendar's custom length, and the month painted
+ * dates green that the day view then could not fit.
+ */
+export function buildUnifiedCalendarMonthServices(params: {
+  venueId: string;
+  calendarId: string;
+  serviceRows: Record<string, unknown>[];
+  assignmentRows: Array<{
+    id: string;
+    service_item_id: string;
+    custom_duration_minutes: number | null;
+    custom_price_pence: number | null;
+  }>;
+}): { allServices: AppointmentService[]; practitionerServices: PractitionerService[] } {
+  const assignmentByServiceId = new Map(params.assignmentRows.map((row) => [row.service_item_id, row]));
+  const allServices = params.serviceRows.map((row) =>
+    serviceItemRowToEngineService(row, params.venueId, assignmentByServiceId.get(row.id as string)),
+  );
+  const practitionerServices: PractitionerService[] = params.assignmentRows.map((row) => ({
+    id: row.id,
+    practitioner_id: params.calendarId,
+    service_id: row.service_item_id,
+    custom_duration_minutes: null,
+    custom_price_pence: row.custom_price_pence,
+  }));
+  return { allServices, practitionerServices };
+}
+
 async function buildUnifiedCalendarMonthInputFactory({
   supabase,
   venueId,
@@ -798,24 +836,13 @@ async function buildUnifiedCalendarMonthInputFactory({
         .in('id', serviceIds)
     : { data: [], error: null };
 
-  const assignmentByServiceId = new Map(assignmentRows.map((row) => [row.service_item_id, row]));
-  const allServices = ((servicesRes.data ?? []) as Record<string, unknown>[]).map((row) => {
-    const service = mapServiceItemToAppointmentService(row, venueId);
-    const assignment = assignmentByServiceId.get(service.id);
-    return {
-      ...service,
-      duration_minutes: assignment?.custom_duration_minutes ?? service.duration_minutes,
-      price_pence: assignment?.custom_price_pence ?? service.price_pence,
-    };
+  const { allServices, practitionerServices } = buildUnifiedCalendarMonthServices({
+    venueId,
+    calendarId,
+    serviceRows: (servicesRes.data ?? []) as Record<string, unknown>[],
+    assignmentRows,
   });
   const services = allServices.filter((service) => service.id === serviceId);
-  const practitionerServices: PractitionerService[] = assignmentRows.map((row) => ({
-    id: row.id,
-    practitioner_id: calendarId,
-    service_id: row.service_item_id,
-    custom_duration_minutes: row.custom_duration_minutes,
-    custom_price_pence: row.custom_price_pence,
-  }));
   const servicesForBookings = new Map(allServices.map((service) => [service.id, service]));
 
   const [

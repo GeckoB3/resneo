@@ -109,7 +109,7 @@ H: PROJ projection-blind fakes; AFTER no-op `after()`; C0 hosted grants; RECUR p
 
 ## 3. Test inventory
 
-147 tests. By layer: route 44, unit 35, pgtap 28, e2e 6, live-staging 6, migration 6, security 6, engine-invariant 4, performance 4, component 3, app-contract 3, manual 2.
+147 tests. By layer: route 45, unit 35, pgtap 28, e2e 6, live-staging 6, migration 6, security 5, engine-invariant 4, performance 4, component 3, app-contract 3, manual 2.
 
 The first 113 came from the first pass. The 34 added by the second pass (OPS, MV, REP, BM, PLAN, SEO, WAIT, FAIR, DIARY, HLP, TERMS-16, CSA-04, DB-10 and SEC-03 to SEC-05) cover the areas it reached that the first did not: operations and alerting, people who work at more than one venue, reporting and attribution, booking models other than appointments, plan tiers and caps, the public page's metadata and waitlist, diary truth, and the help centre's own copy rules. They are detailed in §3.28.
 
@@ -261,7 +261,7 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS, MV
 | TERMS-16 | unit | The month loader applies a per-calendar length once, not twice | W1 Booking correctness |
 | CSA-04 | pgtap | Deleting a calendar that held a live replica's assignment writes an audit row and bumps the revision | W3 Engine |
 | DB-10 | pgtap | Every classified column's entry matches what an apply actually writes | W3 Engine |
-| SEC-03 | security | No identity-bearing compliance answer is returned before a calendar is chosen | W4 Catalogue and booking switch |
+| SEC-03 | route | A pre-booking form files at the venue that will hold the booking | W4 Catalogue and booking switch |
 | SEC-04 | security | The engine flag alone is not sufficient authority: the nonce and owner checks refuse a raw SQL write | W3 Engine |
 | SEC-05 | security | New per-calendar and attribution columns are not readable by `anon` | W15 Grants |
 
@@ -1294,7 +1294,7 @@ Same format as the sections above. Each of these covers an area the first pass d
 - **TERMS-16** (unit, W1): the month loader both bakes a per-calendar length into the service and carries it on the link, which is the double-application the day loader fixed and documented at `appointment-engine.ts:1710-1721`. Expect one application. **Location:** `src/lib/availability/appointment-month-availability.ts:805-818`
 - **CSA-04** (pgtap, W3): deleting a calendar that held a live replica's assignment writes a `collective_audit_events` row and bumps the catalogue revision, and invariant I33 returns 0 afterwards.
 - **DB-10** (pgtap, W3): every classified column's registry entry matches what an apply actually writes. DB-07 proves a column is classified; this proves the classification is true of the engine's behaviour, which is the claim that matters. Enumerate from `pg_attribute`; `service_items` has 46 columns today.
-- **SEC-03** (security, W4): no identity-bearing compliance answer before a calendar is chosen. Query the public requirements route with a guest email and no calendar, across a collective whose members hold records for that guest. Expect `identity_known: false` and no per-venue state.
+- **SEC-03** (route, W4): a pre-booking form files at the venue that will hold the booking. On "any available", complete an inline form and then let the booking land on a calendar at a different venue. Expect the record at the booking's own venue, not at whichever venue happened to be first in the merge. Not a privacy test: the merged answer is deliberately less precise than each member's own page already is, and the single-venue exposure is an accepted platform decision (see plan §6.6, "What this is not").
 - **SEC-04** (security, W3): the engine flag alone is not sufficient authority. A raw SQL session that sets the flag but holds neither the nonce nor the owner role is refused by the lock trigger.
 - **SEC-05** (security, W15): `anon` cannot read the new per-calendar and attribution columns. `updated_by_user_id` is an `auth.users` identifier and `public_read_calendar_service_assignments` is `USING (true)` today, so this fails until that policy is dropped and the public catalogue is served through the admin client.
 

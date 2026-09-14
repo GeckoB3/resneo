@@ -974,20 +974,26 @@ excludes them, otherwise CI re-grants what the migration revokes;
 - **Forms on member calendars** (RT2-2). For a chosen calendar the requirements lookup serves the
   owning venue's own managed type and version and names that venue for uploads, exactly as today.
   For "Any available", inline forms are collected once the calendar is fixed.
-- **The requirements lookup must not become a cross-venue health oracle.** This is the sharpest
-  privacy problem the second pass found, and it is not in the red-team list.
-  `resolveCollectiveRequirements` loops over every providing member venue and calls
-  `publicBookingRequirements` for each (`api/public/compliance/booking-requirements/route.ts:94-105`),
-  which looks the guest up by email at that venue and reads their `compliance_records`
-  (`public-forms-service.ts:411-434`). The merged state (`SATISFIED`, `EXPIRED`, `MISSING`,
-  `LOCK_PASSED`) goes back to an unauthenticated browser, rate-limited only at 30 requests per IP
-  per minute. One email address therefore reveals, across every venue in the collective, whether
-  that person holds a current patch test or similar. Special-category data, to anyone who can type
-  an address. Worse, on "any available" the form is served against the first venue that has one
-  (`route.ts:53-57`), so the guest's pre-booking upload can land at a venue they do not end up
-  booking. The rule: no identity-bearing requirement check before a concrete calendar is chosen.
-  Return `identity_known: false` for the any-available case, and where a form genuinely must be
-  served before the calendar is fixed, name the venue that will receive it. SEC-02 covers this.
+- **Pre-booking form uploads can land at the wrong venue.** On "any available" the calendar is not
+  yet known, so `resolveCollectiveRequirements` merges every providing venue's requirements and
+  draws the forms against the first venue that has any, which is also where the upload goes
+  (`api/public/compliance/booking-requirements/route.ts:52-57,105-124`). A guest can therefore
+  complete a patch test that files at venue A and then be booked on venue B's calendar, which now
+  has no record and either asks again or proceeds believing it has one. This is a correctness and
+  safety problem, not a privacy one: the venue that needs the record is not the venue that holds
+  it. Fix it by collecting inline forms once the calendar is fixed, which §6.6 already requires for
+  a different reason (RT2-2), and by naming the receiving venue wherever a form genuinely must be
+  served before the calendar is known. SEC-03 covers it.
+- **What this is not.** An earlier draft of this section called the same route a cross-venue health
+  oracle. That was wrong and is recorded here so nobody re-raises it. The response merges by form
+  type, worst state wins, into one list with no per-venue breakdown, so a collective query says
+  only "somewhere in this group this email does or does not hold a current record" and never says
+  where. Every member's own booking page is live by default and answers the same question more
+  precisely for that one venue, so the collective endpoint is less informative than what is already
+  public, not more. The underlying single-venue exposure is deliberate and the route says so in its
+  own docstring ("with an email it reveals whether that address has a record on file, the same
+  exposure the old POST pre-check had"). It is a platform decision already taken, and nothing about
+  collectives changes it.
 - **Groups** (RT2-11, D28). Later people in a group are limited to calendars at the first person's
   venue, with the explanation shown before the details step, unless the owner chooses split groups.
 - **Staff visits and groups** require a staff session and stamp the actor (CB-23, CB-26).
@@ -1576,9 +1582,9 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
   nothing tests the cron wrapper this design's two new crons depend on, nothing tests the platform
   console, and nothing stops an em-dash reaching a help article, on a project that rewrites about
   twenty of them.
-- **147 tests across layers**: 35 unit and sweep, 44 route, 3 component, 28 pgTAP, 4 engine
+- **147 tests across layers**: 35 unit and sweep, 45 route, 3 component, 28 pgTAP, 4 engine
   concurrency, 6 migration, 3 app-contract, 6 end-to-end, 6 live-staging, 4 performance,
-  6 security, 2 manual. Key groups: the terms resolver and price snapshot (TERMS, PRICE),
+  5 security, 2 manual. Key groups: the terms resolver and price snapshot (TERMS, PRICE),
   assignment writes (CSA), engine objects, locks and convergence (DB, ENG, REV), real two-connection
   races (CON), the derived catalogue and forms (CAT, CMP), guards (GRD), lifecycle (LIFE), migration
   (MIG), public pages (PUB), the app's real payloads from build 1.1.0 (APP), security, performance
@@ -1623,7 +1629,7 @@ The full plan is `Docs/collective-one-venue-test-plan.md`. Its shape:
 | A host save deadlocks against a concurrent apply, because the dirty triggers sit outside the stated lock order | Medium | Medium | Triggers bump revisions only, in id order, and never touch the master afterwards; the apply reads the master without a row lock; CON-03 covers the pair (§6.4) |
 | Someone with the database connection string writes a replica behind the engine flag, and the daily verifier then repairs over the evidence | Low | High | Flag plus per-transaction nonce plus owner check; the verifier files unexplained drift as its own audit type with the before-image and alerts; I41 (§6.4, §6.16) |
 | The new per-calendar and attribution columns land on a table `anon` can read in full, including an `auth.users` identifier | Medium | High | Drop `public_read_calendar_service_assignments` and serve the public catalogue through the admin client before those columns ship; SEC-05, I42 (§2.2) |
-| One email address becomes a cross-venue health-record oracle through the public requirements route | Medium | High | No identity-bearing requirement check before a calendar is chosen; SEC-03 (§6.6) |
+| A guest's pre-booking form files at one venue and they are booked at another, so the venue that needs the record does not hold it | Medium | Medium | Collect inline forms once the calendar is fixed, as RT2-2 already requires; name the receiving venue where a form must come first; SEC-03 (§6.6) |
 | A member loses its classes, events or table bookings from the web when redirects begin | Medium | High | Appointments-only stated in the product, warnings before accept and before redirects, and a route through for the other models; D44 (§6.14) |
 | The fold makes setting up a collective slower than the manager it replaces | High | Medium | The bulk lane ships with the fold, not after it; specification §2 item 15 (§6.8) |
 | A person who works at two venues cannot use the product at all | High today | High | W16 ships before the collective work; D38 (§6.17) |

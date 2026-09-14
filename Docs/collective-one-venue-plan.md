@@ -78,7 +78,7 @@ one venue even after everything above is fixed:
   runbook in the design, and the platform support console has no collective view, so the first
   report of a stuck replica would come from the host.
 
-In total: 42 split-brain cases (§3), 40 collective bugs, 6 of them high severity, and 19 platform
+In total: 42 split-brain cases (§3), 43 collective bugs, 7 of them high severity, and 19 platform
 bugs found on the way (§4).
 
 **What we recommend.** Host-managed replicas with one truth per fact (§5, §6). The host's own
@@ -510,6 +510,9 @@ every venue.
 | CB-38 | A member can change its timezone while in a collective | Low | Yes | `src/app/api/venue/route.ts:322` |
 | CB-39 | Leaving the Booking Page tab with staged changes relies on `window.confirm`, which is auto-dismissed in the owner's browser | Low | Yes | `SettingsView.tsx:1164-1167,1236-1255` |
 | CB-40 | Former and declined members keep read access to the collective under RLS | Low | Yes | `20270202140000_collective_policies_no_recursion.sql:28-49` |
+| CB-41 | Creating a collective fails silently. The dialog's catch hands the message to the parent panel, which renders it inside `SectionCard.Body` behind the still-open dialog, so all ten server refusals (address taken, name taken, name on hold, not eligible, already in a collective, plan) are invisible: the button simply stops spinning | High | Yes | `VenueCollectivesPanel.tsx:532-534` rendering at `:149-151`; refusals in `collectives/route.ts:30-163` |
+| CB-42 | The collective row shows a green "Active" pill from the moment of creation, while the public page serves its unavailable state until two members are active. "Active" describes the membership row's status column, not the page, and it is the first thing a new host reads | Medium | Yes | `VenueCollectivesPanel.tsx:307-309`; `collectives.ts:872,946,978-981` |
+| CB-43 | The collective row's member line counts only active members but names invited ones too, so a new collective reads "1 active member, Riverside Clinic, Northside Studio" | Low | Yes | `VenueCollectivesPanel.tsx:312-316`; `collectives.ts:327-333,438` |
 
 ### 4.2 Platform bugs found on the way (every venue)
 

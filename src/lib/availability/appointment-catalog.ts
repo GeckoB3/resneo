@@ -25,6 +25,8 @@ import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import {
   canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
+import { loadBookableServiceIds, withoutParked } from '@/lib/linked-accounts/replicas/parking';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
   applicableCalendarValues,
   CALENDAR_ASSIGNMENT_LINK_COLUMNS,
@@ -139,6 +141,12 @@ export interface AppointmentCatalogOptions {
    * the catalogue's, and `assigned: false` so the picker can say so.
    */
   everyCalendarEveryService?: boolean;
+  /**
+   * List parked services too (plan §6.6, D2). Every surface that takes new bookings leaves them out,
+   * which is the default; only a management view that is not about booking (the legacy combined-page
+   * builder) asks for them.
+   */
+  includeParked?: boolean;
 }
 
 export function variantToCatalog(v: ServiceVariant): AppointmentCatalogVariant {
@@ -245,7 +253,15 @@ async function fetchUnifiedAppointmentCatalog(
     fetchServiceCategoryRefs(supabase, venueId),
   ]);
 
-  const services = ((servicesRes.data ?? []) as Record<string, unknown>[]).map(serviceItemRowToAppointmentService);
+  // D2: a venue live in a collective lists only the collective's services for new bookings.
+  const bookable = options?.includeParked
+    ? null
+    : await loadBookableServiceIds(supabase as unknown as RpcClient, venueId);
+  const services = withoutParked(
+    ((servicesRes.data ?? []) as Record<string, unknown>[]).map(serviceItemRowToAppointmentService),
+    bookable,
+    (s) => s.id,
+  );
   const categoryFor = serviceCategoryLookup(categories);
   // A calendar's own values, gated by its service's staff permission flags (W8).
   const serviceRowById = new Map(

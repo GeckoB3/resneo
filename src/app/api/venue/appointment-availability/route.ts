@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isParked, loadBookableServiceIds } from '@/lib/linked-accounts/replicas/parking';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import {
   isUnifiedSchedulingVenue,
@@ -131,6 +133,14 @@ async function handleStaffAppointmentAvailabilityGet(request: NextRequest) {
       return NextResponse.json({ error: scope.error }, { status: scope.status });
     }
     const calendarVenueId = scope.venueId;
+
+    // D2: a parked service offers no slots for a new booking; moving an existing booking is not one.
+    if (!excludeBookingId) {
+      const bookable = await loadBookableServiceIds(admin as unknown as RpcClient, calendarVenueId);
+      if (isParked(bookable, serviceId)) {
+        return NextResponse.json({ date, venue_id: calendarVenueId, practitioners: [] });
+      }
+    }
 
     const venueMode = await resolveVenueMode(admin, calendarVenueId);
     const supportsAppointments =

@@ -109,6 +109,7 @@ export async function loadVenueCatalogueData(
     // service into that venue. Guest booking keeps its own (filtered) catalog.
     ({ practitioners } = await fetchAppointmentCatalog(admin, venueId, {
       includeCalendarsWithoutServices: true,
+      includeParked: true,
     }));
   } catch {
     practitioners = [];

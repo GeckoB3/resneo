@@ -36,6 +36,23 @@ describe('parked services are refused on every create path (D2)', () => {
     expect(read(rel)).toMatch(/collectiveDbError\((bookErr|apptErr|insErr|updErr|rpcError)\)/);
   });
 
+  it('the appointment catalogue leaves parked services out unless a caller asks for them', () => {
+    const src = read('src/lib/availability/appointment-catalog.ts');
+    expect(src).toMatch(/options\?\.includeParked\s*\?\s*null\s*:\s*await loadBookableServiceIds/);
+    expect(src).toMatch(/withoutParked\(/);
+    // Only the legacy combined-page builder, a management view, asks for them.
+    expect(read('src/lib/linked-accounts/catalogue.ts')).toContain('includeParked: true');
+  });
+
+  it.each(['src/app/api/booking/availability/route.ts', 'src/app/api/venue/appointment-availability/route.ts'])(
+    '%s offers no slots for a parked service, except when moving an existing booking',
+    (rel) => {
+      const src = read(rel);
+      expect(src).toMatch(/if \(!excludeBookingId[^{]*\{\s*const bookable = await loadBookableServiceIds/);
+      expect(src).toMatch(/isParked\(bookable/);
+    },
+  );
+
   it('the check fails open and leaves the backstop to the trigger', () => {
     const src = read('src/lib/linked-accounts/replicas/parking.ts');
     expect(src).toContain("rpc('collective_bookable_service_ids'");

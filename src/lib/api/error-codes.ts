@@ -142,6 +142,11 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_LINKS_BEHIND',
   /** Undo is only offered for a minute after a host's save (410). */
   'COLLECTIVE_UNDO_EXPIRED',
+  /**
+   * A new booking, or a booking moved to another service, for a service that is parked: the venue is
+   * live in a collective and the service is not one of the collective's. Offer a collective service.
+   */
+  'COLLECTIVE_SERVICE_PARKED',
 
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',

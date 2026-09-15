@@ -3,8 +3,8 @@
  * Appendix D "Coded errors").
  *
  * Two shapes reach a route:
- *  - the six refusals with their own SQLSTATE, `RN001` to `RN006`, raised by the lock and guard
- *    triggers (20270215120000, 20270216120000);
+ *  - the refusals with their own SQLSTATE, `RN001` to `RN007`, raised by the lock and guard
+ *    triggers (20270215120000, 20270216120000, 20270217120000);
  *  - `P0001` with a code as the message's first token (`COLLECTIVE_NOT_HOST: ...`), raised by an
  *    engine function after the route has already checked the friendly conditions.
  *
@@ -25,6 +25,7 @@ export const COLLECTIVE_SQLSTATE_CODES = {
   RN004: 'COLLECTIVE_MANAGED_COMPLIANCE_TYPE',
   RN005: 'COLLECTIVE_HOST_CHANGE_REFUSED',
   RN006: 'COLLECTIVE_SYNC_COLUMNS_LOCKED',
+  RN007: 'COLLECTIVE_SERVICE_PARKED',
 } as const satisfies Record<string, ApiErrorCode>;
 
 /** Codes an engine function may raise as a `P0001` message prefix, as of the functions shipped. */
@@ -70,6 +71,8 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return `This form is managed by ${host} for ${collective}. Ask ${host} to change it.`;
     case 'COLLECTIVE_HOST_CHANGE_REFUSED':
       return `The host of ${collective} can only change through a host transfer.`;
+    case 'COLLECTIVE_SERVICE_PARKED':
+      return `This service is not on ${page}, so it cannot take new bookings while your venue is part of ${collective}. Existing bookings are not affected.`;
     case 'COLLECTIVE_SYNC_COLUMNS_LOCKED':
       return 'This service follows its collective, so its link to another venue cannot be changed.';
     case 'COLLECTIVE_NOT_HOST':

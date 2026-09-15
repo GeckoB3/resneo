@@ -140,6 +140,8 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_REPLICA_NOT_READY',
   /** A host transfer waits until every member's copy is up to date; retry in a few minutes. */
   'COLLECTIVE_LINKS_BEHIND',
+  /** Undo is only offered for a minute after a host's save (410). */
+  'COLLECTIVE_UNDO_EXPIRED',
 
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',

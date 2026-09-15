@@ -36,6 +36,7 @@ export const COLLECTIVE_PREFIXED_CODES = [
   'COLLECTIVE_CALENDAR_NOT_AT_VENUE',
   'COLLECTIVE_REPLICA_NOT_READY',
   'COLLECTIVE_LINKS_BEHIND',
+  'COLLECTIVE_UNDO_EXPIRED',
 ] as const satisfies readonly ApiErrorCode[];
 
 export type CollectiveDbErrorCode =
@@ -48,7 +49,8 @@ export interface CollectiveNames {
 }
 
 export interface CollectiveDbError {
-  status: 409;
+  /** 409 for every refusal, except an undo that came too late, which is gone (410). */
+  status: 409 | 410;
   code: CollectiveDbErrorCode;
   body: ApiErrorBody;
 }
@@ -84,6 +86,8 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return 'This service is still being set up at that venue. Try again in a minute.';
     case 'COLLECTIVE_LINKS_BEHIND':
       return `Some venues' copies of the ${collective} services are still updating. Hosting can move once they are up to date, usually within a few minutes.`;
+    case 'COLLECTIVE_UNDO_EXPIRED':
+      return 'That change was saved more than a minute ago, so it can no longer be undone. Change it back by hand instead.';
   }
 }
 
@@ -107,5 +111,5 @@ export function collectiveDbError(
     }
   }
   if (!code) return null;
-  return { status: 409, code, body: apiError(prose(code, names), code) };
+  return { status: code === 'COLLECTIVE_UNDO_EXPIRED' ? 410 : 409, code, body: apiError(prose(code, names), code) };
 }

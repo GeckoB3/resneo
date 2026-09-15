@@ -5,6 +5,10 @@ import { API_ERROR_CODES } from '@/lib/api/error-codes';
 import { COLLECTIVE_PREFIXED_CODES, COLLECTIVE_SQLSTATE_CODES, collectiveDbError } from './db-errors';
 
 describe('collectiveDbError', () => {
+  it('answers an expired undo with 410', () => {
+    expect(collectiveDbError({ code: 'P0001', message: 'COLLECTIVE_UNDO_EXPIRED: too late' })?.status).toBe(410);
+  });
+
   it('maps each engine SQLSTATE to its code at 409', () => {
     for (const [state, code] of Object.entries(COLLECTIVE_SQLSTATE_CODES)) {
       const mapped = collectiveDbError({ code: state, message: `${code}: refused` });

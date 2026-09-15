@@ -8,7 +8,7 @@
 --     the apply updates the member's options in place, keeping their ids;
 --   * a host dropping an option archives the member's copy rather than deleting it;
 --   * a host group setting change converges;
---   * the member's own group linked to the replica is unlinked, and the group itself kept;
+--   * a member cannot link its own group to the replica; one linked anyway is unlinked, the group kept;
 --   * unlinking a group at the host unlinks it at the member;
 --   * deleting a master group releases the member's pointers first.
 --
@@ -19,7 +19,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(13);
+SELECT plan(14);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
@@ -120,11 +120,18 @@ SELECT is(
   (SELECT array[max_select::text, hidden_from_online::text] FROM public.addon_groups WHERE id = (SELECT id FROM mgroup)),
   array['1', 'true'], 'A host group setting follows to the member');
 
--- The member links its own group to the replica; the apply takes the link away and keeps the group.
+-- The member cannot link its own group to the replica (20270216120000's lock). A link that got
+-- there anyway, simulated under the engine flag, is taken away by the apply and the group kept.
 INSERT INTO public.addon_groups (id, venue_id, name, selection_type)
 VALUES ('00000000-0000-0000-0000-00000000b0a9', '00000000-0000-0000-0000-00000000b0f2', 'Member own', 'single');
+SELECT throws_ok(
+  format($$ INSERT INTO public.service_addon_groups (venue_id, service_item_id, addon_group_id)
+            VALUES ('00000000-0000-0000-0000-00000000b0f2', %L, '00000000-0000-0000-0000-00000000b0a9') $$, (SELECT id FROM replica)),
+  'RN003', NULL, 'A member cannot link its own group to the collective''s service');
+SELECT set_config('resneo.collective_engine', 'on', true);
 INSERT INTO public.service_addon_groups (venue_id, service_item_id, addon_group_id)
 VALUES ('00000000-0000-0000-0000-00000000b0f2', (SELECT id FROM replica), '00000000-0000-0000-0000-00000000b0a9');
+SELECT set_config('resneo.collective_engine', '', true);
 SELECT public.collective_apply_replica((SELECT id FROM link), NULL, NULL, 'inline');
 SELECT is(
   (SELECT array[(SELECT count(*) FROM public.service_addon_groups WHERE service_item_id = (SELECT id FROM replica) AND addon_group_id = '00000000-0000-0000-0000-00000000b0a9'),

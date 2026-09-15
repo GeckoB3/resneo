@@ -14,7 +14,7 @@
 --   * a venue-wide host requirement change makes the link due and converges;
 --   * a requirement the host removes is removed at the member, and the form kept;
 --   * the member's own venue-wide requirement is never touched;
---   * a member archiving a managed form is drift;
+--   * a member cannot archive a managed form, and one archived anyway is drift;
 --   * the engine copies exactly the registry's host columns for forms and add-ons.
 --
 -- Run with:  supabase test db
@@ -24,7 +24,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(19);
+SELECT plan(20);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
@@ -177,8 +177,14 @@ SELECT is(
   (SELECT array[enforcement, lock_period_hours::text] FROM public.service_compliance_requirements WHERE id = '00000000-0000-0000-0000-0000000c0f09'),
   array['block_all', '24'], 'The member''s own venue-wide requirement is untouched');
 
--- A member archiving a managed form is drift.
+-- A member cannot archive a managed form (20270216120000's lock); one archived anyway, simulated
+-- under the engine flag, is drift.
+SELECT throws_ok(
+  $$ UPDATE public.compliance_types SET archived_at = now(), is_active = false WHERE id = '00000000-0000-0000-0000-0000000c0b02' $$,
+  'RN004', NULL, 'A member cannot archive a form the collective manages');
+SELECT set_config('resneo.collective_engine', 'on', true);
 UPDATE public.compliance_types SET archived_at = now(), is_active = false WHERE id = '00000000-0000-0000-0000-0000000c0b02';
+SELECT set_config('resneo.collective_engine', '', true);
 SELECT isnt(
   public.collective_replica_fingerprint((SELECT id FROM link)),
   public.collective_expected_fingerprint((SELECT id FROM link)),

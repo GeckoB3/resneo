@@ -99,6 +99,14 @@
     {
       "path": "/api/cron/assistant-retention",
       "schedule": "15 4 * * *"
+    },
+    {
+      "path": "/api/cron/collective-replicate",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/collective-verify",
+      "schedule": "0 6 * * *"
     }
   ]
 }

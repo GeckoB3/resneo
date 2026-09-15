@@ -18,7 +18,12 @@ import { salesProgrammeEnabled } from '@/lib/sales/constants';
 import { attachSalesAttributionOnSignup } from '@/lib/sales/attach-on-signup';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
-import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
+import {
+  getExistingVenueForUserEmail,
+  hasUnrevokedStaffMembership,
+  signupEmailIsTeamMemberMessage,
+} from '@/lib/signup-existing-venue';
+import { apiError } from '@/lib/api/error-codes';
 import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
@@ -76,6 +81,19 @@ export async function POST(request: Request) {
         return NextResponse.json({ redirect_url: '/signup/booking-models' });
       }
       return NextResponse.json({ redirect_url: '/onboarding' });
+    }
+
+    // Not an owner, but works at a venue: a new venue would put this login at two venues,
+    // which cannot open either dashboard (D38), and the paid provisioning paths would not
+    // create it anyway. Refuse here, before anything is charged or created.
+    if (await hasUnrevokedStaffMembership(admin, user.id, user.email)) {
+      return NextResponse.json(
+        apiError(
+          signupEmailIsTeamMemberMessage((user.email ?? '').trim().toLowerCase()),
+          'SIGNUP_EMAIL_IS_TEAM_MEMBER',
+        ),
+        { status: 409 },
+      );
     }
 
     // Founding Partner: skip Stripe, create venue directly

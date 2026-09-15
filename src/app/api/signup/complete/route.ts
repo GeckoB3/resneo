@@ -13,7 +13,12 @@ import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { parseNotificationSettings } from '@/lib/notifications/notification-settings';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
-import { escapeLikePattern } from '@/lib/db/like-escape';
+import {
+  getExistingVenueForUserEmail,
+  hasUnrevokedStaffMembership,
+  signupPaidTeamMemberMessage,
+} from '@/lib/signup-existing-venue';
+import { apiError } from '@/lib/api/error-codes';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 import { attachReferralOnSignup } from '@/lib/referrals/attach-on-signup';
@@ -61,36 +66,45 @@ export async function POST(request: Request) {
 
     const admin = getSupabaseAdminClient();
 
-    // Check if venue already exists for this user (idempotency)
-    const { data: existingStaff } = await admin
-      .from('staff')
-      .select('venue_id')
-      .ilike('email', escapeLikePattern((user.email ?? '').toLowerCase().trim()))
-      .order('venue_id', { ascending: true })
-      .limit(10);
-
-    if (existingStaff && existingStaff.length > 0) {
-      const venueId = existingStaff[0]?.venue_id;
-      if (venueId) {
-        const { data: existingVenue } = await admin
-          .from('venues')
-          .select('pricing_tier, active_booking_models, onboarding_completed')
-          .eq('id', venueId)
-          .maybeSingle();
-        const activeModels = Array.isArray(existingVenue?.active_booking_models)
-          ? existingVenue.active_booking_models
-          : [];
-        if (
-          isAppointmentPlanTier(existingVenue?.pricing_tier) &&
-          activeModels.length === 0 &&
-          existingVenue?.onboarding_completed !== true
-        ) {
-          await clearSignupPendingUserMetadata(admin, user.id);
-          return NextResponse.json({ redirect_url: '/signup/booking-models' });
-        }
+    // Idempotency: this checkout already has a venue if one carries its Stripe customer
+    // (the webhook may have won the race), or if the user owns one.
+    const sessionCustomerId =
+      typeof session.customer === 'string' ? session.customer : session.customer?.id ?? null;
+    if (sessionCustomerId) {
+      const { data: customerVenue } = await admin
+        .from('venues')
+        .select('pricing_tier, active_booking_models, onboarding_completed')
+        .eq('stripe_customer_id', sessionCustomerId)
+        .maybeSingle();
+      if (customerVenue) {
+        await clearSignupPendingUserMetadata(admin, user.id);
+        return NextResponse.json({ redirect_url: resolvePostSignupRedirectUrl(customerVenue) });
       }
+    }
+
+    const ownedVenue = await getExistingVenueForUserEmail(admin, user.email);
+    if (ownedVenue) {
       await clearSignupPendingUserMetadata(admin, user.id);
-      return NextResponse.json({ redirect_url: '/onboarding' });
+      return NextResponse.json({ redirect_url: resolvePostSignupRedirectUrl(ownedVenue) });
+    }
+
+    // A staff row that is not an owned venue is not this signup's venue. It used to be read
+    // as one, so a team member elsewhere paid and was sent back to that venue with no venue
+    // of their own. A second venue would lock the login out of both (D38), so create nothing
+    // and say so; create-checkout refuses this case before payment, so reaching here means
+    // they joined a team mid-checkout or paid before that refusal existed. Revoked rows do
+    // not count, and fall through to provisioning.
+    if (await hasUnrevokedStaffMembership(admin, user.id, user.email)) {
+      console.error('[signup/complete] Paid checkout for a login that is staff at a venue; no venue created', {
+        userId: user.id,
+        stripeCustomerId: sessionCustomerId,
+        sessionId: session.id,
+      });
+      await clearSignupPendingUserMetadata(admin, user.id);
+      return NextResponse.json(
+        apiError(signupPaidTeamMemberMessage(authEmail), 'SIGNUP_EMAIL_IS_TEAM_MEMBER'),
+        { status: 409 },
+      );
     }
 
     const metadata = session.metadata ?? {};

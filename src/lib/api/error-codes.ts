@@ -89,6 +89,29 @@ export const API_ERROR_CODES = [
    * state (collective plan D38).
    */
   'STAFF_EMAIL_AT_OTHER_VENUE',
+  /**
+   * Signup by an email that already works at a venue it does not own. Refused
+   * before checkout, because a new venue would put the login at two venues
+   * (D38); after a paid checkout it means no venue was created.
+   */
+  'SIGNUP_EMAIL_IS_TEAM_MEMBER',
+  /**
+   * staff/create was given an email that already has a login (a customer
+   * account, say). That route sets a password the admin chose, so it refuses
+   * rather than overwrite someone's credentials; Invite is the path instead.
+   */
+  'STAFF_EMAIL_HAS_LOGIN',
+  /**
+   * staff/[id]/reset-password on a row with no login bound to it yet (an invite
+   * nobody has accepted) or a revoked row. Resend invite is the path instead.
+   */
+  'STAFF_LOGIN_NOT_CLAIMED',
+  /**
+   * staff/[id]/reset-password on a login that is also used outside this venue's
+   * team (customer bookings, another venue, platform access), so only its owner
+   * may change the password. Resend invite emails them a link instead.
+   */
+  'STAFF_LOGIN_USED_ELSEWHERE',
 
   // ── Collectives (plan Appendix D; mapped by src/lib/linked-accounts/replicas/db-errors.ts) ──
   /** A member changed something its collective manages on a service. Ask the host; reload. */

@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
+import {
+  getExistingVenueForUserEmail,
+  hasUnrevokedStaffMembership,
+  signupEmailIsTeamMemberMessage,
+} from '@/lib/signup-existing-venue';
 import { pricingTierToSignupFamily } from '@/lib/signup-plan-family';
 
 /**
@@ -22,6 +26,14 @@ export async function GET() {
     const existing = await getExistingVenueForUserEmail(admin, user.email);
 
     if (!existing) {
+      // Staff at a venue they do not own: checkout will refuse (D38), so say so up front.
+      if (await hasUnrevokedStaffMembership(admin, user.id, user.email)) {
+        return NextResponse.json({
+          hasVenue: false,
+          teamMember: true,
+          message: signupEmailIsTeamMemberMessage((user.email ?? '').trim().toLowerCase()),
+        });
+      }
       return NextResponse.json({ hasVenue: false });
     }
 

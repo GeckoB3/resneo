@@ -255,6 +255,22 @@ ALTER TABLE public.compliance_type_versions ADD COLUMN IF NOT EXISTS replica_of_
 ALTER TABLE public.service_compliance_requirements ADD COLUMN IF NOT EXISTS replica_of_requirement_id uuid
   REFERENCES public.service_compliance_requirements (id) ON DELETE NO ACTION;
 
+-- Every new column of a registry table is classified in the same migration (DB-07 fails otherwise).
+-- All eleven are identity mappings (Appendix F): the engine maps them, it never copies them.
+INSERT INTO public.collective_column_classes (table_name, column_name, class, note) VALUES
+  ('service_variants', 'replica_of_variant_id', 'identity', 'the master option this replica option follows'),
+  ('addon_groups', 'managed_by_collective_id', 'identity', 'set while the collective manages this group'),
+  ('addon_groups', 'replica_of_addon_group_id', 'identity', 'the master group this managed group follows'),
+  ('addons', 'replica_of_addon_id', 'identity', 'the master option this managed option follows'),
+  ('service_categories', 'managed_by_collective_id', 'identity', 'set while the collective manages this heading'),
+  ('service_categories', 'replica_of_category_id', 'identity', 'the master heading this heading follows'),
+  ('compliance_types', 'managed_by_collective_id', 'identity', 'set while the collective manages this form'),
+  ('compliance_types', 'replica_of_compliance_type_id', 'identity', 'the master form this form follows'),
+  ('compliance_types', 'accepts_records_from_type_id', 'identity', 'records filed under this type count; kept at release'),
+  ('compliance_type_versions', 'replica_of_version_id', 'identity', 'the master version this version follows'),
+  ('service_compliance_requirements', 'replica_of_requirement_id', 'identity', 'the master requirement this follows')
+ON CONFLICT (table_name, column_name) DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS service_variants_replica_of
   ON public.service_variants (replica_of_variant_id) WHERE replica_of_variant_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS addon_groups_managed_by_collective

@@ -389,6 +389,8 @@ async function seedStaffFirstVenue(admin) {
   const sharedServiceId = await ensureService(admin, venueId, STAFF_FIRST_SHARED_SERVICE_NAME, {
     deposit_pence: DEPOSIT_PENCE,
     payment_requirement: 'deposit',
+    // Calendar A's own price applies only while staff may customise price (D56).
+    staff_may_customize_price: true,
   });
   await linkServiceToCalendar(admin, calendarA, sharedServiceId, STAFF_FIRST_CALENDAR_A_PRICE_PENCE);
   await linkServiceToCalendar(admin, calendarB, sharedServiceId);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClientFromHeaders } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import { resolveCallerGrantOverVenue } from '@/lib/linked-accounts/queries';
 import {
   linkedBookingChangeSchema,
@@ -196,6 +197,10 @@ export async function PATCH(request: NextRequest) {
     });
     if (rpcError) {
       console.error('linked_apply_booking_update RPC failed:', rpcError.message);
+      const collectiveRefusal = collectiveDbError(rpcError);
+      if (collectiveRefusal) {
+        return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+      }
       return NextResponse.json({ error: 'Failed to update the booking.' }, { status: 500 });
     }
 
@@ -450,6 +455,11 @@ export async function POST(request: NextRequest) {
     });
     if (rpcError) {
       console.error('linked_apply_booking_insert RPC failed:', rpcError.message);
+      // A partner service parked by its venue's collective (RN007) answers as a coded 409.
+      const collectiveRefusal = collectiveDbError(rpcError);
+      if (collectiveRefusal) {
+        return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+      }
       return NextResponse.json({ error: 'Failed to create the booking.' }, { status: 500 });
     }
 

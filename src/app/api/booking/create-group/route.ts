@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { stripe } from '@/lib/stripe';
 import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
@@ -635,6 +638,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // D2: a venue live in a collective takes new bookings only for the collective's services.
+    if (useUnifiedBookingRows) {
+      const parked = await parkedServiceRefusal(
+        supabase as unknown as RpcClient,
+        validatedPeople.map((p) => ({ venueId: venue_id, serviceItemId: p.appointment_service_id })),
+      );
+      if (parked) {
+        return NextResponse.json(parked.body, { status: parked.status });
+      }
+    }
+
     // Per-person service delivery location: any client-address service in the group
     // makes the organiser's address mandatory for public sources; each booking row
     // snapshots its own service's location.
@@ -882,6 +896,10 @@ export async function POST(request: NextRequest) {
         // Clean up already-created bookings
         if (bookingIds.length > 0) {
           await supabase.from('bookings').delete().in('id', bookingIds);
+        }
+        const collectiveRefusal = collectiveDbError(bookErr);
+        if (collectiveRefusal) {
+          return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
         }
         return NextResponse.json({ error: 'Failed to create group booking' }, { status: 500 });
       }

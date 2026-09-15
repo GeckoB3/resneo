@@ -2,6 +2,9 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
   createAppointmentSlotRecheck,
   SLOT_TAKEN_RESPONSE,
@@ -1019,6 +1022,15 @@ export async function POST(request: NextRequest) {
       const practitioner_id = parsed.data.practitioner_id as string;
       const appointment_service_id = parsed.data.appointment_service_id as string;
 
+      // D2: a venue live in a collective takes new bookings only for the collective's services, and
+      // "Override availability" does not change that.
+      const parked = await parkedServiceRefusal(admin as unknown as RpcClient, [
+        { venueId, serviceItemId: appointment_service_id },
+      ]);
+      if (parked) {
+        return NextResponse.json(parked.body, { status: parked.status });
+      }
+
       const svcWindow = await loadServiceEntityBookingWindow(
         admin,
         venueId,
@@ -1490,6 +1502,10 @@ export async function POST(request: NextRequest) {
 
       if (apptErr || !apptBooking) {
         console.error('Appointment booking insert failed:', apptErr?.message, apptErr?.details);
+        const collectiveRefusal = collectiveDbError(apptErr);
+        if (collectiveRefusal) {
+          return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+        }
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }
       if (overrideWarnings) {

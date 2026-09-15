@@ -2,6 +2,9 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import {
@@ -548,6 +551,25 @@ export async function PATCH(
     // run can say so.
     const outsideHours = checks.some((c) => c.result.ok && c.result.outsideHours);
 
+    // D2: a service added, or swapped in for a different one, must not be parked. A booking that
+    // keeps its service stays manageable even when that service is parked.
+    if (usesServiceItems) {
+      const parked = await parkedServiceRefusal(
+        admin as unknown as RpcClient,
+        plan.entries
+          .filter((entry) => {
+            if (entry.kind === 'add') return true;
+            if (entry.kind !== 'swap') return false;
+            const current = rowById.get(entry.bookingId!);
+            return (current?.service_item_id as string | null | undefined) !== entry.serviceId;
+          })
+          .map((entry) => ({ venueId: scopeVenueId, serviceItemId: entry.serviceId })),
+      );
+      if (parked) {
+        return NextResponse.json(parked.body, { status: parked.status });
+      }
+    }
+
     // A service being added or swapped in may carry its own compliance
     // requirement for this guest, the same gate the create and modify paths run.
     for (const entry of plan.entries) {
@@ -716,6 +738,10 @@ export async function PATCH(
         if (insErr || !inserted) {
           console.error('Visit service insert failed:', insErr);
           await rollback();
+          const collectiveRefusal = collectiveDbError(insErr);
+          if (collectiveRefusal) {
+            return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+          }
           return NextResponse.json({ error: 'Could not add that service' }, { status: 500 });
         }
         insertedIds.push(inserted.id as string);
@@ -787,6 +813,10 @@ export async function PATCH(
       if (updErr) {
         console.error('Visit service update failed:', updErr);
         await rollback();
+        const collectiveRefusal = collectiveDbError(updErr);
+        if (collectiveRefusal) {
+          return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+        }
         return NextResponse.json({ error: 'Could not change this visit' }, { status: 500 });
       }
       if (!updated) {

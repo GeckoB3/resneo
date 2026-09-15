@@ -2,6 +2,9 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
   cancelBookingAfterPaymentFailure,
   CARD_HOLD_SETUP_FAILED_NOTE,
@@ -1068,6 +1071,13 @@ async function handleNonTableBooking(
     if (!practitioner_id || !appointment_service_id) {
       return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
     }
+    // D2: a venue live in a collective takes new bookings only for the collective's services.
+    const parked = await parkedServiceRefusal(supabase as unknown as RpcClient, [
+      { venueId: venue_id, serviceItemId: appointment_service_id },
+    ]);
+    if (parked) {
+      return NextResponse.json(parked.body, { status: parked.status });
+    }
     const serviceWindow = await loadServiceEntityBookingWindow(
       supabase,
       venue_id,
@@ -1870,6 +1880,11 @@ async function handleNonTableBooking(
     .single();
 
   if (bookErr) {
+    // The parked-service trigger (RN007) and the collective locks answer as coded 409s.
+    const collectiveRefusal = collectiveDbError(bookErr);
+    if (collectiveRefusal) {
+      return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
+    }
     // C1: the enforce_cde_capacity DB trigger RAISES (SQLSTATE 23P01,
     // message contains CDE_CAPACITY) when an event/class/resource slot just
     // filled or overlapped between the availability read and this insert.

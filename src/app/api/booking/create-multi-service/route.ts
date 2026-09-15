@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { stripe } from '@/lib/stripe';
 import { cancelAbandonedPaymentIntent } from '@/lib/booking/cancel-abandoned-payment-intent';
@@ -691,6 +694,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // D2: a venue live in a collective takes new bookings only for the collective's services.
+    if (useUnifiedBookingRows) {
+      const parked = await parkedServiceRefusal(
+        supabase as unknown as RpcClient,
+        validated.map((seg) => ({ venueId: venue_id, serviceItemId: seg.appointment_service_id })),
+      );
+      if (parked) {
+        return NextResponse.json(parked.body, { status: parked.status });
+      }
+    }
+
     const { data: nameRows } = useUnifiedBookingRows
       ? await supabase.from('unified_calendars').select('id, name').eq('venue_id', venue_id)
       : await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
@@ -971,6 +985,10 @@ export async function POST(request: NextRequest) {
         console.error('Multi-service booking insert failed:', bookErr);
         if (bookingIds.length > 0) {
           await supabase.from('bookings').delete().in('id', bookingIds);
+        }
+        const collectiveRefusal = collectiveDbError(bookErr);
+        if (collectiveRefusal) {
+          return NextResponse.json(collectiveRefusal.body, { status: collectiveRefusal.status });
         }
         return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
       }

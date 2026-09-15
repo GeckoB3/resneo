@@ -75,6 +75,7 @@ import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { AddonsLibraryView } from '@/app/dashboard/addons/AddonsLibraryView';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useVenueWideBlocks } from '@/lib/hooks/use-venue-wide-blocks';
+import { calendarValuesClearedByFlagChange } from '@/lib/venue/calendar-values-flag-off';
 
 interface Service {
   id: string;
@@ -220,6 +221,12 @@ function penceToPounds(pence: number | null): string {
   return (pence / 100).toFixed(2);
 }
 
+/** "price", "price and deposit", "price, deposit and length". */
+function joinFieldLabels(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 export function AppointmentServicesView({
   isAdmin,
   currentStaffId,
@@ -266,6 +273,14 @@ export function AppointmentServicesView({
   );
   const [form, setForm] = useState<AppointmentServiceFormValues>(DEFAULT_APPOINTMENT_SERVICE_FORM_VALUES);
   const [saving, setSaving] = useState(false);
+  /**
+   * A save that turns off a staff permission box some calendars stored values under (D6, D56):
+   * the admin confirms before those values are cleared.
+   */
+  const [pendingFlagClear, setPendingFlagClear] = useState<{
+    payload: Record<string, unknown>;
+    clears: ReturnType<typeof calendarValuesClearedByFlagChange>;
+  } | null>(null);
   /** Services whose active flag is being flipped from the card, so the switch can lock while it saves. */
   const [activeToggling, setActiveToggling] = useState<Set<string>>(() => new Set());
   const complianceEnabled = useAppointmentsFeatureFlag('compliance_records_enabled');
@@ -967,6 +982,27 @@ export function AppointmentServicesView({
           }
         : built.payload;
 
+    // Turning off a staff permission box clears the values calendars set under it: ask first.
+    if (editingId && isAdmin) {
+      const current = services.find((s) => s.id === editingId);
+      const clears = current
+        ? calendarValuesClearedByFlagChange({
+            before: current,
+            after: { ...current, ...payload },
+            links: links.filter((l) => l.service_id === editingId),
+            calendarName: (calendarId) => practitioners.find((p) => p.id === calendarId)?.name ?? 'A calendar',
+          })
+        : [];
+      if (clears.length > 0) {
+        setPendingFlagClear({ payload, clears });
+        return;
+      }
+    }
+
+    await saveServicePayload(payload);
+  }
+
+  async function saveServicePayload(payload: Record<string, unknown>) {
     setSaving(true);
     setError(null);
     try {
@@ -1726,6 +1762,43 @@ export function AppointmentServicesView({
       ) : null}
 
 
+
+      <Dialog
+        open={pendingFlagClear !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) setPendingFlagClear(null);
+        }}
+        title="Clear calendars' own values?"
+        description="You are turning off permission for staff to set their own values for this service. These calendars set their own, and they will be cleared so each calendar uses the service's values."
+        size="sm"
+        footer={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              loading={saving}
+              disabled={saving}
+              onClick={() => {
+                const pending = pendingFlagClear;
+                setPendingFlagClear(null);
+                if (pending) void saveServicePayload(pending.payload);
+              }}
+            >
+              Clear and save
+            </Button>
+            <Button type="button" variant="secondary" disabled={saving} onClick={() => setPendingFlagClear(null)}>
+              Go back
+            </Button>
+          </div>
+        }
+      >
+        <ul className="space-y-1 text-sm text-slate-700" data-testid="flag-clear-list">
+          {(pendingFlagClear?.clears ?? []).map((c) => (
+            <li key={c.calendarId}>
+              <span className="font-medium text-slate-900">{c.calendarName}</span>: {joinFieldLabels(c.fields)}
+            </li>
+          ))}
+        </ul>
+      </Dialog>
 
       <ServiceRemovalBookingsDialog
         open={serviceRemoval !== null}

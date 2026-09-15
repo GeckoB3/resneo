@@ -49,6 +49,7 @@ import {
 } from '@/lib/venue/calendar-service-assignment-writes';
 import { apiError } from '@/lib/api/error-codes';
 import { applicableCalendarValues, type CalendarAssignmentRow } from '@/lib/booking/calendar-service-terms';
+import { clearCalendarValuesForFlagsTurnedOff } from '@/lib/venue/calendar-values-flag-off';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -1580,6 +1581,14 @@ export async function PATCH(request: NextRequest) {
         after(() => syncCopiesOfService(admin, originId, 'PATCH /api/venue/appointment-services'));
       }
 
+      // An unticked staff permission box clears the price, deposit, length or buffer calendars stored
+      // under it (D6, D56), so ticking it again later cannot bring an old price back unnoticed.
+      const clearedCalendarValues = await clearCalendarValuesForFlagsTurnedOff(admin, {
+        serviceItemId: id as string,
+        before: serviceRow as Record<string, unknown>,
+        after: savedRow,
+      });
+
       const [variantMap, addonGroupMap] = await Promise.all([
         loadVariantsForServices({
           admin,
@@ -1601,6 +1610,7 @@ export async function PATCH(request: NextRequest) {
         ...mapServiceItemRowForDashboard(savedRow),
         variants: variantMap.get(id as string) ?? [],
         addon_groups: addonGroupMap.get(id as string) ?? [],
+        ...(clearedCalendarValues.length > 0 ? { cleared_calendar_values: clearedCalendarValues } : {}),
       });
     }
 

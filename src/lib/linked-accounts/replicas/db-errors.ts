@@ -35,6 +35,7 @@ export const COLLECTIVE_PREFIXED_CODES = [
   'COLLECTIVE_VENUE_NOT_MEMBER',
   'COLLECTIVE_CALENDAR_NOT_AT_VENUE',
   'COLLECTIVE_REPLICA_NOT_READY',
+  'COLLECTIVE_LINKS_BEHIND',
 ] as const satisfies readonly ApiErrorCode[];
 
 export type CollectiveDbErrorCode =
@@ -81,6 +82,8 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return 'That calendar belongs to a different venue. Reload and pick the calendar again.';
     case 'COLLECTIVE_REPLICA_NOT_READY':
       return 'This service is still being set up at that venue. Try again in a minute.';
+    case 'COLLECTIVE_LINKS_BEHIND':
+      return `Some venues' copies of the ${collective} services are still updating. Hosting can move once they are up to date, usually within a few minutes.`;
   }
 }
 

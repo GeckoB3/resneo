@@ -8,6 +8,8 @@
 --   * an existing booking on a parked service stays manageable: its status and time can change;
 --     moving a booking onto a parked service is refused;
 --   * a withdrawn offering's master is parked at the host;
+--   * a booking on an event session is never parked, even when its session names a parked service
+--     (20270217130000);
 --   * parking lifts when the member is suspended, when the page pauses, and on a legacy_copies
 --     collective nothing is ever parked.
 --
@@ -18,7 +20,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(13);
+SELECT plan(14);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
@@ -90,6 +92,17 @@ SELECT throws_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f01', '00000000-
   'RN007', NULL, 'A new booking for a host service not on the page is refused');
 SELECT throws_ok(pg_temp.book('00000000-0000-0000-0000-0000009a0f02', '00000000-0000-0000-0000-0000009a0a02', '00000000-0000-0000-0000-0000009a0d02', '00000000-0000-0000-0000-0000009a0503'),
   'RN007', NULL, 'A new booking for the member''s own service is refused');
+
+INSERT INTO public.event_sessions (id, calendar_id, venue_id, session_date, start_time, end_time, service_item_id)
+VALUES ('00000000-0000-0000-0000-0000009a0c51', '00000000-0000-0000-0000-0000009a0d01', '00000000-0000-0000-0000-0000009a0f01',
+        DATE '2031-03-05', TIME '18:00', TIME '19:00', '00000000-0000-0000-0000-0000009a0502');
+SELECT lives_ok(
+  $$ INSERT INTO public.bookings (venue_id, guest_id, calendar_id, service_item_id, event_session_id, booking_date, booking_time,
+       booking_end_time, party_size, status, source, booking_model)
+     VALUES ('00000000-0000-0000-0000-0000009a0f01', '00000000-0000-0000-0000-0000009a0a01', '00000000-0000-0000-0000-0000009a0d01',
+       '00000000-0000-0000-0000-0000009a0502', '00000000-0000-0000-0000-0000009a0c51', DATE '2031-03-05', TIME '18:00', TIME '19:00', 1,
+       'Booked'::booking_status, 'online'::booking_source, 'unified_scheduling'::booking_model) $$,
+  'A booking on an event session is never parked');
 
 SELECT lives_ok(
   $$ UPDATE public.bookings SET status = 'Confirmed'::booking_status, booking_time = TIME '12:00', booking_end_time = TIME '12:30'

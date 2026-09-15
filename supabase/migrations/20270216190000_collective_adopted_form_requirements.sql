@@ -14,7 +14,9 @@
 --     managed_since and keeps its form and service; an INSERT, or an UPDATE that moves a requirement
 --     onto the managed form, is still RN004.
 --   * collective_invariant_report: I15 ignores requirements older than managed_since; I6 ignores
---     bookings of a service with no price, which have nothing to snapshot.
+--     bookings of a service with no price, which have nothing to snapshot; I44 accepts calendar values
+--     written through the engine by a venue that hosted at the time (an audited write), so a host
+--     transfer does not turn the old host's writes into violations.
 
 ALTER TABLE public.compliance_types ADD COLUMN IF NOT EXISTS managed_since timestamptz;
 
@@ -442,6 +444,10 @@ BEGIN
     WHERE a.updated_by_venue_id IS NOT NULL AND a.updated_by_venue_id <> uc.venue_id
       AND NOT EXISTS (SELECT 1 FROM public.venue_collective_members m JOIN public.venue_collectives c ON c.id = m.collective_id
                       WHERE m.venue_id = uc.venue_id AND c.host_venue_id = a.updated_by_venue_id)
+      -- A host that has since handed over hosting wrote through the engine, which audited it.
+      AND NOT EXISTS (SELECT 1 FROM public.collective_audit_events e
+                      WHERE e.actor_venue_id = a.updated_by_venue_id AND e.target_venue_id = uc.venue_id
+                        AND e.event_type IN ('calendar_assigned', 'values_changed'))
       AND (p_collective_id IS NULL OR uc.venue_id = ANY (v_venues))) x;
 END;
 $$;

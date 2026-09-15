@@ -115,6 +115,8 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_CALENDAR_NOT_AT_VENUE',
   /** The member's copy of the service does not exist yet; retry shortly. */
   'COLLECTIVE_REPLICA_NOT_READY',
+  /** A host transfer waits until every member's copy is up to date; retry in a few minutes. */
+  'COLLECTIVE_LINKS_BEHIND',
 
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',

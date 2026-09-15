@@ -21,6 +21,9 @@ import {
   type ServiceGrouping,
 } from './collectives';
 import { evaluateLinkEligibility } from './eligibility';
+import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
+import { buildDerivedCatalogueItems, type DerivedLink, type DerivedVenue } from './replicas/derived-catalogue';
+import { resolveAppointmentsFeatureFlag, parseVenueFeatureFlags } from '@/lib/feature-flags/resolve';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 
@@ -815,9 +818,11 @@ async function loadPublicCombinedCatalogueUncached(
   admin: SupabaseClient,
   collectiveId: string,
 ): Promise<PublicCombinedCatalogue | null> {
+  // `select('*')`: the replicas-model columns (service_model, paused_at) must not break the page on a
+  // database that has not had 20270215120000 yet.
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, status, page_mode, service_grouping, host_venue_id')
+    .select('*')
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective || collective.status !== 'active' || collective.page_mode !== 'unified_catalog') {
@@ -826,7 +831,7 @@ async function loadPublicCombinedCatalogueUncached(
 
   const { data: memberRows } = await admin
     .from('venue_collective_members')
-    .select('venue_id')
+    .select('*')
     .eq('collective_id', collectiveId)
     .eq('status', 'active');
   const memberVenueIds = (memberRows ?? []).map((m) => m.venue_id as string);
@@ -836,7 +841,7 @@ async function loadPublicCombinedCatalogueUncached(
   const { data: venues } = await admin
     .from('venues')
     .select(
-      'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source',
+      'id, name, slug, pricing_tier, plan_status, booking_model, subscription_current_period_end, billing_access_source, feature_flags, stripe_charges_enabled',
     )
     .in('id', memberVenueIds);
   const venueInfo: Record<string, { name: string; slug: string; eligible: boolean }> = {};
@@ -910,6 +915,36 @@ async function loadPublicCombinedCatalogueUncached(
 
   const categories = await fetchCollectiveCategoryRefs(admin, collectiveId);
   const categoryById = new Map(categories.map((c) => [c.id, c]));
+
+  // A replicas-model collective's page is derived from its masters and converged replicas (§6.6).
+  if ((collective as { service_model?: string }).service_model === 'replicas') {
+    const hostVenueId = (collective.host_venue_id as string | null) ?? '';
+    const paused = Boolean((collective as { paused_at?: string | null }).paused_at);
+    const derivedItems = paused
+      ? []
+      : await loadDerivedCatalogueItems(admin, {
+          collectiveId,
+          hostVenueId,
+          items,
+          memberRows: (memberRows ?? []) as Array<Record<string, unknown>>,
+          venues: (venues ?? []) as Array<Record<string, unknown>>,
+          venueInfo,
+          venueData,
+        });
+    const ordered = derivedItems
+      .filter((item) => item.providers.length > 0)
+      .sort((a, b) =>
+        compareCombinedCatalogueItems({ name: a.name, ...a.sortKey }, { name: b.name, ...b.sortKey }),
+      );
+    return {
+      serviceGrouping: collective.service_grouping as ServiceGrouping,
+      items: ordered.map(({ excluded: _excluded, sortKey: _sortKey, ...item }) => item),
+      // Headings follow the host's services on the replicas model, not the collective's own list.
+      categories: hostVenueId ? await fetchServiceCategoryRefs(admin, hostVenueId) : [],
+      venueData,
+      hostVenueId: hostVenueId || null,
+    };
+  }
 
   const providersByItem = new Map<string, PublicCatalogueProvider[]>();
   // itemId → lowest source-service sort_order across bookable providers. Lets the
@@ -1016,4 +1051,98 @@ async function loadPublicCombinedCatalogueUncached(
     venueData,
     hostVenueId: (collective.host_venue_id as string | null) ?? null,
   };
+}
+
+/**
+ * Reads what `buildDerivedCatalogueItems` decides from, for a replicas-model collective: live replica
+ * links, each member's suspension, each venue's card-charge readiness and forms setting, and which
+ * services take payment or need a form.
+ */
+async function loadDerivedCatalogueItems(
+  admin: SupabaseClient,
+  ctx: {
+    collectiveId: string;
+    hostVenueId: string;
+    items: Array<Record<string, unknown>>;
+    memberRows: Array<Record<string, unknown>>;
+    venues: Array<Record<string, unknown>>;
+    venueInfo: Record<string, { name: string; slug: string; eligible: boolean }>;
+    venueData: Record<string, VenueCatalogueData>;
+  },
+) {
+  const offerings = ctx.items
+    .filter((i) => typeof i.master_service_id === 'string')
+    .map((i) => ({
+      id: i.id as string,
+      masterServiceId: i.master_service_id as string,
+      displayOrder: (i.display_order as number | null) ?? 0,
+      imageUrl: (i.image_url as string | null) ?? null,
+      pricingDisplay: ((i.pricing_display as PricingDisplay | null) ?? 'from') as PricingDisplay,
+      allowAnyAvailable: (i.allow_any_available as boolean | null) ?? true,
+    }));
+  if (offerings.length === 0) return [];
+
+  const { data: linkRows, error: linkErr } = await admin
+    .from('collective_service_replicas')
+    .select('collective_service_item_id, venue_id, replica_service_id, applied_revision, desired_revision')
+    .eq('collective_id', ctx.collectiveId)
+    .is('released_at', null);
+  if (linkErr) {
+    console.error('[catalogue] replica links read failed:', linkErr.message, { collectiveId: ctx.collectiveId });
+  }
+  const links: DerivedLink[] = (linkRows ?? []).map((l) => ({
+    itemId: l.collective_service_item_id as string,
+    venueId: l.venue_id as string,
+    replicaServiceId: (l.replica_service_id as string | null) ?? null,
+    current: Number(l.applied_revision) === Number(l.desired_revision),
+  }));
+
+  const suspended = new Set(
+    ctx.memberRows.filter((m) => m.suspended_at != null).map((m) => m.venue_id as string),
+  );
+  const venues: Record<string, DerivedVenue> = {};
+  for (const v of ctx.venues) {
+    const id = v.id as string;
+    const info = ctx.venueInfo[id];
+    if (!info) continue;
+    venues[id] = {
+      name: info.name,
+      slug: info.slug,
+      eligible: info.eligible,
+      suspended: suspended.has(id),
+      chargesEnabled: v.stripe_charges_enabled === true,
+      formsOn: resolveAppointmentsFeatureFlag('compliance_records_enabled', parseVenueFeatureFlags(v.feature_flags)),
+    };
+  }
+
+  const serviceIds = [
+    ...new Set([
+      ...offerings.map((o) => o.masterServiceId),
+      ...links.map((l) => l.replicaServiceId).filter((id): id is string => Boolean(id)),
+    ]),
+  ];
+  const venueIds = Object.keys(venues);
+  const [paymentRes, serviceFormsRes, venueFormsRes] = await Promise.all([
+    admin.from('service_items').select('id, payment_requirement').in('id', serviceIds),
+    admin.from('service_compliance_requirements').select('service_item_id').in('service_item_id', serviceIds),
+    admin.from('service_compliance_requirements').select('venue_id').eq('scope', 'venue').in('venue_id', venueIds),
+  ]);
+  for (const res of [paymentRes, serviceFormsRes, venueFormsRes]) {
+    if (res.error) console.error('[catalogue] derived catalogue read failed:', res.error.message, { collectiveId: ctx.collectiveId });
+  }
+
+  return buildDerivedCatalogueItems({
+    hostVenueId: ctx.hostVenueId,
+    offerings,
+    links,
+    venues,
+    venueData: ctx.venueData,
+    paidServiceIds: new Set(
+      (paymentRes.data ?? [])
+        .filter((r) => ((r.payment_requirement as string | null) ?? 'none') !== 'none')
+        .map((r) => r.id as string),
+    ),
+    serviceIdsWithForms: new Set((serviceFormsRes.data ?? []).map((r) => r.service_item_id as string)),
+    venueIdsWithVenueWideForms: new Set((venueFormsRes.data ?? []).map((r) => r.venue_id as string)),
+  });
 }

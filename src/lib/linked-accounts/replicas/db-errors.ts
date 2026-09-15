@@ -1,0 +1,99 @@
+/**
+ * Turns the collective engine's database refusals into coded API answers (plan §6.4 "Errors",
+ * Appendix D "Coded errors").
+ *
+ * Two shapes reach a route:
+ *  - the six refusals with their own SQLSTATE, `RN001` to `RN006`, raised by the lock and guard
+ *    triggers (20270215120000, 20270216120000);
+ *  - `P0001` with a code as the message's first token (`COLLECTIVE_NOT_HOST: ...`), raised by an
+ *    engine function after the route has already checked the friendly conditions.
+ *
+ * Only the codes listed here are mapped. Any other database error returns null and the route answers
+ * 500: an engine raise outside the list is a bug to page on, not a message to prettify (GRD-04).
+ *
+ * The prose is the UX spec's (`svc.member.error.managed`, `svc.delete.error409`,
+ * `addons.error.managed`, `comp.type.error.managed`); the names are filled in when the route knows
+ * them and fall back to plain words when it does not.
+ */
+import type { ApiErrorCode } from '@/lib/api/error-codes';
+import { apiError, type ApiErrorBody } from '@/lib/api/error-codes';
+
+export const COLLECTIVE_SQLSTATE_CODES = {
+  RN001: 'COLLECTIVE_MANAGED_SERVICE',
+  RN002: 'COLLECTIVE_OFFERED_SERVICE',
+  RN003: 'COLLECTIVE_MANAGED_ADDON_GROUP',
+  RN004: 'COLLECTIVE_MANAGED_COMPLIANCE_TYPE',
+  RN005: 'COLLECTIVE_HOST_CHANGE_REFUSED',
+  RN006: 'COLLECTIVE_SYNC_COLUMNS_LOCKED',
+} as const satisfies Record<string, ApiErrorCode>;
+
+/** Codes an engine function may raise as a `P0001` message prefix, as of the functions shipped. */
+export const COLLECTIVE_PREFIXED_CODES = [
+  'COLLECTIVE_NOT_HOST',
+  'COLLECTIVE_LEGACY_MODEL',
+  'COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE',
+] as const satisfies readonly ApiErrorCode[];
+
+export type CollectiveDbErrorCode =
+  | (typeof COLLECTIVE_SQLSTATE_CODES)[keyof typeof COLLECTIVE_SQLSTATE_CODES]
+  | (typeof COLLECTIVE_PREFIXED_CODES)[number];
+
+export interface CollectiveNames {
+  host?: string | null;
+  collective?: string | null;
+}
+
+export interface CollectiveDbError {
+  status: 409;
+  code: CollectiveDbErrorCode;
+  body: ApiErrorBody;
+}
+
+function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
+  const host = names.host?.trim() || 'the host';
+  const collective = names.collective?.trim() || 'your collective';
+  const page = names.collective?.trim() ? `the ${names.collective.trim()} page` : 'the collective page';
+  switch (code) {
+    case 'COLLECTIVE_MANAGED_SERVICE':
+      return `This service is managed by ${host} for ${collective}. Ask ${host} to change it.`;
+    case 'COLLECTIVE_OFFERED_SERVICE':
+      return `Take this service off ${page} before deleting it.`;
+    case 'COLLECTIVE_MANAGED_ADDON_GROUP':
+      return `This add-on group is managed by ${host} for ${collective}. Ask ${host} to change it.`;
+    case 'COLLECTIVE_MANAGED_COMPLIANCE_TYPE':
+      return `This form is managed by ${host} for ${collective}. Ask ${host} to change it.`;
+    case 'COLLECTIVE_HOST_CHANGE_REFUSED':
+      return `The host of ${collective} can only change through a host transfer.`;
+    case 'COLLECTIVE_SYNC_COLUMNS_LOCKED':
+      return 'This service follows its collective, so its link to another venue cannot be changed.';
+    case 'COLLECTIVE_NOT_HOST':
+      return `Only ${host} can do this for ${collective}.`;
+    case 'COLLECTIVE_LEGACY_MODEL':
+      return `${collective.charAt(0).toUpperCase()}${collective.slice(1)} has not moved to shared services yet, so this is not available.`;
+    case 'COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE':
+      return `Only one of ${host}'s own services can go on ${page}.`;
+  }
+}
+
+/**
+ * Map a Supabase/PostgREST error (or anything with `code` and `message`) to a coded 409, or null when
+ * it is not one of the engine's refusals.
+ */
+export function collectiveDbError(
+  err: { code?: string | null; message?: string | null } | null | undefined,
+  names: CollectiveNames = {},
+): CollectiveDbError | null {
+  if (!err) return null;
+  let code: CollectiveDbErrorCode | null = null;
+  const sqlstate = err.code ?? '';
+  if (sqlstate in COLLECTIVE_SQLSTATE_CODES) {
+    code = COLLECTIVE_SQLSTATE_CODES[sqlstate as keyof typeof COLLECTIVE_SQLSTATE_CODES];
+  } else if (sqlstate === 'P0001') {
+    const prefix = /^([A-Z][A-Z0-9_]*):/.exec(err.message ?? '')?.[1];
+    if (prefix && (COLLECTIVE_PREFIXED_CODES as readonly string[]).includes(prefix)) {
+      code = prefix as CollectiveDbErrorCode;
+    }
+  }
+  if (!code) return null;
+  return { status: 409, code, body: apiError(prose(code, names), code) };
+}

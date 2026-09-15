@@ -90,6 +90,26 @@ export const API_ERROR_CODES = [
    */
   'STAFF_EMAIL_AT_OTHER_VENUE',
 
+  // ── Collectives (plan Appendix D; mapped by src/lib/linked-accounts/replicas/db-errors.ts) ──
+  /** A member changed something its collective manages on a service. Ask the host; reload. */
+  'COLLECTIVE_MANAGED_SERVICE',
+  /** Deleting a service that is on a collective page. Withdraw it from the page first. */
+  'COLLECTIVE_OFFERED_SERVICE',
+  /** A member changed or used an add-on group its collective manages. */
+  'COLLECTIVE_MANAGED_ADDON_GROUP',
+  /** A member changed or required a form its collective manages. */
+  'COLLECTIVE_MANAGED_COMPLIANCE_TYPE',
+  /** The collective's host changes only through a host transfer. */
+  'COLLECTIVE_HOST_CHANGE_REFUSED',
+  /** A service that follows its collective cannot change its link to another venue's service. */
+  'COLLECTIVE_SYNC_COLUMNS_LOCKED',
+  /** Only the collective's host may do this. */
+  'COLLECTIVE_NOT_HOST',
+  /** The collective is still on the old copied-services model, so this action is not available. */
+  'COLLECTIVE_LEGACY_MODEL',
+  /** Only one of the host's own services can be offered on the collective page. */
+  'COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE',
+
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',
   'NOT_FOUND',

@@ -230,8 +230,13 @@ describe('enrichBookingEmailForComms appointment pricing', () => {
   function makeApptClient(data: {
     anchor: Record<string, unknown>;
     practitioner: { name: string } | null;
-    service: { name: string; price_pence: number | null; staff_may_customize_price?: boolean } | null;
-    link: { custom_price_pence: number | null } | null;
+    service: {
+      name: string;
+      price_pence: number | null;
+      staff_may_customize_price?: boolean;
+      staff_may_customize_name?: boolean;
+    } | null;
+    link: { custom_price_pence: number | null; custom_name?: string | null } | null;
     variant?: { name: string; price_pence: number | null } | null;
   }): SupabaseClient {
     let bookingsCalls = 0;
@@ -250,10 +255,13 @@ describe('enrichBookingEmailForComms appointment pricing', () => {
                 party_size: 1,
               };
         case 'practitioners':
+        case 'unified_calendars':
           return data.practitioner;
         case 'appointment_services':
+        case 'service_items':
           return data.service;
         case 'practitioner_services':
+        case 'calendar_service_assignments':
           return data.link;
         case 'service_variants':
           return data.variant ?? null;
@@ -285,6 +293,39 @@ describe('enrichBookingEmailForComms appointment pricing', () => {
     person_label: null,
     location_type: null,
   };
+
+  it("names the service as the calendar does while the name flag is on, and the service's name once it is off (TERMS-13)", async () => {
+    const unifiedAnchor = {
+      ...legacyAnchor,
+      practitioner_id: null,
+      appointment_service_id: null,
+      calendar_id: 'cal-1',
+      service_item_id: 'si-1',
+    };
+    const withFlag = await enrichBookingEmailForComms(
+      makeApptClient({
+        anchor: unifiedAnchor,
+        practitioner: { name: 'Sam' },
+        service: { name: 'Cut', price_pence: 2500, staff_may_customize_name: true },
+        link: { custom_price_pence: null, custom_name: 'Senior cut' },
+      }),
+      bookingId,
+      base,
+    );
+    expect(withFlag.appointment_service_name).toBe('Senior cut');
+
+    const withoutFlag = await enrichBookingEmailForComms(
+      makeApptClient({
+        anchor: unifiedAnchor,
+        practitioner: { name: 'Sam' },
+        service: { name: 'Cut', price_pence: 2500, staff_may_customize_name: false },
+        link: { custom_price_pence: null, custom_name: 'Senior cut' },
+      }),
+      bookingId,
+      base,
+    );
+    expect(withoutFlag.appointment_service_name).toBe('Cut');
+  });
 
   it('uses the per-practitioner custom price over the base service price', async () => {
     const out = await enrichBookingEmailForComms(

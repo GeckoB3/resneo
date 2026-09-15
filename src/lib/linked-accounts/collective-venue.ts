@@ -471,8 +471,9 @@ async function loadCollectiveAppointmentCatalogUncached(
         // level); otherwise it degrades to 'none', matching what the create route
         // will actually charge.
         const rawPayReq = meta?.paymentRequirement ?? 'none';
+        const depositPence = terms ? terms.depositPence : meta?.deposit ?? null;
         const cardHoldFeeConfigured =
-          (meta?.deposit ?? 0) > 0 ||
+          (depositPence ?? 0) > 0 ||
           activeVariants(provider.venueId, provider.sourceServiceId).some(
             (v) => (v.deposit_pence ?? 0) > 0,
           );
@@ -484,9 +485,9 @@ async function loadCollectiveAppointmentCatalogUncached(
           name: item.name,
           description: item.description,
           duration_minutes: (terms ? terms.durationMinutes : provider.durationMinutes) ?? 0,
-          buffer_minutes: meta?.buffer ?? 0,
+          buffer_minutes: terms ? terms.bufferMinutes : meta?.buffer ?? 0,
           price_pence: terms ? terms.pricePence : provider.pricePence,
-          deposit_pence: meta?.deposit ?? null,
+          deposit_pence: depositPence,
           payment_requirement: paymentRequirement,
           // `catalogue.items` is already sorted (host display_order → member venue
           // service order → name), so the index is the display position.

@@ -24,10 +24,12 @@ import { evaluateLinkEligibility } from './eligibility';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 
-/** One calendar's own terms for one service: its custom price and length, else the service's. */
+/** One calendar's own terms for one service: its own values where it has them, else the service's. */
 export interface CalendarServiceTerms {
   durationMinutes: number | null;
   pricePence: number | null;
+  bufferMinutes: number;
+  depositPence: number | null;
   /** The processing pattern fitted to this calendar's length. */
   processingBlocks: ProcessingTimeBlock[];
 }
@@ -137,6 +139,8 @@ export async function loadVenueCatalogueData(
       calendarServiceTerms.set(calendarServiceTermsKey(p.id, s.id), {
         durationMinutes: s.duration_minutes ?? null,
         pricePence: s.price_pence ?? null,
+        bufferMinutes: s.buffer_minutes ?? 0,
+        depositPence: s.deposit_pence ?? null,
         processingBlocks: s.processing_time_blocks ?? [],
       });
       const existing = services.get(s.id);

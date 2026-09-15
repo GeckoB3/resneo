@@ -35,7 +35,11 @@ import {
   resetVisitScheduledComms,
   visitCancellationFields,
 } from '@/lib/booking/visit-write-shared';
-import { calendarDurationMinutes, type CalendarAssignmentValues } from '@/lib/booking/calendar-service-terms';
+import {
+  applicableCalendarValues,
+  calendarDurationMinutes,
+  type CalendarAssignmentRow,
+} from '@/lib/booking/calendar-service-terms';
 
 /** The statuses that put a service on the calendar; see the schedule route. */
 const SCHEDULED_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
@@ -299,7 +303,8 @@ export async function PATCH(
     const [svcRes, variantRes, assignRes] = await Promise.all([
       admin
         .from(serviceTable)
-        .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks, is_active')
+        // Both service tables carry staff_may_customize_buffer (20260330120000 and the unified schema).
+        .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks, is_active, staff_may_customize_buffer')
         .eq('venue_id', scopeVenueId)
         .in('id', [...wantedServiceIds]),
       admin
@@ -309,7 +314,7 @@ export async function PATCH(
       usesServiceItems
         ? admin
             .from('calendar_service_assignments')
-            .select('service_item_id, custom_duration_minutes')
+            .select('service_item_id, custom_duration_minutes, custom_buffer_minutes')
             .eq('calendar_id', calendarId)
         : admin
             .from('practitioner_services')
@@ -324,10 +329,10 @@ export async function PATCH(
         String(usesServiceItems ? a.service_item_id : a.service_id),
       ),
     );
-    const assignmentByService = new Map<string, CalendarAssignmentValues>();
+    const assignmentByService = new Map<string, CalendarAssignmentRow>();
     for (const a of (assignRes.data ?? []) as Array<Record<string, unknown>>) {
       const sid = String(usesServiceItems ? a.service_item_id : a.service_id);
-      assignmentByService.set(sid, a as CalendarAssignmentValues);
+      assignmentByService.set(sid, a as CalendarAssignmentRow);
     }
 
     const catalogue = new Map<string, CatalogueServiceForVisit>();
@@ -340,7 +345,12 @@ export async function PATCH(
         // A calendar's own length for the service wins, the way every other
         // appointment path resolves it.
         durationMinutes: calendarDurationMinutes(Number(svc.duration_minutes ?? 30), assignmentByService.get(id)),
-        bufferMinutes: Math.max(0, Number(svc.buffer_minutes ?? 0)),
+        // The calendar's own buffer while the service allows one (W8), else the service's.
+        bufferMinutes: Math.max(
+          0,
+          applicableCalendarValues(assignmentByService.get(id), svc).custom_buffer_minutes ??
+            Number(svc.buffer_minutes ?? 0),
+        ),
         // The wait after the service (processing past its end), which the next
         // service in the visit stands behind along with the buffer. A variant
         // with its own pattern has its own wait; otherwise the parent's applies.

@@ -25,6 +25,11 @@ import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import {
   canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { loadAddonGroupsForServices } from '@/lib/addons/addon-resolution';
+import {
+  applicableCalendarValues,
+  CALENDAR_ASSIGNMENT_LINK_COLUMNS,
+  type CalendarAssignmentRow,
+} from '@/lib/booking/calendar-service-terms';
 import type { AppointmentCatalogAddonGroup } from '@/types/booking-models';
 
 export interface AppointmentCatalogVariant {
@@ -235,27 +240,24 @@ async function fetchUnifiedAppointmentCatalog(
       .order('name'),
     supabase
       .from('calendar_service_assignments')
-      .select('id, calendar_id, service_item_id, custom_duration_minutes, custom_price_pence')
+      .select(CALENDAR_ASSIGNMENT_LINK_COLUMNS)
       .in('calendar_id', calendarIds),
     fetchServiceCategoryRefs(supabase, venueId),
   ]);
 
   const services = ((servicesRes.data ?? []) as Record<string, unknown>[]).map(serviceItemRowToAppointmentService);
   const categoryFor = serviceCategoryLookup(categories);
+  // A calendar's own values, gated by its service's staff permission flags (W8).
+  const serviceRowById = new Map(
+    ((servicesRes.data ?? []) as Record<string, unknown>[]).map((row) => [row.id as string, row]),
+  );
   const practitionerServices: PractitionerService[] = (assignRes.data ?? []).map((a) => {
-    const row = a as {
-      id: string;
-      calendar_id: string;
-      service_item_id: string;
-      custom_duration_minutes: number | null;
-      custom_price_pence: number | null;
-    };
+    const row = a as CalendarAssignmentRow & { id: string; calendar_id: string; service_item_id: string };
     return {
       id: row.id,
       practitioner_id: row.calendar_id,
       service_id: row.service_item_id,
-      custom_duration_minutes: row.custom_duration_minutes,
-      custom_price_pence: row.custom_price_pence,
+      ...applicableCalendarValues(row, serviceRowById.get(row.service_item_id)),
     };
   });
 

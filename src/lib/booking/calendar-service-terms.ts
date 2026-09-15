@@ -111,3 +111,59 @@ export function resolveCalendarServiceTerms(params: {
     processingBlocks,
   };
 }
+
+/**
+ * The assignment columns the loaders select to build a calendar's link row: the seven values a
+ * calendar can hold of its own (W8, migration 20270214140000).
+ */
+export const CALENDAR_ASSIGNMENT_LINK_COLUMNS =
+  'id, calendar_id, service_item_id, custom_name, custom_description, custom_duration_minutes, custom_buffer_minutes, custom_price_pence, custom_deposit_pence, custom_colour';
+
+/** A calendar's stored values, as `calendar_service_assignments` holds them. */
+export interface CalendarAssignmentRow extends CalendarAssignmentValues {
+  custom_name?: string | null;
+  custom_description?: string | null;
+  custom_buffer_minutes?: number | null;
+  custom_deposit_pence?: number | null;
+  custom_colour?: string | null;
+}
+
+/** The service's staff permission flags, as `service_items` holds them. */
+export interface ServiceCustomisationFlags {
+  staff_may_customize_name?: boolean | null;
+  staff_may_customize_description?: boolean | null;
+  staff_may_customize_duration?: boolean | null;
+  staff_may_customize_buffer?: boolean | null;
+  staff_may_customize_price?: boolean | null;
+  staff_may_customize_deposit?: boolean | null;
+  staff_may_customize_colour?: boolean | null;
+}
+
+/**
+ * A calendar's values that apply to a booking, gated by the service's staff permission flags.
+ *
+ * Name, description, buffer, deposit and colour apply only while their flag is on: a value stored
+ * while the flag was on stops applying when an admin turns it off (R8).
+ *
+ * Price and length apply AS STORED, flag or not, exactly as they have always applied (SB-12).
+ * Gating them would change what a calendar charges today wherever a price was stored and the
+ * flag later turned off (one such row on staging, 2026-09-15). That is an owner decision (D6
+ * clears stored values when a flag goes off), so it is not taken silently here.
+ */
+export function applicableCalendarValues(
+  assignment: CalendarAssignmentRow | null | undefined,
+  flags: ServiceCustomisationFlags | null | undefined,
+): Required<CalendarAssignmentRow> {
+  const on = (flag: boolean | null | undefined) => flag === true;
+  const text = (v: string | null | undefined) => (typeof v === 'string' && v.trim() !== '' ? v : null);
+  const num = (v: number | null | undefined) => (setNumber(v) ? v : null);
+  return {
+    custom_price_pence: num(assignment?.custom_price_pence),
+    custom_duration_minutes: num(assignment?.custom_duration_minutes),
+    custom_name: on(flags?.staff_may_customize_name) ? text(assignment?.custom_name) : null,
+    custom_description: on(flags?.staff_may_customize_description) ? text(assignment?.custom_description) : null,
+    custom_buffer_minutes: on(flags?.staff_may_customize_buffer) ? num(assignment?.custom_buffer_minutes) : null,
+    custom_deposit_pence: on(flags?.staff_may_customize_deposit) ? num(assignment?.custom_deposit_pence) : null,
+    custom_colour: on(flags?.staff_may_customize_colour) ? text(assignment?.custom_colour) : null,
+  };
+}

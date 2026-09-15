@@ -48,6 +48,7 @@ import {
   STALE_SERVICE_MESSAGE,
 } from '@/lib/venue/calendar-service-assignment-writes';
 import { apiError } from '@/lib/api/error-codes';
+import { applicableCalendarValues, type CalendarAssignmentRow } from '@/lib/booking/calendar-service-terms';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -669,25 +670,19 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch service links' }, { status: 500 });
       }
 
+      // Each calendar's own values as they apply: name, description, buffer, deposit and colour
+      // only while the service's staff permission flag is on, price and length as stored (W8,
+      // TERMS-14). The web card and the mobile app merge these over the service unchanged.
+      const serviceRowById = new Map(
+        ((servicesRes.data ?? []) as Record<string, unknown>[]).map((s) => [s.id as string, s]),
+      );
       const practitioner_services = (linksRes.data ?? []).map((r) => {
-        const row = r as {
-          id: string;
-          calendar_id: string;
-          service_item_id: string;
-          custom_duration_minutes: number | null;
-          custom_price_pence: number | null;
-        };
+        const row = r as CalendarAssignmentRow & { id: string; calendar_id: string; service_item_id: string };
         return {
           id: row.id,
           practitioner_id: row.calendar_id,
           service_id: row.service_item_id,
-          custom_duration_minutes: row.custom_duration_minutes,
-          custom_price_pence: row.custom_price_pence,
-          custom_name: null,
-          custom_description: null,
-          custom_buffer_minutes: null,
-          custom_deposit_pence: null,
-          custom_colour: null,
+          ...applicableCalendarValues(row, serviceRowById.get(row.service_item_id)),
         };
       });
 

@@ -47,11 +47,15 @@ describe('loadVenueCatalogueData calendar terms (CB-01)', () => {
     expect(data.calendarServiceTerms.get(calendarServiceTermsKey('cal-plain', 's1'))).toEqual({
       durationMinutes: 30,
       pricePence: 2500,
+      bufferMinutes: 0,
+      depositPence: null,
       processingBlocks: [],
     });
     expect(data.calendarServiceTerms.get(calendarServiceTermsKey('cal-senior', 's1'))).toEqual({
       durationMinutes: 50,
       pricePence: 2200,
+      bufferMinutes: 0,
+      depositPence: null,
       processingBlocks: [{ start_minute: 20, duration_minutes: 10 }],
     });
   });

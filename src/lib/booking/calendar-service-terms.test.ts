@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applicableCalendarValues,
   calendarDurationMinutes,
   calendarPricePence,
   resolveCalendarServiceTerms,
@@ -106,6 +107,72 @@ describe('the shared merges agree with the resolver', () => {
       length: terms.durationMinutes,
       buffer: terms.bufferMinutes,
       deposit: terms.depositPence,
+    });
+  });
+});
+
+/** W8: a calendar's own values apply within the service's staff permission flags. */
+describe('applicableCalendarValues', () => {
+  const stored = {
+    custom_name: 'Senior cut',
+    custom_description: 'With Sam',
+    custom_duration_minutes: 50,
+    custom_buffer_minutes: 10,
+    custom_price_pence: 2200,
+    custom_deposit_pence: 500,
+    custom_colour: '#123456',
+  };
+
+  it('applies all seven while every flag is on', () => {
+    expect(
+      applicableCalendarValues(stored, {
+        staff_may_customize_name: true,
+        staff_may_customize_description: true,
+        staff_may_customize_duration: true,
+        staff_may_customize_buffer: true,
+        staff_may_customize_price: true,
+        staff_may_customize_deposit: true,
+        staff_may_customize_colour: true,
+      }),
+    ).toEqual(stored);
+  });
+
+  it('ignores name, description, buffer, deposit and colour once their flag is off', () => {
+    expect(applicableCalendarValues(stored, {})).toEqual({
+      custom_name: null,
+      custom_description: null,
+      custom_buffer_minutes: null,
+      custom_deposit_pence: null,
+      custom_colour: null,
+      // Price and length keep applying as stored, as they always have (owner decision pending, D6).
+      custom_duration_minutes: 50,
+      custom_price_pence: 2200,
+    });
+  });
+
+  it('treats a blank name as not set, and 0 as a real buffer or deposit', () => {
+    expect(
+      applicableCalendarValues(
+        { custom_name: '  ', custom_buffer_minutes: 0, custom_deposit_pence: 0 },
+        { staff_may_customize_name: true, staff_may_customize_buffer: true, staff_may_customize_deposit: true },
+      ),
+    ).toMatchObject({ custom_name: null, custom_buffer_minutes: 0, custom_deposit_pence: 0 });
+  });
+
+  it('a merged service shows the calendar name, buffer and deposit the flags allow', () => {
+    const base = { ...service, id: 's1', name: 'Colour', colour: '#000000', is_active: true } as unknown as AppointmentService;
+    const link = {
+      id: 'l1',
+      practitioner_id: 'c1',
+      service_id: 's1',
+      ...applicableCalendarValues(stored, { staff_may_customize_name: true, staff_may_customize_buffer: true }),
+    } as PractitionerService;
+    const merged = mergeAppointmentServiceWithPractitionerLink(base, link);
+    expect({ name: merged.name, buffer: merged.buffer_minutes, deposit: merged.deposit_pence, colour: merged.colour }).toEqual({
+      name: 'Senior cut',
+      buffer: 10,
+      deposit: 1000,
+      colour: '#000000',
     });
   });
 });

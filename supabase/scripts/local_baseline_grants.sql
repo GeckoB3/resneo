@@ -56,7 +56,11 @@ BEGIN
          'practitioner_calendar_blocks',
          'service_schedule_exceptions',
          'calendar_date_overrides',
-         'collective_column_classes'
+         'collective_column_classes',
+         'collective_service_replicas',
+         'collective_catalogue_revisions',
+         'collective_audit_events',
+         'collective_operations'
        )
   LOOP
     EXECUTE format(

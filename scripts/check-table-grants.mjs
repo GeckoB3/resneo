@@ -171,6 +171,25 @@ async function main() {
     );
   }
 
+  // -- Collective engine tables (W3, 20270215120000) ---------------------------
+  // Service role only: replica links, revisions, the engine's audit trail and lifecycle jobs decide
+  // what reaches other businesses. Hosted defaults grant client roles on every new table.
+  for (const rel of [
+    'collective_service_replicas',
+    'collective_catalogue_revisions',
+    'collective_audit_events',
+    'collective_operations',
+  ]) {
+    for (const role of ['anon', 'authenticated']) {
+      const row = grant(rel, role);
+      check(
+        `${rel}: ${role} holds nothing`,
+        row === null,
+        `live: ${fmt(row)}. Apply supabase/migrations/20270215120000_collective_engine_schema.sql`,
+      );
+    }
+  }
+
   // -- Service catalogue and collective tables (W15, 20270214120000) ----------
   // anon may keep SELECT (RLS returns nothing without a policy) but no write privilege. Hosted
   // defaults grant client roles on every new table, so a table created after the migration

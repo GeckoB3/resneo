@@ -53,6 +53,21 @@ describe('parked services are refused on every create path (D2)', () => {
     },
   );
 
+  it.each(['src/app/api/booking/appointment-calendar/route.ts', 'src/app/api/venue/appointment-calendar/route.ts'])(
+    '%s offers no month dates for a parked service',
+    (rel) => {
+      const src = read(rel);
+      expect(src).toContain('isParked(await loadBookableServiceIds(');
+      expect(src).toMatch(/available_dates: \[\]/);
+    },
+  );
+
+  it('the staff month keeps dates for moving an existing booking', () => {
+    expect(read('src/app/api/venue/appointment-calendar/route.ts')).toMatch(
+      /!excludeBookingId &&\s*isParked\(await loadBookableServiceIds/,
+    );
+  });
+
   it('the check fails open and leaves the backstop to the trigger', () => {
     const src = read('src/lib/linked-accounts/replicas/parking.ts');
     expect(src).toContain("rpc('collective_bookable_service_ids'");

@@ -14,6 +14,18 @@
 --     (D25), not tombstoned;
 --   * collective_dissolved is audited, the revision bumped and one notice job queued (N19).
 -- No account link is written (D41). A collective already dissolved returns zeros.
+--
+-- Also: collective_service_items.master_service_id becomes ON DELETE SET NULL (it was NO ACTION,
+-- as Appendix C wrote it). NO ACTION meant a host could never delete a service it had once offered,
+-- even after withdrawing it or dissolving the collective, and a host venue could not be hard-deleted.
+-- The rule the plan wants (RT1-5) is only that an ACTIVE offering's master cannot be deleted, and the
+-- lock trigger's RN002 enforces exactly that before any FK action runs.
+
+ALTER TABLE public.collective_service_items
+  DROP CONSTRAINT IF EXISTS collective_service_items_master_service_id_fkey;
+ALTER TABLE public.collective_service_items
+  ADD CONSTRAINT collective_service_items_master_service_id_fkey
+  FOREIGN KEY (master_service_id) REFERENCES public.service_items (id) ON DELETE SET NULL;
 
 CREATE OR REPLACE FUNCTION public.collective_dissolve_core(
   p_collective_id uuid,

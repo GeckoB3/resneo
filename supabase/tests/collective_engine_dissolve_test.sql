@@ -6,7 +6,8 @@
 --   * every active membership, the host's included, goes left and is released; members keep their
 --     services, now unlocked;
 --   * offerings are archived, the collective is dissolved with its address kept;
---   * the host may then delete the service it offered;
+--   * the host may then delete the service it offered, and the archived offering forgets it;
+--   * while an offering is active, its master still cannot be deleted (RN002);
 --   * a second dissolve does nothing;
 --   * a legacy_copies collective is refused.
 --
@@ -17,7 +18,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(11);
+SELECT plan(13);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
@@ -88,6 +89,14 @@ SELECT is(
 SELECT is(
   (SELECT count(*)::int FROM public.collective_service_items WHERE master_service_id = '00000000-0000-0000-0000-00000000f051' AND status = 'active'),
   0, 'No active offering remains, so the host''s service is no longer protected as offered');
+
+SELECT lives_ok(
+  $$ DELETE FROM public.service_items WHERE id = '00000000-0000-0000-0000-00000000f051' $$,
+  'The host can delete a service it once offered');
+SELECT is(
+  (SELECT count(*)::int FROM public.collective_service_items
+   WHERE collective_id = '00000000-0000-0000-0000-00000000f0c1' AND status = 'archived' AND master_service_id IS NULL),
+  1, 'and the archived offering no longer names it');
 
 SELECT is(
   (SELECT (public.collective_dissolve('00000000-0000-0000-0000-00000000f0c1', 'host_ended', NULL, NULL)->>'members_released')::int),

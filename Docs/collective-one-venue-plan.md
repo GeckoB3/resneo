@@ -2888,7 +2888,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS venue_collective_members_one_live_venue
 -- per (collective_id, venue_id) over invited and active rows, so I43 stays an invariant.
 
 ALTER TABLE public.collective_service_items
-  ADD COLUMN IF NOT EXISTS master_service_id uuid REFERENCES public.service_items (id) ON DELETE NO ACTION,
+  ADD COLUMN IF NOT EXISTS master_service_id uuid REFERENCES public.service_items (id) ON DELETE NO ACTION,  -- SET NULL since 20270216140000: NO ACTION blocked deleting any once-offered service; RN002 still guards active offerings
   ADD COLUMN IF NOT EXISTS entity_type text NOT NULL DEFAULT 'service';         -- T14 (D44)
 ALTER TABLE public.collective_service_items
   ADD CONSTRAINT collective_service_items_entity_type_valid CHECK (entity_type IN ('service'));

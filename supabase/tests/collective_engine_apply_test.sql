@@ -13,6 +13,7 @@
 --   * withdrawing the offering retires the member's service;
 --   * the claim leases due links once;
 --   * an apply for a membership that has ended writes nothing;
+--   * the engine flag does not outlive an engine call;
 --   * client roles cannot call the engine.
 --
 -- Run with:  supabase test db
@@ -22,7 +23,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(19);
+SELECT plan(20);
 
 -- Host H, member M, a replicas-model collective, M's membership.
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
@@ -71,6 +72,9 @@ SELECT is(
 CREATE TEMP TABLE first_apply AS SELECT public.collective_apply_replica((SELECT id FROM link), NULL, NULL, 'inline') AS r;
 
 SELECT ok((SELECT (r->>'ok')::boolean FROM first_apply), 'The first apply succeeds');
+
+SELECT is(coalesce(current_setting('resneo.collective_engine', true), ''), '',
+  'The engine flag is off again once the call returns');
 
 CREATE TEMP TABLE replica AS
 SELECT replica_service_id AS id FROM public.collective_service_replicas WHERE id = (SELECT id FROM link);

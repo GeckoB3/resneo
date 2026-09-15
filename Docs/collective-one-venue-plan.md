@@ -3028,6 +3028,15 @@ DB-01 asserts the value of `proconfig`, not its presence, and fails on any unqua
 `prosrc`. No function calls `set_config` for the flag: the function-level `SET` is what Postgres
 restores on exit (RT1-7).
 
+**Amended 2026-09-15 (build):** hosted Supabase refuses a function-level `SET resneo.collective_engine`
+to the migration role ("permission denied to set parameter", 42501; attaching a custom setting to a
+function needs a superuser). Each engine entry point is therefore a thin wrapper that calls
+`collective_engine_enter()` (remembers the flag, `set_config(..., 'on', true)`), runs the `*_core`
+body, and calls `collective_engine_leave(prev)`. A raise rolls the transaction or the caller's
+savepoint back, which restores the setting too, so the flag still cannot outlive the call.
+`src/lib/testing/migration-function-settings.test.ts` refuses any dotted setting in a function
+definition.
+
 **The engine flag rule.** `resneo.collective_engine = 'on'` is read by the lock triggers, the host
 guard, the sync-columns guard and the dirty triggers; the first three let the write through, the
 dirty triggers skip (the engine bumps explicitly where it means to, so a replica-side write never

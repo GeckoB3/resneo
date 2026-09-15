@@ -10,8 +10,16 @@
 -- the projection covers exactly what the apply writes, so the fingerprints agree part by part.
 --
 -- Conventions (Appendix D): SECURITY DEFINER, `SET search_path = ''` with every relation qualified,
--- `SET resneo.collective_engine = 'on'` on functions (never on trigger functions), writers take
--- `SET lock_timeout = '2s'`, all revoked from client roles and granted to service_role only.
+-- writers take `SET lock_timeout = '2s'`, all revoked from client roles and granted to service_role only.
+--
+-- THE ENGINE FLAG IS SET AT RUN TIME, NOT IN THE FUNCTION DEFINITION. Appendix D writes
+-- `SET resneo.collective_engine = 'on'` as a function-level clause, which Postgres restores on exit.
+-- Hosted Supabase refuses that clause to the migration role ("permission denied to set parameter",
+-- 42501, staging 2026-09-15): attaching a custom setting to a function needs a superuser. So each
+-- engine entry point is a thin wrapper: it remembers the flag, turns it on with set_config(.., true),
+-- calls the body (`*_core`), and puts the previous value back. If the body raises, the transaction
+-- (or the caller's savepoint) rolls back, and a rollback restores the setting too, so the flag
+-- cannot outlive the call either way. `src/lib/testing/migration-function-settings.test.ts` refuses the clause.
 
 -- ===========================================================================
 -- Helpers
@@ -32,6 +40,33 @@ AS $$
   JOIN public.collective_column_classes k ON k.table_name = c.relname AND k.column_name = a.attname
   WHERE n.nspname = 'public' AND c.relname = p_table AND a.attnum > 0 AND NOT a.attisdropped
     AND k.class = ANY (p_classes);
+$$;
+
+-- Turn the engine flag on for the rest of the call, returning what it was.
+CREATE OR REPLACE FUNCTION public.collective_engine_enter()
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_prev text := coalesce(current_setting('resneo.collective_engine', true), '');
+BEGIN
+  PERFORM pg_catalog.set_config('resneo.collective_engine', 'on', true);
+  RETURN v_prev;
+END;
+$$;
+
+-- Put the flag back as it was before the call.
+CREATE OR REPLACE FUNCTION public.collective_engine_leave(p_prev text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  PERFORM pg_catalog.set_config('resneo.collective_engine', coalesce(p_prev, ''), true);
+END;
 $$;
 
 -- A named pause point for concurrency tests; a no-op in every real database.
@@ -221,7 +256,6 @@ LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-SET resneo.collective_engine = 'on'
 SET lock_timeout = '2s'
 AS $$
   UPDATE public.collective_service_replicas SET lease_until = p_now + p_lease
@@ -240,7 +274,7 @@ $$;
 -- ===========================================================================
 -- Apply
 -- ===========================================================================
-CREATE OR REPLACE FUNCTION public.collective_apply_replica(
+CREATE OR REPLACE FUNCTION public.collective_apply_replica_core(
   p_link_id uuid,
   p_actor_venue_id uuid,
   p_actor_user_id uuid,
@@ -253,7 +287,6 @@ LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-SET resneo.collective_engine = 'on'
 SET lock_timeout = '2s'
 AS $$
 DECLARE
@@ -470,10 +503,36 @@ BEGIN
 END;
 $$;
 
+
+-- Entry point: the engine flag is on for exactly this call (see the header).
+CREATE OR REPLACE FUNCTION public.collective_apply_replica(
+  p_link_id uuid,
+  p_actor_venue_id uuid,
+  p_actor_user_id uuid,
+  p_job text DEFAULT NULL,
+  p_now timestamptz DEFAULT now(),
+  p_support_session_id uuid DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_prev text := public.collective_engine_enter();
+  v_result jsonb;
+BEGIN
+  v_result := public.collective_apply_replica_core(p_link_id, p_actor_venue_id, p_actor_user_id, p_job, p_now, p_support_session_id);
+  PERFORM public.collective_engine_leave(v_prev);
+  RETURN v_result;
+END;
+$$;
+
 -- ===========================================================================
 -- Offer and withdraw
 -- ===========================================================================
-CREATE OR REPLACE FUNCTION public.collective_offer_service(
+CREATE OR REPLACE FUNCTION public.collective_offer_service_core(
   p_collective_id uuid,
   p_master_service_id uuid,
   p_actor_venue_id uuid,
@@ -485,7 +544,6 @@ LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-SET resneo.collective_engine = 'on'
 SET lock_timeout = '2s'
 AS $$
 DECLARE
@@ -581,7 +639,32 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.collective_withdraw_service(
+
+-- Entry point: the engine flag is on for exactly this call (see the header).
+CREATE OR REPLACE FUNCTION public.collective_offer_service(
+  p_collective_id uuid,
+  p_master_service_id uuid,
+  p_actor_venue_id uuid,
+  p_actor_user_id uuid,
+  p_now timestamptz DEFAULT now()
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_prev text := public.collective_engine_enter();
+  v_result jsonb;
+BEGIN
+  v_result := public.collective_offer_service_core(p_collective_id, p_master_service_id, p_actor_venue_id, p_actor_user_id, p_now);
+  PERFORM public.collective_engine_leave(v_prev);
+  RETURN v_result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.collective_withdraw_service_core(
   p_item_id uuid,
   p_actor_venue_id uuid,
   p_actor_user_id uuid,
@@ -592,7 +675,6 @@ LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-SET resneo.collective_engine = 'on'
 SET lock_timeout = '2s'
 AS $$
 DECLARE
@@ -633,6 +715,30 @@ BEGIN
   PERFORM public.collective_bump_revision(v_item.collective_id, p_now);
 
   RETURN jsonb_build_object('item_id', p_item_id, 'retired', v_retired);
+END;
+$$;
+
+
+-- Entry point: the engine flag is on for exactly this call (see the header).
+CREATE OR REPLACE FUNCTION public.collective_withdraw_service(
+  p_item_id uuid,
+  p_actor_venue_id uuid,
+  p_actor_user_id uuid,
+  p_now timestamptz DEFAULT now()
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_prev text := public.collective_engine_enter();
+  v_result jsonb;
+BEGIN
+  v_result := public.collective_withdraw_service_core(p_item_id, p_actor_venue_id, p_actor_user_id, p_now);
+  PERFORM public.collective_engine_leave(v_prev);
+  RETURN v_result;
 END;
 $$;
 
@@ -786,8 +892,9 @@ RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = ''
-SET resneo.collective_engine = 'on'
 AS $$
+DECLARE
+  v_prev text := public.collective_engine_enter();
 BEGIN
   IF p_table = 'service_variants' THEN
     UPDATE public.service_variants SET replica_of_variant_id = NULL, is_active = false
@@ -796,6 +903,7 @@ BEGIN
     UPDATE public.service_categories SET replica_of_category_id = NULL, managed_by_collective_id = NULL
     WHERE replica_of_category_id = p_id;
   END IF;
+  PERFORM public.collective_engine_leave(v_prev);
 END;
 $$;
 
@@ -824,6 +932,11 @@ CREATE TRIGGER trg_collective_release_category_pointers
 -- Grants: service role only.
 -- ===========================================================================
 REVOKE ALL ON FUNCTION public.collective_registry_columns(text, text[]) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.collective_engine_enter() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.collective_engine_leave(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.collective_apply_replica_core(uuid, uuid, uuid, text, timestamptz, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.collective_offer_service_core(uuid, uuid, uuid, uuid, timestamptz) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.collective_withdraw_service_core(uuid, uuid, uuid, timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.collective_engine_test_point(text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.collective_bump_revision(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.collective_write_audit(uuid, text, uuid, uuid, text, uuid, uuid, uuid, uuid, bigint, jsonb, uuid, timestamptz) FROM PUBLIC, anon, authenticated;

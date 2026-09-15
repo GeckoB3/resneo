@@ -109,6 +109,12 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_LEGACY_MODEL',
   /** Only one of the host's own services can be offered on the collective page. */
   'COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE',
+  /** The venue named is not an active member of the collective. Reload the members. */
+  'COLLECTIVE_VENUE_NOT_MEMBER',
+  /** The calendar named belongs to a different venue than the one given. */
+  'COLLECTIVE_CALENDAR_NOT_AT_VENUE',
+  /** The member's copy of the service does not exist yet; retry shortly. */
+  'COLLECTIVE_REPLICA_NOT_READY',
 
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',

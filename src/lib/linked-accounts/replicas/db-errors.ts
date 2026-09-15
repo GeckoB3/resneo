@@ -32,6 +32,9 @@ export const COLLECTIVE_PREFIXED_CODES = [
   'COLLECTIVE_NOT_HOST',
   'COLLECTIVE_LEGACY_MODEL',
   'COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE',
+  'COLLECTIVE_VENUE_NOT_MEMBER',
+  'COLLECTIVE_CALENDAR_NOT_AT_VENUE',
+  'COLLECTIVE_REPLICA_NOT_READY',
 ] as const satisfies readonly ApiErrorCode[];
 
 export type CollectiveDbErrorCode =
@@ -72,6 +75,12 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return `${collective.charAt(0).toUpperCase()}${collective.slice(1)} has not moved to shared services yet, so this is not available.`;
     case 'COLLECTIVE_OFFERING_NEEDS_HOST_SERVICE':
       return `Only one of ${host}'s own services can go on ${page}.`;
+    case 'COLLECTIVE_VENUE_NOT_MEMBER':
+      return `That venue is not a member of ${collective} any more. Reload to see the current members.`;
+    case 'COLLECTIVE_CALENDAR_NOT_AT_VENUE':
+      return 'That calendar belongs to a different venue. Reload and pick the calendar again.';
+    case 'COLLECTIVE_REPLICA_NOT_READY':
+      return 'This service is still being set up at that venue. Try again in a minute.';
   }
 }
 

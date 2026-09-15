@@ -14,6 +14,24 @@ import { assertStaffSlotAvailable } from '@/lib/light-plan';
 import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
+import { lookupAuthUserIdByEmail } from '@/lib/auth/ensure-auth-user-for-email';
+
+function existingLoginResponse(email: string) {
+  return NextResponse.json(
+    apiError(
+      `${email} already has a ResNeo login, so we cannot set a password for it. Use Invite instead: they will get a link to join your team and keep their own password.`,
+      'STAFF_EMAIL_HAS_LOGIN',
+    ),
+    { status: 409 },
+  );
+}
+
+/** GoTrue answers a duplicate createUser with 422 `email_exists`; older versions only say so in prose. */
+function isEmailAlreadyRegistered(err: { code?: string; status?: number; message?: string }): boolean {
+  if (err.code === 'email_exists') return true;
+  const msg = err.message?.toLowerCase() ?? '';
+  return msg.includes('already') && (msg.includes('registered') || msg.includes('exists'));
+}
 
 const createSchema = z
   .object({
@@ -147,54 +165,44 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'This email is already a staff member at this venue' }, { status: 409 });
     }
 
-    // Create the Supabase Auth user (or link to existing)
-    let authUserId: string | null = null;
+    // A login that already exists is never given a password here. This route emails the
+    // admin's chosen password to the person, so reusing it would hand the admin a working
+    // password for somebody's customer account, bookings and all. Invite is the path for
+    // an existing login: the person gets a link and keeps their own password.
+    // Looked up through the RPC, not listUsers(), which returns only its first page.
+    const existingAuthUserId = await lookupAuthUserIdByEmail(admin, normalisedEmail);
 
-    // Check if auth user already exists
-    const { data: existingUsers } = await admin.auth.admin.listUsers();
-    const existingAuthUser = existingUsers?.users?.find(
-      (u) => u.email?.toLowerCase() === normalisedEmail,
-    );
-
-    // Before touching the auth user: a refused request must not have reset anyone's password.
-    if (await staffMembershipElsewhere(admin, staff.venue_id, normalisedEmail, existingAuthUser?.id)) {
+    if (await staffMembershipElsewhere(admin, staff.venue_id, normalisedEmail, existingAuthUserId)) {
       return NextResponse.json(
         apiError(staffEmailAtOtherVenueMessage(normalisedEmail), 'STAFF_EMAIL_AT_OTHER_VENUE'),
         { status: 409 },
       );
     }
 
-    if (existingAuthUser) {
-      authUserId = existingAuthUser.id;
-      // Ensure they can sign in with email/password without a separate confirmation step
-      const { error: updateErr } = await admin.auth.admin.updateUserById(authUserId, {
-        password,
-        email_confirm: true,
-      });
-      if (updateErr) {
-        console.error('Auth user update failed:', updateErr);
-        return NextResponse.json(
-          { error: 'Failed to set password for this account. Try again or contact support.' },
-          { status: 500 },
-        );
-      }
-    } else {
-      const { data: newUser, error: createErr } = await admin.auth.admin.createUser({
-        email: normalisedEmail,
-        password,
-        email_confirm: true,
-        user_metadata: { venue_id: staff.venue_id },
-      });
-
-      if (createErr) {
-        console.error('Auth user creation failed:', createErr);
-        return NextResponse.json(
-          { error: 'Failed to create user account. Try again or contact support.' },
-          { status: 500 },
-        );
-      }
-      authUserId = newUser.user.id;
+    if (existingAuthUserId) {
+      return existingLoginResponse(normalisedEmail);
     }
+
+    const { data: newUser, error: createErr } = await admin.auth.admin.createUser({
+      email: normalisedEmail,
+      password,
+      email_confirm: true,
+      user_metadata: { venue_id: staff.venue_id },
+    });
+
+    if (createErr) {
+      // The lookup can miss (its RPC failing reads as "no user"), but createUser never
+      // touches an existing account, so a duplicate lands here and is refused the same way.
+      if (isEmailAlreadyRegistered(createErr)) {
+        return existingLoginResponse(normalisedEmail);
+      }
+      console.error('Auth user creation failed:', createErr);
+      return NextResponse.json(
+        { error: 'Failed to create user account. Try again or contact support.' },
+        { status: 500 },
+      );
+    }
+    const authUserId = newUser.user.id;
 
     // Insert into staff table
     const { data: newStaff, error: insertErr } = await admin
@@ -204,7 +212,7 @@ export async function POST(request: NextRequest) {
         email: normalisedEmail,
         name: name?.trim() || null,
         role,
-        // Durable auth link: the auth user was just created (or matched) above,
+        // Durable auth link: the auth user was just created above,
         // so identity resolution never has to rely on the fragile email match.
         user_id: authUserId,
       })
@@ -213,6 +221,9 @@ export async function POST(request: NextRequest) {
 
     if (insertErr) {
       console.error('Staff insert failed:', insertErr);
+      // Remove the login we just made, or a retry would be refused as an existing login.
+      const { error: deleteErr } = await admin.auth.admin.deleteUser(authUserId);
+      if (deleteErr) console.error('[staff/create] deleteUser after failed insert:', deleteErr);
       return NextResponse.json({ error: 'Failed to add staff member' }, { status: 500 });
     }
 

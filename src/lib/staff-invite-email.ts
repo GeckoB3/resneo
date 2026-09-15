@@ -24,6 +24,7 @@
 import { randomBytes } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/emails/send-email';
+import { lookupAuthUserIdByEmail } from '@/lib/auth/ensure-auth-user-for-email';
 
 export type StaffAccessLinkChannel = 'sendgrid' | 'supabase_invite';
 
@@ -195,25 +196,11 @@ async function ensureAuthUserWithStaffMetadata(
   normalisedEmail: string,
   userMetadata: Record<string, unknown>,
 ): Promise<{ ok: true; createdUserId: string | null } | { ok: false; error: string; status: number }> {
-  const { data: listData, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  if (listErr) {
-    console.error('[staff-invite-email] listUsers:', listErr);
-    return { ok: false, error: 'Could not look up auth user', status: 500 };
-  }
-
-  const existing = listData?.users?.find((u) => u.email?.toLowerCase() === normalisedEmail);
-
-  if (existing) {
-    const merged = { ...(existing.user_metadata ?? {}), ...userMetadata };
-    if (existing.user_metadata?.has_set_password === true) {
-      merged.has_set_password = true;
-    }
-    const { error: updErr } = await admin.auth.admin.updateUserById(existing.id, { user_metadata: merged });
-    if (updErr) {
-      console.error('[staff-invite-email] updateUserById:', updErr);
-      return { ok: false, error: 'Could not update auth profile for this staff member', status: 500 };
-    }
-    return { ok: true, createdUserId: null };
+  // Looked up through the RPC, not listUsers(), which returns one page: with more logins than
+  // that page holds, an existing customer was missed and createUser then refused the invite.
+  const existingId = await lookupAuthUserIdByEmail(admin, normalisedEmail);
+  if (existingId) {
+    return mergeStaffMetadataIntoExistingUser(admin, existingId, userMetadata);
   }
 
   const tempPassword = randomBytes(32).toString('hex');
@@ -226,7 +213,15 @@ async function ensureAuthUserWithStaffMetadata(
 
   if (createErr) {
     const createMsg = createErr.message?.toLowerCase() ?? '';
-    if (createMsg.includes('already') || createMsg.includes('registered') || createMsg.includes('exists')) {
+    const alreadyRegistered =
+      (createErr as { code?: string }).code === 'email_exists' ||
+      createMsg.includes('already') ||
+      createMsg.includes('registered') ||
+      createMsg.includes('exists');
+    if (alreadyRegistered) {
+      // The lookup reads an RPC failure as "no user"; one more try before refusing.
+      const again = await lookupAuthUserIdByEmail(admin, normalisedEmail);
+      if (again) return mergeStaffMetadataIntoExistingUser(admin, again, userMetadata);
       return { ok: false, error: 'This email is already registered. Try resending the invite.', status: 409 };
     }
     console.error('[staff-invite-email] createUser:', createErr);
@@ -234,6 +229,29 @@ async function ensureAuthUserWithStaffMetadata(
   }
 
   return { ok: true, createdUserId: created.user.id };
+}
+
+async function mergeStaffMetadataIntoExistingUser(
+  admin: SupabaseClient,
+  userId: string,
+  userMetadata: Record<string, unknown>,
+): Promise<{ ok: true; createdUserId: null } | { ok: false; error: string; status: number }> {
+  const { data: got, error: getErr } = await admin.auth.admin.getUserById(userId);
+  if (getErr || !got?.user) {
+    console.error('[staff-invite-email] getUserById:', getErr);
+    return { ok: false, error: 'Could not look up auth user', status: 500 };
+  }
+  const existing = got.user;
+  const merged = { ...(existing.user_metadata ?? {}), ...userMetadata };
+  if (existing.user_metadata?.has_set_password === true) {
+    merged.has_set_password = true;
+  }
+  const { error: updErr } = await admin.auth.admin.updateUserById(existing.id, { user_metadata: merged });
+  if (updErr) {
+    console.error('[staff-invite-email] updateUserById:', updErr);
+    return { ok: false, error: 'Could not update auth profile for this staff member', status: 500 };
+  }
+  return { ok: true, createdUserId: null };
 }
 
 /**

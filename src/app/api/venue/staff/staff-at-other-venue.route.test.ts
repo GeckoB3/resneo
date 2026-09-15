@@ -43,6 +43,7 @@ const EXISTING_USER = 'auth-user-1';
 /** Staff rows elsewhere: `email` for a row matched by address, `user` for one matched by auth id only. */
 function world(elsewhere: 'none' | 'email' | 'user') {
   const responder: Responder = (call) => {
+    if (call.table === 'rpc:lookup_auth_user_id_by_email') return { data: EXISTING_USER };
     if (call.table === 'staff' && call.op === 'insert') {
       return { data: { id: 'staff-new', email: EMAIL, name: null, role: 'staff', created_at: '2026-09-14T00:00:00Z' } };
     }
@@ -57,7 +58,6 @@ function world(elsewhere: 'none' | 'email' | 'user') {
   const rec = makeRecordingDb(responder);
   const auth = {
     admin: {
-      listUsers: vi.fn(async () => ({ data: { users: [{ id: EXISTING_USER, email: EMAIL }] }, error: null })),
       updateUserById: vi.fn(async () => ({ data: {}, error: null })),
       createUser: vi.fn(async () => ({ data: { user: { id: 'new-user' } }, error: null })),
     },

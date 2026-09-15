@@ -171,6 +171,26 @@ async function main() {
     );
   }
 
+  // -- Service catalogue and collective tables (W15, 20270214120000) ----------
+  // anon may keep SELECT (RLS returns nothing without a policy) but no write privilege. Hosted
+  // defaults grant client roles on every new table, so a table created after the migration
+  // would come back writable; add it to the migration's list and to this one.
+  for (const rel of [
+    'service_items', 'service_variants', 'addon_groups', 'addons', 'service_addon_groups',
+    'calendar_service_assignments', 'practitioner_services', 'appointment_services',
+    'service_categories', 'compliance_types', 'compliance_type_versions',
+    'service_compliance_requirements', 'venue_collectives', 'venue_collective_members',
+    'collective_service_items', 'collective_service_providers', 'collective_service_categories',
+  ]) {
+    const row = grant(rel, 'anon');
+    const writes = (row?.table_privileges ?? []).filter((p) => p !== 'SELECT');
+    check(
+      `${rel}: anon holds no write privilege`,
+      writes.length === 0,
+      `live: ${fmt(row)}. Apply supabase/migrations/20270214120000_service_catalogue_anon_reads_and_writes.sql`,
+    );
+  }
+
   // -- user_devices (P0-13) --------------------------------------------------
   // The audience column is added by migration 20270121120000, and the client
   // writes it through the session client under RLS. A relation-wide grant

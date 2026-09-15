@@ -1,6 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DbMappingRow } from '@/lib/import/apply-mappings';
-import { calendarDurationMinutes, calendarPricePence } from '@/lib/booking/calendar-service-terms';
+import {
+  applicableCalendarValues,
+  calendarDurationMinutes,
+  calendarPricePence,
+} from '@/lib/booking/calendar-service-terms';
 
 /** True when the booking CSV mapping wires `targetField` to a column (or split part). */
 export function isBookingImportFieldMapped(mappings: DbMappingRow[], targetField: string): boolean {
@@ -25,7 +29,7 @@ export async function fetchUnifiedServiceCommercialDefaults(
 ): Promise<ServiceCommercialDefaults | null> {
   const { data: si, error } = await admin
     .from('service_items')
-    .select('id, venue_id, duration_minutes, price_pence, deposit_pence')
+    .select('id, venue_id, duration_minutes, price_pence, deposit_pence, staff_may_customize_duration, staff_may_customize_price')
     .eq('id', serviceItemId)
     .eq('venue_id', venueId)
     .maybeSingle();
@@ -40,11 +44,18 @@ export async function fetchUnifiedServiceCommercialDefaults(
 
   const row = csa as { custom_duration_minutes?: number | null; custom_price_pence?: number | null } | null;
 
-  const base = si as { duration_minutes: number; price_pence: number | null; deposit_pence: number | null };
+  const base = si as {
+    duration_minutes: number;
+    price_pence: number | null;
+    deposit_pence: number | null;
+    staff_may_customize_duration?: boolean | null;
+    staff_may_customize_price?: boolean | null;
+  };
+  const applicable = applicableCalendarValues(row, base);
 
   return {
-    durationMinutes: calendarDurationMinutes(base.duration_minutes, row),
-    pricePence: calendarPricePence(base.price_pence, row),
+    durationMinutes: calendarDurationMinutes(base.duration_minutes, applicable),
+    pricePence: calendarPricePence(base.price_pence, applicable),
     depositPence: base.deposit_pence,
   };
 }
@@ -57,7 +68,7 @@ export async function fetchPractitionerServiceCommercialDefaults(
 ): Promise<ServiceCommercialDefaults | null> {
   const { data: svc, error } = await admin
     .from('appointment_services')
-    .select('id, venue_id, duration_minutes, price_pence, deposit_pence')
+    .select('id, venue_id, duration_minutes, price_pence, deposit_pence, staff_may_customize_duration, staff_may_customize_price')
     .eq('id', appointmentServiceId)
     .eq('venue_id', venueId)
     .maybeSingle();
@@ -76,11 +87,18 @@ export async function fetchPractitionerServiceCommercialDefaults(
     custom_deposit_pence?: number | null;
   } | null;
 
-  const base = svc as { duration_minutes: number; price_pence: number | null; deposit_pence: number | null };
+  const base = svc as {
+    duration_minutes: number;
+    price_pence: number | null;
+    deposit_pence: number | null;
+    staff_may_customize_duration?: boolean | null;
+    staff_may_customize_price?: boolean | null;
+  };
+  const applicable = applicableCalendarValues(row, base);
 
   return {
-    durationMinutes: calendarDurationMinutes(base.duration_minutes, row),
-    pricePence: calendarPricePence(base.price_pence, row),
+    durationMinutes: calendarDurationMinutes(base.duration_minutes, applicable),
+    pricePence: calendarPricePence(base.price_pence, applicable),
     depositPence: row?.custom_deposit_pence ?? base.deposit_pence,
   };
 }

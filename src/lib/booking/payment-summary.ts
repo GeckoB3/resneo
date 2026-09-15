@@ -1,5 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { calendarPricePence, type CalendarAssignmentValues } from '@/lib/booking/calendar-service-terms';
+import {
+  applicableCalendarValues,
+  calendarPricePence,
+  type CalendarAssignmentValues,
+  type ServiceCustomisationFlags,
+} from '@/lib/booking/calendar-service-terms';
 
 /**
  * In-person payments (Tap to Pay / Terminal) — booking payment summary helpers.
@@ -128,26 +133,7 @@ async function loadServicePricePence(
     const serviceId = src.serviceIdOf(booking);
     if (!serviceId) continue;
 
-    // Per-practitioner override first: it replaces the service's base price.
-    const ownerId = src.ownerIdOf(booking);
-    if (ownerId) {
-      const { data, error } = await admin
-        .from(src.overrideTable)
-        .select('custom_price_pence')
-        .eq(src.ownerCol, ownerId)
-        .eq(src.serviceCol, serviceId)
-        .maybeSingle();
-      if (error) {
-        console.error(`[payment-summary] ${src.overrideTable} load failed:`, error.message, {
-          ownerId,
-          serviceId,
-        });
-      }
-      const own = calendarPricePence(null, data as CalendarAssignmentValues | null);
-      if (own != null) return own;
-    }
-
-    let query = admin.from(src.serviceTable).select('price_pence').eq('id', serviceId);
+    let query = admin.from(src.serviceTable).select('price_pence, staff_may_customize_price').eq('id', serviceId);
     // Defence in depth, mirroring the variant lookup's venue scoping.
     if (booking.venue_id) query = query.eq('venue_id', booking.venue_id);
     const { data, error } = await query.maybeSingle();
@@ -159,7 +145,28 @@ async function loadServicePricePence(
       });
       continue;
     }
-    const raw = (data as { price_pence?: number | null } | null)?.price_pence;
+    const serviceRow = data as ({ price_pence?: number | null } & ServiceCustomisationFlags) | null;
+
+    // The calendar's own price replaces the service's, while the service's price flag allows it (D56).
+    const ownerId = src.ownerIdOf(booking);
+    if (ownerId && serviceRow?.staff_may_customize_price) {
+      const { data: link, error: linkErr } = await admin
+        .from(src.overrideTable)
+        .select('custom_price_pence')
+        .eq(src.ownerCol, ownerId)
+        .eq(src.serviceCol, serviceId)
+        .maybeSingle();
+      if (linkErr) {
+        console.error(`[payment-summary] ${src.overrideTable} load failed:`, linkErr.message, {
+          ownerId,
+          serviceId,
+        });
+      }
+      const own = calendarPricePence(null, applicableCalendarValues(link as CalendarAssignmentValues | null, serviceRow));
+      if (own != null) return own;
+    }
+
+    const raw = serviceRow?.price_pence;
     if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
   }
   return null;
@@ -519,36 +526,43 @@ export async function loadRowTotalResolver(
     ];
     if (serviceIds.length === 0) continue;
 
-    // Overrides for these services, restricted to the practitioners actually
-    // involved. The pair is re-matched below: `.in()` on two columns is a cross
-    // product, so a row here is only used when BOTH halves match a real line.
-    const ownerIds = [...new Set(unpricedRows.map(src.ownerIdOf).filter((v): v is string => !!v))];
-    if (ownerIds.length > 0) {
-      const { data, error } = await admin
-        .from(src.overrideTable)
-        .select(`${src.ownerCol}, ${src.serviceCol}, custom_price_pence`)
-        .in(src.ownerCol, ownerIds)
-        .in(src.serviceCol, serviceIds);
-      if (error) {
-        console.error(`[payment-summary] visit ${src.overrideTable} load failed:`, error.message);
-      }
-      for (const o of (data ?? []) as Array<Record<string, unknown>>) {
-        const price = calendarPricePence(null, o as CalendarAssignmentValues);
-        if (price == null) continue;
-        overridePrices.set(`${String(o[src.ownerCol])}|${String(o[src.serviceCol])}`, price);
-      }
-    }
-
-    let q = admin.from(src.serviceTable).select('id, price_pence').in('id', serviceIds);
+    let q = admin.from(src.serviceTable).select('id, price_pence, staff_may_customize_price').in('id', serviceIds);
     if (venueId) q = q.eq('venue_id', venueId);
     const { data, error } = await q;
     if (error) {
       console.error(`[payment-summary] visit ${src.serviceTable} price load failed:`, error.message);
       continue;
     }
-    for (const s of (data ?? []) as Array<{ id: string; price_pence: number | null }>) {
+    const flagsByService = new Map<string, ServiceCustomisationFlags>();
+    for (const s of (data ?? []) as Array<{ id: string; price_pence: number | null } & ServiceCustomisationFlags>) {
+      flagsByService.set(s.id, s);
       if (typeof s.price_pence === 'number' && Number.isFinite(s.price_pence)) {
         servicePrices.set(s.id, s.price_pence);
+      }
+    }
+
+    // Calendar prices for these services, restricted to the practitioners actually involved and to
+    // services whose price flag allows one (D56). The pair is re-matched below: `.in()` on two
+    // columns is a cross product, so a row here is only used when BOTH halves match a real line.
+    const ownerIds = [...new Set(unpricedRows.map(src.ownerIdOf).filter((v): v is string => !!v))];
+    const flaggedServiceIds = serviceIds.filter((id) => flagsByService.get(id)?.staff_may_customize_price);
+    if (ownerIds.length > 0 && flaggedServiceIds.length > 0) {
+      const { data: links, error: linkErr } = await admin
+        .from(src.overrideTable)
+        .select(`${src.ownerCol}, ${src.serviceCol}, custom_price_pence`)
+        .in(src.ownerCol, ownerIds)
+        .in(src.serviceCol, flaggedServiceIds);
+      if (linkErr) {
+        console.error(`[payment-summary] visit ${src.overrideTable} load failed:`, linkErr.message);
+      }
+      for (const o of (links ?? []) as Array<Record<string, unknown>>) {
+        const serviceId = String(o[src.serviceCol]);
+        const price = calendarPricePence(
+          null,
+          applicableCalendarValues(o as CalendarAssignmentValues, flagsByService.get(serviceId)),
+        );
+        if (price == null) continue;
+        overridePrices.set(`${String(o[src.ownerCol])}|${serviceId}`, price);
       }
     }
   }

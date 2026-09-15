@@ -230,7 +230,7 @@ describe('enrichBookingEmailForComms appointment pricing', () => {
   function makeApptClient(data: {
     anchor: Record<string, unknown>;
     practitioner: { name: string } | null;
-    service: { name: string; price_pence: number | null } | null;
+    service: { name: string; price_pence: number | null; staff_may_customize_price?: boolean } | null;
     link: { custom_price_pence: number | null } | null;
     variant?: { name: string; price_pence: number | null } | null;
   }): SupabaseClient {
@@ -291,7 +291,7 @@ describe('enrichBookingEmailForComms appointment pricing', () => {
       makeApptClient({
         anchor: legacyAnchor,
         practitioner: { name: 'Norah' },
-        service: { name: 'Haircut', price_pence: 2800 },
+        service: { name: 'Haircut', price_pence: 2800, staff_may_customize_price: true },
         link: { custom_price_pence: 2600 },
       }),
       bookingId,
@@ -300,6 +300,20 @@ describe('enrichBookingEmailForComms appointment pricing', () => {
     expect(out.appointment_service_name).toBe('Haircut');
     expect(out.appointment_price_display).toBe('£26.00');
     expect(out.booking_total_price_pence).toBe(2600);
+  });
+
+  it("ignores the calendar's stored price once the service's price flag is off (D56)", async () => {
+    const out = await enrichBookingEmailForComms(
+      makeApptClient({
+        anchor: legacyAnchor,
+        practitioner: { name: 'Norah' },
+        service: { name: 'Haircut', price_pence: 2800, staff_may_customize_price: false },
+        link: { custom_price_pence: 2600 },
+      }),
+      bookingId,
+      base,
+    );
+    expect(out.appointment_price_display).toBe('£28.00');
   });
 
   it('falls back to the base service price when there is no override', async () => {

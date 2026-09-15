@@ -23,7 +23,11 @@ import { fitProcessingBlocksToDuration } from '@/lib/appointments/processing-tim
  * A calendar value of 0 is a real value (a calendar offering the service free); only
  * null or a non-number means "not set".
  *
- * W1b extends this to the other per-calendar fields and their flags; callers do not change.
+ * FLAGS (D56, owner 2026-09-15). Every calendar value applies only while the service's matching
+ * `staff_may_customize_*` flag is on. `calendarPricePence` and `calendarDurationMinutes` take
+ * APPLICABLE values: pass a raw assignment row through `applicableCalendarValues` with the
+ * service's flags first. The loaders build link rows that way, so a merge over a loaded link is
+ * already gated.
  */
 
 /** The assignment columns this resolver reads. Select these, then pass the row in. */
@@ -142,13 +146,11 @@ export interface ServiceCustomisationFlags {
 /**
  * A calendar's values that apply to a booking, gated by the service's staff permission flags.
  *
- * Name, description, buffer, deposit and colour apply only while their flag is on: a value stored
- * while the flag was on stops applying when an admin turns it off (R8).
- *
- * Price and length apply AS STORED, flag or not, exactly as they have always applied (SB-12).
- * Gating them would change what a calendar charges today wherever a price was stored and the
- * flag later turned off (one such row on staging, 2026-09-15). That is an owner decision (D6
- * clears stored values when a flag goes off), so it is not taken silently here.
+ * Each of the seven applies only while its flag is on: a value stored while the flag was on stops
+ * applying the moment an admin turns it off, and applies again if the flag is turned back on
+ * (R8, TERMS-02). Until 2026-09-15 a stored price and length applied whatever the flag said
+ * (SB-12); the owner chose to gate them straight away (D56), accepting that a calendar holding a
+ * price with its flag off goes back to the service's price.
  */
 export function applicableCalendarValues(
   assignment: CalendarAssignmentRow | null | undefined,
@@ -158,8 +160,8 @@ export function applicableCalendarValues(
   const text = (v: string | null | undefined) => (typeof v === 'string' && v.trim() !== '' ? v : null);
   const num = (v: number | null | undefined) => (setNumber(v) ? v : null);
   return {
-    custom_price_pence: num(assignment?.custom_price_pence),
-    custom_duration_minutes: num(assignment?.custom_duration_minutes),
+    custom_price_pence: on(flags?.staff_may_customize_price) ? num(assignment?.custom_price_pence) : null,
+    custom_duration_minutes: on(flags?.staff_may_customize_duration) ? num(assignment?.custom_duration_minutes) : null,
     custom_name: on(flags?.staff_may_customize_name) ? text(assignment?.custom_name) : null,
     custom_description: on(flags?.staff_may_customize_description) ? text(assignment?.custom_description) : null,
     custom_buffer_minutes: on(flags?.staff_may_customize_buffer) ? num(assignment?.custom_buffer_minutes) : null,

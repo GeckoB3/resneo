@@ -203,7 +203,7 @@ describe('resolveBookingTotalPenceFromRow', () => {
     // collects another.
     const { admin } = makeAdmin((call) => {
       if (call.table === 'practitioner_services') return { data: { custom_price_pence: 1800 } };
-      if (call.table === 'appointment_services') return { data: { price_pence: 1500 } };
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500, staff_may_customize_price: true } };
       throw new Error(`unexpected table ${call.table}`);
     });
     const total = await resolveBookingTotalPenceFromRow(admin, {
@@ -215,8 +215,25 @@ describe('resolveBookingTotalPenceFromRow', () => {
     expect(total).toBe(1800);
   });
 
+  it("ignores a calendar's stored price once the service's price flag is off (D56)", async () => {
+    const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'service_items') return { data: { price_pence: 5000, staff_may_customize_price: false } };
+      if (call.table === 'calendar_service_assignments') return { data: { custom_price_pence: 3000 } };
+      throw new Error(`unexpected table ${call.table}`);
+    });
+    const total = await resolveBookingTotalPenceFromRow(admin, {
+      booking_total_price_pence: null,
+      service_item_id: 'si-1',
+      calendar_id: 'cal-1',
+    });
+    expect(total).toBe(5000);
+    // The stored price is not even read while the flag is off.
+    expect(calls.map((c) => c.table)).toEqual(['service_items']);
+  });
+
   it('reads the override from calendar_service_assignments on the newer schema', async () => {
     const { admin, calls } = makeAdmin((call) => {
+      if (call.table === 'service_items') return { data: { price_pence: 3000, staff_may_customize_price: true } };
       if (call.table === 'calendar_service_assignments') {
         return { data: { custom_price_pence: 2200 } };
       }
@@ -228,8 +245,8 @@ describe('resolveBookingTotalPenceFromRow', () => {
       calendar_id: 'cal-1',
     });
     expect(total).toBe(2200);
-    // The service list price is not queried once the override answered.
-    expect(calls.map((c) => c.table)).toEqual(['calendar_service_assignments']);
+    // The service row is read first for its price flag, then the calendar's own price.
+    expect(calls.map((c) => c.table)).toEqual(['service_items', 'calendar_service_assignments']);
   });
 
   it('treats a null override as "no override" and falls through to the service', async () => {
@@ -252,6 +269,7 @@ describe('resolveBookingTotalPenceFromRow', () => {
     // NOT silently fall back to charging the base price.
     const { admin } = makeAdmin((call) => {
       if (call.table === 'practitioner_services') return { data: { custom_price_pence: 0 } };
+      if (call.table === 'appointment_services') return { data: { price_pence: 1500, staff_may_customize_price: true } };
       throw new Error(`unexpected table ${call.table}`);
     });
     const total = await resolveBookingTotalPenceFromRow(admin, {
@@ -535,7 +553,7 @@ describe('loadVisitPaymentPicture (§5.7 visit-scoped settlement)', () => {
         return { data: [{ practitioner_id: 'p1', service_id: 'svc-1', custom_price_pence: 1800 }] };
       }
       if (call.table === 'appointment_services') {
-        return { data: [{ id: 'svc-1', price_pence: 1500 }] };
+        return { data: [{ id: 'svc-1', price_pence: 1500, staff_may_customize_price: true }] };
       }
       if (call.table === 'booking_payments') return { data: [] };
       throw new Error(`unexpected table ${call.table}`);

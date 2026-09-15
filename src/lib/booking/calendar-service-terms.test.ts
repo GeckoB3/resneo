@@ -137,17 +137,18 @@ describe('applicableCalendarValues', () => {
     ).toEqual(stored);
   });
 
-  it('ignores name, description, buffer, deposit and colour once their flag is off', () => {
+  it('ignores every stored value once its flag is off, price and length included (TERMS-02, D56)', () => {
     expect(applicableCalendarValues(stored, {})).toEqual({
       custom_name: null,
       custom_description: null,
       custom_buffer_minutes: null,
       custom_deposit_pence: null,
       custom_colour: null,
-      // Price and length keep applying as stored, as they always have (owner decision pending, D6).
-      custom_duration_minutes: 50,
-      custom_price_pence: 2200,
+      custom_duration_minutes: null,
+      custom_price_pence: null,
     });
+    // Turning a flag back on uses the stored value again.
+    expect(applicableCalendarValues(stored, { staff_may_customize_price: true }).custom_price_pence).toBe(2200);
   });
 
   it('treats a blank name as not set, and 0 as a real buffer or deposit', () => {

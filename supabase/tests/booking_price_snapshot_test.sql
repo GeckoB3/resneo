@@ -6,7 +6,9 @@
 --   * a price supplied by the caller is kept;
 --   * editing the catalogue afterwards does not move a booking's snapshot;
 --   * moving a booking's time or calendar keeps the snapshot; changing its option re-prices;
---   * the snapshot cannot be negative; a non-appointment row is left alone.
+--   * the snapshot cannot be negative; a non-appointment row is left alone;
+--   * once the service's price flag is off, a new booking on that calendar takes the service price
+--     (D56, 20270214150000), and existing snapshots stay as they were.
 --
 -- Run with:  supabase test db
 -- Each test file runs inside a transaction that is rolled back afterwards.
@@ -15,7 +17,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(9);
+SELECT plan(10);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES ('00000000-0000-0000-0000-00000000b0f1', 'Snapshot Venue', 'snapshot-venue',
@@ -30,8 +32,9 @@ VALUES
   ('00000000-0000-0000-0000-00000000b0c1', '00000000-0000-0000-0000-00000000b0f1', 'Plain chair'),
   ('00000000-0000-0000-0000-00000000b0c2', '00000000-0000-0000-0000-00000000b0f1', 'Senior chair');
 
-INSERT INTO public.service_items (id, venue_id, name, duration_minutes, price_pence)
-VALUES ('00000000-0000-0000-0000-00000000b051', '00000000-0000-0000-0000-00000000b0f1', 'Cut', 30, 2500);
+-- Staff may customise price, so a calendar's own price applies (D56, 20270214150000).
+INSERT INTO public.service_items (id, venue_id, name, duration_minutes, price_pence, staff_may_customize_price)
+VALUES ('00000000-0000-0000-0000-00000000b051', '00000000-0000-0000-0000-00000000b0f1', 'Cut', 30, 2500, true);
 
 INSERT INTO public.service_variants (id, venue_id, service_item_id, name, duration_minutes, price_pence)
 VALUES
@@ -114,6 +117,18 @@ SELECT throws_ok(
   $$ UPDATE public.bookings SET service_price_snapshot_pence = -1 WHERE id = (SELECT plain FROM t) $$,
   '23514', NULL,
   'A negative snapshot is refused');
+
+UPDATE public.service_items SET staff_may_customize_price = false
+WHERE id = '00000000-0000-0000-0000-00000000b051';
+CREATE TEMP TABLE after_flag_off AS
+  SELECT pg_temp.mk('00000000-0000-0000-0000-00000000b0c2', NULL) AS id;
+
+SELECT is(
+  (SELECT array[
+     (SELECT service_price_snapshot_pence FROM public.bookings WHERE id = (SELECT id FROM after_flag_off)),
+     (SELECT service_price_snapshot_pence FROM public.bookings WHERE id = (SELECT custom FROM t))]),
+  array[9900, 3500],
+  'With the price flag off a new booking takes the service price; an earlier booking keeps its own');
 
 SELECT * FROM finish();
 

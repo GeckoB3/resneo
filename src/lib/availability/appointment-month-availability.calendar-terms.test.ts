@@ -12,6 +12,9 @@ const serviceRow = {
   price_pence: 4000,
   processing_time_blocks: [{ start_minute: 20, duration_minutes: 20 }],
   is_active: true,
+  // Staff may set their own length and price for this service, so the calendar's values apply.
+  staff_may_customize_duration: true,
+  staff_may_customize_price: true,
 };
 
 const assignment = {
@@ -63,6 +66,16 @@ describe('buildUnifiedCalendarMonthServices (TERMS-16)', () => {
     expect(shape(allServices[0]!.processing_time_blocks)).toEqual(shape(day.processing_time_blocks));
     // The pattern moved with the shorter length rather than staying where the 60-minute service drew it.
     expect(shape(allServices[0]!.processing_time_blocks)).toEqual([[40, 30]]);
+  });
+
+  it('ignores the calendar length and price once the service flags are off (D56)', () => {
+    const { allServices } = buildUnifiedCalendarMonthServices({
+      venueId: 'v1',
+      calendarId: 'cal-1',
+      serviceRows: [{ ...serviceRow, staff_may_customize_duration: false, staff_may_customize_price: false }],
+      assignmentRows: [assignment],
+    });
+    expect(allServices[0]).toMatchObject({ duration_minutes: 60, price_pence: 4000 });
   });
 
   it('leaves an unassigned-length calendar on the service length', () => {

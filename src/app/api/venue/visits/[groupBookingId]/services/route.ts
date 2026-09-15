@@ -304,7 +304,7 @@ export async function PATCH(
       admin
         .from(serviceTable)
         // Both service tables carry staff_may_customize_buffer (20260330120000 and the unified schema).
-        .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks, is_active, staff_may_customize_buffer')
+        .select('id, name, duration_minutes, buffer_minutes, processing_time_blocks, is_active, staff_may_customize_duration, staff_may_customize_buffer')
         .eq('venue_id', scopeVenueId)
         .in('id', [...wantedServiceIds]),
       admin
@@ -344,7 +344,10 @@ export async function PATCH(
         name: String(svc.name ?? 'Service'),
         // A calendar's own length for the service wins, the way every other
         // appointment path resolves it.
-        durationMinutes: calendarDurationMinutes(Number(svc.duration_minutes ?? 30), assignmentByService.get(id)),
+        durationMinutes: calendarDurationMinutes(
+          Number(svc.duration_minutes ?? 30),
+          applicableCalendarValues(assignmentByService.get(id), svc),
+        ),
         // The calendar's own buffer while the service allows one (W8), else the service's.
         bufferMinutes: Math.max(
           0,

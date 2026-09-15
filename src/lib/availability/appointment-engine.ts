@@ -1529,7 +1529,9 @@ export function serviceItemRowToEngineService(
     durationMinutes: s.duration_minutes as number,
     processingBlocks: parseProcessingTimeBlocksFromDb(s.processing_time_blocks),
   });
-  const effectiveDuration = calendarDurationMinutes(canon.durationMinutes, custom);
+  // The calendar's own length and price apply only while the service's flags allow them (D56).
+  const applicable = applicableCalendarValues(custom, s);
+  const effectiveDuration = calendarDurationMinutes(canon.durationMinutes, applicable);
   /**
    * A calendar's `custom_duration_minutes` shortens the service without
    * touching its processing pattern, so the catalogue's blocks can fall
@@ -1552,7 +1554,7 @@ export function serviceItemRowToEngineService(
     buffer_minutes: (s.buffer_minutes as number) ?? 0,
     processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
     processing_time_blocks: fittedBlocks,
-    price_pence: calendarPricePence(s.price_pence as number | null, custom),
+    price_pence: calendarPricePence(s.price_pence as number | null, applicable),
     payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
     deposit_pence: (s.deposit_pence as number | null) ?? null,
     colour: (s.colour as string) ?? '#3B82F6',

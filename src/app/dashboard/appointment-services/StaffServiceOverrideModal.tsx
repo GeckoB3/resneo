@@ -59,6 +59,11 @@ interface Props {
   calendarChoices?: CalendarChoice[];
   selectedCalendarId?: string;
   onSelectedCalendarChange?: (calendarId: string) => void;
+  /**
+   * The one calendar these values are for, when the dialog is opened from that calendar (an admin
+   * on Calendar Availability, CSA-08). The calendar is always sent, and the copy names it.
+   */
+  calendar?: CalendarChoice;
 }
 
 export function StaffServiceOverrideModal({
@@ -71,6 +76,7 @@ export function StaffServiceOverrideModal({
   calendarChoices = [],
   selectedCalendarId,
   onSelectedCalendarChange,
+  calendar,
 }: Props) {
   const sym = currencySymbolFromCode(currency);
 
@@ -159,7 +165,9 @@ export function StaffServiceOverrideModal({
       const raw = buildPatch();
       const { service_id, ...rest } = raw;
       const body: Record<string, unknown> = { service_id };
-      if (calendarChoices.length > 1 && selectedCalendarId) {
+      if (calendar) {
+        body.calendar_id = calendar.id;
+      } else if (calendarChoices.length > 1 && selectedCalendarId) {
         body.calendar_id = selectedCalendarId;
       }
       for (const [k, v] of Object.entries(rest)) {
@@ -200,13 +208,13 @@ export function StaffServiceOverrideModal({
       onOpenChange={(next) => {
         if (!next) onClose();
       }}
-      title={`Your settings: ${base.name}`}
+      title={calendar ? `${base.name} on ${calendar.name}` : `Your settings: ${base.name}`}
       size="md"
       footer={
         <OverrideModalFooter onClose={onClose} onSave={() => void handleSave()} saving={saving} />
       }
     >
-      {calendarChoices.length > 1 && selectedCalendarId && onSelectedCalendarChange ? (
+      {!calendar && calendarChoices.length > 1 && selectedCalendarId && onSelectedCalendarChange ? (
         <div className="mb-4">
           <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
           <select
@@ -223,9 +231,11 @@ export function StaffServiceOverrideModal({
         </div>
       ) : null}
       <p className="mb-4 text-sm text-slate-600">
-        {calendarChoices.length > 1
-          ? 'Changes apply only to the calendar you select above. Match the venue default to clear your override for a field.'
-          : 'Changes apply only to your calendar. Match the venue default to clear your override for a field.'}
+        {calendar
+          ? `These values apply to ${calendar.name} only. Set a field back to the venue default to clear it.`
+          : calendarChoices.length > 1
+            ? 'Changes apply only to the calendar you select above. Match the venue default to clear your override for a field.'
+            : 'Changes apply only to your calendar. Match the venue default to clear your override for a field.'}
       </p>
       {error ? <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 

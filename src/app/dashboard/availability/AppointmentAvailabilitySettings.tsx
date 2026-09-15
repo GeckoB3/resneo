@@ -34,6 +34,8 @@ import {
   weeklyCalendarHoursOutsideVenue,
 } from '@/lib/calendar/hours-mismatch';
 import type { OpeningHours } from '@/types/availability';
+import type { PractitionerService } from '@/types/booking-models';
+import { StaffServiceOverrideModal } from '@/app/dashboard/appointment-services/StaffServiceOverrideModal';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Practitioner {
@@ -101,11 +103,45 @@ interface ExperienceEventRow {
 interface Service {
   id: string;
   name: string;
+  /** The rest of the Services GET row, used by the per-calendar values dialog (CSA-08). */
+  description?: string | null;
+  duration_minutes?: number;
+  buffer_minutes?: number;
+  price_pence?: number | null;
+  deposit_pence?: number | null;
+  colour?: string;
+  staff_may_customize_name?: boolean;
+  staff_may_customize_description?: boolean;
+  staff_may_customize_duration?: boolean;
+  staff_may_customize_buffer?: boolean;
+  staff_may_customize_price?: boolean;
+  staff_may_customize_deposit?: boolean;
+  staff_may_customize_colour?: boolean;
 }
 
 interface PractitionerServiceLink {
   practitioner_id: string;
   service_id: string;
+  custom_name?: string | null;
+  custom_description?: string | null;
+  custom_duration_minutes?: number | null;
+  custom_buffer_minutes?: number | null;
+  custom_price_pence?: number | null;
+  custom_deposit_pence?: number | null;
+  custom_colour?: string | null;
+}
+
+/** Whether a service lets any calendar hold values of its own. */
+function serviceAllowsCalendarValues(svc: Service): boolean {
+  return Boolean(
+    svc.staff_may_customize_name ||
+      svc.staff_may_customize_description ||
+      svc.staff_may_customize_duration ||
+      svc.staff_may_customize_buffer ||
+      svc.staff_may_customize_price ||
+      svc.staff_may_customize_deposit ||
+      svc.staff_may_customize_colour,
+  );
 }
 
 type Tab = 'team' | 'hours' | 'breaks' | 'daysoff';
@@ -243,6 +279,8 @@ export function AppointmentAvailabilitySettings({
   const [snapshotClassIds, setSnapshotClassIds] = useState<string[]>([]);
   /** The calendar's services as the dialog loaded them: sent back so a stale save is refused. */
   const [snapshotServiceIds, setSnapshotServiceIds] = useState<string[]>([]);
+  /** The service whose values the admin is editing for the calendar being edited (CSA-08). */
+  const [valuesServiceId, setValuesServiceId] = useState<string | null>(null);
   const [snapshotResourceIds, setSnapshotResourceIds] = useState<string[]>([]);
   const [snapshotEventIds, setSnapshotEventIds] = useState<string[]>([]);
   const [classTypes, setClassTypes] = useState<ClassTypeRow[]>([]);
@@ -1296,6 +1334,18 @@ export function AppointmentAvailabilitySettings({
                                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                 />
                                 <span className="text-sm text-slate-700">{svc.name}</span>
+                                {editingId && snapshotServiceIds.includes(svc.id) && serviceAllowsCalendarValues(svc) ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      setValuesServiceId(svc.id);
+                                    }}
+                                    className="ml-auto shrink-0 text-xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+                                  >
+                                    Edit values
+                                  </button>
+                                ) : null}
                               </label>
                             ))}
                           </div>
@@ -1699,6 +1749,44 @@ export function AppointmentAvailabilitySettings({
           </p>
         ) : null}
       </Dialog>
+
+      {(() => {
+        const svc = valuesServiceId ? services.find((s) => s.id === valuesServiceId) : null;
+        if (!svc || !editingId) return null;
+        const link = pLinks.find((l) => l.practitioner_id === editingId && l.service_id === svc.id) ?? null;
+        return (
+          <StaffServiceOverrideModal
+            open
+            onClose={() => setValuesServiceId(null)}
+            onSaved={() => {
+              void fetch('/api/venue/appointment-services')
+                .then((res) => (res.ok ? res.json() : null))
+                .then((data: { practitioner_services?: PractitionerServiceLink[] } | null) => {
+                  if (data?.practitioner_services) setPLinks(data.practitioner_services);
+                });
+            }}
+            service={{
+              id: svc.id,
+              name: svc.name,
+              description: svc.description ?? null,
+              duration_minutes: svc.duration_minutes ?? 30,
+              buffer_minutes: svc.buffer_minutes ?? 0,
+              price_pence: svc.price_pence ?? null,
+              deposit_pence: svc.deposit_pence ?? null,
+              colour: svc.colour ?? '#3B82F6',
+              staff_may_customize_name: svc.staff_may_customize_name,
+              staff_may_customize_description: svc.staff_may_customize_description,
+              staff_may_customize_duration: svc.staff_may_customize_duration,
+              staff_may_customize_buffer: svc.staff_may_customize_buffer,
+              staff_may_customize_price: svc.staff_may_customize_price,
+              staff_may_customize_deposit: svc.staff_may_customize_deposit,
+              staff_may_customize_colour: svc.staff_may_customize_colour,
+            }}
+            link={link ? ({ id: `${editingId}:${svc.id}`, ...link } as PractitionerService) : null}
+            calendar={{ id: editingId, name: formName || 'This calendar' }}
+          />
+        );
+      })()}
     </div>
   );
 }

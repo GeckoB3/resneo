@@ -83,6 +83,14 @@ import {
 } from '@/components/linked-accounts/collective/CollectiveServicesBanner';
 import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
+import {
+  CollectiveCalendarsSection,
+  EMPTY_CALENDARS_VALUE,
+  type CollectiveCalendarsValue,
+} from '@/components/linked-accounts/collective/CollectiveCalendarsSection';
+import { CollectiveSaveSummary } from '@/components/linked-accounts/collective/CollectiveSaveSummary';
+import type { CollectiveSync } from '@/lib/linked-accounts/replicas/inline-apply';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -289,6 +297,13 @@ export function AppointmentServicesView({
   // Host admins are handed every calendar in the collective; everyone else gets nothing here.
   const [collectiveCalendars, setCollectiveCalendars] = useState<CollectiveCalendarGroup[]>([]);
   const [collectiveFilter, setCollectiveFilter] = useState<CollectiveServicesFilterValue>('all');
+  /** Calendar ticks the host has changed but not saved: intent, never a picture of the whole set. */
+  const [collectiveCalendarsDiff, setCollectiveCalendarsDiff] =
+    useState<CollectiveCalendarsValue>(EMPTY_CALENDARS_VALUE);
+  const [collectiveSave, setCollectiveSave] = useState<{ sync: CollectiveSync; serviceName: string } | null>(null);
+  const [staleService, setStaleService] = useState<{ id: string; name: string } | null>(null);
+  /** Set by the stale ask: the service to open again once the fresh list has arrived. */
+  const [reopenServiceId, setReopenServiceId] = useState<string | null>(null);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
 
@@ -500,6 +515,16 @@ export function AppointmentServicesView({
     };
   }, [services]);
 
+  /**
+   * The service open in the form, when the host has it on the collective page. Its calendars are
+   * then chosen across every venue through the engine, so the form's own calendar list steps aside.
+   */
+  const editingCollectiveBlock = useMemo(() => {
+    if (!editingId) return null;
+    const block = services.find((s) => s.id === editingId)?.collective ?? null;
+    return block && block.role === 'master' ? block : null;
+  }, [editingId, services]);
+
   const collectiveMemberNames = useMemo(
     () => collectiveCalendars.filter((g) => !g.is_host).map((g) => g.venue_name),
     [collectiveCalendars],
@@ -537,6 +562,16 @@ export function AppointmentServicesView({
   const [reorderError, setReorderError] = useState<string | null>(null);
 
   const categoryFor = useMemo(() => serviceCategoryLookup(categories), [categories]);
+
+  useEffect(() => {
+    if (!reopenServiceId) return;
+    const svc = services.find((s) => s.id === reopenServiceId);
+    if (!svc) return;
+    setReopenServiceId(null);
+    openEdit(svc);
+    // openEdit only sets state from the service it is given, so it is safe to leave out.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reopenServiceId, services]);
 
   useEffect(() => {
     // Category first, then the venue drag order: each category's services sit
@@ -832,6 +867,7 @@ export function AppointmentServicesView({
     });
     setEditingId(null);
     setEditingBaseline(null);
+    setCollectiveCalendarsDiff(EMPTY_CALENDARS_VALUE);
     setError(null);
     setShowAddCalendarModal(false);
     setNewCalendarName('');
@@ -906,6 +942,7 @@ export function AppointmentServicesView({
     });
     setEditingId(svc.id);
     setEditingBaseline({ updatedAt: svc.updated_at ?? null, calendarIds: svcLinks });
+    setCollectiveCalendarsDiff(EMPTY_CALENDARS_VALUE);
     setError(null);
     setShowAddCalendarModal(false);
     setNewCalendarName('');
@@ -1014,7 +1051,7 @@ export function AppointmentServicesView({
   async function patchServicePayload(
     payload: Record<string, unknown>,
     acknowledge: boolean,
-  ): Promise<'saved' | 'needs_confirmation'> {
+  ): Promise<{ outcome: 'saved'; body: Record<string, unknown> } | { outcome: 'needs_confirmation' | 'stale' }> {
     const res = await fetch(
       acknowledge
         ? '/api/venue/appointment-services?acknowledge_affected_bookings=true'
@@ -1025,16 +1062,24 @@ export function AppointmentServicesView({
         body: JSON.stringify(payload),
       },
     );
-    if (res.ok) return 'saved';
+    if (res.ok) return { outcome: 'saved', body: (await res.json().catch(() => ({}))) as Record<string, unknown> };
 
     const data = (await res.json().catch(() => ({}))) as {
       error?: string;
+      code?: string;
       details?: unknown;
     };
+    // Someone else saved this service after the form opened (W2). The page asks before
+    // overwriting them, rather than reporting a failure the owner cannot act on.
+    if (res.status === 412 && data.code === 'STALE_RESOURCE') {
+      const svc = services.find((s) => s.id === editingId);
+      setStaleService({ id: editingId ?? '', name: svc?.name ?? 'This service' });
+      return { outcome: 'stale' };
+    }
     const confirmation = res.status === 409 ? parseServiceRemovalConfirmation(data) : null;
     if (confirmation) {
       openServiceRemoval({ kind: 'service_form', payload }, confirmation);
-      return 'needs_confirmation';
+      return { outcome: 'needs_confirmation' };
     }
     const baseMsg = data.error ?? 'Failed to save service';
     // `details` is a zod flatten() OBJECT, not a string. Typed as a string it
@@ -1060,6 +1105,12 @@ export function AppointmentServicesView({
             ...built.payload,
             ...(editingBaseline.updatedAt ? { expected_updated_at: editingBaseline.updatedAt } : {}),
             expected_calendar_ids: editingBaseline.calendarIds,
+            // The host's calendar choices across the collective, as a diff (contract 4). Absent
+            // when nothing was ticked, so an ordinary save sends nothing new.
+            ...(editingCollectiveBlock &&
+            (collectiveCalendarsDiff.add.length > 0 || collectiveCalendarsDiff.remove.length > 0)
+              ? { collective_calendars: collectiveCalendarsDiff }
+              : {}),
           }
         : built.payload;
 
@@ -1087,12 +1138,20 @@ export function AppointmentServicesView({
     setSaving(true);
     setError(null);
     try {
-      if ((await patchServicePayload(payload, false)) === 'needs_confirmation') {
-        // The service form closes so the two dialogs never stack; cancelling reopens it.
+      const result = await patchServicePayload(payload, false);
+      if (result.outcome !== 'saved') {
+        // Both answers put a dialog in front of the owner: the bookings a removal would leave
+        // behind, or the change someone else saved first. The form closes so they never stack,
+        // and cancelling reopens it.
         setShowModal(false);
         return;
       }
 
+      // How far the save reached, and the 60 second offer to put it back (D50). Absent at a
+      // venue that is not hosting a collective, which is every venue today.
+      const sync = (result.body.collective_sync ?? null) as CollectiveSync | null;
+      setCollectiveSave(sync ? { sync, serviceName: String(payload.name ?? 'This service') } : null);
+      setCollectiveCalendarsDiff(EMPTY_CALENDARS_VALUE);
       setShowModal(false);
       await fetchAll();
     } catch (err) {
@@ -1218,6 +1277,21 @@ export function AppointmentServicesView({
         />
       ) : (
         <>
+      {collectiveSave && collective ? (
+        <div className="mb-4">
+          <CollectiveSaveSummary
+            sync={collectiveSave.sync}
+            serviceName={collectiveSave.serviceName}
+            collectiveId={collective.id}
+            venueNames={[...collectiveMemberNames]}
+            onUndone={() => {
+              setCollectiveSave(null);
+              void fetchAll();
+            }}
+          />
+        </div>
+      ) : null}
+
       {!showModal && error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
           <span>{error}</span>
@@ -1680,7 +1754,17 @@ export function AppointmentServicesView({
               venueWideBlocks={venueWideBlocks}
               linkedCalendarsForPreview={linkedCalendarsForPreview}
               calendarsSection={
-                calendarsForServiceForm.length > 0 ||
+                editingCollectiveBlock ? (
+                  <CollectiveCalendarsSection
+                    groups={collectiveCalendars}
+                    itemId={editingCollectiveBlock.item_id}
+                    collectiveName={editingCollectiveBlock.collective_name}
+                    currencySymbol={sym}
+                    value={collectiveCalendarsDiff}
+                    onChange={setCollectiveCalendarsDiff}
+                    hiddenReasons={editingCollectiveBlock.hidden_reasons}
+                  />
+                ) : calendarsForServiceForm.length > 0 ||
                 lingeringCalendarLinks.length > 0 ||
                 practitioners.length === 0 ? (
                   <div>
@@ -1899,6 +1983,36 @@ export function AppointmentServicesView({
             </li>
           ))}
         </ul>
+      </Dialog>
+
+      <Dialog
+        open={staleService !== null}
+        onOpenChange={(open) => {
+          if (!open) setStaleService(null);
+        }}
+        title={collectiveCopy('svc.stale.title', { service: staleService?.name })}
+        description={collectiveCopy('svc.stale.message', { service: staleService?.name })}
+        size="sm"
+        footer={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                const id = staleService?.id ?? null;
+                setStaleService(null);
+                setReopenServiceId(id);
+                void fetchAll();
+              }}
+            >
+              {collectiveCopy('svc.stale.confirm')}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setStaleService(null)}>
+              Go back
+            </Button>
+          </div>
+        }
+      >
+        <p className="sr-only">{collectiveCopy('svc.stale.message', { service: staleService?.name })}</p>
       </Dialog>
 
       <ServiceRemovalBookingsDialog

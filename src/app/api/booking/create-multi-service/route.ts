@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { recordCollectiveBookingAudit } from '@/lib/linked-accounts/audit';
 import { isStaffBookingSource, loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
 import { apiError } from '@/lib/api/error-codes';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
@@ -1017,6 +1018,26 @@ export async function POST(request: NextRequest) {
       }
 
       bookingIds.push(booking.id);
+    }
+
+
+    // §6.5: a member's staff booking at another member's venue through the collective is audited,
+    // stamping the acting venue. A booking at the acting venue's own calendars is not cross-venue.
+    if (effectiveCollectiveId && staffActor?.via === 'collective') {
+      const auditCollectiveId = effectiveCollectiveId;
+      const actingVenueId = staffActor.staff.venue_id;
+      const actingUserId = staffActor.userId;
+      const auditedBookingIds = [...bookingIds];
+      after(async () => {
+        await recordCollectiveBookingAudit({
+          admin: supabase,
+          collectiveId: auditCollectiveId,
+          actingVenueId,
+          actingUserId,
+          owningVenueId: venue_id,
+          bookingIds: auditedBookingIds,
+        });
+      });
     }
 
     // Attach any inline-captured compliance records to the (first) booking of the group.

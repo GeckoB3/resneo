@@ -69,7 +69,14 @@ export async function recordReadAudit(params: ReadAuditParams): Promise<void> {
 
 interface BookingWriteAuditParams {
   admin: SupabaseClient;
-  linkId: string;
+  /** The account link that authorised the write, or null when a collective did (plan §6.5). */
+  linkId?: string | null;
+  /**
+   * The collective that authorised the write. `account_link_audit_log` takes either authority since
+   * 20270215120000 (`account_link_audit_log_one_authority`), so a collective staff booking at
+   * another member's venue is audited without inventing a pairwise link (D41).
+   */
+  collectiveId?: string | null;
   actingVenueId: string;
   actingUserId: string | null;
   owningVenueId: string;
@@ -83,7 +90,8 @@ interface BookingWriteAuditParams {
 export async function recordBookingWriteAudit(params: BookingWriteAuditParams): Promise<void> {
   const {
     admin,
-    linkId,
+    linkId = null,
+    collectiveId = null,
     actingVenueId,
     actingUserId,
     owningVenueId,
@@ -92,10 +100,15 @@ export async function recordBookingWriteAudit(params: BookingWriteAuditParams): 
     beforeState = null,
     afterState = null,
   } = params;
+  if (!linkId && !collectiveId) {
+    console.error('[linked-accounts] recordBookingWriteAudit needs a link or a collective');
+    return;
+  }
 
   try {
     const { error } = await admin.from('account_link_audit_log').insert({
       link_id: linkId,
+      collective_id: collectiveId,
       acting_venue_id: actingVenueId,
       acting_user_id: actingUserId,
       owning_venue_id: owningVenueId,
@@ -135,5 +148,33 @@ export function auditActionLabel(actionType: string): string {
       return 'Deleted booking';
     default:
       return actionType;
+  }
+}
+
+/**
+ * One audit row per booking a member's staff made at another member's venue through the collective
+ * (plan §6.5 "Staff authority": authorised by collective role, audited, stamping the acting venue).
+ * A booking at the acting venue's own calendars is not cross-venue and is not audited here.
+ */
+export async function recordCollectiveBookingAudit(params: {
+  admin: SupabaseClient;
+  collectiveId: string;
+  actingVenueId: string;
+  actingUserId: string | null;
+  owningVenueId: string;
+  bookingIds: string[];
+  actionType?: 'created_booking' | 'edited_booking' | 'cancelled_booking';
+}): Promise<void> {
+  if (params.actingVenueId === params.owningVenueId || params.bookingIds.length === 0) return;
+  for (const bookingId of params.bookingIds) {
+    await recordBookingWriteAudit({
+      admin: params.admin,
+      collectiveId: params.collectiveId,
+      actingVenueId: params.actingVenueId,
+      actingUserId: params.actingUserId,
+      owningVenueId: params.owningVenueId,
+      actionType: params.actionType ?? 'created_booking',
+      bookingId,
+    });
   }
 }

@@ -37,7 +37,8 @@ import { formatYmdInTimezone } from '@/lib/venue/venue-local-clock';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
 
 export type StaffOverrideActor =
-  | { ok: true; staff: VenueStaff; via: 'own' | 'collective' | 'linked' }
+  /** `userId` is the signed-in user behind the staff row, for the cross-venue audit trail. */
+  | { ok: true; staff: VenueStaff; via: 'own' | 'collective' | 'linked'; userId: string | null }
   | { ok: false; status: 401 | 403; error: string };
 
 /**
@@ -92,15 +93,15 @@ export async function resolveStaffBookingActor(
   if (!staff) {
     return { ok: false, status: 401, error: messages.signedOut };
   }
-  if (staff.venue_id === target.venueId) return { ok: true, staff, via: 'own' };
+  if (staff.venue_id === target.venueId) return { ok: true, staff, via: 'own', userId };
   if (target.collectiveId) {
     const scope = await resolveStaffCollectiveScope(admin, staff.venue_id, target.collectiveId);
     if (scope && scope.memberVenueIds.includes(target.venueId)) {
-      return { ok: true, staff, via: 'collective' };
+      return { ok: true, staff, via: 'collective', userId };
     }
   }
   const linked = await resolveLinkedStaffCreateScope(admin, staff.venue_id, target.venueId, userId);
-  if (linked.ok) return { ok: true, staff, via: 'linked' };
+  if (linked.ok) return { ok: true, staff, via: 'linked', userId };
   return { ok: false, status: 403, error: messages.forbidden };
 }
 

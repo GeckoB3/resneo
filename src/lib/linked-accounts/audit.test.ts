@@ -63,6 +63,8 @@ describe('recordBookingWriteAudit', () => {
     expect(insert).toHaveBeenCalledTimes(1);
     expect(insert).toHaveBeenCalledWith({
       link_id: 'link-1',
+      // Either authority since 20270215120000; a link booking carries no collective.
+      collective_id: null,
       acting_venue_id: 'venue-b',
       acting_user_id: 'user-1',
       owning_venue_id: 'venue-a',

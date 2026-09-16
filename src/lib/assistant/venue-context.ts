@@ -6,6 +6,8 @@ import { isAppointmentPlanTier, isLightPlanTier } from '@/lib/tier-enforcement';
 import { assertCalendarSlotAvailable } from '@/lib/light-plan';
 import { venueHasStripePaymentMethodForSms } from '@/lib/stripe/venue-customer-payment';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { findCollectiveLockForVenue } from '@/lib/linked-accounts/collective-venue-locks';
 
 /**
  * What applies to THIS venue (Docs/help-assistant-plan.md, 2.3): the second layer of
@@ -38,6 +40,18 @@ export interface AssistantVenueContext {
   page: string | null;
   /** YYYY-MM-DD in the venue's timezone. */
   today: string;
+  /**
+   * The live collective this venue is part of, and its part in it (plan §6.12): a host manages the
+   * collective's services and page, a member does not, so the answer depends on which.
+   */
+  collective: AssistantCollective | null;
+}
+
+export interface AssistantCollective {
+  name: string;
+  role: 'host' | 'member';
+  /** True on the shared-services model (the host's services run at every venue). */
+  sharedServices: boolean;
 }
 
 export function planLabelForTier(tier: string | null | undefined): string {
@@ -94,6 +108,20 @@ export interface AssistantContextDeps {
   calendarUsage: (venueId: string) => Promise<{ current: number; limit: number }>;
   smsCardOnFile: (venueId: string) => Promise<boolean>;
   now: () => Date;
+  /** The venue's collective and its part in it; absent means none. */
+  collective?: (venueId: string) => Promise<AssistantCollective | null>;
+}
+
+async function loadAssistantCollective(venueId: string): Promise<AssistantCollective | null> {
+  const admin = getSupabaseAdminClient();
+  const lock = await findCollectiveLockForVenue(admin, venueId);
+  if (!lock) return null;
+  const { data } = await admin.from('venue_collectives').select('service_model').eq('id', lock.collectiveId).maybeSingle();
+  return {
+    name: lock.collectiveName,
+    role: lock.hostVenueId === venueId ? 'host' : 'member',
+    sharedServices: data?.service_model === 'replicas',
+  };
 }
 
 const defaultDeps: AssistantContextDeps = {
@@ -103,6 +131,7 @@ const defaultDeps: AssistantContextDeps = {
   },
   smsCardOnFile: venueHasStripePaymentMethodForSms,
   now: () => new Date(),
+  collective: loadAssistantCollective,
 };
 
 function terminologyOf(raw: unknown): VenueTerminology | null {
@@ -151,6 +180,15 @@ export async function buildAssistantVenueContext(
 
   const timezone = row.timezone?.trim() || 'Europe/London';
 
+  let collective: AssistantCollective | null = null;
+  if (deps.collective) {
+    try {
+      collective = await deps.collective(input.venueId);
+    } catch (e) {
+      console.warn('[assistant context] collective unavailable', e);
+    }
+  }
+
   return {
     planLabel: planLabelForTier(tier),
     planStatus: effectivePlanStatus(row.plan_status, row.subscription_current_period_end, deps.now().getTime()),
@@ -166,6 +204,7 @@ export async function buildAssistantVenueContext(
     client: input.client,
     page: input.page,
     today: todayInTimezone(timezone, deps.now()),
+    collective,
   };
 }
 

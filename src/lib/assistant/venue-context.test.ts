@@ -30,6 +30,25 @@ const PLUS_ROW = {
   stripe_connected_account_id: 'acct_123',
 };
 
+/** Plan 6.12: the assistant knows whether the venue hosts a collective or is a member of one. */
+describe('buildAssistantVenueContext collective', () => {
+  const input = { venueId: 'v1', role: 'admin' as const, client: 'web' as const, page: null };
+
+  it("carries the venue's collective and its part in it", async () => {
+    const collective = { name: 'Northside', role: 'member' as const, sharedServices: true };
+    const ctx = await buildAssistantVenueContext(PLUS_ROW, input, deps({ collective: async () => collective }));
+    expect(ctx.collective).toEqual(collective);
+  });
+
+  it('is none outside a collective, and when the lookup fails', async () => {
+    expect((await buildAssistantVenueContext(PLUS_ROW, input, deps())).collective).toBeNull();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failing = deps({ collective: async () => { throw new Error('down'); } });
+    expect((await buildAssistantVenueContext(PLUS_ROW, input, failing)).collective).toBeNull();
+    warn.mockRestore();
+  });
+});
+
 /** Docs/help-assistant-plan.md, 5.1: tier, flag and role mapping. */
 describe('buildAssistantVenueContext', () => {
   it('maps a Plus admin venue', async () => {

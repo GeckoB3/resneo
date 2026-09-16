@@ -29,6 +29,7 @@ const CTX: AssistantVenueContext = {
   client: 'web',
   page: '/dashboard/calendar',
   today: '2026-09-06',
+  collective: null,
 };
 
 /** Docs/help-assistant-plan.md, 5.1. */
@@ -115,6 +116,23 @@ describe('buildContextBlock', () => {
     expect(block).not.toContain('Screen the question was asked from');
     expect(block).toContain('- Using: the ResNeo app');
     expect(buildContextBlock({ ...CTX, calendars: { used: 9, limit: null } })).toContain('- Calendars: 9 (no limit on this plan)');
+  });
+});
+
+describe('buildContextBlock for a venue collective (plan 6.12)', () => {
+  it('tells a host from a member, so a member is not given host instructions', () => {
+    const host = buildContextBlock({ ...CTX, collective: { name: 'Northside', role: 'host', sharedServices: true } });
+    expect(host).toContain(`- Venue collective: hosts "Northside", so it manages the collective's services and booking page`);
+    expect(host).toContain(`a member's other services are parked while it is a member`);
+
+    const member = buildContextBlock({ ...CTX, collective: { name: 'Northside', role: 'member', sharedServices: false } });
+    expect(member).toContain('- Venue collective: a member of "Northside"; the host manages');
+    expect(member).not.toContain('shares services');
+    expect(member).not.toMatch(EM_DASH);
+  });
+
+  it('says nothing about collectives for a venue outside one', () => {
+    expect(buildContextBlock(CTX)).not.toContain('Venue collective');
   });
 });
 

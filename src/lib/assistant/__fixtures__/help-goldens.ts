@@ -48,6 +48,7 @@ export const DEFAULT_GOLDEN_CONTEXT: AssistantVenueContext = {
   client: 'web',
   page: null,
   today: '2026-09-06',
+  collective: null,
 };
 
 export const HELP_GOLDENS: HelpGolden[] = [

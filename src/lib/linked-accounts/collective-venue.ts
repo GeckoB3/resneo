@@ -29,6 +29,7 @@ import {
 } from './catalogue';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { mergeVenueTerminology } from '@/lib/dashboard/merge-venue-terminology';
+import { mapVenueFeatureFlagsForPublic } from '@/lib/booking/venue-public-feature-flags';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { loadVariantsForServices } from '@/lib/venue/service-variants';
 import { variantToCatalog, type AppointmentCatalogVariant } from '@/lib/availability/appointment-catalog';
@@ -187,8 +188,12 @@ export async function loadCollectiveVenuePublic(
     booking_paused: !bookable,
     require_account_login_for_bookings: requireAccountLogin,
     is_collective: true,
+    // The host's full resolved set (D32, D43): its waitlist, self-reschedule, staff-first and
+    // "Any available" settings and order are the page's, as they are on its own page.
     feature_flags: {
+      ...mapVenueFeatureFlagsForPublic(host?.feature_flags ?? {}),
       resolved: {
+        ...mapVenueFeatureFlagsForPublic(host?.feature_flags ?? {})?.resolved,
         any_available_practitioner: hostAnyAvailablePractitioner,
         staff_first_booking_flow: hostStaffFirstBookingFlow,
       },

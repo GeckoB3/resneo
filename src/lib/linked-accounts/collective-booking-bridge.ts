@@ -16,6 +16,7 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { computeAppointmentAvailableDatesInMonth } from '@/lib/availability/appointment-month-availability';
 import { ANY_AVAILABLE_PRACTITIONER_ID } from '@/lib/availability/appointment-any-practitioner';
+import { loadHostAnyAvailableConfig, poolCollectiveSlots } from '@/lib/linked-accounts/collective-any-available';
 import type { PhantomBooking } from '@/lib/availability/appointment-engine';
 import { computeChainStartsForPractitioner } from '@/lib/availability/appointment-chain';
 import { prepareChainSegments, type ChainSegmentRequest, type VenueClockRow } from '@/lib/availability/appointment-chain-server';
@@ -293,12 +294,9 @@ export async function loadCollectiveDayAvailability(
   );
 
   if (params.anyAvailable) {
-    // Pool into one "any available" practitioner; dedupe by time (earliest/first calendar wins).
-    const byTime = new Map<string, DaySlot>();
-    for (const slot of perCalendar.flat()) {
-      if (!byTime.has(slot.start_time)) byTime.set(slot.start_time, slot);
-    }
-    const pooled = [...byTime.values()].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    // Pool into one "any available" practitioner, each contested time given fairly (SB-40).
+    const config = await loadHostAnyAvailableConfig(admin, collectiveId);
+    const pooled = poolCollectiveSlots(perCalendar.flat(), config, date);
     return {
       date,
       venue_id: collectiveId,
@@ -498,11 +496,8 @@ export async function loadCollectiveChainDayAvailability(
   if (invalid) return { ok: false, ...(invalid as { error: string; details?: unknown }) };
 
   if (params.anyAvailable) {
-    const byTime = new Map<string, DaySlot>();
-    for (const slot of perCalendar.flat()) {
-      if (!byTime.has(slot.start_time)) byTime.set(slot.start_time, slot);
-    }
-    const pooled = [...byTime.values()].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    const config = await loadHostAnyAvailableConfig(admin, collectiveId);
+    const pooled = poolCollectiveSlots(perCalendar.flat(), config, date);
     return {
       ok: true,
       payload: {

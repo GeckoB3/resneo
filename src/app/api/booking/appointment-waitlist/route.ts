@@ -10,6 +10,8 @@ import {
   parseVenueFeatureFlags,
 } from '@/lib/feature-flags';
 import { validateGuestWaitlistTimeInput } from '@/lib/booking/waitlist-time-window';
+import { isCollectiveId } from '@/lib/linked-accounts/collective-booking-bridge';
+import { resolveCollectiveWaitlistTarget } from '@/lib/linked-accounts/collective-waitlist';
 
 const joinSchema = z.object({
   venue_id: z.string().uuid(),
@@ -36,13 +38,28 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
-    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, parsed.data.venue_id, request);
+    // The collective page (D43): the entry is filed at the member venue that can offer the time.
+    let venueId = parsed.data.venue_id;
+    let serviceId = parsed.data.service_id;
+    let practitionerId = parsed.data.practitioner_id ?? null;
+    if (await isCollectiveId(supabase, venueId)) {
+      const target = await resolveCollectiveWaitlistTarget(supabase, {
+        collectiveId: venueId,
+        offeringId: serviceId,
+        calendarId: practitionerId,
+      });
+      if (!target.ok) return NextResponse.json({ error: target.error }, { status: target.status });
+      venueId = target.venueId;
+      serviceId = target.serviceId;
+      practitionerId = target.calendarId;
+    }
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId, request);
     if (blocked) return blocked;
 
     const { data: venueRow } = await supabase
       .from('venues')
       .select('feature_flags')
-      .eq('id', parsed.data.venue_id)
+      .eq('id', venueId)
       .maybeSingle();
     const venueFlags = parseVenueFeatureFlags(
       (venueRow as { feature_flags?: unknown } | null)?.feature_flags,
@@ -64,19 +81,19 @@ export async function POST(request: NextRequest) {
     const { data: unifiedService } = await supabase
       .from('service_items')
       .select('id')
-      .eq('id', parsed.data.service_id)
-      .eq('venue_id', parsed.data.venue_id)
+      .eq('id', serviceId)
+      .eq('venue_id', venueId)
       .maybeSingle();
 
-    const appointmentServiceId = unifiedService ? null : parsed.data.service_id;
-    const serviceItemId = unifiedService ? parsed.data.service_id : null;
+    const appointmentServiceId = unifiedService ? null : serviceId;
+    const serviceItemId = unifiedService ? serviceId : null;
 
     if (!unifiedService) {
       const { data: legacyService } = await supabase
         .from('appointment_services')
         .select('id')
-        .eq('id', parsed.data.service_id)
-        .eq('venue_id', parsed.data.venue_id)
+        .eq('id', serviceId)
+        .eq('venue_id', venueId)
         .maybeSingle();
       if (!legacyService) {
         return NextResponse.json({ error: 'Invalid service for this venue' }, { status: 400 });
@@ -86,7 +103,7 @@ export async function POST(request: NextRequest) {
     const { count } = await supabase
       .from('waitlist_entries')
       .select('id', { count: 'exact', head: true })
-      .eq('venue_id', parsed.data.venue_id)
+      .eq('venue_id', venueId)
       .eq('desired_date', parsed.data.desired_date)
       .eq('guest_phone', guestPhoneE164)
       .eq('waitlist_kind', 'appointment')
@@ -111,11 +128,11 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase
       .from('waitlist_entries')
       .insert({
-        venue_id: parsed.data.venue_id,
+        venue_id: venueId,
         waitlist_kind: 'appointment',
         appointment_service_id: appointmentServiceId,
         service_item_id: serviceItemId,
-        practitioner_id: parsed.data.practitioner_id ?? null,
+        practitioner_id: practitionerId,
         desired_date: parsed.data.desired_date,
         desired_time: timeParsed.desired_time,
         desired_time_end: timeParsed.desired_time_end,

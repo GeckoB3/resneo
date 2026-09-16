@@ -61,6 +61,34 @@ export const COLLECTIVE_COPY = {
   'svc.card.noCalendars': 'No calendars offer this yet, so guests cannot book it.',
   'svc.card.parked': 'Parked while {collective} is live. Put it on the page to take bookings for it.',
 
+  // Services page, member (AppointmentServicesView.tsx)
+  'svc.member.subtitle':
+    'Services from {host} are managed by {host}. You choose which of your calendars offer them.',
+  'svc.member.banner.title': 'You are part of {collective}',
+  'svc.member.banner.body':
+    '{host} manages the services on the {collective} page, including their prices, deposits and forms. You choose which of your calendars offer each one. Your other services are parked while you are part of {collective}, so nobody can book them until you leave.',
+  'svc.member.banner.leave': 'Leaving {collective}',
+  'svc.member.section.fromHostCaption': 'Managed by {host} for {collective}',
+  'svc.member.section.retired': 'No longer offered by {host}',
+  'svc.member.section.retiredCaption':
+    '{host} took these off the {collective} page. They cannot be booked. Bookings already made are not changed.',
+  'svc.member.section.parkedTitle': 'Parked while you are part of {collective}',
+  'svc.member.section.parkedCaption':
+    'Yours to edit, but nobody can book these while you are part of {collective}. Bookings already made are not changed. To offer one now, suggest it to {host}.',
+  'svc.member.card.view': 'View',
+  'svc.member.card.settingUp': 'Setting up. Guests can book it on your calendars once this finishes.',
+  'svc.member.card.updating': 'Updating from {host}. Guests can book it on your calendars again in a moment.',
+  'svc.member.card.failed':
+    'This service is not up to date with {host}, so guests cannot book it on your calendars. {host} has been told.',
+  'svc.member.card.noStripe':
+    'Guests cannot book this online with you until you connect Stripe, because it takes {paymentKind}.',
+  'svc.member.card.connectStripe': 'Connect Stripe',
+  'svc.member.card.formsOff':
+    'This service asks for {forms}. Turn on compliance records so your calendars can offer it online.',
+  'svc.member.card.turnOn': 'Turn on',
+  'svc.member.card.noCalendars': 'None of your calendars offer this yet.',
+  'svc.member.card.cameFrom': 'Came from {host}',
+
   // The save summary, the undo and the stale ask
   'svc.save.allDone': 'Saved. {service} is up to date at {venueList}.',
   'svc.save.pending':

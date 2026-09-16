@@ -28,6 +28,8 @@ const ALLOWED: Record<string, string> = {
   'src/app/api/venue/practitioner-services/route.ts': 'write route: keeps raw values across a diff',
   'src/app/dashboard/appointment-services/AppointmentServicesView.tsx': 'editor: carries raw values into the form',
   'src/app/dashboard/appointment-services/StaffServiceOverrideModal.tsx': 'editor: writes raw values',
+  'src/components/linked-accounts/collective/CollectiveCalendarsSection.tsx':
+    "editor: shows a calendar's own stored values as chips and a comparison, already gated by the loader",
 };
 
 const READ = /[.?]\s*custom_(price_pence|duration_minutes)\b|\[\s*['"]custom_(price_pence|duration_minutes)['"]\s*\]/;

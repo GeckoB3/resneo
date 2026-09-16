@@ -35,8 +35,11 @@ export function FromHostPill({ hostName }: { hostName: string }) {
   );
 }
 
-/** A venue's own service, not on the page, so nobody can book it while the collective is live. */
-export function ParkedPill({ venueName, collectiveName }: { venueName: string; collectiveName: string }) {
+/**
+ * A venue's own service, not on the page, so nobody can book it while the collective is live. On a
+ * venue's own page the venue is the reader, so the name defaults to "your venue".
+ */
+export function ParkedPill({ venueName = 'your venue', collectiveName }: { venueName?: string; collectiveName: string }) {
   return (
     <Pill variant="neutral" size="sm">
       {collectiveCopy('common.pill.parked')}

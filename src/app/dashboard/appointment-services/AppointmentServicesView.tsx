@@ -69,6 +69,20 @@ import { ComplianceRequirementsEditor } from '@/components/dashboard/compliance/
 import { complianceJsonFetcher } from '@/components/dashboard/compliance/shared';
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import {
+  CollectivePill,
+  FromHostPill,
+  ParkedPill,
+  RetiredPill,
+  VenueSyncPill,
+} from '@/components/linked-accounts/collective/CollectivePills';
+import {
+  CollectiveServicesBanner,
+  CollectiveServicesFilter,
+  type CollectiveServicesFilterValue,
+} from '@/components/linked-accounts/collective/CollectiveServicesBanner';
+import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
+import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -120,6 +134,8 @@ interface Service {
   location_type?: string | null;
   online_meeting_url?: string | null;
   online_meeting_info?: string | null;
+  /** What this service is to the collective, when the venue is in one (W5). Null at every venue today. */
+  collective?: CollectiveServiceBlock | null;
 }
 
 
@@ -144,6 +160,25 @@ interface PractitionerServiceLink {
   custom_colour?: string | null;
 }
 
+
+/**
+ * What one service is to the collective, in pills: what it is, and how its copies are doing. A
+ * service that is up to date says so once and quietly; anything else names the venue in the pill's
+ * own reason sentence, which comes from the API so a host and a member read the same words.
+ */
+function CollectiveServicePills({ block }: { block: CollectiveServiceBlock }) {
+  return (
+    <>
+      {block.role === 'master' ? <CollectivePill collectiveName={block.collective_name} /> : null}
+      {block.role === 'replica' ? <FromHostPill hostName={block.host_venue_name} /> : null}
+      {block.role === 'retired' ? <RetiredPill /> : null}
+      {block.role === 'parked' ? <ParkedPill collectiveName={block.collective_name} /> : null}
+      {block.role === 'parked' ? null : (
+        <VenueSyncPill status={block.status} reason={block.status_reason} />
+      )}
+    </>
+  );
+}
 
 type ServicesPageTab = 'services' | 'categories' | 'addons';
 
@@ -251,6 +286,9 @@ export function AppointmentServicesView({
 
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<ServiceCategoryRef[]>([]);
+  // Host admins are handed every calendar in the collective; everyone else gets nothing here.
+  const [collectiveCalendars, setCollectiveCalendars] = useState<CollectiveCalendarGroup[]>([]);
+  const [collectiveFilter, setCollectiveFilter] = useState<CollectiveServicesFilterValue>('all');
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
 
@@ -391,6 +429,9 @@ export function AppointmentServicesView({
       setServices(svcData.services ?? []);
       setLinks(svcData.practitioner_services ?? []);
       setCategories(Array.isArray(svcData.categories) ? (svcData.categories as ServiceCategoryRef[]) : []);
+      setCollectiveCalendars(
+        Array.isArray(svcData.collective_calendars) ? (svcData.collective_calendars as CollectiveCalendarGroup[]) : [],
+      );
       setPractitioners(practData.practitioners ?? []);
     } catch {
       setError('Failed to load services. Please check your connection.');
@@ -442,12 +483,52 @@ export function AppointmentServicesView({
     [form.practitioner_ids, practitioners],
   );
 
+  /**
+   * The collective this venue is in, as the services themselves report it (W5). Every service in a
+   * live collective carries the same collective and host names, and the role says which side of it
+   * this venue is on. Null at every venue today.
+   */
+  const collective = useMemo(() => {
+    const block = services.find((s) => s.collective)?.collective ?? null;
+    if (!block) return null;
+    const roles = new Set(services.map((s) => s.collective?.role).filter(Boolean));
+    return {
+      id: block.collective_id,
+      name: block.collective_name,
+      hostVenueName: block.host_venue_name,
+      isHost: roles.has('master') || !roles.has('replica'),
+    };
+  }, [services]);
+
+  const collectiveMemberNames = useMemo(
+    () => collectiveCalendars.filter((g) => !g.is_host).map((g) => g.venue_name),
+    [collectiveCalendars],
+  );
+
+  const collectiveBehindVenueNames = useMemo(
+    () => [
+      ...new Set(
+        collectiveCalendars.flatMap((g) => [...g.sync.pending, ...g.sync.failed].map((v) => v.venue_name)),
+      ),
+    ],
+    [collectiveCalendars],
+  );
+
+  const collectiveFilterCounts = useMemo(() => {
+    if (!collective) return undefined;
+    const onPage = services.filter((s) => s.collective && s.collective.role !== 'parked').length;
+    return { all: services.length, on_page: onPage, parked: services.length - onPage };
+  }, [collective, services]);
+
   /** Admins manage definitions for everyone. Non-admins see the full venue list read-only; they edit what they offer under Availability. */
   const visibleServices = useMemo(() => {
-    if (isAdmin) return services;
-    if (linkedPractitionerIds.length === 0) return [];
-    return services;
-  }, [isAdmin, services, linkedPractitionerIds.length]);
+    const all = isAdmin || linkedPractitionerIds.length > 0 ? services : [];
+    if (!collective || collectiveFilter === 'all') return all;
+    // "Parked" is anything not on the page: a service with no collective block is parked too,
+    // because a venue in a live collective offers only the collective's services (D2).
+    const onPage = (svc: Service) => Boolean(svc.collective) && svc.collective!.role !== 'parked';
+    return all.filter((svc) => (collectiveFilter === 'on_page' ? onPage(svc) : !onPage(svc)));
+  }, [isAdmin, services, linkedPractitionerIds.length, collective, collectiveFilter]);
 
   // Manual display order (admins): drag a card, or use the arrow buttons, then the
   // order persists via /reorder and drives the public + staff booking service lists.
@@ -469,7 +550,7 @@ export function AppointmentServicesView({
     setOrderedServiceIds(sorted.map((s) => s.id));
   }, [services, categoryFor]);
 
-  const canReorderServices = isAdmin && services.length > 1;
+  const canReorderServices = isAdmin && services.length > 1 && collectiveFilter === 'all';
 
   const orderedVisibleServices = useMemo(() => {
     const byId = new Map(visibleServices.map((s) => [s.id, s]));
@@ -1176,6 +1257,25 @@ export function AppointmentServicesView({
         </SectionCard>
       ) : (
         <div className="space-y-3">
+          {collective ? (
+            <CollectiveServicesBanner
+              variant={collective.isHost ? 'host' : 'member'}
+              collectiveName={collective.name}
+              hostVenueName={collective.hostVenueName}
+              memberNames={collectiveMemberNames}
+              invitedOnly={collective.isHost && collectiveMemberNames.length === 0}
+              behindVenueNames={collectiveBehindVenueNames}
+            />
+          ) : null}
+          {collective ? (
+            <CollectiveServicesFilter
+              value={collectiveFilter}
+              onChange={setCollectiveFilter}
+              collectiveName={collective.name}
+              counts={collectiveFilterCounts}
+              reorderHidden={isAdmin && services.length > 1 && collectiveFilter !== 'all'}
+            />
+          ) : null}
           {canReorderServices ? (
             <p className="text-xs text-slate-500">
               Drag the handle (or use the arrows) to set the order services appear in on your public
@@ -1281,6 +1381,7 @@ export function AppointmentServicesView({
                           Inactive
                         </Pill>
                       ) : null}
+                      {svc.collective ? <CollectiveServicePills block={svc.collective} /> : null}
                     </div>
                   }
                 />

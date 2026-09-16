@@ -564,6 +564,19 @@ export function DashboardSidebar({
             />
           )}
 
+          {/* The Collective area: where a venue in a live collective runs it (UX spec §2 item 15).
+              Shown to admins of any venue in one, members included; the page itself refuses
+              anyone else. */}
+          {collectiveBookingLinks.length > 0 && (
+            <NavLinkItem
+              href="/dashboard/collective"
+              label={collectiveBookingLinks.length === 1 ? collectiveBookingLinks[0]!.name : 'Collective'}
+              icon={UsersIcon}
+              active={isActive('/dashboard/collective')}
+              onNavigate={closeMobile}
+            />
+          )}
+
           {/* Combined booking page(s) — venue collectives (plan §23) */}
           {collectiveBookingLinks.map((link) => (
             <NavLinkItem

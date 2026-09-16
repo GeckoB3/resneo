@@ -78,12 +78,15 @@ async function tryFillFrame(frame: ReturnType<Page['frameLocator']>): Promise<bo
     const country = frame.getByRole('combobox', { name: /country|region/i });
     const countryCode =
       (await country.count()) > 0 ? ((await country.inputValue().catch(() => '')) || '').toUpperCase() : '';
+    // Match the value to the format the element is asking for, not to where the venue is. The
+    // field's accessible name comes from its visible label, so ask by name rather than by
+    // attribute: a field named "ZIP" always takes five digits.
+    const zip = frame.getByRole('textbox', { name: /zip/i });
     const postal = frame.getByRole('textbox', { name: /zip|postal|postcode/i });
-    if ((await postal.count()) > 0) {
-      const label = (await postal.first().getAttribute('aria-label').catch(() => null)) ?? '';
-      // Match the value to the format the element is asking for, not to where the venue is.
-      const ukLayout = countryCode ? countryCode === 'GB' : !/zip/i.test(label);
-      await postal.first().fill(ukLayout ? TEST_CARD.postcode : TEST_CARD.zip);
+    if ((await zip.count()) > 0) {
+      await zip.first().fill(TEST_CARD.zip);
+    } else if ((await postal.count()) > 0) {
+      await postal.first().fill(countryCode && countryCode !== 'GB' ? TEST_CARD.zip : TEST_CARD.postcode);
     }
     return true;
   }

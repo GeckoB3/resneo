@@ -283,6 +283,9 @@ describe('the picker', () => {
     tick('Haircut');
     clickButton(/^Continue$/);
     await waitForStep('Who would you like to see?');
+    // Each person shows the venue they work at (public.calendar.venue).
+    expect(screen.getByRole('button', { name: /^A Ada/ })).toHaveTextContent('Zen Studio');
+    expect(screen.getByRole('button', { name: /^B Ben/ })).toHaveTextContent('Bloom');
     clickPractitioner('Ada');
     await waitForStep('Date and time');
     expect(screen.getByTestId('slot-trader-line')).toHaveTextContent(

@@ -188,6 +188,7 @@ export async function loadCollectiveVenuePublic(
     booking_paused: !bookable,
     require_account_login_for_bookings: requireAccountLogin,
     is_collective: true,
+    collective_venue_count: memberVenueIds.length,
     // The host's full resolved set (D32, D43): its waitlist, self-reschedule, staff-first and
     // "Any available" settings and order are the page's, as they are on its own page.
     feature_flags: {

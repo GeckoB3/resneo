@@ -383,6 +383,9 @@ export const COLLECTIVE_COPY = {
   'public.meta.title': 'Book with {collective}',
   'public.meta.description': 'Book online with {collective}. {venueCount} venues, one booking page.',
   'public.header.venues': '{venueCount} venues',
+  'public.calendar.venue': '{venue}',
+  'public.group.sameVenue':
+    'Everyone in a group booking is seen at the same place. To book with more than one venue, make a separate booking for each.',
   'email.confirm.through': 'You booked through {collective}.',
   // Who the guest is booking with on a collective page (UX spec item 14; PUB-03, RT2-14, PB-15).
   'public.trader': 'You are booking with {business}, {address}.',

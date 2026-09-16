@@ -96,6 +96,7 @@ type CatalogService = Record<string, unknown> & { id: string };
 type CatalogPractitioner = {
   id: string;
   name: string;
+  owning_venue_id?: string;
   owning_venue_name?: string;
   services: CatalogService[];
 };
@@ -161,6 +162,7 @@ function combinedCatalog(): CatalogPractitioner[] {
   return [
     {
       ...ADA,
+      owning_venue_id: 'venue-harbour',
       owning_venue_name: 'Harbour Clinic',
       services: [
         service(PLAIN, 'Plain Offering', 3000, { any_available: true }),
@@ -181,6 +183,7 @@ function combinedCatalog(): CatalogPractitioner[] {
     },
     {
       ...BEN,
+      owning_venue_id: 'venue-riverside',
       owning_venue_name: 'Riverside Studio',
       services: [
         service(PLAIN, 'Plain Offering', 3000, { any_available: true }),
@@ -697,6 +700,22 @@ describe('combined page, service-first: calendar before options', () => {
     await waitForStep(STEP.service);
   });
 
+  it('says a group is seen at one venue, before the details step (public.group.sameVenue)', async () => {
+    installFetch(combinedCatalog());
+    renderFlow({ venue: combinedVenue });
+    await waitForStep(STEP.modeChoice);
+    clickButton(/Group appointment/i);
+    await waitForStep(STEP.groupReview);
+
+    await addGroupPerson('Sam', 'Plain Offering', 'Ada');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await addGroupPerson('Jo', 'Plain Offering', 'Ben');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Everyone in a group booking is seen at the same place. To book with more than one venue, make a separate booking for each.',
+    );
+    expect(screen.getByRole('button', { name: /Continue to details/i })).toBeDisabled();
+  });
+
   it('offers the group path from the chooser', async () => {
     installFetch(combinedCatalog());
     renderFlow({ venue: combinedVenue });
@@ -966,7 +985,7 @@ describe('edit mode: order is preserved', () => {
 // Group booking
 // ---------------------------------------------------------------------------
 
-async function addGroupPerson(label: string, serviceName: string): Promise<void> {
+async function addGroupPerson(label: string, serviceName: string, person = 'Ada'): Promise<void> {
   clickButton(/Add a person/i);
   await waitForStep(STEP.groupPerson);
 
@@ -979,7 +998,7 @@ async function addGroupPerson(label: string, serviceName: string): Promise<void>
   clickService(serviceName);
   await waitForStep(STEP.groupPractitioner);
 
-  clickPractitioner('Ada');
+  clickPractitioner(person);
   await screen.findByRole('heading', { name: `Pick a time for ${label}` });
   await pickFirstSlot();
   await waitForStep(STEP.groupReview);

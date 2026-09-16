@@ -499,6 +499,7 @@ interface CatalogPractitioner {
   id: string;
   name: string;
   /** Collective page: the member venue that owns this calendar, and its address (PUB-03). */
+  owning_venue_id?: string;
   owning_venue_name?: string;
   owning_venue_address?: string;
   services: Array<{
@@ -2159,6 +2160,19 @@ export function AppointmentBookingFlow({
     return catalogStaff.filter((p) => wanted.every((id) => p.services.some((s) => s.id === id)));
   }, [catalogStaff, selectedServiceId, chainExtras]);
 
+  /**
+   * Collective page: the venue under each person's name (UX spec `public.calendar.venue`), unless
+   * the name already carries it because two people share a name.
+   */
+  const calendarVenueLine = useCallback(
+    (prac: { name: string; owning_venue_name?: string }): string | null => {
+      const venueName = prac.owning_venue_name?.trim();
+      if (!venue.is_collective || !venueName || prac.name.endsWith(`· ${venueName}`)) return null;
+      return collectiveCopy('public.calendar.venue', { venue: venueName });
+    },
+    [venue.is_collective],
+  );
+
   /** Everyone the staff-first picker offers; empty calendars are already excluded upstream. */
   const bookableStaff = useMemo(
     () => catalogStaff.filter((p) => p.services.length > 0),
@@ -2331,6 +2345,19 @@ export function AppointmentBookingFlow({
    * these lookups are practitioner-scoped (empty until a calendar is picked).
    */
   const isCombined = Boolean(venue.is_collective);
+  /**
+   * Collective page: a group shares one venue, one contact and one payment (D28), so people booked
+   * with calendars at different venues cannot go on together. Said before the details step.
+   */
+  const groupSpansVenues = useMemo(() => {
+    if (!isCombined || groupPeople.length < 2) return false;
+    const venues = new Set(
+      groupPeople
+        .map((p) => catalogStaff.find((c) => c.id === p.practitionerId)?.owning_venue_id ?? null)
+        .filter((v): v is string => Boolean(v)),
+    );
+    return venues.size > 1;
+  }, [isCombined, groupPeople, catalogStaff]);
 
   /**
    * Whose catalogue the extra services' options come from: the chosen person
@@ -5435,6 +5462,9 @@ export function AppointmentBookingFlow({
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{prac.name.charAt(0).toUpperCase()}</div>
                         <div className="min-w-0">
                           <div className="font-medium text-slate-900">{prac.name}</div>
+                          {calendarVenueLine(prac) ? (
+                            <div className="mt-0.5 text-xs text-slate-500">{calendarVenueLine(prac)}</div>
+                          ) : null}
                           {availabilityOverride &&
                           prac.services.find((s) => s.id === selectedServiceId)?.assigned === false ? (
                             <div className="mt-0.5 text-[11px] font-semibold text-amber-800">
@@ -6369,6 +6399,11 @@ export function AppointmentBookingFlow({
             </button>
           )}
 
+          {groupSpansVenues ? (
+            <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {collectiveCopy('public.group.sameVenue')}
+            </p>
+          ) : null}
           {/* Continue to details */}
           {groupPeople.length >= 1 && (
             <div className="mt-4 flex gap-3">
@@ -6380,7 +6415,8 @@ export function AppointmentBookingFlow({
               </button>
               <button
                 onClick={() => void advanceToGroupDetails()}
-                className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 shadow-sm"
+                disabled={groupSpansVenues}
+                className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Continue to details
               </button>

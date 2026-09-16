@@ -13,6 +13,10 @@ const prefsSchema = z
     reschedule: z.boolean().optional(),
     create: z.boolean().optional(),
     notes: z.boolean().optional(),
+    // A venue that shares its page with others (contract 15). Emails about prices, payments and
+    // forms are not here: they always send, because they change what a guest pays or fills in.
+    collective_digest: z.boolean().optional(),
+    collective_calendars: z.boolean().optional(),
   })
   .strict();
 
@@ -45,7 +49,8 @@ export async function GET(request: NextRequest) {
 /**
  * PATCH /api/venue/notifications/preferences — update which cross-venue write
  * events email this venue (§17.4). Admin only; in-app notifications are
- * unaffected. Accepts any subset of { cancel, reschedule, create, notes }.
+ * unaffected. Accepts any subset of { cancel, reschedule, create, notes,
+ * collective_digest, collective_calendars }.
  */
 export async function PATCH(request: NextRequest) {
   const supabase = await createVenueRouteClient(request);

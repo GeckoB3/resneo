@@ -9,8 +9,21 @@
 /** The cross-venue write categories a venue can be emailed about. */
 export type LinkedNotificationCategory = 'cancel' | 'reschedule' | 'create' | 'notes';
 
+/**
+ * What a venue in a collective can be emailed about (plan Appendix E contract 15; W5).
+ *
+ *   collective_digest    the daily summary of the host's other changes to shared services (N7)
+ *   collective_calendars another venue changing which calendars offer a shared service (N11, N12)
+ *
+ * Both start on, unlike the four above: a venue that shares its page with others has agreed to be
+ * told what changes on it. Emails about prices, payments and forms are not a preference at all,
+ * because they change what a guest pays or fills in, so they always send.
+ */
+export type CollectiveNotificationCategory = 'collective_digest' | 'collective_calendars';
+
 /** Email-on flags per category. */
-export type LinkedNotificationPrefs = Record<LinkedNotificationCategory, boolean>;
+export type LinkedNotificationPrefs = Record<LinkedNotificationCategory, boolean> &
+  Record<CollectiveNotificationCategory, boolean>;
 
 export const LINKED_NOTIFICATION_CATEGORIES: LinkedNotificationCategory[] = [
   'cancel',
@@ -29,7 +42,14 @@ export const DEFAULT_LINKED_NOTIFICATION_PREFS: LinkedNotificationPrefs = {
   reschedule: false,
   create: false,
   notes: false,
+  collective_digest: true,
+  collective_calendars: true,
 };
+
+export const COLLECTIVE_NOTIFICATION_CATEGORIES: CollectiveNotificationCategory[] = [
+  'collective_digest',
+  'collective_calendars',
+];
 
 /** Human-readable labels for the settings matrix. */
 export const LINKED_NOTIFICATION_LABELS: Record<LinkedNotificationCategory, string> = {
@@ -39,19 +59,25 @@ export const LINKED_NOTIFICATION_LABELS: Record<LinkedNotificationCategory, stri
   notes: 'Edits booking notes or service',
 };
 
+/** The same, for a venue that shares a page with others. */
+export const COLLECTIVE_NOTIFICATION_LABELS: Record<CollectiveNotificationCategory, string> = {
+  collective_digest: 'Email me a daily summary of other changes to shared services',
+  collective_calendars: 'Email me when another venue changes which of our calendars offer a service',
+};
+
 /** Merge a stored (possibly partial / malformed) prefs blob over the defaults. */
 export function resolveLinkedNotificationPrefs(raw: unknown): LinkedNotificationPrefs {
   const out: LinkedNotificationPrefs = { ...DEFAULT_LINKED_NOTIFICATION_PREFS };
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const obj = raw as Record<string, unknown>;
-    for (const key of LINKED_NOTIFICATION_CATEGORIES) {
+    for (const key of [...LINKED_NOTIFICATION_CATEGORIES, ...COLLECTIVE_NOTIFICATION_CATEGORIES]) {
       if (typeof obj[key] === 'boolean') out[key] = obj[key] as boolean;
     }
   }
   return out;
 }
 
-/** Keep only the four known boolean keys when persisting (drops anything else). */
+/** Keep only the known boolean keys when persisting (drops anything else). */
 export function sanitiseLinkedNotificationPrefs(raw: unknown): LinkedNotificationPrefs {
   return resolveLinkedNotificationPrefs(raw);
 }

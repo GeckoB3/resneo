@@ -113,3 +113,66 @@ function sameValue(a: unknown, b: unknown): boolean {
   }
   return false;
 }
+
+interface VariantInput {
+  id?: string;
+  name: string;
+  description?: string | null;
+  duration_minutes: number;
+  buffer_minutes?: number;
+  price_pence?: number | null;
+  deposit_pence?: number | null;
+  is_active?: boolean;
+  processing_time_blocks?: unknown;
+}
+
+const VARIANT_FIELDS = ['name', 'description', 'duration_minutes', 'buffer_minutes', 'price_pence', 'deposit_pence', 'is_active'] as const;
+
+const emptyBlocks = (value: unknown) => value == null || (Array.isArray(value) && value.length === 0);
+
+/**
+ * Whether the options and add-on links a save re-sends are the ones the member's copy already has.
+ * Each is true when it was not sent. Options are matched by id, so a new or removed option is a
+ * change; add-on links by group and order.
+ */
+export async function memberRelationsUnchanged(
+  admin: SupabaseClient,
+  serviceId: string,
+  sent: { variants?: VariantInput[]; addonLinks?: { addon_group_id: string; sort_order?: number }[] },
+): Promise<{ variants: boolean; addonLinks: boolean }> {
+  let variants = true;
+  if (sent.variants) {
+    const { data } = await admin.from('service_variants').select('*').eq('service_item_id', serviceId);
+    const stored = new Map(((data ?? []) as Record<string, unknown>[]).map((row) => [row.id as string, row]));
+    variants =
+      sent.variants.length === stored.size &&
+      sent.variants.every((v) => {
+        const row = v.id ? stored.get(v.id) : undefined;
+        if (!row) return false;
+        const fieldsSame = VARIANT_FIELDS.every((field) => {
+          const incoming = (v as unknown as Record<string, unknown>)[field];
+          if (incoming === undefined) return true;
+          if (field === 'is_active') return (incoming !== false) === (row.is_active !== false);
+          if (field === 'buffer_minutes') return Number(incoming ?? 0) === Number(row.buffer_minutes ?? 0);
+          return sameValue(incoming, row[field]);
+        });
+        const blocksSame =
+          v.processing_time_blocks === undefined ||
+          (emptyBlocks(v.processing_time_blocks) && emptyBlocks(row.processing_time_blocks)) ||
+          sameValue(v.processing_time_blocks, row.processing_time_blocks);
+        return fieldsSame && blocksSame;
+      });
+  }
+  let addonLinks = true;
+  if (sent.addonLinks) {
+    const { data } = await admin
+      .from('service_addon_groups')
+      .select('addon_group_id, sort_order')
+      .eq('service_item_id', serviceId)
+      .order('sort_order', { ascending: true });
+    const stored = ((data ?? []) as Record<string, unknown>[]).map((row) => row.addon_group_id as string);
+    const incoming = [...new Set(sent.addonLinks.map((link) => link.addon_group_id))];
+    addonLinks = incoming.length === stored.length && incoming.every((groupId, i) => groupId === stored[i]);
+  }
+  return { variants, addonLinks };
+}

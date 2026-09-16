@@ -4,7 +4,12 @@ import { loadHostCollectiveCalendars } from '@/lib/linked-accounts/replicas/host
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { noticeNames, notifyHostCalendarChange } from '@/lib/linked-accounts/replicas/collective-notices';
-import { hostOwnedFieldsInSave, loadMemberServiceContext } from '@/lib/linked-accounts/replicas/member-save';
+import {
+  hostOwnedFieldsInSave,
+  loadMemberServiceContext,
+  MEMBER_EDITABLE_SERVICE_KEYS,
+  memberRelationsUnchanged,
+} from '@/lib/linked-accounts/replicas/member-save';
 import { clearMemberCalendarValues } from '@/lib/linked-accounts/replicas/member-values-clear';
 import {
   loadMasterSaveContext,
@@ -1396,6 +1401,7 @@ export async function PATCH(request: NextRequest) {
        * (contract 4, member half). The engine refuses the rest anyway; this says so in words.
        */
       // A venue is either the host of this service or a member holding a copy, never both.
+      let writeRelations = true;
       const memberContext = masterContext
         ? null
         : await loadMemberServiceContext(admin, id as string, staff.venue_id);
@@ -1404,7 +1410,13 @@ export async function PATCH(request: NextRequest) {
           { ...(parsed.data as Record<string, unknown>), ...(collectiveCalendarsPatch ? { collective_calendars: true } : {}) },
           serviceRow as Record<string, unknown>,
         );
-        if (refused.length > 0) {
+        // The app sends every option and add-on link back on each save (APP-01): unchanged, they
+        // are not written, since they are the host's; changed, the save is the host's to make.
+        const relations = await memberRelationsUnchanged(admin, id as string, {
+          variants: variantsProvided ? parsedVariants : undefined,
+          addonLinks: addonLinksProvided ? parsedAddonLinks : undefined,
+        });
+        if (refused.length > 0 || !relations.variants || !relations.addonLinks) {
           return NextResponse.json(
             apiError(
               `${memberContext.hostVenueName} manages this service for ${memberContext.collectiveName}, so only ${memberContext.hostVenueName} can change it. You choose which of your calendars offer it.`,
@@ -1413,6 +1425,7 @@ export async function PATCH(request: NextRequest) {
             { status: 409 },
           );
         }
+        writeRelations = false;
       }
 
       const collectiveBefore = await captureMasterProjection(admin, masterContext);
@@ -1717,6 +1730,12 @@ export async function PATCH(request: NextRequest) {
       }
 
       let savedRow = serviceRow as Record<string, unknown>;
+      if (memberContext) {
+        // A member writes only its own fields. The rest of its copy is the host's, and the check
+        // above has already refused a save that would change any of it.
+        const own = new Set<string>(MEMBER_EDITABLE_SERVICE_KEYS);
+        updatePayload = Object.fromEntries(Object.entries(updatePayload).filter(([key]) => own.has(key)));
+      }
       if (Object.keys(updatePayload).length > 0) {
         const updateServiceRow = (values: Record<string, unknown>) => {
           let q = admin.from('service_items').update(values).eq('id', id).eq('venue_id', staff.venue_id);
@@ -1774,7 +1793,7 @@ export async function PATCH(request: NextRequest) {
       }
 
       let savedVariants: Awaited<ReturnType<typeof replaceServiceVariants>> | null = null;
-      if (variantsProvided) {
+      if (variantsProvided && writeRelations) {
         savedVariants = await replaceServiceVariants({
           admin,
           venueId: staff.venue_id,
@@ -1789,7 +1808,7 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
-      if (addonLinksProvided) {
+      if (addonLinksProvided && writeRelations) {
         const linkRes = await replaceServiceAddonGroupLinks({
           admin,
           venueId: staff.venue_id,
@@ -2324,6 +2343,10 @@ export async function DELETE(request: NextRequest) {
     const { error } = await admin.from(table).delete().eq('id', id).eq('venue_id', staff.venue_id);
 
     if (error) {
+      // A host's service on the collective page, or a member's copy of one, is refused by the
+      // engine (RN002, RN001); say why rather than failing (APP-01).
+      const coded = collectiveDbError(error);
+      if (coded) return NextResponse.json(coded.body, { status: coded.status });
       console.error('DELETE /api/venue/appointment-services failed:', error);
       return NextResponse.json({ error: 'Failed to delete service' }, { status: 500 });
     }

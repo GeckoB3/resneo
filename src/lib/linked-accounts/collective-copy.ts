@@ -373,6 +373,9 @@ export const COLLECTIVE_COPY = {
   'notify.inviteExpired.body':
     'The invitation for {venue} to join {collective} was not answered within 30 days, so it has closed. {host} can send a new one.',
 
+  // The staff form's contact picker inside a live collective (collective-contact-search.ts)
+  'staff.contact.ownerLine': "{venue}'s client",
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

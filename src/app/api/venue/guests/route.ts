@@ -20,6 +20,7 @@ import {
   applyGuestSearch,
   type GuestRowBase,
 } from '@/lib/guests/guest-contacts-list';
+import { searchCollectiveContacts } from '@/lib/linked-accounts/collective-contact-search';
 
 function shapeGuestListRow(
   row: GuestRowBase,
@@ -78,6 +79,22 @@ export async function GET(request: NextRequest) {
 
     const params = parseGuestListQuery(request.nextUrl.searchParams);
     const { search, tags, sort, filter, segment, page, limit, include_custom_fields } = params;
+
+    // Contract 16 (D41): inside a live collective the picker searches every member venue whose
+    // account link shares client details, and names the owner on each row. Outside one, refused.
+    if (request.nextUrl.searchParams.get('scope') === 'collective') {
+      const found = await searchCollectiveContacts(staff.db, staff.venue_id, search, limit);
+      if (!found.ok) {
+        return NextResponse.json(
+          { error: 'Your venue is not part of a live collective, so only your own clients can be searched.' },
+          { status: 403 },
+        );
+      }
+      return NextResponse.json(
+        { guests: found.guests, total: found.guests.length, page: 0, limit, total_count: found.guests.length },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
 
     const guestListSelect = include_custom_fields
       ? 'id, first_name, last_name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, identifiability_tier, marketing_opt_out, marketing_consent, custom_fields'

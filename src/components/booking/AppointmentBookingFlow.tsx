@@ -5990,6 +5990,7 @@ export function AppointmentBookingFlow({
           ) : (
             <>
             <DetailsStep
+              contactScope={collectiveId && !isPublicGuest ? 'collective' : 'venue'}
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
               date={date}
               partySize={1}
@@ -6974,6 +6975,7 @@ export function AppointmentBookingFlow({
                 );
               })()}
               <DetailsStep
+                contactScope={collectiveId && !isPublicGuest ? 'collective' : 'venue'}
                 slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
                 date={groupPeople[0]?.date ?? date}
                 partySize={groupPeople.length}

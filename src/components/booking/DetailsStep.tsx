@@ -117,6 +117,8 @@ type FormDataStaff = z.infer<ReturnType<typeof buildDetailsSchemaStaff>>;
 type FormDataStaffWalkIn = z.infer<ReturnType<typeof buildDetailsSchemaStaffWalkIn>>;
 
 interface DetailsStepProps {
+  /** Staff forms booking for a live collective search its contacts across every venue (D41). */
+  contactScope?: 'venue' | 'collective';
   slot: AvailableSlot;
   date: string;
   partySize: number;
@@ -176,6 +178,7 @@ interface DetailsStepProps {
 }
 
 export function DetailsStep({
+  contactScope = 'venue',
   slot,
   date,
   partySize,
@@ -457,6 +460,7 @@ export function DetailsStep({
         {useStaffContactAutocomplete ? (
           <>
             <StaffGuestContactFields
+              searchScope={contactScope}
               values={{
                 firstName: wFirstName ?? '',
                 lastName: wLastName ?? '',

@@ -43,6 +43,8 @@ export interface StaffGuestContactFieldsProps {
    */
   showSearchBox?: boolean;
   searchBoxId?: string;
+  /** Search every venue of the live collective (the collective staff form), not just this one. */
+  searchScope?: 'venue' | 'collective';
 }
 
 /** The search box counts as a field for the shared dropdown state. */
@@ -67,6 +69,7 @@ export function StaffGuestContactFields({
   emailOptional = true,
   showSearchBox = true,
   searchBoxId = 'staff-guest-search',
+  searchScope = 'venue',
 }: StaffGuestContactFieldsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<number | null>(null);
@@ -76,7 +79,7 @@ export function StaffGuestContactFields({
 
   const searchQuery =
     activeField === 'search' ? searchInput.trim() : activeField ? values[activeField].trim() : '';
-  const { results, loading, error, showHint, showEmpty, minQueryLength } = useGuestToolbarSearch(searchQuery);
+  const { results, loading, error, showHint, showEmpty, minQueryLength } = useGuestToolbarSearch(searchQuery, searchScope);
 
   const clearBlurTimeout = useCallback(() => {
     if (blurTimeoutRef.current != null) {

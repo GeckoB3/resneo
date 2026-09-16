@@ -8,6 +8,7 @@ import { notifyFailingLinks } from '@/lib/linked-accounts/replicas/collective-fa
 import { sendMasterChangeNotices } from '@/lib/linked-accounts/replicas/master-change-notices';
 import { drainOperationNotices } from '@/lib/linked-accounts/replicas/collective-operation-notices';
 import { drainReleaseFollowups } from '@/lib/linked-accounts/replicas/release-followups';
+import { countLinksBehindTooLong, replicateStaleMinutes } from '@/lib/linked-accounts/replicas/replication-alerts';
 
 /**
  * GET/POST /api/cron/collective-replicate: every 5 minutes, apply due collective replica links
@@ -24,7 +25,22 @@ async function handlePost(request: NextRequest) {
   if (denied) return denied;
 
   const supabase = getSupabaseAdminClient();
+  const startedAt = Date.now();
   const counters = await runCollectiveReplicate(supabase as unknown as RpcClient);
+  // §6.16 alerts: links behind for over an hour, and a gap since the last completed run.
+  try {
+    const behind = await countLinksBehindTooLong(supabase, Date.now());
+    counters.results.behind_over_60m = behind;
+    if (behind > 0) counters.errors += 1;
+    const stale = await replicateStaleMinutes(supabase, startedAt);
+    if (stale !== null) {
+      counters.results.minutes_since_last_run = stale;
+      counters.errors += 1;
+    }
+  } catch (err) {
+    console.error('[collective] replication alerts threw:', err);
+    counters.errors += 1;
+  }
   // After the applies, so a link this run fixed is not reported (N5). A failure to notify is an
   // error in the run, never a reason to stop applying.
   try {

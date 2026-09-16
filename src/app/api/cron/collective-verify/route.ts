@@ -9,6 +9,7 @@ import { endCollectivesBelowTwo } from '@/lib/linked-accounts/replicas/below-two
 import { runAdoptionDeadlines } from '@/lib/linked-accounts/replicas/adoptions';
 import { releaseExpiredDissolvedAddresses } from '@/lib/linked-accounts/replicas/dissolved-page';
 import { runLifecycleReminders } from '@/lib/linked-accounts/replicas/lifecycle-reminders';
+import { replicateStaleMinutes } from '@/lib/linked-accounts/replicas/replication-alerts';
 
 /**
  * GET/POST /api/cron/collective-verify: daily, read the collective invariant report, repair lag,
@@ -51,6 +52,17 @@ async function handlePost(request: NextRequest) {
     counters.errors += adoptions.errors;
   } catch (err) {
     console.error('[collective] adoption deadlines threw:', err);
+    counters.errors += 1;
+  }
+  // The daily backstop for a replication cron that has stopped (§6.16).
+  try {
+    const stale = await replicateStaleMinutes(supabase, Date.now());
+    if (stale !== null) {
+      counters.results.replicate_minutes_since_last_run = stale;
+      counters.errors += 1;
+    }
+  } catch (err) {
+    console.error('[collective] replication staleness check threw:', err);
     counters.errors += 1;
   }
   // Reminders (N1, N20, N21, N23) and invitations closed after 30 days (N35).

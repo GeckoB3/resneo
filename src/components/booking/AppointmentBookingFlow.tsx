@@ -1185,6 +1185,8 @@ export function AppointmentBookingFlow({
     card_hold_requested?: boolean;
     /** Unmet requirements flagged at staff booking time (audit M2; staff are never blocked, plan §5). */
     compliance_warnings?: StaffComplianceWarning[];
+    /** D47: the same person looks booked at another venue of the collective at this time. */
+    same_person_warning?: string;
   } | null>(null);
   /** Server-verified payment outcome (plan Phase 5): drives honest confirmation copy. */
   const [paymentOutcome, setPaymentOutcome] = useState<ConfirmOutcome | null>(null);
@@ -3605,6 +3607,8 @@ export function AppointmentBookingFlow({
             payment_url: data.payment_url,
             card_hold_requested: Boolean(staffCardHold && staffRequireCardHold && data.payment_url),
             compliance_warnings: Array.isArray(data.compliance_warnings) ? data.compliance_warnings : undefined,
+            same_person_warning:
+              typeof data.same_person_warning?.message === 'string' ? data.same_person_warning.message : undefined,
           });
           setStep('confirmation');
           staffFlowStartedAtRef.current = Date.now();
@@ -6179,6 +6183,14 @@ export function AppointmentBookingFlow({
           ) : !isEdit && isPublicGuest && !isCardHoldPaymentMode(createResult?.payment_mode) ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-brand-800/90">
               No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
+            </p>
+          ) : null}
+          {isStaff && createResult?.same_person_warning ? (
+            <p
+              role="status"
+              className="mx-auto mt-4 max-w-sm rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-900"
+            >
+              {createResult.same_person_warning}
             </p>
           ) : null}
           {isStaff ? (

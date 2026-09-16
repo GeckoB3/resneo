@@ -479,6 +479,13 @@ export const COLLECTIVE_COPY = {
   'values.help.member': '{host} decides which values you can change here. They apply to {calendar} only.',
   'values.standard': 'Standard: {value}',
 
+  // The diary (PractitionerCalendarView.tsx, StaffAppointmentModifyForm.tsx; UX spec item 13, D46, D47)
+  'move.otherVenue.title': 'This booking cannot be moved to {venue}',
+  'move.otherVenue.body':
+    "Bookings stay with the venue they were made at, because that venue holds the client's record and any payment. You can move it to any calendar at {ownVenue}.",
+  'clash.samePerson':
+    '{calendar} at {venue} looks like the same person as {otherCalendar} at {otherVenue}, who already has a booking at this time.',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

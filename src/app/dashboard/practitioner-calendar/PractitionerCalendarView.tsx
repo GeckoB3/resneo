@@ -112,6 +112,7 @@ import { getStaffBookingSurfaceTabs } from '@/lib/booking/staff-booking-modal-op
 import type { StaffRebookBootstrapPayloadV1 } from '@/lib/booking/staff-rebook-bootstrap';
 import { warmStaffBookingSurface } from '@/lib/booking/staff-surface-warm';
 import type { StaffCollectiveSummary } from '@/lib/linked-accounts/collective-staff-scope';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import {
   RESOURCE_BOOKING_CAPACITY_STATUSES,
   type ResourceBooking as EngineResourceBooking,
@@ -298,6 +299,9 @@ interface CrossVenueMoveDialog {
   targetLinkedColumn: LinkedColumn | null;
   dateStr: string;
   time: string;
+  /** The two venues, so a move inside a live collective is answered by D46. */
+  sourceVenueId: string;
+  targetVenueId: string;
 }
 
 interface CrossVenueRebook {
@@ -6236,6 +6240,8 @@ export function PractitionerCalendarView({
         targetVenueName: targetLinkedColumn?.venueName ?? null,
         targetLinkedColumn,
         dateStr,
+        sourceVenueId: draggedOwnerVenueId,
+        targetVenueId: targetOwnerVenueId,
         // The booking form offers whole slots, so the dropped minute rounds to five.
         time: minutesToTime(Math.round(targetStartMins / 5) * 5),
       });
@@ -9316,7 +9322,33 @@ export function PractitionerCalendarView({
         />
       ) : null}
 
-      {crossVenueMove ? (
+      {crossVenueMove &&
+      staffCollective &&
+      staffCollective.memberVenueIds.includes(crossVenueMove.sourceVenueId) &&
+      staffCollective.memberVenueIds.includes(crossVenueMove.targetVenueId) ? (
+        // D46: inside a collective the booking stays with its venue, and nothing offers to rebook it
+        // elsewhere, which would lose the client's record and any payment.
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setCrossVenueMove(null);
+          }}
+          title={collectiveCopy('move.otherVenue.title', { venue: crossVenueMove.targetVenueName ?? 'your venue' })}
+          size="sm"
+          contentClassName="max-w-md"
+          footer={
+            <div className="flex w-full justify-end">
+              <Button type="button" variant="primary" size="sm" onClick={() => setCrossVenueMove(null)}>
+                OK
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-sm text-slate-700">
+            {collectiveCopy('move.otherVenue.body', { ownVenue: crossVenueMove.sourceVenueName ?? 'your venue' })}
+          </p>
+        </Dialog>
+      ) : crossVenueMove ? (
         <Dialog
           open
           onOpenChange={(open) => {

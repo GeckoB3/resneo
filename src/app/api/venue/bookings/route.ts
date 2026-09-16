@@ -3,6 +3,7 @@ import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { findSamePersonClash } from '@/lib/linked-accounts/same-person';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
@@ -1718,6 +1719,24 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // D47: the same person with a calendar at another venue of the collective, already booked
+      // now. A warning for whoever booked second; the booking stands and nothing is written.
+      let samePerson: Awaited<ReturnType<typeof findSamePersonClash>> = null;
+      if (useUnifiedAppointmentStorage) {
+        try {
+          samePerson = await findSamePersonClash(admin, {
+            venueId,
+            calendarId: practitioner_id,
+            date: booking_date,
+            startTime: timeForDb,
+            endTime: (apptInsert.booking_end_time as string | null | undefined) ?? null,
+            bookingId: apptBooking.id,
+          });
+        } catch (err) {
+          console.warn('[bookings] same-person check failed:', err);
+        }
+      }
+
       if (parsed.data.staff_booking_duration_ms != null) {
         await logStaffBookingFlowEvent(admin, {
           venue_id: venueId,
@@ -1741,6 +1760,7 @@ export async function POST(request: NextRequest) {
           // audit M2: surface unmet warn_staff/warn_client requirements so the staff UI can flag them.
           ...(apptCompliance.warnings.length > 0 ? { compliance_warnings: apptCompliance.warnings } : {}),
           ...(overrideWarnings ? { availability_override_warnings: overrideWarnings } : {}),
+          ...(samePerson ? { same_person_warning: samePerson } : {}),
         },
         { status: 201 },
       );

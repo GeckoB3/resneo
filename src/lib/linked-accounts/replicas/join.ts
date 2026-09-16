@@ -22,6 +22,7 @@ import { recordBell } from '@/lib/linked-accounts/replicas/collective-notices';
 import { engineErrorResponse } from '@/lib/linked-accounts/replicas/host-route-helpers';
 import { applyLinksInline } from '@/lib/linked-accounts/replicas/inline-apply';
 import { JOIN_CONSENT_VERSION } from '@/lib/linked-accounts/replicas/hosting-constants';
+import { findCollectiveLockForVenue } from '@/lib/linked-accounts/collective-venue-locks';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
 
 /** The one normaliser for "the same name" (plan contract 6). */
@@ -59,7 +60,14 @@ type Row = Record<string, unknown>;
 /** The blocker the engine names, as the invited venue reads it (UX spec `join.block.*`). */
 export function joinBlockerWords(
   blocker: string | null,
-  names: { collective: string; yourTimezone?: string | null; timezone?: string | null; yourCurrency?: string | null; currency?: string | null },
+  names: {
+    collective: string;
+    yourTimezone?: string | null;
+    timezone?: string | null;
+    yourCurrency?: string | null;
+    currency?: string | null;
+    otherCollective?: string | null;
+  },
 ): string | null {
   if (!blocker) return null;
   if (blocker === 'timezone') {
@@ -76,7 +84,11 @@ export function joinBlockerWords(
       currency: names.currency ?? 'another currency',
     });
   }
-  if (blocker === 'exclusivity') return collectiveCopy('join.block.otherCollectiveGeneric');
+  if (blocker === 'exclusivity') {
+    return names.otherCollective
+      ? collectiveCopy('join.block.otherCollective', { otherCollective: names.otherCollective })
+      : collectiveCopy('join.block.otherCollectiveGeneric');
+  }
   if (blocker === 'booking_model') return collectiveCopy('join.block.bookingModel', { collective: names.collective });
   if (blocker === 'mesh') return collectiveCopy('join.block.links', { collective: names.collective });
   return collectiveCopy('join.block.unknown');
@@ -108,6 +120,8 @@ export async function loadJoinPreview(
     admin.rpc('collective_join_blocker', { p_collective_id: collectiveId, p_venue_id: venueId }),
   ]);
   const host = (venues ?? []).find((v) => v.id === hostId) as Row | undefined;
+  // The engine's blocker says only "exclusivity"; the venue reads which collective it is in.
+  const other = blocker === 'exclusivity' ? await findCollectiveLockForVenue(admin, venueId, collectiveId) : null;
   const me = (venues ?? []).find((v) => v.id === venueId) as Row | undefined;
   const masterIds = (items ?? []).map((i) => i.master_service_id as string).filter(Boolean);
 
@@ -196,6 +210,7 @@ export async function loadJoinPreview(
       timezone: (host?.timezone as string | null) ?? null,
       yourCurrency: (me?.currency as string | null) ?? null,
       currency: (host?.currency as string | null) ?? null,
+      otherCollective: other?.collectiveName ?? null,
     }),
     services_to_set_up: masterIds.length,
     same_name: sameNames,

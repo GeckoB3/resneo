@@ -353,7 +353,10 @@ export const COLLECTIVE_COPY = {
   'join.block.currency': 'You cannot join because your venue uses {yourCurrency} and {collective} uses {currency}.',
   // Added while building the join: the deck names another collective by name, which the engine's
   // blocker does not return; and it has no sentence for the booking-model and account-link checks.
+  'join.block.otherCollective': 'Your venue is already part of {otherCollective}. Leave it before joining another.',
   'join.block.otherCollectiveGeneric': 'Your venue is already part of another collective. Leave it before joining this one.',
+  // Added with the exclusivity check at invite (W7): the deck only has the wizard's short label.
+  'invite.block.otherCollective': '{venue} is already part of another collective, so it cannot be invited until it leaves.',
   'join.block.bookingModel': 'You cannot join because your venue takes bookings in a different way from {collective}.',
   'join.block.links':
     'You cannot join yet because your account links with every venue in {collective} need full access both ways. Check them under Linked accounts.',
@@ -388,7 +391,8 @@ export const COLLECTIVE_COPY = {
   'join.confirm': 'Join {collective}',
   'join.next': 'Next',
   'join.back': 'Back',
-  'join.error.consent': 'Please read what joining means and tick the box to agree before joining.',
+  // Only an older app's one-tap accept reaches this: the web dialog always sends the consent.
+  'join.error.consent': 'Please open ResNeo on the web to read what joining means, then accept there.',
   'join.loading': 'Getting your services ready to compare...',
 
   // Moving the hosting (hosting-actions.ts, the Venues tab and the candidate's banner)

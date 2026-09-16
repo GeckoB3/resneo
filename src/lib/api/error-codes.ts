@@ -157,6 +157,8 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_BOOKING_MODEL_LOCKED',
   /** The venues would trade in different currencies: at create, invite and accept, or a change (409). */
   'COLLECTIVE_CURRENCY_MISMATCH',
+  /** A venue can be part of one live collective at a time: invite, accept and create refuse a second (409). */
+  'COLLECTIVE_VENUE_IN_OTHER_COLLECTIVE',
   /**
    * A new booking, or a booking moved to another service, for a service that is parked: the venue is
    * live in a collective and the service is not one of the collective's. Offer a collective service.

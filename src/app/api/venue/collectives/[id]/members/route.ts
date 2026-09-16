@@ -15,6 +15,7 @@ import {
 } from '@/lib/linked-accounts/replicas/hosting-actions';
 import { runJoin } from '@/lib/linked-accounts/replicas/join';
 import { runReleaseAction } from '@/lib/linked-accounts/replicas/release-actions';
+import { exclusivityRefusal } from '@/lib/linked-accounts/collective-venue-locks';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -143,6 +144,9 @@ export async function PATCH(
           { status: 409 },
         );
       }
+      // One live collective per venue (§6.7).
+      const taken = await exclusivityRefusal(ctx.admin, [input.venueId], collectiveId, 'invite');
+      if (taken) return taken;
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
       // Same gate as collective CREATE (D4 mutual write + D8 single timezone) — an
       // invite must not admit a venue the create path would have rejected.
@@ -314,6 +318,9 @@ export async function PATCH(
         );
         return refused ?? finish();
       }
+      // One live collective per venue (§6.7); the engine checks again under its lock on the other model.
+      const taken = await exclusivityRefusal(ctx.admin, [ctx.venueId], collectiveId, 'accept');
+      if (taken) return taken;
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
       // Same gate as collective CREATE (D4 mutual write + D8 single timezone): link
       // or timezone changes since the invite must block acceptance, not just creation.

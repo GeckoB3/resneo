@@ -25,10 +25,14 @@ export interface VenueCollectiveLock {
   hostVenueId: string;
 }
 
-/** The active collective the venue is part of, or null. */
+/**
+ * The active collective the venue is part of, or null. `exceptCollectiveId` leaves one out, which is
+ * how exclusivity asks "is it in any other?" (plan §6.7, I7).
+ */
 export async function findCollectiveLockForVenue(
   admin: SupabaseClient,
   venueId: string,
+  exceptCollectiveId?: string,
 ): Promise<VenueCollectiveLock | null> {
   const { data: memberships } = await admin
     .from('venue_collective_members')
@@ -45,7 +49,7 @@ export async function findCollectiveLockForVenue(
       ...(memberships ?? []).map((m) => m.collective_id as string),
       ...(hosted ?? []).map((c) => c.id as string),
     ]),
-  ].filter(Boolean);
+  ].filter((id) => Boolean(id) && id !== exceptCollectiveId);
   if (ids.length === 0) return null;
   const { data: collectives } = await admin
     .from('venue_collectives')
@@ -65,6 +69,28 @@ export async function findCollectiveLockForVenue(
 
 const sameTimezone = (a: string | null | undefined, b: string | null | undefined) =>
   (a?.trim() || 'Europe/London') === (b?.trim() || 'Europe/London');
+
+/** A venue already in another live collective cannot be invited to this one: the 409, or null. */
+export async function exclusivityRefusal(
+  admin: SupabaseClient,
+  venueIds: string[],
+  exceptCollectiveId: string | undefined,
+  as: 'invite' | 'accept',
+): Promise<NextResponse | null> {
+  for (const venueId of venueIds) {
+    const other = await findCollectiveLockForVenue(admin, venueId, exceptCollectiveId);
+    if (!other) continue;
+    let error: string;
+    if (as === 'accept') {
+      error = collectiveCopy('join.block.otherCollective', { otherCollective: other.collectiveName });
+    } else {
+      const { data: venue } = await admin.from('venues').select('name').eq('id', venueId).maybeSingle();
+      error = collectiveCopy('invite.block.otherCollective', { venue: (venue?.name as string | undefined) ?? 'That venue' });
+    }
+    return NextResponse.json(apiError(error, 'COLLECTIVE_VENUE_IN_OTHER_COLLECTIVE'), { status: 409 });
+  }
+  return null;
+}
 
 /** A timezone change while in a collective: the 409 to send, or null. */
 export function timezoneLockRefusal(

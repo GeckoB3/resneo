@@ -326,6 +326,31 @@ export const COLLECTIVE_COPY = {
     'The link between {venue} and {host} ended, so {venue} is no longer part of {collective}. It keeps every service, calendar and booking.',
   'notify.review.cta': 'Review your services',
 
+  // Adding a member's service, and the member's answer (adoptions.ts, AddFromVenueDialog.tsx,
+  // AdoptionReviewDialog.tsx; UX spec `svc.addFrom.*`, `svc.member.adopt.*`, N26)
+  'svc.addFrom.button': 'Add from another venue',
+  'svc.addFrom.title': 'Add a service from another venue',
+  'svc.addFrom.help':
+    'Choose a service that only one venue has. It is copied into your services, put on the {collective} page and set up at every venue. You control it from then on.',
+  'svc.addFrom.venueLabel': 'Venue',
+  'svc.addFrom.empty': '{venue} has no services of its own to add.',
+  'svc.addFrom.adoptNote':
+    '{venue} is asked whether to use its own {service} for this. If it does, its calendars and bookings for it stay as they are.',
+  'svc.addFrom.confirm': 'Copy and add to the page',
+  'svc.addFrom.done': '{service} is on the {collective} page. We have asked {venue} whether to use its own {service} for it.',
+  'svc.member.adopt.title': '{host} wants to use your {service}',
+  'svc.member.adopt.message':
+    '{host} has put {service} on the {collective} page. You can use your own {service} for it, so its calendars and bookings stay as they are, or keep yours separate. If you keep yours separate, it is parked while you are part of {collective}.',
+  'svc.member.adopt.useMine': 'Use my {service}',
+  'svc.member.adopt.keepSeparate': 'Keep mine separate',
+  // Added (W7): the button on the question's line; the deck names only the choices.
+  'svc.member.adopt.open': 'Choose',
+  'notify.adopt.subject': '{host} wants to use your {service}',
+  // Added (W7): the deck gives N26 no button label.
+  'notify.adopt.cta': 'Choose on your Services page',
+  'notify.adopt.body':
+    '{host} has put {service} on the {collective} page. Choose whether to use your own {service} for it, so its calendars and bookings stay as they are.',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

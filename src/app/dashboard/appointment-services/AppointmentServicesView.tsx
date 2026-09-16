@@ -83,6 +83,7 @@ import {
   type CollectiveServicesFilterValue,
 } from '@/components/linked-accounts/collective/CollectiveServicesBanner';
 import { ReleaseReviewCard } from '@/components/linked-accounts/collective/ReleaseReview';
+import { AddFromVenueDialog, AdoptionRequests } from '@/components/linked-accounts/collective/Adoptions';
 import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
 import {
@@ -342,6 +343,9 @@ export function AppointmentServicesView({
   const [categories, setCategories] = useState<ServiceCategoryRef[]>([]);
   // Host admins are handed every calendar in the collective; everyone else gets nothing here.
   const [collectiveCalendars, setCollectiveCalendars] = useState<CollectiveCalendarGroup[]>([]);
+  // "Add from another venue" (host) and what it said when done (UX spec `svc.addFrom.*`).
+  const [addFromOpen, setAddFromOpen] = useState(false);
+  const [addFromDone, setAddFromDone] = useState<string | null>(null);
   const [collectiveFilter, setCollectiveFilter] = useState<CollectiveServicesFilterValue>('all');
   /** Calendar ticks the host has changed but not saved: intent, never a picture of the whole set. */
   const [collectiveCalendarsDiff, setCollectiveCalendarsDiff] =
@@ -1408,16 +1412,30 @@ export function AppointmentServicesView({
         }
         actions={
           showServicesTab && (isAdmin || linkedPractitionerIds.length > 0) ? (
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path d="M12 5v14m-7-7h14" />
-              </svg>
-              Add service
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {isAdmin && collective?.isHost && collectiveMemberNames.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddFromDone(null);
+                    setAddFromOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  {collectiveCopy('svc.addFrom.button')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={openCreate}
+                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path d="M12 5v14m-7-7h14" />
+                </svg>
+                Add service
+              </button>
+            </div>
           ) : null
         }
       />
@@ -1521,6 +1539,33 @@ export function AppointmentServicesView({
           ) : null}
           {/* After leaving a collective, what to check (UX spec J7). Only when not in one now. */}
           {isAdmin && !collective ? <ReleaseReviewCard /> : null}
+          {isAdmin && collective && !collective.isHost ? (
+            <AdoptionRequests
+              collectiveId={collective.id}
+              initialItemId={searchParams.get('adopt')}
+              onAnswered={() => void fetchAll()}
+            />
+          ) : null}
+          {addFromDone ? (
+            <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              {addFromDone}
+            </p>
+          ) : null}
+          {addFromOpen && collective ? (
+            <AddFromVenueDialog
+              open
+              onClose={() => setAddFromOpen(false)}
+              collectiveId={collective.id}
+              collectiveName={collective.name}
+              venues={collectiveCalendars.filter((g) => !g.is_host).map((g) => ({ venue_id: g.venue_id, venue_name: g.venue_name }))}
+              formatPrice={(pence) => formatPrice(pence)}
+              onAdded={(message) => {
+                setAddFromOpen(false);
+                setAddFromDone(message);
+                void fetchAll();
+              }}
+            />
+          ) : null}
           {collective ? (
             <CollectiveServicesBanner
               variant={collective.isHost ? 'host' : 'member'}

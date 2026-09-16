@@ -13,6 +13,7 @@
  *   N23  the page is paused              every live venue, with the day it would end
  *   N36  a member's subscription lapsed  that member
  *   N37  and came back                   that member (a bell only)
+ *   N26  the host wants to use a member's service   that member, and again at day 7
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyVenue } from '@/lib/linked-accounts/notifications';
@@ -171,6 +172,38 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
       venues,
       collectiveCopy('notify.paused.subject', { collective: collectiveName }),
       collectiveCopy('notify.paused.body', { oldHost, collective: collectiveName, date }),
+    );
+    return;
+  }
+
+  if (notice === 'N26') {
+    if (!op.venue_id) throw new Error('N26 without a venue');
+    const itemId = String(op.progress?.item_id ?? '');
+    const serviceId = String(op.progress?.source_service_id ?? '');
+    // A reminder for a question already answered is not sent.
+    if (op.progress?.reminder === true) {
+      const { data: still } = await admin.rpc('collective_adoption_pending', { p_item_id: itemId, p_venue_id: op.venue_id });
+      if (!still) return;
+    }
+    const [venueNames, { data: service }] = await Promise.all([
+      names([collective.host_venue_id as string]),
+      admin.from('service_items').select('name').eq('id', serviceId).maybeSingle(),
+    ]);
+    const host = venueNames.get(collective.host_venue_id as string) ?? 'The host';
+    const params = { host, service: (service?.name as string | undefined) ?? 'your service', collective: collectiveName };
+    const subject = collectiveCopy('notify.adopt.subject', params);
+    const base = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.resneo.com').replace(/\/$/, '');
+    await notifyVenue(
+      admin,
+      op.venue_id,
+      subject,
+      {
+        heading: subject,
+        paragraphs: [collectiveCopy('notify.adopt.body', params)],
+        ctaLabel: collectiveCopy('notify.adopt.cta'),
+        ctaUrl: `${base}/dashboard/appointment-services?adopt=${encodeURIComponent(itemId)}`,
+      },
+      { type: 'collective_n26', category: 'collective', collectiveId: op.collective_id, payload: { item_id: itemId } },
     );
     return;
   }

@@ -5,8 +5,39 @@ import { requireReplicasHost, engineErrorResponse } from '@/lib/linked-accounts/
 import { applyLinksInline } from '@/lib/linked-accounts/replicas/inline-apply';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { notifyServiceOffered } from '@/lib/linked-accounts/replicas/collective-notices';
+import { ownServicesAt, runAddFromVenue } from '@/lib/linked-accounts/replicas/adoptions';
 
 const offerSchema = z.object({ service_id: z.string().uuid() });
+const addFromSchema = z.object({ source_venue_id: z.string().uuid(), source_service_id: z.string().uuid() });
+
+/**
+ * GET /api/venue/collectives/[id]/offerings?source_venue_id=: the member's own services the host
+ * can add to the page ("Add from another venue", UX spec `svc.addFrom.*`).
+ */
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const resolved = await resolveLinkAdmin();
+  if (!resolved.ok) return resolved.response;
+  const { ctx } = resolved;
+  const { id } = await params;
+  const sourceVenueId = request.nextUrl.searchParams.get('source_venue_id') ?? '';
+  if (!z.string().uuid().safeParse(sourceVenueId).success) {
+    return NextResponse.json({ error: 'Choose a venue.' }, { status: 400 });
+  }
+  const host = await requireReplicasHost(ctx.admin, id, ctx.venueId);
+  if (!host.ok) return host.response;
+  const { data: membership } = await ctx.admin
+    .from('venue_collective_members')
+    .select('id')
+    .eq('collective_id', id)
+    .eq('venue_id', sourceVenueId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (!membership || sourceVenueId === ctx.venueId) {
+    return NextResponse.json({ error: `That venue is not a member of ${host.collective.name}.` }, { status: 404 });
+  }
+  const services = await ownServicesAt(ctx.admin, sourceVenueId);
+  return NextResponse.json({ services }, { headers: { 'Cache-Control': 'no-store' } });
+}
 
 /**
  * POST /api/venue/collectives/[id]/offerings — put one of the host's own services on the collective
@@ -17,8 +48,9 @@ const offerSchema = z.object({ service_id: z.string().uuid() });
  * budget, so the host is told which venues are already up to date and which are still updating; the
  * cron picks up the rest.
  *
- * "Add from another venue" (T28), which copies a member's service into a new host master first, is
- * a separate body shape and comes with the adoption flow.
+ * "Add from another venue" (T28) is the other body shape, `{ source_venue_id, source_service_id }`:
+ * the engine copies the member's service into a new host service first, offers that, and asks the
+ * member whether to use its own (adoptions.ts).
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const resolved = await resolveLinkAdmin();
@@ -35,6 +67,27 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+  const addFrom = addFromSchema.safeParse(body);
+  if (addFrom.success) {
+    const host = await requireReplicasHost(ctx.admin, id, ctx.venueId);
+    if (!host.ok) return host.response;
+    const added = await runAddFromVenue(
+      {
+        admin: ctx.admin,
+        collectiveId: id,
+        collectiveName: host.collective.name,
+        hostVenueId: ctx.venueId,
+        hostVenueName: ctx.venue.name,
+        venueId: ctx.venueId,
+        userId: ctx.userId,
+      },
+      { venueId: addFrom.data.source_venue_id, serviceId: addFrom.data.source_service_id },
+    );
+    if (!added.ok) return added.response;
+    invalidateCollectiveCatalogMemo(id);
+    return NextResponse.json(added.result, { status: 201 });
+  }
+
   const parsed = offerSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: 'A service to offer is required.' }, { status: 400 });

@@ -6,6 +6,7 @@ import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 import { runCollectiveVerify, type RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { syncMemberSuspensions } from '@/lib/linked-accounts/replicas/collective-suspension';
 import { endCollectivesBelowTwo } from '@/lib/linked-accounts/replicas/below-two';
+import { runAdoptionDeadlines } from '@/lib/linked-accounts/replicas/adoptions';
 
 /**
  * GET/POST /api/cron/collective-verify: daily, read the collective invariant report, repair lag,
@@ -40,6 +41,16 @@ async function handlePost(request: NextRequest) {
   counters.results.members_suspended = suspension.suspended;
   counters.results.members_resumed = suspension.resumed;
   counters.errors += suspension.errors;
+  // Unanswered adoptions: the day-7 reminder and the day-14 "Keep mine separate" (§6.7).
+  try {
+    const adoptions = await runAdoptionDeadlines(supabase);
+    counters.results.adoption_reminders = adoptions.reminded;
+    counters.results.adoptions_defaulted = adoptions.defaulted;
+    counters.errors += adoptions.errors;
+  } catch (err) {
+    console.error('[collective] adoption deadlines threw:', err);
+    counters.errors += 1;
+  }
   // After the deadlines, which can leave a collective with one venue (§6.7).
   try {
     const lone = await endCollectivesBelowTwo(supabase);

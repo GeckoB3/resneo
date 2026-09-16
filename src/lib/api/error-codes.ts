@@ -159,6 +159,10 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_CURRENCY_MISMATCH',
   /** A venue can be part of one live collective at a time: invite, accept and create refuse a second (409). */
   'COLLECTIVE_VENUE_IN_OTHER_COLLECTIVE',
+  /** That member's service is already waiting for its answer to an earlier request (409). */
+  'COLLECTIVE_ADOPTION_PENDING',
+  /** The adoption was already answered, or can no longer be (409). */
+  'COLLECTIVE_ADOPTION_NOT_PENDING',
   /**
    * A new booking, or a booking moved to another service, for a service that is parked: the venue is
    * live in a collective and the service is not one of the collective's. Offer a collective service.

@@ -131,6 +131,33 @@ describe('drainOperationNotices', () => {
     });
   });
 
+  it('asks a member about its service, with the way to answer (N26)', async () => {
+    const { outcome } = drain(
+      world([op('N26', { progress: { notice: 'N26', item_id: 'item-1', source_service_id: 'svc-1' } })], (call) =>
+        call.table === 'service_items' ? { data: { name: 'Balayage' } } : undefined,
+      ),
+    );
+    await outcome;
+    expect(told()).toEqual(['member']);
+    expect(subjects()).toEqual(['Host Venue wants to use your Balayage']);
+    const params = (notifyVenue.mock.calls[0] as unknown as [unknown, string, string, { ctaUrl: string; ctaLabel: string }])[3];
+    expect(params.ctaUrl).toMatch(/\/dashboard\/appointment-services\?adopt=item-1$/);
+    expect(params.ctaLabel).toBe('Choose on your Services page');
+  });
+
+  it('skips the day-7 reminder when the member has already answered (N26)', async () => {
+    const { recording, outcome } = drain(
+      world(
+        [op('N26', { progress: { notice: 'N26', item_id: 'item-1', source_service_id: 'svc-1', reminder: true } })],
+        (call) => (call.table === 'rpc:collective_adoption_pending' ? { data: null } : undefined),
+      ),
+    );
+    expect(await outcome).toEqual({ sent: 1, failed: 0 });
+    expect(notifyVenue).not.toHaveBeenCalled();
+    const updates = recording.calls.filter((c) => c.table === 'collective_operations' && c.op === 'update');
+    expect((updates.at(-1)!.payload as { status: string }).status).toBe('done');
+  });
+
   it('marks a sent notice done', async () => {
     const { recording, outcome } = drain(world([op('N22')]));
     await outcome;

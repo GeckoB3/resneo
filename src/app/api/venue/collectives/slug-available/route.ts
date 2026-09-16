@@ -13,18 +13,21 @@ export async function GET(request: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({
       available: false,
+      format: true,
       reason: 'Use 3–60 lowercase letters, numbers and hyphens.',
     });
   }
 
   const { data } = await ctx.admin
     .from('venue_collectives')
-    .select('id')
+    .select('id, status, host_venue_id')
     .eq('slug', parsed.data)
     .maybeSingle();
+  // DL4: the host's own ended collective does not hold the address against it.
+  const taken = Boolean(data) && !(data?.status === 'dissolved' && data?.host_venue_id === ctx.venueId);
 
   return NextResponse.json({
-    available: !data,
-    reason: data ? 'That address is already taken.' : null,
+    available: !taken,
+    reason: taken ? 'That address is already taken.' : null,
   });
 }

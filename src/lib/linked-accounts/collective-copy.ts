@@ -376,6 +376,85 @@ export const COLLECTIVE_COPY = {
   // The staff form's contact picker inside a live collective (collective-contact-search.ts)
   'staff.contact.ownerLine': "{venue}'s client",
 
+  // Creating a collective (CreateCollectiveDialog.tsx, collective-candidates.ts; UX spec J1)
+  'create.title': 'Create a collective',
+  'create.step': 'Step {n} of 4',
+  'create.what.title': 'What a collective is',
+  'create.what.1': 'Two or more venues sell their appointments on one booking page, as one business.',
+  'create.what.2':
+    'The host puts services on that page and sets their prices, deposits and forms for every venue.',
+  'create.what.3': 'Each venue keeps its own calendars, clients, bookings and payments.',
+  'create.what.host': '{venue} will be the host.',
+  'create.name.label': 'Collective name',
+  'create.name.help': 'Guests see this name on the booking page and in their emails.',
+  'create.address.preview': '{origin}/book/c/{slug}',
+  'create.address.checking': 'Checking this address...',
+  'create.address.free': 'This address is free.',
+  'create.address.taken': 'That address is taken. Try another.',
+  'create.address.format': 'Use lower-case letters, numbers and hyphens only.',
+  'create.disabled.address': 'Choose a free address to continue.',
+  'create.venues.ok': 'Can join',
+  'create.venues.pill.noPayments': 'No card payments',
+  'create.venues.warn.noStripe':
+    '{venue} has not connected Stripe. It can join, but guests cannot book its calendars online for services that take a payment.',
+  'create.venues.pill.cannotJoin': 'Cannot join yet',
+  'create.venues.blocked.otherCollective': 'Already part of another collective',
+  'create.venues.blocked.timezone': 'In {timezone}, not {yourTimezone}',
+  'create.venues.blocked.currency': 'Uses {currency}, not {yourCurrency}',
+  'create.venues.blocked.plan': 'Their plan does not include collectives',
+  'create.venues.blocked.permissions': 'Your link with {venue} does not share full calendar details yet.',
+  'create.venues.fixPermissions': "Change the link's permissions",
+  'create.venues.selected': '{count} venues selected',
+  'create.venues.empty.title': 'No venues to invite yet',
+  'create.venues.empty.body':
+    'You can invite venues you have an active link with. Set one up under Active links first.',
+  'create.changes.title': 'What changes when {collective} starts',
+  'create.changes.intro':
+    'Here is what happens for you and for each venue you invite, once two venues are in.',
+  'create.changes.address.note': 'Guests who visit any of these addresses land on the {collective} page.',
+  'create.changes.address.when':
+    'This starts once two venues are in and at least one calendar offers a service. Until then, every page stays as it is.',
+  'create.changes.services.title': 'The services come from you',
+  'create.changes.services.body':
+    "Services you put on the page are set up in each venue's account, with your prices, deposits and forms. You change them for every venue at once.",
+  'create.changes.owns.title': 'Each venue keeps what is its own',
+  'create.changes.owns.body':
+    'Its calendars, working hours, clients, bookings and payments stay with that venue. Clients pay the venue they book with.',
+  'create.changes.clients.title': 'Your account links stay as they are',
+  'create.changes.clients.body':
+    "Every venue in {collective} is already linked with the others, which is how you see each other's clients and bookings. {collective} does not change those links, and leaving or ending it does not end them. Its reports show every venue's takings, each named.",
+  'create.changes.ending':
+    'Any venue can leave at any time, and you can end {collective} at any time. Every venue keeps its services, calendars, clients and bookings.',
+  'create.changes.ack': 'I understand what changes for {venue} and for the venues I invite.',
+  'create.changes.help': 'Read more about collectives',
+  'create.check.role': 'Host',
+  'create.check.notLive':
+    'The {collective} page is not live yet. It goes live once an invited venue accepts and at least one calendar offers a service.',
+  'create.check.emailPreview': 'What {venueList} will read',
+  'create.cta.create': 'Create and send invitations',
+  'create.cta.creating': 'Creating...',
+  'create.done.title': '{collective} is created',
+  'create.done.body':
+    'Invitations are on their way to {venueList}. The page goes live once a venue accepts and a calendar offers a service.',
+  'create.done.copy': 'Copy address',
+  'create.done.cta': 'Go to Collective',
+  'create.done.later': 'Do this later',
+  // Added (W7): the deck names step 5's three next steps but gives them no words.
+  'create.next.invitees': 'Waiting for {count} invited venues',
+  'create.next.invitees.body': 'See who has answered on the Venues tab.',
+  'create.next.services': 'Put services on the page',
+  'create.next.services.body': 'Choose which of your services the {collective} page offers, on your Services page.',
+  'create.next.design': 'Design the page',
+  'create.next.design.body': 'Choose how the {collective} page looks, under Settings, Booking Page.',
+  'create.toast.done': '{collective} created. Invitations sent to {venueList}.',
+  'row.pill.waiting': 'Waiting for venues',
+  'row.pill.noServices': 'Nothing on the page yet',
+  'row.pill.live': 'Live',
+  'row.members.line': '{activeCount} venues in and {invitedCount} invited: {venueList}',
+  'row.notLive.reason': 'Not live yet: {reason}',
+  'bm.invite.noAppointments':
+    '{venue} does not offer appointments, so it cannot join a collective yet. A collective page shows appointments only.',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

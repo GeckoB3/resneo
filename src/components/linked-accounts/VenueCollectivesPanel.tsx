@@ -7,14 +7,12 @@ import { Pill } from '@/components/ui/dashboard/Pill';
 import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui';
 import { CombinedPageManager } from './CombinedPageManager';
 import { JoinCollectiveDialog } from './collective/JoinCollectiveDialog';
+import { CreateCollectiveDialog } from './collective/CreateCollectiveDialog';
 import { EndedCollectivesList, LeaveCollectiveDialog, ReleaseReviewCard } from './collective/ReleaseReview';
 import type { ReleaseReview } from '@/lib/linked-accounts/replicas/release-review';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
 import type { CollectiveView } from '@/lib/linked-accounts/collectives';
 import { fullMutualLinks } from '@/lib/linked-accounts/full-mutual-links';
-
-const inputCls =
-  'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500';
 
 /**
  * Linked venues eligible for a COMBINED page (plan §22 / D4): full calendar
@@ -214,16 +212,14 @@ export function VenueCollectivesPanel({
       </SectionCard.Body>
 
       {createOpen ? (
-        <CreateCollectiveModal
+        <CreateCollectiveDialog
           venueName={venueName}
-          eligibleLinks={eligibleLinks}
           onClose={() => setCreateOpen(false)}
-          onCreated={async () => {
-            setCreateOpen(false);
-            await load();
+          onCreated={() => {
+            // The dialog stays open on its receipt step; the list behind it refreshes now.
+            void load();
             refreshLayout();
           }}
-          onError={setError}
         />
       ) : null}
 
@@ -430,170 +426,6 @@ function CollectiveRow({
         ) : null}
       </div>
     </div>
-  );
-}
-
-function CreateCollectiveModal({
-  venueName,
-  eligibleLinks,
-  onClose,
-  onCreated,
-  onError,
-}: {
-  venueName: string;
-  eligibleLinks: AccountLinkView[];
-  onClose: () => void;
-  onCreated: () => void;
-  onError: (msg: string) => void;
-}) {
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [invited, setInvited] = useState<string[]>([]);
-  const [slugState, setSlugState] = useState<{ available: boolean; reason: string | null } | null>(
-    null,
-  );
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    const trimmed = slug.trim().toLowerCase();
-    if (!trimmed) {
-      setSlugState(null);
-      return;
-    }
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `/api/venue/collectives/slug-available?slug=${encodeURIComponent(trimmed)}`,
-        );
-        const json = await res.json();
-        if (!cancelled) setSlugState(json);
-      } catch {
-        if (!cancelled) setSlugState({ available: false, reason: 'Check failed.' });
-      }
-    }, 400);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [slug]);
-
-  const canSubmit =
-    !busy && name.trim().length >= 2 && slugState?.available === true && invited.length >= 1;
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      busy={busy}
-      title="Create a venue collective"
-      description="Combine your venue with linked venues on one branded public booking page."
-    >
-      <div className="space-y-3">
-        <label className="block">
-          <span className="block text-sm font-medium text-slate-700">Collective name</span>
-          <input
-            className={`mt-1 ${inputCls}`}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={120}
-            placeholder="e.g. The Riverside Wellbeing Collective"
-            autoFocus
-          />
-        </label>
-        <label className="block">
-          <span className="block text-sm font-medium text-slate-700">Booking-page address</span>
-          <div className="mt-1 flex items-center gap-1 text-sm text-slate-500">
-            <span>/book/c/</span>
-            <input
-              className={`${inputCls} flex-1`}
-              value={slug}
-              onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-              maxLength={60}
-              placeholder="riverside-wellbeing"
-            />
-          </div>
-          {slug && slugState ? (
-            <p
-              className={`mt-1 text-xs ${
-                slugState.available ? 'text-emerald-700' : 'text-rose-700'
-              }`}
-            >
-              {slugState.available ? 'Address is available.' : slugState.reason}
-            </p>
-          ) : null}
-        </label>
-
-        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          Your combined page works like a single venue, with one services menu and one team across
-          all members. After creating it, use <span className="font-medium">Manage combined page</span> to
-          choose which services to offer, assign calendars from any venue, and design the page.
-        </p>
-
-        <div>
-          <p className="text-sm font-medium text-slate-700">Invite linked venues</p>
-          <p className="text-xs text-slate-500">
-            Only venues granting create/edit/cancel access both ways with {venueName} can be invited.
-          </p>
-          <div className="mt-2 space-y-1">
-            {eligibleLinks.length === 0 ? (
-              <p className="text-xs text-rose-700">No eligible linked venues.</p>
-            ) : (
-              eligibleLinks.map((l) => (
-                <label key={l.id} className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="rounded border-slate-300"
-                    checked={invited.includes(l.otherVenue.id)}
-                    onChange={(e) =>
-                      setInvited((cur) =>
-                        e.target.checked
-                          ? [...cur, l.otherVenue.id]
-                          : cur.filter((v) => v !== l.otherVenue.id),
-                      )
-                    }
-                  />
-                  {l.otherVenue.name}
-                </label>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className={btnSecondary} disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={btnPrimary}
-            disabled={!canSubmit}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                const res = await fetch('/api/venue/collectives', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    name: name.trim(),
-                    slug: slug.trim().toLowerCase(),
-                    inviteVenueIds: invited,
-                  }),
-                });
-                const json = await res.json();
-                if (!res.ok) throw new Error(json.error ?? 'Failed to create collective.');
-                onCreated();
-              } catch (err) {
-                onError(err instanceof Error ? err.message : 'Failed to create collective.');
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? 'Creating…' : 'Create collective'}
-          </button>
-        </div>
-      </div>
-    </Modal>
   );
 }
 

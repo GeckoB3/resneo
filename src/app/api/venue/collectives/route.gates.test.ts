@@ -74,6 +74,7 @@ describe('creating a collective (BM-04)', () => {
       code: 'COLLECTIVE_CURRENCY_MISMATCH',
       error:
         'Café Dublin takes payment in EUR and the collective uses GBP. Every venue in a collective has to use the same currency.',
+      field: 'venues',
     });
     expect(recording.calls.some((c) => c.table === 'venue_collectives' && c.op === 'insert')).toBe(false);
   });

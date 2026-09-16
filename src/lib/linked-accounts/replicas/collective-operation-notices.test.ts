@@ -301,3 +301,41 @@ describe('noticeDate', () => {
     expect(noticeDate(null)).toBe('soon');
   });
 });
+
+describe('asking to use a member page address (N38)', () => {
+  const state = (pending: string | null, status = 'active'): Responder => (call) => {
+    if (call.table === 'venue_collectives') {
+      return {
+        data: {
+          id: 'collective-1',
+          name: 'Northside',
+          host_venue_id: 'host',
+          status,
+          paused_at: null,
+          pending_host_venue_id: null,
+          host_transfer_at: null,
+          pending_adopted_venue_id: pending,
+        },
+      };
+    }
+    if (call.table === 'venues' && call.columns === 'slug') return { data: { slug: 'zen' } };
+    return undefined;
+  };
+  const request = () => op('N38', { progress: { notice: 'N38', host_venue_id: 'host' } });
+
+  it("tells the member's admins, naming their own address and where to answer", async () => {
+    await drain(world([request()], state('member'))).outcome;
+    expect(told()).toEqual(['member']);
+    expect(subjects()).toEqual(['Host Venue would like to use your page address for Northside']);
+    const content = (notifyVenue.mock.calls[0] as unknown as [unknown, string, string, { paragraphs: string[]; ctaUrl: string }])[3];
+    expect(content.paragraphs[0]).toMatch(/^Host Venue has asked to use https?:\/\/[^ ]+\/book\/zen as the address of the Northside page\./);
+    expect(content.ctaUrl).toMatch(/\/dashboard\/settings\?tab=booking-page$/);
+  });
+
+  it('sends nothing once the request was answered, withdrawn or the collective ended', async () => {
+    await drain(world([request()], state(null))).outcome;
+    await drain(world([request()], state('third'))).outcome;
+    await drain(world([request()], state('member', 'dissolved'))).outcome;
+    expect(notifyVenue).not.toHaveBeenCalled();
+  });
+});

@@ -218,6 +218,18 @@ export const COLLECTIVE_COPY = {
     '{venue} stops being part of {collective}. Its copies of your services become its own, and bookings already made are not changed.',
   'ov.venues.cancelTitle': 'Cancel the invitation to {venue}?',
   'ov.venues.cancelMessage': '{venue} will no longer be able to join. You can invite it again later.',
+  // Using a member's page address (UX spec `bp.address.adopt.*`, N38, decided 2026-09-14).
+  'bp.address.adopt.pending': 'Waiting for {venue} to agree. Until it does, the {collective} page keeps {collectiveAddress}.',
+  'bp.address.adopt.ask':
+    '{host} would like the {collective} page to use your page address, {ownAddress}. Nothing changes unless you agree, and you get the address back if you leave.',
+  'bp.address.adopt.confirm': 'Agree',
+  'bp.address.adopt.decline': 'Not now',
+  'history.addressAdopted': '{venue} agreed that the {collective} page uses its page address, {address}',
+  'notify.adoptAddress.subject': '{host} would like to use your page address for {collective}',
+  'notify.adoptAddress.body':
+    '{host} has asked to use {ownAddress} as the address of the {collective} page. Nothing changes unless you agree, and you get the address back if you leave.',
+  // Added (W10): the notice's button, which opens the Booking Page tab where the member answers.
+  'notify.adoptAddress.cta': 'Answer the request',
   // The own page's status line on the Booking Page tab (UX spec item 11, `bp.status.*`, `bp.reason.*`).
   'bp.status.redirecting': 'Guests who visit your own booking page are sent to the {collective} page.',
   'bp.status.showing': 'Your own page is showing because {reason}.',

@@ -9,6 +9,7 @@
  * what happened at another member.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 export type HistoryFilter = 'all' | 'services' | 'calendars' | 'members';
 
@@ -39,6 +40,9 @@ export const HISTORY_FILTER_TYPES: Record<Exclude<HistoryFilter, 'all'>, string[
     'host_transfer_requested',
     'host_transfer_cancelled',
     'host_transferred',
+    'address_adoption_requested',
+    'address_adopted',
+    'address_adoption_declined',
     'collective_paused',
     'collective_resumed',
     'collective_dissolved',
@@ -167,6 +171,16 @@ export function historySentence(row: HistoryRow, names: HistoryNames): string {
       return `${actor} cancelled the move of hosting to ${venue}`;
     case 'host_transferred':
       return `${venue} became host`;
+    case 'address_adoption_requested':
+      return `${actor} asked to use ${venue}'s page address for ${collective}`;
+    case 'address_adopted':
+      return collectiveCopy('history.addressAdopted', {
+        venue,
+        collective,
+        address: String((row.changes as { after?: { address?: string } } | null)?.after?.address ?? 'its address'),
+      });
+    case 'address_adoption_declined':
+      return `${venue} kept its page address for now`;
     case 'collective_paused':
       return `The ${collective} page was paused`;
     case 'collective_resumed':

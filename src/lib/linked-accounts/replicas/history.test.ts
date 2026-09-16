@@ -84,6 +84,22 @@ describe('historySentence', () => {
     );
   });
 
+  it('reads a request to use a page address, and its answers', () => {
+    const at = { target_venue_name: 'Zen Studio', service_id: null };
+    expect(historySentence(row({ event_type: 'address_adoption_requested', ...at }), names)).toBe(
+      "Sam at Host Venue asked to use Zen Studio's page address for Northside",
+    );
+    expect(
+      historySentence(
+        row({ event_type: 'address_adopted', ...at, changes: { after: { address: '/book/zen' } } }),
+        names,
+      ),
+    ).toBe('Zen Studio agreed that the Northside page uses its page address, /book/zen');
+    expect(historySentence(row({ event_type: 'address_adoption_declined', ...at }), names)).toBe(
+      'Zen Studio kept its page address for now',
+    );
+  });
+
   it('still says something for an event it has no sentence for', () => {
     expect(historySentence(row({ event_type: 'photo_copied' }), names)).toBe(
       'Sam at Host Venue made a change to Northside',

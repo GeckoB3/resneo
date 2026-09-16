@@ -185,6 +185,11 @@ export interface CollectiveView {
    * contract 8). Null when nothing is pending.
    */
   pendingHost: { venueId: string; venueName: string; transferAt: string | null } | null;
+  /**
+   * The venue whose page address the host has asked to use, waiting for its admin (§6.9, N38).
+   * Null when nothing is waiting, or on the older model.
+   */
+  pendingAdoptedVenueId?: string | null;
   members: {
     venueId: string;
     venueName: string;
@@ -347,7 +352,7 @@ export async function loadCollectiveViewsForVenue(
   // The engine's lifecycle state, read apart from the columns every older reader shares.
   const { data: lifecycleRows } = await admin
     .from('venue_collectives')
-    .select('id, service_model, paused_at, pending_host_venue_id, host_transfer_at')
+    .select('id, service_model, paused_at, pending_host_venue_id, host_transfer_at, pending_adopted_venue_id')
     .in('id', [...collectiveIds]);
   const lifecycle = new Map(
     (lifecycleRows ?? []).map((r) => [
@@ -357,6 +362,7 @@ export async function loadCollectiveViewsForVenue(
         pausedAt: (r.paused_at as string | null) ?? null,
         pendingHostVenueId: (r.pending_host_venue_id as string | null) ?? null,
         hostTransferAt: (r.host_transfer_at as string | null) ?? null,
+        pendingAdoptedVenueId: (r.pending_adopted_venue_id as string | null) ?? null,
       },
     ]),
   );
@@ -479,6 +485,12 @@ export async function loadCollectiveViewsForVenue(
             venueName: venueNames[lifecycle.get(row.id)!.pendingHostVenueId!] ?? 'A venue',
             transferAt: lifecycle.get(row.id)!.hostTransferAt,
           }
+        : null,
+      // A request stands only while that venue is still an active member.
+      pendingAdoptedVenueId: members.some(
+        (m) => m.venueId === lifecycle.get(row.id)?.pendingAdoptedVenueId && m.status === 'active',
+      )
+        ? lifecycle.get(row.id)!.pendingAdoptedVenueId
         : null,
       members,
       activeMemberCount: members.filter((m) => m.status === 'active').length,

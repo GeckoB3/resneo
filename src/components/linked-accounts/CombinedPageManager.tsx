@@ -11,6 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, btnPrimary, btnSecondary, btnDanger } from './linked-accounts-ui';
 import { collectivePublicPath, collectivePublicUrl } from '@/lib/linked-accounts/collective-public-url';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { type BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import { BookingPageEditor } from '@/components/booking-page-editor/BookingPageEditor';
 import { BookOpeningHours } from '@/components/booking/BookOpeningHours';
@@ -941,6 +942,7 @@ export function CombinedPageMemberSummary({
         <p className="text-sm font-bold text-slate-900">Combined page address</p>
         <p className="text-xs text-slate-500">This is the page to send your guests to.</p>
         <CombinedPageAddressRow collective={collective} />
+        <AddressAdoptionAsk collective={collective} host={host} />
       </section>
       <CombinedPageAboutSection collective={collective} />
       <section className="space-y-2 rounded-xl border border-slate-200 p-4">
@@ -982,6 +984,70 @@ export function CombinedPageMemberSummary({
   );
 }
 
+/**
+ * The host's request to use this venue's page address, waiting for this member's admin (§6.9, N38).
+ * Nothing changes unless they agree.
+ */
+export function AddressAdoptionAsk({ collective, host }: { collective: CollectiveView; host: string }) {
+  const [answer, setAnswer] = useState<'adopted' | 'declined' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!collective.pendingAdoptedVenueId || collective.pendingAdoptedVenueId !== collective.myVenueId) return null;
+  if (answer) {
+    return (
+      <p role="status" className="text-sm text-slate-700">
+        {answer === 'adopted'
+          ? `The ${collective.name} page now uses your page address.`
+          : `Your page address stays as it is.`}
+      </p>
+    );
+  }
+  const ownSlug = collective.members.find((m) => m.venueId === collective.myVenueId)?.venueSlug ?? null;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const send = async (accept: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/collectives/${collective.id}/address-adoption`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accept }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? 'Could not save your answer. Please try again.');
+      setAnswer(accept ? 'adopted' : 'declined');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save your answer. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div data-testid="address-adoption-ask" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p className="text-sm text-amber-950">
+        {collectiveCopy('bp.address.adopt.ask', {
+          host,
+          collective: collective.name,
+          ownAddress: ownSlug ? `${origin}/book/${ownSlug}` : 'your page address',
+        })}
+      </p>
+      {error ? (
+        <p role="alert" className="text-sm text-rose-700">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={btnPrimary} disabled={busy} onClick={() => void send(true)}>
+          {collectiveCopy('bp.address.adopt.confirm')}
+        </button>
+        <button type="button" className={btnSecondary} disabled={busy} onClick={() => void send(false)}>
+          {collectiveCopy('bp.address.adopt.decline')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Booking page address (host): the combined page works like one venue
 // ---------------------------------------------------------------------------
@@ -995,10 +1061,15 @@ function PageAddressSection({
   busy: boolean;
   onSettings: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
-  const adopt = collective.slugStrategy === 'adopt_member';
-  const adoptedSlug = adopt
+  const pendingId = collective.pendingAdoptedVenueId ?? null;
+  const adopted = collective.slugStrategy === 'adopt_member';
+  // A member's address waits for its admin (§6.9): the picker shows the request, the page keeps
+  // its current address until they agree.
+  const adopt = adopted || Boolean(pendingId);
+  const adoptedSlug = adopted
     ? (collective.members.find((m) => m.venueId === collective.adoptedVenueId)?.venueSlug ?? null)
     : null;
+  const pendingName = pendingId ? (collective.members.find((m) => m.venueId === pendingId)?.venueName ?? 'That venue') : null;
   return (
     <section className="space-y-2 rounded-xl border border-slate-200 p-4">
       <p className="text-sm font-bold text-slate-900">Booking page address</p>
@@ -1039,7 +1110,7 @@ function PageAddressSection({
           <select
             className={inputCls}
             disabled={busy}
-            value={collective.adoptedVenueId ?? ''}
+            value={pendingId ?? collective.adoptedVenueId ?? ''}
             onChange={(e) =>
               void onSettings({ slugStrategy: 'adopt_member', adoptedVenueId: e.target.value })
             }
@@ -1052,7 +1123,15 @@ function PageAddressSection({
                 </option>
               ))}
           </select>
-          {adoptedSlug ? (
+          {pendingName ? (
+            <p data-testid="address-adoption-pending" className="mt-1 text-xs text-slate-700">
+              {collectiveCopy('bp.address.adopt.pending', {
+                venue: pendingName,
+                collective: collective.name,
+                collectiveAddress: collectivePublicPath(collective),
+              })}
+            </p>
+          ) : adoptedSlug ? (
             <p className="mt-1 text-xs text-slate-600">
               Customers reach it at <code className="text-xs">/book/{adoptedSlug}</code>.
             </p>

@@ -109,7 +109,7 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
   const notice = String(op.progress?.notice ?? '');
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, name, host_venue_id, dissolved_at, paused_at, status, pending_host_venue_id, host_transfer_at')
+    .select('id, name, host_venue_id, dissolved_at, paused_at, status, pending_host_venue_id, host_transfer_at, pending_adopted_venue_id')
     .eq('id', op.collective_id)
     .maybeSingle();
   if (!collective && notice === 'N19' && op.progress?.host_deleted === true) {
@@ -254,6 +254,37 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
     for (const venueId of [op.venue_id, hostId]) {
       await recordBell(admin, venueId, subject, body, { type: 'collective_n35', collectiveId: op.collective_id });
     }
+    return;
+  }
+
+  if (notice === 'N38') {
+    if (!op.venue_id) throw new Error('N38 without a venue');
+    // A request withdrawn or answered before the drain is not sent.
+    if (collective.status !== 'active' || collective.pending_adopted_venue_id !== op.venue_id) return;
+    const hostId = String(op.progress?.host_venue_id ?? collective.host_venue_id);
+    const [venueNames, { data: own }] = await Promise.all([
+      names([hostId]),
+      admin.from('venues').select('slug').eq('id', op.venue_id).maybeSingle(),
+    ]);
+    const base = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.resneo.com').replace(/\/$/, '');
+    const params = {
+      host: venueNames.get(hostId) ?? 'The host',
+      collective: collectiveName,
+      ownAddress: own?.slug ? `${base}/book/${own.slug as string}` : 'your page address',
+    };
+    const subject = collectiveCopy('notify.adoptAddress.subject', params);
+    await notifyVenue(
+      admin,
+      op.venue_id,
+      subject,
+      {
+        heading: subject,
+        paragraphs: [collectiveCopy('notify.adoptAddress.body', params)],
+        ctaLabel: collectiveCopy('notify.adoptAddress.cta'),
+        ctaUrl: `${base}/dashboard/settings?tab=booking-page`,
+      },
+      { type: 'collective_n38', category: 'collective', collectiveId: op.collective_id },
+    );
     return;
   }
 

@@ -42,6 +42,8 @@ export const COLLECTIVE_PREFIXED_CODES = [
   'COLLECTIVE_CONSENT_REQUIRED',
   'COLLECTIVE_ADOPTION_PENDING',
   'COLLECTIVE_ADOPTION_NOT_PENDING',
+  'COLLECTIVE_ADDRESS_TAKEN',
+  'COLLECTIVE_ADDRESS_NOT_PENDING',
 ] as const satisfies readonly ApiErrorCode[];
 
 export type CollectiveDbErrorCode =
@@ -103,6 +105,10 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return 'That venue has already been asked about this service. Wait for its answer.';
     case 'COLLECTIVE_ADOPTION_NOT_PENDING':
       return 'This has already been answered. Reload to see where things stand.';
+    case 'COLLECTIVE_ADDRESS_TAKEN':
+      return 'That page address is already used by another collective page.';
+    case 'COLLECTIVE_ADDRESS_NOT_PENDING':
+      return 'This request has already been answered or withdrawn. Reload to see where things stand.';
   }
 }
 

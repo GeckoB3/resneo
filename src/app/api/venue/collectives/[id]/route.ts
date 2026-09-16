@@ -157,7 +157,29 @@ export async function PATCH(
     }
 
     // Combined booking page — where it is served (plan D1).
-    if (parsed.data.slugStrategy !== undefined) {
+    // On the shared-services model a member's address waits for its admin (§6.9, N38): the engine
+    // records the request and the collective keeps its address until the member agrees.
+    const { data: modelRow } =
+      parsed.data.slugStrategy !== undefined
+        ? await ctx.admin.from('venue_collectives').select('service_model').eq('id', id).maybeSingle()
+        : { data: null };
+    const onEngine = modelRow?.service_model === 'replicas';
+    let addressRequest: { venueId: string } | null = null;
+    if (parsed.data.slugStrategy !== undefined && onEngine) {
+      if (parsed.data.slugStrategy === 'adopt_member') {
+        if (!parsed.data.adoptedVenueId) {
+          return NextResponse.json(
+            { error: 'Choose which member venue’s booking address to use.' },
+            { status: 400 },
+          );
+        }
+        addressRequest = { venueId: parsed.data.adoptedVenueId };
+      } else {
+        updates.slug_strategy = 'dedicated';
+        updates.adopted_venue_id = null;
+        updates.pending_adopted_venue_id = null;
+      }
+    } else if (parsed.data.slugStrategy !== undefined) {
       if (parsed.data.slugStrategy === 'adopt_member') {
         const adoptId = parsed.data.adoptedVenueId;
         if (!adoptId) {
@@ -200,17 +222,31 @@ export async function PATCH(
       }
     }
 
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && !addressRequest) {
       return NextResponse.json({ error: 'No changes supplied.' }, { status: 400 });
     }
 
-    const { error } = await ctx.admin
-      .from('venue_collectives')
-      .update(updates)
-      .eq('id', id);
-    if (error) {
-      console.error('PATCH /api/venue/collectives/[id] failed:', error.message);
-      return NextResponse.json({ error: 'Failed to update collective.' }, { status: 500 });
+    if (Object.keys(updates).length > 0) {
+      const { error } = await ctx.admin
+        .from('venue_collectives')
+        .update(updates)
+        .eq('id', id);
+      if (error) {
+        console.error('PATCH /api/venue/collectives/[id] failed:', error.message);
+        return NextResponse.json({ error: 'Failed to update collective.' }, { status: 500 });
+      }
+    }
+
+    if (addressRequest) {
+      const { error } = await ctx.admin.rpc('collective_request_address_adoption', {
+        p_collective_id: id,
+        p_venue_id: addressRequest.venueId,
+        p_actor_venue_id: ctx.venueId,
+        p_actor_user_id: ctx.userId,
+      });
+      if (error) {
+        return engineErrorResponse(error, { collective: collective.name as string }, 'Failed to update collective.');
+      }
     }
 
     const collectives = await loadCollectiveViewsForVenue(ctx.admin, ctx.venueId);

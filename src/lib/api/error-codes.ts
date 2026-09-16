@@ -165,6 +165,10 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_ADOPTION_PENDING',
   /** The adoption was already answered, or can no longer be (409). */
   'COLLECTIVE_ADOPTION_NOT_PENDING',
+  /** Another live collective page already uses that venue's page address (409). */
+  'COLLECTIVE_ADDRESS_TAKEN',
+  /** No request to use this venue's page address is waiting for an answer (409). */
+  'COLLECTIVE_ADDRESS_NOT_PENDING',
   /** An older manager action with no shared-services equivalent (MGR-01), each with its own reason (409). */
   'COLLECTIVE_REPLICAS_ALWAYS_FOLLOW',
   'COLLECTIVE_HEADINGS_FOLLOW_SERVICES',

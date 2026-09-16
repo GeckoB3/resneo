@@ -30,6 +30,8 @@ export interface CollectiveSync {
   failed: CollectiveSyncFailure[];
   /** The master_changed row this save wrote, for the 60 second undo. */
   audit_event_id?: string | null;
+  /** Calendars the engine refused during this save; the rest of the save still stands. */
+  calendar_failures?: { venue_id: string; calendar_id: string; message: string }[];
 }
 
 /** A host save waits this long for members to catch up before leaving the rest to the cron. */

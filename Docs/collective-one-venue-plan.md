@@ -896,7 +896,10 @@ hazard 3).
   venue_name }], failed: [{ venue_id, venue_name, message, code }], audit_event_id }`, so the host
   sees `svc.save.allDone` ("Saved. {service} is up to date at {venueList}.") or
   `svc.save.pending` ("Saved. {venue} is updating. Its calendars take new bookings for {service}
-  again in a moment."). `audit_event_id` is what the 60-second undo sends back (below).
+  again in a moment."). `audit_event_id` is what the 60-second undo sends back (below). Built
+  2026-09-16 with one more optional key, `calendar_failures: [{ venue_id, calendar_id, message }]`:
+  a save carries the host's calendar choices too, and a calendar the engine refuses must be named
+  without losing the save that succeeded (`svc.save.calendarFailed`).
 - A cron every 5 minutes with backoff (1 minute, 5 minutes, 30 minutes, 2 hours, 6 hours).
 - In staff and host booking routes before pricing: apply within a short budget, and refuse a
   commercial term that is still behind with the retryable 409 `COLLECTIVE_SERVICE_UPDATING`
@@ -3403,10 +3406,18 @@ and host admins get, top level and never merged into `practitioner_services` (§
 
 ```
 collective_calendars: [{ venue_id, venue_name, is_host, sync: collective_sync,
-  calendars: [{ id, name, is_active, assigned, values: { custom_name, custom_description, custom_duration_minutes,
-    custom_buffer_minutes, custom_price_pence, custom_deposit_pence, custom_colour },
-    last_changed: { venue_name, at } | null }] }]
+  calendars: [{ id, name, is_active, assigned: [{ item_id, service_id,
+    values: { custom_name, custom_description, custom_duration_minutes, custom_buffer_minutes,
+      custom_price_pence, custom_deposit_pence, custom_colour },
+    last_changed: { venue_name, at } | null }] }] }]
 ```
+
+**Amended 2026-09-16, as built.** `assigned` was one boolean per calendar, with the values and
+`last_changed` beside it. That can only answer for a single service, and the grid (item 15) puts
+every service against every venue in one read, so a calendar instead carries the list of services
+it offers. A page showing one service looks for that service's `item_id` in the list, which means
+the same thing, and finds the values and `last_changed` that went with it. The list is only as long
+as the assignments that exist, so nothing is sent for a calendar that offers nothing.
 
 `values` are the stored values, gated by the master's flags (a stored value under a flag that is
 off comes back null, TERMS-14); the seven fields today are two real columns and five hard-coded

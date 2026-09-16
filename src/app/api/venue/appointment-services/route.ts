@@ -1,5 +1,13 @@
 import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
 import { loadCollectiveServiceBlocks } from '@/lib/linked-accounts/replicas/service-blocks';
+import { loadHostCollectiveCalendars } from '@/lib/linked-accounts/replicas/host-calendars';
+import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import {
+  loadMasterSaveContext,
+  captureMasterProjection,
+  recordMasterChangeAndApply,
+} from '@/lib/linked-accounts/replicas/master-save';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { isMissingSyncColumnError, patchTouchesSyncedShape, syncCopiesOfService } from '@/lib/linked-accounts/service-sync';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
@@ -710,6 +718,11 @@ export async function GET(request: NextRequest) {
       // What each service is to this venue while it is in a collective (W5). The map is empty at
       // every venue that is not in a replicas-model collective, which is all of them today.
       const collectiveBlocks = await loadCollectiveServiceBlocks(admin, catalogVenueId);
+      // Every calendar in the collective, host admins only: the host chooses which of them offer
+      // a service, at its own venue and at members. Members are never merged into
+      // practitioner_services, which the app sends back as the whole set (contract 5).
+      const collectiveCalendars =
+        staff.role === 'admin' ? await loadHostCollectiveCalendars(admin, catalogVenueId) : null;
       const servicesWithVariants = services.map((s) => ({
         ...s,
         variants: variantMap.get(s.id as string) ?? [],
@@ -722,6 +735,7 @@ export async function GET(request: NextRequest) {
           services: servicesWithVariants,
           practitioner_services,
           categories,
+          ...(collectiveCalendars ? { collective_calendars: collectiveCalendars } : {}),
         },
         { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } },
       );
@@ -1156,6 +1170,16 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * The host's calendar choices sent with a service save: which calendars offer it, at its own venue
+ * and at members (plan Appendix E contract 4). Every entry goes through the engine, which is the
+ * only writer of another venue's assignments.
+ */
+const collectiveCalendarsPatchSchema = z.object({
+  add: z.array(z.object({ calendar_id: z.string().uuid(), venue_id: z.string().uuid() })).optional(),
+  remove: z.array(z.object({ calendar_id: z.string().uuid(), venue_id: z.string().uuid() })).optional(),
+});
+
 /** PATCH /api/venue/appointment-services - admin: full edit; staff: assigned calendars only. */
 export async function PATCH(request: NextRequest) {
   try {
@@ -1171,6 +1195,7 @@ export async function PATCH(request: NextRequest) {
       addon_group_links: addonLinksRaw,
       expected_updated_at: rawExpectedUpdatedAt,
       expected_calendar_ids: rawExpectedCalendarIds,
+      collective_calendars: rawCollectiveCalendars,
       ...rest
     } = body;
     const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
@@ -1185,6 +1210,18 @@ export async function PATCH(request: NextRequest) {
     const parsed = servicePatchSchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    let collectiveCalendarsPatch: z.infer<typeof collectiveCalendarsPatchSchema> | null = null;
+    if (rawCollectiveCalendars !== undefined) {
+      const calendarsParsed = collectiveCalendarsPatchSchema.safeParse(rawCollectiveCalendars);
+      if (!calendarsParsed.success) {
+        return NextResponse.json(
+          { error: 'Each calendar needs a calendar and a venue.', details: calendarsParsed.error.flatten() },
+          { status: 400 },
+        );
+      }
+      collectiveCalendarsPatch = calendarsParsed.data;
     }
 
     const variantsProvided = variantsRaw !== undefined;
@@ -1243,6 +1280,12 @@ export async function PATCH(request: NextRequest) {
           { status: 403 },
         );
       }
+      if (collectiveCalendarsPatch) {
+        return NextResponse.json(
+          { error: 'Only venue admins can choose which calendars offer a shared service.' },
+          { status: 403 },
+        );
+      }
     }
 
     const admin = getSupabaseAdminClient();
@@ -1284,6 +1327,28 @@ export async function PATCH(request: NextRequest) {
       ) {
         return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
       }
+
+      /**
+       * What this service is to the collective (W5). There is a context only at the host of a live
+       * replicas-model collective, which is no venue today, and everything below is a no-op without
+       * one. `before` is what the collective copies as the save begins, so the 60 second undo has
+       * something exact to put back.
+       */
+      const masterContext = await loadMasterSaveContext(admin, id as string, staff.venue_id);
+      if (collectiveCalendarsPatch && !masterContext) {
+        return NextResponse.json(
+          apiError(
+            'This service is not on the collective page, so its calendars cannot be shared.',
+            'COLLECTIVE_REPLICA_NOT_READY',
+          ),
+          { status: 409 },
+        );
+      }
+      const collectiveBefore = await captureMasterProjection(admin, masterContext);
+      const collectiveNames = masterContext
+        ? { collective: masterContext.collectiveName, host: masterContext.hostVenueName }
+        : {};
+      const collectiveCalendarFailures: { venue_id: string; calendar_id: string; message: string }[] = [];
 
       const customCoherent = assertPatchCustomAvailabilityCoherent({
         patch: parsed.data,
@@ -1500,6 +1565,67 @@ export async function PATCH(request: NextRequest) {
         updatePayload.sync_state = 'customised';
       }
 
+      /**
+       * The host's calendar choices go through the engine, the only writer of another venue's
+       * assignments (§6.7). They run before the service write, so a removal that would leave
+       * bookings behind answers first and the save has not happened yet. A removal the host has
+       * not acknowledged writes nothing; earlier removals in the same list that had no bookings
+       * are written, which is what the host asked for either way, and the retry finds them gone.
+       */
+      if (masterContext && collectiveCalendarsPatch) {
+        const calendarEntries = [
+          ...(collectiveCalendarsPatch.remove ?? []).map((e) => ({ ...e, action: 'unassign' as const })),
+          ...(collectiveCalendarsPatch.add ?? []).map((e) => ({ ...e, action: 'assign' as const })),
+        ];
+        for (const entry of calendarEntries) {
+          const { data: calData, error: calError } = await admin.rpc('collective_set_calendar_offering', {
+            p_collective_id: masterContext.collectiveId,
+            p_item_id: masterContext.itemId,
+            p_venue_id: entry.venue_id,
+            p_calendar_id: entry.calendar_id,
+            p_action: entry.action,
+            p_actor_venue_id: staff.venue_id,
+            // The venue acts, not a person: this route holds no user id to hand over.
+            p_actor_user_id: null,
+            p_acknowledge_affected: acknowledgeAffectedBookings,
+          });
+          if (calError) {
+            const coded = collectiveDbError(calError, collectiveNames);
+            if (!coded) {
+              console.error(
+                'PATCH /api/venue/appointment-services collective_set_calendar_offering failed:',
+                calError,
+              );
+            }
+            collectiveCalendarFailures.push({
+              venue_id: entry.venue_id,
+              calendar_id: entry.calendar_id,
+              message: coded?.body.error ?? 'Could not change that calendar.',
+            });
+            continue;
+          }
+          const calResult = (calData ?? {}) as {
+            written?: boolean;
+            affected_bookings?: { booking_date: string; booking_time: string; calendar_id: string }[];
+          };
+          if (
+            entry.action === 'unassign' &&
+            calResult.written === false &&
+            (calResult.affected_bookings?.length ?? 0) > 0
+          ) {
+            return NextResponse.json(
+              {
+                requires_confirmation: true,
+                affected_bookings: calResult.affected_bookings,
+                written: false,
+              },
+              { status: 409 },
+            );
+          }
+        }
+        invalidateCollectiveCatalogMemo(masterContext.collectiveId);
+      }
+
       let savedRow = serviceRow as Record<string, unknown>;
       if (Object.keys(updatePayload).length > 0) {
         const updateServiceRow = (values: Record<string, unknown>) => {
@@ -1521,6 +1647,10 @@ export async function PATCH(request: NextRequest) {
           return NextResponse.json(apiError(STALE_SERVICE_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
         }
         if (error) {
+          // A member editing a field the collective owns is refused by the engine (RN001, RN006):
+          // that is an answer the page can show, not a fault.
+          const coded = collectiveDbError(error, collectiveNames);
+          if (coded) return NextResponse.json(coded.body, { status: coded.status });
           console.error('PATCH /api/venue/appointment-services (service_items) failed:', error);
           return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
         }
@@ -1581,6 +1711,22 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
+      /**
+       * The save is written. Record what the collective copies, before and after, so the host can
+       * undo it for 60 seconds, then bring every member's copy up to date within the save's budget
+       * (§6.4). What the budget does not reach is `pending` and the cron has it within five minutes.
+       */
+      const collectiveSync = await recordMasterChangeAndApply(admin, {
+        context: masterContext,
+        serviceId: id as string,
+        before: collectiveBefore,
+        actorVenueId: staff.venue_id,
+        actorUserId: null,
+      });
+      if (collectiveSync && collectiveCalendarFailures.length > 0) {
+        collectiveSync.calendar_failures = collectiveCalendarFailures;
+      }
+
       if (touchesShape) {
         // Members' copies of THIS service follow its shape. After the response: a partner
         // venue's problem must neither slow nor fail the owner's own save.
@@ -1618,6 +1764,7 @@ export async function PATCH(request: NextRequest) {
         variants: variantMap.get(id as string) ?? [],
         addon_groups: addonGroupMap.get(id as string) ?? [],
         ...(clearedCalendarValues.length > 0 ? { cleared_calendar_values: clearedCalendarValues } : {}),
+        ...(collectiveSync ? { collective_sync: collectiveSync } : {}),
       });
     }
 

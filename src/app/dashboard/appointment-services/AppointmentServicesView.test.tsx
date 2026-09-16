@@ -165,6 +165,18 @@ describe('a member of a collective', () => {
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
   });
 
+  it("tells a member's staff their calendar choice reaches the collective page", async () => {
+    const world = show({
+      isAdmin: false,
+      linkedPractitionerIds: ['cal-1'],
+      services: [harnessService({ collective: harnessCollectiveBlock({ role: 'replica', status: 'up_to_date' }) })],
+      practitioners: [{ id: 'cal-1', name: 'Room 1', is_active: true, calendar_type: 'staff', working_hours: {} }],
+    });
+    await world.ready();
+    expect(screen.getByText('Offer on your calendars')).toBeInTheDocument();
+    expect(screen.getByText('Your choice updates the Northside page straight away.')).toBeInTheDocument();
+  });
+
   it('suggests a parked service to the host, after asking', async () => {
     const world = show({
       services: [

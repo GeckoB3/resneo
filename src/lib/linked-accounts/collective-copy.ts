@@ -475,6 +475,10 @@ export const COLLECTIVE_COPY = {
     "Group your services under headings. Headings from {host} follow {host}'s names. Their order here only changes your own lists, not the {collective} page.",
   'cat.member.lockedTooltip': '{host} manages this heading for {collective}.',
 
+  // Per-calendar values (StaffServiceOverrideModal.tsx; UX spec item 9)
+  'values.help.member': '{host} decides which values you can change here. They apply to {calendar} only.',
+  'values.standard': 'Standard: {value}',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

@@ -1891,6 +1891,11 @@ export function AppointmentServicesView({
                               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                                 Offer on your calendars
                               </p>
+                              {svc.collective && svc.collective.role !== 'parked' ? (
+                                <p className="mb-2 text-xs text-slate-600">
+                                  {collectiveCopy('reach.staff.toggles', { collective: svc.collective.collective_name })}
+                                </p>
+                              ) : null}
                               <div className="space-y-2">
                                 {linkedPractitionerIds.map((calendarId) => {
                                   const calendar = practitioners.find((p) => p.id === calendarId);
@@ -2616,6 +2621,16 @@ export function AppointmentServicesView({
           selectedCalendarId={overrideCalendarId ?? linkedPractitionerIds[0]}
           onSelectedCalendarChange={setOverrideCalendarId}
           currency={currency}
+          collective={
+            overrideService.collective && overrideService.collective.role !== 'parked'
+              ? {
+                  hostName: overrideService.collective.host_venue_name,
+                  // Only the host's own staff read the venue name, and at the host it is this venue.
+                  venueName: overrideService.collective.host_venue_name,
+                  isMember: overrideService.collective.role !== 'master',
+                }
+              : null
+          }
         />
       )}
     </div>

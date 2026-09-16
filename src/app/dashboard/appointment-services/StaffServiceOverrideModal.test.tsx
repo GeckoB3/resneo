@@ -59,3 +59,64 @@ describe('StaffServiceOverrideModal opened from a calendar', () => {
     expect(bodies[0]).toMatchObject({ service_id: 'svc-1', calendar_id: 'cal-sam' });
   });
 });
+
+describe('StaffServiceOverrideModal on a collective service', () => {
+  const offered = {
+    ...service,
+    staff_may_customize_name: true,
+    staff_may_customize_description: true,
+    staff_may_customize_duration: true,
+  };
+
+  it("tells a member's staff who decides, uses the host's standard values, and never offers the name", () => {
+    render(
+      <StaffServiceOverrideModal
+        open
+        onClose={() => {}}
+        onSaved={() => {}}
+        service={offered}
+        link={null}
+        calendar={{ id: 'cal-sam', name: 'Sam' }}
+        collective={{ hostName: 'Host Venue', venueName: 'Host Venue', isMember: true }}
+      />,
+    );
+    expect(
+      screen.getByText('Host Venue decides which values you can change here. They apply to Sam only.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Standard: 30 min')).toBeInTheDocument();
+    expect(screen.queryByText('Display name')).not.toBeInTheDocument();
+    expect(screen.queryByText('Description')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Venue default/)).not.toBeInTheDocument();
+  });
+
+  it("tells the host's staff the values reach every booking of that calendar", () => {
+    render(
+      <StaffServiceOverrideModal
+        open
+        onClose={() => {}}
+        onSaved={() => {}}
+        service={offered}
+        link={null}
+        calendar={{ id: 'cal-sam', name: 'Sam' }}
+        collective={{ hostName: 'Zen Studio', venueName: 'Zen Studio', isMember: false }}
+      />,
+    );
+    expect(
+      screen.getByText('These values apply to Sam at Zen Studio only, wherever it is booked.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows nothing when only the name or description could change', () => {
+    const { container } = render(
+      <StaffServiceOverrideModal
+        open
+        onClose={() => {}}
+        onSaved={() => {}}
+        service={{ ...service, staff_may_customize_price: false, staff_may_customize_name: true }}
+        link={null}
+        collective={{ hostName: 'Host Venue', venueName: 'Host Venue', isMember: true }}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+});

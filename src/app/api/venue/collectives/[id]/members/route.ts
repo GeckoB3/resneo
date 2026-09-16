@@ -16,6 +16,7 @@ import {
 import { runJoin } from '@/lib/linked-accounts/replicas/join';
 import { runReleaseAction } from '@/lib/linked-accounts/replicas/release-actions';
 import { exclusivityRefusal } from '@/lib/linked-accounts/collective-venue-locks';
+import { setListOnOldPage } from '@/lib/linked-accounts/replicas/dissolved-page';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -78,6 +79,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'Collective not found.' }, { status: 404 });
     }
     const collective = collectiveData as CollectiveRow;
+    // Contract 9: after the end, a former member chooses whether the old page lists it (D25).
+    if (collective.status === 'dissolved' && input.action === 'configure' && input.list_on_old_page !== undefined) {
+      const changed = await setListOnOldPage(ctx.admin, collectiveId, ctx.venueId, input.list_on_old_page);
+      if (!changed) {
+        return NextResponse.json(
+          { error: 'Your venue was not part of this collective when it ended, or its old page has closed.' },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ ok: true, list_on_old_page: input.list_on_old_page });
+    }
     if (collective.status !== 'active') {
       return NextResponse.json({ error: 'This collective has been dissolved.' }, { status: 409 });
     }

@@ -79,6 +79,55 @@ describe('creating a collective (BM-04)', () => {
   });
 });
 
+describe('the address of an ended collective (DL4)', () => {
+  const create = async (heldBy: string) => {
+    const recording = makeRecordingDb((call) => {
+      if (call.table === 'venue_collectives' && call.op === 'select' && call.columns === 'id, status, host_venue_id') {
+        return { data: { id: 'old-collective', status: 'dissolved', host_venue_id: heldBy } };
+      }
+      if (call.table === 'venues') {
+        return {
+          data: [
+            { id: HOST, name: 'Host Venue', timezone: 'Europe/London', currency: 'GBP' },
+            { id: MEMBER, name: 'Zen Studio', timezone: 'Europe/London', currency: 'GBP' },
+          ],
+        };
+      }
+      return undefined;
+    });
+    vi.mocked(resolveLinkAdmin).mockResolvedValue({
+      ok: true,
+      ctx: {
+        admin: recording.db as unknown as SupabaseClient,
+        venueId: HOST,
+        eligibility: { feature: true, canCreate: true },
+      },
+    } as unknown as Awaited<ReturnType<typeof resolveLinkAdmin>>);
+    const response = await createCollective(
+      new NextRequest('http://test/api/venue/collectives', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Northside', slug: 'northside', inviteVenueIds: [MEMBER] }),
+      }),
+    );
+    const released = recording.calls.some(
+      (c) => c.table === 'venue_collectives' && c.op === 'update' && (c.payload as { slug?: string }).slug === 'dissolved-old-collective',
+    );
+    return { response, released };
+  };
+
+  it("lets the same host take its ended collective's address back", async () => {
+    const { response, released } = await create(HOST);
+    expect(response.status).not.toBe(409);
+    expect(released).toBe(true);
+  });
+
+  it('keeps it from anyone else during the 90 days', async () => {
+    const { response, released } = await create('someone-else');
+    expect(response.status).toBe(409);
+    expect(released).toBe(false);
+  });
+});
+
 describe('PATCH /api/venue while in a collective (TERMS-15, BM-02)', () => {
   const venueResponder = (inCollective: boolean): Responder => (call) => {
     if (call.table === 'venue_collective_members') {

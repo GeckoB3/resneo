@@ -34,6 +34,8 @@ vi.mock('@/lib/linked-accounts/collective-venue', () => ({ invalidateCollectiveC
 vi.mock('@/lib/linked-accounts/replicas/release-followups', () => ({
   drainReleaseFollowups: vi.fn(async () => ({})),
 }));
+const setListOnOldPage = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('@/lib/linked-accounts/replicas/dissolved-page', () => ({ setListOnOldPage }));
 vi.mock('@/lib/linked-accounts/replicas/release-review', () => ({
   loadReleaseReview: vi.fn(async () => null),
 }));
@@ -52,9 +54,10 @@ interface WorldOptions {
   /** The venues already in another live collective. */
   elsewhere?: string[];
   myStatus?: 'invited' | 'active';
+  collectiveStatus?: string;
 }
 
-function world({ model = 'legacy_copies', elsewhere = [], myStatus = 'active' }: WorldOptions): Responder {
+function world({ model = 'legacy_copies', elsewhere = [], myStatus = 'active', collectiveStatus = 'active' }: WorldOptions): Responder {
   return (call) => {
     const eqValue = (column: string) => call.filters.find((f) => f[0] === 'eq' && f[1] === column)?.[2];
     if (call.table === 'venue_collectives' && call.op === 'select') {
@@ -67,7 +70,7 @@ function world({ model = 'legacy_copies', elsewhere = [], myStatus = 'active' }:
         data: {
           id: COLLECTIVE,
           host_venue_id: HOST,
-          status: 'active',
+          status: collectiveStatus,
           name: 'Northside',
           page_mode: 'unified_catalog',
           booking_page_config: {},
@@ -187,5 +190,27 @@ describe('LIFE-14: ending a membership never touches an account link', () => {
     const recording = signIn(MEMBER, { myStatus: 'invited' });
     expect((await patch({ action: 'decline' })).status).toBe(200);
     expect(linkWrites(recording.calls)).toEqual([]);
+  });
+});
+
+describe('contract 9: listing on the old page after the end', () => {
+  it('lets a former member change its choice', async () => {
+    signIn(MEMBER, { collectiveStatus: 'dissolved' });
+    const response = await patch({ action: 'configure', list_on_old_page: false });
+    expect(response.status).toBe(200);
+    expect(setListOnOldPage).toHaveBeenCalledWith(expect.anything(), COLLECTIVE, MEMBER, false);
+  });
+
+  it('refuses a venue that was not part of it at the end', async () => {
+    signIn(OUTSIDER, { collectiveStatus: 'dissolved' });
+    setListOnOldPage.mockResolvedValueOnce(false);
+    expect((await patch({ action: 'configure', list_on_old_page: true })).status).toBe(404);
+  });
+
+  it('still refuses any other change to an ended collective', async () => {
+    signIn(MEMBER, { collectiveStatus: 'dissolved' });
+    setListOnOldPage.mockClear();
+    expect((await patch({ action: 'leave' })).status).toBe(409);
+    expect(setListOnOldPage).not.toHaveBeenCalled();
   });
 });

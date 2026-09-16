@@ -7,6 +7,7 @@ import { runCollectiveVerify, type RpcClient } from '@/lib/linked-accounts/repli
 import { syncMemberSuspensions } from '@/lib/linked-accounts/replicas/collective-suspension';
 import { endCollectivesBelowTwo } from '@/lib/linked-accounts/replicas/below-two';
 import { runAdoptionDeadlines } from '@/lib/linked-accounts/replicas/adoptions';
+import { releaseExpiredDissolvedAddresses } from '@/lib/linked-accounts/replicas/dissolved-page';
 
 /**
  * GET/POST /api/cron/collective-verify: daily, read the collective invariant report, repair lag,
@@ -49,6 +50,15 @@ async function handlePost(request: NextRequest) {
     counters.errors += adoptions.errors;
   } catch (err) {
     console.error('[collective] adoption deadlines threw:', err);
+    counters.errors += 1;
+  }
+  // An ended collective's neutral page runs for 90 days; then its address is free (D25).
+  try {
+    const addresses = await releaseExpiredDissolvedAddresses(supabase);
+    counters.results.dissolved_addresses_released = addresses.released;
+    counters.errors += addresses.errors;
+  } catch (err) {
+    console.error('[collective] address release threw:', err);
     counters.errors += 1;
   }
   // After the deadlines, which can leave a collective with one venue (§6.7).

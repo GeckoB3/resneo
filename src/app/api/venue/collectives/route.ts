@@ -5,6 +5,7 @@ import { loadCollectiveViewsForVenue } from '@/lib/linked-accounts/collectives';
 import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import { notifyCollectiveInvitation } from '@/lib/linked-accounts/notifications';
 import { exclusivityRefusal } from '@/lib/linked-accounts/collective-venue-locks';
+import { releaseDissolvedAddress } from '@/lib/linked-accounts/replicas/dissolved-page';
 
 /** GET /api/venue/collectives — collectives this venue hosts or belongs to. */
 export async function GET() {
@@ -82,10 +83,14 @@ export async function POST(request: NextRequest) {
     // Slug uniqueness among collectives.
     const { data: slugTaken } = await ctx.admin
       .from('venue_collectives')
-      .select('id')
+      .select('id, status, host_venue_id')
       .eq('slug', slug)
       .maybeSingle();
-    if (slugTaken) {
+    // DL4: an ended collective keeps its address for its neutral page, but its own host may take it
+    // back for a new collective straight away. Anyone else waits for the 90 days.
+    if (slugTaken && slugTaken.status === 'dissolved' && slugTaken.host_venue_id === ctx.venueId) {
+      await releaseDissolvedAddress(ctx.admin, slugTaken.id as string);
+    } else if (slugTaken) {
       return NextResponse.json(
         { error: 'That booking-page address is already in use. Choose another.' },
         { status: 409 },

@@ -257,3 +257,89 @@ export function ReleaseReviewCard({ initial }: { initial?: ReleaseReview | null 
   };
   return <ReleaseReviewPanel review={review} onDismiss={dismiss} />;
 }
+
+interface EndedCollectiveRow {
+  collective_id: string;
+  name: string;
+  dissolved_at: string;
+  list_on_old_page: boolean;
+}
+
+/**
+ * The collectives this venue was part of when they ended, for the 90 days their old page shows,
+ * with the choice to be listed there (UX spec `la.row.ended`, `la.row.listOnOldPage`; contract 9).
+ */
+export function EndedCollectivesList({ venueName, refreshKey = 0 }: { venueName: string; refreshKey?: number }) {
+  const [rows, setRows] = useState<EndedCollectiveRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/collectives/ended');
+        if (!res.ok) return;
+        const data = (await res.json()) as { ended: EndedCollectiveRow[] };
+        if (!cancelled) setRows(data.ended);
+      } catch {
+        /* Nothing to show when it cannot load. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  if (rows.length === 0) return null;
+
+  const toggle = async (row: EndedCollectiveRow, listed: boolean) => {
+    setError(null);
+    setRows((prev) => prev.map((r) => (r.collective_id === row.collective_id ? { ...r, list_on_old_page: listed } : r)));
+    try {
+      const res = await fetch(`/api/venue/collectives/${row.collective_id}/members`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'configure', list_on_old_page: listed }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setRows((prev) =>
+        prev.map((r) => (r.collective_id === row.collective_id ? { ...r, list_on_old_page: !listed } : r)),
+      );
+      setError('That did not save. Please try again.');
+    }
+  };
+
+  const date = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  return (
+    <ul className="space-y-2" aria-label="Ended collectives">
+      {error ? (
+        <li role="alert" className="text-sm text-rose-700">
+          {error}
+        </li>
+      ) : null}
+      {rows.map((row) => (
+        <li
+          key={row.collective_id}
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm"
+        >
+          <span>
+            <span className="font-semibold text-slate-900">{row.name}</span>{' '}
+            <span className="text-slate-500">{collectiveCopy('la.row.ended', { date: date(row.dissolved_at) })}</span>
+          </span>
+          <label className="flex items-center gap-2 text-slate-700">
+            <input
+              type="checkbox"
+              checked={row.list_on_old_page}
+              onChange={(e) => void toggle(row, e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+            />
+            {collectiveCopy('la.row.listOnOldPage', { venue: venueName, collective: row.name })}
+          </label>
+        </li>
+      ))}
+    </ul>
+  );
+}

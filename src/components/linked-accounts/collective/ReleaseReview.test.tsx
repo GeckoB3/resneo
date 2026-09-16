@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { LeaveCollectiveDialog, ReleaseReviewCard, ReleaseReviewPanel } from './ReleaseReview';
+import { EndedCollectivesList, LeaveCollectiveDialog, ReleaseReviewCard, ReleaseReviewPanel } from './ReleaseReview';
 import type { ReleaseReview } from '@/lib/linked-accounts/replicas/release-review';
 
 const review: ReleaseReview = {
@@ -119,6 +119,50 @@ describe('ReleaseReviewCard', () => {
     const fetchMock = vi.fn(async () => json({ review: null }));
     vi.stubGlobal('fetch', fetchMock);
     const { container } = render(<ReleaseReviewCard />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('EndedCollectivesList', () => {
+  const ended = [
+    { collective_id: 'collective-1', name: 'Northside', dissolved_at: '2026-10-01T09:00:00Z', list_on_old_page: true },
+  ];
+
+  it('shows when it ended and saves the listing choice', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'PATCH' ? json({ ok: true }) : json({ ended }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<EndedCollectivesList venueName="Zen Studio" />);
+    expect(await screen.findByText('Ended on 1 October 2026')).toBeInTheDocument();
+    const box = screen.getByRole('checkbox', { name: 'List Zen Studio on the old Northside page' });
+    expect(box).toBeChecked();
+    await userEvent.setup().click(box);
+    expect(box).not.toBeChecked();
+    const patch = fetchMock.mock.calls.find((c) => c[1]?.method === 'PATCH')!;
+    expect(patch[0]).toBe('/api/venue/collectives/collective-1/members');
+    expect(JSON.parse(patch[1]!.body as string)).toEqual({ action: 'configure', list_on_old_page: false });
+  });
+
+  it('puts the choice back when the save fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        init?.method === 'PATCH' ? json({ error: 'no' }, 500) : json({ ended }),
+      ),
+    );
+    render(<EndedCollectivesList venueName="Zen Studio" />);
+    const box = await screen.findByRole('checkbox');
+    await userEvent.setup().click(box);
+    expect(await screen.findByRole('alert')).toHaveTextContent('That did not save.');
+    expect(box).toBeChecked();
+  });
+
+  it('shows nothing when no collective has ended', async () => {
+    const fetchMock = vi.fn(async () => json({ ended: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = render(<EndedCollectivesList venueName="Zen Studio" />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });

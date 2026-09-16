@@ -351,6 +351,16 @@ export const COLLECTIVE_COPY = {
   'notify.adopt.body':
     '{host} has put {service} on the {collective} page. Choose whether to use your own {service} for it, so its calendars and bookings stay as they are.',
 
+  // After a collective ends (dissolved-page.ts; UX spec `public.dissolved.*`, `la.row.*`)
+  'public.dissolved.title': '{collective} is no longer taking bookings',
+  'public.dissolved.body': 'You can still book with these businesses:',
+  'public.dissolved.book': 'Book with {venue}',
+  'public.dissolved.none': 'Please contact the business directly.',
+  'public.dissolved.existing':
+    'If you already have a booking, the link in your confirmation email still lets you manage it.',
+  'la.row.ended': 'Ended on {date}',
+  'la.row.listOnOldPage': 'List {venue} on the old {collective} page',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

@@ -6,7 +6,9 @@ import {
   loadCollectivePageView,
   CollectiveUnavailable,
   CollectivePageBody,
+  DissolvedCollectivePage,
 } from './collective-page-view';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +24,13 @@ export async function generateMetadata({
   // reconcile and the metadata pass uses a plain read instead.
   const known = await loadCollectiveBrandingBySlug(admin, slug);
   if (!known) return { title: 'Booking page not found' };
+  if (known.status === 'dissolved') {
+    // D25: the neutral page is not an index target.
+    return {
+      title: collectiveCopy('public.dissolved.title', { collective: known.name }),
+      robots: { index: false, follow: true },
+    };
+  }
   if (known.status !== 'active') return { title: known.name };
   return {
     title: `${known.name}: Book online`,
@@ -42,6 +51,7 @@ export default async function CollectiveBookingPage({
   const { slug } = await params;
   const view = await loadCollectivePageView(getSupabaseAdminClient(), slug);
   if (view.status === 'notfound') notFound();
+  if (view.status === 'dissolved') return <DissolvedCollectivePage page={view.page} />;
   if (view.status === 'unavailable') {
     return <CollectiveUnavailable name={view.name} branding={view.branding} />;
   }

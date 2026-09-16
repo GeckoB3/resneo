@@ -7,7 +7,7 @@ import { Pill } from '@/components/ui/dashboard/Pill';
 import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui';
 import { CombinedPageManager } from './CombinedPageManager';
 import { JoinCollectiveDialog } from './collective/JoinCollectiveDialog';
-import { LeaveCollectiveDialog, ReleaseReviewCard } from './collective/ReleaseReview';
+import { EndedCollectivesList, LeaveCollectiveDialog, ReleaseReviewCard } from './collective/ReleaseReview';
 import type { ReleaseReview } from '@/lib/linked-accounts/replicas/release-review';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
 import type { CollectiveView } from '@/lib/linked-accounts/collectives';
@@ -155,6 +155,7 @@ export function VenueCollectivesPanel({
       />
       <SectionCard.Body className="space-y-3">
         <ReleaseReviewCard key={review.key} initial={review.value} />
+        <EndedCollectivesList venueName={venueName} refreshKey={review.key} />
         {error ? (
           <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
         ) : null}

@@ -285,6 +285,8 @@ export const collectiveMemberActionSchema = z.object({
     .optional(),
   /** configure: what this member's own /book/{slug} does while the combined page is live (plan D2). */
   soloPageBehavior: z.enum(['keep_live', 'redirect']).optional(),
+  /** configure, after the collective ended: list this venue on the old page (contract 9, D25). */
+  list_on_old_page: z.boolean().optional(),
 });
 
 // ---- Combined-page catalogue (plan §4.3/§4.4, §7.3/§7.4) --------------------

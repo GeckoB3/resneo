@@ -28,6 +28,7 @@ import {
 import { minutesBetweenStartAndEndHM } from '@/lib/booking/validate-appointment-modification';
 import { formatCardHoldFeePence } from '@/lib/booking/card-hold-terms';
 import { guestCardHoldHeldLine } from '@/lib/booking/guest-card-hold-summary';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 /*
   P2-5a (Register Q-01). LAZY, because this view is what an emailed cancel
@@ -606,6 +607,11 @@ export function GuestBookingDetailView({
         <div className="bg-gradient-to-r from-brand-600 to-brand-700 px-6 py-5">
           <h2 className="text-lg font-semibold text-white">{details.venue_name}</h2>
           {details.venue_address && <p className="mt-0.5 text-sm text-brand-100">{details.venue_address}</p>}
+          {details.booked_through ? (
+            <p data-testid="booked-through" className="mt-1 text-xs text-brand-100">
+              {collectiveCopy('guest.bookedThrough', { collective: details.booked_through })}
+            </p>
+          ) : null}
         </div>
 
         <div className="min-w-0 space-y-4 p-4 sm:p-6">

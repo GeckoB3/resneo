@@ -57,6 +57,8 @@ export interface BookingDetailDto {
   venue_name: string | undefined;
   venue_address: string | null | undefined;
   venue_phone: string | null;
+  /** The collective page the booking was made through (UX spec `guest.bookedThrough`); absent otherwise. */
+  booked_through?: string;
   booking_date: string;
   booking_time: string;
   party_size: number;
@@ -240,6 +242,8 @@ export interface BookingDetailSourceRow {
   cancellation_actor_type?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  /** Set when the booking was made through a collective page. */
+  collective_id?: string | null;
 }
 
 export async function buildBookingDetailDto(
@@ -581,12 +585,24 @@ export async function buildBookingDetailDto(
     booking.id,
   );
 
+  // Named only when the booking came through a collective page, so every other payload is unchanged.
+  let bookedThrough: string | null = null;
+  if (booking.collective_id) {
+    const { data: collective } = await supabase
+      .from('venue_collectives')
+      .select('name')
+      .eq('id', booking.collective_id)
+      .maybeSingle();
+    bookedThrough = ((collective?.name as string | null | undefined) ?? '').trim() || null;
+  }
+
   return {
     booking_id: booking.id,
     venue_id: booking.venue_id,
     venue_name: (venue as { name?: string } | null)?.name,
     venue_address: (venue as { address?: string | null } | null)?.address,
     venue_phone: (venue as { phone?: string | null } | null)?.phone ?? null,
+    ...(bookedThrough ? { booked_through: bookedThrough } : {}),
     booking_date: booking.booking_date,
     booking_time: timeStr,
     party_size: booking.party_size,

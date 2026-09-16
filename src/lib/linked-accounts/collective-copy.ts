@@ -378,6 +378,7 @@ export const COLLECTIVE_COPY = {
     '{host} has put {service} on the {collective} page. Choose whether to use your own {service} for it, so its calendars and bookings stay as they are.',
 
   // After a collective ends (dissolved-page.ts; UX spec `public.dissolved.*`, `la.row.*`)
+  'guest.bookedThrough': 'Booked through {collective}',
   // Who the guest is booking with on a collective page (UX spec item 14; PUB-03, RT2-14, PB-15).
   'public.trader': 'You are booking with {business}, {address}.',
   // Added (W10): the same line for a business with no address on file.

@@ -1,0 +1,177 @@
+/**
+ * Every word the collective surfaces say (UX spec §5, the copy deck; W5).
+ *
+ * One home for these strings, so a host and a member never read two different sentences about the
+ * same fact, and so the wording can be reviewed in one place rather than hunted through components.
+ * Placeholders are `{braces}` and filled by `collectiveCopy`; a placeholder left unfilled is a bug
+ * the unit test catches, not something a venue should ever read.
+ *
+ * House style (CLAUDE.md): plain, warm, second person, short sentences, and no em-dashes anywhere.
+ */
+
+export const COLLECTIVE_COPY = {
+  // Badges (CollectivePills.tsx)
+  'common.pill.collective': 'Collective',
+  'common.srOnly.collective': 'On the {collective} page',
+  'common.pill.fromHost': 'From {host}',
+  'common.pill.parked': 'Parked',
+  'common.srOnly.parked': 'Not bookable while {venue} is part of {collective}',
+  'common.pill.retired': 'Retired',
+  'common.pill.settingUp': 'Setting up',
+  'common.pill.updating': 'Updating',
+  'common.pill.upToDate': 'Up to date',
+  'common.pill.couldNotUpdate': 'Could not update',
+  'common.pill.paused': 'Paused',
+  // Added while building the pill: the deck's `svc.card.hiddenAt` names a venue, and the pill
+  // itself often stands where no single venue can be named. The reason sentence says where.
+  'common.pill.hidden': 'Hidden',
+  'common.pill.turnedOffByHost': 'Turned off by {host}',
+
+  // Reach lines (EditReachNote)
+  'reach.host.master': 'This service is on the {collective} page. Saving updates it at {venueList}.',
+  'reach.host.parked':
+    'This service is not on the {collective} page, so it is parked: nobody can book it while {collective} is live. Bookings already made are not changed.',
+  'reach.member.replica':
+    '{host} manages this service for {collective}. You choose which of your calendars offer it. For anything else, ask {host}.',
+  'reach.member.parked':
+    'This service is parked while you are part of {collective}, so nobody can book it, your team included. Bookings already made are not changed. You can edit it, and it is bookable again as soon as you leave.',
+  'reach.calendar.values': 'These values apply to {calendar} at {venue} only, wherever it is booked.',
+  'reach.member.calendarTicks':
+    'Ticking a service adds this calendar to it on the {collective} page. Unticking takes it off.',
+  'reach.staff.toggles': 'Your choice updates the {collective} page straight away.',
+
+  // Services page, host (AppointmentServicesView.tsx)
+  'svc.host.banner.title': 'You host {collective}',
+  'svc.host.banner.body':
+    'Services marked Collective are on the {collective} page. When you save one, the change reaches {venueList}. Your other services are parked while {collective} is live: nobody can book them, but bookings already made are not changed.',
+  'svc.host.banner.invitedOnly':
+    'You host {collective}. When venues accept your invitation, the services you put on the page are set up in their accounts.',
+  'svc.host.banner.viewPage': 'View the {collective} page',
+  'svc.host.banner.behind': '{venue} has not received your latest changes yet.',
+  'svc.host.banner.retry': 'Retry',
+  'svc.host.emptyCollective': 'Services you add can be put on the {collective} page.',
+  'svc.filter.label': 'Show',
+  'svc.filter.all': 'All services',
+  'svc.filter.reorderOff': 'Show all services to change their order.',
+  'svc.card.updatingAt': 'Updating at {venue}',
+  'svc.card.failedAt': 'Could not update at {venue}',
+  'svc.card.failedDetail': '{venue}: {reason}',
+  'svc.card.hiddenAt': 'Hidden at {venue}',
+  'svc.card.inactiveOffered': 'Turned off, so it is hidden on the {collective} page and at {venueList}.',
+  'svc.card.noCalendars': 'No calendars offer this yet, so guests cannot book it.',
+  'svc.card.parked': 'Parked while {collective} is live. Put it on the page to take bookings for it.',
+
+  // The save summary, the undo and the stale ask
+  'svc.save.allDone': 'Saved. {service} is up to date at {venueList}.',
+  'svc.save.pending':
+    'Saved. {venue} is updating. Its calendars take new bookings for {service} again in a moment.',
+  'svc.save.failed': 'Saved here, but {venue} could not be updated yet: {reason}. We will keep trying.',
+  'svc.save.retry': 'Retry now',
+  'svc.save.calendarFailed': '{calendar} at {venue} could not be changed: {reason}.',
+  'sync.reason.busy': '{venue} was busy. We will try again in a moment.',
+  'sync.reason.subscription': "{venue}'s subscription has lapsed.",
+  'sync.reason.unknown': 'something went wrong on our side',
+  'ov.undo.offer': 'Put it back',
+  'ov.undo.done': 'We put {service} back to how it was, at every venue.',
+  'ov.undo.expired':
+    'That change is now part of your history, so it cannot be undone here. Edit the service to change it again.',
+  'svc.stale.title': '{service} changed while you were editing',
+  'svc.stale.message':
+    'Someone saved a change to {service} after you opened it. Reload it to see the latest version, then make your change again.',
+  'svc.stale.confirm': 'Reload service',
+
+  // CollectiveCalendarsSection
+  'svc.cal.heading': 'Calendars that offer this service',
+  'svc.cal.help.collective':
+    'Tick the calendars that should offer this service, at any venue in {collective}.',
+  'svc.cal.venueYou': '{venue} (you)',
+  'svc.cal.noCalendars': '{venue} has no active calendars yet.',
+  'svc.cal.notSaved.add': 'Not saved yet',
+  'svc.cal.notSaved.remove': 'Not saved yet: will stop offering',
+  'svc.cal.editValues': 'Edit values',
+  'svc.cal.chip.price': 'Custom price {price}',
+  'svc.cal.chip.length': 'Custom length {minutes} min',
+  'svc.cal.chip.buffer': 'Custom buffer {minutes} min',
+  'svc.cal.chip.deposit': 'Custom deposit {price}',
+  'svc.cal.chip.colour': 'Custom colour',
+  'svc.cal.chip.name': 'Custom name',
+  'svc.cal.lastChanged': 'Last changed by {venue}, {date}',
+  'svc.cal.compare': 'Compare values for every calendar',
+  'svc.cal.compare.standard': 'Standard',
+  'svc.cal.inactiveOther': '(not available: calendar turned off at {venue})',
+  'svc.cal.warn.noStripe':
+    '{venue} cannot take card payments yet, so guests cannot book its calendars for this service online. Its team can still book it.',
+  'svc.cal.warn.formsOff':
+    '{venue} has forms switched off, so its calendars are hidden for this service until it turns them on.',
+  'svc.cal.warn.suspended':
+    "{venue}'s subscription has lapsed, so its calendars are hidden from the {collective} page until it is put right.",
+  'svc.cal.warn.settingUp': 'Setting up at {venue}. Its calendars can take bookings once this finishes.',
+  'svc.cal.warn.failed': 'Could not update at {venue}: {reason}.',
+
+  // The commercial change ask
+  'svc.commercial.title': 'Update {service} at every venue?',
+  'svc.commercial.message': 'These changes apply to new bookings at {venueList}.',
+  'svc.commercial.bookingsKept': 'Bookings already made keep the price and terms they were booked with.',
+  'svc.commercial.membersTold': '{venueList} are told about these changes by email.',
+  'svc.commercial.clearValues.heading': 'Custom values that will be cleared',
+  'svc.commercial.clearValues.row': '{calendar} at {venue}: {field} goes back to {value}',
+  'svc.commercial.confirm': 'Save and update',
+  'diff.row': '{label}: {from} to {to}',
+  'diff.none': 'None',
+} as const;
+
+export type CollectiveCopyId = keyof typeof COLLECTIVE_COPY;
+
+/** The ids that are deliberately the same sentence somewhere else, so nothing is written twice. */
+export const COLLECTIVE_COPY_ALIASES = {
+  'svc.filter.onPage': 'common.srOnly.collective',
+  'svc.filter.parked': 'common.pill.parked',
+  'svc.card.onPageSwitch': 'common.srOnly.collective',
+  'svc.member.section.fromHost': 'common.pill.fromHost',
+  'svc.member.section.parked': 'common.pill.parked',
+} as const satisfies Record<string, CollectiveCopyId>;
+
+/** Labels for the fields a commercial change lists in its ask (`diff.row`). */
+export const COLLECTIVE_DIFF_LABELS = {
+  price: 'Price',
+  deposit: 'Deposit',
+  noShowFee: 'No-show fee',
+  payment: 'Online payment',
+  length: 'Length',
+  buffer: 'Buffer',
+  cancellation: 'Cancellation notice',
+  options: 'Options',
+  addons: 'Add-ons',
+  forms: 'Forms',
+} as const;
+
+/**
+ * "A", "A and B", "A, B and C", then "A, B and 2 more", so a host with thirty members reads a
+ * sentence rather than a list.
+ */
+export function formatVenueList(names: string[], namesShownWhenLong = 2): string {
+  const clean = names.map((n) => n.trim()).filter(Boolean);
+  if (clean.length === 0) return '';
+  if (clean.length === 1) return clean[0]!;
+  if (clean.length <= 3) return `${clean.slice(0, -1).join(', ')} and ${clean[clean.length - 1]}`;
+  const shown = clean.slice(0, namesShownWhenLong);
+  return `${shown.join(', ')} and ${clean.length - shown.length} more`;
+}
+
+export type CollectiveCopyParams = Record<string, string | number | undefined | null>;
+
+/**
+ * The sentence for `id`, with its placeholders filled. A placeholder with no value is left as it
+ * is, which the unit test forbids, rather than becoming an empty gap a venue would have to guess at.
+ */
+export function collectiveCopy(id: CollectiveCopyId, params: CollectiveCopyParams = {}): string {
+  return COLLECTIVE_COPY[id].replace(/\{(\w+)\}/g, (whole, key: string) => {
+    const value = params[key];
+    return value === undefined || value === null || value === '' ? whole : String(value);
+  });
+}
+
+/** Which placeholders a sentence needs, so a caller can be checked against it. */
+export function collectiveCopyPlaceholders(id: CollectiveCopyId): string[] {
+  return [...new Set([...COLLECTIVE_COPY[id].matchAll(/\{(\w+)\}/g)].map((m) => m[1]!))];
+}

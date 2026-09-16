@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { buildVenueEmbedSnippet, normalizeEmbedAccentHex } from '@/lib/embed/accent-colour';
 import { EMBED_IFRAME_DEFAULT_HEIGHT_PX } from '@/lib/embed/widget-frame';
+import { collectivePublicPath, type CollectiveAddressSource } from '@/lib/linked-accounts/collective-public-url';
 import {
   BOOKING_PAGE_FIELD_HEADING_MB1_CLASS,
   BOOKING_PAGE_FIELD_HEADING_MB15_CLASS,
@@ -21,6 +22,8 @@ interface WidgetSectionProps {
 interface CollectiveEmbedOption {
   slug: string;
   name: string;
+  /** Where guests reach the page, an adopted venue's address included. */
+  path: string;
 }
 
 export function WidgetSection({
@@ -62,7 +65,11 @@ export function WidgetSection({
               c.myMembershipStatus === 'active' &&
               c.activeMemberCount >= 2,
           )
-          .map((c: { slug: string; name: string }) => ({ slug: c.slug, name: c.name }));
+          .map((c: CollectiveAddressSource & { name: string }) => ({
+            slug: c.slug,
+            name: c.name,
+            path: collectivePublicPath(c),
+          }));
         setCollectives(options);
       } catch {
         // Collective embed is optional; ignore failures.
@@ -116,6 +123,7 @@ export function WidgetSection({
   }, []);
 
   const usingCollective = target !== 'venue';
+  const chosenCollective = usingCollective ? collectives.find((c) => c.slug === target) ?? null : null;
   const root = baseUrl.replace(/\/$/, '');
   const venueEmbed = buildVenueEmbedSnippet({
     baseUrl,
@@ -123,11 +131,15 @@ export function WidgetSection({
     accentHex: accentColour,
   });
   const embedUrl = usingCollective
-    ? `${root}/book/c/${target}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`
+    ? // `/book` refuses to be framed; `/embed/c/{slug}` is the collective's embed (CB-06).
+      `${root}/embed/c/${target}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`
     : venueEmbed.embedUrl;
   const bookUrl = usingCollective
-    ? `${root}/book/c/${target}`
+    ? `${root}${chosenCollective?.path ?? `/book/c/${target}`}`
     : `${root}/book/${venueSlug}`;
+  // The QR code is named after the page it opens (§6.9).
+  const qrLabel = chosenCollective?.name ?? venueName;
+  const qrFileSlug = usingCollective ? target : venueSlug;
   const snippet = usingCollective
     ? `<iframe src="${embedUrl}" width="100%" height="${EMBED_IFRAME_DEFAULT_HEIGHT_PX}" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
 <script src="${root}/embed/resize.js"></script>`
@@ -179,15 +191,15 @@ export function WidgetSection({
       ctx.fillStyle = '#111';
       ctx.font = '24px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(venueName, canvas.width / 2, qrSize + padding + 32);
+      ctx.fillText(qrLabel, canvas.width / 2, qrSize + padding + 32);
       const dataUrl = canvas.toDataURL('image/png');
       const a = document.createElement('a');
       a.href = dataUrl;
-      a.download = `reserve-ni-qr-${venueSlug}.png`;
+      a.download = `reserve-ni-qr-${qrFileSlug}.png`;
       a.click();
     };
     img.src = qrDataUrl;
-  }, [qrDataUrl, venueName, venueSlug]);
+  }, [qrDataUrl, qrLabel, qrFileSlug]);
 
   const embedAccentHex = normalizeEmbedAccentHex(accentColour);
   const embedAccentPickerValue = embedAccentHex ? `#${embedAccentHex}` : '#4f46e5';

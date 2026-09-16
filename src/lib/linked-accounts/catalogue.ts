@@ -724,14 +724,16 @@ export async function resolveCombinedSlugClaim(
     .eq('status', 'active')
     .eq('solo_page_behavior', 'redirect');
   for (const m of memberRows ?? []) {
+    // `select('*')`: `service_model` must not break the page on a database without the engine.
     const { data: col } = await admin
       .from('venue_collectives')
-      .select('slug, adopted_venue_id')
+      .select('*')
       .eq('id', m.collective_id as string)
       .eq('status', 'active')
       .eq('page_mode', 'unified_catalog')
       .maybeSingle();
-    if (!col) continue;
+    // A shared-services collective ignores the stored choice: its rule is derived (page-handover.ts).
+    if (!col || (col as { service_model?: string }).service_model === 'replicas') continue;
     let redirectTo = `/book/c/${col.slug as string}`;
     if (col.adopted_venue_id) {
       const { data: adoptedVenue } = await admin

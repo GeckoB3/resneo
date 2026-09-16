@@ -30,6 +30,7 @@ import {
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { findStaffCollectiveForVenue } from '@/lib/linked-accounts/collective-staff-scope';
+import { resolveOwnPageHandover } from '@/lib/linked-accounts/replicas/page-handover';
 import type { SettingsCollectiveNote } from './sections/CombinedPageNotice';
 import { referralProgrammeEnabled } from '@/lib/referrals/constants';
 import { loadReferralsDashboardForVenue } from '@/lib/referrals/load-dashboard';
@@ -252,7 +253,17 @@ export default async function SettingsPage({
       admin.from('venues').select('name').eq('id', staffCollective.hostVenueId).maybeSingle(),
       admin.from('venue_collectives').select('slug_strategy, adopted_venue_id').eq('id', staffCollective.collectiveId).maybeSingle(),
     ]);
+    // §6.9: the own page's derived status, on the shared-services model only.
+    const handover = await resolveOwnPageHandover(admin, venueId);
     collective = {
+      ownPage: handover
+        ? {
+            redirecting: handover.redirect,
+            reason: handover.reason,
+            otherModels: handover.otherModels,
+            ownPath: handover.ownPath,
+          }
+        : null,
       id: staffCollective.collectiveId,
       name: staffCollective.name,
       isHost: staffCollective.hostVenueId === venueId,

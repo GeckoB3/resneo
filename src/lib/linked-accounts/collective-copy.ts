@@ -218,6 +218,14 @@ export const COLLECTIVE_COPY = {
     '{venue} stops being part of {collective}. Its copies of your services become its own, and bookings already made are not changed.',
   'ov.venues.cancelTitle': 'Cancel the invitation to {venue}?',
   'ov.venues.cancelMessage': '{venue} will no longer be able to join. You can invite it again later.',
+  // The own page's status line on the Booking Page tab (UX spec item 11, `bp.status.*`, `bp.reason.*`).
+  'bp.status.redirecting': 'Guests who visit your own booking page are sent to the {collective} page.',
+  'bp.status.showing': 'Your own page is showing because {reason}.',
+  'bp.reason.notLive': 'the {collective} page is not live yet',
+  'bp.reason.noCalendars': 'none of your calendars offer a service on the {collective} page yet',
+  'bp.reason.paused': 'booking is paused on the {collective} page',
+  'bp.reason.settingUp': 'your services from {host} are still being set up',
+  'bp.reason.unavailable': 'the {collective} page is unavailable right now',
   'bp.members.cancelInvite': 'Cancel invitation',
   'bp.members.askToHost': 'Ask to host',
   'bp.members.history': 'History',
@@ -358,6 +366,11 @@ export const COLLECTIVE_COPY = {
     '{host} has put {service} on the {collective} page. Choose whether to use your own {service} for it, so its calendars and bookings stay as they are.',
 
   // After a collective ends (dissolved-page.ts; UX spec `public.dissolved.*`, `la.row.*`)
+  // Added (W10): the card on a venue's own page when its appointments are booked on the collective
+  // page but its other booking types stay (UX spec item 14, "a card that links to the collective page").
+  'public.handover.title': 'Appointments are booked with {collective}',
+  'public.handover.body': 'Choose a service and a time on the {collective} booking page.',
+  'public.handover.button': 'Book an appointment',
   'public.dissolved.title': '{collective} is no longer taking bookings',
   'public.dissolved.body': 'You can still book with these businesses:',
   'public.dissolved.book': 'Book with {venue}',

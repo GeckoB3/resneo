@@ -597,9 +597,10 @@ export async function reconcileCollective(
         .eq('collective_id', collectiveId)
         .eq('status', 'invited');
     }
-    // No catalogue cleanup needed on dissolve: `status='dissolved'` takes the
-    // page offline, and the overrides are collective-scoped so every venue's own
-    // services are already pristine (plan §8.3, the non-destructive guarantee).
+    // Nothing here touches the venues' services: `status='dissolved'` takes the page offline and
+    // the collective-scoped overrides stop applying. That does not make each venue's catalogue as
+    // it was before joining: the older model's plain copies stay behind at the venues that received
+    // them, and the shared-services model releases its replicas through the engine (plan §6.7).
     return { removedVenueIds, dissolved: true, hostTransferredTo: null };
   }
 

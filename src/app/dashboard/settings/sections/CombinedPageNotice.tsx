@@ -1,6 +1,8 @@
 'use client';
 
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import type { HandoverReason } from '@/lib/linked-accounts/replicas/page-handover';
 
 /** The live venue collective a venue belongs to, as the Booking page tab needs it. */
 export interface SettingsCollectiveNote {
@@ -11,6 +13,45 @@ export interface SettingsCollectiveNote {
   hostVenueName: string;
   /** The combined page is served at this venue's own booking address. */
   adoptedThisVenue: boolean;
+  /**
+   * Shared-services collectives: whether this venue's own page hands over, and why not (§6.9).
+   * Absent on the older model, whose own page follows the venue's stored choice.
+   */
+  ownPage?: {
+    redirecting: boolean;
+    reason: HandoverReason | null;
+    /** "classes and events", which stay on the own page. */
+    otherModels: string | null;
+    /** `/book/{slug}`. */
+    ownPath: string | null;
+  } | null;
+}
+
+/** The own page's one-line status, in the words of UX spec `bp.status.*`. */
+export function OwnPageStatusLine({ collective }: { collective: SettingsCollectiveNote }) {
+  const own = collective.ownPage;
+  if (!own) return null;
+  const params = { collective: collective.name, host: collective.hostVenueName };
+  return (
+    <div data-testid="own-page-status" className="space-y-1 text-sm text-slate-700">
+      <p>
+        {own.redirecting
+          ? collectiveCopy('bp.status.redirecting', params)
+          : collectiveCopy('bp.status.showing', {
+              reason: collectiveCopy(`bp.reason.${own.reason ?? 'unavailable'}` as 'bp.reason.notLive', params),
+            })}
+      </p>
+      {own.redirecting && own.otherModels && own.ownPath ? (
+        <p>
+          {collectiveCopy('bm.redirect.otherModels', {
+            collective: collective.name,
+            modelList: own.otherModels,
+            link: own.ownPath,
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /** Which booking page the tab is managing. */
@@ -47,6 +88,7 @@ export function CombinedPageScopeSwitch({
         }
       />
       <SectionCard.Body className="space-y-3">
+        <OwnPageStatusLine collective={collective} />
         {collective.adoptedThisVenue ? (
           <p className="text-sm text-slate-600">
             The combined page is served at this venue’s own address, so its settings are what guests see

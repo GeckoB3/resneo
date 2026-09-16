@@ -412,7 +412,7 @@ function CollectiveRow({
                     ? onLeave()
                     : onConfirm({
                         title: 'Leave this collective?',
-                        description: `Your venue will be removed from "${collective.name}". Your own booking page is unaffected.`,
+                        description: `Your venue will be removed from "${collective.name}". Guests who visit your own booking page will book your own services there.`,
                         confirmLabel: 'Leave collective',
                         danger: true,
                         run: async () => onAction({ action: 'leave' }),

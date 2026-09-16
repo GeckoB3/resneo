@@ -19,6 +19,7 @@ import {
 } from '@/components/booking/appointment-public-ui';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { isCdeBookingModel } from '@/lib/booking/cde-booking';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 const EMPTY_ENABLED: BookingModel[] = [];
 
@@ -90,6 +91,8 @@ export function BookPublicBookingFlow({
   const waitlistPrefillDate = searchParams.get('date') ?? undefined;
   const waitlistPrefillTime = searchParams.get('time') ?? undefined;
   const waitlistPrefillServiceId = searchParams.get('service_id') ?? undefined;
+  // A venue's calendar address handed over to its collective page arrives as `?calendar=` (§6.9).
+  const calendarParam = searchParams.get('calendar')?.trim() || undefined;
   const activeSlug = useMemo(
     () => resolvePublicBookTabFromQuery(tabParam, activeModels, venue.terminology),
     [tabParam, activeModels, venue.terminology],
@@ -199,6 +202,23 @@ export function BookPublicBookingFlow({
         </div>
       )}
 
+      {appointmentTabs && venue.appointments_handover ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <p className="text-base font-semibold text-slate-900">
+            {collectiveCopy('public.handover.title', { collective: venue.appointments_handover.collective_name })}
+          </p>
+          <p className="mt-2 text-sm text-slate-600">
+            {collectiveCopy('public.handover.body', { collective: venue.appointments_handover.collective_name })}
+          </p>
+          <a
+            href={venue.appointments_handover.href}
+            target={embed ? '_top' : undefined}
+            className="ap-btn-primary mt-4 inline-flex min-h-[44px] items-center rounded-xl px-5 py-2.5 text-sm font-semibold"
+          >
+            {collectiveCopy('public.handover.button')}
+          </a>
+        </div>
+      ) : (
       <PublicBookingAccountGateProvider venue={venue}>
         <BookingFlowRouter
           key={activeSlug}
@@ -210,7 +230,7 @@ export function BookPublicBookingFlow({
           accentColour={accentColour}
           collectiveId={collectiveId}
           collectiveServiceItemId={collectiveServiceItemId}
-          preselectedPractitionerId={preselectedPractitionerId}
+          preselectedPractitionerId={preselectedPractitionerId ?? calendarParam}
           waitlistOfferEntryId={waitlistOfferEntryId}
           preselectedServiceId={preselectedServiceId ?? waitlistPrefillServiceId}
           initialDate={initialDate ?? waitlistPrefillDate}
@@ -218,6 +238,7 @@ export function BookPublicBookingFlow({
           initialStep={initialStep}
         />
       </PublicBookingAccountGateProvider>
+      )}
     </div>
   );
 }

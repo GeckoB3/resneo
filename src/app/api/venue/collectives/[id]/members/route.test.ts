@@ -55,9 +55,17 @@ interface WorldOptions {
   elsewhere?: string[];
   myStatus?: 'invited' | 'active';
   collectiveStatus?: string;
+  /** The venue being removed is still only invited. */
+  targetInvited?: boolean;
 }
 
-function world({ model = 'legacy_copies', elsewhere = [], myStatus = 'active', collectiveStatus = 'active' }: WorldOptions): Responder {
+function world({
+  model = 'legacy_copies',
+  elsewhere = [],
+  myStatus = 'active',
+  collectiveStatus = 'active',
+  targetInvited = false,
+}: WorldOptions): Responder {
   return (call) => {
     const eqValue = (column: string) => call.filters.find((f) => f[0] === 'eq' && f[1] === column)?.[2];
     if (call.table === 'venue_collectives' && call.op === 'select') {
@@ -85,17 +93,23 @@ function world({ model = 'legacy_copies', elsewhere = [], myStatus = 'active', c
         return { data: venue && elsewhere.includes(venue) ? [{ collective_id: 'other-collective' }] : [] };
       }
       if (call.columns === 'id, status') {
+        const wantsActive = call.filters.some((f) => f[0] === 'eq' && f[1] === 'status' && f[2] === 'active');
+        if (venue === MEMBER && targetInvited && wantsActive) return { data: null };
         if (venue === MEMBER) return { data: { id: 'membership-member', status: myStatus } };
         if (venue === HOST) return { data: { id: 'membership-host', status: 'active' } };
         return { data: null };
       }
-      // The "already invited or a member" lookup.
-      if (call.columns === 'id') return { data: null };
+      // The open-invitation lookup, and the "already invited or a member" one.
+      if (call.columns === 'id') {
+        const openInvitation = call.filters.some((f) => f[0] === 'eq' && f[1] === 'status' && f[2] === 'invited');
+        return { data: openInvitation && targetInvited ? { id: 'invitation-1' } : null };
+      }
       if (call.columns === 'status') return { data: [{ status: 'active' }, { status: 'active' }, { status: 'active' }] };
       return { data: [{ venue_id: HOST }, { venue_id: MEMBER }] };
     }
     if (call.table === 'venues' && call.op === 'select') return { data: { name: 'Bloom' } };
     if (call.table === 'rpc:collective_release_member') return { data: { operation_id: 'op-1' } };
+    if (call.table === 'venue_collective_members' && call.op === 'insert') return { data: { id: 'new-invite' } };
     return undefined;
   };
 }
@@ -212,5 +226,31 @@ describe('contract 9: listing on the old page after the end', () => {
     setListOnOldPage.mockClear();
     expect((await patch({ action: 'leave' })).status).toBe(409);
     expect(setListOnOldPage).not.toHaveBeenCalled();
+  });
+});
+
+describe('invitations on the shared-services model', () => {
+  it('audits a new invitation through the engine', async () => {
+    const recording = signIn(HOST, { model: 'replicas' });
+    expect((await patch({ action: 'invite', venueId: OUTSIDER })).status).toBe(200);
+    expect(recording.calls.filter((c) => c.table === 'rpc:collective_record_invitation').map((c) => c.payload)).toEqual([
+      { p_member_id: 'new-invite', p_actor_venue_id: HOST, p_actor_user_id: 'user-1' },
+    ]);
+  });
+
+  it('does not on the older model', async () => {
+    const recording = signIn(HOST);
+    await patch({ action: 'invite', venueId: OUTSIDER });
+    expect(recording.calls.some((c) => c.table === 'rpc:collective_record_invitation')).toBe(false);
+  });
+
+  it('withdraws an open invitation through the engine, releasing nothing (N34)', async () => {
+    const recording = signIn(HOST, { model: 'replicas', targetInvited: true });
+    expect((await patch({ action: 'remove', venueId: MEMBER })).status).toBe(200);
+    expect(recording.calls.filter((c) => c.table === 'rpc:collective_close_invitation').map((c) => c.payload)).toEqual([
+      { p_member_id: 'invitation-1', p_reason: 'withdrawn', p_actor_venue_id: HOST, p_actor_user_id: 'user-1' },
+    ]);
+    expect(recording.calls.some((c) => c.table === 'rpc:collective_release_member')).toBe(false);
+    expect(recording.calls.some((c) => c.table === 'venue_collective_members' && c.op === 'update')).toBe(false);
   });
 });

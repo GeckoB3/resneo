@@ -176,13 +176,25 @@ export async function PATCH(
           { status: eligibility.code ? 409 : 400 },
         );
       }
-      await ctx.admin.from('venue_collective_members').insert({
-        collective_id: collectiveId,
-        venue_id: input.venueId,
-        status: 'invited',
-        display_order: members.length,
-        invited_by_user_id: ctx.userId,
-      });
+      const { data: invited } = await ctx.admin
+        .from('venue_collective_members')
+        .insert({
+          collective_id: collectiveId,
+          venue_id: input.venueId,
+          status: 'invited',
+          display_order: members.length,
+          invited_by_user_id: ctx.userId,
+        })
+        .select('id')
+        .maybeSingle();
+      // On the shared-services model the invitation is audited, so History shows it (§6.7).
+      if (invited?.id && (await usesEngine())) {
+        await ctx.admin.rpc('collective_record_invitation', {
+          p_member_id: invited.id,
+          p_actor_venue_id: ctx.venueId,
+          p_actor_user_id: ctx.userId,
+        });
+      }
       await notifyCollectiveInvitation(
         ctx.admin,
         input.venueId,
@@ -260,13 +272,32 @@ export async function PATCH(
           .eq('venue_id', input.venueId)
           .eq('status', 'active')
           .maybeSingle();
-        // An open invitation is withdrawn the older way below: nothing was handed over to release.
         if (target) {
           const result = await runReleaseAction(releaseContext, 'remove', {
             id: target.id as string,
             venueId: input.venueId,
           });
           return result.ok ? finish() : result.response;
+        }
+        // An open invitation is withdrawn: nothing was handed over, so nothing is released (N34).
+        const { data: invitation } = await ctx.admin
+          .from('venue_collective_members')
+          .select('id')
+          .eq('collective_id', collectiveId)
+          .eq('venue_id', input.venueId)
+          .eq('status', 'invited')
+          .maybeSingle();
+        if (invitation) {
+          const { error } = await ctx.admin.rpc('collective_close_invitation', {
+            p_member_id: invitation.id,
+            p_reason: 'withdrawn',
+            p_actor_venue_id: ctx.venueId,
+            p_actor_user_id: ctx.userId,
+          });
+          if (error) {
+            return NextResponse.json({ error: 'Could not withdraw the invitation. Please try again.' }, { status: 500 });
+          }
+          return finish();
         }
       }
       await ctx.admin

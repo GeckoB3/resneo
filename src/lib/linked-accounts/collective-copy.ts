@@ -361,6 +361,18 @@ export const COLLECTIVE_COPY = {
   'la.row.ended': 'Ended on {date}',
   'la.row.listOnOldPage': 'List {venue} on the old {collective} page',
 
+  // Invitations (lifecycle-reminders.ts and the notice drain; UX spec N1, N34, N35)
+  'notify.invite.subject': '{host} invited you to join {collective}',
+  'notify.invite.body':
+    "{host} has invited {venue} to join {collective}, so your calendars and theirs work as one business with one booking page. If you join, {host} manages the services on the page, including their prices and forms, and clients pay you directly. Each venue keeps its own clients and bookings, and while the collective runs the venues can see each other's client records and takings. You can leave at any time.",
+  'notify.invite.cta': 'Review invitation',
+  'notify.inviteWithdrawn.subject': '{host} withdrew the invitation to {collective}',
+  'notify.inviteWithdrawn.body':
+    '{host} has withdrawn its invitation for {venue} to join {collective}. Nothing has changed in your account, and {host} can invite you again later.',
+  'notify.inviteExpired.subject': 'The invitation to {collective} has expired',
+  'notify.inviteExpired.body':
+    'The invitation for {venue} to join {collective} was not answered within 30 days, so it has closed. {host} can send a new one.',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

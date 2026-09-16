@@ -8,6 +8,7 @@ import { syncMemberSuspensions } from '@/lib/linked-accounts/replicas/collective
 import { endCollectivesBelowTwo } from '@/lib/linked-accounts/replicas/below-two';
 import { runAdoptionDeadlines } from '@/lib/linked-accounts/replicas/adoptions';
 import { releaseExpiredDissolvedAddresses } from '@/lib/linked-accounts/replicas/dissolved-page';
+import { runLifecycleReminders } from '@/lib/linked-accounts/replicas/lifecycle-reminders';
 
 /**
  * GET/POST /api/cron/collective-verify: daily, read the collective invariant report, repair lag,
@@ -50,6 +51,16 @@ async function handlePost(request: NextRequest) {
     counters.errors += adoptions.errors;
   } catch (err) {
     console.error('[collective] adoption deadlines threw:', err);
+    counters.errors += 1;
+  }
+  // Reminders (N1, N20, N21, N23) and invitations closed after 30 days (N35).
+  try {
+    const reminders = await runLifecycleReminders(supabase);
+    counters.results.lifecycle_reminders = reminders.reminders;
+    counters.results.invitations_expired = reminders.invitations_expired;
+    counters.errors += reminders.errors;
+  } catch (err) {
+    console.error('[collective] lifecycle reminders threw:', err);
     counters.errors += 1;
   }
   // An ended collective's neutral page runs for 90 days; then its address is free (D25).

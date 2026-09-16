@@ -3390,7 +3390,7 @@ said, because only the engine may write `collective_audit_events`: they are two 
 sets the pending columns, audits the step and queues its notice. The acceptance is audited as the new
 event type `host_transfer_accepted`. The candidate's refusal is its own action, `decline_host`, which
 calls `collective_cancel_host_transfer` with the candidate as actor. The notices the engine queues
-(N19 to N23) are sent by a drain in the replicate cron. The N20 and N21 reminders are not built yet.
+(N19 to N23) are sent by a drain in the replicate cron. The reminders (N1 at day 7, N20 after 3 days, N21 two days before, N23 on day 23) are queued daily by the verify cron as keyed `notice` jobs (`lifecycle-reminders.ts`), which also closes invitations at 30 days through `collective_close_invitation` (20270218170000, with N34 on withdrawal and N35 on expiry); the drain sends a reminder only while its subject still stands.
 
 **Built 2026-09-16, with two additions.** The body takes `acknowledge_affected`, because a
 removal that would leave bookings behind writes nothing and comes back as the per-op code

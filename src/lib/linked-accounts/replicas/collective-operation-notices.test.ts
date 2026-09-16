@@ -175,6 +175,83 @@ describe('drainOperationNotices', () => {
     expect(subjects()).toEqual(['Eastside has ended', 'Eastside has ended']);
   });
 
+  describe('reminders', () => {
+    const live = (fields: Record<string, unknown>): Responder => (call) =>
+      call.table === 'venue_collectives'
+        ? {
+            data: {
+              id: 'collective-1',
+              name: 'Northside',
+              host_venue_id: 'host',
+              status: 'active',
+              paused_at: null,
+              pending_host_venue_id: null,
+              host_transfer_at: null,
+              ...fields,
+            },
+          }
+        : undefined;
+    const reminder = (notice: string, progress: Record<string, unknown> = {}) =>
+      op(notice, { progress: { notice, reminder: true, ...progress } });
+
+    it('reminds a venue still asked to host, and not one whose request has moved on (N20)', async () => {
+      await drain(world([reminder('N20')], live({ pending_host_venue_id: 'member' }))).outcome;
+      expect(told()).toEqual(['member']);
+      notifyVenue.mockClear();
+      await drain(world([reminder('N20')], live({ pending_host_venue_id: 'third' }))).outcome;
+      expect(notifyVenue).not.toHaveBeenCalled();
+    });
+
+    it('reminds of the move only if the day is unchanged (N21)', async () => {
+      const at = '2026-10-15T09:00:00Z';
+      await drain(world([reminder('N21', { host_transfer_at: at })], live({ pending_host_venue_id: 'member', host_transfer_at: '2026-10-15T09:00:00.000Z' }))).outcome;
+      expect(subjects()[0]).toBe('Zen Studio will host Northside from 15 October');
+      notifyVenue.mockClear();
+      await drain(world([reminder('N21', { host_transfer_at: at })], live({ pending_host_venue_id: 'member', host_transfer_at: '2026-10-20T09:00:00Z' }))).outcome;
+      expect(notifyVenue).not.toHaveBeenCalled();
+    });
+
+    it('reminds of a pause only while the same pause lasts (N23)', async () => {
+      const pausedAt = '2026-10-01T08:00:00Z';
+      await drain(world([reminder('N23', { paused_at: pausedAt })], live({ paused_at: pausedAt }))).outcome;
+      expect(notifyVenue).toHaveBeenCalled();
+      notifyVenue.mockClear();
+      await drain(world([reminder('N23', { paused_at: pausedAt })], live({ paused_at: null }))).outcome;
+      expect(notifyVenue).not.toHaveBeenCalled();
+    });
+
+    it('sends the invitation again only while it is open (N1)', async () => {
+      const open = drain(
+        world([reminder('N1')], (call) => (call.table === 'venue_collective_members' ? { data: { id: 'm-1' } } : undefined)),
+      );
+      await open.outcome;
+      expect(subjects()).toEqual(['Host Venue invited you to join Northside']);
+      const params = (notifyVenue.mock.calls[0] as unknown as [unknown, string, string, { ctaLabel: string }])[3];
+      expect(params.ctaLabel).toBe('Review invitation');
+      notifyVenue.mockClear();
+      await drain(
+        world([reminder('N1')], (call) => (call.table === 'venue_collective_members' ? { data: null } : undefined)),
+      ).outcome;
+      expect(notifyVenue).not.toHaveBeenCalled();
+    });
+  });
+
+  it('emails the invitee that an invitation was withdrawn, with no bell (N34)', async () => {
+    await drain(world([op('N34')])).outcome;
+    expect(told()).toEqual(['member']);
+    expect(subjects()).toEqual(['Host Venue withdrew the invitation to Northside']);
+    expect((notifyVenue.mock.calls[0] as unknown as unknown[])[4]).toBe(false);
+  });
+
+  it('rings the invitee and the host when an invitation expires (N35)', async () => {
+    const { recording, outcome } = drain(world([op('N35')]));
+    await outcome;
+    expect(notifyVenue).not.toHaveBeenCalled();
+    const bells = recording.calls.filter((c) => c.table === 'account_link_notifications');
+    expect(bells.map((b) => (b.payload as { venue_id: string }).venue_id)).toEqual(['member', 'host']);
+    expect(bells[0]!.payload).toMatchObject({ payload: { title: 'The invitation to Northside has expired' } });
+  });
+
   it('marks a sent notice done', async () => {
     const { recording, outcome } = drain(world([op('N22')]));
     await outcome;

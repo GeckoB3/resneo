@@ -14,6 +14,12 @@
  *   N36  a member's subscription lapsed  that member
  *   N37  and came back                   that member (a bell only)
  *   N26  the host wants to use a member's service   that member, and again at day 7
+ *   N1   an invitation still open at day 7            the invitee (the first N1 is the invite route's)
+ *   N34  the host withdrew an invitation              the invitee, by email
+ *   N35  an invitation expired after 30 days          the invitee and the host, by bell
+ *
+ * A reminder (`progress.reminder`) of N20, N21 or N23 is sent only while what it reminds about still
+ * stands: the same venue still asked, the same day still set, the page still paused since then.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyVenue } from '@/lib/linked-accounts/notifications';
@@ -102,7 +108,7 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
   const notice = String(op.progress?.notice ?? '');
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, name, host_venue_id, dissolved_at, paused_at')
+    .select('id, name, host_venue_id, dissolved_at, paused_at, status, pending_host_venue_id, host_transfer_at')
     .eq('id', op.collective_id)
     .maybeSingle();
   if (!collective && notice === 'N19' && op.progress?.host_deleted === true) {
@@ -149,6 +155,75 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
       );
     }
   };
+
+  if (op.progress?.reminder === true && ['N20', 'N21', 'N23'].includes(notice)) {
+    const sameTime = (a: unknown, b: unknown) =>
+      typeof a === 'string' && typeof b === 'string' && Date.parse(a) === Date.parse(b);
+    const stands =
+      collective.status === 'active' &&
+      (notice === 'N20'
+        ? collective.pending_host_venue_id === op.venue_id && !collective.host_transfer_at
+        : notice === 'N21'
+          ? collective.pending_host_venue_id === op.venue_id &&
+            sameTime(collective.host_transfer_at, op.progress?.host_transfer_at)
+          : sameTime(collective.paused_at, op.progress?.paused_at));
+    if (!stands) return;
+  }
+
+  if (notice === 'N1' || notice === 'N34' || notice === 'N35') {
+    if (!op.venue_id) throw new Error(`${notice} without a venue`);
+    const hostId = collective.host_venue_id as string;
+    const venueNames = await names([hostId, op.venue_id]);
+    const params = {
+      host: venueNames.get(hostId) ?? 'The host',
+      venue: venueNames.get(op.venue_id) ?? 'your venue',
+      collective: collectiveName,
+    };
+    if (notice === 'N1') {
+      // A reminder: only while the invitation is still open.
+      const { data: still } = await admin
+        .from('venue_collective_members')
+        .select('id')
+        .eq('collective_id', op.collective_id)
+        .eq('venue_id', op.venue_id)
+        .eq('status', 'invited')
+        .maybeSingle();
+      if (!still) return;
+      const subject = collectiveCopy('notify.invite.subject', params);
+      const base = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.resneo.com').replace(/\/$/, '');
+      await notifyVenue(
+        admin,
+        op.venue_id,
+        subject,
+        {
+          heading: subject,
+          paragraphs: [collectiveCopy('notify.invite.body', params)],
+          ctaLabel: collectiveCopy('notify.invite.cta'),
+          ctaUrl: `${base}/dashboard/settings?tab=linked-accounts`,
+        },
+        { type: 'collective_n1', category: 'collective', collectiveId: op.collective_id },
+      );
+      return;
+    }
+    if (notice === 'N34') {
+      const subject = collectiveCopy('notify.inviteWithdrawn.subject', params);
+      // Email only (UX spec §4): the invitee has nothing to act on.
+      await notifyVenue(
+        admin,
+        op.venue_id,
+        subject,
+        { heading: subject, paragraphs: [collectiveCopy('notify.inviteWithdrawn.body', params)] },
+        false,
+      );
+      return;
+    }
+    const subject = collectiveCopy('notify.inviteExpired.subject', params);
+    const body = collectiveCopy('notify.inviteExpired.body', params);
+    for (const venueId of [op.venue_id, hostId]) {
+      await recordBell(admin, venueId, subject, body, { type: 'collective_n35', collectiveId: op.collective_id });
+    }
+    return;
+  }
 
   if (notice === 'N20') {
     if (!op.venue_id) throw new Error('N20 without a venue');

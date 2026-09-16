@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/primitives/Button';
 import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
 import type { CollectiveSync } from '@/lib/linked-accounts/replicas/inline-apply';
+import { syncFailureReason } from '@/lib/linked-accounts/replicas/sync-reasons';
 
 /** The host has 60 seconds to put a change back (D50); the route refuses after that. */
 export const UNDO_WINDOW_MS = 60_000;
@@ -156,13 +157,5 @@ export function CollectiveSaveSummary({
   );
 }
 
-/** The engine's failure codes in the host's words; anything else stays vague rather than technical. */
-export function syncFailureReason(code: string | null | undefined, venueName: string): string {
-  if (code === 'lock_timeout' || code === '55P03' || code === 'busy') {
-    return collectiveCopy('sync.reason.busy', { venue: venueName });
-  }
-  if (code === 'membership_suspended' || code === 'subscription_lapsed') {
-    return collectiveCopy('sync.reason.subscription', { venue: venueName });
-  }
-  return collectiveCopy('sync.reason.unknown');
-}
+/** Kept here so existing imports still work; the one mapping lives in sync-reasons.ts. */
+export { syncFailureReason } from '@/lib/linked-accounts/replicas/sync-reasons';

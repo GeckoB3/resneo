@@ -252,6 +252,17 @@ export const COLLECTIVE_COPY = {
   'ov.grid.done': 'Done',
 
   // Notices (collective-notices.ts; UX spec §4)
+  'notify.failedHost.subject': '{service} could not be updated at {venue}',
+  'notify.failedHost.body':
+    "Your latest change to {service} has not reached {venue}: {reason}. Until it does, guests cannot book {service} on {venue}'s calendars. We are still trying.",
+  'notify.failedHost.bodyMany':
+    "Your latest changes to {service} have not reached {venue}: {reason}. Until they do, guests cannot book them on {venue}'s calendars. We are still trying.",
+  'notify.failedMember.subject': '{service} from {host} is not up to date',
+  'notify.failedMember.subjectMany': '{service} from {host} are not up to date',
+  'notify.failedMember.body':
+    'Guests cannot book {service} on your calendars until it updates. {host} has been told, and we are still trying.',
+  'notify.failedMember.bodyMany':
+    'Guests cannot book {service} on your calendars until they update. {host} has been told, and we are still trying.',
   'notify.offered.subject': '{host} added {service} to {collective}',
   'notify.offered.body': '{service} is set up in your account. Choose which of your calendars offer it.',
   'notify.hostCalendar.added.subject': '{host} added {calendar} to {service}',
@@ -265,6 +276,8 @@ export const COLLECTIVE_COPY = {
   'notify.valuesCleared.subject': 'Custom values for {service} were cleared',
   'notify.valuesCleared.body':
     '{host} no longer lets calendars set their own {field} for {service}. {calendars} now use the standard value, {value}.',
+  'notify.valuesCleared.bodyOne':
+    '{host} no longer lets calendars set their own {field} for {service}. {calendars} now uses the standard value, {value}.',
   'notify.pageBooking.subject': 'New booking with {venue} on the {collective} page',
   'notify.pageBooking.body':
     "A guest booked {service} with {calendar} at {venue} for {date}. {venue} holds the booking and the client's details.",

@@ -21,7 +21,7 @@ const dashboardUrl = (path: string): string => {
  * A bell without an email: the venue sees it next time it looks, and nothing lands in its inbox.
  * Used where an email would be noise (one line in the day's digest, or a page that books all day).
  */
-async function recordBell(
+export async function recordBell(
   admin: SupabaseClient,
   venueId: string,
   title: string,

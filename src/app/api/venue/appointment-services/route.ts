@@ -5,6 +5,7 @@ import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { noticeNames, notifyHostCalendarChange } from '@/lib/linked-accounts/replicas/collective-notices';
 import { hostOwnedFieldsInSave, loadMemberServiceContext } from '@/lib/linked-accounts/replicas/member-save';
+import { clearMemberCalendarValues } from '@/lib/linked-accounts/replicas/member-values-clear';
 import {
   loadMasterSaveContext,
   captureMasterProjection,
@@ -1832,6 +1833,16 @@ export async function PATCH(request: NextRequest) {
         before: serviceRow as Record<string, unknown>,
         after: savedRow,
       });
+      // The same, at every member holding a copy: their calendars stored values under the same
+      // permission, and they must not come back when the host ticks it again (D6, N15).
+      const clearedMemberValues = await clearMemberCalendarValues(admin, {
+        context: masterContext,
+        serviceName: String(savedRow.name ?? 'A service'),
+        before: serviceRow as Record<string, unknown>,
+        after: savedRow,
+        actorVenueId: staff.venue_id,
+        actorUserId: null,
+      });
 
       const [variantMap, addonGroupMap] = await Promise.all([
         loadVariantsForServices({
@@ -1856,6 +1867,7 @@ export async function PATCH(request: NextRequest) {
         addon_groups: addonGroupMap.get(id as string) ?? [],
         ...(clearedCalendarValues.length > 0 ? { cleared_calendar_values: clearedCalendarValues } : {}),
         ...(collectiveSync ? { collective_sync: collectiveSync } : {}),
+        ...(clearedMemberValues.length > 0 ? { cleared_member_values: clearedMemberValues } : {}),
       });
     }
 

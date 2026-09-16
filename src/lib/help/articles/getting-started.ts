@@ -27,6 +27,7 @@ import { article as reports } from './getting-started/reports';
 import { article as importingData } from './getting-started/importing-data';
 import { article as referAndEarn } from './getting-started/refer-and-earn';
 import { article as linkedVenues } from './getting-started/linked-venues';
+import { article as venueCollectives } from './getting-started/venue-collectives';
 
 export const gettingStartedCategory: HelpCategory = {
   slug: 'getting-started',
@@ -34,5 +35,5 @@ export const gettingStartedCategory: HelpCategory = {
   description:
     "Everything you need to set up and run ResNeo for your appointments business: your profile, hours, payments, booking page, services, classes, events, resources, your team, the daily tools, communications, reports, and more, all in plain language.",
   plan: 'all',
-  articles: [welcome, signingIn, dashboardOverview, setupChecklist, businessProfile, businessAndCalendarHours, stripePayments, publicBookingPage, whatYourClientsSee, optionalBookingFeatures, staffFirstBooking, staff, services, classes, events, resources, calendar, bookingsList, newBooking, contacts, yourClientsResneoAccount, waitlist, compliance, communications, reports, importingData, referAndEarn, linkedVenues],
+  articles: [welcome, signingIn, dashboardOverview, setupChecklist, businessProfile, businessAndCalendarHours, stripePayments, publicBookingPage, whatYourClientsSee, optionalBookingFeatures, staffFirstBooking, staff, services, classes, events, resources, calendar, bookingsList, newBooking, contacts, yourClientsResneoAccount, waitlist, compliance, communications, reports, importingData, referAndEarn, linkedVenues, venueCollectives],
 };

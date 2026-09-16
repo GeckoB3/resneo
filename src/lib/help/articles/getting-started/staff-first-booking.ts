@@ -64,7 +64,7 @@ If **Appointment waitlist** is on, the same card also offers to join your waitli
 
 When **Any available practitioner** is also on, an **Any available** card ("First available time across the team") sits at the top of the picker whenever more than one person is bookable. Clients who do not mind who they see can take it: they see the whole team's service list with "from" prices, the banner reads **Booking with whoever is available first**, and they get the first free time across the team, exactly as before. **See someone else** is not offered from this route, because it already covered everyone.
 
-On a combined page the card appears only when at least one service is offered on the same terms by every venue. If the client then picks a service that differs by venue, the page asks them to choose a calendar after all, explaining that the service is a little different for each person.
+On a combined page the card appears only when at least one service is offered on the same terms on every calendar. If the client then picks a service whose options, extras or price differ from one calendar to another, the page asks them to choose a calendar after all, explaining that the service is a little different for each person.
 
 ## Group bookings
 

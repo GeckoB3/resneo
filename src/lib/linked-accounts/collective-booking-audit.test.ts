@@ -10,7 +10,7 @@ import { recordBookingWriteAudit, recordCollectiveBookingAudit } from './audit';
  * 20270215120000, so no pairwise link is invented for it (D41).
  */
 function admin() {
-  const insert = vi.fn(() => Promise.resolve({ error: null }));
+  const insert = vi.fn((_row: Record<string, unknown>) => Promise.resolve({ error: null }));
   const from = vi.fn(() => ({ insert }));
   return { client: { from } as unknown as SupabaseClient, from, insert };
 }

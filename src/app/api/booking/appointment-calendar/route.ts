@@ -5,6 +5,7 @@ import {
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isParked, loadBookableServiceIds } from '@/lib/linked-accounts/replicas/parking';
+import { loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
 import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import {
@@ -152,8 +153,12 @@ async function handleAppointmentCalendarGet(request: NextRequest) {
       );
     }
 
-    // D2: a parked service has no dates to offer for a new booking.
-    if (isParked(await loadBookableServiceIds(supabase as unknown as RpcClient, venueId), serviceId)) {
+    // D2 and "staff bookings only": neither offers a guest any dates.
+    const [bookableIds, staffOnlyIds] = await Promise.all([
+      loadBookableServiceIds(supabase as unknown as RpcClient, venueId),
+      loadStaffOnlyServiceIds(supabase, [serviceId]),
+    ]);
+    if (isParked(bookableIds, serviceId) || staffOnlyIds.has(serviceId)) {
       return NextResponse.json(
         {
           venue_id: venueId,

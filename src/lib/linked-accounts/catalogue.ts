@@ -113,6 +113,9 @@ export async function loadVenueCatalogueData(
     ({ practitioners } = await fetchAppointmentCatalog(admin, venueId, {
       includeCalendarsWithoutServices: true,
       includeParked: true,
+      // Both the combined-page builder and the collective builds need every service; the public
+      // combined page drops staff-only ones per provider (buildDerivedCatalogueItems).
+      audience: 'staff',
     }));
   } catch {
     practitioners = [];
@@ -1123,7 +1126,7 @@ async function loadDerivedCatalogueItems(
   ];
   const venueIds = Object.keys(venues);
   const [paymentRes, serviceFormsRes, venueFormsRes] = await Promise.all([
-    admin.from('service_items').select('id, payment_requirement').in('id', serviceIds),
+    admin.from('service_items').select('id, payment_requirement, is_bookable_online').in('id', serviceIds),
     admin.from('service_compliance_requirements').select('service_item_id').in('service_item_id', serviceIds),
     admin.from('service_compliance_requirements').select('venue_id').eq('scope', 'venue').in('venue_id', venueIds),
   ]);
@@ -1144,5 +1147,8 @@ async function loadDerivedCatalogueItems(
     ),
     serviceIdsWithForms: new Set((serviceFormsRes.data ?? []).map((r) => r.service_item_id as string)),
     venueIdsWithVenueWideForms: new Set((venueFormsRes.data ?? []).map((r) => r.venue_id as string)),
+    staffOnlyServiceIds: new Set(
+      (paymentRes.data ?? []).filter((r) => r.is_bookable_online === false).map((r) => r.id as string),
+    ),
   });
 }

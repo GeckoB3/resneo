@@ -48,7 +48,7 @@ describe('parked services are refused on every create path (D2)', () => {
     '%s offers no slots for a parked service, except when moving an existing booking',
     (rel) => {
       const src = read(rel);
-      expect(src).toMatch(/if \(!excludeBookingId[^{]*\{\s*const bookable = await loadBookableServiceIds/);
+      expect(src).toMatch(/if \(!excludeBookingId[^{]*\{[\s\S]{0,400}?loadBookableServiceIds\(/);
       expect(src).toMatch(/isParked\(bookable/);
     },
   );
@@ -57,7 +57,7 @@ describe('parked services are refused on every create path (D2)', () => {
     '%s offers no month dates for a parked service',
     (rel) => {
       const src = read(rel);
-      expect(src).toContain('isParked(await loadBookableServiceIds(');
+      expect(src).toMatch(/isParked\((await loadBookableServiceIds\(|bookableIds)/);
       expect(src).toMatch(/available_dates: \[\]/);
     },
   );

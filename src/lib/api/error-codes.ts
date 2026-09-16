@@ -148,6 +148,12 @@ export const API_ERROR_CODES = [
    */
   'COLLECTIVE_SERVICE_PARKED',
 
+  /**
+   * The service is marked "staff bookings only" (`is_bookable_online = false`), so a guest-facing
+   * source cannot book it; staff sources (phone, walk-in) still can.
+   */
+  'SERVICE_NOT_BOOKABLE_ONLINE',
+
   // ── Generic ─────────────────────────────────────────────────────────────
   'VALIDATION_FAILED',
   'NOT_FOUND',

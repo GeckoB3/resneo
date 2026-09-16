@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
+import { isStaffBookingSource, loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
+import { apiError } from '@/lib/api/error-codes';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
@@ -636,6 +638,17 @@ export async function POST(request: NextRequest) {
         { error: 'Venue has not set up payments; deposits are required for these services.' },
         { status: 400 }
       );
+    }
+
+    // "Staff bookings only" (plan §6.6): staff sources may book it, a guest source may not.
+    if (!isStaffBookingSource(source)) {
+      const staffOnly = await loadStaffOnlyServiceIds(supabase, validatedPeople.map((p) => p.appointment_service_id));
+      if (validatedPeople.some((p) => staffOnly.has(p.appointment_service_id))) {
+        return NextResponse.json(
+          apiError('This service is not bookable online. Please contact the venue to book it.', 'SERVICE_NOT_BOOKABLE_ONLINE'),
+          { status: 409 },
+        );
+      }
     }
 
     // D2: a venue live in a collective takes new bookings only for the collective's services.

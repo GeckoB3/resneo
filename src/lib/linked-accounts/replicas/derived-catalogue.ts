@@ -13,7 +13,9 @@
  *   - `behind`: its venue's replica has not converged to the latest revision (never the host);
  *   - `payments`: the service takes payment and the venue cannot take card charges;
  *   - `forms`: the service needs a form (its own requirement or a venue-wide one) and the venue has
- *     forms switched off.
+ *     forms switched off;
+ *   - `staff_only`: the service is marked "staff bookings only" (`is_bookable_online = false`), so
+ *     guests never book it themselves while staff still can.
  *
  * Pure: the caller reads the rows (catalogue.ts) and this decides.
  */
@@ -24,7 +26,7 @@ import type { PublicCatalogueItem, PublicCatalogueProvider, VenueCatalogueData }
 /** The same key as catalogue.ts `calendarServiceTermsKey`. */
 const termsKey = (calendarId: string, serviceId: string) => `${calendarId}:${serviceId}`;
 
-export type ProviderExclusion = 'suspended' | 'behind' | 'payments' | 'forms';
+export type ProviderExclusion = 'suspended' | 'behind' | 'payments' | 'forms' | 'staff_only';
 
 export interface DerivedOffering {
   id: string;
@@ -65,6 +67,8 @@ export interface DerivedCatalogueInput {
   serviceIdsWithForms: Set<string>;
   /** Venues with at least one venue-wide form requirement. */
   venueIdsWithVenueWideForms: Set<string>;
+  /** Service ids marked "staff bookings only". */
+  staffOnlyServiceIds: Set<string>;
 }
 
 export interface DerivedCatalogueItem extends PublicCatalogueItem {
@@ -113,7 +117,9 @@ export function buildDerivedCatalogueItems(input: DerivedCatalogueInput): Derive
             : (input.serviceIdsWithForms.has(source.serviceId) || input.venueIdsWithVenueWideForms.has(source.venueId)) &&
                 !venue.formsOn
               ? 'forms'
-              : null;
+              : input.staffOnlyServiceIds.has(source.serviceId)
+                ? 'staff_only'
+                : null;
       for (const calendarId of data.serviceCalendars.get(source.serviceId) ?? []) {
         const terms = data.calendarServiceTerms.get(termsKey(calendarId, source.serviceId));
         const provider: PublicCatalogueProvider = {

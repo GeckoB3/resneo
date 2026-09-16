@@ -45,6 +45,7 @@ function input(over: Partial<DerivedCatalogueInput> = {}): DerivedCatalogueInput
     paidServiceIds: new Set(),
     serviceIdsWithForms: new Set(),
     venueIdsWithVenueWideForms: new Set(),
+    staffOnlyServiceIds: new Set(),
     ...over,
   };
 }
@@ -93,6 +94,12 @@ describe('buildDerivedCatalogueItems', () => {
       venueIdsWithVenueWideForms: new Set(['member']), venues: { host: venue(), member: venue({ formsOn: false }) },
     }))[0]!;
     expect(venueWide.providers.map((p) => p.venueId)).toEqual(['host']);
+  });
+
+  it('keeps a staff-only service for staff and hides it from guests', () => {
+    const [item] = buildDerivedCatalogueItems(input({ staffOnlyServiceIds: new Set(['r1']) }));
+    expect(item!.providers.map((p) => p.venueId)).toEqual(['host']);
+    expect(item!.excluded.every((e) => e.reason === 'staff_only')).toBe(true);
   });
 
   it('ignores an offering with nothing to show, an ineligible venue, and a link with no replica yet', () => {

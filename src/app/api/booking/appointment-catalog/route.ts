@@ -91,6 +91,8 @@ export async function GET(request: NextRequest) {
       practitionerSlug: practitionerSlug || undefined,
       includeHiddenAddons,
       everyCalendarEveryService: overrideRequested,
+      // A staff session sees "staff bookings only" services; the public does not.
+      audience: includeHiddenAddons ? 'staff' : 'public',
     });
     if (practitionerSlug && catalog.practitioners.length === 0) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });

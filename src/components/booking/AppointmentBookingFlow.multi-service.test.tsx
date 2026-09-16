@@ -127,14 +127,14 @@ function jsonResponse(body: unknown): Response {
 
 type CreateCall = { url: string; body: Record<string, unknown> };
 
-function installFetch(): { urls: string[]; creates: CreateCall[] } {
+function installFetch(practitioners: CatalogPractitioner[] = catalog()): { urls: string[]; creates: CreateCall[] } {
   const urls: string[] = [];
   const creates: CreateCall[] = [];
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : String(input);
     urls.push(url);
     const params = new URLSearchParams(url.split('?')[1] ?? '');
-    if (url.includes('/api/booking/appointment-catalog')) return jsonResponse({ practitioners: catalog() });
+    if (url.includes('/api/booking/appointment-catalog')) return jsonResponse({ practitioners });
     if (url.includes('appointment-calendar')) return jsonResponse({ available_dates: [todayYmd()] });
     if (url.includes('validate-appointment-slot')) return jsonResponse({ ok: true, valid: true });
     if (url.includes('/api/booking/create') || url.includes('/api/venue/bookings')) {
@@ -244,6 +244,37 @@ describe('the picker', () => {
     expect(bar).toHaveTextContent('1 service');
     tick('Haircut');
     expect(screen.queryByTestId('service-picker-bar')).not.toBeInTheDocument();
+  });
+
+  it('on a collective page, says a visit stays at one venue and does not move on (BM-06)', async () => {
+    // Ada (one venue) only cuts; Ben (another) only waxes: nobody can take both in one visit.
+    installFetch([
+      { ...ADA, services: [service(HAIRCUT, 'Haircut', 3000)] },
+      { ...BEN, services: [service(WAXING, 'Waxing', 1500, { duration_minutes: 15 })] },
+    ]);
+    render(<AppointmentBookingFlow venue={venue({ is_collective: true })} />);
+    await startSingleBooking();
+
+    tick('Haircut');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    tick('Waxing');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'All the services in one visit have to be with the same person, so they are at one venue.',
+    );
+    clickButton(/^Continue$/);
+    expect(screen.getByRole('heading', { name: 'Select a service' })).toBeInTheDocument();
+
+    tick('Waxing');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('says nothing on a collective page when one person offers them all', async () => {
+    installFetch();
+    render(<AppointmentBookingFlow venue={venue({ is_collective: true })} />);
+    await startSingleBooking();
+    tick('Haircut');
+    tick('Waxing');
+    expect(screen.queryByText(/have to be with the same person/)).not.toBeInTheDocument();
   });
 
   it('stops at four services', async () => {

@@ -202,6 +202,11 @@ export function JoinCollectiveDialog({ open, onClose, collectiveId, venueName, o
                   <li key={n}>{collectiveCopy(`join.means.${n}` as 'join.means.1', { host, collective })}</li>
                 ))}
               </ul>
+              {preview.other_models ? (
+                <p className="text-amber-800">
+                  {collectiveCopy('bm.join.otherModels', { modelList: preview.other_models, collective })}
+                </p>
+              ) : null}
               {preview.warnings.no_stripe_paid_services > 0 ? (
                 <p className="text-amber-800">
                   {collectiveCopy('join.warn.noStripe', { count: preview.warnings.no_stripe_paid_services })}

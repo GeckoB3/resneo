@@ -26,8 +26,8 @@ export function collectiveView(overrides: Partial<CollectiveView> = {}): Collect
     pausedAt: null,
     pendingHost: null,
     members: [
-      { venueId: 'v-host', venueName: 'Plus 1', venueSlug: 'plus-1-venue', status: 'active', displayOrder: 0, soloPageBehavior: 'keep_live' },
-      { venueId: 'v-member', venueName: 'Light 3', venueSlug: 'light-3', status: 'active', displayOrder: 1, soloPageBehavior: 'keep_live' },
+      { venueId: 'v-host', venueName: 'Plus 1', venueSlug: 'plus-1-venue', status: 'active', displayOrder: 0, soloPageBehavior: 'keep_live', alsoRuns: null },
+      { venueId: 'v-member', venueName: 'Light 3', venueSlug: 'light-3', status: 'active', displayOrder: 1, soloPageBehavior: 'keep_live', alsoRuns: null },
     ],
     activeMemberCount: 2,
     ...overrides,

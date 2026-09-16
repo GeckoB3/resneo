@@ -39,6 +39,7 @@ interface CollectiveMemberRow {
   venueId: string;
   venueName: string;
   status: string;
+  alsoRuns?: string | null;
 }
 
 interface CollectiveListEntry {
@@ -133,6 +134,7 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
           venue_name: m.venueName,
           status: m.status as 'active' | 'invited',
           is_host: m.venueId === hostVenueId,
+          also_runs: m.alsoRuns ?? null,
         }));
   }, [entry]);
 

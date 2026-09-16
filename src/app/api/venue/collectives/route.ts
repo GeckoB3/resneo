@@ -4,7 +4,7 @@ import { createCollectiveSchema } from '@/lib/linked-accounts/validation';
 import { loadCollectiveViewsForVenue } from '@/lib/linked-accounts/collectives';
 import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import { notifyCollectiveInvitation } from '@/lib/linked-accounts/notifications';
-import { exclusivityRefusal } from '@/lib/linked-accounts/collective-venue-locks';
+import { exclusivityRefusal, noAppointmentsRefusal } from '@/lib/linked-accounts/collective-venue-locks';
 import { releaseDissolvedAddress } from '@/lib/linked-accounts/replicas/dissolved-page';
 
 /** GET /api/venue/collectives — collectives this venue hosts or belongs to. */
@@ -91,6 +91,8 @@ export async function POST(request: NextRequest) {
     // One live collective per venue (§6.7): an invitee already in one is refused by name.
     const taken = await exclusivityRefusal(ctx.admin, inviteVenueIds, undefined, 'invite');
     if (taken) return withField(taken, 'venues');
+    const noAppointments = await noAppointmentsRefusal(ctx.admin, inviteVenueIds);
+    if (noAppointments) return withField(noAppointments, 'venues');
 
     // Slug uniqueness among collectives.
     const { data: slugTaken } = await ctx.admin

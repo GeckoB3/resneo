@@ -18,6 +18,7 @@ import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api/error-codes';
 import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { currencyMismatchWords, normalCurrency } from '@/lib/linked-accounts/collective-currency';
+import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 
 export interface VenueCollectiveLock {
   collectiveId: string;
@@ -88,6 +89,35 @@ export async function exclusivityRefusal(
       error = collectiveCopy('invite.block.otherCollective', { venue: (venue?.name as string | undefined) ?? 'That venue' });
     }
     return NextResponse.json(apiError(error, 'COLLECTIVE_VENUE_IN_OTHER_COLLECTIVE'), { status: 409 });
+  }
+  return null;
+}
+
+/**
+ * A venue with no active appointments model cannot be invited or accept (BM-01): the page shows
+ * appointments only, so it would join and add nothing. The 409, or null.
+ */
+export async function noAppointmentsRefusal(admin: SupabaseClient, venueIds: string[]): Promise<NextResponse | null> {
+  if (venueIds.length === 0) return null;
+  const { data: venues } = await admin
+    .from('venues')
+    .select('id, name, pricing_tier, booking_model, enabled_models, active_booking_models')
+    .in('id', venueIds);
+  for (const venue of venues ?? []) {
+    const models = resolveActiveBookingModels({
+      pricingTier: venue.pricing_tier as string | null,
+      bookingModel: venue.booking_model as never,
+      enabledModels: venue.enabled_models,
+      activeBookingModels: venue.active_booking_models,
+    });
+    if (models.includes('unified_scheduling' as never)) continue;
+    return NextResponse.json(
+      apiError(
+        collectiveCopy('bm.invite.noAppointments', { venue: (venue.name as string | null) ?? 'That venue' }),
+        'COLLECTIVE_NO_APPOINTMENTS',
+      ),
+      { status: 409 },
+    );
   }
   return null;
 }

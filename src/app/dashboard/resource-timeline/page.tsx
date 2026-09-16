@@ -5,6 +5,8 @@ import { ToastProvider } from '@/components/ui/Toast';
 import { ResourceTimelineView } from './ResourceTimelineView';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { findCollectiveLockForVenue } from '@/lib/linked-accounts/collective-venue-locks';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 export default async function ResourceTimelinePage() {
   const supabase = await createClient();
@@ -34,10 +36,17 @@ export default async function ResourceTimelinePage() {
     staff.role === 'admin' || !staff.id
       ? []
       : await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
+  // D45: a collective shares no rooms or equipment, and two venues listing one room can double-book it.
+  const inCollective = Boolean(await findCollectiveLockForVenue(admin, staff.venue_id));
 
   return (
     <ToastProvider>
       <PageFrame maxWidthClass="max-w-[min(90rem,100%)]">
+        {inCollective ? (
+          <p role="note" className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            {collectiveCopy('bm.resource.notShared')}
+          </p>
+        ) : null}
         <ResourceTimelineView
           venueId={staff.venue_id}
           isAdmin={staff.role === 'admin'}

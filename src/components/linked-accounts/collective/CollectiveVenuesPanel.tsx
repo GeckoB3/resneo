@@ -25,6 +25,8 @@ export interface CollectiveVenueRow {
   venue_name: string;
   status: 'active' | 'invited';
   is_host: boolean;
+  /** Classes, events or bookable rooms the venue also runs, which the page does not carry (§6.14). */
+  also_runs?: string | null;
 }
 
 export interface CollectiveVenuesPanelProps {
@@ -197,6 +199,11 @@ export function CollectiveVenuesPanel({
                   status={failed ? 'failed' : behind ? 'updating' : 'up_to_date'}
                   reason={failed ? group.sync.failed[0]!.message : null}
                 />
+              ) : null}
+              {venue.also_runs ? (
+                <span className="order-last basis-full text-xs text-slate-500">
+                  {collectiveCopy('bm.members.alsoRuns', { modelList: venue.also_runs })}
+                </span>
               ) : null}
               <span className="ml-auto flex flex-wrap items-center gap-2">
                 {venue.status === 'active' ? (

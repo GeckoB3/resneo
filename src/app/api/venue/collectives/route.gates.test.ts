@@ -46,8 +46,8 @@ describe('creating a collective (BM-04)', () => {
       if (call.table === 'venues') {
         return {
           data: [
-            { id: HOST, name: 'Host Venue', timezone: 'Europe/London', currency: 'GBP' },
-            { id: EURO, name: 'Café Dublin', timezone: 'Europe/London', currency: 'EUR' },
+            { id: HOST, name: 'Host Venue', timezone: 'Europe/London', currency: 'GBP', booking_model: 'unified_scheduling' },
+            { id: EURO, name: 'Café Dublin', timezone: 'Europe/London', currency: 'EUR', booking_model: 'unified_scheduling' },
           ],
         };
       }
@@ -89,8 +89,8 @@ describe('the address of an ended collective (DL4)', () => {
       if (call.table === 'venues') {
         return {
           data: [
-            { id: HOST, name: 'Host Venue', timezone: 'Europe/London', currency: 'GBP' },
-            { id: MEMBER, name: 'Zen Studio', timezone: 'Europe/London', currency: 'GBP' },
+            { id: HOST, name: 'Host Venue', timezone: 'Europe/London', currency: 'GBP', booking_model: 'unified_scheduling' },
+            { id: MEMBER, name: 'Zen Studio', timezone: 'Europe/London', currency: 'GBP', booking_model: 'unified_scheduling' },
           ],
         };
       }

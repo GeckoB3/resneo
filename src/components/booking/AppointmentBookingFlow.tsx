@@ -33,6 +33,7 @@ import type { ProcessingTimeBlock } from '@/types/booking-models';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 import { MultiServicePickerBar, type PickerServiceLine } from './MultiServicePickerBar';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import {
   MAX_SERVICES_PER_VISIT,
   chainSpanMinutes,
@@ -2519,7 +2520,21 @@ export function AppointmentBookingFlow({
   }, []);
 
   /** Continue from the picker: the first tick leads, the rest follow as extras. */
+  /**
+   * On a collective page, the ticked services no one calendar offers together (BM-06). A visit is
+   * one person, so one venue; the picker says so and does not move on, rather than finding no
+   * times later.
+   */
+  const pickerSpansVenues = useMemo(() => {
+    if (!isCombined || pendingServiceIds.length < 2) return false;
+    const listed = new Set(serviceListForStep.map((svc) => svc.id));
+    const ids = pendingServiceIds.filter((id) => listed.has(id));
+    if (ids.length < 2) return false;
+    return !catalogStaff.some((p) => ids.every((id) => p.services.some((s) => s.id === id)));
+  }, [isCombined, pendingServiceIds, serviceListForStep, catalogStaff]);
+
   const continueFromServicePicker = useCallback(() => {
+    if (pickerSpansVenues) return;
     const listed = new Set(serviceListForStep.map((svc) => svc.id));
     const ids = pendingServiceIds.filter((id) => listed.has(id));
     const first = ids[0];
@@ -2528,7 +2543,7 @@ export function AppointmentBookingFlow({
     setChainExtras(extras);
     setChainAddonIds([]);
     chooseServiceAndAdvance(first, extras);
-  }, [chooseServiceAndAdvance, pendingServiceIds, serviceListForStep]);
+  }, [chooseServiceAndAdvance, pendingServiceIds, serviceListForStep, pickerSpansVenues]);
 
   const toggleGroupPendingService = useCallback((serviceId: string) => {
     setGroupPendingServiceIds((prev) =>
@@ -4720,6 +4735,11 @@ export function AppointmentBookingFlow({
               />
             </div>
           )}
+          {pickerSpansVenues ? (
+            <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {collectiveCopy('bm.visit.sameVenue')}
+            </p>
+          ) : null}
           {!isEdit && !catalogLoading && serviceListForStep.length > 0 ? (
             <MultiServicePickerBar
               services={pendingPickerLines}

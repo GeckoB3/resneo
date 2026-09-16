@@ -460,6 +460,15 @@ export const COLLECTIVE_COPY = {
   'row.notLive.reason': 'Not live yet: {reason}',
   'bm.invite.noAppointments':
     '{venue} does not offer appointments, so it cannot join a collective yet. A collective page shows appointments only.',
+  'bm.join.otherModels':
+    'You also run {modelList}. Those stay on your own booking page and are not shown on the {collective} page.',
+  'bm.redirect.otherModels':
+    'Your own booking page now opens the {collective} page. Your {modelList} are still bookable at {link}.',
+  'bm.resource.notShared':
+    "Rooms and equipment are not shared between venues. If two venues use the same room, keep it on one venue's calendars only.",
+  'bm.visit.sameVenue': 'All the services in one visit have to be with the same person, so they are at one venue.',
+  // Added (W20): the plan's host line (§6.14 item 4), which the deck names but gives no id.
+  'bm.members.alsoRuns': 'Also runs {modelList}, which stay on its own booking page.',
 
   // Added (W6): the deck points at "the form's existing label", but no form ever had this field.
   'svc.member.view.instructionsLabel': 'Before the appointment',

@@ -57,6 +57,8 @@ interface WorldOptions {
   collectiveStatus?: string;
   /** The venue being removed is still only invited. */
   targetInvited?: boolean;
+  /** The venues that run classes only, with no appointments model. */
+  classOnly?: string[];
 }
 
 function world({
@@ -65,6 +67,7 @@ function world({
   myStatus = 'active',
   collectiveStatus = 'active',
   targetInvited = false,
+  classOnly = [],
 }: WorldOptions): Responder {
   return (call) => {
     const eqValue = (column: string) => call.filters.find((f) => f[0] === 'eq' && f[1] === column)?.[2];
@@ -106,6 +109,19 @@ function world({
       }
       if (call.columns === 'status') return { data: [{ status: 'active' }, { status: 'active' }, { status: 'active' }] };
       return { data: [{ venue_id: HOST }, { venue_id: MEMBER }] };
+    }
+    if (call.table === 'venues' && call.op === 'select' && call.columns?.includes('booking_model')) {
+      const ids = (call.filters.find((f) => f[0] === 'in' && f[1] === 'id')?.[2] ?? []) as string[];
+      return {
+        data: ids.map((id) => ({
+          id,
+          name: 'Bloom',
+          pricing_tier: 'multi',
+          booking_model: classOnly.includes(id) ? 'class_session' : 'unified_scheduling',
+          enabled_models: [],
+          active_booking_models: classOnly.includes(id) ? ['class_session'] : ['unified_scheduling'],
+        })),
+      };
     }
     if (call.table === 'venues' && call.op === 'select') return { data: { name: 'Bloom' } };
     if (call.table === 'rpc:collective_release_member') return { data: { operation_id: 'op-1' } };
@@ -172,6 +188,29 @@ describe('LIFE-01: one live collective per venue', () => {
       error: 'Please open ResNeo on the web to read what joining means, then accept there.',
     });
     expect(recording.calls.some((c) => c.table === 'rpc:collective_join_member')).toBe(false);
+  });
+});
+
+describe('BM-01: a venue with no appointments cannot join', () => {
+  const refusal = {
+    code: 'COLLECTIVE_NO_APPOINTMENTS',
+    error: 'Bloom does not offer appointments, so it cannot join a collective yet. A collective page shows appointments only.',
+  };
+
+  it('refuses to invite it, with the reason', async () => {
+    const recording = signIn(HOST, { classOnly: [OUTSIDER] });
+    const response = await patch({ action: 'invite', venueId: OUTSIDER });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(refusal);
+    expect(recording.calls.some((c) => c.table === 'venue_collective_members' && c.op === 'insert')).toBe(false);
+  });
+
+  it('refuses its accept, with the reason', async () => {
+    const recording = signIn(MEMBER, { classOnly: [MEMBER], myStatus: 'invited' });
+    const response = await patch({ action: 'accept' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(refusal);
+    expect(recording.calls.some((c) => c.table === 'venue_collective_members' && c.op === 'update')).toBe(false);
   });
 });
 

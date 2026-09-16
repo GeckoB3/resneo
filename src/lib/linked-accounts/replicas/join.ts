@@ -24,6 +24,7 @@ import { applyLinksInline } from '@/lib/linked-accounts/replicas/inline-apply';
 import { JOIN_CONSENT_VERSION } from '@/lib/linked-accounts/replicas/hosting-constants';
 import { findCollectiveLockForVenue } from '@/lib/linked-accounts/collective-venue-locks';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlag } from '@/lib/feature-flags/resolve';
+import { OTHER_MODEL_COLUMNS, otherBookingModelList } from '@/lib/linked-accounts/collective-other-models';
 
 /** The one normaliser for "the same name" (plan contract 6). */
 export const sameName = (name: string | null | undefined): string => (name ?? '').trim().toLowerCase();
@@ -53,6 +54,8 @@ export interface JoinPreview {
   own_services: JoinOption[];
   forms: { host_type_id: string; name: string; my_type_id: string }[];
   warnings: { no_stripe_paid_services: number; form_services: number; forms_off: boolean };
+  /** The venue's classes, events or bookable rooms in words, which stay on its own page (D44), or null. */
+  other_models: string | null;
 }
 
 type Row = Record<string, unknown>;
@@ -110,7 +113,7 @@ export async function loadJoinPreview(
   const [{ data: venues }, { data: items }, { data: blocker }] = await Promise.all([
     admin
       .from('venues')
-      .select('id, name, timezone, currency, stripe_charges_enabled, feature_flags')
+      .select(`id, name, timezone, currency, stripe_charges_enabled, feature_flags, ${OTHER_MODEL_COLUMNS}`)
       .in('id', [hostId, venueId]),
     admin
       .from('collective_service_items')
@@ -223,6 +226,7 @@ export async function loadJoinPreview(
       form_services: formServices,
       forms_off: !formsOn,
     },
+    other_models: otherBookingModelList(me),
   };
 }
 

@@ -6,6 +6,7 @@ import { evaluateLinkEligibility } from './eligibility';
 import { parseVenueFeatureFlags, resolveAppointmentsFeatureFlags } from '@/lib/feature-flags';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { OpeningHours } from '@/components/booking/types';
+import { OTHER_MODEL_COLUMNS, otherBookingModelList, type VenueModelColumns } from '@/lib/linked-accounts/collective-other-models';
 import {
   inheritCollectivePageConfigFromHost,
   type CollectiveBookingPageConfig,
@@ -192,6 +193,8 @@ export interface CollectiveView {
     status: CollectiveMemberStatus;
     displayOrder: number;
     soloPageBehavior: SoloPageBehavior;
+    /** The venue's classes, events or bookable rooms, which the page does not carry (§6.14), or null. */
+    alsoRuns: string | null;
   }[];
   activeMemberCount: number;
 }
@@ -372,12 +375,16 @@ export async function loadCollectiveViewsForVenue(
   const venueSlugs: Record<string, string | null> = {};
   const venuePageConfigs: Record<string, BookingPageConfig | null> = {};
   const venueContacts: Record<string, NonNullable<CollectiveView['hostContact']>> = {};
+  const venueAlsoRuns: Record<string, string | null> = {};
   if (venueIdsToLoad.size > 0) {
     const { data: venues } = await admin
       .from('venues')
-      .select('id, name, slug, feature_flags, booking_page_config, phone, website_url, address, opening_hours')
+      .select(
+        `id, name, slug, feature_flags, booking_page_config, phone, website_url, address, opening_hours, ${OTHER_MODEL_COLUMNS}`,
+      )
       .in('id', [...venueIdsToLoad]);
     for (const v of venues ?? []) {
+      venueAlsoRuns[v.id as string] = otherBookingModelList(v as VenueModelColumns);
       const contact = v as { phone?: unknown; website_url?: unknown; address?: unknown; opening_hours?: unknown };
       venueContacts[v.id as string] = {
         phone: typeof contact.phone === 'string' && contact.phone.trim() ? contact.phone.trim() : null,
@@ -424,6 +431,7 @@ export async function loadCollectiveViewsForVenue(
         status: m.status as CollectiveMemberStatus,
         displayOrder: (m.display_order as number) ?? 0,
         soloPageBehavior: ((m.solo_page_behavior as SoloPageBehavior) ?? 'keep_live'),
+        alsoRuns: venueAlsoRuns[m.venue_id as string] ?? null,
       }))
       .sort((a, b) => a.displayOrder - b.displayOrder);
     const mine = members.find((m) => m.venueId === venueId);

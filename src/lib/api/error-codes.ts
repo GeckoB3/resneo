@@ -153,6 +153,8 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_CONSENT_REQUIRED',
   /** A timezone change while the venue is part of a collective, which shares one timezone (409). */
   'COLLECTIVE_TIMEZONE_LOCKED',
+  /** The venue has no active appointments model, so it cannot be invited or accept (409, BM-01). */
+  'COLLECTIVE_NO_APPOINTMENTS',
   /** Switching appointments off while the venue is part of a collective (409). */
   'COLLECTIVE_BOOKING_MODEL_LOCKED',
   /** The venues would trade in different currencies: at create, invite and accept, or a change (409). */

@@ -18,6 +18,7 @@ import type { ProviderExclusion } from '@/lib/linked-accounts/replicas/derived-c
 import { inheritCollectivePageConfigFromHost } from '@/lib/linked-accounts/collective-page-config';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenuePublic } from '@/components/booking/types';
+import type { BookingModel } from '@/types/booking-models';
 import type { BookingPageConfig } from '@/lib/booking/booking-page-theme';
 import type { BookingPagePublicService } from '@/lib/booking/booking-page-tabs';
 import {
@@ -58,6 +59,18 @@ async function loadCollectiveRow(admin: SupabaseClient, collectiveId: string): P
     .eq('id', collectiveId)
     .maybeSingle();
   return (data as CollectiveRow | null) ?? null;
+}
+
+/**
+ * The booking model each kind of collective offering is served by (D44). The discriminator is
+ * `collective_service_items.entity_type`, which allows only 'service' today, so the page lists one
+ * model; a later kind adds its row here and the page's model tabs follow.
+ */
+export const COLLECTIVE_ENTITY_MODELS = { service: 'unified_scheduling' } as const satisfies Record<string, BookingModel>;
+
+/** The synthetic venue's model list, derived from the offering kinds rather than written out. */
+export function collectiveBookingModels(): BookingModel[] {
+  return [...new Set<BookingModel>(Object.values(COLLECTIVE_ENTITY_MODELS))];
 }
 
 /**
@@ -164,7 +177,7 @@ export async function loadCollectiveVenuePublic(
     opening_hours: (host?.opening_hours as VenuePublic['opening_hours']) ?? null,
     timezone: col.timezone ?? 'Europe/London',
     booking_model: 'unified_scheduling',
-    active_booking_models: ['unified_scheduling'],
+    active_booking_models: collectiveBookingModels(),
     enabled_models: [],
     // The combined page is always an appointments page, so the host's words are
     // resolved against that model rather than passed through raw: a host that

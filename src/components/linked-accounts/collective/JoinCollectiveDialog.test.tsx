@@ -37,6 +37,7 @@ const preview: JoinPreview = {
   own_services: [{ id: 'mine-nails', name: 'Nails' }],
   forms: [{ host_type_id: 'host-patch', name: 'Patch test', my_type_id: 'my-patch' }],
   warnings: { no_stripe_paid_services: 2, form_services: 1, forms_off: true },
+  other_models: null,
 };
 
 function stubFetch(body: unknown, status = 200) {
@@ -68,6 +69,23 @@ describe('JoinCollectiveDialog', () => {
     expect(screen.getByText(/Clients pay you, through your own Stripe account/)).toBeInTheDocument();
     expect(screen.getByText(/You have not connected Stripe. 2 services/)).toBeInTheDocument();
     expect(screen.getByText(/Some services ask for forms/)).toBeInTheDocument();
+  });
+
+  it('says before accepting that other booking types stay on the own page (BM-03)', async () => {
+    stubFetch({ ...preview, other_models: 'classes and bookable rooms' });
+    show();
+    expect(
+      await screen.findByText(
+        'You also run classes and bookable rooms. Those stay on your own booking page and are not shown on the Northside page.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('says nothing of other booking types for an appointments-only venue', async () => {
+    stubFetch(preview);
+    show();
+    await screen.findByText('What joining means');
+    expect(screen.queryByText(/You also run/)).not.toBeInTheDocument();
   });
 
   it('shows why the venue cannot join, with no way to go on', async () => {

@@ -183,6 +183,38 @@ export const COLLECTIVE_COPY = {
   'ov.venue.updating': 'Updating. Its calendars take new bookings again in a moment.',
   'ov.venue.failed': 'An update did not go through.',
 
+  // The Collective area's tabs
+  'ov.tab.overview': 'Services',
+  'ov.tab.venues': 'Venues',
+  'ov.tab.history': 'History',
+  'ov.venues.invite': 'Invite a venue',
+  'ov.venues.invited': '(invited)',
+  'ov.venues.host': 'Host',
+  'ov.venues.member': 'Member',
+  'ov.venues.remove': 'Remove',
+  'ov.venues.removeTitle': 'Remove {venue} from {collective}?',
+  'ov.venues.removeMessage':
+    '{venue} stops being part of {collective}. Its copies of your services become its own, and bookings already made are not changed.',
+  'ov.venues.cancelTitle': 'Cancel the invitation to {venue}?',
+  'ov.venues.cancelMessage': '{venue} will no longer be able to join. You can invite it again later.',
+  'bp.members.cancelInvite': 'Cancel invitation',
+  'bp.members.askToHost': 'Ask to host',
+  'bp.members.history': 'History',
+
+  // History (CollectiveHistoryPanel.tsx)
+  'history.title': '{collective} history',
+  'history.filter.all': 'All changes',
+  'history.filter.services': 'Services',
+  'history.filter.calendars': 'Calendars',
+  'history.filter.members': 'Members',
+  'history.filter.venue': 'Venue',
+  'history.filter.anyVenue': 'Every venue',
+  'history.filter.from': 'From',
+  'history.filter.to': 'To',
+  'history.empty': 'Nothing has changed yet.',
+  'history.more': 'Load more',
+  'history.export': 'Download this history',
+
   // The services grid and its bulk lane (CollectiveServicesGrid.tsx; UX spec §2 item 15)
   'ov.filter.all': 'All services',
   'ov.filter.attention': 'Needs attention',

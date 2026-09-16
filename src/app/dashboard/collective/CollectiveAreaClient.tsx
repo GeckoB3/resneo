@@ -9,6 +9,12 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { CollectiveHistoryPanel } from '@/components/linked-accounts/collective/CollectiveHistoryPanel';
+import {
+  CollectiveVenuesPanel,
+  type CollectiveVenueRow,
+} from '@/components/linked-accounts/collective/CollectiveVenuesPanel';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { Button } from '@/components/ui/primitives/Button';
@@ -23,6 +29,14 @@ import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/serv
 import type { BulkOp, BulkOpResult } from '@/lib/linked-accounts/replicas/bulk-ops';
 import type { PreviewVenue } from '@/lib/linked-accounts/replicas/bulk-preview';
 
+type AreaTab = 'services' | 'venues' | 'history';
+
+interface CollectiveMemberRow {
+  venueId: string;
+  venueName: string;
+  status: string;
+}
+
 interface ServiceRow {
   id: string;
   name: string;
@@ -34,12 +48,27 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
   const [groups, setGroups] = useState<CollectiveCalendarGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<AreaTab>('services');
+  const [historyVenueId, setHistoryVenueId] = useState<string | null>(null);
+  /** Every collective this venue is in, with its venues and invitations, from the collectives list. */
+  const [collectiveList, setCollectiveList] = useState<
+    { id: string; hostVenueId: string; members: CollectiveMemberRow[] }[]
+  >([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/venue/appointment-services');
+      const [res, collectivesRes] = await Promise.all([
+        fetch('/api/venue/appointment-services'),
+        fetch('/api/venue/collectives'),
+      ]);
+      if (collectivesRes.ok) {
+        const list = (await collectivesRes.json()) as {
+          collectives?: { id: string; hostVenueId: string; members: CollectiveMemberRow[] }[];
+        };
+        setCollectiveList(list.collectives ?? []);
+      }
       if (!res.ok) {
         setError('Could not load the collective. Please refresh the page.');
         return;
@@ -76,6 +105,20 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
       calendarGroups: groups,
     });
   }, [collective, services, groups]);
+
+  const venueRows = useMemo<CollectiveVenueRow[]>(() => {
+    // The services say which collective this page is about; the list says who is in it.
+    const match = collectiveList.find((c) => c.id === collective?.id) ?? null;
+    const hostVenueId = match?.hostVenueId ?? null;
+    return (match?.members ?? [])
+        .filter((m) => m.status === 'active' || m.status === 'invited')
+        .map((m) => ({
+          venue_id: m.venueId,
+          venue_name: m.venueName,
+          status: m.status as 'active' | 'invited',
+          is_host: m.venueId === hostVenueId,
+        }));
+  }, [collectiveList, collective]);
 
   const commit = useCallback(
     async (ops: BulkOp[]): Promise<BulkOpResult[]> => {
@@ -156,6 +199,47 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
     <div className="space-y-4">
       <PageHeader eyebrow="Collective" title={collective.name} subtitle={collectiveCopy('ov.subtitle')} />
 
+      <TabBar
+        tabs={[
+          { id: 'services' as const, label: collectiveCopy('ov.tab.overview') },
+          // A member's own membership lives on its Linked accounts row, so it has no Venues tab.
+          ...(collective.isHost ? [{ id: 'venues' as const, label: collectiveCopy('ov.tab.venues') }] : []),
+          { id: 'history' as const, label: collectiveCopy('ov.tab.history') },
+        ]}
+        value={tab}
+        onChange={(next) => {
+          if (next !== 'history') setHistoryVenueId(null);
+          setTab(next);
+        }}
+      />
+
+      {tab === 'venues' && collective.isHost ? (
+        <CollectiveVenuesPanel
+          collectiveId={collective.id}
+          collectiveName={collective.name}
+          venues={venueRows}
+          groups={groups}
+          onChanged={() => void load()}
+          onShowHistory={(venueId) => {
+            setHistoryVenueId(venueId);
+            setTab('history');
+          }}
+        />
+      ) : null}
+
+      {tab === 'history' ? (
+        <CollectiveHistoryPanel
+          key={historyVenueId ?? 'all'}
+          collectiveId={collective.id}
+          collectiveName={collective.name}
+          venues={collective.isHost ? venueRows.map((v) => ({ venue_id: v.venue_id, venue_name: v.venue_name })) : []}
+          initialVenueId={historyVenueId}
+        />
+      ) : null}
+
+      {tab === 'services' ? (
+      <>
+
       {groups.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {groups.map((group) => {
@@ -206,6 +290,8 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
           />
         </SectionCard.Body>
       </SectionCard>
+      </>
+      ) : null}
     </div>
   );
 }

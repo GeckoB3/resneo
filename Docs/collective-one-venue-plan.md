@@ -3390,7 +3390,11 @@ removal that would leave bookings behind writes nothing and comes back as the pe
 it answers the single-service removal. The response also carries `collective_sync`, because the
 members' copies are applied once at the end of the whole call rather than once per operation,
 and the host needs the same "who is still updating" line a single save gives it. The preview
-half of the contract is not built yet.
+half was built the same day: it applies the staged operations to a copy of the collective as it is
+now and answers `{ venues: [{ venue_id, venue_name, is_host, shows, hides: [{ reason }] }] }`,
+where a reason is one of the catalogue's exclusions or `no_calendars`. It previews the whole staged
+set in one call (up to 1,600 operations) rather than the first 200, because a preview of part of
+the save would describe a different page from the one the host is about to make.
 | 14 | Undo | `POST /api/venue/collectives/[id]/undo { audit_event_id }` | | `collective_sync` | 410 `COLLECTIVE_UNDO_EXPIRED` | Host admin |
 | 15 | Notification preferences | `PATCH /api/venue/notifications/preferences` | gains `collective_digest`, `collective_calendars` | | | Venue admin |
 | 16 | Contact search | `GET /api/venue/guests?scope=collective&q=` | | rows gain `owner_venue_id`, `owner_venue_name` | 403 outside a live collective | Staff of a live member |

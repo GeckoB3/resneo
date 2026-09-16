@@ -200,7 +200,17 @@ export const COLLECTIVE_COPY = {
   'ov.bulk.someFailedOne': '1 change did not go through. It is still here, so you can try again.',
   'ov.bulk.confirm.title': 'Save these changes?',
   'ov.bulk.confirm.message': 'This changes {count} services at {venueList}.',
+  'ov.bulk.confirm.messageOne': 'This changes {count} service at {venueList}.',
   'ov.bulk.confirm.confirm': 'Save changes',
+  'ov.preview.button': 'See what each venue will show',
+  'ov.preview.title': 'What guests will see',
+  'ov.preview.willHide': 'This will not be bookable at {venue}, because {reason}.',
+  // Added while building the preview: the deck names what hides, and the dialog also has to say
+  // what shows, and what to say when a venue would show nothing at all.
+  'ov.preview.shows': 'Guests can book: {services}.',
+  'ov.preview.nothing': 'Guests will not be able to book anything with {venue} on the page.',
+  'ov.preview.loading': 'Working out what each venue will show...',
+  'ov.preview.failed': 'Could not work out the preview. Your changes are still here.',
   'ov.grid.cell.all': 'All calendars',
   'ov.grid.cell.some': 'Some calendars',
   'ov.grid.cell.none': 'No calendars',

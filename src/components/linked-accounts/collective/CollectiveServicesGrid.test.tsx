@@ -130,6 +130,12 @@ describe('the grid', () => {
 });
 
 describe('the bulk lane', () => {
+  /** Save now asks first: "This changes N services at X and Y." */
+  const saveAndConfirm = async (label: RegExp) => {
+    await userEvent.click(screen.getByRole('button', { name: label }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
+  };
+
   const selectRowAndColumn = async () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select Massage' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select Zen Studio' }));
@@ -139,7 +145,7 @@ describe('the bulk lane', () => {
     const { onCommit } = show();
     await selectRowAndColumn();
     await userEvent.click(screen.getByRole('button', { name: 'Choose calendars' }));
-    await userEvent.click(screen.getByRole('button', { name: /Save 1 change/ }));
+    await saveAndConfirm(/Save 1 change/);
 
     await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1));
     expect(onCommit.mock.calls[0]![0]).toEqual([
@@ -174,7 +180,7 @@ describe('the bulk lane', () => {
     // Every row, every venue, every calendar: 150 services x 3 calendars = 450 operations.
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select every service shown' }));
     await userEvent.click(screen.getByRole('button', { name: 'Choose calendars' }));
-    await userEvent.click(screen.getByRole('button', { name: /Save 450 changes/ }));
+    await saveAndConfirm(/Save 450 changes/);
     await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(3));
     expect(onCommit.mock.calls.map((call) => call[0].length)).toEqual([200, 200, 50]);
   });
@@ -186,7 +192,7 @@ describe('the bulk lane', () => {
     show({ onCommit });
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select Massage' }));
     await userEvent.click(screen.getByRole('button', { name: 'Choose calendars' }));
-    await userEvent.click(screen.getByRole('button', { name: /Save 3 changes/ }));
+    await saveAndConfirm(/Save 3 changes/);
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('1 change did not go through'),
@@ -206,5 +212,69 @@ describe('the bulk lane', () => {
   it('cannot change calendars for a service that is not on the page', () => {
     show();
     expect(screen.getByRole('button', { name: 'Sauna at Host Venue: No calendars' })).toBeDisabled();
+  });
+});
+
+describe('before the save goes', () => {
+  it('asks first, saying how many services at which venues, and sends nothing on Go back', async () => {
+    const { onCommit } = show();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Massage' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Zen Studio' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Choose calendars' }));
+    await userEvent.click(screen.getByRole('button', { name: /Save 1 change/ }));
+
+    const ask = await screen.findByRole('dialog');
+    expect(within(ask).getByRole('heading', { name: 'Save these changes?' })).toBeInTheDocument();
+    expect(within(ask).getAllByText('This changes 1 service at Zen Studio.').length).toBeGreaterThan(0);
+    await userEvent.click(within(ask).getByRole('button', { name: 'Go back' }));
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('shows what each venue would offer, and why something would not be bookable', async () => {
+    const onPreview = vi.fn(async () => [
+      {
+        venue_id: 'host',
+        venue_name: 'Host Venue',
+        is_host: true,
+        shows: [{ service_id: 'svc-1', name: 'Facial' }],
+        hides: [],
+      },
+      {
+        venue_id: 'member',
+        venue_name: 'Zen Studio',
+        is_host: false,
+        shows: [],
+        hides: [{ service_id: 'svc-2', name: 'Massage', reason: 'payments' as const }],
+      },
+    ]);
+    const { onCommit } = show({ onPreview });
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Massage' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Zen Studio' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Choose calendars' }));
+    await userEvent.click(screen.getByRole('button', { name: 'See what each venue will show' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByText('Guests can book: Facial.');
+    expect(
+      within(dialog).getByText(
+        'This will not be bookable at Zen Studio, because card payments are not set up there.',
+      ),
+    ).toBeInTheDocument();
+    // A preview is a preview: it sends the staged set and saves nothing.
+    expect(onPreview).toHaveBeenCalledWith([
+      { op: 'assign', service_id: 'svc-2', venue_id: 'member', calendar_id: 'cal-m1' },
+    ]);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('says so when the preview could not be worked out, and keeps the changes', async () => {
+    const onPreview = vi.fn(async () => {
+      throw new Error('down');
+    });
+    show({ onPreview });
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Massage' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Choose calendars' }));
+    await userEvent.click(screen.getByRole('button', { name: 'See what each venue will show' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your changes are still here');
   });
 });

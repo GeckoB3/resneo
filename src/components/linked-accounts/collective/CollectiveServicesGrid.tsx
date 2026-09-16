@@ -16,7 +16,8 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
 import { CollectiveCalendarsSection, type CollectiveCalendarsValue } from './CollectiveCalendarsSection';
-import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
+import { PREVIEW_REASON_WORDS, type PreviewVenue } from '@/lib/linked-accounts/replicas/bulk-preview';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
 import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
 import type { BulkOp, BulkOpResult } from '@/lib/linked-accounts/replicas/bulk-ops';
@@ -37,6 +38,8 @@ export interface CollectiveServicesGridProps {
   onCommit: (ops: BulkOp[]) => Promise<BulkOpResult[]>;
   /** Called after a save so the page can reload what the collective now looks like. */
   onSaved?: () => void;
+  /** What each venue's guests would see if the staged changes were saved (contract 13 preview). */
+  onPreview?: (ops: BulkOp[]) => Promise<PreviewVenue[]>;
 }
 
 /** A staged change, keyed so the same cell cannot hold two contradictory ones. */
@@ -69,6 +72,7 @@ export function CollectiveServicesGrid({
   currencySymbol = '£',
   onCommit,
   onSaved,
+  onPreview,
 }: CollectiveServicesGridProps) {
   const [filter, setFilter] = useState<GridFilter>('all');
   const [search, setSearch] = useState('');
@@ -78,6 +82,11 @@ export function CollectiveServicesGrid({
   const [openCell, setOpenCell] = useState<{ serviceId: string; venueId: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [failures, setFailures] = useState<{ key: string; message: string }[]>([]);
+  /** The ask before a save: it says how many services at which venues, and nothing goes until yes. */
+  const [confirming, setConfirming] = useState(false);
+  const [preview, setPreview] = useState<{ state: 'loading' | 'ready' | 'failed'; venues: PreviewVenue[] } | null>(
+    null,
+  );
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -167,6 +176,35 @@ export function CollectiveServicesGrid({
       }
     }
     stage(ops);
+  };
+
+  const stagedOps = (): BulkOp[] => staged.map(({ key: _key, ...op }) => op as BulkOp);
+
+  /** "This changes {count} services at {venueList}": counted from what is staged, not selected. */
+  const confirmSummary = () => {
+    const serviceIds = new Set(staged.map((s) => s.service_id));
+    const venueIds = new Set(
+      staged.flatMap((s) =>
+        s.op === 'assign' || s.op === 'unassign' || (s.op === 'retry' && s.venue_id)
+          ? [s.venue_id as string]
+          : groups.map((g) => g.venue_id),
+      ),
+    );
+    const names = groups.filter((g) => venueIds.has(g.venue_id)).map((g) => g.venue_name);
+    return collectiveCopy(serviceIds.size === 1 ? 'ov.bulk.confirm.messageOne' : 'ov.bulk.confirm.message', {
+      count: serviceIds.size,
+      venueList: formatVenueList(names),
+    });
+  };
+
+  const openPreview = async () => {
+    if (!onPreview) return;
+    setPreview({ state: 'loading', venues: [] });
+    try {
+      setPreview({ state: 'ready', venues: await onPreview(stagedOps()) });
+    } catch {
+      setPreview({ state: 'failed', venues: [] });
+    }
   };
 
   const save = async () => {
@@ -375,7 +413,12 @@ export function CollectiveServicesGrid({
                 <Button type="button" variant="ghost" size="sm" onClick={() => setStaged([])} disabled={saving}>
                   {collectiveCopy('ov.bulk.discard')}
                 </Button>
-                <Button type="button" size="sm" onClick={() => void save()} loading={saving}>
+                {onPreview ? (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => void openPreview()} disabled={saving}>
+                    {collectiveCopy('ov.preview.button')}
+                  </Button>
+                ) : null}
+                <Button type="button" size="sm" onClick={() => setConfirming(true)} loading={saving}>
                   {collectiveCopy(staged.length === 1 ? 'ov.bulk.saveOne' : 'ov.bulk.save', { count: staged.length })}
                 </Button>
               </>
@@ -392,6 +435,102 @@ export function CollectiveServicesGrid({
             })}
           </p>
         </div>
+      ) : null}
+
+      {confirming ? (
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setConfirming(false);
+          }}
+          title={collectiveCopy('ov.bulk.confirm.title')}
+          description={confirmSummary()}
+          size="sm"
+          footer={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  setConfirming(false);
+                  void save();
+                }}
+              >
+                {collectiveCopy('ov.bulk.confirm.confirm')}
+              </Button>
+              {onPreview ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setConfirming(false);
+                    void openPreview();
+                  }}
+                >
+                  {collectiveCopy('ov.preview.button')}
+                </Button>
+              ) : null}
+              <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+                Go back
+              </Button>
+            </div>
+          }
+        >
+          <p className="sr-only">{confirmSummary()}</p>
+        </Dialog>
+      ) : null}
+
+      {preview ? (
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setPreview(null);
+          }}
+          title={collectiveCopy('ov.preview.title')}
+          size="md"
+          footer={
+            <Button type="button" onClick={() => setPreview(null)}>
+              {collectiveCopy('ov.grid.done')}
+            </Button>
+          }
+        >
+          {preview.state === 'loading' ? (
+            <p role="status" className="text-sm text-slate-600">
+              {collectiveCopy('ov.preview.loading')}
+            </p>
+          ) : preview.state === 'failed' ? (
+            <p role="alert" className="text-sm text-rose-700">
+              {collectiveCopy('ov.preview.failed')}
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {preview.venues.map((venue) => (
+                <section key={venue.venue_id} className="space-y-1">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {venue.is_host ? collectiveCopy('svc.cal.venueYou', { venue: venue.venue_name }) : venue.venue_name}
+                  </h3>
+                  <p className="text-sm text-slate-700">
+                    {venue.shows.length > 0
+                      ? collectiveCopy('ov.preview.shows', { services: venue.shows.map((s) => s.name).join(', ') })
+                      : collectiveCopy('ov.preview.nothing', { venue: venue.venue_name })}
+                  </p>
+                  {venue.hides.length > 0 ? (
+                    <ul className="space-y-0.5 text-sm text-amber-900">
+                      {venue.hides.map((hidden) => (
+                        <li key={hidden.service_id}>
+                          <span className="font-medium">{hidden.name}:</span>{' '}
+                          {collectiveCopy('ov.preview.willHide', {
+                            venue: venue.venue_name,
+                            reason: PREVIEW_REASON_WORDS[hidden.reason],
+                          })}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </section>
+              ))}
+            </div>
+          )}
+        </Dialog>
       ) : null}
 
       {openCell && openGroup && openService ? (

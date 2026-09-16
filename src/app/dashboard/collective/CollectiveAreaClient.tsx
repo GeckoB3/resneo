@@ -21,6 +21,7 @@ import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
 import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
 import type { BulkOp, BulkOpResult } from '@/lib/linked-accounts/replicas/bulk-ops';
+import type { PreviewVenue } from '@/lib/linked-accounts/replicas/bulk-preview';
 
 interface ServiceRow {
   id: string;
@@ -92,6 +93,21 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
       }
       const data = (await res.json()) as { results?: BulkOpResult[] };
       return data.results ?? [];
+    },
+    [collective],
+  );
+
+  const previewOps = useCallback(
+    async (ops: BulkOp[]): Promise<PreviewVenue[]> => {
+      if (!collective) return [];
+      const res = await fetch(`/api/venue/collectives/${collective.id}/bulk/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ops }),
+      });
+      if (!res.ok) throw new Error('preview failed');
+      const data = (await res.json()) as { venues?: PreviewVenue[] };
+      return data.venues ?? [];
     },
     [collective],
   );
@@ -185,6 +201,7 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
             groups={groups}
             currencySymbol={currencySymbolFromCode(currency)}
             onCommit={commit}
+            onPreview={previewOps}
             onSaved={() => void load()}
           />
         </SectionCard.Body>

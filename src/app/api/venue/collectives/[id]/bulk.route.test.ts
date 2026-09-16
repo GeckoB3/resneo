@@ -24,6 +24,7 @@ import { getVenueStaff, type VenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { makeRecordingDb, type Responder } from '@/lib/testing/recording-supabase';
 import { POST as bulk } from './bulk/route';
+import { POST as preview } from './bulk/preview/route';
 
 const HOST = 'venue-host';
 const COLLECTIVE = '11111111-1111-4111-8111-111111111111';
@@ -186,5 +187,74 @@ describe('POST /api/venue/collectives/[id]/bulk', () => {
     const res = await send({ ops: [{ op: 'retry', service_id: SERVICE }] });
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe('COLLECTIVE_LEGACY_MODEL');
+  });
+});
+
+describe('POST /api/venue/collectives/[id]/bulk/preview', () => {
+  const ask = (body: unknown) =>
+    preview(
+      new NextRequest('http://localhost/api/venue/collectives/x/bulk/preview', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: COLLECTIVE }) },
+    );
+
+  const previewWorld = () =>
+    world((call) => {
+      if (call.table === 'rpc:collective_venue_live_state') {
+        return { data: { collective_id: COLLECTIVE, role: 'host', paused: false } };
+      }
+      if (call.table === 'venue_collective_members') {
+        return {
+          data: [
+            { venue_id: HOST, venues: { name: 'Host Venue' }, suspended_at: null },
+            { venue_id: MEMBER, venues: { name: 'Zen Studio' }, suspended_at: null },
+          ],
+        };
+      }
+      if (call.table === 'collective_service_items') {
+        return { data: [{ id: 'item-1', master_service_id: SERVICE, status: 'active' }] };
+      }
+      if (call.table === 'collective_service_replicas') return { data: [] };
+      // The service blocks read the venues as a list; the route's own auth reads one venue.
+      if (call.table === 'venues' && call.columns?.includes('stripe_charges_enabled')) {
+        return {
+          data: [
+            { id: HOST, name: 'Host Venue', feature_flags: {}, stripe_charges_enabled: true },
+            { id: MEMBER, name: 'Zen Studio', feature_flags: {}, stripe_charges_enabled: true },
+          ],
+        };
+      }
+      if (call.table === 'unified_calendars') {
+        return { data: [{ id: CALENDAR, venue_id: MEMBER, name: 'Chair 2', is_active: true }] };
+      }
+      if (call.table === 'service_items' && call.columns === 'id, name') {
+        return { data: [{ id: SERVICE, name: 'Facial' }] };
+      }
+      return undefined;
+    });
+
+  it('answers per venue, and writes nothing', async () => {
+    const recording = previewWorld();
+    const res = await ask({
+      ops: [{ op: 'assign', service_id: SERVICE, venue_id: MEMBER, calendar_id: CALENDAR }],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { venues: { venue_id: string; shows: { name: string }[] }[] };
+    expect(body.venues.find((v) => v.venue_id === MEMBER)?.shows.map((s) => s.name)).toEqual(['Facial']);
+    // A preview calls no engine function and writes no row.
+    expect(recording.calls.some((c) => c.op === 'rpc' && c.table !== 'rpc:collective_venue_live_state' && c.table !== 'rpc:collective_bookable_service_ids')).toBe(false);
+    expect(recording.calls.some((c) => c.op === 'insert' || c.op === 'update' || c.op === 'delete')).toBe(false);
+  });
+
+  it('is only for the host', async () => {
+    world((call) =>
+      call.table === 'venue_collectives'
+        ? { data: { id: COLLECTIVE, name: 'Northside', status: 'active', service_model: 'replicas', host_venue_id: 'someone-else' } }
+        : undefined,
+    );
+    const res = await ask({ ops: [] });
+    expect(res.status).toBe(403);
   });
 });

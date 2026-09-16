@@ -82,6 +82,7 @@ import {
   CollectiveServicesFilter,
   type CollectiveServicesFilterValue,
 } from '@/components/linked-accounts/collective/CollectiveServicesBanner';
+import { ReleaseReviewCard } from '@/components/linked-accounts/collective/ReleaseReview';
 import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
 import {
@@ -1518,6 +1519,8 @@ export function AppointmentServicesView({
               }}
             />
           ) : null}
+          {/* After leaving a collective, what to check (UX spec J7). Only when not in one now. */}
+          {isAdmin && !collective ? <ReleaseReviewCard /> : null}
           {collective ? (
             <CollectiveServicesBanner
               variant={collective.isHost ? 'host' : 'member'}

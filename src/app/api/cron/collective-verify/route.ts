@@ -5,6 +5,7 @@ import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 import { runCollectiveVerify, type RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { syncMemberSuspensions } from '@/lib/linked-accounts/replicas/collective-suspension';
+import { endCollectivesBelowTwo } from '@/lib/linked-accounts/replicas/below-two';
 
 /**
  * GET/POST /api/cron/collective-verify: daily, read the collective invariant report, repair lag,
@@ -39,6 +40,15 @@ async function handlePost(request: NextRequest) {
   counters.results.members_suspended = suspension.suspended;
   counters.results.members_resumed = suspension.resumed;
   counters.errors += suspension.errors;
+  // After the deadlines, which can leave a collective with one venue (§6.7).
+  try {
+    const lone = await endCollectivesBelowTwo(supabase);
+    counters.results.dissolved_below_two = lone.ended;
+    counters.errors += lone.errors;
+  } catch (err) {
+    console.error('[collective] below-two sweep threw:', err);
+    counters.errors += 1;
+  }
   const outcome = await finalizeCronRun(counters);
   if (unreadable) {
     return NextResponse.json({ ...outcome.body, ok: false, reason: 'unreadable', detail: unreadable }, { status: 200 });

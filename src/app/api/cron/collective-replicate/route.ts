@@ -7,6 +7,7 @@ import { runCollectiveReplicate, type RpcClient } from '@/lib/linked-accounts/re
 import { notifyFailingLinks } from '@/lib/linked-accounts/replicas/collective-failure-notices';
 import { sendMasterChangeNotices } from '@/lib/linked-accounts/replicas/master-change-notices';
 import { drainOperationNotices } from '@/lib/linked-accounts/replicas/collective-operation-notices';
+import { drainReleaseFollowups } from '@/lib/linked-accounts/replicas/release-followups';
 
 /**
  * GET/POST /api/cron/collective-replicate: every 5 minutes, apply due collective replica links
@@ -50,6 +51,17 @@ async function handlePost(request: NextRequest) {
     if (queued.failed > 0) counters.errors += queued.failed;
   } catch (err) {
     console.error('[collective] queued notices threw:', err);
+    counters.errors += 1;
+  }
+  // The work after a release: photo copies and N16 to N18.
+  try {
+    const releases = await drainReleaseFollowups(supabase);
+    counters.results.releases_followed_up = releases.done;
+    counters.results.release_photos_copied = releases.photos_copied;
+    counters.results.release_photos_failed = releases.photos_failed;
+    if (releases.failed > 0) counters.errors += releases.failed;
+  } catch (err) {
+    console.error('[collective] release follow-ups threw:', err);
     counters.errors += 1;
   }
   const outcome = await finalizeCronRun(counters);

@@ -275,6 +275,57 @@ export const COLLECTIVE_COPY = {
   'bm.currency.blocked':
     '{venue} takes payment in {currency} and the collective uses {hostCurrency}. Every venue in a collective has to use the same currency.',
 
+  // Leaving, removal and the review after (release-actions.ts, release-followups.ts, release-review.ts;
+  // UX spec J7, J8, `leave.*`, `remove.*`, `review.*`)
+  'leave.title': 'Leave {collective}?',
+  'leave.message':
+    'You keep every service, calendar and booking. Services from {host} become yours to edit, and guests book you on your own booking page again.',
+  'leave.body.services':
+    '{count} services from {host} become your own services, with the settings they have now.',
+  'leave.body.noStripe':
+    '{count} of them take a payment online. You have not connected Stripe, so they stop taking payments online until you do.',
+  'leave.body.bookings': 'Bookings made through the {collective} page stay with you.',
+  'leave.body.lastMember': '{collective} needs at least two venues, so it ends when you leave.',
+  'leave.body.access':
+    "Your account links with {venueList} stay exactly as they are, so you can still see and manage each other's bookings and clients. To change a link, go to Linked accounts.",
+  'leave.confirm': 'Leave {collective}',
+  'review.title': 'You left {collective}. Review your services',
+  'review.titleRemoved': 'You are no longer part of {collective}. Review your services',
+  'review.prices': 'Check prices and deposits on {count} services that came from {host}',
+  'review.link': 'Add your own online meeting link to {count} services',
+  'review.stripe': 'Connect Stripe to take payments online again',
+  'review.library': 'Check headings, add-ons and forms that came from {host}',
+  'review.photos.copying': 'Copying photos from {host}...',
+  'review.photos.done': 'Photos copied',
+  'review.photos.failed': 'Some photos could not be copied.',
+  'review.sameName':
+    'You now have two services called {service}: yours, and the one that came from {host}. Both are active. Rename or turn off the one you do not need.',
+  'review.unparked':
+    '{count} services that were parked while you were part of {collective} are bookable again.',
+  'review.dismiss': 'Done',
+  // Singular forms, so one service never reads "1 services".
+  'review.pricesOne': 'Check prices and deposits on 1 service that came from {host}',
+  'review.linkOne': 'Add your own online meeting link to 1 service',
+  'review.unparkedOne': '1 service that was parked while you were part of {collective} is bookable again.',
+  'leave.body.servicesOne': '1 service from {host} becomes your own service, with the settings it has now.',
+  'leave.body.noStripeOne':
+    'It takes a payment online. You have not connected Stripe, so it stops taking payments online until you do.',
+  'remove.title': 'Remove {venue} from {collective}?',
+  'remove.message':
+    '{venue} keeps every service, calendar and booking, and its own booking page comes back. Its calendars leave the {collective} page straight away.',
+  'remove.lastMember': '{collective} needs at least two venues, so removing {venue} ends {collective}.',
+  'remove.confirm': 'Remove {venue}',
+  'notify.left.subject': '{venue} left {collective}',
+  'notify.left.body':
+    "{venue}'s calendars are no longer on the {collective} page. It keeps the services it had from you as its own services. Your account link with {venue} is unchanged.",
+  'notify.removed.subject': 'You are no longer part of {collective}',
+  'notify.removed.body':
+    '{host} removed {venue} from {collective}. You keep every service, calendar and booking. Services from {host} are now yours to edit, and your own booking page is back. Your account links are unchanged.',
+  'notify.linkEnded.subject': '{venue} left {collective} because a link ended',
+  'notify.linkEnded.body':
+    'The link between {venue} and {host} ended, so {venue} is no longer part of {collective}. It keeps every service, calendar and booking.',
+  'notify.review.cta': 'Review your services',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

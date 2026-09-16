@@ -7,6 +7,8 @@ import { Pill } from '@/components/ui/dashboard/Pill';
 import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui';
 import { CombinedPageManager } from './CombinedPageManager';
 import { JoinCollectiveDialog } from './collective/JoinCollectiveDialog';
+import { LeaveCollectiveDialog, ReleaseReviewCard } from './collective/ReleaseReview';
+import type { ReleaseReview } from '@/lib/linked-accounts/replicas/release-review';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
 import type { CollectiveView } from '@/lib/linked-accounts/collectives';
 import { fullMutualLinks } from '@/lib/linked-accounts/full-mutual-links';
@@ -45,6 +47,9 @@ export function VenueCollectivesPanel({
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   // Joining a shared-services collective asks for consent and choices first (contract 6).
   const [joinTarget, setJoinTarget] = useState<CollectiveView | null>(null);
+  // Leaving one explains what changes first, then shows what to review (contract 7).
+  const [leaveTarget, setLeaveTarget] = useState<CollectiveView | null>(null);
+  const [review, setReview] = useState<{ value: ReleaseReview | null; key: number }>({ value: null, key: 0 });
   const router = useRouter();
 
   /**
@@ -149,6 +154,7 @@ export function VenueCollectivesPanel({
         }
       />
       <SectionCard.Body className="space-y-3">
+        <ReleaseReviewCard key={review.key} initial={review.value} />
         {error ? (
           <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
         ) : null}
@@ -191,6 +197,10 @@ export function VenueCollectivesPanel({
               onJoin={() => {
                 setError(null);
                 setJoinTarget(c);
+              }}
+              onLeave={() => {
+                setError(null);
+                setLeaveTarget(c);
               }}
               onManage={() => {
                 setError(null);
@@ -241,6 +251,20 @@ export function VenueCollectivesPanel({
         />
       ) : null}
 
+      {leaveTarget ? (
+        <LeaveCollectiveDialog
+          open
+          collectiveId={leaveTarget.id}
+          onClose={() => setLeaveTarget(null)}
+          onLeft={(next) => {
+            setLeaveTarget(null);
+            setReview((cur) => ({ value: next, key: cur.key + 1 }));
+            void load();
+            refreshLayout();
+          }}
+        />
+      ) : null}
+
       {joinTarget ? (
         <JoinCollectiveDialog
           open
@@ -270,6 +294,7 @@ function CollectiveRow({
   busy,
   onAction,
   onJoin,
+  onLeave,
   onManage,
   onConfirm,
 }: {
@@ -277,6 +302,7 @@ function CollectiveRow({
   busy: boolean;
   onAction: (body: Record<string, unknown>) => void;
   onJoin: () => void;
+  onLeave: () => void;
   onManage: () => void;
   onConfirm: (state: ConfirmState) => void;
 }) {
@@ -385,13 +411,15 @@ function CollectiveRow({
                 className={btnSecondary}
                 disabled={busy}
                 onClick={() =>
-                  onConfirm({
-                    title: 'Leave this collective?',
-                    description: `Your venue will be removed from "${collective.name}". Your own booking page is unaffected.`,
-                    confirmLabel: 'Leave collective',
-                    danger: true,
-                    run: async () => onAction({ action: 'leave' }),
-                  })
+                  collective.serviceModel === 'replicas'
+                    ? onLeave()
+                    : onConfirm({
+                        title: 'Leave this collective?',
+                        description: `Your venue will be removed from "${collective.name}". Your own booking page is unaffected.`,
+                        confirmLabel: 'Leave collective',
+                        danger: true,
+                        run: async () => onAction({ action: 'leave' }),
+                      })
                 }
               >
                 Leave

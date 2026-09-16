@@ -511,15 +511,19 @@ export function selectReplacementHost(
 export async function reconcileCollective(
   admin: SupabaseClient,
   collectiveId: string,
-): Promise<{ removedVenueIds: string[]; dissolved: boolean; hostTransferredTo: string | null }> {
+  opts: { fromRender?: boolean } = {},
+): Promise<{ removedVenueIds: string[]; dissolved: boolean; hostTransferredTo: string | null; engine?: boolean }> {
   const removedVenueIds: string[] = [];
   const { data: collective } = await admin
     .from('venue_collectives')
-    .select('id, status, host_venue_id, page_mode')
+    .select('id, status, host_venue_id, page_mode, service_model')
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective || collective.status !== 'active') {
     return { removedVenueIds, dissolved: false, hostTransferredTo: null };
+  }
+  if (collective.service_model === 'replicas' || collective.service_model === 'migrating') {
+    return reconcileEngineCollective(admin, collectiveId, collective.host_venue_id as string, opts);
   }
 
   const { data: members } = await admin
@@ -632,6 +636,64 @@ export async function reconcileCollective(
 }
 
 /**
+ * The reconcile on the shared-services model (plan §6.7, "reconcile off renders"; W7). A render never
+ * changes membership: the page shows only eligible venues whatever the rows say. A link change or the
+ * maintenance cron releases, through the engine and with the reason `link_ended`, each venue that no
+ * longer has full access with every other (the host's release pauses the collective instead), and a
+ * collective left with fewer than two venues ends. The engine's jobs send the notices (N18, N19), so
+ * the caller sends none of the older ones.
+ */
+async function reconcileEngineCollective(
+  admin: SupabaseClient,
+  collectiveId: string,
+  hostVenueId: string,
+  opts: { fromRender?: boolean },
+): Promise<{ removedVenueIds: string[]; dissolved: boolean; hostTransferredTo: string | null; engine: true }> {
+  const none = { removedVenueIds: [] as string[], dissolved: false, hostTransferredTo: null, engine: true as const };
+  if (opts.fromRender) return none;
+  const { data: members } = await admin
+    .from('venue_collective_members')
+    .select('id, venue_id')
+    .eq('collective_id', collectiveId)
+    .eq('status', 'active');
+  const active = (members ?? []).map((m) => ({ id: m.id as string, venueId: m.venue_id as string }));
+  const broken: typeof active = [];
+  try {
+    for (const member of active) {
+      const others = active.filter((m) => m.venueId !== member.venueId).map((m) => m.venueId);
+      if (!(await hasFullMutualLinks(admin, member.venueId, others))) broken.push(member);
+    }
+  } catch (err) {
+    console.warn('[reconcileCollective] aborting without changes, link read failed:', err);
+    return none;
+  }
+  const removedVenueIds: string[] = [];
+  for (const member of broken) {
+    const { error } = await admin.rpc('collective_release_member', {
+      p_member_id: member.id,
+      p_reason: 'link_ended',
+      p_actor_venue_id: null,
+      p_actor_user_id: null,
+    });
+    if (error) {
+      console.error('[reconcileCollective] release failed:', member.id, error.message);
+      continue;
+    }
+    if (member.venueId !== hostVenueId) removedVenueIds.push(member.venueId);
+  }
+  if (broken.length === 0) return none;
+  const { endIfBelowTwo, pendingReleaseFollowups } = await import('./replicas/below-two');
+  const dissolved = await endIfBelowTwo(admin, collectiveId);
+  try {
+    const { drainReleaseFollowups } = await import('./replicas/release-followups');
+    await drainReleaseFollowups(admin, { operationIds: await pendingReleaseFollowups(admin, collectiveId) });
+  } catch (err) {
+    console.error('[reconcileCollective] release follow-ups will run from the cron:', err);
+  }
+  return { removedVenueIds, dissolved, hostTransferredTo: null, engine: true };
+}
+
+/**
  * Apply the plan §8.2 provider suspend/resume/remove ladder for a unified
  * catalogue. Computes each surviving member's write-eligibility, then uses the
  * pure {@link planProviderStatuses} to decide the new `status` for every
@@ -728,10 +790,12 @@ export async function reconcileCollectivesAfterLinkChange(
       const beforeVenues = (beforeRows ?? []).map((m) => m.venue_id as string);
       const collectiveName = (collectiveRow?.name as string) ?? 'a venue collective';
 
-      const { removedVenueIds, dissolved, hostTransferredTo } = await reconcileCollective(
+      const { removedVenueIds, dissolved, hostTransferredTo, engine } = await reconcileCollective(
         admin,
         collectiveId,
       );
+      // On the shared-services model the engine's own jobs tell everyone (N18, N19).
+      if (engine) continue;
       if (removedVenueIds.length === 0 && !dissolved && !hostTransferredTo) continue;
 
       await Promise.allSettled(
@@ -968,7 +1032,7 @@ export async function loadPublicCollective(
   if (collective.status !== 'active') return null;
 
   // Re-verify links still hold; this may dissolve the collective.
-  const { dissolved } = await reconcileCollective(admin, collective.id);
+  const { dissolved } = await reconcileCollective(admin, collective.id, { fromRender: true });
   if (dissolved) return null;
 
   const { data: memberRows } = await admin

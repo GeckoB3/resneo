@@ -14,6 +14,7 @@ import {
   runHostingAction,
 } from '@/lib/linked-accounts/replicas/hosting-actions';
 import { runJoin } from '@/lib/linked-accounts/replicas/join';
+import { runReleaseAction } from '@/lib/linked-accounts/replicas/release-actions';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -89,6 +90,25 @@ export async function PATCH(
       .eq('venue_id', ctx.venueId)
       .in('status', ['invited', 'active'])
       .maybeSingle();
+
+    // On the shared-services model, joining, leaving and removal belong to the engine (contracts 6, 7).
+    const usesEngine = async () => {
+      const { data: model } = await ctx.admin
+        .from('venue_collectives')
+        .select('service_model')
+        .eq('id', collectiveId)
+        .maybeSingle();
+      return model?.service_model === 'replicas';
+    };
+    const releaseContext = {
+      admin: ctx.admin,
+      collectiveId,
+      collectiveName: collective.name,
+      hostVenueId: collective.host_venue_id,
+      venueId: ctx.venueId,
+      venueName: ctx.venue.name,
+      userId: ctx.userId,
+    };
 
     const finish = async () => {
       // Membership decides whose calendars the memoised catalogue may offer.
@@ -216,6 +236,23 @@ export async function PATCH(
       if (!input.venueId || input.venueId === ctx.venueId) {
         return NextResponse.json({ error: 'Choose a member to remove.' }, { status: 400 });
       }
+      if (await usesEngine()) {
+        const { data: target } = await ctx.admin
+          .from('venue_collective_members')
+          .select('id, status')
+          .eq('collective_id', collectiveId)
+          .eq('venue_id', input.venueId)
+          .eq('status', 'active')
+          .maybeSingle();
+        // An open invitation is withdrawn the older way below: nothing was handed over to release.
+        if (target) {
+          const result = await runReleaseAction(releaseContext, 'remove', {
+            id: target.id as string,
+            venueId: input.venueId,
+          });
+          return result.ok ? finish() : result.response;
+        }
+      }
       await ctx.admin
         .from('venue_collective_members')
         .update({ status: 'removed', left_at: new Date().toISOString() })
@@ -256,12 +293,7 @@ export async function PATCH(
       }
       // On the shared-services model, joining is the engine's (contract 6): the venue's answers
       // and its consent, one call, then the first copies and the notices.
-      const { data: model } = await ctx.admin
-        .from('venue_collectives')
-        .select('service_model')
-        .eq('id', collectiveId)
-        .maybeSingle();
-      if (model?.service_model === 'replicas') {
+      if (await usesEngine()) {
         const refused = await runJoin(
           {
             admin: ctx.admin,
@@ -337,6 +369,19 @@ export async function PATCH(
           },
           { status: 400 },
         );
+      }
+      if (myMembership.status === 'active' && (await usesEngine())) {
+        const result = await runReleaseAction(releaseContext, 'leave', {
+          id: myMembership.id as string,
+          venueId: ctx.venueId,
+        });
+        if (!result.ok) return result.response;
+        invalidateCollectiveCatalogMemo(collectiveId);
+        const collectives = await loadCollectiveViewsForVenue(ctx.admin, ctx.venueId);
+        return NextResponse.json({
+          collective: collectives.find((c) => c.id === collectiveId) ?? null,
+          review: result.review,
+        });
       }
       await ctx.admin
         .from('venue_collective_members')

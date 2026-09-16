@@ -1,4 +1,5 @@
 import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
+import { loadCollectiveServiceBlocks } from '@/lib/linked-accounts/replicas/service-blocks';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { isMissingSyncColumnError, patchTouchesSyncedShape, syncCopiesOfService } from '@/lib/linked-accounts/service-sync';
 import { VENUE_CATALOG_CACHE_CONTROL } from '@/lib/realtime/dashboard-sync-constants';
@@ -706,10 +707,14 @@ export async function GET(request: NextRequest) {
           includeInactive: true,
         }),
       ]);
+      // What each service is to this venue while it is in a collective (W5). The map is empty at
+      // every venue that is not in a replicas-model collective, which is all of them today.
+      const collectiveBlocks = await loadCollectiveServiceBlocks(admin, catalogVenueId);
       const servicesWithVariants = services.map((s) => ({
         ...s,
         variants: variantMap.get(s.id as string) ?? [],
         addon_groups: addonGroupMap.get(s.id as string) ?? [],
+        collective: collectiveBlocks.get(s.id as string) ?? null,
       }));
 
       return NextResponse.json(
@@ -764,10 +769,12 @@ export async function GET(request: NextRequest) {
         includeInactive: true,
       }),
     ]);
+    const legacyCollectiveBlocks = await loadCollectiveServiceBlocks(admin, staff.venue_id);
     const servicesWithVariants = services.map((s) => ({
       ...s,
       variants: variantMap.get(s.id as string) ?? [],
       addon_groups: addonGroupMap.get(s.id as string) ?? [],
+      collective: legacyCollectiveBlocks.get(s.id as string) ?? null,
     }));
 
     return NextResponse.json(

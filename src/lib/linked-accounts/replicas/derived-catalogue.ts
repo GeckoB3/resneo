@@ -76,6 +76,27 @@ export interface DerivedCatalogueItem extends PublicCatalogueItem {
   sortKey: { displayOrder: number; sourceOrder: number; category: ServiceCategoryRef | null };
 }
 
+/**
+ * Why a guest cannot book this calendar right now, or null. One place, so the combined page and the
+ * host's Services page never disagree about what is hidden and why.
+ */
+export function providerExclusionReason(facts: {
+  suspended: boolean;
+  behind: boolean;
+  paid: boolean;
+  chargesEnabled: boolean;
+  needsForm: boolean;
+  formsOn: boolean;
+  staffOnly: boolean;
+}): ProviderExclusion | null {
+  if (facts.suspended) return 'suspended';
+  if (facts.behind) return 'behind';
+  if (facts.paid && !facts.chargesEnabled) return 'payments';
+  if (facts.needsForm && !facts.formsOn) return 'forms';
+  if (facts.staffOnly) return 'staff_only';
+  return null;
+}
+
 export function buildDerivedCatalogueItems(input: DerivedCatalogueInput): DerivedCatalogueItem[] {
   const out: DerivedCatalogueItem[] = [];
   for (const offering of input.offerings) {
@@ -108,18 +129,15 @@ export function buildDerivedCatalogueItems(input: DerivedCatalogueInput): Derive
         name = service.name;
         description = service.description;
       }
-      const reason: ProviderExclusion | null = venue.suspended
-        ? 'suspended'
-        : source.behind
-          ? 'behind'
-          : input.paidServiceIds.has(source.serviceId) && !venue.chargesEnabled
-            ? 'payments'
-            : (input.serviceIdsWithForms.has(source.serviceId) || input.venueIdsWithVenueWideForms.has(source.venueId)) &&
-                !venue.formsOn
-              ? 'forms'
-              : input.staffOnlyServiceIds.has(source.serviceId)
-                ? 'staff_only'
-                : null;
+      const reason = providerExclusionReason({
+        suspended: venue.suspended,
+        behind: source.behind,
+        paid: input.paidServiceIds.has(source.serviceId),
+        chargesEnabled: venue.chargesEnabled,
+        needsForm: input.serviceIdsWithForms.has(source.serviceId) || input.venueIdsWithVenueWideForms.has(source.venueId),
+        formsOn: venue.formsOn,
+        staffOnly: input.staffOnlyServiceIds.has(source.serviceId),
+      });
       for (const calendarId of data.serviceCalendars.get(source.serviceId) ?? []) {
         const terms = data.calendarServiceTerms.get(termsKey(calendarId, source.serviceId));
         const provider: PublicCatalogueProvider = {

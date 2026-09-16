@@ -4,6 +4,7 @@ import { loadHostCollectiveCalendars } from '@/lib/linked-accounts/replicas/host
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import { noticeNames, notifyHostCalendarChange } from '@/lib/linked-accounts/replicas/collective-notices';
+import { hostOwnedFieldsInSave, loadMemberServiceContext } from '@/lib/linked-accounts/replicas/member-save';
 import {
   loadMasterSaveContext,
   captureMasterProjection,
@@ -1367,6 +1368,31 @@ export async function PATCH(request: NextRequest) {
           { status: 409 },
         );
       }
+      /**
+       * The other side of the same question: a member holding a copy of one of the host's services
+       * may change which of its calendars offer it, and its own joining details, and nothing else
+       * (contract 4, member half). The engine refuses the rest anyway; this says so in words.
+       */
+      // A venue is either the host of this service or a member holding a copy, never both.
+      const memberContext = masterContext
+        ? null
+        : await loadMemberServiceContext(admin, id as string, staff.venue_id);
+      if (memberContext) {
+        const refused = hostOwnedFieldsInSave(
+          { ...(parsed.data as Record<string, unknown>), ...(collectiveCalendarsPatch ? { collective_calendars: true } : {}) },
+          serviceRow as Record<string, unknown>,
+        );
+        if (refused.length > 0) {
+          return NextResponse.json(
+            apiError(
+              `${memberContext.hostVenueName} manages this service for ${memberContext.collectiveName}, so only ${memberContext.hostVenueName} can change it. You choose which of your calendars offer it.`,
+              'COLLECTIVE_MANAGED_SERVICE',
+            ),
+            { status: 409 },
+          );
+        }
+      }
+
       const collectiveBefore = await captureMasterProjection(admin, masterContext);
       const collectiveNames = masterContext
         ? { collective: masterContext.collectiveName, host: masterContext.hostVenueName }

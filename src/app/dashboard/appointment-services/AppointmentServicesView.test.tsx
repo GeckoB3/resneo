@@ -10,7 +10,7 @@
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('next/navigation', () => ({
@@ -194,6 +194,81 @@ describe('a member of a collective', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/until you connect Stripe/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Connect Stripe' })).toBeInTheDocument();
+  });
+});
+
+describe("a member looking at the host's service", () => {
+  const openView = async () => {
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[0]!);
+    return screen.findByRole('dialog');
+  };
+
+  const viewWorld = () =>
+    show({
+      services: [
+        harnessService({
+          collective: harnessCollectiveBlock({ role: 'replica', status: 'up_to_date' }),
+          price_pence: 6500,
+          deposit_pence: null,
+          duration_minutes: 45,
+        }),
+      ],
+      practitioners: [
+        { id: 'cal-1', name: 'Room 1', is_active: true, calendar_type: 'staff', working_hours: {} },
+        { id: 'cal-2', name: 'Room 2', is_active: true, calendar_type: 'staff', working_hours: {} },
+      ],
+      practitionerServices: [{ practitioner_id: 'cal-1', service_id: 'svc-1' }],
+    });
+
+  it('shows the values, not a form of disabled inputs', async () => {
+    const world = viewWorld();
+    await world.ready();
+    const dialog = await openView();
+    expect(within(dialog).getByText('£65.00')).toBeInTheDocument();
+    expect(within(dialog).getByText('45 min')).toBeInTheDocument();
+    expect(within(dialog).getByText('No deposit')).toBeInTheDocument();
+    expect(within(dialog).getByText('What Host Venue has set')).toBeInTheDocument();
+    // The only inputs are the member's own choices.
+    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(2);
+    expect(within(dialog).queryByDisplayValue('Facial')).not.toBeInTheDocument();
+  });
+
+  it('ticks the calendars that already offer it, and saves the new set', async () => {
+    const world = viewWorld();
+    await world.ready();
+    const dialog = await openView();
+    expect(within(dialog).getByRole('checkbox', { name: 'Room 1' })).toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: 'Room 2' })).not.toBeChecked();
+
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Room 2' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save your settings' }));
+
+    await waitFor(() => expect(world.requests('PATCH', '/api/venue/appointment-services')).toHaveLength(1));
+    expect(world.requests('PATCH', '/api/venue/appointment-services')[0]!.body).toEqual({
+      id: 'svc-1',
+      practitioner_ids: ['cal-1', 'cal-2'],
+      expected_calendar_ids: ['cal-1'],
+    });
+  });
+
+  it('offers no save until something changes', async () => {
+    const world = viewWorld();
+    await world.ready();
+    const dialog = await openView();
+    expect(within(dialog).getByRole('button', { name: 'Save your settings' })).toBeDisabled();
+  });
+
+  it("shows the refusal when a member's save reached something the host owns", async () => {
+    const world = viewWorld();
+    await world.ready();
+    world.reply('PATCH', '/api/venue/appointment-services', 409, {
+      error: 'Host Venue manages this service for Northside, so only Host Venue can change it.',
+      code: 'COLLECTIVE_MANAGED_SERVICE',
+    });
+    const dialog = await openView();
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Room 2' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save your settings' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('only Host Venue can change it');
   });
 });
 

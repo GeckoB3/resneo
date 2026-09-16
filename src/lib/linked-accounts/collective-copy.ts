@@ -88,10 +88,20 @@ export const COLLECTIVE_COPY = {
   'svc.member.card.turnOn': 'Turn on',
   'svc.member.card.noCalendars': 'None of your calendars offer this yet.',
   'svc.member.card.cameFrom': 'Came from {host}',
+  'svc.member.view.lastUpdated': 'Last updated from {host} {relativeTime}',
+  'svc.member.view.calendarsHeading': 'Your calendars that offer this service',
+  'svc.member.view.calendarsHelp': 'When you save, ticked calendars offer {service} on the {collective} page.',
+  'svc.member.view.linkLabel': 'Link for your calendars',
+  'svc.member.view.hostHeading': 'What {host} has set',
+  'svc.member.view.retiredNote':
+    '{host} has taken this off the {collective} page. It takes no new bookings, and the bookings you already have are not changed.',
   'svc.member.section.fromHostTitle': 'From {host}',
   'svc.member.card.chooseCalendars': 'Choose calendars',
 
   // The service form (AppointmentServiceFormFields.tsx)
+  'svc.form.location.linkLabel': 'Link for your calendars',
+  'svc.form.location.infoLabel': 'Joining information for your clients',
+  'svc.form.location.linkHelp': 'Each venue adds its own link for its own calendars.',
   'svc.form.staffOnly.label': 'Staff bookings only',
   'svc.form.staffOnly.help':
     'Your team can book this from the diary. Guests do not see it on your booking page.',

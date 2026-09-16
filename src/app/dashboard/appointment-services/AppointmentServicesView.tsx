@@ -89,6 +89,7 @@ import {
   type CollectiveCalendarsValue,
 } from '@/components/linked-accounts/collective/CollectiveCalendarsSection';
 import { CollectiveSaveSummary } from '@/components/linked-accounts/collective/CollectiveSaveSummary';
+import { MemberServiceView } from '@/components/linked-accounts/collective/MemberServiceView';
 import type { CollectiveSync } from '@/lib/linked-accounts/replicas/inline-apply';
 import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
@@ -343,6 +344,9 @@ export function AppointmentServicesView({
     useState<CollectiveCalendarsValue>(EMPTY_CALENDARS_VALUE);
   const [collectiveSave, setCollectiveSave] = useState<{ sync: CollectiveSync; serviceName: string } | null>(null);
   const [staleService, setStaleService] = useState<{ id: string; name: string } | null>(null);
+  /** A service the host manages, opened to look at and to choose this venue's calendars (W6). */
+  const [viewingService, setViewingService] = useState<Service | null>(null);
+  const [viewingError, setViewingError] = useState<string | null>(null);
   /** Set by the stale ask: the service to open again once the fresh list has arrived. */
   const [reopenServiceId, setReopenServiceId] = useState<string | null>(null);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
@@ -1794,7 +1798,14 @@ export function AppointmentServicesView({
                         );
                       })() : null}
                       <DashboardEntityRowActions
-                        onEdit={() => openEdit(svc)}
+                        onEdit={() => {
+                          if (isManagedByHost(svc)) {
+                            setViewingError(null);
+                            setViewingService(svc);
+                            return;
+                          }
+                          openEdit(svc);
+                        }}
                         showDelete={!isManagedByHost(svc)}
                         editLabel={isManagedByHost(svc) ? collectiveCopy('svc.member.card.view') : 'Edit'}
                         onDelete={() => {
@@ -2120,6 +2131,69 @@ export function AppointmentServicesView({
       >
         <p className="sr-only">{collectiveCopy('svc.stale.message', { service: staleService?.name })}</p>
       </Dialog>
+
+      {viewingService && viewingService.collective ? (
+        <MemberServiceView
+          open
+          onClose={() => setViewingService(null)}
+          service={{
+            ...viewingService,
+            compliance_type_names: complianceTypeNamesByService.get(viewingService.id) ?? [],
+            addon_groups: (viewingService.addon_groups ?? []).map((entry) => ({
+              group: { id: entry.group.id, name: entry.group.name },
+            })),
+          }}
+          block={viewingService.collective}
+          currencySymbol={sym}
+          saving={saving}
+          error={viewingError}
+          calendars={practitioners
+            .filter((p) => p.is_active !== false)
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              is_active: p.is_active,
+              offers: calendarOffersService(p.id, viewingService.id),
+            }))}
+          onSave={(values) => {
+            const service = viewingService;
+            void (async () => {
+              setSaving(true);
+              setViewingError(null);
+              try {
+                const res = await fetch('/api/venue/appointment-services', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    id: service.id,
+                    practitioner_ids: values.practitioner_ids,
+                    expected_calendar_ids: links
+                      .filter((l) => l.service_id === service.id)
+                      .map((l) => l.practitioner_id),
+                    ...(service.location_type === 'online'
+                      ? {
+                          online_meeting_url: values.online_meeting_url ?? '',
+                          online_meeting_info: values.online_meeting_info ?? '',
+                        }
+                      : {}),
+                  }),
+                });
+                if (!res.ok) {
+                  const data = (await res.json().catch(() => ({}))) as { error?: string };
+                  setViewingError(data.error ?? 'Could not save your settings. Please try again.');
+                  return;
+                }
+                setViewingService(null);
+                await fetchAll();
+              } catch {
+                setViewingError('Could not save your settings. Please check your connection.');
+              } finally {
+                setSaving(false);
+              }
+            })();
+          }}
+        />
+      ) : null}
 
       <ServiceRemovalBookingsDialog
         open={serviceRemoval !== null}

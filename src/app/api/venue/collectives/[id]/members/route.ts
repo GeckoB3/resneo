@@ -13,6 +13,7 @@ import {
   legacyTransferRefused,
   runHostingAction,
 } from '@/lib/linked-accounts/replicas/hosting-actions';
+import { runJoin } from '@/lib/linked-accounts/replicas/join';
 import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
@@ -249,6 +250,34 @@ export async function PATCH(
           { error: 'This invitation is no longer open.' },
           { status: 409 },
         );
+      }
+      // On the shared-services model, joining is the engine's (contract 6): the venue's answers
+      // and its consent, one call, then the first copies and the notices.
+      const { data: model } = await ctx.admin
+        .from('venue_collectives')
+        .select('service_model')
+        .eq('id', collectiveId)
+        .maybeSingle();
+      if (model?.service_model === 'replicas') {
+        const refused = await runJoin(
+          {
+            admin: ctx.admin,
+            collectiveId,
+            collectiveName: collective.name,
+            hostVenueId: collective.host_venue_id,
+            memberId: myMembership.id as string,
+            venueId: ctx.venueId,
+            venueName: ctx.venue.name,
+            userId: ctx.userId,
+          },
+          {
+            consent_version: input.consent_version,
+            same_name_choices: input.same_name_choices,
+            own_service_choices: input.own_service_choices,
+            form_choices: input.form_choices,
+          },
+        );
+        return refused ?? finish();
       }
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
       // Same gate as collective CREATE (D4 mutual write + D8 single timezone): link

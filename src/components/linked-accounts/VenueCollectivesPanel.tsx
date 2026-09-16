@@ -6,6 +6,7 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { Modal, btnDanger, btnPrimary, btnSecondary } from './linked-accounts-ui';
 import { CombinedPageManager } from './CombinedPageManager';
+import { JoinCollectiveDialog } from './collective/JoinCollectiveDialog';
 import type { AccountLinkView } from '@/lib/linked-accounts/types';
 import type { CollectiveView } from '@/lib/linked-accounts/collectives';
 import { fullMutualLinks } from '@/lib/linked-accounts/full-mutual-links';
@@ -42,6 +43,8 @@ export function VenueCollectivesPanel({
   const [createOpen, setCreateOpen] = useState(false);
   const [manageTarget, setManageTarget] = useState<CollectiveView | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  // Joining a shared-services collective asks for consent and choices first (contract 6).
+  const [joinTarget, setJoinTarget] = useState<CollectiveView | null>(null);
   const router = useRouter();
 
   /**
@@ -185,6 +188,10 @@ export function VenueCollectivesPanel({
               collective={c}
               busy={busy}
               onAction={(body) => memberAction(c.id, body)}
+              onJoin={() => {
+                setError(null);
+                setJoinTarget(c);
+              }}
               onManage={() => {
                 setError(null);
                 setManageTarget(c);
@@ -234,6 +241,20 @@ export function VenueCollectivesPanel({
         />
       ) : null}
 
+      {joinTarget ? (
+        <JoinCollectiveDialog
+          open
+          collectiveId={joinTarget.id}
+          venueName={venueName}
+          onClose={() => setJoinTarget(null)}
+          onJoined={() => {
+            setJoinTarget(null);
+            void load();
+            refreshLayout();
+          }}
+        />
+      ) : null}
+
       <ConfirmModal
         state={confirm}
         busy={busy}
@@ -248,12 +269,14 @@ function CollectiveRow({
   collective,
   busy,
   onAction,
+  onJoin,
   onManage,
   onConfirm,
 }: {
   collective: CollectiveView;
   busy: boolean;
   onAction: (body: Record<string, unknown>) => void;
+  onJoin: () => void;
   onManage: () => void;
   onConfirm: (state: ConfirmState) => void;
 }) {
@@ -334,7 +357,9 @@ function CollectiveRow({
                   type="button"
                   className={btnPrimary}
                   disabled={busy}
-                  onClick={() => onAction({ action: 'accept' })}
+                  onClick={() =>
+                    collective.serviceModel === 'replicas' ? onJoin() : onAction({ action: 'accept' })
+                  }
                 >
                   Accept invitation
                 </button>

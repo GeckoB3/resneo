@@ -252,8 +252,37 @@ export const collectiveMemberActionSchema = z.object({
   visibleServiceIds: z.array(z.string().uuid()).optional(),
   allowAnyPractitionerSubstitution: z.boolean().optional(),
   displayOrder: z.number().int().min(0).max(999).optional(),
-  /** accept_host / take_over_hosting: the consent the venue was shown (contract 8). */
+  /** accept / accept_host / take_over_hosting: the consent the venue was shown (contracts 6, 8). */
   consent_version: z.string().max(100).optional(),
+  /** accept, shared-services model: the venue's answers (contract 6). */
+  same_name_choices: z
+    .array(
+      z.object({
+        item_id: z.string().uuid(),
+        choice: z.enum(['add_new', 'use_mine']),
+        my_service_id: z.string().uuid().optional(),
+        option_map: z
+          .array(z.object({ my_variant_id: z.string().uuid(), host_variant_id: z.string().uuid().nullable() }))
+          .max(100)
+          .optional(),
+      }),
+    )
+    .max(500)
+    .optional(),
+  own_service_choices: z
+    .array(z.object({ service_id: z.string().uuid(), choice: z.enum(['ask', 'park']) }))
+    .max(500)
+    .optional(),
+  form_choices: z
+    .array(
+      z.object({
+        host_type_id: z.string().uuid(),
+        choice: z.enum(['use_existing', 'use_theirs']),
+        my_type_id: z.string().uuid().optional(),
+      }),
+    )
+    .max(200)
+    .optional(),
   /** configure: what this member's own /book/{slug} does while the combined page is live (plan D2). */
   soloPageBehavior: z.enum(['keep_live', 'redirect']).optional(),
 });

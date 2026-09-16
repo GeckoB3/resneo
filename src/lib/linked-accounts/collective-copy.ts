@@ -266,6 +266,71 @@ export const COLLECTIVE_COPY = {
   'ov.grid.empty': 'No services match.',
   'ov.grid.done': 'Done',
 
+  // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
+  'join.title': 'Join {collective}',
+  'join.step': 'Step {n} of {total}',
+  'join.step.means': 'What joining means',
+  'join.step.services': 'Your services',
+  'join.step.forms': 'Forms you already use',
+  'join.step.check': 'Check and join',
+  'join.means.1':
+    '{host} sets up the services on the {collective} page in your account and controls them: names, descriptions, prices, deposits, payment rules, options, add-ons and forms.',
+  'join.means.2': 'Clients pay you, through your own Stripe account, at the prices {host} sets.',
+  'join.means.3':
+    'You choose which of your calendars offer each service. Your working hours and closures stay yours.',
+  'join.means.4': 'Your clients and bookings stay yours.',
+  'join.means.5':
+    'While you are part of {collective}, guests who visit your own booking page land on the {collective} page.',
+  'join.means.6':
+    'Your services that are not on the {collective} page are parked while you are part of {collective}: nobody can book them, your team included. They stay yours to edit, bookings already made for them are not changed, and you can ask {host} to add any of them.',
+  'join.means.7': 'You can leave at any time. You keep every service and booking.',
+  'join.warn.noStripe':
+    'You have not connected Stripe. {count} services on the page take a deposit, full payment or card hold, so guests cannot book those with you online until you connect it.',
+  'join.warn.formsOn':
+    'Some services ask for forms. Your calendars can offer those only while compliance records are switched on for your venue, and once on they stay on while you are part of {collective}. We do not switch them on for you.',
+  'join.block.timezone':
+    'You cannot join because your venue is in {yourTimezone} and {collective} is in {timezone}. Change your timezone under Profile first.',
+  'join.block.currency': 'You cannot join because your venue uses {yourCurrency} and {collective} uses {currency}.',
+  // Added while building the join: the deck names another collective by name, which the engine's
+  // blocker does not return; and it has no sentence for the booking-model and account-link checks.
+  'join.block.otherCollectiveGeneric': 'Your venue is already part of another collective. Leave it before joining this one.',
+  'join.block.bookingModel': 'You cannot join because your venue takes bookings in a different way from {collective}.',
+  'join.block.links':
+    'You cannot join yet because your account links with every venue in {collective} need full access both ways. Check them under Linked accounts.',
+  'join.block.unknown': 'You cannot join right now. Please try again, or contact support if this keeps happening.',
+  'join.services.sameName.heading': 'Services with the same name',
+  'join.services.sameName.help':
+    "You already have services with these names. Choose whether to use yours or add {host}'s as new.",
+  'join.services.addNew': "Add {host}'s as a new service",
+  'join.services.useMine': 'Use my {service}',
+  'join.services.useMine.note':
+    "Your {service} keeps its calendars and bookings. Its settings change to {host}'s. Bookings already made keep their price.",
+  'join.map.heading': 'Match your options',
+  'join.map.yours': 'Your option',
+  'join.map.theirs': "{host}'s option",
+  'join.map.keepOld': 'Keep for existing bookings only',
+  'join.services.own.heading': 'Your other services',
+  'join.services.own.help':
+    'These are not on the {collective} page, so they are parked while you are part of {collective}. Bookings already made for them are not changed. If one should be on the page, ask {host} to add it.',
+  'join.services.park': 'Park it until I leave',
+  'join.services.ask': 'Ask {host} to add it to {collective}',
+  'join.services.none': 'You have no services of your own to decide about.',
+  'join.forms.useExisting': 'Use my existing {form}, so records my clients already gave still count',
+  'join.forms.useTheirs': "Use {host}'s version as a separate form",
+  'join.forms.note': 'Either way, {host} decides which forms its services ask for.',
+  'join.forms.none': 'None of your forms share a name with the ones {collective} uses.',
+  'join.summary.setup': '{count} services from {host} will be set up in your account.',
+  'join.summary.useMine': '{count} of your services will be used for services from {host}.',
+  'join.summary.park': '{count} of your services will be parked until you leave {collective}.',
+  'join.summary.ask': '{host} will be asked to add {count} of your services.',
+  'join.consent':
+    "I understand that guests who visit {venue}'s booking page will be sent to the {collective} page, that {host} manages the services on it for {venue}, and that the venues in {collective} can see each other's clients, bookings and takings through our account links.",
+  'join.confirm': 'Join {collective}',
+  'join.next': 'Next',
+  'join.back': 'Back',
+  'join.error.consent': 'Please read what joining means and tick the box to agree before joining.',
+  'join.loading': 'Getting your services ready to compare...',
+
   // Moving the hosting (hosting-actions.ts, the Venues tab and the candidate's banner)
   'transfer.ask.button': 'Ask to host',
   'transfer.ask.title': 'Ask {venue} to host {collective}?',
@@ -318,6 +383,12 @@ export const COLLECTIVE_COPY = {
   'notify.commercial.putBack': '{host} put {service} back to how it was.',
   'notify.digest.subject': 'Changes from {host} today',
   'notify.digest.body': 'Here is what {host} changed in services on the {collective} page today.',
+  'notify.joined.subject': '{venue} joined {collective}',
+  'notify.joined.body':
+    'Your services on the {collective} page are being set up at {venue}. Choose which of its calendars offer each service on your Services page, or let {venue} choose.',
+  'notify.suggestion.subject': '{venue} suggests {service} for {collective}',
+  'notify.suggestion.body':
+    '{venue} would like {service} on the {collective} page. If you add it, you control it for every venue.',
   'notify.hostRequest.subject': '{host} asked you to host {collective}',
   'notify.hostRequest.body':
     'If you accept, you manage the services on the {collective} page for every venue, including their prices and forms.',

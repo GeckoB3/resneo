@@ -4,6 +4,7 @@ import { resolveLinkAdmin, enforceLinkRateLimit } from '@/lib/linked-accounts/ro
 import { requireReplicasHost, engineErrorResponse } from '@/lib/linked-accounts/replicas/host-route-helpers';
 import { applyLinksInline } from '@/lib/linked-accounts/replicas/inline-apply';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import { notifyServiceOffered } from '@/lib/linked-accounts/replicas/collective-notices';
 
 const offerSchema = z.object({ service_id: z.string().uuid() });
 
@@ -75,6 +76,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     actorUserId: ctx.userId,
   });
   invalidateCollectiveCatalogMemo(id);
+
+  // N8: every member now has a copy to give calendars to. A bell, not an email: the day's other
+  // changes reach them in the digest.
+  await notifyServiceOffered(ctx.admin, {
+    memberVenueIds: links.map((l) => l.venue_id),
+    collectiveId: id,
+    collectiveName: host.collective.name,
+    hostVenueId: ctx.venueId,
+    hostVenueName: ctx.venue.name,
+    serviceName: (service.name as string) ?? 'A service',
+  });
 
   return NextResponse.json(
     {

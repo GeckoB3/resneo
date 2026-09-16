@@ -148,6 +148,24 @@ export const COLLECTIVE_COPY = {
   'svc.cal.warn.settingUp': 'Setting up at {venue}. Its calendars can take bookings once this finishes.',
   'svc.cal.warn.failed': 'Could not update at {venue}: {reason}.',
 
+  // Notices (collective-notices.ts; UX spec §4)
+  'notify.offered.subject': '{host} added {service} to {collective}',
+  'notify.offered.body': '{service} is set up in your account. Choose which of your calendars offer it.',
+  'notify.hostCalendar.added.subject': '{host} added {calendar} to {service}',
+  'notify.hostCalendar.added.body':
+    'Guests can now book {service} with {calendar} on the {collective} page. You can change this on Calendar Availability.',
+  'notify.hostCalendar.removed.subject': '{host} took {calendar} off {service}',
+  'notify.hostCalendar.removed.body':
+    '{calendar} no longer offers {service} for new bookings. {count} upcoming bookings stay as they are.',
+  'notify.values.subject': "{host} changed {calendar}'s {field} for {service}",
+  'notify.values.body': '{calendar} now uses {value} for {service}.',
+  'notify.valuesCleared.subject': 'Custom values for {service} were cleared',
+  'notify.valuesCleared.body':
+    '{host} no longer lets calendars set their own {field} for {service}. {calendars} now use the standard value, {value}.',
+  'notify.pageBooking.subject': 'New booking with {venue} on the {collective} page',
+  'notify.pageBooking.body':
+    "A guest booked {service} with {calendar} at {venue} for {date}. {venue} holds the booking and the client's details.",
+
   // The commercial change ask
   'svc.commercial.title': 'Update {service} at every venue?',
   'svc.commercial.message': 'These changes apply to new bookings at {venueList}.',

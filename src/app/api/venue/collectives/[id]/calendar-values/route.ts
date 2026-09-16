@@ -3,6 +3,13 @@ import { z } from 'zod';
 import { resolveLinkAdmin, enforceLinkRateLimit } from '@/lib/linked-accounts/route-helpers';
 import { requireReplicasHost, engineErrorResponse } from '@/lib/linked-accounts/replicas/host-route-helpers';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import {
+  CALENDAR_VALUE_WORDS,
+  describeCalendarValue,
+  joinNames,
+  notifyCalendarValuesChanged,
+} from '@/lib/linked-accounts/replicas/collective-notices';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 
 /** The seven per-calendar values (W8). An absent key is unchanged; null clears one. */
 const valuesSchema = z
@@ -74,6 +81,39 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   invalidateCollectiveCatalogMemo(id);
   const result = (data ?? {}) as { assignment_id?: string; before?: unknown; after?: unknown };
+
+  // N14: the venue whose calendar it is hears what its own calendar now charges or times. The
+  // host's own calendars are its own business, so nothing is sent for those.
+  const { data: calendarRow } = await ctx.admin
+    .from('unified_calendars')
+    .select('id, name, venue_id, venues:venue_id (name, currency)')
+    .eq('id', parsed.data.calendar_id)
+    .maybeSingle();
+  const calendarVenueId = (calendarRow?.venue_id as string | null) ?? null;
+  if (calendarVenueId && calendarVenueId !== ctx.venueId) {
+    const { data: serviceRow } = await ctx.admin
+      .from('service_items')
+      .select('name')
+      .eq('id', parsed.data.service_id)
+      .maybeSingle();
+    const joinedVenue = (calendarRow?.venues ?? null) as { currency?: string | null } | { currency?: string | null }[] | null;
+    const currency = (Array.isArray(joinedVenue) ? joinedVenue[0]?.currency : joinedVenue?.currency) ?? null;
+    const symbol = currencySymbolFromCode(currency);
+    const fields = Object.keys(parsed.data.values);
+    await notifyCalendarValuesChanged(ctx.admin, {
+      memberVenueId: calendarVenueId,
+      collectiveId: id,
+      hostVenueName: ctx.venue.name,
+      calendarName: (calendarRow?.name as string) ?? 'A calendar',
+      serviceName: (serviceRow?.name as string) ?? 'a service',
+      fields: fields.map((f) => CALENDAR_VALUE_WORDS[f] ?? f),
+      value: joinNames(
+        fields.map((f) =>
+          describeCalendarValue(f, (parsed.data.values as Record<string, unknown>)[f], symbol),
+        ),
+      ),
+    });
+  }
   return NextResponse.json({
     assignment_id: result.assignment_id ?? null,
     before: result.before ?? null,

@@ -3,6 +3,7 @@ import { loadCollectiveServiceBlocks } from '@/lib/linked-accounts/replicas/serv
 import { loadHostCollectiveCalendars } from '@/lib/linked-accounts/replicas/host-calendars';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import { noticeNames, notifyHostCalendarChange } from '@/lib/linked-accounts/replicas/collective-notices';
 import {
   loadMasterSaveContext,
   captureMasterProjection,
@@ -1371,6 +1372,13 @@ export async function PATCH(request: NextRequest) {
         ? { collective: masterContext.collectiveName, host: masterContext.hostVenueName }
         : {};
       const collectiveCalendarFailures: { venue_id: string; calendar_id: string; message: string }[] = [];
+      /** Calendar changes that went through, so the venues they belong to can be told once (N11). */
+      const collectiveCalendarWrites: {
+        venue_id: string;
+        calendar_id: string;
+        action: 'assign' | 'unassign';
+        kept: number;
+      }[] = [];
 
       const customCoherent = assertPatchCustomAvailabilityCoherent({
         patch: parsed.data,
@@ -1630,6 +1638,14 @@ export async function PATCH(request: NextRequest) {
             written?: boolean;
             affected_bookings?: { booking_date: string; booking_time: string; calendar_id: string }[];
           };
+          if (calResult.written) {
+            collectiveCalendarWrites.push({
+              venue_id: entry.venue_id,
+              calendar_id: entry.calendar_id,
+              action: entry.action,
+              kept: calResult.affected_bookings?.length ?? 0,
+            });
+          }
           if (
             entry.action === 'unassign' &&
             calResult.written === false &&
@@ -1747,6 +1763,33 @@ export async function PATCH(request: NextRequest) {
       });
       if (collectiveSync && collectiveCalendarFailures.length > 0) {
         collectiveSync.calendar_failures = collectiveCalendarFailures;
+      }
+
+      // N11, grouped per save: one notice per venue and per action, naming its own calendars. The
+      // host's own calendars are its own business, so nothing is sent for those.
+      if (masterContext && collectiveCalendarWrites.length > 0) {
+        const names = await noticeNames(admin, {
+          itemId: masterContext.itemId,
+          calendarIds: collectiveCalendarWrites.map((w) => w.calendar_id),
+        });
+        const grouped = new Map<string, typeof collectiveCalendarWrites>();
+        for (const write of collectiveCalendarWrites) {
+          if (write.venue_id === staff.venue_id) continue;
+          const key = `${write.venue_id}:${write.action}`;
+          grouped.set(key, [...(grouped.get(key) ?? []), write]);
+        }
+        for (const writes of grouped.values()) {
+          await notifyHostCalendarChange(admin, {
+            memberVenueId: writes[0].venue_id,
+            collectiveId: masterContext.collectiveId,
+            collectiveName: masterContext.collectiveName,
+            hostVenueName: masterContext.hostVenueName,
+            serviceName: names.serviceName,
+            calendarNames: writes.map((w) => names.calendarName(w.calendar_id)),
+            action: writes[0].action,
+            keptBookings: writes.reduce((total, w) => total + w.kept, 0),
+          });
+        }
       }
 
       if (touchesShape) {

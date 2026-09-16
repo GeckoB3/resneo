@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
 import { recordCollectiveBookingAudit } from '@/lib/linked-accounts/audit';
+import { notifyPageBooking } from '@/lib/linked-accounts/replicas/collective-notices';
 import { isStaffBookingSource, loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
 import { apiError } from '@/lib/api/error-codes';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
@@ -1036,6 +1037,26 @@ export async function POST(request: NextRequest) {
           actingUserId,
           owningVenueId: venue_id,
           bookingIds: auditedBookingIds,
+        });
+      });
+    }
+
+    // N32: a guest booked a member's calendar on the collective page, so the venue running the
+    // page is told a booking happened, with no client details at all (D34). One notice for the
+    // visit, named by its first service. Staff bookings are not page bookings.
+    if (effectiveCollectiveId && !isStaffBookingSource(source) && !staffActor) {
+      const noticeCollectiveId = effectiveCollectiveId;
+      const noticeVenueId = venue_id;
+      const noticeCalendarId = practitionerId;
+      const noticeServiceName = validated[0]?.service_display_name ?? null;
+      const noticeDate = validated[0]?.booking_date ?? '';
+      after(async () => {
+        await notifyPageBooking(supabase, {
+          collectiveId: noticeCollectiveId,
+          owningVenueId: noticeVenueId,
+          serviceName: noticeServiceName,
+          calendarId: noticeCalendarId,
+          date: noticeDate,
         });
       });
     }

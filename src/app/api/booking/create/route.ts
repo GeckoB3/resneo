@@ -6,6 +6,7 @@ import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
 import { isStaffBookingSource, loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
 import { apiError } from '@/lib/api/error-codes';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import { notifyPageBooking } from '@/lib/linked-accounts/replicas/collective-notices';
 import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
   cancelBookingAfterPaymentFailure,
@@ -2142,6 +2143,26 @@ async function handleNonTableBooking(
       bookingId: booking.id,
       purpose: 'manage',
     });
+
+    // N32: a guest booked a member's calendar on the collective page, so the venue running the
+    // page is told a booking happened. Never the client's name or contact details (D34), and never
+    // for the host's own calendars. Staff bookings are not page bookings.
+    if (collective_id && !isStaffBookingSource(source)) {
+      const noticeVenueId = venue_id;
+      const noticeCalendarId = practitioner_id ?? null;
+      const noticeServiceName =
+        (appointmentEmailExtras.appointment_service_name as string | null | undefined) ?? null;
+      const noticeDate = booking_date;
+      after(async () => {
+        await notifyPageBooking(supabase, {
+          collectiveId: collective_id,
+          owningVenueId: noticeVenueId,
+          serviceName: noticeServiceName,
+          calendarId: noticeCalendarId,
+          date: noticeDate,
+        });
+      });
+    }
 
     if (guest.email || guest.phone) {
       after(async () => {

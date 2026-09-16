@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { resolveLinkAdmin, enforceLinkRateLimit } from '@/lib/linked-accounts/route-helpers';
 import { requireReplicasHost, engineErrorResponse } from '@/lib/linked-accounts/replicas/host-route-helpers';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
+import { noticeNames, notifyHostCalendarChange } from '@/lib/linked-accounts/replicas/collective-notices';
 
 const calendarSchema = z.object({
   item_id: z.string().uuid(),
@@ -82,6 +83,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
       { status: 409 },
     );
+  }
+
+  // N11: the venue whose calendar it is hears it from the host, with what it means for its
+  // bookings. The host's own calendars are its own business, so nothing is sent for those.
+  if (result.written && parsed.data.venue_id !== ctx.venueId) {
+    const names = await noticeNames(ctx.admin, {
+      itemId: parsed.data.item_id,
+      calendarIds: [parsed.data.calendar_id],
+    });
+    await notifyHostCalendarChange(ctx.admin, {
+      memberVenueId: parsed.data.venue_id,
+      collectiveId: id,
+      collectiveName: host.collective.name,
+      hostVenueName: ctx.venue.name,
+      serviceName: names.serviceName,
+      calendarNames: [names.calendarName(parsed.data.calendar_id)],
+      action: parsed.data.action,
+      keptBookings: result.affected_bookings?.length ?? 0,
+    });
   }
 
   return NextResponse.json({

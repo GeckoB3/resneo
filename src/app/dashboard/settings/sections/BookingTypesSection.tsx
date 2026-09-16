@@ -14,6 +14,7 @@ import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useSettingsSave } from '../SettingsSaveContext';
 import { useDashboardBookingModelsNavSync } from '@/app/dashboard/DashboardShell';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 const APPOINTMENTS_PLAN_MODELS: Array<{
   model: Extract<BookingModel, 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking'>;
@@ -51,9 +52,14 @@ interface Props {
   venue: VenueSettings;
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
+  /**
+   * The collective this venue is part of, if any: appointments cannot be switched off while it is
+   * (UX spec `bm.model.locked`; the server refuses with COLLECTIVE_BOOKING_MODEL_LOCKED).
+   */
+  collectiveName?: string | null;
 }
 
-export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
+export function BookingTypesSection({ venue, onUpdate, isAdmin, collectiveName = null }: Props) {
   const router = useRouter();
   const { report } = useSettingsSave();
   const bookingNavSync = useDashboardBookingModelsNavSync();
@@ -237,6 +243,7 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
       <ul className="space-y-3">
         {visible.map((opt) => {
           const checked = draft.includes(opt.model);
+          const lockedOn = Boolean(collectiveName) && opt.model === 'unified_scheduling' && checked;
           return (
             <li
               key={opt.model}
@@ -247,11 +254,18 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
                   type="checkbox"
                   className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                   checked={checked}
+                  disabled={lockedOn}
+                  aria-describedby={lockedOn ? `${opt.model}-locked` : undefined}
                   onChange={() => toggle(opt.model)}
                 />
                 <span>
                   <span className="font-medium text-slate-900">{opt.title}</span>
                   <span className="mt-0.5 block text-sm text-slate-600">{opt.description}</span>
+                  {lockedOn ? (
+                    <span id={`${opt.model}-locked`} className="mt-1 block text-sm text-amber-800">
+                      {collectiveCopy('bm.model.locked', { venue: venue.name ?? 'Your venue' })}
+                    </span>
+                  ) : null}
                 </span>
               </label>
               {checked && (

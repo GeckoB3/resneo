@@ -1542,6 +1542,7 @@ function SettingsViewInner({
               isAdmin={isAdmin}
               bookingModel={bookingModel}
               isAppointmentsProduct={isAppointmentsProduct}
+              collectiveName={collective?.name ?? null}
             />
           </SettingsProfileGroup>
 
@@ -1599,7 +1600,12 @@ function SettingsViewInner({
             title="Models on your public page"
             description="Choose which booking experiences are active for guests and which tools appear in your dashboard."
           >
-            <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <BookingTypesSection
+              venue={venue}
+              onUpdate={onUpdate}
+              isAdmin={isAdmin}
+              collectiveName={collective?.name ?? null}
+            />
             <RequireAccountLoginSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
           </SettingsProfileGroup>
 

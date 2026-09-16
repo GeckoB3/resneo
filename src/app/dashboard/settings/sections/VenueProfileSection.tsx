@@ -15,6 +15,7 @@ import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useSettingsSave } from '../SettingsSaveContext';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -79,6 +80,11 @@ interface VenueProfileSectionProps {
   bookingModel?: string;
   /** When set, overrides tier-derived detection (keeps profile in sync with settings shell). */
   isAppointmentsProduct?: boolean;
+  /**
+   * The collective this venue is part of, if any: its timezone is locked while it is (UX spec
+   * `profile.timezone.locked`; the server refuses with COLLECTIVE_TIMEZONE_LOCKED).
+   */
+  collectiveName?: string | null;
 }
 
 function buildRequestBody(data: ProfileForm) {
@@ -116,6 +122,7 @@ export function VenueProfileSection({
   isAdmin,
   bookingModel: _bookingModel = 'table_reservation',
   isAppointmentsProduct: isAppointmentsProductProp,
+  collectiveName = null,
 }: VenueProfileSectionProps) {
   const isAppointmentsProduct =
     isAppointmentsProductProp ?? isAppointmentsProductVenue(venue.pricing_tier ?? null);
@@ -511,7 +518,13 @@ export function VenueProfileSection({
             <label htmlFor="timezone" className="mb-1 block text-sm font-medium text-slate-700">
               Timezone
             </label>
-            <select id="timezone" {...register('timezone')} disabled={!isAdmin} className={inputClass}>
+            <select
+              id="timezone"
+              {...register('timezone')}
+              disabled={!isAdmin || Boolean(collectiveName)}
+              aria-describedby={collectiveName ? 'timezone-locked' : undefined}
+              className={inputClass}
+            >
               {/*
                 A select rather than free text (G23). A venue's timezone is the
                 source of truth for every booking instant it stores, so a value
@@ -531,6 +544,11 @@ export function VenueProfileSection({
                 </option>
               ))}
             </select>
+            {collectiveName ? (
+              <p id="timezone-locked" className="mt-1 text-xs text-slate-500">
+                {collectiveCopy('profile.timezone.locked', { collective: collectiveName })}
+              </p>
+            ) : null}
           </div>
         </form>
       </SectionCard.Body>

@@ -126,15 +126,18 @@ export async function PATCH(
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
       // Same gate as collective CREATE (D4 mutual write + D8 single timezone) — an
       // invite must not admit a venue the create path would have rejected.
-      const eligibility = await checkCombinedEligibility(ctx.admin, [input.venueId, ...members]);
+      const eligibility = await checkCombinedEligibility(ctx.admin, [input.venueId, ...members], {
+        hostVenueId: collective.host_venue_id,
+      });
       if (!eligibility.ok) {
         return NextResponse.json(
           {
             error:
               eligibility.reason ??
               'That venue can’t join the combined page yet.',
+            ...(eligibility.code ? { code: eligibility.code } : {}),
           },
-          { status: 400 },
+          { status: eligibility.code ? 409 : 400 },
         );
       }
       await ctx.admin.from('venue_collective_members').insert({
@@ -282,15 +285,18 @@ export async function PATCH(
       const members = await activeMemberVenueIds(ctx.admin, collectiveId);
       // Same gate as collective CREATE (D4 mutual write + D8 single timezone): link
       // or timezone changes since the invite must block acceptance, not just creation.
-      const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...members]);
+      const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...members], {
+        hostVenueId: collective.host_venue_id,
+      });
       if (!eligibility.ok) {
         return NextResponse.json(
           {
             error:
               eligibility.reason ??
               'Your venue can’t join the combined page yet.',
+            ...(eligibility.code ? { code: eligibility.code } : {}),
           },
-          { status: 400 },
+          { status: eligibility.code ? 409 : 400 },
         );
       }
       await ctx.admin

@@ -135,11 +135,16 @@ export async function POST(request: NextRequest) {
     // Combined-only (plan §22 / D-V1): a collective is born as a combined page,
     // so the D4 write gate + D8 single-timezone check is enforced at create time
     // across every member (host + invitees).
-    const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...inviteVenueIds]);
+    const eligibility = await checkCombinedEligibility(ctx.admin, [ctx.venueId, ...inviteVenueIds], {
+      hostVenueId: ctx.venueId,
+    });
     if (!eligibility.ok) {
       return NextResponse.json(
-        { error: eligibility.reason ?? 'These venues can’t run a combined page yet.' },
-        { status: 400 },
+        {
+          error: eligibility.reason ?? 'These venues can’t run a combined page yet.',
+          ...(eligibility.code ? { code: eligibility.code } : {}),
+        },
+        { status: eligibility.code ? 409 : 400 },
       );
     }
 

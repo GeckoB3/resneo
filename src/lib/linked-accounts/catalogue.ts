@@ -21,6 +21,7 @@ import {
   type ServiceGrouping,
 } from './collectives';
 import { evaluateLinkEligibility } from './eligibility';
+import { currencyMismatchWords, normalCurrency } from './collective-currency';
 import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
 import {
   buildDerivedCatalogueItems,
@@ -216,6 +217,8 @@ export function normaliseServiceNameForMerge(name: string): string {
 export interface CombinedEligibilityResult {
   ok: boolean;
   reason: string | null;
+  /** Set when the refusal has its own code (a currency mismatch answers 409, BM-04). */
+  code?: 'COLLECTIVE_CURRENCY_MISMATCH';
   /** The single shared timezone, when all members agree (else null). */
   timezone: string | null;
 }
@@ -224,11 +227,16 @@ export interface CombinedEligibilityResult {
  * Whether a set of member venues may run a combined (unified_catalog) page:
  * every pair must hold full mutual create/edit/cancel access (plan D4, via
  * {@link hasFullMutualWriteLinks}) and all members must share one timezone
- * (plan D8). Used to gate upgrade and to validate it stays satisfiable.
+ * (plan D8) and one currency (graft 4: the page shows the host's currency, so a member trading in
+ * another would have its prices relabelled rather than converted). Used to gate upgrade and to
+ * validate it stays satisfiable.
+ *
+ * `hostVenueId` names whose currency is the collective's; without it the first venue's is.
  */
 export async function checkCombinedEligibility(
   admin: SupabaseClient,
   memberVenueIds: string[],
+  options: { hostVenueId?: string } = {},
 ): Promise<CombinedEligibilityResult> {
   const ids = [...new Set(memberVenueIds.filter(Boolean))];
   if (ids.length < 2) {
@@ -245,13 +253,25 @@ export async function checkCombinedEligibility(
       };
     }
   }
-  const { data: venues } = await admin.from('venues').select('id, timezone').in('id', ids);
+  const { data: venues } = await admin.from('venues').select('id, name, timezone, currency').in('id', ids);
   const tzs = new Set((venues ?? []).map((v) => ((v.timezone as string | null) ?? 'Europe/London')));
   if (tzs.size > 1) {
     return {
       ok: false,
       reason: 'All members must share the same timezone to run a combined page.',
       timezone: null,
+    };
+  }
+  const hostId = options.hostVenueId ?? ids[0];
+  const host = (venues ?? []).find((v) => v.id === hostId);
+  const hostCurrency = normalCurrency(host?.currency as string | null | undefined);
+  const odd = (venues ?? []).find((v) => normalCurrency(v.currency as string | null | undefined) !== hostCurrency);
+  if (odd) {
+    return {
+      ok: false,
+      reason: currencyMismatchWords((odd.name as string | null) ?? 'A venue', odd.currency as string | null, hostCurrency),
+      timezone: null,
+      code: 'COLLECTIVE_CURRENCY_MISMATCH',
     };
   }
   return { ok: true, reason: null, timezone: [...tzs][0] ?? null };

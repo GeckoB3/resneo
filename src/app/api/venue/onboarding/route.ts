@@ -10,6 +10,11 @@ import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { normalizeWebsiteUrlForStorage } from '@/lib/urls/website-url';
 import { candidateVenueSlugs, firstAvailableVenueSlug } from '@/lib/venue/unique-venue-slug';
+import {
+  bookingModelLockRefusal,
+  currencyLockRefusal,
+  findCollectiveLockForVenue,
+} from '@/lib/linked-accounts/collective-venue-locks';
 
 const onboardingEmailSchema = z.string().trim().email().max(255);
 
@@ -123,6 +128,49 @@ export async function PATCH(request: Request) {
       updates.booking_model = bookingModel;
       updates.active_booking_models = activeModels;
       updates.enabled_models = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
+    }
+
+    // A venue in a collective keeps the collective's currency and its appointments (W7; BM-04).
+    if (updates.currency !== undefined || updates.active_booking_models !== undefined) {
+      const lock = await findCollectiveLockForVenue(admin, staff.venue_id);
+      if (lock) {
+        const { data: current } = await admin
+          .from('venues')
+          .select('name, currency, booking_model, enabled_models, active_booking_models, pricing_tier')
+          .eq('id', staff.venue_id)
+          .single();
+        const row = (current ?? {}) as {
+          name?: string | null;
+          currency?: string | null;
+          booking_model?: BookingModel;
+          enabled_models?: unknown;
+          active_booking_models?: unknown;
+          pricing_tier?: string | null;
+        };
+        const venueName = row.name ?? 'Your venue';
+        const currencyRefused = await currencyLockRefusal(
+          admin,
+          lock,
+          { id: staff.venue_id, name: venueName, currency: row.currency },
+          updates.currency as string | undefined,
+        );
+        if (currencyRefused) return currencyRefused;
+        if (updates.active_booking_models !== undefined) {
+          const before = resolveActiveBookingModels({
+            pricingTier: row.pricing_tier,
+            bookingModel: row.booking_model,
+            enabledModels: row.enabled_models,
+            activeBookingModels: row.active_booking_models,
+          });
+          const after = updates.active_booking_models as string[];
+          const modelRefused = bookingModelLockRefusal(
+            lock,
+            venueName,
+            before.filter((m) => !after.includes(m)),
+          );
+          if (modelRefused) return modelRefused;
+        }
+      }
     }
 
     if (Object.keys(updates).length === 0 && !preferredSlug) {

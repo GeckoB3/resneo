@@ -151,6 +151,12 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_TRANSFER_PENDING',
   /** Accepting needs the consent the venue was shown, sent back with its version (409). */
   'COLLECTIVE_CONSENT_REQUIRED',
+  /** A timezone change while the venue is part of a collective, which shares one timezone (409). */
+  'COLLECTIVE_TIMEZONE_LOCKED',
+  /** Switching appointments off while the venue is part of a collective (409). */
+  'COLLECTIVE_BOOKING_MODEL_LOCKED',
+  /** The venues would trade in different currencies: at create, invite and accept, or a change (409). */
+  'COLLECTIVE_CURRENCY_MISMATCH',
   /**
    * A new booking, or a booking moved to another service, for a service that is parked: the venue is
    * live in a collective and the service is not one of the collective's. Offer a collective service.

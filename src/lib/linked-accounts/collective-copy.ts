@@ -266,6 +266,15 @@ export const COLLECTIVE_COPY = {
   'ov.grid.empty': 'No services match.',
   'ov.grid.done': 'Done',
 
+  // Settings a collective depends on (collective-venue-locks.ts; UX spec `profile.timezone.*`, `bm.*`)
+  'profile.timezone.locked':
+    'You cannot change your timezone while you are part of {collective}, because every venue in it uses the same timezone.',
+  'profile.timezone.error': 'Your venue is part of {collective}, so its timezone cannot change. Leave {collective} first.',
+  'bm.model.locked':
+    'You cannot switch appointments off while {venue} is in a collective, because the collective page needs them.',
+  'bm.currency.blocked':
+    '{venue} takes payment in {currency} and the collective uses {hostCurrency}. Every venue in a collective has to use the same currency.',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

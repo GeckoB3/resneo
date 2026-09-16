@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
+import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
@@ -93,7 +94,7 @@ import { MemberServiceView } from '@/components/linked-accounts/collective/Membe
 import { CollectiveTodoStrip } from '@/components/linked-accounts/collective/CollectiveTodoStrip';
 import { buildCollectiveTodos } from '@/lib/linked-accounts/replicas/collective-todos';
 import type { CollectiveSync } from '@/lib/linked-accounts/replicas/inline-apply';
-import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -349,6 +350,11 @@ export function AppointmentServicesView({
   /** A service the host manages, opened to look at and to choose this venue's calendars (W6). */
   const [viewingService, setViewingService] = useState<Service | null>(null);
   const [viewingError, setViewingError] = useState<string | null>(null);
+  /** The host flipping a service's "On the page" switch: asked first, then offered or withdrawn. */
+  const [offerAsk, setOfferAsk] = useState<{ svc: Service; offer: boolean } | null>(null);
+  const [offerBusy, setOfferBusy] = useState<Set<string>>(() => new Set());
+  /** New services go on the collective page unless the host unticks it (UX spec §2 item 1). */
+  const [addToPage, setAddToPage] = useState(true);
   /** Set by the stale ask: the service to open again once the fresh list has arrived. */
   const [reopenServiceId, setReopenServiceId] = useState<string | null>(null);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
@@ -977,6 +983,7 @@ export function AppointmentServicesView({
     setEditingId(null);
     setEditingBaseline(null);
     setCollectiveCalendarsDiff(EMPTY_CALENDARS_VALUE);
+    setAddToPage(true);
     setError(null);
     setShowAddCalendarModal(false);
     setNewCalendarName('');
@@ -1122,6 +1129,45 @@ export function AppointmentServicesView({
    * partial body, so this sends the one field and shows the result at once,
    * rolling back if the save fails.
    */
+  /**
+   * Put a service on the collective page, or take it off (contract 1). The engine does the work at
+   * every venue; the page reloads to show what each venue now carries.
+   */
+  async function setOnPage(serviceId: string, offer: boolean, itemId: string | null): Promise<string | null> {
+    if (!collective) return null;
+    const res = offer
+      ? await fetch(`/api/venue/collectives/${collective.id}/offerings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ service_id: serviceId }),
+        })
+      : await fetch(`/api/venue/collectives/${collective.id}/offerings/${itemId}`, { method: 'DELETE' });
+    if (res.ok) return null;
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    return data.error ?? 'That did not go through. Please try again.';
+  }
+
+  async function confirmOnPage() {
+    const ask = offerAsk;
+    setOfferAsk(null);
+    if (!ask) return;
+    setOfferBusy((prev) => new Set(prev).add(ask.svc.id));
+    setError(null);
+    try {
+      const failed = await setOnPage(ask.svc.id, ask.offer, ask.svc.collective?.item_id ?? null);
+      if (failed) setError(failed);
+      await fetchAll();
+    } catch {
+      setError('That did not go through. Please check your connection.');
+    } finally {
+      setOfferBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(ask.svc.id);
+        return next;
+      });
+    }
+  }
+
   async function toggleServiceActive(svc: Service, nextActive: boolean) {
     if (activeToggling.has(svc.id)) return;
     setActiveToggling((prev) => new Set(prev).add(svc.id));
@@ -1255,6 +1301,20 @@ export function AppointmentServicesView({
         // and cancelling reopens it.
         setShowModal(false);
         return;
+      }
+
+      // A new service at a host goes on the page unless the host unticked the box. The service is
+      // saved either way; a refusal here is reported, never a reason to lose the service.
+      if (!editingId && collective?.isHost && addToPage) {
+        const createdId = typeof result.body.id === 'string' ? result.body.id : null;
+        if (createdId) {
+          const failed = await setOnPage(createdId, true, null);
+          if (failed) {
+            setError(
+              collectiveCopy('svc.offer.error', { service: String(payload.name ?? 'This service'), collective: collective.name }),
+            );
+          }
+        }
       }
 
       // How far the save reached, and the 60 second offer to put it back (D50). Absent at a
@@ -1805,6 +1865,35 @@ export function AppointmentServicesView({
                         cover, and the active flag is not one of them, so their
                         switch would flip and then roll straight back.
                       */}
+                      {isAdmin && collective?.isHost && svc.collective && !isManagedByHost(svc) ? (() => {
+                        const onPage = svc.collective.role === 'master';
+                        const switchId = `service-on-page-${svc.id}`;
+                        return (
+                          <span className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              id={switchId}
+                              role="switch"
+                              aria-checked={onPage}
+                              aria-label={`${collectiveCopy('svc.card.onPageSwitch', { collective: collective.name })}: ${svc.name}`}
+                              disabled={offerBusy.has(svc.id)}
+                              onClick={() => setOfferAsk({ svc, offer: !onPage })}
+                              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-wait disabled:opacity-60 ${
+                                onPage ? 'bg-brand-600' : 'bg-slate-300'
+                              }`}
+                            >
+                              <span
+                                className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                                  onPage ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                            <label htmlFor={switchId} className="cursor-pointer select-none text-xs text-slate-600">
+                              {collectiveCopy('svc.card.onPageSwitch', { collective: collective.name })}
+                            </label>
+                          </span>
+                        );
+                      })() : null}
                       {isAdmin && !isManagedByHost(svc) ? (() => {
                         const toggling = activeToggling.has(svc.id);
                         const switchId = `service-active-${svc.id}`;
@@ -1891,6 +1980,26 @@ export function AppointmentServicesView({
         {error && (
               <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
             )}
+
+            {!editingId && isAdmin && collective?.isHost ? (
+              <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={addToPage}
+                    onChange={(e) => setAddToPage(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+                  />
+                  {collectiveCopy('svc.add.onPageCheckbox', { collective: collective.name })}
+                </label>
+                <p className="mt-1 text-xs text-slate-600">
+                  {collectiveCopy('svc.add.onPageHelp', {
+                    venueList: formatVenueList(collectiveMemberNames) || 'the other venues',
+                    collective: collective.name,
+                  })}
+                </p>
+              </div>
+            ) : null}
 
             <AppointmentServiceFormFields
               form={form}
@@ -2231,6 +2340,33 @@ export function AppointmentServicesView({
           }}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={offerAsk !== null}
+        onOpenChange={(open) => {
+          if (!open) setOfferAsk(null);
+        }}
+        destructive={offerAsk?.offer === false}
+        title={
+          offerAsk && collective
+            ? collectiveCopy(offerAsk.offer ? 'svc.offer.title' : 'svc.withdraw.title', {
+                service: offerAsk.svc.name,
+                collective: collective.name,
+              })
+            : ''
+        }
+        message={
+          offerAsk && collective
+            ? collectiveCopy(offerAsk.offer ? 'svc.offer.message' : 'svc.withdraw.message', {
+                service: offerAsk.svc.name,
+                collective: collective.name,
+                venueList: formatVenueList(collectiveMemberNames) || 'the other venues',
+              })
+            : ''
+        }
+        confirmLabel={collectiveCopy(offerAsk?.offer === false ? 'svc.withdraw.confirm' : 'svc.offer.confirm')}
+        onConfirm={() => void confirmOnPage()}
+      />
 
       <ServiceRemovalBookingsDialog
         open={serviceRemoval !== null}

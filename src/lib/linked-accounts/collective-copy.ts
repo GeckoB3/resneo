@@ -175,6 +175,21 @@ export const COLLECTIVE_COPY = {
   'ov.todo.formsOffOne':
     '{venue} has forms switched off, so {count} service that needs a form is hidden from guests there.',
   'svc.offer.chooseCalendars': 'Choose calendars',
+  'svc.card.onPageSwitch': 'On the {collective} page',
+  'svc.offer.title': 'Add {service} to the {collective} page?',
+  'svc.offer.message':
+    '{service} is set up at {venueList} with your settings, and you control it for every venue. Their calendars do not offer it until you or they choose calendars.',
+  'svc.offer.confirm': 'Add to the page',
+  'svc.offer.done': 'Added to the {collective} page and set up at {venueList}.',
+  'svc.offer.error': 'Could not add {service} to the {collective} page. Please try again.',
+  'svc.withdraw.title': 'Take {service} off the {collective} page?',
+  'svc.withdraw.message':
+    'Guests will no longer see {service} on the {collective} page. At {venueList} it becomes a retired service and their calendars stop offering it. Bookings already made are not changed. At your venue it stays in your services, parked.',
+  'svc.withdraw.confirm': 'Take off the page',
+  'svc.withdraw.done': 'Taken off the {collective} page.',
+  'svc.add.onPageCheckbox': 'Show on the {collective} page',
+  'svc.add.onPageHelp':
+    'Sets it up at {venueList} too, with your settings. You can choose their calendars after saving. If you untick this, the service is parked while {collective} is live.',
 
   // The Collective area (CollectiveAreaClient.tsx; UX spec §2 item 15)
   'ov.subtitle': 'Who is in it, what is on the page, and which calendars offer what.',

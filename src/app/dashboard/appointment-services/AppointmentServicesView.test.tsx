@@ -199,6 +199,99 @@ describe('a member of a collective', () => {
   });
 });
 
+describe('putting a service on the page', () => {
+  const hostServices = () => [
+    harnessService({ collective: harnessCollectiveBlock() }),
+    harnessService({
+      id: 'svc-2',
+      name: 'Massage',
+      collective: harnessCollectiveBlock({ role: 'parked', item_id: null, status: 'hidden' }),
+    }),
+  ];
+  const groups = [
+    {
+      venue_id: 'member',
+      venue_name: 'Zen Studio',
+      is_host: false,
+      sync: { venues: 1, applied: 1, pending: [], failed: [] },
+      calendars: [],
+    },
+  ];
+
+  it('asks before taking a service off the page, then withdraws its offering', async () => {
+    const world = show({ services: hostServices(), collectiveCalendars: groups });
+    await world.ready();
+    await userEvent.click(screen.getByRole('switch', { name: 'On the Northside page: Facial' }));
+    const ask = await screen.findByRole('dialog');
+    expect(within(ask).getByText('Take Facial off the Northside page?')).toBeInTheDocument();
+    expect(world.requests('DELETE', '/api/venue/collectives/')).toHaveLength(0);
+
+    await userEvent.click(within(ask).getByRole('button', { name: 'Take off the page' }));
+    await waitFor(() =>
+      expect(world.requests('DELETE', '/api/venue/collectives/collective-1/offerings/item-1')).toHaveLength(1),
+    );
+  });
+
+  it('puts a parked service on the page after the host says yes', async () => {
+    const world = show({ services: hostServices(), collectiveCalendars: groups });
+    await world.ready();
+    const parkedSwitch = screen.getByRole('switch', { name: 'On the Northside page: Massage' });
+    expect(parkedSwitch).toHaveAttribute('aria-checked', 'false');
+    await userEvent.click(parkedSwitch);
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Add to the page' }));
+    await waitFor(() => expect(world.requests('POST', '/api/venue/collectives/collective-1/offerings')).toHaveLength(1));
+    expect(world.requests('POST', '/api/venue/collectives/collective-1/offerings')[0]!.body).toEqual({
+      service_id: 'svc-2',
+    });
+  });
+
+  it('offers a new service on the page by default', async () => {
+    const world = show({
+      services: hostServices(),
+      collectiveCalendars: groups,
+      routes: { 'POST /api/venue/appointment-services': { status: 201, body: { id: 'svc-new', name: 'Peel' } } },
+    });
+    await world.ready();
+    await userEvent.click(screen.getByRole('button', { name: /add service/i }));
+    const dialog = await screen.findByRole('dialog');
+    const box = within(dialog).getByRole('checkbox', { name: 'Show on the Northside page' });
+    expect(box).toBeChecked();
+    expect(within(dialog).getByText(/Sets it up at Zen Studio too/)).toBeInTheDocument();
+
+    await userEvent.type(within(dialog).getByLabelText(/^name/i), 'Peel');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create Service' }));
+    await waitFor(() => expect(world.requests('POST', '/api/venue/collectives/collective-1/offerings')).toHaveLength(1));
+    expect(world.requests('POST', '/api/venue/collectives/collective-1/offerings')[0]!.body).toEqual({
+      service_id: 'svc-new',
+    });
+  });
+
+  it('leaves a new service parked when the host unticks it', async () => {
+    const world = show({
+      services: hostServices(),
+      collectiveCalendars: groups,
+      routes: { 'POST /api/venue/appointment-services': { status: 201, body: { id: 'svc-new', name: 'Peel' } } },
+    });
+    await world.ready();
+    await userEvent.click(screen.getByRole('button', { name: /add service/i }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Show on the Northside page' }));
+    await userEvent.type(within(dialog).getByLabelText(/^name/i), 'Peel');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create Service' }));
+    await waitFor(() => expect(world.requests('POST', '/api/venue/appointment-services')).toHaveLength(1));
+    expect(world.requests('POST', '/api/venue/collectives/')).toHaveLength(0);
+  });
+
+  it('shows neither to a venue outside a collective', async () => {
+    const world = show({ services: [harnessService()] });
+    await world.ready();
+    expect(screen.queryByRole('switch', { name: /On the .* page/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /add service/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByRole('checkbox', { name: /Show on the/ })).not.toBeInTheDocument();
+  });
+});
+
 describe('what needs you', () => {
   it('names a service on the page that no calendar offers, and opens it', async () => {
     const world = show({

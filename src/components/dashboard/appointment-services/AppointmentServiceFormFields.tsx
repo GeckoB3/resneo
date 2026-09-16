@@ -118,8 +118,11 @@ export function AppointmentServiceFormFields({
       {staffNotice}
 
       <div>
-        <label className="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+        <label htmlFor={`service-name-${fieldGroupSuffix}`} className="mb-1 block text-sm font-medium text-slate-700">
+          Name *
+        </label>
         <input
+          id={`service-name-${fieldGroupSuffix}`}
           type="text"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}

@@ -90,6 +90,8 @@ import {
 } from '@/components/linked-accounts/collective/CollectiveCalendarsSection';
 import { CollectiveSaveSummary } from '@/components/linked-accounts/collective/CollectiveSaveSummary';
 import { MemberServiceView } from '@/components/linked-accounts/collective/MemberServiceView';
+import { CollectiveTodoStrip } from '@/components/linked-accounts/collective/CollectiveTodoStrip';
+import { buildCollectiveTodos } from '@/lib/linked-accounts/replicas/collective-todos';
 import type { CollectiveSync } from '@/lib/linked-accounts/replicas/inline-apply';
 import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
@@ -589,6 +591,26 @@ export function AppointmentServicesView({
     ],
     [collectiveCalendars],
   );
+
+  /**
+   * The handful of things that stop guests booking and that nobody would otherwise notice: a
+   * service no calendar offers, a venue that has joined and chosen nothing, payments or forms in
+   * the way. Empty at a venue that is not in a collective, which is every venue today.
+   */
+  const collectiveTodos = useMemo(() => {
+    if (!collective) return [];
+    const offersByService = new Map<string, number>();
+    for (const link of links) {
+      offersByService.set(link.service_id, (offersByService.get(link.service_id) ?? 0) + 1);
+    }
+    return buildCollectiveTodos({
+      isHost: collective.isHost,
+      services: services.map((s) => ({ id: s.id, name: s.name, collective: s.collective ?? null })),
+      calendarGroups: collectiveCalendars,
+      ownCalendarCount: (serviceId) => offersByService.get(serviceId) ?? 0,
+      ownVenueId: collectiveCalendars.find((g) => !g.is_host)?.venue_id ?? null,
+    });
+  }, [collective, services, collectiveCalendars, links]);
 
   const collectiveFilterCounts = useMemo(() => {
     if (!collective) return undefined;
@@ -1421,6 +1443,21 @@ export function AppointmentServicesView({
         </SectionCard>
       ) : (
         <div className="space-y-3">
+          {collectiveTodos.length > 0 ? (
+            <CollectiveTodoStrip
+              todos={collectiveTodos}
+              onOpenService={(serviceId) => {
+                const svc = services.find((s) => s.id === serviceId);
+                if (!svc) return;
+                if (isManagedByHost(svc)) {
+                  setViewingError(null);
+                  setViewingService(svc);
+                  return;
+                }
+                openEdit(svc);
+              }}
+            />
+          ) : null}
           {collective ? (
             <CollectiveServicesBanner
               variant={collective.isHost ? 'host' : 'member'}

@@ -96,7 +96,6 @@ export const COLLECTIVE_COPY = {
   'svc.member.view.retiredNote':
     '{host} has taken this off the {collective} page. It takes no new bookings, and the bookings you already have are not changed.',
   'svc.member.section.fromHostTitle': 'From {host}',
-  'svc.member.card.chooseCalendars': 'Choose calendars',
 
   // The service form (AppointmentServiceFormFields.tsx)
   'svc.form.location.linkLabel': 'Link for your calendars',
@@ -159,6 +158,23 @@ export const COLLECTIVE_COPY = {
     "{venue}'s subscription has lapsed, so its calendars are hidden from the {collective} page until it is put right.",
   'svc.cal.warn.settingUp': 'Setting up at {venue}. Its calendars can take bookings once this finishes.',
   'svc.cal.warn.failed': 'Could not update at {venue}: {reason}.',
+
+  // "What needs you" (collective-todos.ts)
+  'ov.todo.heading': 'What needs you',
+  'ov.todo.noCalendars': '{service} is on the page but no calendar offers it, so guests cannot book it.',
+  'ov.todo.newVenue': '{venue} has joined. Choose their calendars on {count} services.',
+  'ov.todo.newVenueOne': '{venue} has joined. Choose their calendars on {count} service.',
+  'ov.todo.failed': '{count} services could not be updated at {venue}.',
+  'ov.todo.failedOne': '{count} service could not be updated at {venue}.',
+  'ov.todo.noStripe':
+    '{venue} cannot take card payments yet, so {count} paid services are hidden from guests there.',
+  'ov.todo.noStripeOne':
+    '{venue} cannot take card payments yet, so {count} paid service is hidden from guests there.',
+  'ov.todo.formsOff':
+    '{venue} has forms switched off, so {count} services that need a form are hidden from guests there.',
+  'ov.todo.formsOffOne':
+    '{venue} has forms switched off, so {count} service that needs a form is hidden from guests there.',
+  'svc.offer.chooseCalendars': 'Choose calendars',
 
   // Notices (collective-notices.ts; UX spec §4)
   'notify.offered.subject': '{host} added {service} to {collective}',

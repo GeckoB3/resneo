@@ -193,7 +193,72 @@ describe('a member of a collective', () => {
       screen.getByText('Setting up. Guests can book it on your calendars once this finishes.'),
     ).toBeInTheDocument();
     expect(screen.getByText(/until you connect Stripe/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Connect Stripe' })).toBeInTheDocument();
+    // Twice by design: the strip at the top says it once for the venue, the card says it for
+    // the service it is about.
+    expect(screen.getAllByRole('link', { name: 'Connect Stripe' }).length).toBeGreaterThan(0);
+  });
+});
+
+describe('what needs you', () => {
+  it('names a service on the page that no calendar offers, and opens it', async () => {
+    const world = show({
+      services: [harnessService({ collective: harnessCollectiveBlock() })],
+      collectiveCalendars: [
+        {
+          venue_id: 'host',
+          venue_name: 'Host Venue',
+          is_host: true,
+          sync: { venues: 1, applied: 1, pending: [], failed: [] },
+          calendars: [{ id: 'cal-1', name: 'Room 1', is_active: true, assigned: [] }],
+        },
+      ],
+    });
+    await world.ready();
+    expect(screen.getByRole('heading', { name: 'What needs you' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Facial is on the page but no calendar offers it, so guests cannot book it.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Choose calendars' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('says nothing when there is nothing to do', async () => {
+    const world = show({
+      services: [harnessService({ collective: harnessCollectiveBlock() })],
+      collectiveCalendars: [
+        {
+          venue_id: 'host',
+          venue_name: 'Host Venue',
+          is_host: true,
+          sync: { venues: 1, applied: 1, pending: [], failed: [] },
+          calendars: [
+            {
+              id: 'cal-1',
+              name: 'Room 1',
+              is_active: true,
+              assigned: [
+                {
+                  item_id: 'item-1',
+                  service_id: 'svc-1',
+                  values: {
+                    custom_price_pence: null,
+                    custom_duration_minutes: null,
+                    custom_name: null,
+                    custom_description: null,
+                    custom_buffer_minutes: null,
+                    custom_deposit_pence: null,
+                    custom_colour: null,
+                  },
+                  last_changed: null,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    await world.ready();
+    expect(screen.queryByRole('heading', { name: 'What needs you' })).not.toBeInTheDocument();
   });
 });
 

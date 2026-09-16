@@ -60,7 +60,8 @@ BEGIN
          'collective_service_replicas',
          'collective_catalogue_revisions',
          'collective_audit_events',
-         'collective_operations'
+         'collective_operations',
+         'collective_notice_marks'
        )
   LOOP
     EXECUTE format(

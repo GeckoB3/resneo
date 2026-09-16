@@ -263,6 +263,13 @@ export const COLLECTIVE_COPY = {
     'Guests cannot book {service} on your calendars until it updates. {host} has been told, and we are still trying.',
   'notify.failedMember.bodyMany':
     'Guests cannot book {service} on your calendars until they update. {host} has been told, and we are still trying.',
+  'notify.commercial.subject': '{host} changed {service}',
+  'notify.commercial.subjectMany': '{host} changed {count} services',
+  'notify.commercial.body':
+    'These changes apply to new bookings on your calendars from now. Bookings already made keep the price and terms they were booked with.',
+  'notify.commercial.putBack': '{host} put {service} back to how it was.',
+  'notify.digest.subject': 'Changes from {host} today',
+  'notify.digest.body': 'Here is what {host} changed in services on the {collective} page today.',
   'notify.offered.subject': '{host} added {service} to {collective}',
   'notify.offered.body': '{service} is set up in your account. Choose which of your calendars offer it.',
   'notify.hostCalendar.added.subject': '{host} added {calendar} to {service}',

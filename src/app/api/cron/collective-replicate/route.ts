@@ -5,6 +5,7 @@ import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 import { runCollectiveReplicate, type RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { notifyFailingLinks } from '@/lib/linked-accounts/replicas/collective-failure-notices';
+import { sendMasterChangeNotices } from '@/lib/linked-accounts/replicas/master-change-notices';
 
 /**
  * GET/POST /api/cron/collective-replicate: every 5 minutes, apply due collective replica links
@@ -29,6 +30,16 @@ async function handlePost(request: NextRequest) {
     counters.results.failure_notices = notices.hostNotices;
   } catch (err) {
     console.error('[collective] failure notices threw:', err);
+    counters.errors += 1;
+  }
+  // The host's changes, to its members: commercial ones once a burst is quiet (N6), the rest in
+  // the 18:00 digest, each member's own time (N7).
+  try {
+    const changes = await sendMasterChangeNotices(supabase);
+    counters.results.commercial_notices = changes.commercial;
+    counters.results.digests = changes.digests;
+  } catch (err) {
+    console.error('[collective] change notices threw:', err);
     counters.errors += 1;
   }
   const outcome = await finalizeCronRun(counters);

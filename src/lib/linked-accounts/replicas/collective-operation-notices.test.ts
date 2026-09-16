@@ -158,6 +158,23 @@ describe('drainOperationNotices', () => {
     expect((updates.at(-1)!.payload as { status: string }).status).toBe('done');
   });
 
+  it('still tells the venues when the deleted host took the collective with it (N19)', async () => {
+    const { outcome } = drain(
+      world(
+        [
+          op('N19', {
+            venue_id: null,
+            progress: { notice: 'N19', host_deleted: true, collective_name: 'Eastside', venue_ids: ['member', 'third'] },
+          }),
+        ],
+        (call) => (call.table === 'venue_collectives' ? { data: null } : undefined),
+      ),
+    );
+    expect(await outcome).toEqual({ sent: 1, failed: 0 });
+    expect(told()).toEqual(['member', 'third']);
+    expect(subjects()).toEqual(['Eastside has ended', 'Eastside has ended']);
+  });
+
   it('marks a sent notice done', async () => {
     const { recording, outcome } = drain(world([op('N22')]));
     await outcome;

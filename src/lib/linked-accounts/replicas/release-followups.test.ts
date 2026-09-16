@@ -201,6 +201,14 @@ describe('drainReleaseFollowups: notices', () => {
     expect(emailed()[0]!.subject).toBe('Zen Studio left Northside because a link ended');
   });
 
+  it("names a deleted venue in the host's notice, and copies no photos for it", async () => {
+    const deleted = { ...op({ reason: 'venue_deleted', services: ['svc-cut'], venue_name: 'Gone Studio' }), venue_id: 'deleted' };
+    const { copy, run } = setup([deleted], {});
+    await run();
+    expect(copy).not.toHaveBeenCalled();
+    expect(emailed()[0]).toEqual({ venueId: 'host', subject: 'Gone Studio left Northside', cta: null });
+  });
+
   it('sends nothing for a collective that ended, which has its own notice (N19)', async () => {
     const { run } = setup([op({ reason: 'dissolved', services: [] })]);
     expect(await run()).toMatchObject({ done: 1 });

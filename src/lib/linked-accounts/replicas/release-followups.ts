@@ -42,6 +42,8 @@ interface FollowupRow {
 
 interface Progress {
   reason?: string;
+  /** Set when the venue itself was deleted (20270218160000): its name for the host's notice. */
+  venue_name?: string;
   services?: string[];
   /** Services whose photo step is finished, copied or not. */
   photos_done?: string[];
@@ -97,7 +99,7 @@ export async function drainReleaseFollowups(
       outcome.photos_copied += photos.copied;
       outcome.photos_failed += photos.failed;
       if (!progress.notified) {
-        await sendReleaseNotice(admin, op, progress.reason ?? 'left');
+        await sendReleaseNotice(admin, op, progress.reason ?? 'left', progress.venue_name);
         progress.notified = true;
       }
       const finished = photos.pending === 0;
@@ -182,6 +184,8 @@ async function copyPhotos(
   lastTry: boolean,
   now: number,
 ): Promise<{ copied: number; failed: number; pending: number }> {
+  // A deleted venue has no page to keep photos on.
+  if (progress.reason === 'venue_deleted') return { copied: 0, failed: 0, pending: 0 };
   const done = new Set(progress.photos_done ?? []);
   const services = (progress.services ?? []).filter((id) => !done.has(id));
   const result = { copied: 0, failed: 0, pending: 0 };
@@ -254,7 +258,12 @@ async function placeOnOwnPage(admin: SupabaseClient, venueId: string, placed: Re
     .eq('id', venueId);
 }
 
-async function sendReleaseNotice(admin: SupabaseClient, op: FollowupRow, reason: string): Promise<void> {
+async function sendReleaseNotice(
+  admin: SupabaseClient,
+  op: FollowupRow,
+  reason: string,
+  deletedVenueName?: string,
+): Promise<void> {
   if (!op.venue_id || reason === 'dissolved') return;
   const { data: collective } = await admin
     .from('venue_collectives')
@@ -267,7 +276,7 @@ async function sendReleaseNotice(admin: SupabaseClient, op: FollowupRow, reason:
   const { data: venues } = await admin.from('venues').select('id, name').in('id', [op.venue_id, hostId]);
   const nameOf = (id: string, fallback: string) =>
     ((venues ?? []).find((v) => v.id === id)?.name as string | undefined) ?? fallback;
-  const venue = nameOf(op.venue_id, 'A venue');
+  const venue = nameOf(op.venue_id, deletedVenueName ?? 'A venue');
   const host = nameOf(hostId, 'The host');
   const meta = { category: 'collective' as const, collectiveId: op.collective_id };
 

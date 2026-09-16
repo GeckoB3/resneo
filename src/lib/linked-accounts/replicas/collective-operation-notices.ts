@@ -105,6 +105,22 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
     .select('id, name, host_venue_id, dissolved_at, paused_at')
     .eq('id', op.collective_id)
     .maybeSingle();
+  if (!collective && notice === 'N19' && op.progress?.host_deleted === true) {
+    // The host venue was deleted, taking the collective's rows with it: the job carries what it needs.
+    const name = typeof op.progress.collective_name === 'string' ? op.progress.collective_name : 'your collective';
+    const venueIds = Array.isArray(op.progress.venue_ids) ? (op.progress.venue_ids as string[]) : [];
+    const subject = collectiveCopy('notify.dissolved.subject', { collective: name });
+    for (const venueId of venueIds) {
+      await notifyVenue(
+        admin,
+        venueId,
+        subject,
+        { heading: subject, paragraphs: [collectiveCopy('notify.dissolved.body')] },
+        { type: 'collective_n19', category: 'collective', collectiveId: null },
+      );
+    }
+    return;
+  }
   if (!collective) throw new Error('collective not found');
   const collectiveName = (collective.name as string) ?? 'your collective';
 

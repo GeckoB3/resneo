@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { makeRecordingDb, type Responder } from '@/lib/testing/recording-supabase';
 
+type Row = Record<string, unknown>;
+
 vi.mock('@/lib/booking/staff-booking-access', () => ({
   loadStaffAccessibleBooking: vi.fn(),
   resolveLinkedStaffCreateScope: vi.fn(async () => ({ ok: true, venueId: 'member', linked: null })),
@@ -55,6 +57,7 @@ function world(extra: Responder = () => undefined) {
     if (call.table === 'venues') {
       return { data: [{ id: 'member', name: 'Zen Studio', timezone: 'Europe/London' }, { id: 'host', name: 'Host Venue' }] };
     }
+    if (call.table === 'venue_collectives') return { data: { service_model: 'replicas' } };
     if (call.table === 'collective_service_items') return { data: { id: 'offer-cut', master_service_id: 'master-cut', status: 'active' } };
     if (call.table === 'collective_service_replicas') return { data: { replica_service_id: 'replica-cut' } };
     if (call.table === 'guests') return { data: { first_name: 'Sam', last_name: 'Guest', email: 'sam@x.test', phone: '+447700900000' } };
@@ -190,6 +193,42 @@ describe('moveBookingToCollectiveVenue', () => {
     expect(result).toMatchObject({ ok: false, status: 409, code: 'COLLECTIVE_MOVE_ATTACHED' });
     expect((result as { error: string }).error).toMatch(/deposit, card hold or payment/);
     expect(vi.mocked(executeBookingModificationGuestNotification)).not.toHaveBeenCalled();
+  });
+});
+
+describe('moveBookingToCollectiveVenue on the older model (found on staging)', () => {
+  /** Plus 1's Beard Trim at the host; Light 3's own copy, provided by John on the page. */
+  const legacy = (providers: Row[]) =>
+    world((call) => {
+      if (call.table === 'venue_collectives') return { data: { service_model: 'legacy_copies' } };
+      if (call.table === 'collective_service_items') return { data: [{ id: 'offer-live' }] };
+      if (call.table === 'collective_service_providers') {
+        const venue = call.filters.find((f) => f[1] === 'venue_id')?.[2];
+        if (venue === 'host') return { data: [{ item_id: 'offer-live' }] };
+        return { data: providers };
+      }
+      if (call.table === 'service_items') return { data: { id: 'zen-beard', is_active: true } };
+      if (call.table === 'calendar_service_assignments') return { data: { calendar_id: 'cal-zen' } };
+      return undefined;
+    });
+
+  it("finds the member's own copy the calendar provides, and checks the time on it", async () => {
+    const result = await move(legacy([{ id: 'p-1', source_service_id: 'zen-beard', practitioner_id: 'cal-zen' }]));
+    expect(result).toMatchObject({ ok: true, bookingId: 'b-new' });
+    expect(vi.mocked(validateAppointmentModificationInterval).mock.calls[0]![0]).toMatchObject({
+      venueId: 'member',
+      practId: 'cal-zen',
+      svcId: 'zen-beard',
+    });
+  });
+
+  it('accepts a venue-wide provider when the calendar offers the copy', async () => {
+    expect(await move(legacy([{ id: 'p-1', source_service_id: 'zen-beard', practitioner_id: null }]))).toMatchObject({ ok: true });
+  });
+
+  it("refuses when no provider at the venue is that calendar's", async () => {
+    const result = await move(legacy([{ id: 'p-1', source_service_id: 'zen-beard', practitioner_id: 'cal-other' }]));
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'COLLECTIVE_MOVE_SERVICE' });
   });
 });
 

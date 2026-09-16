@@ -60,15 +60,104 @@ export function moveRefusalWords(message: string, venueName: string): { error: s
   return { code: 'COLLECTIVE_MOVE_NOT_ALLOWED', error: collectiveCopy('move.refused.notAllowed', { venue: venueName }) };
 }
 
+/**
+ * On a collective still on the older model, each venue offers its own copy and the page links them
+ * through providers: the target is the offering's active provider at the target venue for that
+ * calendar (named on the provider, or venue-wide with the calendar assigned). Options match by name.
+ */
+async function legacyTargetServiceFor(
+  admin: SupabaseClient,
+  booking: Row,
+  collectiveId: string,
+  targetVenueId: string,
+  calendarId: string,
+): Promise<{ serviceId: string; variantId: string | null } | null> {
+  const serviceId = booking.service_item_id as string | null;
+  if (!serviceId) return null;
+  const { data: items } = await admin
+    .from('collective_service_items')
+    .select('id')
+    .eq('collective_id', collectiveId)
+    .eq('status', 'active');
+  const activeItemIds = ((items ?? []) as Row[]).map((i) => i.id as string);
+  if (activeItemIds.length === 0) return null;
+  const { data: own } = await admin
+    .from('collective_service_providers')
+    .select('item_id')
+    .in('item_id', activeItemIds)
+    .eq('venue_id', booking.venue_id as string)
+    .eq('source_service_id', serviceId)
+    .eq('status', 'active');
+  const ownItems = [...new Set(((own ?? []) as Row[]).map((p) => p.item_id as string))].sort();
+  const bookedItem = booking.collective_service_item_id as string | null;
+  const itemId = bookedItem && ownItems.includes(bookedItem) ? bookedItem : ownItems[0];
+  if (!itemId) return null;
+
+  const { data: providers } = await admin
+    .from('collective_service_providers')
+    .select('id, source_service_id, practitioner_id')
+    .eq('item_id', itemId)
+    .eq('venue_id', targetVenueId)
+    .eq('status', 'active');
+  const candidates = ((providers ?? []) as Row[]).sort((a, b) => {
+    const rank = (p: Row) => (p.practitioner_id ? 0 : 1);
+    return rank(a) - rank(b) || String(a.id).localeCompare(String(b.id));
+  });
+  let targetServiceId: string | null = null;
+  for (const p of candidates) {
+    if (p.practitioner_id && p.practitioner_id !== calendarId) continue;
+    const { data: service } = await admin
+      .from('service_items')
+      .select('id, is_active')
+      .eq('id', p.source_service_id as string)
+      .eq('venue_id', targetVenueId)
+      .maybeSingle();
+    if (!service || service.is_active === false) continue;
+    if (!p.practitioner_id) {
+      const { data: assigned } = await admin
+        .from('calendar_service_assignments')
+        .select('calendar_id')
+        .eq('calendar_id', calendarId)
+        .eq('service_item_id', p.source_service_id as string)
+        .maybeSingle();
+      if (!assigned) continue;
+    }
+    targetServiceId = p.source_service_id as string;
+    break;
+  }
+  if (!targetServiceId) return null;
+
+  const variantId = (booking.service_variant_id as string | null) ?? null;
+  if (!variantId) return { serviceId: targetServiceId, variantId: null };
+  const { data: variant } = await admin.from('service_variants').select('name').eq('id', variantId).maybeSingle();
+  const wanted = ((variant?.name as string | undefined) ?? '').trim().toLowerCase();
+  const { data: options } = await admin
+    .from('service_variants')
+    .select('id, name')
+    .eq('service_item_id', targetServiceId)
+    .eq('is_active', true);
+  const match = ((options ?? []) as Row[]).find((o) => String(o.name).trim().toLowerCase() === wanted);
+  return match ? { serviceId: targetServiceId, variantId: match.id as string } : null;
+}
+
 /** The venue's own service and option standing for the booked ones, found through the offering. */
 async function targetServiceFor(
   admin: SupabaseClient,
   booking: Row,
   collective: { collectiveId: string; hostVenueId: string },
   targetVenueId: string,
+  calendarId: string,
 ): Promise<{ serviceId: string; variantId: string | null } | null> {
   const serviceId = booking.service_item_id as string | null;
   if (!serviceId) return null;
+  const { data: model } = await admin
+    .from('venue_collectives')
+    .select('service_model')
+    .eq('id', collective.collectiveId)
+    .maybeSingle();
+  if (model?.service_model !== 'replicas') {
+    return legacyTargetServiceFor(admin, booking, collective.collectiveId, targetVenueId, calendarId);
+  }
   let itemId = (booking.collective_service_item_id as string | null) ?? null;
   if (!itemId) {
     const { data: replica } = await admin
@@ -166,7 +255,7 @@ export async function moveBookingToCollectiveVenue(
   const today = formatIsoDateInTimeZone(new Date(), (targetVenue?.timezone as string | null) || 'Europe/London');
   if (input.bookingDate < today) return refuse(400, 'Choose a date from today onwards.');
 
-  const target = await targetServiceFor(admin, booking as Row, collective, targetVenueId);
+  const target = await targetServiceFor(admin, booking as Row, collective, targetVenueId, input.calendarId);
   if (!target) {
     return refuse(409, collectiveCopy('move.refused.service', { venue: venueName }), 'COLLECTIVE_MOVE_SERVICE');
   }

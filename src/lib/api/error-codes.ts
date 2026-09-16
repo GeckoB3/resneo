@@ -163,6 +163,10 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_ADOPTION_PENDING',
   /** The adoption was already answered, or can no longer be (409). */
   'COLLECTIVE_ADOPTION_NOT_PENDING',
+  /** An older manager action with no shared-services equivalent (MGR-01), each with its own reason (409). */
+  'COLLECTIVE_REPLICAS_ALWAYS_FOLLOW',
+  'COLLECTIVE_HEADINGS_FOLLOW_SERVICES',
+  'COLLECTIVE_EDIT_ON_SERVICES_PAGE',
   /**
    * A new booking, or a booking moved to another service, for a service that is parked: the venue is
    * live in a collective and the service is not one of the collective's. Offer a collective service.

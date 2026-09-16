@@ -449,6 +449,14 @@ export async function loadCatalogueForManagement(
     .eq('id', collectiveId)
     .maybeSingle();
   if (!collective) return null;
+  // On the shared-services model every copy follows its master, so the older manager's sync states
+  // do not apply (MGR-01): read apart, like every other reader of the engine's columns.
+  const { data: modelRow } = await admin
+    .from('venue_collectives')
+    .select('service_model')
+    .eq('id', collectiveId)
+    .maybeSingle();
+  const followsEngine = (modelRow?.service_model as string | undefined) === 'replicas';
 
   const { data: memberRows } = await admin
     .from('venue_collective_members')
@@ -595,7 +603,7 @@ export async function loadCatalogueForManagement(
           (practitionerId ? practitionerNameById.has(`${venueId}:${practitionerId}`) : true),
         sync: (() => {
           const v = syncViews.get(sourceServiceId);
-          if (!v) return { state: 'none' as const, originVenueName: null, inStep: null };
+          if (!v || followsEngine) return { state: 'none' as const, originVenueName: null, inStep: null };
           // A venue's own service is an "independent copy" only when it stands in for the
           // offering at a venue other than the origin's, which is where "Link to {origin}
           // and update" applies; at the origin it is the original.

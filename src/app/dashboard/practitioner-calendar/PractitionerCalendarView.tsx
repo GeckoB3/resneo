@@ -14,7 +14,6 @@ import {
   visitTouchingEdges,
 } from '@/lib/calendar/visit-siblings';
 import {
-  calendarAvailableRangesOnDate,
   calendarHasAvailableHoursOnDate,
   calendarWorksOnDate,
 } from '@/lib/calendar/calendar-works-on-date';
@@ -65,6 +64,7 @@ import {
   linkedColumnKey,
   linkedColumnUsesNativeGrid,
   linkedGrantActForOwnerVenue,
+  linkedPractitionerOpenRanges,
   linkedVenueScheduleBlocksForColumn,
   resolveLinkedGridPractitionerIdForPatch,
 } from '@/lib/linked-accounts/calendar';
@@ -330,22 +330,9 @@ interface LinkedColumn {
   action: LinkedVenueCalendar['action'];
 }
 
-/**
- * A linked column's open minutes on `dateYmd`, resolved exactly as the owner's own diary
- * resolves them: schedule periods, rota, days off and per-date hours, minus leave, within the
- * owner venue's opening hours and closures (SB-39). Null when the feed predates `schedule`.
- */
+/** A linked column's open minutes on `dateYmd`, as the owner's own diary resolves them (SB-39). */
 function linkedColumnOpenRanges(col: LinkedColumn, dateYmd: string): Array<{ start: number; end: number }> | null {
-  if (!col.schedule || !col.hours) return null;
-  return calendarAvailableRangesOnDate({
-    practitioner: { id: col.practitionerId, ...col.schedule } as unknown as Parameters<
-      typeof calendarAvailableRangesOnDate
-    >[0]['practitioner'],
-    dateYmd,
-    leavePeriods: col.hours.leavePeriods,
-    openingHours: col.hours.openingHours,
-    venueWideBlocks: col.hours.venueWideBlocks,
-  });
+  return linkedPractitionerOpenRanges(col.practitionerId, col.schedule, col.hours, dateYmd);
 }
 
 function linkedColumnHoursLine(col: LinkedColumn, dateYmd: string): string {

@@ -6,6 +6,7 @@ import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { CalendarScheduleRow } from '@/lib/availability/calendar-hours';
 import type { PractitionerLeavePeriodInput } from '@/lib/calendar/schedule-closure-blocks';
+import { calendarAvailableRangesOnDate } from '@/lib/calendar/calendar-works-on-date';
 
 /**
  * Map a booking row onto a calendar column id — mirrors native
@@ -82,6 +83,30 @@ export interface LinkedVenueHours {
   venueWideBlocks: AvailabilityBlock[];
   /** Leave on the linked calendars, over the requested range. */
   leavePeriods: PractitionerLeavePeriodInput[];
+}
+
+/**
+ * A linked calendar's open minutes on `dateYmd`, resolved exactly as the owner's own diary
+ * resolves them: schedule periods, rota, days off and per-date hours, minus leave, within the
+ * owner venue's opening hours and closures (SB-39, DIARY-01). Null when the feed predates
+ * `schedule`, so the caller falls back to the weekly template.
+ */
+export function linkedPractitionerOpenRanges(
+  practitionerId: string,
+  schedule: CalendarScheduleRow | undefined,
+  hours: LinkedVenueHours | undefined,
+  dateYmd: string,
+): Array<{ start: number; end: number }> | null {
+  if (!schedule || !hours) return null;
+  return calendarAvailableRangesOnDate({
+    practitioner: { id: practitionerId, ...schedule } as unknown as Parameters<
+      typeof calendarAvailableRangesOnDate
+    >[0]['practitioner'],
+    dateYmd,
+    leavePeriods: hours.leavePeriods,
+    openingHours: hours.openingHours,
+    venueWideBlocks: hours.venueWideBlocks,
+  });
 }
 
 export interface LinkedBooking {

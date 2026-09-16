@@ -55,6 +55,8 @@ export async function GET(request: NextRequest) {
       const catalog = await loadCollectiveAppointmentCatalog(supabase, venueId, {
         includeHiddenAddons: memberStaff,
         everyCalendar: overrideRequested,
+        // Staff also see the calendars a guest cannot book right now, each with a note (§6.6).
+        includeExcludedForStaff: memberStaff,
       });
       return NextResponse.json(catalog);
     }

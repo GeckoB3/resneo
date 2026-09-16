@@ -22,7 +22,12 @@ import {
 } from './collectives';
 import { evaluateLinkEligibility } from './eligibility';
 import { fetchServiceCategoryRefs } from '@/lib/booking/service-categories-db';
-import { buildDerivedCatalogueItems, type DerivedLink, type DerivedVenue } from './replicas/derived-catalogue';
+import {
+  buildDerivedCatalogueItems,
+  type DerivedLink,
+  type DerivedVenue,
+  type ProviderExclusion,
+} from './replicas/derived-catalogue';
 import { resolveAppointmentsFeatureFlag, parseVenueFeatureFlags } from '@/lib/feature-flags/resolve';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
 import type { ProcessingTimeBlock } from '@/types/booking-models';
@@ -755,6 +760,11 @@ export interface PublicCombinedCatalogue {
    */
   venueData: Record<string, VenueCatalogueData>;
   hostVenueId: string | null;
+  /**
+   * Replicas model only: the calendars a guest may not book right now, per offering, with the
+   * reason. The staff build lists them with a note; the public page never sees them (§6.6).
+   */
+  excludedByItem?: Record<string, { provider: PublicCatalogueProvider; reason: ProviderExclusion }[]>;
 }
 
 /**
@@ -942,6 +952,9 @@ async function loadPublicCombinedCatalogueUncached(
     return {
       serviceGrouping: collective.service_grouping as ServiceGrouping,
       items: ordered.map(({ excluded: _excluded, sortKey: _sortKey, ...item }) => item),
+      excludedByItem: Object.fromEntries(
+        derivedItems.filter((i) => i.excluded.length > 0).map((i) => [i.id, i.excluded]),
+      ),
       // Headings follow the host's services on the replicas model, not the collective's own list.
       categories: hostVenueId ? await fetchServiceCategoryRefs(admin, hostVenueId) : [],
       venueData,

@@ -13,6 +13,8 @@
  */
 
 import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import type { PublicCatalogueProvider } from '@/lib/linked-accounts/catalogue';
+import type { ProviderExclusion } from '@/lib/linked-accounts/replicas/derived-catalogue';
 import { inheritCollectivePageConfigFromHost } from '@/lib/linked-accounts/collective-page-config';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenuePublic } from '@/components/booking/types';
@@ -225,6 +227,11 @@ export interface CollectiveCatalogService {
   source_service_id: string;
   /** Where the service is delivered; a `client_address` service collects an address. */
   location_type?: import('@/types/booking-models').ServiceLocationType;
+  /**
+   * Staff only: why a guest cannot book this calendar right now, in plain words (§6.6). Staff may
+   * still book it. Absent on the public catalogue, which leaves those calendars out entirely.
+   */
+  staff_note?: string;
 }
 
 export interface CollectiveCatalogPractitioner {
@@ -239,6 +246,22 @@ export interface CollectiveCatalogPractitioner {
    */
   owning_venue_name: string;
   services: CollectiveCatalogService[];
+}
+
+/** Why a guest cannot book this calendar right now, for staff eyes only (§6.6). */
+export function staffNoteForExclusion(reason: ProviderExclusion, venueName: string): string {
+  switch (reason) {
+    case 'payments':
+      return `Card payments are not set up at ${venueName}, so take payment in person.`;
+    case 'forms':
+      return `Forms are switched off at ${venueName}, so its form cannot be collected there.`;
+    case 'behind':
+      return `This service is still updating at ${venueName}. Guests cannot book it there until it catches up.`;
+    case 'suspended':
+      return `${venueName} is suspended in the collective, so guests cannot book it there.`;
+    case 'staff_only':
+      return 'This service is staff bookings only, so guests cannot book it themselves.';
+  }
 }
 
 const DEFAULT_CANCELLATION_NOTICE_HOURS = 24;
@@ -279,9 +302,10 @@ export function invalidateCollectiveCatalogMemo(collectiveId: string): void {
 export async function loadCollectiveAppointmentCatalog(
   admin: SupabaseClient,
   collectiveId: string,
-  options?: { includeHiddenAddons?: boolean; everyCalendar?: boolean },
+  options?: { includeHiddenAddons?: boolean; everyCalendar?: boolean; includeExcludedForStaff?: boolean },
 ): Promise<CollectiveAppointmentCatalog> {
-  const key = `${collectiveId}|${options?.includeHiddenAddons ? 1 : 0}|${options?.everyCalendar ? 1 : 0}`;
+  // The staff variants must never be served to the public, so every option is part of the key.
+  const key = `${collectiveId}|${options?.includeHiddenAddons ? 1 : 0}|${options?.everyCalendar ? 1 : 0}|${options?.includeExcludedForStaff ? 1 : 0}`;
   const now = Date.now();
   const hit = catalogMemo.get(key);
   if (hit && now - hit.at < CATALOG_MEMO_TTL_MS) return hit.value;
@@ -306,6 +330,11 @@ async function loadCollectiveAppointmentCatalogUncached(
      * `assigned: false` where the calendar itself is not a provider.
      */
     everyCalendar?: boolean;
+    /**
+     * Staff of a member venue also see the calendars a guest cannot book right now, each with a
+     * `staff_note` saying why (§6.6). The public build never passes this.
+     */
+    includeExcludedForStaff?: boolean;
   },
 ): Promise<{ practitioners: CollectiveCatalogPractitioner[]; categories: ServiceCategoryRef[] }> {
   const catalogue = await loadPublicCombinedCatalogue(admin, collectiveId);
@@ -448,7 +477,12 @@ async function loadCollectiveAppointmentCatalogUncached(
   };
 
   for (const [itemIndex, item] of catalogue.items.entries()) {
-    for (const provider of item.providers) {
+    const excludedHere = options?.includeExcludedForStaff ? catalogue.excludedByItem?.[item.id] ?? [] : [];
+    const providersForBuild: { provider: PublicCatalogueProvider; note?: string }[] = [
+      ...item.providers.map((provider) => ({ provider })),
+      ...excludedHere.map(({ provider, reason }) => ({ provider, note: staffNoteForExclusion(reason, provider.venueName) })),
+    ];
+    for (const { provider, note } of providersForBuild) {
       const data = venueData[provider.venueId];
       if (!data) continue;
       const calendarIds = provider.practitionerId
@@ -481,6 +515,7 @@ async function loadCollectiveAppointmentCatalogUncached(
           rawPayReq === 'card_hold' ? (cardHoldFeeConfigured ? 'card_hold' : 'none') : rawPayReq;
         entry.services.push({
           ...(options?.everyCalendar ? { assigned: true } : {}),
+          ...(note ? { staff_note: note } : {}),
           id: item.id,
           name: item.name,
           description: item.description,

@@ -145,3 +145,49 @@ describe('ServiceCategoriesManager', () => {
     expect(rowNames()).toEqual(['Hair', 'Nails']);
   });
 });
+
+describe('ServiceCategoriesManager in a collective (W6)', () => {
+  const managed: ServiceCategoryRef = { ...HAIR, managed: true };
+
+  it("locks the host's headings for a member, and says why", () => {
+    renderManager(fakeApi(), {
+      categories: [managed, NAILS],
+      collective: { name: 'Northside', hostName: 'Host Venue', isHost: false, venueList: 'Host Venue' },
+    });
+    expect(
+      screen.getByText(
+        "Group your services under headings. Headings from Host Venue follow Host Venue's names. Their order here only changes your own lists, not the Northside page.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('From Host Venue')).toBeInTheDocument();
+    const [renameHair, renameNails] = screen.getAllByRole('button', { name: 'Rename' });
+    const [deleteHair, deleteNails] = screen.getAllByRole('button', { name: 'Delete' });
+    expect(renameHair).toBeDisabled();
+    expect(deleteHair).toBeDisabled();
+    expect(renameHair).toHaveAccessibleDescription('Host Venue manages this heading for Northside.');
+    expect(renameNails).toBeEnabled();
+    expect(deleteNails).toBeEnabled();
+    // Reordering still works for the member's own lists.
+    expect(screen.getByRole('button', { name: 'Move Hair down' })).toBeEnabled();
+  });
+
+  it("tells the host which headings reach every venue, and what a delete does there", async () => {
+    renderManager(fakeApi(), {
+      collective: {
+        name: 'Northside',
+        hostName: 'Zen Studio',
+        isHost: true,
+        venueList: 'Bloom and Cedar',
+        onPageCountByCategory: new Map([['c-hair', 2]]),
+      },
+    });
+    expect(screen.getByText(/Headings used by services on the page reach Bloom and Cedar\./)).toBeInTheDocument();
+    expect(screen.getAllByText('Collective')).toHaveLength(1);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    expect(
+      await screen.findByText(
+        '2 services move to "Other services" on the Northside page and at Bloom and Cedar. Nothing about a service is deleted.',
+      ),
+    ).toBeInTheDocument();
+  });
+});

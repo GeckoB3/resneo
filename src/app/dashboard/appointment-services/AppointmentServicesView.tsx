@@ -594,6 +594,17 @@ export function AppointmentServicesView({
     [collectiveCalendars],
   );
 
+  /** Services on the collective page per heading, for the host's Categories tab (W6). */
+  const onPageCountByCategory = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of services) {
+      const categoryId = (s as { category_id?: string | null }).category_id;
+      if (!categoryId || s.collective?.role !== 'master') continue;
+      counts.set(categoryId, (counts.get(categoryId) ?? 0) + 1);
+    }
+    return counts;
+  }, [services]);
+
   const collectiveBehindVenueNames = useMemo(
     () => [
       ...new Set(
@@ -1465,6 +1476,17 @@ export function AppointmentServicesView({
           uncategorisedCount={uncategorisedCount}
           isAdmin={isAdmin}
           onChange={setCategories}
+          collective={
+            collective
+              ? {
+                  name: collective.name,
+                  hostName: collective.hostVenueName,
+                  isHost: collective.isHost,
+                  venueList: formatVenueList(collectiveMemberNames, 3),
+                  onPageCountByCategory: onPageCountByCategory,
+                }
+              : null
+          }
         />
       ) : (
         <>
@@ -2369,6 +2391,11 @@ export function AppointmentServicesView({
                           online_meeting_url: values.online_meeting_url ?? '',
                           online_meeting_info: values.online_meeting_info ?? '',
                         }
+                      : {}),
+                    // Only when changed: a calendar-only save sends nothing else.
+                    ...((values.pre_appointment_instructions ?? '') !==
+                    ((service as { pre_appointment_instructions?: string | null }).pre_appointment_instructions ?? '')
+                      ? { pre_appointment_instructions: values.pre_appointment_instructions ?? '' }
                       : {}),
                   }),
                 });

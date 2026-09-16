@@ -107,6 +107,14 @@ const locationFieldsSchema = {
   online_meeting_info: z.string().max(2000).nullable().optional(),
 };
 
+/**
+ * What the guest is asked to do before the appointment (G8a). A venue's own under a collective
+ * (D53), so a member edits it on a service from its host too (member-save.ts allowlist).
+ */
+const venueFieldsSchema = {
+  pre_appointment_instructions: z.string().max(2000).nullable().optional(),
+};
+
 const customWorkingHoursSchema = customWorkingHoursRequestSchema;
 const STAFF_SERVICE_FIELD_PERMISSIONS = {
   name: 'staff_may_customize_name',
@@ -153,6 +161,7 @@ const serviceSchema = z
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
     ...locationFieldsSchema,
+    ...venueFieldsSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -244,6 +253,7 @@ const servicePatchSchema = z
     custom_working_hours: customWorkingHoursSchema,
     processing_time_blocks: processingTimeBlocksSchema.optional(),
     ...locationFieldsSchema,
+    ...venueFieldsSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -746,11 +756,22 @@ export async function GET(request: NextRequest) {
         collective: collectiveBlocks.get(s.id as string) ?? null,
       }));
 
+      // Headings the member's collective manages (W6): the Categories tab locks them.
+      const { data: managedHeadings } =
+        categories.length > 0
+          ? await admin
+              .from('service_categories')
+              .select('id')
+              .eq('venue_id', catalogVenueId)
+              .not('managed_by_collective_id', 'is', null)
+          : { data: [] as { id: string }[] };
+      const managedIds = new Set((managedHeadings ?? []).map((h) => h.id as string));
+
       return NextResponse.json(
         {
           services: servicesWithVariants,
           practitioner_services,
-          categories,
+          categories: categories.map((c) => (managedIds.has(c.id) ? { ...c, managed: true } : c)),
           ...(collectiveCalendars ? { collective_calendars: collectiveCalendars } : {}),
         },
         { headers: { 'Cache-Control': VENUE_CATALOG_CACHE_CONTROL } },
@@ -1548,6 +1569,10 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
+      if (Object.prototype.hasOwnProperty.call(updatePayload, 'pre_appointment_instructions')) {
+        const text = (updatePayload.pre_appointment_instructions as string | null | undefined)?.trim();
+        updatePayload.pre_appointment_instructions = text ? text : null;
+      }
       delete updatePayload.location_type;
       delete updatePayload.online_meeting_url;
       delete updatePayload.online_meeting_info;
@@ -2049,6 +2074,7 @@ export async function PATCH(request: NextRequest) {
     delete patchPayload.location_type;
     delete patchPayload.online_meeting_url;
     delete patchPayload.online_meeting_info;
+    delete patchPayload.pre_appointment_instructions;
     Object.assign(
       patchPayload,
       locationPatchFields(

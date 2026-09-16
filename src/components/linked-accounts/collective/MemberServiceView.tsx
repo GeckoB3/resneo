@@ -41,6 +41,7 @@ export interface MemberServiceValues {
   location_type?: string | null;
   online_meeting_url?: string | null;
   online_meeting_info?: string | null;
+  pre_appointment_instructions?: string | null;
   variants?: { id?: string; name: string; is_active?: boolean }[];
   addon_groups?: { group: { id: string; name: string } }[];
   compliance_type_names?: string[];
@@ -50,6 +51,7 @@ export interface MemberServiceSave {
   practitioner_ids: string[];
   online_meeting_url?: string;
   online_meeting_info?: string;
+  pre_appointment_instructions?: string;
 }
 
 export interface MemberServiceViewProps {
@@ -82,12 +84,14 @@ export function MemberServiceView({
   const [chosen, setChosen] = useState<string[]>(savedCalendarIds);
   const [meetingUrl, setMeetingUrl] = useState(service.online_meeting_url ?? '');
   const [meetingInfo, setMeetingInfo] = useState(service.online_meeting_info ?? '');
+  const [instructions, setInstructions] = useState(service.pre_appointment_instructions ?? '');
 
   const changed =
     chosen.length !== savedCalendarIds.length ||
     chosen.some((id) => !savedCalendarIds.includes(id)) ||
     meetingUrl !== (service.online_meeting_url ?? '') ||
-    meetingInfo !== (service.online_meeting_info ?? '');
+    meetingInfo !== (service.online_meeting_info ?? '') ||
+    instructions !== (service.pre_appointment_instructions ?? '');
 
   const isOnline = service.location_type === 'online';
   const host = block.host_venue_name;
@@ -102,7 +106,12 @@ export function MemberServiceView({
       description={collectiveCopy('reach.member.replica', { host, collective: block.collective_name })}
       footer={
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" onClick={() => onSave({ practitioner_ids: chosen, online_meeting_url: meetingUrl, online_meeting_info: meetingInfo })} loading={saving} disabled={!changed || saving}>
+          <Button type="button" onClick={() => onSave({
+                practitioner_ids: chosen,
+                online_meeting_url: meetingUrl,
+                online_meeting_info: meetingInfo,
+                pre_appointment_instructions: instructions,
+              })} loading={saving} disabled={!changed || saving}>
             Save your settings
           </Button>
           <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
@@ -214,6 +223,18 @@ export function MemberServiceView({
               <EditReachNote>{collectiveCopy('svc.form.location.linkHelp')}</EditReachNote>
             </div>
           ) : null}
+
+          <label className="block text-sm">
+            <span className="font-medium text-slate-800">{collectiveCopy('svc.member.view.instructionsLabel')}</span>
+            <textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              rows={2}
+              maxLength={2000}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-sm"
+            />
+            <EditReachNote>{collectiveCopy('svc.member.view.instructionsHelp', { host })}</EditReachNote>
+          </label>
         </section>
 
         {/* 3. What the host has set. */}

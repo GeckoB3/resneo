@@ -455,6 +455,20 @@ export const COLLECTIVE_COPY = {
   'bm.invite.noAppointments':
     '{venue} does not offer appointments, so it cannot join a collective yet. A collective page shows appointments only.',
 
+  // Added (W6): the deck points at "the form's existing label", but no form ever had this field.
+  'svc.member.view.instructionsLabel': 'Before the appointment',
+  'svc.member.view.instructionsHelp':
+    'What guests booking with you should know beforehand, such as where to park. Only your guests see this; {host} does not set it.',
+
+  // The Categories tab (ServiceCategoriesManager.tsx; UX spec §2 item 6)
+  'cat.host.description':
+    'Group your services under headings on the {collective} page, so customers find what they want faster. Drag the handle (or use the arrows) to set their order. Headings used by services on the page reach {venueList}.',
+  'cat.host.deleteOnPage':
+    '{count} services move to "Other services" on the {collective} page and at {venueList}. Nothing about a service is deleted.',
+  'cat.member.description':
+    "Group your services under headings. Headings from {host} follow {host}'s names. Their order here only changes your own lists, not the {collective} page.",
+  'cat.member.lockedTooltip': '{host} manages this heading for {collective}.',
+
   // Joining (join.ts and JoinCollectiveDialog.tsx; UX spec `join.*`)
   'join.title': 'Join {collective}',
   'join.step': 'Step {n} of {total}',

@@ -184,6 +184,24 @@ describe('PATCH and DELETE /api/venue/service-categories', () => {
   });
 });
 
+describe('a heading the collective manages (W6)', () => {
+  it('refuses a rename or delete in words about a heading', async () => {
+    mockStaff.mockResolvedValue(staff());
+    const { admin } = makeAdmin(() => ({ data: null, error: { code: 'RN001', message: 'managed' } }));
+    mockAdmin.mockReturnValue(admin as never);
+    for (const response of [
+      await PATCH(req('PATCH', { id: CAT_A, name: 'Colour' })),
+      await DELETE(req('DELETE', { id: CAT_A })),
+    ]) {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: 'This heading is managed by your collective’s host. Ask them to change it.',
+        code: 'COLLECTIVE_MANAGED_SERVICE',
+      });
+    }
+  });
+});
+
 describe('PUT /api/venue/service-categories/reorder', () => {
   it('403 for non-admin staff', async () => {
     mockStaff.mockResolvedValue(staff('staff'));

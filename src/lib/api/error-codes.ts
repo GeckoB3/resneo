@@ -143,6 +143,11 @@ export const API_ERROR_CODES = [
   /** Undo is only offered for a minute after a host's save (410). */
   'COLLECTIVE_UNDO_EXPIRED',
   /**
+   * A bulk change would stop a calendar offering a service it still has bookings for. Nothing was
+   * written: open that service to see the bookings, then send it again acknowledged.
+   */
+  'COLLECTIVE_AFFECTED_BOOKINGS',
+  /**
    * A new booking, or a booking moved to another service, for a service that is parked: the venue is
    * live in a collective and the service is not one of the collective's. Offer a collective service.
    */

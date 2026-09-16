@@ -3383,6 +3383,14 @@ Every route follows the repository's shape: a Next handler under `src/app/api/`,
 | 11 | Calendar Availability save | `PUT /api/venue/practitioner-services` | gains `expected_service_ids: uuid[]` (the full set as loaded) | `{ success, added: [], removed: [] }` | 412 `STALE_RESOURCE` | Venue admin, own calendars |
 | 12 | Per-calendar values | `PATCH /api/venue/practitioner-service-overrides` (admins and all seven fields); host on a member calendar: `PUT /api/venue/collectives/[id]/calendar-values { calendar_id, service_id, values }` | | `{ assignment_id, before, after }` | 400 floor and flag; 403 | Calendar staff within flags; venue admins; host admin |
 | 13 | Bulk lane | `POST /api/venue/collectives/[id]/bulk { ops: [{ op: 'offer','withdraw','assign','unassign','retry', service_id, venue_id?, calendar_id? }] }` (max 200; the client chunks); `POST .../bulk/preview` same body | | `{ results: [{ index, ok, code?, message? }] }`; preview: per venue what guests would see (`ov.preview.*`) | per-op codes | Host admin |
+
+**Built 2026-09-16, with two additions.** The body takes `acknowledge_affected`, because a
+removal that would leave bookings behind writes nothing and comes back as the per-op code
+`COLLECTIVE_AFFECTED_BOOKINGS` (new in `API_ERROR_CODES`), which the host answers the same way
+it answers the single-service removal. The response also carries `collective_sync`, because the
+members' copies are applied once at the end of the whole call rather than once per operation,
+and the host needs the same "who is still updating" line a single save gives it. The preview
+half of the contract is not built yet.
 | 14 | Undo | `POST /api/venue/collectives/[id]/undo { audit_event_id }` | | `collective_sync` | 410 `COLLECTIVE_UNDO_EXPIRED` | Host admin |
 | 15 | Notification preferences | `PATCH /api/venue/notifications/preferences` | gains `collective_digest`, `collective_calendars` | | | Venue admin |
 | 16 | Contact search | `GET /api/venue/guests?scope=collective&q=` | | rows gain `owner_venue_id`, `owner_venue_name` | 403 outside a live collective | Staff of a live member |

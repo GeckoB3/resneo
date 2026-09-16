@@ -19,6 +19,8 @@ export async function executeBookingModificationGuestNotification(
   admin: SupabaseClient,
   venueId: string,
   bookingId: string,
+  /** "What changed", shown in the email when set (a move to another venue says where). */
+  options: { changeSummary?: string | null } = {},
 ): Promise<BookingModificationNotifyResult> {
   const { data: bookingRow, error: bkErr } = await admin
     .from('bookings')
@@ -133,7 +135,9 @@ export async function executeBookingModificationGuestNotification(
   });
 
   const enriched = await enrichBookingEmailForComms(admin, bookingId, bookingEmail);
-  const { email, sms } = await sendBookingModificationNotification(enriched, venueEmailData, venueId);
+  const { email, sms } = await sendBookingModificationNotification(enriched, venueEmailData, venueId, {
+    changeSummary: options.changeSummary ?? null,
+  });
   return {
     emailSent: email.sent,
     smsSent: sms.sent,

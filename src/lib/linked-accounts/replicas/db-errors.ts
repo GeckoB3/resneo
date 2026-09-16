@@ -44,6 +44,9 @@ export const COLLECTIVE_PREFIXED_CODES = [
   'COLLECTIVE_ADOPTION_NOT_PENDING',
   'COLLECTIVE_ADDRESS_TAKEN',
   'COLLECTIVE_ADDRESS_NOT_PENDING',
+  'COLLECTIVE_MOVE_ATTACHED',
+  'COLLECTIVE_MOVE_SERVICE',
+  'COLLECTIVE_MOVE_NOT_ALLOWED',
 ] as const satisfies readonly ApiErrorCode[];
 
 export type CollectiveDbErrorCode =
@@ -109,6 +112,12 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return 'That page address is already used by another collective page.';
     case 'COLLECTIVE_ADDRESS_NOT_PENDING':
       return 'This request has already been answered or withdrawn. Reload to see where things stand.';
+    case 'COLLECTIVE_MOVE_ATTACHED':
+      return 'This booking has a payment, form or visit attached, so it stays with the venue it was made at.';
+    case 'COLLECTIVE_MOVE_SERVICE':
+      return 'That calendar does not offer this service, so the booking cannot move there.';
+    case 'COLLECTIVE_MOVE_NOT_ALLOWED':
+      return `This booking cannot be moved to that venue in ${collective}.`;
   }
 }
 

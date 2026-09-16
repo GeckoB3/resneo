@@ -375,6 +375,7 @@ export async function sendBookingModificationNotification(
   booking: BookingEmailData,
   venue: VenueEmailData,
   venueId: string,
+  options: { changeSummary?: string | null } = {},
 ): Promise<{ email: SendResult; sms: SendResult }> {
   const [email, sms] = await Promise.all([
     sendPolicyMessage({
@@ -384,6 +385,7 @@ export async function sendBookingModificationNotification(
       messageKey: 'booking_modification',
       channel: 'email',
       mode: 'upsert',
+      changeSummary: options.changeSummary ?? null,
     }),
     sendPolicyMessage({
       venueId,

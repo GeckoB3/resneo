@@ -282,7 +282,7 @@ The first 113 came from the first pass. The 34 added by the second pass (OPS-01 
 | LIFE-14 | route | Today's leave, removal and dissolve routes leave every account link untouched | W7 Lifecycle |
 | REP-06 | route | Reports after the end show own rows only, with the "via {collective}" filter kept | W17 Reporting |
 | DIARY-02 | route | Two calendars that look like one person warn whoever books second | W21 Diary truth |
-| DIARY-03 | component | The move dialog refuses another venue's calendar and offers no rebook-then-cancel | W21 Diary truth |
+| DIARY-03 | component | A booking moves to another venue's calendar in one step when nothing is attached, and is refused with the reason otherwise | W21 Diary truth |
 | PUB-05 | route | A member with another booking model keeps its own page for those tabs | W10 Booking pages and links |
 | MIG-05 | migration | Existing bookings are protected through apply and rollback | W9 Migration |
 | MIG-06 | migration | The host's values apply at the switch, the before-image is recorded, nothing is sent or shown | W9 Migration |
@@ -1407,12 +1407,12 @@ Same format as the sections above. Each of these covers an area the first pass d
 - **Expected:** The second booking shows `clash.samePerson` ("{calendar} at {venue} looks like the same person as {otherCalendar} at {otherVenue}, who already has a booking at this time.") and can still be made; no warning when the emails differ, when both calendars are at one venue, or once the collective has ended; nothing is modelled: the check writes no row, column or link, and the warning carries no guest name.
 - **Location:** `src/app/api/venue/bookings/route.clash.test.ts; src/lib/linked-accounts/same-person.test.ts`
 
-#### DIARY-03 The move dialog refuses another venue's calendar and offers no rebook-then-cancel
-- **Layer:** component. **Workstream:** W21 Diary truth. **Requirements:** R9, R11. **Decision:** D46.
-- **Pins:** A move to another venue would lose the client's record and any payment; D46 keeps it refused and rewrites the dialog so it stops offering a lossy rebook-then-cancel workaround.
-- **Scenario:** Open the modify form (`StaffAppointmentModifyForm`) for a booking at the host with the calendar list open; pick a member calendar; pick another host calendar.
-- **Expected:** Only same-venue calendars are offered; choosing another venue's calendar shows `move.otherVenue.title` "This booking cannot be moved to {venue}" and `move.otherVenue.body` "Bookings stay with the venue they were made at, because that venue holds the client's record and any payment. You can move it to any calendar at {ownVenue}."; no rebook-then-cancel path, link or hint anywhere in the dialog; the same-venue move works as before; the copy is em-dash free.
-- **Location:** `src/components/booking/StaffAppointmentModifyForm.collective-move.test.tsx`
+#### DIARY-03 A booking moves to another venue's calendar when nothing is attached
+- **Layer:** component, route and pgTAP. **Workstream:** W21 Diary truth. **Requirements:** R9, R11. **Decision:** D46 (revised by the owner 2026-09-16).
+- **Pins:** A move to another venue used to offer rebook-then-cancel, which sent a cancellation and a new confirmation and dropped any deposit or card hold.
+- **Scenario:** Drag a plain booking at the host onto a member calendar; drag one with a deposit, a payment, completed forms, or in a visit; drop on a calendar that does not offer the service; the modify form's calendar list.
+- **Expected:** The dialog asks `move.otherVenue.title` and moves on confirm: one new booking at the member on its service, option, add-ons and client record, same length and price, the original cancelled by staff with no message, `booking_moved_out` and `booking_moved_in` on the two venues' logs, one change message to the client from the member with `move.guest.changed`; the other cases are refused with `move.refused.*` and nothing written; no rebook-then-cancel path anywhere; the modify form still lists only the booking's own venue's calendars.
+- **Location:** `src/app/dashboard/practitioner-calendar/CollectiveVenueMoveDialog.test.tsx; src/lib/linked-accounts/move-booking.test.ts; supabase/tests/collective_move_booking_test.sql; src/components/booking/StaffAppointmentModifyForm.collective-move.test.tsx`
 
 #### HLP-01 Help copy cannot regress
 - **Layer:** unit. **Workstream:** W13.

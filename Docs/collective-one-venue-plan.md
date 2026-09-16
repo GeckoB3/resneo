@@ -1960,14 +1960,13 @@ person.
 - **Moving a booking between venues** (SB-41). Within the replicas model the two calendars offer
   the same service under the same terms, so "you cannot move it" is hard to defend to a
   receptionist. The design does not require the ownership rule to bend: a move across venues is a
-  transfer of ownership, and §6.1 says ownership never moves. D46 is answered (§11.4): it stays
-  refused, and the dialog says why without offering the lossy rebook-then-cancel path. The dialog
-  is `move.otherVenue.title`, "This booking cannot be moved to {venue}", with
-  `move.otherVenue.body`: "Bookings stay with the venue they were made at, because that venue
-  holds the client's record and any payment. You can move it to any calendar at {ownVenue}."
-  (DIARY-03). A true cross-venue move, with the deposit, card hold, compliance records and guest
-  messages all accounted for, is its own piece of work if it is ever wanted, and is not improvised
-  inside this project.
+  transfer of ownership, and §6.1 says ownership never moves. D46 was first answered as "keep it refused"; the owner
+  revised it on 2026-09-16 (option 2). A booking with nothing attached moves as a hand-over in one
+  transaction: the other venue gets its own booking, on its own service, option, add-ons and client
+  record, at the time and price booked; the original is cancelled without a message; and the client
+  gets one change message from the new venue (`move.otherVenue.*`, `move.guest.changed`). A booking
+  with a deposit, card hold, payment or completed form, or one in a visit or group, stays where it
+  is and the dialog says why (`move.refused.*`, DIARY-03). Moving those is still its own project.
 - **People are not modelled across venues** (SB-28, SB-38). Two separate failures share one cause.
   A person with staff rows at two venues cannot sign in at all (`venue-auth.ts:55-65` refuses to
   choose a venue and `dashboard/layout.tsx:89-93` redirects them into signup), and a person with a
@@ -2194,7 +2193,7 @@ next reader would otherwise rediscover it and propose work.
 | SB-32, duplicate contacts across member venues | Accepted, and covered in the help centre only. No product UI, no banner, no warning at join: help articles and customer service handle it (D42) |
 | SB-36, two venues sharing a physical room | Not supported. Say so in the product. A cross-venue resource is a platform change, not a collective one (D45) |
 | SB-38, one practitioner with a calendar at two venues | Warn, do not model. Flag two calendars in a collective sharing a name and email; a person identity above the venue is out of scope (D47) |
-| SB-41, moving a booking between venues | Stays refused. Ownership never moves, per §6.1. Rewrite the dialog so it stops offering a lossy rebook-and-cancel workaround (D46) |
+| SB-41, moving a booking between venues | A booking with nothing attached moves as a hand-over to the other venue; anything carrying money or forms stays refused with the reason (D46, revised 2026-09-16) |
 | The engine flag's actor binding | Dropped as a security measure. Anyone holding the connection string has already won, so a nonce defends nothing. The audit half is kept and is the point: see §6.4 |
 | The public requirements route | Not a finding. §6.6 records why, so it is not raised a third time |
 | PB-18, marketing email has no unsubscribe link | Real and platform-wide, and nothing to do with collectives. Raised here only because this review found it; it belongs in its own piece of work |
@@ -2532,7 +2531,7 @@ Recorded for the record. Each has one sensible answer and no commercial or legal
 | D40 | `capacity_per_session` on a collective service, where a member's room is smaller than the host's | **Venue-controlled, with the host's value as the starting point at join. A host cannot know another business's room size, and overbooking a member's room is a failure the guest experiences** |
 | D43 | The waitlist on the collective page, which cannot appear today because the synthetic venue publishes only two resolved flags | **Publish the full resolved flag set on the synthetic venue and give the waitlist route a collective branch, so a guest can wait for the collective the way they can wait for a venue. Without it the page is worse than the member's own page it replaces** |
 | D45 | Two venues sharing one physical room or piece of equipment | **Not supported, and said so plainly, until a cross-venue resource exists. Today each venue can put the same real room on a calendar and the platform will double-book it (SB-36).** Confirmed 2026-09-14 that resources are a live booking model, so this is a real scenario rather than a theoretical one, and it is most likely in exactly the collective shape D38 and D39 identify as commonest: venues under common ownership, sharing premises |
-| D46 | Moving a booking to a calendar at another venue in the collective | **Keep it refused, and rewrite the dialog to say why without offering the lossy rebook-then-cancel path. A true cross-venue move transfers ownership, which §6.1 forbids, so specify it as its own project if it is wanted** |
+| D46 | Moving a booking to a calendar at another venue in the collective | **Revised by the owner on 2026-09-16 ("option 2"): a booking with nothing attached moves in one step. The other venue gets its own booking (its service, option, add-ons and client record, the time and price booked), the original is cancelled without a message, and the client gets one change message from the new venue (`collective_move_booking`, `POST /api/venue/bookings/[id]/move-venue`). A deposit, card hold, payment, completed form, visit or group keeps the booking where it is, with the reason. The first answer (keep it refused) stood until then** |
 | D47 | One practitioner with a calendar at two venues, who can be booked twice at the same moment (SB-38) | **Warn, do not model, this release: flag two calendars in a collective that share a name and email, and show the clash to whoever books second. A person identity above the venue is a platform change, not a collective one** |
 | D48 | Search engines and link previews for the collective page and members' pages, which have no canonical, no Open Graph image and, on `/book/{venue}`, no metadata at all (PB-17) | **Give `/book/c/{slug}` full metadata and make it canonical for any address it has adopted; give member pages their own metadata and a canonical pointing at whichever page actually serves them. Do this in the same workstream as the redirects, because they answer the same question** |
 | D53 | The two column-registry classes still marked undecided: `pre_appointment_instructions` and `online_unmet_message` (§6.3) | **`pre_appointment_instructions` is venue-controlled, seeded from the master at creation, because it describes the venue the guest visits; `online_unmet_message` is host-controlled, because it belongs to the form definition.** Recorded in `collective_column_classes` (Appendix F) |

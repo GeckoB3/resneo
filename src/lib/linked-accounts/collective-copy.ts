@@ -523,9 +523,25 @@ export const COLLECTIVE_COPY = {
   'values.standard': 'Standard: {value}',
 
   // The diary (PractitionerCalendarView.tsx, StaffAppointmentModifyForm.tsx; UX spec item 13, D46, D47)
-  'move.otherVenue.title': 'This booking cannot be moved to {venue}',
+  // D46 revised 2026-09-16 (option 2): a booking with nothing attached moves to the other venue.
+  'move.otherVenue.title': 'Move this booking to {venue}?',
   'move.otherVenue.body':
-    "Bookings stay with the venue they were made at, because that venue holds the client's record and any payment. You can move it to any calendar at {ownVenue}.",
+    "{calendar} at {venue} will have this booking at {time}, at the same price. It comes off {ownVenue}'s diary, and the client gets one message with the new details.",
+  'move.otherVenue.confirm': 'Move to {venue}',
+  'move.otherVenue.moving': 'Moving…',
+  'move.otherVenue.done': 'Moved to {calendar} at {venue}.',
+  'move.otherVenue.doneNotTold':
+    'Moved to {calendar} at {venue}. The client was not sent a message, because {venue} has booking change messages turned off.',
+  'move.refused.payment':
+    'This booking has a deposit, card hold or payment, so it stays with the venue that took it. You can move it within that venue.',
+  'move.refused.forms':
+    'The client has completed forms for this booking, so it stays with the venue that holds them. You can move it within that venue.',
+  'move.refused.visit':
+    'This booking is part of a visit or group, so it cannot be moved to {venue} on its own.',
+  'move.refused.status': 'Only upcoming bookings can be moved to {venue}.',
+  'move.refused.service': 'That calendar at {venue} does not offer this service, so the booking cannot move there.',
+  'move.refused.notAllowed': 'This booking cannot be moved to {venue}.',
+  'move.guest.changed': 'Your appointment is now with {calendar} at {venue}.',
   'clash.samePerson':
     '{calendar} at {venue} looks like the same person as {otherCalendar} at {otherVenue}, who already has a booking at this time.',
 

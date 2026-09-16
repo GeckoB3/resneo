@@ -287,7 +287,7 @@ function formatDateNice(isoDate: string): string {
 }
 
 /** What the cross-account move dialog needs to say and to do. */
-interface CrossVenueMoveDialog {
+export interface CrossVenueMoveDialog {
   booking: Booking;
   sourceCalendarName: string;
   /** Null when the dragged booking is on this venue. */
@@ -302,6 +302,85 @@ interface CrossVenueMoveDialog {
   /** The two venues, so a move inside a live collective is answered by D46. */
   sourceVenueId: string;
   targetVenueId: string;
+}
+
+/** The confirmation for a move to another venue of the collective (D46 revised, option 2). */
+export function CollectiveVenueMoveDialog({
+  move,
+  onClose,
+  onMoved,
+}: {
+  move: CrossVenueMoveDialog;
+  onClose: () => void;
+  onMoved: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const venue = move.targetVenueName ?? 'your venue';
+  const calendarId = move.targetLinkedColumn?.practitionerId ?? move.targetColumnKey;
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/bookings/${move.booking.id}/move-venue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calendar_id: calendarId, booking_date: move.dateStr, booking_time: move.time }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string; guest_notified?: boolean };
+      if (!res.ok) {
+        setError(json.error ?? 'The booking could not be moved. Please try again.');
+        return;
+      }
+      const params = { calendar: move.targetCalendarName, venue };
+      onMoved(
+        json.guest_notified === false
+          ? collectiveCopy('move.otherVenue.doneNotTold', params)
+          : collectiveCopy('move.otherVenue.done', params),
+      );
+    } catch {
+      setError('The booking could not be moved. Please check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+      title={collectiveCopy('move.otherVenue.title', { venue })}
+      size="sm"
+      contentClassName="max-w-md"
+      footer={
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => void send()}>
+            {busy ? collectiveCopy('move.otherVenue.moving') : collectiveCopy('move.otherVenue.confirm', { venue })}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-700">
+          {collectiveCopy('move.otherVenue.body', {
+            calendar: move.targetCalendarName,
+            venue,
+            time: `${move.time.slice(0, 5)} on ${formatDateNice(move.dateStr)}`,
+            ownVenue: move.sourceVenueName ?? 'your venue',
+          })}
+        </p>
+        {error ? (
+          <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Dialog>
+  );
 }
 
 interface CrossVenueRebook {
@@ -9313,28 +9392,18 @@ export function PractitionerCalendarView({
       staffCollective &&
       staffCollective.memberVenueIds.includes(crossVenueMove.sourceVenueId) &&
       staffCollective.memberVenueIds.includes(crossVenueMove.targetVenueId) ? (
-        // D46: inside a collective the booking stays with its venue, and nothing offers to rebook it
-        // elsewhere, which would lose the client's record and any payment.
-        <Dialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setCrossVenueMove(null);
+        // D46 revised (2026-09-16): inside a collective a booking with nothing attached moves to the
+        // other venue in one step; the server refuses the rest with the reason.
+        <CollectiveVenueMoveDialog
+          move={crossVenueMove}
+          onClose={() => setCrossVenueMove(null)}
+          onMoved={(message) => {
+            setCrossVenueMove(null);
+            addToast(message, 'success');
+            void refetchBookingsList();
+            void loadLinkedData();
           }}
-          title={collectiveCopy('move.otherVenue.title', { venue: crossVenueMove.targetVenueName ?? 'your venue' })}
-          size="sm"
-          contentClassName="max-w-md"
-          footer={
-            <div className="flex w-full justify-end">
-              <Button type="button" variant="primary" size="sm" onClick={() => setCrossVenueMove(null)}>
-                OK
-              </Button>
-            </div>
-          }
-        >
-          <p className="text-sm text-slate-700">
-            {collectiveCopy('move.otherVenue.body', { ownVenue: crossVenueMove.sourceVenueName ?? 'your venue' })}
-          </p>
-        </Dialog>
+        />
       ) : crossVenueMove ? (
         <Dialog
           open

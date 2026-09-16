@@ -169,6 +169,14 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_ADDRESS_TAKEN',
   /** No request to use this venue's page address is waiting for an answer (409). */
   'COLLECTIVE_ADDRESS_NOT_PENDING',
+  /** A booking with a deposit, hold, payment or completed form, or in a visit, stays at its venue (409, D46). */
+  'COLLECTIVE_MOVE_ATTACHED',
+  /** The other venue's calendar does not offer the booked service or option (409, D46). */
+  'COLLECTIVE_MOVE_SERVICE',
+  /** The booking cannot move there: not the same live collective, or not the venue's client (409, D46). */
+  'COLLECTIVE_MOVE_NOT_ALLOWED',
+  /** The time is not free on the other venue's calendar (409, D46). */
+  'COLLECTIVE_MOVE_TIME',
   /** An older manager action with no shared-services equivalent (MGR-01), each with its own reason (409). */
   'COLLECTIVE_REPLICAS_ALWAYS_FOLLOW',
   'COLLECTIVE_HEADINGS_FOLLOW_SERVICES',

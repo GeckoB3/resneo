@@ -498,6 +498,9 @@ function StaffCustomDurationPopover({
 interface CatalogPractitioner {
   id: string;
   name: string;
+  /** Collective page: the member venue that owns this calendar, and its address (PUB-03). */
+  owning_venue_name?: string;
+  owning_venue_address?: string;
   services: Array<{
     id: string;
     name: string;
@@ -2779,6 +2782,24 @@ export function AppointmentBookingFlow({
     () => (assignedPractitionerId ? catalogStaff.find((p) => p.id === assignedPractitionerId) ?? null : null),
     [assignedPractitionerId, catalogStaff],
   );
+
+  /**
+   * Collective page: the business the guest is booking with, once the calendar is known (PUB-03,
+   * RT2-14). The page is one venue to look at, but the booking, the payment and the client record
+   * belong to that member.
+   */
+  const tradingVenue = useMemo(() => {
+    if (!isCombined || !assignedPractitioner?.owning_venue_name?.trim()) return null;
+    return {
+      name: assignedPractitioner.owning_venue_name.trim(),
+      address: assignedPractitioner.owning_venue_address?.trim() || null,
+    };
+  }, [isCombined, assignedPractitioner]);
+  const traderLine = tradingVenue
+    ? tradingVenue.address
+      ? collectiveCopy('public.trader', { business: tradingVenue.name, address: tradingVenue.address })
+      : collectiveCopy('public.traderNoAddress', { business: tradingVenue.name })
+    : null;
 
   /** Staff member for this visit after a time is chosen (especially “any available”). */
   const assignedStaffDisplayName = useMemo(() => {
@@ -5468,6 +5489,11 @@ export function AppointmentBookingFlow({
                   </>
                 ) : null}
               </div>
+              {traderLine ? (
+                <p data-testid="slot-trader-line" className="ap-context-muted mt-1 text-xs">
+                  {traderLine}
+                </p>
+              ) : null}
             </AppointmentSummaryStrip>
           ) : (
             <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5 text-sm">
@@ -6015,6 +6041,8 @@ export function AppointmentBookingFlow({
             <>
             <DetailsStep
               contactScope={collectiveId && !isPublicGuest ? 'collective' : 'venue'}
+              traderLine={isPublicGuest ? traderLine : null}
+              marketingBusiness={isPublicGuest && isCombined ? tradingVenue?.name ?? venue.name : null}
               slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
               date={date}
               partySize={1}
@@ -6106,6 +6134,11 @@ export function AppointmentBookingFlow({
         </div>
       )}
 
+      {step === 'payment' && createResult?.client_secret && isPublicGuest && tradingVenue ? (
+        <p data-testid="payment-payee" className="mb-3 text-sm font-medium text-slate-700">
+          {collectiveCopy('public.payment.payee', { business: tradingVenue.name })}
+        </p>
+      ) : null}
       {step === 'payment' && createResult?.client_secret && (
         <PaymentStep
           clientSecret={createResult.client_secret}
@@ -6147,6 +6180,11 @@ export function AppointmentBookingFlow({
           </h2>
           {paymentOutcome === 'processing' || paymentOutcome === 'unconfirmed' ? (
             <p className="mt-2 text-sm text-brand-700">{PAYMENT_PROCESSING_BODY}</p>
+          ) : null}
+          {isPublicGuest && tradingVenue ? (
+            <p data-testid="confirmation-through" className="mt-2 text-sm text-brand-800">
+              {collectiveCopy('public.confirmation.through', { business: tradingVenue.name, collective: venue.name })}
+            </p>
           ) : null}
           {multiServiceSegments && multiServiceSegments.length > 1 ? (
             <div className="mt-3 space-y-2 text-left text-sm text-brand-800">
@@ -7008,6 +7046,7 @@ export function AppointmentBookingFlow({
               })()}
               <DetailsStep
                 contactScope={collectiveId && !isPublicGuest ? 'collective' : 'venue'}
+                marketingBusiness={isPublicGuest && isCombined ? tradingVenue?.name ?? venue.name : null}
                 slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
                 date={groupPeople[0]?.date ?? date}
                 partySize={groupPeople.length}

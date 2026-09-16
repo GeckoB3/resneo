@@ -258,6 +258,8 @@ export interface CollectiveCatalogPractitioner {
    * list and qualifies duplicate names by folding itself into {@link name}.
    */
   owning_venue_name: string;
+  /** The owning venue's address, so the guest is told who they are booking with (PUB-03). */
+  owning_venue_address: string;
   services: CollectiveCatalogService[];
 }
 
@@ -482,6 +484,7 @@ async function loadCollectiveAppointmentCatalogUncached(
         name,
         owning_venue_id: venueId,
         owning_venue_name: '',
+        owning_venue_address: '',
         services: [],
       };
       byCalendar.set(calendarId, entry);
@@ -611,11 +614,16 @@ async function loadCollectiveAppointmentCatalogUncached(
   // Every calendar carries its venue's name: the picker shows it under each
   // person, and duplicate names still fold it into the name itself so the
   // downstream summaries and banners stay unambiguous.
-  const { data: venueRows } = await admin.from('venues').select('id, name').in('id', venueIds);
+  const { data: venueRows } = await admin.from('venues').select('id, name, address').in('id', venueIds);
   const venueName: Record<string, string> = {};
-  for (const v of venueRows ?? []) venueName[v.id as string] = (v.name as string) ?? '';
+  const venueAddress: Record<string, string> = {};
+  for (const v of venueRows ?? []) {
+    venueName[v.id as string] = (v.name as string) ?? '';
+    venueAddress[v.id as string] = ((v.address as string | null) ?? '').trim();
+  }
   for (const p of result) {
     p.owning_venue_name = venueName[p.owning_venue_id] ?? '';
+    p.owning_venue_address = venueAddress[p.owning_venue_id] ?? '';
   }
 
   // Venue-qualify duplicate staff names (e.g. two "Andrew"s, one per venue) so

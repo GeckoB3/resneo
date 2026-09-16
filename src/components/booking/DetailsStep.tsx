@@ -19,6 +19,7 @@ import {
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 import { cardHoldBookingNoticeLine } from './card-hold-copy';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -166,6 +167,12 @@ interface DetailsStepProps {
   hideAppointmentRequestField?: boolean;
   submitClassName?: string;
   fieldClassName?: string;
+  /**
+   * Collective page (PUB-03): who the guest is booking with, shown above the consents, and the
+   * business the marketing consent names. Set, the consent starts unticked.
+   */
+  traderLine?: string | null;
+  marketingBusiness?: string | null;
   /** Notified as the guest types their email (debounced upstream) — drives the compliance pre-check. */
   onEmailChange?: (email: string) => void;
   /**
@@ -207,6 +214,8 @@ export function DetailsStep({
   fieldClassName,
   onEmailChange,
   beforeFooter,
+  traderLine = null,
+  marketingBusiness = null,
 }: DetailsStepProps) {
   // The submit button lives outside the fields form (see `beforeFooter`) and targets it by id.
   const formId = useId();
@@ -244,7 +253,8 @@ export function DetailsStep({
       address_city: initialDetails?.address_city ?? '',
       address_postcode: initialDetails?.address_postcode ?? '',
       acceptTerms: false,
-      marketingConsent: true,
+      // A collective page names the business and asks rather than assumes (PB-15).
+      marketingConsent: !marketingBusiness,
     },
   });
 
@@ -677,10 +687,17 @@ export function DetailsStep({
       <div className="space-y-4">
         {audience === 'public' && (
           <>
+            {traderLine ? (
+              <p data-testid="trader-line" className="text-sm font-medium text-slate-700">
+                {traderLine}
+              </p>
+            ) : null}
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
               <input type="checkbox" {...register('marketingConsent')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
               <span className="text-sm text-slate-600">
-                Sign me up to receive offers and news from this business by email.
+                {marketingBusiness
+                  ? collectiveCopy('public.marketing.collective', { business: marketingBusiness })
+                  : 'Sign me up to receive offers and news from this business by email.'}
               </span>
             </label>
 

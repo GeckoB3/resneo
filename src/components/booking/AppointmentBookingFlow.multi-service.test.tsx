@@ -268,6 +268,28 @@ describe('the picker', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('on a collective page, names the business once the calendar is chosen (PUB-03)', async () => {
+    installFetch([
+      {
+        ...ADA,
+        owning_venue_name: 'Zen Studio',
+        owning_venue_address: '1 High Street, Belfast',
+        services: [service(HAIRCUT, 'Haircut', 3000)],
+      } as CatalogPractitioner,
+      { ...BEN, owning_venue_name: 'Bloom', owning_venue_address: '', services: [service(HAIRCUT, 'Haircut', 3500)] } as CatalogPractitioner,
+    ]);
+    render(<AppointmentBookingFlow venue={venue({ is_collective: true })} />);
+    await startSingleBooking();
+    tick('Haircut');
+    clickButton(/^Continue$/);
+    await waitForStep('Who would you like to see?');
+    clickPractitioner('Ada');
+    await waitForStep('Date and time');
+    expect(screen.getByTestId('slot-trader-line')).toHaveTextContent(
+      'You are booking with Zen Studio, 1 High Street, Belfast.',
+    );
+  });
+
   it('says nothing on a collective page when one person offers them all', async () => {
     installFetch();
     render(<AppointmentBookingFlow venue={venue({ is_collective: true })} />);

@@ -1,4 +1,6 @@
+import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
+import { calendarPageMetadata } from '@/lib/booking/booking-page-metadata';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getPublicVenueForBookBySlug } from '@/lib/booking/get-public-venue-for-book';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -26,6 +28,15 @@ async function getActivePractitionerForBook(
   if (error || !data || !data.is_active) return null;
   const bookingSlug = typeof data.slug === 'string' && data.slug ? data.slug : norm;
   return { id: data.id, name: data.name, bookingSlug };
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ 'venue-slug': string; 'practitioner-slug': string }>;
+}): Promise<Metadata> {
+  const { 'venue-slug': venueSlug, 'practitioner-slug': practitionerSlug } = await params;
+  return calendarPageMetadata(getSupabaseAdminClient(), venueSlug, practitionerSlug);
 }
 
 export default async function BookPractitionerPage({

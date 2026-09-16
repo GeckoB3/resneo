@@ -1,4 +1,6 @@
+import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
+import { venuePageMetadata } from '@/lib/booking/booking-page-metadata';
 import { getPublicVenueForBookBySlug } from '@/lib/booking/get-public-venue-for-book';
 import { BookPublicLayout } from '@/components/booking/BookPublicLayout';
 import { loadBookPublicLayoutData } from '@/lib/booking/load-book-public-layout-data';
@@ -7,6 +9,15 @@ import { resolveCombinedSlugClaim } from '@/lib/linked-accounts/catalogue';
 import { handoverUrl, resolveOwnPageHandover } from '@/lib/linked-accounts/replicas/page-handover';
 import { loadCollectivePageView, CollectivePageBody } from '../c/[slug]/collective-page-view';
 import { searchParamsReader, type PageSearchParams } from './search-params';
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ 'venue-slug': string }>;
+}): Promise<Metadata> {
+  const { 'venue-slug': slug } = await params;
+  return venuePageMetadata(getSupabaseAdminClient(), slug);
+}
 
 export default async function BookPage({
   params,

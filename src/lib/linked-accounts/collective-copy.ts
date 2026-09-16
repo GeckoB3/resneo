@@ -379,6 +379,10 @@ export const COLLECTIVE_COPY = {
 
   // After a collective ends (dissolved-page.ts; UX spec `public.dissolved.*`, `la.row.*`)
   'guest.bookedThrough': 'Booked through {collective}',
+  // Public identity (UX spec §3 "Public identity", D48).
+  'public.meta.title': 'Book with {collective}',
+  'public.meta.description': 'Book online with {collective}. {venueCount} venues, one booking page.',
+  'public.header.venues': '{venueCount} venues',
   'email.confirm.through': 'You booked through {collective}.',
   // Who the guest is booking with on a collective page (UX spec item 14; PUB-03, RT2-14, PB-15).
   'public.trader': 'You are booking with {business}, {address}.',

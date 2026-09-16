@@ -12,6 +12,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CollectiveVenuesPanel, type CollectiveVenueRow } from './CollectiveVenuesPanel';
 import { CollectiveHistoryPanel } from './CollectiveHistoryPanel';
+import { HostingRequestBanner, PausedHostingBanner } from './CollectiveHostingControls';
 
 const COLLECTIVE = 'collective-1';
 
@@ -164,5 +165,124 @@ describe('CollectiveHistoryPanel', () => {
     render(<CollectiveHistoryPanel collectiveId={COLLECTIVE} collectiveName="Northside" />);
     const link = await screen.findByRole('link', { name: 'Download this history' });
     expect(link.getAttribute('href')).toContain('format=csv');
+  });
+});
+
+describe('moving the hosting, and ending the collective', () => {
+  const panel = (props: Partial<React.ComponentProps<typeof CollectiveVenuesPanel>> = {}) => {
+    const onChanged = vi.fn();
+    const onEnded = vi.fn();
+    render(
+      <CollectiveVenuesPanel
+        collectiveId={COLLECTIVE}
+        collectiveName="Northside"
+        venues={venues}
+        groups={[]}
+        onChanged={onChanged}
+        onShowHistory={vi.fn()}
+        serviceModel="replicas"
+        onEnded={onEnded}
+        {...props}
+      />,
+    );
+    return { onChanged, onEnded };
+  };
+
+  it('asks a member to host, after saying what that means', async () => {
+    const fetch = fetchMock({ collective: null });
+    vi.stubGlobal('fetch', fetch);
+    const { onChanged } = panel();
+    await userEvent.click(screen.getByRole('button', { name: 'Ask to host' }));
+    const ask = await screen.findByRole('dialog');
+    expect(within(ask).getByText('Ask Zen Studio to host Northside?')).toBeInTheDocument();
+    expect(within(ask).getByText(/hosting moves 14 days after Zen Studio accepts/)).toBeInTheDocument();
+    await userEvent.click(within(ask).getByRole('button', { name: 'Send request' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({ action: 'offer_host', venueId: 'member' });
+  });
+
+  it('offers no Ask to host on the older model', () => {
+    panel({ serviceModel: 'legacy_copies' });
+    expect(screen.queryByRole('button', { name: 'Ask to host' })).not.toBeInTheDocument();
+  });
+
+  it('shows a pending move with its day, and cancels it', async () => {
+    const fetch = fetchMock({ collective: null });
+    vi.stubGlobal('fetch', fetch);
+    panel({ pendingHost: { venueId: 'member', venueName: 'Zen Studio', transferAt: '2026-10-15T09:00:00Z' } });
+    expect(screen.getByText('Zen Studio will host Northside from 15 October.')).toBeInTheDocument();
+    // One move at a time.
+    expect(screen.queryByRole('button', { name: 'Ask to host' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel the move' }));
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel the move' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({ action: 'cancel_host_transfer' });
+  });
+
+  it('ends the collective only once its name is typed', async () => {
+    const fetch = fetchMock({ ok: true });
+    vi.stubGlobal('fetch', fetch);
+    const { onEnded } = panel();
+    await userEvent.click(screen.getByRole('button', { name: 'End Northside' }));
+    const dialog = await screen.findByRole('dialog');
+    const confirm = within(dialog).getByRole('button', { name: 'End Northside' });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(within(dialog).getByRole('textbox'), 'northside');
+    expect(confirm).toBeEnabled();
+    await userEvent.click(confirm);
+    await waitFor(() => expect(onEnded).toHaveBeenCalled());
+    expect(fetch.mock.calls[0]![0]).toBe(`/api/venue/collectives/${COLLECTIVE}`);
+    expect(fetch.mock.calls[0]![1]!.method).toBe('DELETE');
+  });
+});
+
+describe('answering a request to host', () => {
+  it('accepts only after the venue ticks that it agrees, sending the consent version', async () => {
+    const fetch = fetchMock({ collective: null });
+    vi.stubGlobal('fetch', fetch);
+    const onChanged = vi.fn();
+    render(
+      <HostingRequestBanner collectiveId={COLLECTIVE} collectiveName="Northside" hostName="Host Venue" onChanged={onChanged} />,
+    );
+    expect(screen.getByText('Host Venue asked you to host Northside')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Review request' }));
+    const dialog = await screen.findByRole('dialog');
+    const accept = within(dialog).getByRole('button', { name: 'Accept and host' });
+    expect(accept).toBeDisabled();
+    await userEvent.click(within(dialog).getByRole('checkbox'));
+    await userEvent.click(accept);
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({
+      action: 'accept_host',
+      consent_version: 'host-transfer-2026-09',
+    });
+  });
+
+  it('says no in one step', async () => {
+    const fetch = fetchMock({ collective: null });
+    vi.stubGlobal('fetch', fetch);
+    render(
+      <HostingRequestBanner collectiveId={COLLECTIVE} collectiveName="Northside" hostName="Host Venue" onChanged={vi.fn()} />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Say no' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({ action: 'decline_host' });
+  });
+
+  it('lets a venue take over a paused collective, with the same consent', async () => {
+    const fetch = fetchMock({ collective: null });
+    vi.stubGlobal('fetch', fetch);
+    render(
+      <PausedHostingBanner collectiveId={COLLECTIVE} collectiveName="Northside" formerHostName="Host Venue" onChanged={vi.fn()} />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Take over hosting' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('checkbox'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Accept and host' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({
+      action: 'take_over_hosting',
+      consent_version: 'host-transfer-2026-09',
+    });
   });
 });

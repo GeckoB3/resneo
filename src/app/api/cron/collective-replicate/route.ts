@@ -6,6 +6,7 @@ import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 import { runCollectiveReplicate, type RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import { notifyFailingLinks } from '@/lib/linked-accounts/replicas/collective-failure-notices';
 import { sendMasterChangeNotices } from '@/lib/linked-accounts/replicas/master-change-notices';
+import { drainOperationNotices } from '@/lib/linked-accounts/replicas/collective-operation-notices';
 
 /**
  * GET/POST /api/cron/collective-replicate: every 5 minutes, apply due collective replica links
@@ -40,6 +41,15 @@ async function handlePost(request: NextRequest) {
     counters.results.digests = changes.digests;
   } catch (err) {
     console.error('[collective] change notices threw:', err);
+    counters.errors += 1;
+  }
+  // The lifecycle notices the engine queued after commit (N19 to N23).
+  try {
+    const queued = await drainOperationNotices(supabase);
+    counters.results.lifecycle_notices = queued.sent;
+    if (queued.failed > 0) counters.errors += queued.failed;
+  } catch (err) {
+    console.error('[collective] queued notices threw:', err);
     counters.errors += 1;
   }
   const outcome = await finalizeCronRun(counters);

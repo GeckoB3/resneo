@@ -9,6 +9,11 @@ import {
 import { checkCombinedEligibility } from '@/lib/linked-accounts/catalogue';
 import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 import {
+  isHostingAction,
+  legacyTransferRefused,
+  runHostingAction,
+} from '@/lib/linked-accounts/replicas/hosting-actions';
+import {
   notifyCollectiveDissolved,
   notifyCollectiveHostTransferred,
   notifyCollectiveInvitation,
@@ -148,7 +153,30 @@ export async function PATCH(
     }
 
     // ---- transfer_host --------------------------------------------------
+    // ---- moving the hosting on the shared-services model (contract 8) ---
+    if (isHostingAction(input.action)) {
+      const refused = await runHostingAction(
+        {
+          admin: ctx.admin,
+          collectiveId,
+          collectiveName: collective.name,
+          hostVenueId: collective.host_venue_id,
+          venueId: ctx.venueId,
+          venueName: ctx.venue.name,
+          userId: ctx.userId,
+        },
+        { action: input.action, venueId: input.venueId, consent_version: input.consent_version },
+      );
+      return refused ?? finish();
+    }
+
     if (input.action === 'transfer_host') {
+      const { data: model } = await ctx.admin
+        .from('venue_collectives')
+        .select('service_model')
+        .eq('id', collectiveId)
+        .maybeSingle();
+      if (model?.service_model === 'replicas') return legacyTransferRefused(collective.name);
       if (!isHost) {
         return NextResponse.json(
           { error: 'Only the current host can transfer host status.' },

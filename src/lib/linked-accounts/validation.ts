@@ -238,6 +238,12 @@ export const collectiveMemberActionSchema = z.object({
     'remove',
     'configure',
     'transfer_host',
+    // The shared-services lifecycle (contract 8): see replicas/hosting-actions.ts.
+    'offer_host',
+    'accept_host',
+    'decline_host',
+    'cancel_host_transfer',
+    'take_over_hosting',
   ]),
   /** invite / remove: the venue being invited or removed. */
   venueId: z.string().uuid().optional(),
@@ -246,6 +252,8 @@ export const collectiveMemberActionSchema = z.object({
   visibleServiceIds: z.array(z.string().uuid()).optional(),
   allowAnyPractitionerSubstitution: z.boolean().optional(),
   displayOrder: z.number().int().min(0).max(999).optional(),
+  /** accept_host / take_over_hosting: the consent the venue was shown (contract 8). */
+  consent_version: z.string().max(100).optional(),
   /** configure: what this member's own /book/{slug} does while the combined page is live (plan D2). */
   soloPageBehavior: z.enum(['keep_live', 'redirect']).optional(),
 });

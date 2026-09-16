@@ -3377,12 +3377,20 @@ Every route follows the repository's shape: a Next handler under `src/app/api/`,
 | 5 | Services GET | `GET /api/venue/appointment-services` | | per service `collective`; host admins `collective_calendars` (below) | | Any staff |
 | 6 | Accept | `PATCH /api/venue/collectives/[id]/members` `action: 'accept'` | gains `consent_version`, `same_name_choices`, `own_service_choices`, `form_choices` (below) | 200, or 202 `{ operation_id }` | 409 `COLLECTIVE_CONSENT_REQUIRED` | Invitee admin |
 | 7 | Leave | same route, `action: 'leave'` | no link option (DL12) | `{ review: { prices, sameName, stripe, library, photos, unparked } }` | | Member admin |
-| 8 | Host transfer | same route, actions `offer_host { venueId }`, `accept_host { consent_version }`, `cancel_host_transfer`, `take_over_hosting { consent_version }` | | 200 | 409 `COLLECTIVE_LINKS_BEHIND`, `COLLECTIVE_TRANSFER_PENDING` | Host admin; candidate admin |
+| 8 | Host transfer | same route, actions `offer_host { venueId }`, `accept_host { consent_version }`, `decline_host`, `cancel_host_transfer`, `take_over_hosting { consent_version }` | | 200 | 409 `COLLECTIVE_LINKS_BEHIND`, `COLLECTIVE_TRANSFER_PENDING`, `COLLECTIVE_CONSENT_REQUIRED` | Host admin; candidate admin |
 | 9 | Dissolved listing | same route, `configure { list_on_old_page }` after dissolve | | 200 | | Former member admin |
 | 10 | Suggest; answer an adoption | `POST /api/venue/collectives/[id]/suggestions { service_id }`; `POST .../adoptions/[itemId] { choice: 'use_mine' or 'keep_separate', option_map }` | | 201; 200 | 409 `COLLECTIVE_LEGACY_MODEL` | Member admin |
 | 11 | Calendar Availability save | `PUT /api/venue/practitioner-services` | gains `expected_service_ids: uuid[]` (the full set as loaded) | `{ success, added: [], removed: [] }` | 412 `STALE_RESOURCE` | Venue admin, own calendars |
 | 12 | Per-calendar values | `PATCH /api/venue/practitioner-service-overrides` (admins and all seven fields); host on a member calendar: `PUT /api/venue/collectives/[id]/calendar-values { calendar_id, service_id, values }` | | `{ assignment_id, before, after }` | 400 floor and flag; 403 | Calendar staff within flags; venue admins; host admin |
 | 13 | Bulk lane | `POST /api/venue/collectives/[id]/bulk { ops: [{ op: 'offer','withdraw','assign','unassign','retry', service_id, venue_id?, calendar_id? }] }` (max 200; the client chunks); `POST .../bulk/preview` same body | | `{ results: [{ index, ok, code?, message? }] }`; preview: per venue what guests would see (`ov.preview.*`) | per-op codes | Host admin |
+
+**Contract 8 as built (2026-09-16).** The request and the acceptance are not route writes as §6.7 first
+said, because only the engine may write `collective_audit_events`: they are two service-role functions,
+`collective_request_host_transfer` and `collective_accept_host_transfer` (20270218120000), each of which
+sets the pending columns, audits the step and queues its notice. The acceptance is audited as the new
+event type `host_transfer_accepted`. The candidate's refusal is its own action, `decline_host`, which
+calls `collective_cancel_host_transfer` with the candidate as actor. The notices the engine queues
+(N19 to N23) are sent by a drain in the replicate cron. The N20 and N21 reminders are not built yet.
 
 **Built 2026-09-16, with two additions.** The body takes `acknowledge_affected`, because a
 removal that would leave bookings behind writes nothing and comes back as the per-op code

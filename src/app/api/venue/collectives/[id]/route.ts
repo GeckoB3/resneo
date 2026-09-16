@@ -7,6 +7,8 @@ import {
   sanitizeCollectiveBookingPageConfig,
 } from '@/lib/linked-accounts/collective-page-config';
 import { notifyCollectiveDissolved } from '@/lib/linked-accounts/notifications';
+import { engineErrorResponse } from '@/lib/linked-accounts/replicas/host-route-helpers';
+import { invalidateCollectiveCatalogMemo } from '@/lib/linked-accounts/collective-venue';
 
 async function loadHostedCollective(
   admin: import('@supabase/supabase-js').SupabaseClient,
@@ -241,6 +243,28 @@ export async function DELETE(
       );
     }
     if (collective.status !== 'active') {
+      return NextResponse.json({ ok: true });
+    }
+
+    // On the shared-services model the engine ends it (plan §6.7 "active to dissolved"): every
+    // venue is released with its services, offerings are archived, the address is kept for the
+    // neutral page, and N19 is queued. The older path below would leave the copies locked.
+    const { data: model } = await ctx.admin
+      .from('venue_collectives')
+      .select('service_model')
+      .eq('id', id)
+      .maybeSingle();
+    if (model?.service_model === 'replicas') {
+      const { error } = await ctx.admin.rpc('collective_dissolve', {
+        p_collective_id: id,
+        p_reason: 'host_ended',
+        p_actor_venue_id: ctx.venueId,
+        p_actor_user_id: ctx.userId,
+      });
+      if (error) {
+        return engineErrorResponse(error, { collective: collective.name, host: ctx.venue.name }, 'Could not end the collective.');
+      }
+      invalidateCollectiveCatalogMemo(id);
       return NextResponse.json({ ok: true });
     }
 

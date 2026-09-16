@@ -4,12 +4,10 @@
  * The Collective area's Venues tab, for the host (UX spec §2 item 15 "The Venues tab"; W5).
  *
  * One row per venue and per open invitation, with the membership actions that have no other home.
- * What this tab deliberately does not offer yet, and why:
- *   - Invite a venue: the picker, with its eligibility reasons, lives on Settings, Linked accounts,
- *     so this links there rather than building a second one that could disagree with it.
- *   - Ask to host and End the collective: on the shared-services model these go through the
- *     engine's host transfer and dissolve (contracts 7 and 8), which have no route yet. The older
- *     routes write the host directly, which the engine's locks refuse, so they are not offered.
+ * Invite a venue links to Settings, Linked accounts: the picker, with its eligibility reasons,
+ * lives there, and a second one here could disagree with it. Ask to host is offered only on the
+ * shared-services model, where the engine moves the hosting (contract 8); End the collective goes
+ * through the collective route, which hands a shared-services collective to the engine.
  */
 import Link from 'next/link';
 import { useState } from 'react';
@@ -18,6 +16,8 @@ import { ConfirmDialog } from '@/components/ui/primitives/ConfirmDialog';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { VenueSyncPill } from './CollectivePills';
 import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
+import { EndCollectiveSection, hostingAction } from './CollectiveHostingControls';
+import { noticeDate } from '@/lib/linked-accounts/replicas/notice-dates';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
 
 export interface CollectiveVenueRow {
@@ -35,6 +35,39 @@ export interface CollectiveVenuesPanelProps {
   groups: CollectiveCalendarGroup[];
   onChanged: () => void;
   onShowHistory: (venueId: string) => void;
+  /** 'replicas' when hosting moves through the engine; Ask to host is only offered then. */
+  serviceModel?: string;
+  /** A move of hosting in progress, from the collectives list. */
+  pendingHost?: { venueId: string; venueName: string; transferAt: string | null } | null;
+  /** Called once the collective has ended, so the page can leave the area. */
+  onEnded?: () => void;
+}
+
+type Ask = { venue: CollectiveVenueRow; kind: 'remove' | 'cancel' | 'host' | 'cancel_move' } | null;
+
+function askTitle(ask: Ask, collective: string): string {
+  if (!ask) return '';
+  const venue = ask.venue.venue_name;
+  if (ask.kind === 'cancel') return collectiveCopy('ov.venues.cancelTitle', { venue });
+  if (ask.kind === 'host') return collectiveCopy('transfer.ask.title', { venue, collective });
+  if (ask.kind === 'cancel_move') return collectiveCopy('transfer.cancel.title', { venue });
+  return collectiveCopy('ov.venues.removeTitle', { venue, collective });
+}
+
+function askMessage(ask: Ask, collective: string): string {
+  if (!ask) return '';
+  const venue = ask.venue.venue_name;
+  if (ask.kind === 'cancel') return collectiveCopy('ov.venues.cancelMessage', { venue });
+  if (ask.kind === 'host') return collectiveCopy('transfer.ask.message', { venue, collective });
+  if (ask.kind === 'cancel_move') return collectiveCopy('transfer.cancel.message', { venue, collective });
+  return collectiveCopy('ov.venues.removeMessage', { venue, collective });
+}
+
+function askConfirm(ask: Ask): string {
+  if (ask?.kind === 'cancel') return collectiveCopy('bp.members.cancelInvite');
+  if (ask?.kind === 'host') return collectiveCopy('transfer.ask.confirm');
+  if (ask?.kind === 'cancel_move') return collectiveCopy('transfer.cancel');
+  return collectiveCopy('ov.venues.remove');
 }
 
 export function CollectiveVenuesPanel({
@@ -44,10 +77,28 @@ export function CollectiveVenuesPanel({
   groups,
   onChanged,
   onShowHistory,
+  serviceModel = 'legacy_copies',
+  pendingHost = null,
+  onEnded,
 }: CollectiveVenuesPanelProps) {
-  const [asking, setAsking] = useState<{ venue: CollectiveVenueRow; kind: 'remove' | 'cancel' } | null>(null);
+  const [asking, setAsking] = useState<{
+    venue: CollectiveVenueRow;
+    kind: 'remove' | 'cancel' | 'host' | 'cancel_move';
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const moveHosting = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    setError(null);
+    const result = await hostingAction(collectiveId, body);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    onChanged();
+  };
 
   const remove = async (venue: CollectiveVenueRow) => {
     setBusy(true);
@@ -101,6 +152,32 @@ export function CollectiveVenuesPanel({
         </p>
       ) : null}
 
+      {pendingHost ? (
+        <p className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50/60 px-3 py-2 text-sm text-brand-950">
+          {pendingHost.transferAt
+            ? collectiveCopy('transfer.pending.scheduled', {
+                venue: pendingHost.venueName,
+                collective: collectiveName,
+                date: noticeDate(pendingHost.transferAt),
+              })
+            : collectiveCopy('transfer.pending.asked', { venue: pendingHost.venueName })}
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              setAsking({
+                venue: { venue_id: pendingHost.venueId, venue_name: pendingHost.venueName, status: 'active', is_host: false },
+                kind: 'cancel_move',
+              })
+            }
+          >
+            {collectiveCopy('transfer.cancel')}
+          </Button>
+        </p>
+      ) : null}
+
       <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
         {ordered.map((venue) => {
           const group = groups.find((g) => g.venue_id === venue.venue_id) ?? null;
@@ -125,6 +202,17 @@ export function CollectiveVenuesPanel({
                 {venue.status === 'active' ? (
                   <Button type="button" variant="link" size="sm" onClick={() => onShowHistory(venue.venue_id)}>
                     {collectiveCopy('bp.members.history')}
+                  </Button>
+                ) : null}
+                {!venue.is_host && venue.status === 'active' && serviceModel === 'replicas' && !pendingHost ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setAsking({ venue, kind: 'host' })}
+                  >
+                    {collectiveCopy('transfer.ask.button')}
                   </Button>
                 ) : null}
                 {!venue.is_host && venue.status === 'active' ? (
@@ -160,30 +248,24 @@ export function CollectiveVenuesPanel({
         onOpenChange={(open) => {
           if (!open) setAsking(null);
         }}
-        title={
-          asking?.kind === 'cancel'
-            ? collectiveCopy('ov.venues.cancelTitle', { venue: asking.venue.venue_name })
-            : collectiveCopy('ov.venues.removeTitle', {
-                venue: asking?.venue.venue_name ?? '',
-                collective: collectiveName,
-              })
-        }
-        message={
-          asking?.kind === 'cancel'
-            ? collectiveCopy('ov.venues.cancelMessage', { venue: asking.venue.venue_name })
-            : collectiveCopy('ov.venues.removeMessage', {
-                venue: asking?.venue.venue_name ?? '',
-                collective: collectiveName,
-              })
-        }
-        confirmLabel={
-          asking?.kind === 'cancel' ? collectiveCopy('bp.members.cancelInvite') : collectiveCopy('ov.venues.remove')
-        }
+        destructive={asking?.kind === 'remove' || asking?.kind === 'cancel' || asking?.kind === 'cancel_move'}
+        title={askTitle(asking, collectiveName)}
+        message={askMessage(asking, collectiveName)}
+        confirmLabel={askConfirm(asking)}
         onConfirm={() => {
           const target = asking;
           setAsking(null);
-          if (target) void remove(target.venue);
+          if (!target) return;
+          if (target.kind === 'host') void moveHosting({ action: 'offer_host', venueId: target.venue.venue_id });
+          else if (target.kind === 'cancel_move') void moveHosting({ action: 'cancel_host_transfer' });
+          else void remove(target.venue);
         }}
+      />
+
+      <EndCollectiveSection
+        collectiveId={collectiveId}
+        collectiveName={collectiveName}
+        onEnded={() => (onEnded ? onEnded() : onChanged())}
       />
     </section>
   );

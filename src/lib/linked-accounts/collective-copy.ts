@@ -266,6 +266,39 @@ export const COLLECTIVE_COPY = {
   'ov.grid.empty': 'No services match.',
   'ov.grid.done': 'Done',
 
+  // Moving the hosting (hosting-actions.ts, the Venues tab and the candidate's banner)
+  'transfer.ask.button': 'Ask to host',
+  'transfer.ask.title': 'Ask {venue} to host {collective}?',
+  'transfer.ask.message':
+    "If {venue} accepts, it controls the services on the {collective} page for every venue, including yours. The page then shows {venue}'s address, phone and opening hours. Every venue is told, and hosting moves 14 days after {venue} accepts.",
+  'transfer.ask.confirm': 'Send request',
+  'transfer.pending.asked': 'Asked {venue} to host. Waiting for {venue} to answer.',
+  'transfer.pending.scheduled': '{venue} will host {collective} from {date}.',
+  'transfer.cancel': 'Cancel the move',
+  'transfer.cancel.title': 'Cancel the move of hosting to {venue}?',
+  'transfer.cancel.message': '{venue} is told, and {collective} keeps its current host.',
+  'transfer.request.title': '{host} asked you to host {collective}',
+  'transfer.accept.title': 'Take over hosting {collective}?',
+  'transfer.accept.1':
+    'You will control the services on the page for every venue: names, prices, deposits, payment rules, options, add-ons and forms.',
+  'transfer.accept.2': "{host}'s services on the page become services you manage, in {host}'s account.",
+  'transfer.accept.3': 'The {collective} page will show your address, phone and opening hours.',
+  'transfer.accept.4': 'Clients keep paying the venue whose calendar they book.',
+  'transfer.accept.consent': 'I agree to host {collective} and manage its services for every venue.',
+  'transfer.accept.confirm': 'Accept and host',
+  'transfer.decline': 'Say no',
+  'transfer.review': 'Review request',
+  'transfer.error.consent': 'Please read what hosting involves and tick the box to agree before accepting.',
+  'transfer.paused.title': '{collective} is paused',
+  'transfer.paused.body':
+    '{collective} has no host, so its page is not taking bookings. One venue can take over hosting, or {collective} ends after 30 days and every venue keeps everything.',
+  'transfer.paused.takeOver': 'Take over hosting',
+  'dissolve.button': 'End {collective}',
+  'dissolve.title': 'End {collective}?',
+  'dissolve.message':
+    "The {collective} page stops taking bookings straight away. Every venue keeps its services, calendars, clients and bookings, and its own booking page comes back. For 90 days, old links to the {collective} page show a page listing each venue's own booking page.",
+  'dissolve.typeToConfirm': 'Type {collective} to confirm',
+
   // Notices (collective-notices.ts; UX spec §4)
   'notify.failedHost.subject': '{service} could not be updated at {venue}',
   'notify.failedHost.body':
@@ -285,6 +318,27 @@ export const COLLECTIVE_COPY = {
   'notify.commercial.putBack': '{host} put {service} back to how it was.',
   'notify.digest.subject': 'Changes from {host} today',
   'notify.digest.body': 'Here is what {host} changed in services on the {collective} page today.',
+  'notify.hostRequest.subject': '{host} asked you to host {collective}',
+  'notify.hostRequest.body':
+    'If you accept, you manage the services on the {collective} page for every venue, including their prices and forms.',
+  'notify.hostMoving.subject': '{newHost} will host {collective} from {date}',
+  'notify.hostMoving.body':
+    'From {date}, {newHost} manages the services on the {collective} page, including the prices and forms used on your calendars. You can leave at any time.',
+  'notify.hostMoved.subject': '{newHost} now hosts {collective}',
+  'notify.hostMoved.body':
+    '{newHost} manages the services on the {collective} page from today. Bookings already made are not changed.',
+  'notify.paused.subject': '{collective} is paused',
+  'notify.paused.body':
+    '{oldHost} is no longer part of {collective}, so its page is paused. One of you can take over hosting before {date}, or {collective} ends and every venue keeps everything.',
+  'notify.dissolved.subject': '{collective} has ended',
+  'notify.dissolved.body':
+    'Every venue keeps its services, calendars, clients and bookings. Your own booking page is back. Your account links are unchanged.',
+  // Added while building the lifecycle: the plan tells both sides when a move is called off, and
+  // the deck had no sentence for it.
+  'notify.hostDeclined.subject': '{venue} will not host {collective}',
+  'notify.hostDeclined.body': '{venue} said no to hosting {collective}. Nothing has changed.',
+  'notify.hostMoveCancelled.subject': 'The move of hosting to your venue was cancelled',
+  'notify.hostMoveCancelled.body': '{venue} cancelled the move, and keeps hosting {collective}. Nothing has changed.',
   'notify.offered.subject': '{host} added {service} to {collective}',
   'notify.offered.body': '{service} is set up in your account. Choose which of your calendars offer it.',
   'notify.hostCalendar.added.subject': '{host} added {calendar} to {service}',

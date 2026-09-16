@@ -175,6 +175,15 @@ export interface CollectiveView {
     displayOrder: number;
     soloPageBehavior: SoloPageBehavior;
   } | null;
+  /** 'replicas' once the collective shares services through the engine (W3); the lifecycle differs. */
+  serviceModel: string;
+  /** Set while the page is paused because its host left or lapsed (plan §6.7). */
+  pausedAt: string | null;
+  /**
+   * A move of hosting in progress: asked (no date yet), or accepted with the day it happens (W7,
+   * contract 8). Null when nothing is pending.
+   */
+  pendingHost: { venueId: string; venueName: string; transferAt: string | null } | null;
   members: {
     venueId: string;
     venueName: string;
@@ -332,8 +341,28 @@ export async function loadCollectiveViewsForVenue(
     .in('collective_id', [...collectiveIds])
     .in('status', ['invited', 'active']);
 
+  // The engine's lifecycle state, read apart from the columns every older reader shares.
+  const { data: lifecycleRows } = await admin
+    .from('venue_collectives')
+    .select('id, service_model, paused_at, pending_host_venue_id, host_transfer_at')
+    .in('id', [...collectiveIds]);
+  const lifecycle = new Map(
+    (lifecycleRows ?? []).map((r) => [
+      r.id as string,
+      {
+        serviceModel: (r.service_model as string | null) ?? 'legacy_copies',
+        pausedAt: (r.paused_at as string | null) ?? null,
+        pendingHostVenueId: (r.pending_host_venue_id as string | null) ?? null,
+        hostTransferAt: (r.host_transfer_at as string | null) ?? null,
+      },
+    ]),
+  );
+
   const venueIdsToLoad = new Set<string>();
   for (const m of allMembers ?? []) venueIdsToLoad.add(m.venue_id as string);
+  for (const state of lifecycle.values()) {
+    if (state.pendingHostVenueId) venueIdsToLoad.add(state.pendingHostVenueId);
+  }
   // Host venues too, so we can resolve each collective's host "Any available
   // practitioner" setting (the combined page follows it).
   for (const c of collectives ?? []) venueIdsToLoad.add((c as VenueCollectiveRow).host_venue_id);
@@ -432,6 +461,15 @@ export async function loadCollectiveViewsForVenue(
             displayOrder: (myRaw.display_order as number) ?? 0,
             soloPageBehavior:
               ((myRaw.solo_page_behavior as SoloPageBehavior) ?? 'keep_live'),
+          }
+        : null,
+      serviceModel: lifecycle.get(row.id)?.serviceModel ?? 'legacy_copies',
+      pausedAt: lifecycle.get(row.id)?.pausedAt ?? null,
+      pendingHost: lifecycle.get(row.id)?.pendingHostVenueId
+        ? {
+            venueId: lifecycle.get(row.id)!.pendingHostVenueId!,
+            venueName: venueNames[lifecycle.get(row.id)!.pendingHostVenueId!] ?? 'A venue',
+            transferAt: lifecycle.get(row.id)!.hostTransferAt,
           }
         : null,
       members,

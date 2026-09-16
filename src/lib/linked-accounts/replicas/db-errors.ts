@@ -38,6 +38,8 @@ export const COLLECTIVE_PREFIXED_CODES = [
   'COLLECTIVE_REPLICA_NOT_READY',
   'COLLECTIVE_LINKS_BEHIND',
   'COLLECTIVE_UNDO_EXPIRED',
+  'COLLECTIVE_TRANSFER_PENDING',
+  'COLLECTIVE_CONSENT_REQUIRED',
 ] as const satisfies readonly ApiErrorCode[];
 
 export type CollectiveDbErrorCode =
@@ -91,6 +93,10 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return `Some venues' copies of the ${collective} services are still updating. Hosting can move once they are up to date, usually within a few minutes.`;
     case 'COLLECTIVE_UNDO_EXPIRED':
       return 'That change was saved more than a minute ago, so it can no longer be undone. Change it back by hand instead.';
+    case 'COLLECTIVE_TRANSFER_PENDING':
+      return `A move of hosting for ${collective} is already pending. Cancel it before asking another venue.`;
+    case 'COLLECTIVE_CONSENT_REQUIRED':
+      return 'Please read what hosting involves and tick the box to agree before accepting.';
   }
 }
 

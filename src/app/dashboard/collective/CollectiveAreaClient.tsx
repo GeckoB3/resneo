@@ -15,6 +15,10 @@ import {
   CollectiveVenuesPanel,
   type CollectiveVenueRow,
 } from '@/components/linked-accounts/collective/CollectiveVenuesPanel';
+import {
+  HostingRequestBanner,
+  PausedHostingBanner,
+} from '@/components/linked-accounts/collective/CollectiveHostingControls';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { Button } from '@/components/ui/primitives/Button';
@@ -37,6 +41,16 @@ interface CollectiveMemberRow {
   status: string;
 }
 
+interface CollectiveListEntry {
+  id: string;
+  hostVenueId: string;
+  myVenueId: string;
+  members: CollectiveMemberRow[];
+  serviceModel?: string;
+  pausedAt?: string | null;
+  pendingHost?: { venueId: string; venueName: string; transferAt: string | null } | null;
+}
+
 interface ServiceRow {
   id: string;
   name: string;
@@ -51,9 +65,7 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
   const [tab, setTab] = useState<AreaTab>('services');
   const [historyVenueId, setHistoryVenueId] = useState<string | null>(null);
   /** Every collective this venue is in, with its venues and invitations, from the collectives list. */
-  const [collectiveList, setCollectiveList] = useState<
-    { id: string; hostVenueId: string; members: CollectiveMemberRow[] }[]
-  >([]);
+  const [collectiveList, setCollectiveList] = useState<CollectiveListEntry[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,9 +76,7 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
         fetch('/api/venue/collectives'),
       ]);
       if (collectivesRes.ok) {
-        const list = (await collectivesRes.json()) as {
-          collectives?: { id: string; hostVenueId: string; members: CollectiveMemberRow[] }[];
-        };
+        const list = (await collectivesRes.json()) as { collectives?: CollectiveListEntry[] };
         setCollectiveList(list.collectives ?? []);
       }
       if (!res.ok) {
@@ -106,9 +116,15 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
     });
   }, [collective, services, groups]);
 
+  /** This collective's entry in the collectives list: who is in it, and any move of hosting. */
+  const entry = useMemo(
+    () => collectiveList.find((c) => c.id === collective?.id) ?? null,
+    [collectiveList, collective],
+  );
+
   const venueRows = useMemo<CollectiveVenueRow[]>(() => {
     // The services say which collective this page is about; the list says who is in it.
-    const match = collectiveList.find((c) => c.id === collective?.id) ?? null;
+    const match = entry;
     const hostVenueId = match?.hostVenueId ?? null;
     return (match?.members ?? [])
         .filter((m) => m.status === 'active' || m.status === 'invited')
@@ -118,7 +134,7 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
           status: m.status as 'active' | 'invited',
           is_host: m.venueId === hostVenueId,
         }));
-  }, [collectiveList, collective]);
+  }, [entry]);
 
   const commit = useCallback(
     async (ops: BulkOp[]): Promise<BulkOpResult[]> => {
@@ -199,6 +215,23 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
     <div className="space-y-4">
       <PageHeader eyebrow="Collective" title={collective.name} subtitle={collectiveCopy('ov.subtitle')} />
 
+      {entry?.pendingHost && entry.pendingHost.venueId === entry.myVenueId && !entry.pendingHost.transferAt ? (
+        <HostingRequestBanner
+          collectiveId={collective.id}
+          collectiveName={collective.name}
+          hostName={collective.hostVenueName}
+          onChanged={() => void load()}
+        />
+      ) : null}
+      {entry?.pausedAt ? (
+        <PausedHostingBanner
+          collectiveId={collective.id}
+          collectiveName={collective.name}
+          formerHostName={collective.hostVenueName}
+          onChanged={() => void load()}
+        />
+      ) : null}
+
       <TabBar
         tabs={[
           { id: 'services' as const, label: collectiveCopy('ov.tab.overview') },
@@ -220,6 +253,11 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
           venues={venueRows}
           groups={groups}
           onChanged={() => void load()}
+          serviceModel={entry?.serviceModel}
+          pendingHost={entry?.pendingHost ?? null}
+          onEnded={() => {
+            window.location.href = '/dashboard';
+          }}
           onShowHistory={(venueId) => {
             setHistoryVenueId(venueId);
             setTab('history');

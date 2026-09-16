@@ -147,6 +147,10 @@ export const API_ERROR_CODES = [
    * written: open that service to see the bookings, then send it again acknowledged.
    */
   'COLLECTIVE_AFFECTED_BOOKINGS',
+  /** A move of hosting is already pending; cancel it before asking another venue (409). */
+  'COLLECTIVE_TRANSFER_PENDING',
+  /** Accepting needs the consent the venue was shown, sent back with its version (409). */
+  'COLLECTIVE_CONSENT_REQUIRED',
   /**
    * A new booking, or a booking moved to another service, for a service that is parked: the venue is
    * live in a collective and the service is not one of the collective's. Offer a collective service.

@@ -236,6 +236,19 @@ describe('drainOperationNotices', () => {
     });
   });
 
+  it("tells the host of a member's suggestion, with the service chosen for it (N25)", async () => {
+    await drain(
+      world([op('N25', { venue_id: 'host', progress: { notice: 'N25', service_id: 'svc-9', from_venue_id: 'member' } })], (call) =>
+        call.table === 'service_items' ? { data: { name: 'Nails' } } : undefined,
+      ),
+    ).outcome;
+    expect(told()).toEqual(['host']);
+    expect(subjects()).toEqual(['Zen Studio suggests Nails for Northside']);
+    const params = (notifyVenue.mock.calls[0] as unknown as [unknown, string, string, { ctaUrl: string; ctaLabel: string }])[3];
+    expect(params.ctaLabel).toBe('Add from another venue');
+    expect(params.ctaUrl).toMatch(/\/dashboard\/appointment-services\?add_from=member&service=svc-9$/);
+  });
+
   it('emails the invitee that an invitation was withdrawn, with no bell (N34)', async () => {
     await drain(world([op('N34')])).outcome;
     expect(told()).toEqual(['member']);

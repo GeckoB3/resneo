@@ -165,6 +165,28 @@ describe('a member of a collective', () => {
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
   });
 
+  it('suggests a parked service to the host, after asking', async () => {
+    const world = show({
+      services: [
+        harnessService({
+          id: 'svc-3',
+          name: 'Sauna',
+          collective: harnessCollectiveBlock({ role: 'parked', item_id: null, status: 'hidden' }),
+        }),
+      ],
+      routes: { 'POST /api/venue/collectives/': { status: 201, body: { ok: true } } },
+    });
+    await world.ready();
+    await userEvent.click(screen.getByRole('button', { name: 'Suggest to Host Venue' }));
+    expect(await screen.findByText('Suggest Sauna for Northside?')).toBeInTheDocument();
+    expect(world.requests('POST', '/api/venue/collectives/')).toHaveLength(0);
+    await userEvent.click(screen.getByRole('button', { name: 'Send suggestion' }));
+    expect(await screen.findByText('Suggestion sent to Host Venue.')).toBeInTheDocument();
+    const [request] = world.requests('POST', '/api/venue/collectives/');
+    expect(request!.url).toMatch(/\/api\/venue\/collectives\/[^/]+\/suggestions$/);
+    expect(request!.body).toEqual({ service_id: 'svc-3' });
+  });
+
   it('does not offer to reorder the collective page', async () => {
     const world = memberWorld();
     await world.ready();

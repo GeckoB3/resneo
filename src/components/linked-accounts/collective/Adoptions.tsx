@@ -29,7 +29,12 @@ export function AddFromVenueDialog({
   venues,
   formatPrice,
   onAdded,
+  initialVenueId = null,
+  initialServiceId = null,
 }: {
+  /** From a member's suggestion (N25): that venue and service, already chosen. */
+  initialVenueId?: string | null;
+  initialServiceId?: string | null;
   open: boolean;
   onClose: () => void;
   collectiveId: string;
@@ -38,7 +43,10 @@ export function AddFromVenueDialog({
   formatPrice: (pence: number) => string;
   onAdded: (message: string) => void;
 }) {
-  const [venueId, setVenueId] = useState(venues[0]?.venue_id ?? '');
+  const [venueId, setVenueId] = useState(
+    initialVenueId && venues.some((v) => v.venue_id === initialVenueId) ? initialVenueId : (venues[0]?.venue_id ?? ''),
+  );
+  const [preset, setPreset] = useState(initialServiceId);
   const [services, setServices] = useState<OwnService[] | null>(null);
   const [serviceId, setServiceId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -59,7 +67,9 @@ export function AddFromVenueDialog({
         const data = (await res.json()) as { services: OwnService[] };
         if (cancelled) return;
         setServices(data.services);
-        setServiceId('');
+        // A suggested service is chosen for the host, once, if it can still be added.
+        setServiceId(preset && data.services.some((s) => s.id === preset) ? preset : '');
+        setPreset(null);
         setError(null);
       } catch {
         if (!cancelled) setError('Could not load that venue’s services. Please check your connection.');
@@ -68,6 +78,8 @@ export function AddFromVenueDialog({
     return () => {
       cancelled = true;
     };
+    // `preset` is read once, for the first list; it is not a reason to fetch again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, collectiveId, venueId]);
 
   const venueName = venues.find((v) => v.venue_id === venueId)?.venue_name ?? 'That venue';

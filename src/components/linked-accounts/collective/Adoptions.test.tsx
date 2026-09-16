@@ -64,6 +64,33 @@ describe('AddFromVenueDialog', () => {
     });
   });
 
+  it("opens on a member's suggestion with that venue and service chosen", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.includes('00000000000c')
+          ? json({ services: [{ id: 'svc-bloom', name: 'Nails', duration_minutes: 30, price_pence: 2000 }] })
+          : json({ services: [] }),
+      ),
+    );
+    render(
+      <AddFromVenueDialog
+        open
+        onClose={vi.fn()}
+        collectiveId="collective-1"
+        collectiveName="Northside"
+        venues={venues}
+        formatPrice={(p) => `£${(p / 100).toFixed(2)}`}
+        onAdded={vi.fn()}
+        initialVenueId="aaaaaaaa-0000-4000-8000-00000000000c"
+        initialServiceId="svc-bloom"
+      />,
+    );
+    expect(screen.getByRole('combobox', { name: 'Venue' })).toHaveValue('aaaaaaaa-0000-4000-8000-00000000000c');
+    expect(await screen.findByRole('radio', { name: /Nails/ })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Copy and add to the page' })).toBeEnabled();
+  });
+
   it('says when a venue has nothing of its own to add', async () => {
     show(vi.fn(async () => json({ services: [] })));
     await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: 'Venue' }), 'aaaaaaaa-0000-4000-8000-00000000000c');

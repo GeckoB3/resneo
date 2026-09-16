@@ -14,6 +14,7 @@
  *   N36  a member's subscription lapsed  that member
  *   N37  and came back                   that member (a bell only)
  *   N26  the host wants to use a member's service   that member, and again at day 7
+ *   N25  a member suggests its own service   the host, with the way to add it
  *   N1   an invitation still open at day 7            the invitee (the first N1 is the invite route's)
  *   N34  the host withdrew an invitation              the invitee, by email
  *   N35  an invitation expired after 30 days          the invitee and the host, by bell
@@ -168,6 +169,37 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
             sameTime(collective.host_transfer_at, op.progress?.host_transfer_at)
           : sameTime(collective.paused_at, op.progress?.paused_at));
     if (!stands) return;
+  }
+
+  if (notice === 'N25') {
+    const fromVenueId = String(op.progress?.from_venue_id ?? '');
+    const serviceId = String(op.progress?.service_id ?? '');
+    const hostId = collective.host_venue_id as string;
+    const [venueNames, { data: service }] = await Promise.all([
+      names([fromVenueId]),
+      admin.from('service_items').select('name').eq('id', serviceId).maybeSingle(),
+    ]);
+    const params = {
+      venue: venueNames.get(fromVenueId) ?? 'A venue',
+      service: (service?.name as string | undefined) ?? 'a service',
+      collective: collectiveName,
+    };
+    const subject = collectiveCopy('notify.suggestion.subject', params);
+    const base = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.resneo.com').replace(/\/$/, '');
+    // The link opens "Add from another venue" with this venue and service already chosen.
+    await notifyVenue(
+      admin,
+      hostId,
+      subject,
+      {
+        heading: subject,
+        paragraphs: [collectiveCopy('notify.suggestion.body', params)],
+        ctaLabel: collectiveCopy('svc.addFrom.button'),
+        ctaUrl: `${base}/dashboard/appointment-services?add_from=${encodeURIComponent(fromVenueId)}&service=${encodeURIComponent(serviceId)}`,
+      },
+      { type: 'collective_n25', category: 'collective', collectiveId: op.collective_id, actorVenueId: fromVenueId },
+    );
+    return;
   }
 
   if (notice === 'N1' || notice === 'N34' || notice === 'N35') {

@@ -76,6 +76,12 @@ export const COLLECTIVE_COPY = {
   'svc.member.section.parkedCaption':
     'Yours to edit, but nobody can book these while you are part of {collective}. Bookings already made are not changed. To offer one now, suggest it to {host}.',
   'svc.member.card.view': 'View',
+  'svc.member.card.suggest': 'Suggest to {host}',
+  'svc.member.suggest.title': 'Suggest {service} for {collective}?',
+  'svc.member.suggest.message':
+    '{host} is asked to add {service} to the {collective} page. If {host} adds it, {host} controls it from then on, and you choose whether your {service} is used for it.',
+  'svc.member.suggest.confirm': 'Send suggestion',
+  'svc.member.suggest.done': 'Suggestion sent to {host}.',
   'svc.member.card.settingUp': 'Setting up. Guests can book it on your calendars once this finishes.',
   'svc.member.card.updating': 'Updating from {host}. Guests can book it on your calendars again in a moment.',
   'svc.member.card.failed':

@@ -346,6 +346,10 @@ export function AppointmentServicesView({
   // "Add from another venue" (host) and what it said when done (UX spec `svc.addFrom.*`).
   const [addFromOpen, setAddFromOpen] = useState(false);
   const [addFromDone, setAddFromDone] = useState<string | null>(null);
+  // A parked service suggested to the host (contract 10, N25), and the answer.
+  const [suggestAsk, setSuggestAsk] = useState<Service | null>(null);
+  const [suggestNote, setSuggestNote] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [addFromPresetUsed, setAddFromPresetUsed] = useState(false);
   const [collectiveFilter, setCollectiveFilter] = useState<CollectiveServicesFilterValue>('all');
   /** Calendar ticks the host has changed but not saved: intent, never a picture of the whole set. */
   const [collectiveCalendarsDiff, setCollectiveCalendarsDiff] =
@@ -429,6 +433,11 @@ export function AppointmentServicesView({
   // Tab navigation: "services" (default) or "addons". Synced to the URL via
   // `?tab=addons` so deep-links and the back button work as expected.
   const searchParams = useSearchParams();
+  // The host arriving from N25 lands with that venue and service chosen.
+  const addFromPreset = useMemo(() => {
+    const venueId = searchParams.get('add_from');
+    return venueId ? { venueId, serviceId: searchParams.get('service') } : null;
+  }, [searchParams]);
   const router = useRouter();
   const pathname = usePathname();
   const initialTab: ServicesPageTab = servicesPageTabFromParam(searchParams.get('tab'));
@@ -1568,21 +1577,39 @@ export function AppointmentServicesView({
               onAnswered={() => void fetchAll()}
             />
           ) : null}
+          {suggestNote ? (
+            <p
+              role={suggestNote.tone === 'error' ? 'alert' : 'status'}
+              className={`rounded-xl border px-4 py-3 text-sm ${
+                suggestNote.tone === 'error'
+                  ? 'border-rose-200 bg-rose-50 text-rose-800'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              }`}
+            >
+              {suggestNote.text}
+            </p>
+          ) : null}
           {addFromDone ? (
             <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
               {addFromDone}
             </p>
           ) : null}
-          {addFromOpen && collective ? (
+          {(addFromOpen || (addFromPreset && !addFromPresetUsed)) && collective?.isHost && isAdmin ? (
             <AddFromVenueDialog
               open
-              onClose={() => setAddFromOpen(false)}
+              initialVenueId={addFromPresetUsed ? null : addFromPreset?.venueId ?? null}
+              initialServiceId={addFromPresetUsed ? null : addFromPreset?.serviceId ?? null}
+              onClose={() => {
+                setAddFromOpen(false);
+                setAddFromPresetUsed(true);
+              }}
               collectiveId={collective.id}
               collectiveName={collective.name}
               venues={collectiveCalendars.filter((g) => !g.is_host).map((g) => ({ venue_id: g.venue_id, venue_name: g.venue_name }))}
               formatPrice={(pence) => formatPrice(pence)}
               onAdded={(message) => {
                 setAddFromOpen(false);
+                setAddFromPresetUsed(true);
                 setAddFromDone(message);
                 void fetchAll();
               }}
@@ -1993,6 +2020,18 @@ export function AppointmentServicesView({
                           </span>
                         );
                       })() : null}
+                      {isAdmin && svc.collective?.role === 'parked' && collective ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSuggestNote(null);
+                            setSuggestAsk(svc);
+                          }}
+                          className="text-xs font-semibold text-brand-700 underline"
+                        >
+                          {collectiveCopy('svc.member.card.suggest', { host: collective.hostVenueName })}
+                        </button>
+                      ) : null}
                       <DashboardEntityRowActions
                         onEdit={() => {
                           if (isManagedByHost(svc)) {
@@ -2415,6 +2454,53 @@ export function AppointmentServicesView({
           }}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={suggestAsk !== null}
+        onOpenChange={(open) => {
+          if (!open) setSuggestAsk(null);
+        }}
+        title={
+          suggestAsk && collective
+            ? collectiveCopy('svc.member.suggest.title', { service: suggestAsk.name, collective: collective.name })
+            : ''
+        }
+        message={
+          suggestAsk && collective
+            ? collectiveCopy('svc.member.suggest.message', {
+                host: collective.hostVenueName,
+                service: suggestAsk.name,
+                collective: collective.name,
+              })
+            : ''
+        }
+        confirmLabel={collectiveCopy('svc.member.suggest.confirm')}
+        onConfirm={() => {
+          const ask = suggestAsk;
+          setSuggestAsk(null);
+          if (!ask || !collective) return;
+          void (async () => {
+            try {
+              const res = await fetch(`/api/venue/collectives/${collective.id}/suggestions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ service_id: ask.id }),
+              });
+              if (!res.ok) {
+                const data = (await res.json().catch(() => ({}))) as { error?: string };
+                setSuggestNote({ tone: 'error', text: data.error ?? 'Could not send the suggestion. Please try again.' });
+                return;
+              }
+              setSuggestNote({
+                tone: 'ok',
+                text: collectiveCopy('svc.member.suggest.done', { host: collective.hostVenueName }),
+              });
+            } catch {
+              setSuggestNote({ tone: 'error', text: 'Could not send the suggestion. Please check your connection.' });
+            }
+          })();
+        }}
+      />
 
       <ConfirmDialog
         open={offerAsk !== null}

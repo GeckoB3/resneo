@@ -190,6 +190,45 @@ function CollectiveServicePills({ block }: { block: CollectiveServiceBlock }) {
   );
 }
 
+/**
+ * The one line a member reads under a service its host manages (UX spec §2 item 3). First match
+ * wins, because a service that is still setting up has nothing useful to say about Stripe yet.
+ */
+function MemberServiceLine({ block }: { block: CollectiveServiceBlock }) {
+  const host = block.host_venue_name;
+  if (block.status === 'setting_up') {
+    return <p className="text-xs text-slate-600">{collectiveCopy('svc.member.card.settingUp')}</p>;
+  }
+  if (block.status === 'updating') {
+    return <p className="text-xs text-slate-600">{collectiveCopy('svc.member.card.updating', { host })}</p>;
+  }
+  if (block.status === 'failed') {
+    return <p className="text-xs text-rose-700">{collectiveCopy('svc.member.card.failed', { host })}</p>;
+  }
+  const hidden = block.hidden_reasons[0];
+  if (hidden?.reason === 'payments') {
+    return (
+      <p className="text-xs text-amber-800">
+        {collectiveCopy('svc.member.card.noStripe', { paymentKind: 'a payment' })}{' '}
+        <Link href="/dashboard/settings?tab=payments" className="font-medium text-brand-700 underline underline-offset-2">
+          {collectiveCopy('svc.member.card.connectStripe')}
+        </Link>
+      </p>
+    );
+  }
+  if (hidden?.reason === 'forms') {
+    return (
+      <p className="text-xs text-amber-800">
+        {collectiveCopy('svc.member.card.formsOff', { forms: 'a form' })}{' '}
+        <Link href="/dashboard/settings?tab=compliance" className="font-medium text-brand-700 underline underline-offset-2">
+          {collectiveCopy('svc.member.card.turnOn')}
+        </Link>
+      </p>
+    );
+  }
+  return null;
+}
+
 type ServicesPageTab = 'services' | 'categories' | 'addons';
 
 /**
@@ -527,6 +566,12 @@ export function AppointmentServicesView({
     return block && block.role === 'master' ? block : null;
   }, [editingId, services]);
 
+  /** True for a copy of a service the host manages: this venue can look, not change (R10). */
+  const isManagedByHost = useCallback(
+    (svc: Service) => svc.collective?.role === 'replica' || svc.collective?.role === 'retired',
+    [],
+  );
+
   const collectiveMemberNames = useMemo(
     () => collectiveCalendars.filter((g) => !g.is_host).map((g) => g.venue_name),
     [collectiveCalendars],
@@ -587,7 +632,8 @@ export function AppointmentServicesView({
     setOrderedServiceIds(sorted.map((s) => s.id));
   }, [services, categoryFor]);
 
-  const canReorderServices = isAdmin && services.length > 1 && collectiveFilter === 'all';
+  const canReorderServices =
+    isAdmin && services.length > 1 && collectiveFilter === 'all' && !(collective && !collective.isHost);
 
   const orderedVisibleServices = useMemo(() => {
     const byId = new Map(visibleServices.map((s) => [s.id, s]));
@@ -604,6 +650,41 @@ export function AppointmentServicesView({
    * than re-sorting, so an optimistic drag shows immediately.
    */
   const groupedVisibleServices = useMemo(() => {
+    if (collective && !collective.isHost) {
+      const roleOf = (svc: Service) => svc.collective?.role ?? 'parked';
+      const sections: Array<{ id: string | null; name: string; services: Service[]; caption?: string; collapsed?: boolean }> = [
+        {
+          id: 'from-host',
+          name: collectiveCopy('svc.member.section.fromHostTitle', { host: collective.hostVenueName }),
+          caption: collectiveCopy('svc.member.section.fromHostCaption', {
+            host: collective.hostVenueName,
+            collective: collective.name,
+          }),
+          services: visibleServices.filter((s) => roleOf(s) === 'replica'),
+        },
+        {
+          id: 'retired',
+          name: collectiveCopy('svc.member.section.retired', { host: collective.hostVenueName }),
+          caption: collectiveCopy('svc.member.section.retiredCaption', {
+            host: collective.hostVenueName,
+            collective: collective.name,
+          }),
+          collapsed: true,
+          services: visibleServices.filter((s) => roleOf(s) === 'retired'),
+        },
+        {
+          id: 'parked',
+          name: collectiveCopy('svc.member.section.parkedTitle', { collective: collective.name }),
+          caption: collectiveCopy('svc.member.section.parkedCaption', {
+            collective: collective.name,
+            host: collective.hostVenueName,
+          }),
+          services: visibleServices.filter((s) => roleOf(s) === 'parked'),
+        },
+      ];
+      return sections.filter((s) => s.services.length > 0);
+    }
+
     const buckets = new Map<string | null, Service[]>();
     for (const svc of orderedVisibleServices) {
       const key = svc.category_id && categoryFor(svc.category_id) ? svc.category_id : null;
@@ -611,7 +692,7 @@ export function AppointmentServicesView({
       if (bucket) bucket.push(svc);
       else buckets.set(key, [svc]);
     }
-    const groups: Array<{ id: string | null; name: string; services: Service[] }> = [];
+    const groups: Array<{ id: string | null; name: string; services: Service[]; caption?: string; collapsed?: boolean }> = [];
     for (const category of categories) {
       const bucket = buckets.get(category.id);
       if (bucket) groups.push({ id: category.id, name: category.name, services: bucket });
@@ -619,7 +700,7 @@ export function AppointmentServicesView({
     const rest = buckets.get(null);
     if (rest) groups.push({ id: null, name: groups.length > 0 ? UNCATEGORISED_GROUP_LABEL : '', services: rest });
     return groups;
-  }, [orderedVisibleServices, categories, categoryFor]);
+  }, [orderedVisibleServices, categories, categoryFor, collective, visibleServices]);
 
   const serviceCountByCategory = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1229,7 +1310,9 @@ export function AppointmentServicesView({
               ? linkedPractitionerIds.length === 0
                 ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
                 : 'Add services and link them only to calendars you control. Use Availability → Services to toggle which columns offer each service.'
-              : 'Define what guests can book, pricing, buffers, and online payment rules.'
+              : collective && !collective.isHost
+                ? collectiveCopy('svc.member.subtitle', { host: collective.hostVenueName })
+                : 'Define what guests can book, pricing, buffers, and online payment rules.'
             : activeTab === 'categories'
               ? 'Group your services under headings so customers find what they want faster, and set the order the headings appear in.'
               : isAdmin
@@ -1344,7 +1427,7 @@ export function AppointmentServicesView({
               behindVenueNames={collectiveBehindVenueNames}
             />
           ) : null}
-          {collective ? (
+          {collective && collective.isHost ? (
             <CollectiveServicesFilter
               value={collectiveFilter}
               onChange={setCollectiveFilter}
@@ -1367,12 +1450,26 @@ export function AppointmentServicesView({
           {groupedVisibleServices.map((group) => (
           <section key={group.id ?? 'other'} aria-label={group.name || 'Services'} className="space-y-3">
             {group.name ? (
-              <div className="flex items-baseline justify-between gap-3 pt-2">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{group.name}</h2>
-                <span className="text-xs text-slate-400">
-                  {group.services.length} service{group.services.length === 1 ? '' : 's'}
-                </span>
-              </div>
+              group.collapsed ? (
+                // The host has taken these off the page: they keep their bookings and take no new
+                // ones, so they are here to be found, not to be read every day.
+                <details className="pt-2">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {group.name} ({group.services.length})
+                  </summary>
+                  {group.caption ? <p className="mt-1 text-xs text-slate-500">{group.caption}</p> : null}
+                </details>
+              ) : (
+                <div className="pt-2">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{group.name}</h2>
+                    <span className="text-xs text-slate-400">
+                      {group.services.length} service{group.services.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  {group.caption ? <p className="mt-1 text-xs text-slate-500">{group.caption}</p> : null}
+                </div>
+              )
             ) : null}
           <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={onServiceDragEnd}>
             <SortableContext items={group.services.map((s) => s.id)} strategy={verticalListSortingStrategy}>
@@ -1459,6 +1556,7 @@ export function AppointmentServicesView({
                         </Pill>
                       ) : null}
                       {svc.collective ? <CollectiveServicePills block={svc.collective} /> : null}
+                      {isManagedByHost(svc) ? <MemberServiceLine block={svc.collective!} /> : null}
                     </div>
                   }
                 />
@@ -1666,7 +1764,7 @@ export function AppointmentServicesView({
                         cover, and the active flag is not one of them, so their
                         switch would flip and then roll straight back.
                       */}
-                      {isAdmin ? (() => {
+                      {isAdmin && !isManagedByHost(svc) ? (() => {
                         const toggling = activeToggling.has(svc.id);
                         const switchId = `service-active-${svc.id}`;
                         return (
@@ -1697,6 +1795,8 @@ export function AppointmentServicesView({
                       })() : null}
                       <DashboardEntityRowActions
                         onEdit={() => openEdit(svc)}
+                        showDelete={!isManagedByHost(svc)}
+                        editLabel={isManagedByHost(svc) ? collectiveCopy('svc.member.card.view') : 'Edit'}
                         onDelete={() => {
                           setDeleteServiceModalError(null);
                           setServiceToDelete({ id: svc.id, name: svc.name });

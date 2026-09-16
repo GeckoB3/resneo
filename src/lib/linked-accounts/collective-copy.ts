@@ -88,6 +88,8 @@ export const COLLECTIVE_COPY = {
   'svc.member.card.turnOn': 'Turn on',
   'svc.member.card.noCalendars': 'None of your calendars offer this yet.',
   'svc.member.card.cameFrom': 'Came from {host}',
+  'svc.member.section.fromHostTitle': 'From {host}',
+  'svc.member.card.chooseCalendars': 'Choose calendars',
 
   // The service form (AppointmentServiceFormFields.tsx)
   'svc.form.staffOnly.label': 'Staff bookings only',

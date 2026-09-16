@@ -126,6 +126,77 @@ describe('a venue in a collective', () => {
   });
 });
 
+describe('a member of a collective', () => {
+  const memberWorld = () =>
+    show({
+      services: [
+        harnessService({
+          collective: harnessCollectiveBlock({ role: 'replica', status: 'up_to_date' }),
+        }),
+        harnessService({
+          id: 'svc-2',
+          name: 'Massage',
+          collective: harnessCollectiveBlock({ role: 'retired', status: 'up_to_date' }),
+        }),
+        harnessService({
+          id: 'svc-3',
+          name: 'Sauna',
+          collective: harnessCollectiveBlock({ role: 'parked', item_id: null, status: 'hidden' }),
+        }),
+      ],
+    });
+
+  it('sorts its services into what the host manages, what it retired, and what is parked', async () => {
+    const world = memberWorld();
+    await world.ready();
+    expect(screen.getByRole('heading', { name: 'From Host Venue' })).toBeInTheDocument();
+    expect(screen.getByText(/No longer offered by Host Venue/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Parked while you are part of Northside' })).toBeInTheDocument();
+    expect(screen.getByText('Managed by Host Venue for Northside')).toBeInTheDocument();
+  });
+
+  it('cannot change a service the host manages, and says View rather than Edit', async () => {
+    const world = memberWorld();
+    await world.ready();
+    expect(screen.queryByRole('switch', { name: /Active \(visible to guests\): Facial/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'View' }).length).toBe(2);
+    // Its own parked service is still its own: it keeps Edit, its switch and its Delete.
+    expect(screen.getByRole('switch', { name: /Active \(visible to guests\): Sauna/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
+  });
+
+  it('does not offer to reorder the collective page', async () => {
+    const world = memberWorld();
+    await world.ready();
+    expect(screen.queryByLabelText('Reorder Facial')).not.toBeInTheDocument();
+  });
+
+  it("says what is happening to a copy that is not ready, in the venue's own terms", async () => {
+    const world = show({
+      services: [
+        harnessService({
+          collective: harnessCollectiveBlock({ role: 'replica', status: 'setting_up' }),
+        }),
+        harnessService({
+          id: 'svc-2',
+          name: 'Massage',
+          collective: harnessCollectiveBlock({
+            role: 'replica',
+            status: 'hidden',
+            hidden_reasons: [{ venue_id: 'member', venue_name: 'Zen Studio', reason: 'payments' }],
+          }),
+        }),
+      ],
+    });
+    await world.ready();
+    expect(
+      screen.getByText('Setting up. Guests can book it on your calendars once this finishes.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/until you connect Stripe/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Connect Stripe' })).toBeInTheDocument();
+  });
+});
+
 describe('saving a service', () => {
   const openFirstService = async () => {
     const edit = screen.getAllByRole('button', { name: /edit/i })[0];

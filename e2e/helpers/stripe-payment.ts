@@ -71,17 +71,19 @@ async function tryFillFrame(frame: ReturnType<Page['frameLocator']>): Promise<bo
     // Which of these the element asks for depends on the country Stripe infers from the
     // caller's IP, so a runner abroad can be shown fields a local run never sees. Fill
     // whatever is present rather than assuming the UK layout.
+    //
+    // The country is read, never changed. Switching it to the UK used to race: the element
+    // re-validated the postal field as a US ZIP while it relabelled, so "BT1 1AA" landed in a
+    // ZIP field and the payment failed with "Your ZIP code is invalid" on some CI runs.
     const country = frame.getByRole('combobox', { name: /country|region/i });
-    if ((await country.count()) > 0) {
-      await country.selectOption({ label: 'United Kingdom' }).catch(() => {});
-    }
-    // Match the value to the format the element is asking for, not to where the venue is.
-    const zip = frame.getByRole('textbox', { name: /zip/i });
-    if ((await zip.count()) > 0) {
-      await zip.fill(TEST_CARD.zip);
-    } else {
-      const postcode = frame.getByRole('textbox', { name: /postal|postcode/i });
-      if ((await postcode.count()) > 0) await postcode.fill(TEST_CARD.postcode);
+    const countryCode =
+      (await country.count()) > 0 ? ((await country.inputValue().catch(() => '')) || '').toUpperCase() : '';
+    const postal = frame.getByRole('textbox', { name: /zip|postal|postcode/i });
+    if ((await postal.count()) > 0) {
+      const label = (await postal.first().getAttribute('aria-label').catch(() => null)) ?? '';
+      // Match the value to the format the element is asking for, not to where the venue is.
+      const ukLayout = countryCode ? countryCode === 'GB' : !/zip/i.test(label);
+      await postal.first().fill(ukLayout ? TEST_CARD.postcode : TEST_CARD.zip);
     }
     return true;
   }

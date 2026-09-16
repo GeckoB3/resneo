@@ -115,6 +115,22 @@ describe('drainOperationNotices', () => {
     expect(subjects()).toEqual(['Northside has ended']);
   });
 
+  it("emails a member that its calendars are hidden, and only rings when they are back (N36, N37)", async () => {
+    await drain(world([op('N36')])).outcome;
+    expect(told()).toEqual(['member']);
+    expect(subjects()).toEqual(['Your calendars are hidden from the Northside page']);
+
+    notifyVenue.mockClear();
+    const back = drain(world([op('N37')]));
+    await back.outcome;
+    expect(notifyVenue).not.toHaveBeenCalled();
+    const bell = back.recording.calls.find((c) => c.table === 'account_link_notifications');
+    expect(bell?.payload).toMatchObject({
+      venue_id: 'member',
+      payload: { title: 'Your calendars are back on the Northside page' },
+    });
+  });
+
   it('marks a sent notice done', async () => {
     const { recording, outcome } = drain(world([op('N22')]));
     await outcome;

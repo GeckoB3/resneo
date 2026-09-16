@@ -330,6 +330,11 @@ export const COLLECTIVE_COPY = {
   'notify.paused.subject': '{collective} is paused',
   'notify.paused.body':
     '{oldHost} is no longer part of {collective}, so its page is paused. One of you can take over hosting before {date}, or {collective} ends and every venue keeps everything.',
+  'notify.suspended.subject': 'Your calendars are hidden from the {collective} page',
+  'notify.suspended.body':
+    "{venue}'s subscription needs attention, so its calendars are hidden from the {collective} page and guests cannot book them there. They come back as soon as the subscription is put right. Bookings already made are not changed.",
+  'notify.resumed.subject': 'Your calendars are back on the {collective} page',
+  'notify.resumed.body': "{venue}'s subscription is active again, so its calendars are back on the {collective} page.",
   'notify.dissolved.subject': '{collective} has ended',
   'notify.dissolved.body':
     'Every venue keeps its services, calendars, clients and bookings. Your own booking page is back. Your account links are unchanged.',

@@ -11,11 +11,14 @@
  *   N21  the move of hosting is agreed   every live venue, with the day it happens
  *   N22  hosting moved                   every live venue
  *   N23  the page is paused              every live venue, with the day it would end
+ *   N36  a member's subscription lapsed  that member
+ *   N37  and came back                   that member (a bell only)
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyVenue } from '@/lib/linked-accounts/notifications';
 import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { noticeDate } from '@/lib/linked-accounts/replicas/notice-dates';
+import { recordBell } from '@/lib/linked-accounts/replicas/collective-notices';
 
 const BATCH = 50;
 const MAX_ATTEMPTS = 5;
@@ -169,6 +172,22 @@ async function sendOne(admin: SupabaseClient, op: OperationRow, now: number): Pr
       collectiveCopy('notify.paused.subject', { collective: collectiveName }),
       collectiveCopy('notify.paused.body', { oldHost, collective: collectiveName, date }),
     );
+    return;
+  }
+
+  if (notice === 'N36' || notice === 'N37') {
+    if (!op.venue_id) throw new Error(`${notice} without a venue`);
+    const venueNames = await names([op.venue_id]);
+    const venue = venueNames.get(op.venue_id) ?? 'Your venue';
+    const key = notice === 'N36' ? 'suspended' : 'resumed';
+    const subject = collectiveCopy(`notify.${key}.subject` as 'notify.suspended.subject', { collective: collectiveName });
+    const body = collectiveCopy(`notify.${key}.body` as 'notify.suspended.body', { venue, collective: collectiveName });
+    if (notice === 'N36') {
+      await tell([op.venue_id], subject, body);
+    } else {
+      // Good news that needs no action: a bell, not an email.
+      await recordBell(admin, op.venue_id, subject, body, { type: 'collective_n37', collectiveId: op.collective_id });
+    }
     return;
   }
 

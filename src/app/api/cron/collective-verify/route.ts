@@ -4,6 +4,7 @@ import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { withCronRunLogging } from '@/lib/platform/cron-log';
 import { finalizeCronRun } from '@/lib/cron/finalize-cron-run';
 import { runCollectiveVerify, type RpcClient } from '@/lib/linked-accounts/replicas/crons';
+import { syncMemberSuspensions } from '@/lib/linked-accounts/replicas/collective-suspension';
 
 /**
  * GET/POST /api/cron/collective-verify: daily, read the collective invariant report, repair lag,
@@ -24,8 +25,20 @@ async function handlePost(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 
-  const admin = getSupabaseAdminClient() as unknown as RpcClient;
+  const supabase = getSupabaseAdminClient();
+  // Subscriptions first, so the verifier's 30-day deadlines see today's suspensions (N36, N37).
+  let suspension = { suspended: 0, resumed: 0, errors: 0 };
+  try {
+    suspension = await syncMemberSuspensions(supabase);
+  } catch (err) {
+    console.error('[collective] suspension sync threw:', err);
+    suspension = { ...suspension, errors: 1 };
+  }
+  const admin = supabase as unknown as RpcClient;
   const { unreadable, ...counters } = await runCollectiveVerify(admin);
+  counters.results.members_suspended = suspension.suspended;
+  counters.results.members_resumed = suspension.resumed;
+  counters.errors += suspension.errors;
   const outcome = await finalizeCronRun(counters);
   if (unreadable) {
     return NextResponse.json({ ...outcome.body, ok: false, reason: 'unreadable', detail: unreadable }, { status: 200 });

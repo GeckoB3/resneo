@@ -1,3 +1,4 @@
+import { managedByCollectiveRefusal } from '@/lib/linked-accounts/replicas/managed-guard';
 import { NextRequest, NextResponse } from 'next/server';
 import { createVenueRouteClient } from '@/lib/supabase/venue-route-client';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
@@ -57,6 +58,8 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
     if (!gate.ok) return gate.response;
 
     const { id } = await resolveParams(ctx);
+    const managed = await managedByCollectiveRefusal(staff.db, 'compliance_types', id, staff.venue_id);
+    if (managed) return managed;
     const body = await request.json().catch(() => null);
     const parsed = complianceTypeVersionCreateSchema.safeParse(body);
     if (!parsed.success) {

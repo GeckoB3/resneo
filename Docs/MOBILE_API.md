@@ -493,3 +493,57 @@ The web diary paints a tail as empty space (the card stops where the practitione
 stretch ends), paints a middle gap as a pale band, and draws a booking taken in either at full
 lane width with no inset; the app's grid may keep its own treatment, but it should not clamp a
 block to the row's duration, and should place the next service of a visit after the tail.
+
+## Venue collectives: what changes for the app (W12, 2026-09-16)
+
+A collective can now run on **shared services** (`venue_collectives.service_model = 'replicas'`):
+the host's services are set up in every member's account and the host controls them. The app
+(checked against Resneo-app `cbc0975`, 1.0.0) needs no change to keep working; this section is the
+contract it can rely on, and the handover list for the app team. Replays of the app's own payloads
+live in `src/app/api/__app-contract__/` (APP-01 to APP-03).
+
+### Service management routes (never documented here before)
+
+| Route | Body the app sends | What a collective adds |
+|---|---|---|
+| `GET /api/venue/appointment-services` | none | Additive only: each service may carry `collective` (role, collective, host, sync); host admins get `collective_calendars`. Per-calendar `custom_*` values are now real values, not null. |
+| `PATCH /api/venue/appointment-services[?acknowledge_affected_bookings=true]` | `{ id, ...service, variants, addon_group_links, practitioner_ids? }` | A member saving a host's service: unchanged fields, options and add-on links pass and are not written; changing which of its calendars offer it passes; any other change is `409 COLLECTIVE_MANAGED_SERVICE` with a sentence in `error`. The affected-bookings `409 { requires_confirmation, affected_bookings[] }` is unchanged. |
+| `DELETE /api/venue/appointment-services` | `{ id }` | A member's copy: `409 COLLECTIVE_MANAGED_SERVICE`. The host's service while it is on the page: `409 COLLECTIVE_OFFERED_SERVICE` ("Take this service off ... before deleting it."). |
+| `PUT /api/venue/practitioner-services[?acknowledge_affected_bookings=true]` | `{ practitioner_id, service_ids }` (whole set) | Without `expected_service_ids`, a set that would drop a service another venue gave this calendar in the last 24 hours answers `412 STALE_RESOURCE` and writes nothing. Refetch and retry. Send `expected_service_ids` (the set as loaded) to get the exact check instead. |
+| `PATCH /api/venue/practitioner-service-overrides` | `{ service_id, calendar_id?, custom_* }` | All seven values are stored, each gated by its `staff_may_customize_*` flag for staff; `custom_deposit_pence: 0` is a stored value. |
+| `PATCH` / `DELETE /api/venue/addon-groups/{id}` | `{ group, service_links? }` | A member's copy of a host's group: `409 COLLECTIVE_MANAGED_ADDON_GROUP`. |
+| `PATCH /api/venue/compliance/types/{id}`, `POST .../versions`, `.../archive`, `.../restore` | as today | A member's copy of a host's form: `409 COLLECTIVE_MANAGED_COMPLIANCE_TYPE`. |
+| `GET /api/venue/staff-collective` | none | `calendar_ids` includes the caller's own calendars, so every diary column, own ones included, opens the collective booking form (D2 as revised 2026-09-14). |
+| `PATCH /api/venue/collectives/{id}/members` | `{ action: 'accept' }` | On shared services the one-tap accept answers `409 COLLECTIVE_CONSENT_REQUIRED`: joining needs the web dialog's consent. `decline` and `leave` are unchanged in shape. |
+| `PATCH /api/venue/collectives/{id}/catalogue` | sync and link actions | On shared services, unlink answers `409 COLLECTIVE_REPLICAS_ALWAYS_FOLLOW` and sync succeeds as a no-op; the GET reports `sync.state: 'none'`, so no badge shows. |
+
+Every refusal above carries `{ error, code }`, with `error` a full sentence the app can show as it
+is. The codes are in `API_ERROR_CODES` (`src/lib/api/error-codes.ts`).
+
+### The client header
+
+`X-ResNeo-Client: <platform>/<version>` is optional and a missing header is permitted permanently
+(the customer portal plan's rule). Nothing refuses a request without it. The planned notice to a
+host when a service on the page is edited from a client without the header (N27) is not built yet.
+
+### Handover for the app team
+
+1. **Leave copy.** `app/(app)/collectives/index.tsx:208` says a member's "own booking page is
+   unaffected". Under D3 it is not: while the member is in a live collective its own page sends
+   guests to the collective page, and leaving brings it back. Suggested text: "Your venue will be
+   removed from "{name}". Guests who visit your own booking page will book your own services
+   there."
+2. **Joining.** Show "Open ResNeo on the web to join" when `accept` answers
+   `COLLECTIVE_CONSENT_REQUIRED` (`join.error.consent`).
+3. **Read-only host services.** For a service whose `collective.role` is `replica`, show it as
+   managed by the host: only the calendar ticks (and the online meeting link) are the member's.
+4. **412 on toggles.** `useToggleCalendarService` should refetch and say the list changed, as the
+   booking sheet already does for 412.
+5. **Sync badges.** The catalogue's `sync` block is always `none` on shared services; the badge
+   code can go once every collective has moved over (W9).
+6. **Contract pass C2** will drop `sync_state`, `synced_at` and `synced_from_service_id` from service
+   rows. The app reads none of them today.
+7. **Moving a booking between venues.** The web diary now moves a plain booking to another venue's
+   calendar through `POST /api/venue/bookings/{id}/move-venue { calendar_id, booking_date,
+   booking_time }` (200 `{ booking_id, venue_id, venue_name, guest_notified }`, or 409 with the
+   reason). The app's drag onto a partner column can use it instead of refusing.

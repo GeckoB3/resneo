@@ -41,6 +41,9 @@ const syncSchema = z.object({
  * answers 409 with those bookings listed so the dashboard can show them and offer to move
  * them; `?acknowledge_affected_bookings=true` then carries the same save through.
  */
+/** How recent another venue's assignment must be for an unversioned full-set save to be stale. */
+const RECENT_OTHER_VENUE_MS = 24 * 60 * 60 * 1000;
+
 export async function PUT(request: NextRequest) {
   try {
     const supabase = await createVenueRouteClient(request);
@@ -90,7 +93,7 @@ export async function PUT(request: NextRequest) {
 
       const { data: existingRows, error: existingErr } = await admin
         .from('calendar_service_assignments')
-        .select('service_item_id')
+        .select('service_item_id, updated_at, updated_by_venue_id')
         .eq('calendar_id', practitioner_id);
       if (existingErr) {
         console.error('PUT /api/venue/practitioner-services (USE) read failed:', existingErr);
@@ -105,6 +108,26 @@ export async function PUT(request: NextRequest) {
       }
       const nextServiceIds = new Set(effectiveServiceIds);
       const removedServiceIds = [...previousServiceIds].filter((sid) => !nextServiceIds.has(sid));
+      // An older app sends the whole set with no expected ids. If that set would drop a service
+      // another venue (the collective's host) gave this calendar in the last day, the app's copy is
+      // almost certainly from before it: answer 412 rather than silently undoing it (APP-02).
+      if (!expected_service_ids && removedServiceIds.length > 0) {
+        const cutoff = Date.now() - RECENT_OTHER_VENUE_MS;
+        const removed = new Set(removedServiceIds);
+        const recentByOthers = (existingRows ?? []).some((row) => {
+          const r = row as { service_item_id: string; updated_at?: string | null; updated_by_venue_id?: string | null };
+          return (
+            removed.has(r.service_item_id) &&
+            Boolean(r.updated_by_venue_id) &&
+            r.updated_by_venue_id !== staff.venue_id &&
+            Boolean(r.updated_at) &&
+            Date.parse(r.updated_at as string) > cutoff
+          );
+        });
+        if (recentByOthers) {
+          return NextResponse.json(apiError(STALE_CALENDAR_SERVICES_MESSAGE, 'STALE_RESOURCE'), { status: 412 });
+        }
+      }
       if (removedServiceIds.length > 0 && !acknowledgeAffectedBookings) {
         const impact = await findBookingsAffectedByRemovingServicesUnified(admin, {
           venueId: staff.venue_id,

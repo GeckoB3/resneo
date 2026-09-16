@@ -89,6 +89,18 @@ export const COLLECTIVE_COPY = {
   'svc.member.card.noCalendars': 'None of your calendars offer this yet.',
   'svc.member.card.cameFrom': 'Came from {host}',
 
+  // The service form (AppointmentServiceFormFields.tsx)
+  'svc.form.staffOnly.label': 'Staff bookings only',
+  'svc.form.staffOnly.help':
+    'Your team can book this from the diary. Guests do not see it on your booking page.',
+  'svc.form.staffOnly.help.collective':
+    'Teams at every venue in {collective} can book this from the diary. Guests do not see it on the {collective} page.',
+  'svc.form.staffMay.nameLocked':
+    'Not available for services on the {collective} page, so guests see the same name and description on every calendar.',
+  'svc.form.staffMay.reach':
+    'These apply to every calendar that offers this service, including calendars at {venueList}.',
+  'svc.form.footerReach': 'Saving updates {service} at every venue in {collective}.',
+
   // The save summary, the undo and the stale ask
   'svc.save.allDone': 'Saved. {service} is up to date at {venueList}.',
   'svc.save.pending':

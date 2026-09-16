@@ -126,6 +126,12 @@ const serviceSchema = z
     payment_requirement: paymentRequirementSchema.optional(),
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
+    /**
+     * "Staff bookings only" (plan Appendix F; W4 honours it everywhere, W5 lets a venue set it).
+     * False means the team can book it from the diary but guests never see it, on this venue's
+     * page or on a collective's.
+     */
+    is_bookable_online: z.boolean().optional(),
     sort_order: z.number().int().optional(),
     /** Category heading on the booking pages; null clears it. Must belong to the venue. */
     category_id: z.string().uuid().nullable().optional(),
@@ -211,6 +217,12 @@ const servicePatchSchema = z
     payment_requirement: paymentRequirementSchema.optional(),
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
+    /**
+     * "Staff bookings only" (plan Appendix F; W4 honours it everywhere, W5 lets a venue set it).
+     * False means the team can book it from the diary but guests never see it, on this venue's
+     * page or on a collective's.
+     */
+    is_bookable_online: z.boolean().optional(),
     sort_order: z.number().int().optional(),
     /** Category heading on the booking pages; null clears it. Must belong to the venue. */
     category_id: z.string().uuid().nullable().optional(),
@@ -422,6 +434,7 @@ function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<str
     booking_minute_marks: (row.booking_minute_marks as number[] | null | undefined) ?? null,
     booking_start_times: (row.booking_start_times as string[] | null | undefined) ?? null,
     custom_availability_enabled: (row.custom_availability_enabled as boolean | undefined) ?? false,
+    is_bookable_online: (row.is_bookable_online as boolean | undefined) ?? true,
     staff_may_customize_name: (row.staff_may_customize_name as boolean | undefined) ?? false,
     staff_may_customize_description: (row.staff_may_customize_description as boolean | undefined) ?? false,
     staff_may_customize_duration: (row.staff_may_customize_duration as boolean | undefined) ?? false,
@@ -955,6 +968,8 @@ export async function POST(request: NextRequest) {
         price_type: 'fixed' as const,
         colour: parsed.data.colour ?? '#3B82F6',
         is_active: parsed.data.is_active ?? true,
+        // A new service takes guest bookings unless the venue says otherwise (Appendix F).
+        is_bookable_online: parsed.data.is_bookable_online ?? true,
         sort_order:
           parsed.data.sort_order ??
           (await nextServiceSortOrder(admin, 'service_items', staff.venue_id)),
@@ -1070,7 +1085,14 @@ export async function POST(request: NextRequest) {
       payment_requirement: parsed.data.payment_requirement,
       deposit_pence: parsed.data.deposit_pence,
     });
-    const { payment_requirement: _pr0, deposit_pence: _dp0, ...restCreate } = parsed.data;
+    // is_bookable_online is dropped with them: the legacy table has no such column, and every
+    // venue is on unified scheduling, so nothing reaches this branch in practice.
+    const {
+      payment_requirement: _pr0,
+      deposit_pence: _dp0,
+      is_bookable_online: _sbo0,
+      ...restCreate
+    } = parsed.data;
     const insertRow = {
       venue_id: staff.venue_id,
       created_by_staff_id: staff.id,
@@ -1814,6 +1836,9 @@ export async function PATCH(request: NextRequest) {
     let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
     let requestedPractitionerIds = practitioner_ids;
     let patchPayload: Record<string, unknown> = { ...parsed.data };
+    // The legacy table has no "staff bookings only" column (Appendix F is unified-only), and every
+    // venue is on unified scheduling, so this only guards a request that cannot happen.
+    delete patchPayload.is_bookable_online;
 
     if (staff.role !== 'admin') {
       managedScope = await requireManagedCalendarIds(admin, staff.venue_id, staff);

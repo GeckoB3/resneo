@@ -142,6 +142,8 @@ interface Service {
   location_type?: string | null;
   online_meeting_url?: string | null;
   online_meeting_info?: string | null;
+  /** False means "staff bookings only": the team can book it, guests never see it (Appendix F). */
+  is_bookable_online?: boolean;
   /** What this service is to the collective, when the venue is in one (W5). Null at every venue today. */
   collective?: CollectiveServiceBlock | null;
 }
@@ -889,6 +891,7 @@ export function AppointmentServicesView({
         (svc.deposit_pence != null && svc.deposit_pence > 0 ? 'deposit' : 'none'),
       colour: svc.colour || '#3B82F6',
       is_active: svc.is_active,
+      is_bookable_online: svc.is_bookable_online !== false,
       category_id: svc.category_id ?? null,
       practitioner_ids: svcLinks,
       staffMay: {
@@ -1749,6 +1752,9 @@ export function AppointmentServicesView({
               currencySymbol={sym}
               fieldGroupSuffix={editingId ?? 'new-service'}
               categories={categories}
+              collectiveName={collective?.name ?? null}
+              collectiveNameLocked={Boolean(editingCollectiveBlock)}
+              collectiveVenueNames={editingCollectiveBlock ? collectiveMemberNames : []}
               venueOpeningHours={venueOpeningHours}
               venueOpeningExceptions={venueOpeningExceptions}
               venueWideBlocks={venueWideBlocks}

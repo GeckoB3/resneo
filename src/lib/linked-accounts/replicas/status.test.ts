@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCollectiveServiceStatus, type CollectiveLinkState } from './status';
+import { hiddenPillVenue, resolveCollectiveServiceStatus, type CollectiveLinkState } from './status';
 
 const link = (over: Partial<CollectiveLinkState> = {}): CollectiveLinkState => ({
   venue_id: 'v1', venue_name: 'Light 3', replica_service_id: 'r1', behind: false, failing: false,
@@ -50,9 +50,22 @@ describe('resolveCollectiveServiceStatus', () => {
     }));
     expect(r.status).toBe('hidden');
     expect(r.status_reason).toBe(
-      'Guests cannot book this everywhere: card payments are not set up at Light 3 and forms are switched off at Aura.',
+      'Guests cannot book this at Light 3, because card payments are not set up there. Guests cannot book this at Aura, because forms are switched off there.',
     );
     expect(r.status_reason).not.toContain('\u2014');
+  });
+
+  it('joins two reasons at one venue, and names the venue on the pill', () => {
+    const reasons = [
+      { venue_id: 'v1', venue_name: 'Light 3', reason: 'forms' as const },
+      { venue_id: 'v1', venue_name: 'Light 3', reason: 'payments' as const },
+    ];
+    expect(resolveCollectiveServiceStatus(input({ hiddenReasons: reasons })).status_reason).toBe(
+      'Guests cannot book this at Light 3, because card payments are not set up there and forms are switched off there.',
+    );
+    expect(hiddenPillVenue(reasons)).toBe('Light 3');
+    expect(hiddenPillVenue([...reasons, { venue_id: 'v2', venue_name: 'Aura', reason: 'forms' }])).toBeNull();
+    expect(hiddenPillVenue([{ venue_id: 'v1', venue_name: 'Light 3', reason: 'staff_only' }])).toBeNull();
   });
 
   it('keeps the most recent update time across venues', () => {

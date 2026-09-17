@@ -141,7 +141,9 @@ export async function loadHostCollectiveCalendars(
   const { data: calendarRows } = await admin
     .from('unified_calendars')
     .select('id, venue_id, name, is_active')
-    .in('venue_id', memberVenueIds);
+    .in('venue_id', memberVenueIds)
+    // People only: a bookable room is a resource, never a calendar that offers a service.
+    .or('calendar_type.eq.practitioner,calendar_type.is.null');
   const calendarIds = (calendarRows ?? []).map((c) => c.id as string);
 
   const [assignmentsRes, servicesRes] = await Promise.all([

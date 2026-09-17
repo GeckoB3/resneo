@@ -106,6 +106,29 @@ describe('the grid', () => {
     expect(screen.getByRole('button', { name: 'Massage at Host Venue: No calendars' })).toBeInTheDocument();
   });
 
+  it('says where guests cannot book, and lists parked services last', () => {
+    show({
+      services: [
+        { id: 'svc-3', name: 'Sauna', collective: block({ role: 'parked', item_id: null, status: 'hidden' }) },
+        {
+          id: 'svc-1',
+          name: 'Facial',
+          collective: block({
+            status: 'hidden',
+            hidden_reasons: [{ venue_id: 'member', venue_name: 'Zen Studio', reason: 'payments' }],
+          }),
+        },
+      ],
+    });
+    expect(
+      screen.getByRole('button', { name: 'Facial at Zen Studio: All calendars, hidden from guests' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Facial at Host Venue: Some calendars' })).toBeInTheDocument();
+    const rows = screen.getAllByRole('rowheader').map((r) => r.textContent);
+    expect(rows[0]).toContain('Facial');
+    expect(rows[1]).toContain('Sauna');
+  });
+
   it('shows the venue services that are not on the page under its own filter', async () => {
     show();
     await userEvent.click(screen.getByRole('button', { name: 'Not on the page' }));
@@ -211,7 +234,7 @@ describe('the bulk lane', () => {
 
   it('cannot change calendars for a service that is not on the page', () => {
     show();
-    expect(screen.getByRole('button', { name: 'Sauna at Host Venue: No calendars' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sauna at Host Venue: Not on the page' })).toBeDisabled();
   });
 });
 

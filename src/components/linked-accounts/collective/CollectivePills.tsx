@@ -76,17 +76,20 @@ const SYNC_PILL: Record<CollectiveServiceStatus, { label: string; variant: 'succ
 export function VenueSyncPill({
   status,
   reason,
+  label,
   className = '',
 }: {
   status: CollectiveServiceStatus;
   reason?: string | null;
+  /** Replaces the status word, e.g. "Hidden at Light 3". */
+  label?: string | null;
   className?: string;
 }) {
   const pill = SYNC_PILL[status];
   return (
     <span title={reason ?? undefined} className={className}>
       <Pill variant={pill.variant} size="sm" dot={pill.dot}>
-        {pill.label}
+        {label ?? pill.label}
       </Pill>
       {reason ? <span className="sr-only"> {reason}</span> : null}
     </span>

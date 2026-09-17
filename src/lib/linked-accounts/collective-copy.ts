@@ -200,6 +200,11 @@ export const COLLECTIVE_COPY = {
   // The Collective area (CollectiveAreaClient.tsx; UX spec §2 item 15)
   'ov.subtitle': 'Who is in it, what is on the page, and which calendars offer what.',
   'ov.venue.counts': '{services} services, {calendars} calendars on the page',
+  'ov.venue.service': 'service',
+  'ov.venue.services': 'services',
+  'ov.venue.calendar': 'calendar',
+  'ov.venue.calendars': 'calendars',
+  'ov.venue.countsWords': '{services}, {calendars} on the page',
   'ov.venue.upToDate': 'Up to date with the page.',
   'ov.venue.updating': 'Updating. Its calendars take new bookings again in a moment.',
   'ov.venue.failed': 'An update did not go through.',
@@ -243,6 +248,13 @@ export const COLLECTIVE_COPY = {
   'bp.members.history': 'History',
 
   // History (CollectiveHistoryPanel.tsx)
+  // The migration to shared services (W9, D54). The deck's `history.migrationApplied` is written
+  // for the member's own view; the history lists every venue, so it names the venue.
+  'history.migrationStarted': '{collective} started moving to shared services',
+  'history.migrationAppliedAt':
+    "{collective}'s shared settings now apply to {venue}'s services from the page. Bookings already made keep their price.",
+  'history.migrationDone': '{collective} now runs on shared services',
+  'history.migrationRolledBack': '{collective} went back to its earlier set-up',
   'history.title': '{collective} history',
   'history.filter.all': 'All changes',
   'history.filter.services': 'Services',
@@ -287,6 +299,10 @@ export const COLLECTIVE_COPY = {
   'ov.grid.cell.all': 'All calendars',
   'ov.grid.cell.some': 'Some calendars',
   'ov.grid.cell.none': 'No calendars',
+  // Added in the live review (2026-09-17): a parked service has no cells to fill, and a cell whose
+  // calendars guests cannot book says so rather than reading as fully offered.
+  'ov.grid.cell.offPage': 'Not on the page',
+  'ov.grid.cell.hidden': 'Hidden from guests',
   'ov.grid.cell.staged': '{count} staged',
   'ov.grid.search': 'Search services',
   'ov.grid.empty': 'No services match.',

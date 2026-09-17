@@ -187,6 +187,30 @@ export function historySentence(row: HistoryRow, names: HistoryNames): string {
       return `The ${collective} page is live again`;
     case 'collective_dissolved':
       return `${actor} ended ${collective}`;
+    case 'migration_applied': {
+      const changes = (row.changes ?? {}) as { before?: Record<string, unknown>; after?: { service_model?: string } };
+      if (changes.before && 'copies' in changes.before) {
+        return collectiveCopy('history.migrationAppliedAt', { venue, collective });
+      }
+      if (changes.after?.service_model === 'replicas') {
+        return collectiveCopy('history.migrationDone', { collective });
+      }
+      return collectiveCopy('history.migrationStarted', { collective });
+    }
+    case 'migration_rolled_back':
+      return collectiveCopy('history.migrationRolledBack', { collective });
+    case 'adoption_requested':
+      return `${actor} asked ${venue} whether to use its own ${service} for the page`;
+    case 'adoption_answered':
+      return `${venue} answered about ${service}`;
+    case 'suggestion_made':
+      return `${venue} suggested ${service} for the page`;
+    case 'payment_rule_downgraded':
+      return `${service} at ${venue} stopped taking payment online, because ${venue} cannot take card payments`;
+    case 'photo_copied':
+      return `A photo for ${service} was copied to ${venue}`;
+    case 'photo_copy_failed':
+      return `A photo for ${service} could not be copied to ${venue}`;
     default:
       return `${actor} made a change to ${collective}`;
   }

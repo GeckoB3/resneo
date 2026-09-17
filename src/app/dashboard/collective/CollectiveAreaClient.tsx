@@ -302,7 +302,10 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
                     />
                   </div>
                   <p className="text-xs text-slate-600">
-                    {collectiveCopy('ov.venue.counts', { services: onPage, calendars })}
+                    {collectiveCopy('ov.venue.countsWords', {
+                      services: `${onPage} ${collectiveCopy(onPage === 1 ? 'ov.venue.service' : 'ov.venue.services')}`,
+                      calendars: `${calendars} ${collectiveCopy(calendars === 1 ? 'ov.venue.calendar' : 'ov.venue.calendars')}`,
+                    })}
                   </p>
                   {failed ? (
                     <Button type="button" variant="link" size="sm" onClick={() => void retryVenue(group.venue_id)}>

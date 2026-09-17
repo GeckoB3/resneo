@@ -86,6 +86,7 @@ import { ReleaseReviewCard } from '@/components/linked-accounts/collective/Relea
 import { AddFromVenueDialog, AdoptionRequests } from '@/components/linked-accounts/collective/Adoptions';
 import type { CollectiveServiceBlock } from '@/lib/linked-accounts/replicas/service-blocks';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
+import { hiddenPillVenue } from '@/lib/linked-accounts/replicas/status';
 import {
   CollectiveCalendarsSection,
   EMPTY_CALENDARS_VALUE,
@@ -190,7 +191,14 @@ function CollectiveServicePills({ block }: { block: CollectiveServiceBlock }) {
       {block.role === 'retired' ? <RetiredPill /> : null}
       {block.role === 'parked' ? <ParkedPill collectiveName={block.collective_name} /> : null}
       {block.role === 'parked' ? null : (
-        <VenueSyncPill status={block.status} reason={block.status_reason} />
+        <VenueSyncPill
+          status={block.status}
+          reason={block.status_reason}
+          label={(() => {
+            const venue = block.status === 'hidden' ? hiddenPillVenue(block.hidden_reasons) : null;
+            return venue ? collectiveCopy('svc.card.hiddenAt', { venue }) : null;
+          })()}
+        />
       )}
     </>
   );

@@ -101,8 +101,21 @@ describe('historySentence', () => {
   });
 
   it('still says something for an event it has no sentence for', () => {
-    expect(historySentence(row({ event_type: 'photo_copied' }), names)).toBe(
+    expect(historySentence(row({ event_type: 'something_new' }), names)).toBe(
       'Sam at Host Venue made a change to Northside',
+    );
+  });
+
+  it('says what the move to shared services did, row by row', () => {
+    const at = (changes: Record<string, unknown>) =>
+      historySentence(row({ event_type: 'migration_applied', target_venue_name: 'Zen Studio', changes }), names);
+    expect(at({ before: { copies: [] } })).toBe(
+      "Northside's shared settings now apply to Zen Studio's services from the page. Bookings already made keep their price.",
+    );
+    expect(at({ before: { masters: [] } })).toBe('Northside started moving to shared services');
+    expect(at({ after: { service_model: 'replicas' } })).toBe('Northside now runs on shared services');
+    expect(historySentence(row({ event_type: 'migration_rolled_back' }), names)).toBe(
+      'Northside went back to its earlier set-up',
     );
   });
 });

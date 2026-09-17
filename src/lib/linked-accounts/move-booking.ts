@@ -229,10 +229,12 @@ export async function moveBookingToCollectiveVenue(
 
   const { data: calendar } = await admin
     .from('unified_calendars')
-    .select('id, name, venue_id, is_active')
+    .select('id, name, venue_id, is_active, calendar_type')
     .eq('id', input.calendarId)
     .maybeSingle();
-  if (!calendar || calendar.is_active === false) return refuse(404, 'That calendar was not found.');
+  if (!calendar || calendar.is_active === false || calendar.calendar_type === 'resource') {
+    return refuse(404, 'That calendar was not found.');
+  }
   const targetVenueId = calendar.venue_id as string;
   if (targetVenueId === ownerVenueId) {
     return refuse(400, 'That calendar is at the same venue. Move the booking there as usual.');

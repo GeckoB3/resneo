@@ -56,19 +56,37 @@ export interface CollectiveServiceStatusResult {
 const list = (names: string[]): string =>
   names.length <= 1 ? names[0] ?? '' : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 
+const HIDDEN_BECAUSE: Record<Exclude<ProviderExclusion, 'staff_only'>, string> = {
+  payments: 'card payments are not set up there',
+  forms: 'forms are switched off there',
+  suspended: 'the venue is suspended from the collective',
+  behind: 'its copy is still updating',
+};
+const HIDDEN_ORDER: Exclude<ProviderExclusion, 'staff_only'>[] = ['payments', 'forms', 'suspended', 'behind'];
+
+/** One sentence per venue, naming where guests cannot book the service and why. */
 function hiddenSentence(reasons: CollectiveHiddenReason[]): string {
-  const byReason = new Map<ProviderExclusion, string[]>();
-  for (const r of reasons) {
-    byReason.set(r.reason, [...(byReason.get(r.reason) ?? []), r.venue_name]);
+  if (reasons.some((r) => r.reason === 'staff_only')) {
+    return 'Guests cannot book this themselves, because it is for staff bookings only.';
   }
-  const parts: string[] = [];
-  const venues = (reason: ProviderExclusion) => list(byReason.get(reason) ?? []);
-  if (byReason.has('payments')) parts.push(`card payments are not set up at ${venues('payments')}`);
-  if (byReason.has('forms')) parts.push(`forms are switched off at ${venues('forms')}`);
-  if (byReason.has('suspended')) parts.push(`${venues('suspended')} is suspended`);
-  if (byReason.has('staff_only')) parts.push('it is staff bookings only');
-  if (byReason.has('behind')) parts.push(`${venues('behind')} is still updating`);
-  return `Guests cannot book this everywhere: ${list(parts)}.`;
+  const byVenue = new Map<string, Set<Exclude<ProviderExclusion, 'staff_only'>>>();
+  for (const r of reasons) {
+    if (r.reason === 'staff_only') continue;
+    byVenue.set(r.venue_name, (byVenue.get(r.venue_name) ?? new Set()).add(r.reason));
+  }
+  return [...byVenue]
+    .map(([venue, why]) => {
+      const because = HIDDEN_ORDER.filter((k) => why.has(k)).map((k) => HIDDEN_BECAUSE[k]);
+      return `Guests cannot book this at ${venue}, because ${list(because)}.`;
+    })
+    .join(' ');
+}
+
+/** The pill's own words for a hidden service: the venue when there is one, else just "Hidden". */
+export function hiddenPillVenue(reasons: CollectiveHiddenReason[]): string | null {
+  if (reasons.some((r) => r.reason === 'staff_only')) return null;
+  const venues = [...new Set(reasons.map((r) => r.venue_name))];
+  return venues.length === 1 ? venues[0]! : null;
 }
 
 /** The one answer for a service's collective status, and the sentence that goes with it. */

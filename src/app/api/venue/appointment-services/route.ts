@@ -1667,6 +1667,17 @@ export async function PATCH(request: NextRequest) {
        * not acknowledged writes nothing; earlier removals in the same list that had no bookings
        * are written, which is what the host asked for either way, and the retry finds them gone.
        */
+      if (masterContext && collectiveCalendarsPatch?.add?.length) {
+        // A bookable room is a resource, not a calendar that offers a service.
+        const { data: roomRows } = await admin
+          .from('unified_calendars')
+          .select('id')
+          .in('id', collectiveCalendarsPatch.add.map((e) => e.calendar_id))
+          .eq('calendar_type', 'resource');
+        if ((roomRows ?? []).length > 0) {
+          return NextResponse.json({ error: 'Rooms and other resources cannot offer a service.' }, { status: 400 });
+        }
+      }
       if (masterContext && collectiveCalendarsPatch) {
         const calendarEntries = [
           ...(collectiveCalendarsPatch.remove ?? []).map((e) => ({ ...e, action: 'unassign' as const })),

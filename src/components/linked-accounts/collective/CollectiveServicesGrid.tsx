@@ -90,7 +90,12 @@ export function CollectiveServicesGrid({
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return services.filter((service) => {
+    // Services on the page first, then the parked ones, each in the venue's own order.
+    const ordered = [
+      ...services.filter((s) => s.collective?.role === 'master'),
+      ...services.filter((s) => s.collective?.role !== 'master'),
+    ];
+    return ordered.filter((service) => {
       if (term && !service.name.toLowerCase().includes(term)) return false;
       const block = service.collective;
       const onPage = Boolean(block) && block!.role === 'master';
@@ -348,6 +353,15 @@ export function CollectiveServicesGrid({
                   </th>
                   {groups.map((group) => {
                     const state = cellState(group, itemId);
+                    const hiddenHere =
+                      onPage && state !== 'none'
+                        ? (service.collective?.hidden_reasons ?? []).some((r) => r.venue_id === group.venue_id)
+                        : false;
+                    const label = !onPage
+                      ? collectiveCopy('ov.grid.cell.offPage')
+                      : hiddenHere
+                        ? `${CELL_LABEL[state]}, ${collectiveCopy('ov.grid.cell.hidden').toLowerCase()}`
+                        : CELL_LABEL[state];
                     const changes = stagedFor(service.id, group.venue_id).length;
                     const failedHere = failures.some((f) => f.key.includes(`${service.id}:${group.venue_id}`));
                     return (
@@ -361,15 +375,19 @@ export function CollectiveServicesGrid({
                               ? 'border-rose-300 bg-rose-50 text-rose-800'
                               : changes > 0
                                 ? 'border-brand-300 bg-brand-50 text-brand-800'
-                                : state === 'all'
+                                : !onPage
+                                  ? 'border-slate-200 bg-slate-50 text-slate-500'
+                                  : hiddenHere
+                                    ? 'border-amber-200 bg-amber-50 text-amber-900'
+                                    : state === 'all'
                                   ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
                                   : state === 'some'
                                     ? 'border-amber-200 bg-amber-50 text-amber-900'
                                     : 'border-slate-200 bg-white text-slate-600'
                           }`}
-                          aria-label={`${service.name} at ${group.venue_name}: ${CELL_LABEL[state]}`}
+                          aria-label={`${service.name} at ${group.venue_name}: ${label}`}
                         >
-                          {CELL_LABEL[state]}
+                          {label}
                           {changes > 0 ? ` (${collectiveCopy('ov.grid.cell.staged', { count: changes })})` : ''}
                         </button>
                       </td>

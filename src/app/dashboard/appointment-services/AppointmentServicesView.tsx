@@ -71,6 +71,7 @@ import { complianceJsonFetcher } from '@/components/dashboard/compliance/shared'
 import { useAppointmentsFeatureFlag } from '@/components/providers/VenueFeatureFlagsProvider';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import {
+  EditReachNote,
   CollectivePill,
   FromHostPill,
   ParkedPill,
@@ -1457,7 +1458,11 @@ export function AppointmentServicesView({
         }
         actions={
           showServicesTab && (isAdmin || linkedPractitionerIds.length > 0) ? (
-            <div className="flex flex-wrap items-center gap-2">
+            <div
+              className={`grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center ${
+                isAdmin && collective?.isHost && collectiveMemberNames.length > 0 ? 'grid-cols-2' : 'grid-cols-1'
+              }`}
+            >
               {isAdmin && collective?.isHost && collectiveMemberNames.length > 0 ? (
                 <button
                   type="button"
@@ -1465,7 +1470,7 @@ export function AppointmentServicesView({
                     setAddFromDone(null);
                     setAddFromOpen(true);
                   }}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-center text-sm font-semibold leading-tight text-slate-700 shadow-sm hover:bg-slate-50 sm:px-4"
                 >
                   {collectiveCopy('svc.addFrom.button')}
                 </button>
@@ -1473,7 +1478,7 @@ export function AppointmentServicesView({
               <button
                 type="button"
                 onClick={openCreate}
-                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 sm:px-4"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path d="M12 5v14m-7-7h14" />
@@ -1727,7 +1732,7 @@ export function AppointmentServicesView({
                     ) : undefined
                   }
                   right={
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
                       {canReorderServices ? (
                         <span className="mr-1 flex items-center gap-1">
                           {dragHandle}
@@ -1786,7 +1791,7 @@ export function AppointmentServicesView({
                     </div>
                   }
                 />
-                <SectionCard.Body className="!pt-0">
+                <SectionCard.Body className="!pt-3">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1 space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
@@ -1982,6 +1987,30 @@ export function AppointmentServicesView({
                           })}
                         </div>
                       )}
+                      {(() => {
+                        // A host's service on the page: the calendars at the other venues that offer it
+                        // too, so the card says everywhere it can be booked.
+                        const itemId = svc.collective?.role === 'master' ? svc.collective.item_id : null;
+                        if (!itemId) return null;
+                        const elsewhere = collectiveCalendars
+                          .filter((g) => !g.is_host)
+                          .flatMap((g) =>
+                            g.calendars
+                              .filter((cal) => cal.is_active && cal.assigned.some((a) => a.item_id === itemId))
+                              .map((cal) => ({ id: cal.id, name: cal.name, venue: g.venue_name })),
+                          );
+                        if (elsewhere.length === 0) return null;
+                        return (
+                          <div className="mt-1.5 flex flex-wrap gap-1" aria-label="Calendars at other venues">
+                            {elsewhere.map((cal) => (
+                              <Pill key={cal.id} variant="neutral" size="sm">
+                                {cal.name}
+                                <span className="ml-1 font-normal text-slate-500">({cal.venue})</span>
+                              </Pill>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                   {(isAdmin ||
@@ -2126,6 +2155,24 @@ export function AppointmentServicesView({
               <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
             )}
 
+            {(() => {
+              // Where a save to this service reaches, said before anything is changed (UX spec 0.2).
+              const block = editingId ? services.find((x) => x.id === editingId)?.collective ?? null : null;
+              if (!block || (block.role !== 'master' && block.role !== 'parked')) return null;
+              return (
+                <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2">
+                  <EditReachNote className="!mt-0">
+                    {block.role === 'master'
+                      ? collectiveCopy('reach.host.master', {
+                          collective: block.collective_name,
+                          venueList: formatVenueList(collectiveMemberNames) || 'every venue',
+                        })
+                      : collectiveCopy('reach.host.parked', { collective: block.collective_name })}
+                  </EditReachNote>
+                </div>
+              );
+            })()}
+
             {!editingId && isAdmin && collective?.isHost ? (
               <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
@@ -2171,6 +2218,17 @@ export function AppointmentServicesView({
                     value={collectiveCalendarsDiff}
                     onChange={setCollectiveCalendarsDiff}
                     hiddenReasons={editingCollectiveBlock.hidden_reasons}
+                    defaults={{
+                      durationMinutes: Number.isFinite(Number(form.duration_minutes)) ? Number(form.duration_minutes) : null,
+                      bufferMinutes: Number.isFinite(Number(form.buffer_minutes)) ? Number(form.buffer_minutes) : null,
+                      pricePence: form.price.trim() !== '' && Number.isFinite(Number(form.price)) ? Math.round(Number(form.price) * 100) : null,
+                      depositPence:
+                        form.payment_requirement !== 'deposit'
+                          ? 0
+                          : form.deposit.trim() !== '' && Number.isFinite(Number(form.deposit))
+                            ? Math.round(Number(form.deposit) * 100)
+                            : null,
+                    }}
                   />
                 ) : calendarsForServiceForm.length > 0 ||
                 lingeringCalendarLinks.length > 0 ||

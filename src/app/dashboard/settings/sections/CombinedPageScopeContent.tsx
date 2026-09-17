@@ -47,7 +47,7 @@ export function CombinedPageScopeContent({
             : `This combined page is managed by ${collective.hostVenueName}.`
         }
       />
-      <SectionCard.Body>
+      <SectionCard.Body className="!px-2 sm:!px-6">
         {view ? (
           view.isHost ? (
             <CombinedPageManagerPanel

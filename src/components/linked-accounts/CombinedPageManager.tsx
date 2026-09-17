@@ -717,7 +717,8 @@ export function CombinedPageManagerPanel({
 
         {tab === 'page' && isHost ? (
           <div className="space-y-3">
-            <div aria-live="polite" className="h-4 text-xs">
+            {sharedServices ? <SharedServicesPointer /> : null}
+            <div aria-live="polite" className="h-4 text-right text-xs">
               {pageSave.status === 'saving' ? (
                 <span className="text-amber-600">Saving…</span>
               ) : pageSave.status === 'saved' ? (
@@ -726,7 +727,6 @@ export function CombinedPageManagerPanel({
                 <span className="text-rose-600">{pageSave.message ?? 'Save failed.'}</span>
               ) : null}
             </div>
-            {sharedServices ? <SharedServicesPointer /> : null}
             <BookingPageEditor adapter={pageAdapter} reporter={pageReporter} />
           </div>
         ) : null}

@@ -373,7 +373,7 @@ function CollectiveRow({
         </div>
 
         {!dissolved ? (
-          <div className="flex shrink-0 flex-wrap items-start gap-2">
+          <div className="flex min-w-0 flex-wrap items-start gap-2 sm:shrink-0">
             {invited ? (
               <>
                 <button

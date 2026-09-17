@@ -91,48 +91,62 @@ export function CollectiveHistoryPanel({
         {collectiveCopy('history.title', { collective: collectiveName })}
       </h2>
 
-      <div className="flex flex-wrap items-end gap-3 text-sm">
-        <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
+      <div className="space-y-3 text-sm">
+        <div className="flex w-fit max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-white p-0.5">
           {FILTERS.map((option) => (
             <button
               key={option.value}
               type="button"
               aria-pressed={filter === option.value}
               onClick={() => setFilter(option.value)}
-              className={`rounded-md px-2.5 py-1 ${filter === option.value ? 'bg-brand-600 text-white' : 'text-slate-700'}`}
+              className={`shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-xs sm:px-2.5 sm:text-sm ${
+                filter === option.value ? 'bg-brand-600 text-white' : 'text-slate-700'
+              }`}
             >
               {option.label}
             </button>
           ))}
         </div>
-        {venues.length > 0 ? (
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-600">{collectiveCopy('history.filter.venue')}</span>
-            <select
-              value={venueId ?? ''}
-              onChange={(e) => setVenueId(e.target.value || null)}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1"
-            >
-              <option value="">{collectiveCopy('history.filter.anyVenue')}</option>
-              {venues.map((venue) => (
-                <option key={venue.venue_id} value={venue.venue_id}>
-                  {venue.venue_name}
-                </option>
-              ))}
-            </select>
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
+          {venues.length > 0 ? (
+            <label className="col-span-2 flex flex-col gap-1 sm:col-auto">
+              <span className="text-xs text-slate-600">{collectiveCopy('history.filter.venue')}</span>
+              <select
+                value={venueId ?? ''}
+                onChange={(e) => setVenueId(e.target.value || null)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1"
+              >
+                <option value="">{collectiveCopy('history.filter.anyVenue')}</option>
+                {venues.map((venue) => (
+                  <option key={venue.venue_id} value={venue.venue_id}>
+                    {venue.venue_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <label className="flex min-w-0 flex-col gap-1">
+            <span className="text-xs text-slate-600">{collectiveCopy('history.filter.from')}</span>
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1"
+            />
           </label>
-        ) : null}
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-slate-600">{collectiveCopy('history.filter.from')}</span>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1" />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-slate-600">{collectiveCopy('history.filter.to')}</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1" />
-        </label>
-        <a href={csvHref} className="ml-auto font-medium text-brand-700 underline underline-offset-2">
-          {collectiveCopy('history.export')}
-        </a>
+          <label className="flex min-w-0 flex-col gap-1">
+            <span className="text-xs text-slate-600">{collectiveCopy('history.filter.to')}</span>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1"
+            />
+          </label>
+          <Button asChild variant="secondary" size="sm" className="col-span-2 sm:col-auto sm:ml-auto">
+            <a href={csvHref}>{collectiveCopy('history.export')}</a>
+          </Button>
+        </div>
       </div>
 
       {error ? (
@@ -147,9 +161,12 @@ export function CollectiveHistoryPanel({
 
       <ol className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
         {events.map((event) => (
-          <li key={event.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2 text-sm">
-            <span className="text-slate-900">{event.sentence}</span>
-            <time dateTime={event.at} className="text-xs text-slate-500">
+          <li
+            key={event.id}
+            className="flex flex-col gap-0.5 px-3 py-2 text-sm sm:flex-row sm:items-baseline sm:justify-between sm:gap-4"
+          >
+            <span className="min-w-0 text-slate-900">{event.sentence}</span>
+            <time dateTime={event.at} className="shrink-0 whitespace-nowrap text-xs text-slate-500">
               {formatWhen(event.at)}
             </time>
           </li>

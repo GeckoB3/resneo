@@ -2070,6 +2070,8 @@ export function AppointmentBookingFlow({
         description: string | null;
         duration_minutes: number;
         minPricePence: number | null;
+        /** Calendars charge different prices for it, so the list says "From". */
+        priceVaries?: boolean;
         sortOrder: number;
         /** Same value as `sortOrder`, under the name the category grouping reads. */
         sort_order: number;
@@ -2078,17 +2080,20 @@ export function AppointmentBookingFlow({
         assigned?: boolean;
       }
     >();
+    const firstPrice = new Map<string, number | null>();
     for (const p of catalogStaff) {
       for (const s of p.services) {
         const price = s.price_pence;
         const existing = map.get(s.id);
         if (!existing) {
+          firstPrice.set(s.id, price ?? null);
           map.set(s.id, {
             id: s.id,
             name: s.name,
             description: s.description?.trim() ? s.description.trim() : null,
             duration_minutes: s.duration_minutes,
             minPricePence: price,
+            priceVaries: false,
             sortOrder: s.sort_order ?? 0,
             sort_order: s.sort_order ?? 0,
             category: s.category ?? null,
@@ -2098,6 +2103,7 @@ export function AppointmentBookingFlow({
           if (!existing.description && s.description?.trim()) {
             existing.description = s.description.trim();
           }
+          if ((price ?? null) !== (firstPrice.get(s.id) ?? null)) existing.priceVaries = true;
           if (price != null && (existing.minPricePence == null || price < existing.minPricePence)) {
             existing.minPricePence = price;
           }
@@ -2314,6 +2320,11 @@ export function AppointmentBookingFlow({
 
   function formatFromPrice(pence: number | null): string {
     return formatFromBookablePricePence(pence, sym);
+  }
+
+  /** "From" only when the price really differs: across calendars, or across the service's options. */
+  function formatListPrice(svc: { minPricePence: number | null; priceVaries?: boolean }, hasVariants: boolean): string {
+    return !hasVariants && svc.priceVaries === false ? formatPrice(svc.minPricePence) : formatFromPrice(svc.minPricePence);
   }
 
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
@@ -4639,7 +4650,7 @@ export function AppointmentBookingFlow({
                                 across their options, or across the whole team. */}
                             {isStaffFirst && staffFirstServices && !serviceHasVariants
                               ? formatPrice(svc.minPricePence)
-                              : formatFromPrice(svc.minPricePence)}
+                              : formatListPrice(svc, serviceHasVariants)}
                           </span>
                           {pickerSelected ? (
                             <span className="ap-pick-check inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white" aria-hidden>
@@ -4750,7 +4761,9 @@ export function AppointmentBookingFlow({
                         onClick={navigateFromServiceRow}
                         className="flex flex-shrink-0 items-center gap-2 border-l border-slate-100 bg-white py-3.5 pl-3 pr-3 text-left transition-colors hover:bg-slate-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
                       >
-                        <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
+                        <span className="text-sm font-semibold text-brand-600">
+                          {formatListPrice(svc, serviceHasVariants)}
+                        </span>
                         <svg className="h-4 w-4 flex-shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                         </svg>
@@ -5352,7 +5365,11 @@ export function AppointmentBookingFlow({
           {selectedService && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
               <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {(serviceSelectionDurationMinutes ?? selectedService.duration_minutes) + selectedAddonSummary.totalMinutes} min &middot; {selectedVariant ? formatPrice(priceWithSelectedAddons(selectedVariant.price_pence)) : formatFromPrice(priceWithSelectedAddons(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence))}{addonCountSuffix(selectedAddonSummary.lines.length)}</span></div>
+              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {(serviceSelectionDurationMinutes ?? selectedService.duration_minutes) + selectedAddonSummary.totalMinutes} min &middot; {selectedVariant ? formatPrice(priceWithSelectedAddons(selectedVariant.price_pence)) : (() => {
+                const listed = servicesWithFromPrice.find((s) => s.id === selectedService.id);
+                const pence = priceWithSelectedAddons(listed?.minPricePence ?? selectedService.price_pence);
+                return listed && !serviceHasVariants && listed.priceVaries === false ? formatPrice(pence) : formatFromPrice(pence);
+              })()}{addonCountSuffix(selectedAddonSummary.lines.length)}</span></div>
             </div>
           )}
           {anyRouteActive ? (
@@ -6569,7 +6586,7 @@ export function AppointmentBookingFlow({
                         {isStaffFirst && groupStaffFirstServices &&
                         catalogVariantsForServiceFromStaff(catalogStaff, svc.id, groupPractitionerId).length === 0
                           ? formatPrice(svc.minPricePence)
-                          : formatFromPrice(svc.minPricePence)}
+                          : formatListPrice(svc, catalogVariantsForServiceId(catalogStaff, svc.id).length > 0)}
                       </span>
                       {groupPendingServiceIds.includes(svc.id) ? (
                         <span className="ap-pick-check inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white" aria-hidden>

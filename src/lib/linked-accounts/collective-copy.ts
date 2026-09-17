@@ -280,7 +280,9 @@ export const COLLECTIVE_COPY = {
   'ov.filter.all': 'All services',
   'ov.filter.attention': 'Needs attention',
   'ov.filter.offPage': 'Not on the page',
-  'ov.bulk.selected': '{services} services at {venues} venues selected',
+  'ov.bulk.selected': '{services} at {venues} selected',
+  'ov.bulk.venue': 'venue',
+  'ov.bulk.venues': 'venues',
   'ov.bulk.offer': 'Put on the page',
   'ov.bulk.withdraw': 'Take off the page',
   'ov.bulk.addCalendars': 'Choose calendars',
@@ -677,6 +679,9 @@ export const COLLECTIVE_COPY = {
   'transfer.paused.takeOver': 'Take over hosting',
   'dissolve.button': 'End {collective}',
   'dissolve.title': 'End {collective}?',
+  'dissolve.sectionTitle': 'End the collective',
+  'dissolve.hint':
+    'The shared page stops taking bookings. Every venue keeps its services, calendars, clients and bookings.',
   'dissolve.message':
     "The {collective} page stops taking bookings straight away. Every venue keeps its services, calendars, clients and bookings, and its own booking page comes back. For 90 days, old links to the {collective} page show a page listing each venue's own booking page.",
   'dissolve.typeToConfirm': 'Type {collective} to confirm',

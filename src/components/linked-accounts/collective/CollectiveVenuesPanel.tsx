@@ -140,12 +140,9 @@ export function CollectiveVenuesPanel({
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold text-slate-900">Venues</h2>
-        <Link
-          href="/dashboard/settings?tab=linked-accounts"
-          className="text-sm font-medium text-brand-700 underline underline-offset-2"
-        >
-          {collectiveCopy('ov.venues.invite')}
-        </Link>
+        <Button asChild variant="secondary" size="sm">
+          <Link href="/dashboard/settings?tab=linked-accounts">{collectiveCopy('ov.venues.invite')}</Link>
+        </Button>
       </div>
 
       {error ? (
@@ -205,7 +202,7 @@ export function CollectiveVenuesPanel({
                   {collectiveCopy('bm.members.alsoRuns', { modelList: venue.also_runs })}
                 </span>
               ) : null}
-              <span className="ml-auto flex flex-wrap items-center gap-2">
+              <span className="ml-auto flex flex-wrap items-center justify-end gap-x-1 gap-y-1">
                 {venue.status === 'active' ? (
                   <Button type="button" variant="link" size="sm" onClick={() => onShowHistory(venue.venue_id)}>
                     {collectiveCopy('bp.members.history')}
@@ -228,6 +225,7 @@ export function CollectiveVenuesPanel({
                     variant="ghost"
                     size="sm"
                     disabled={busy}
+                    className="!text-rose-700 hover:!bg-rose-50"
                     onClick={() => setAsking({ venue, kind: 'remove' })}
                   >
                     {collectiveCopy('ov.venues.remove')}

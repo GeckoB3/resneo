@@ -431,6 +431,16 @@ export function BookableCalendarsPanel({
     const canMoveDown = canReorderCalendars && orderIndex >= 0 && orderIndex < orderedIds.length - 1;
 
     const chipBase = 'rounded px-1.5 py-0.5 text-[11px] font-medium leading-snug ring-1';
+    /** Services always show; the other sections only while their booking model is on. */
+    const sectionCount = 1 + Number(shows.classes) + Number(shows.resources) + Number(shows.events);
+    const sectionGrid =
+      sectionCount === 1
+        ? 'grid-cols-1'
+        : sectionCount === 2
+          ? 'grid-cols-2'
+          : sectionCount === 3
+            ? 'grid-cols-2 sm:grid-cols-3'
+            : 'grid-cols-2 sm:grid-cols-4';
 
     return (
       <>
@@ -473,7 +483,7 @@ export function BookableCalendarsPanel({
                   </p>
                 </div>
               )}
-              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+              <dl className={`mt-2 grid gap-x-3 gap-y-2 ${sectionGrid}`}>
                 <div>
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <ServicesIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -768,7 +778,17 @@ export function BookableCalendarsPanel({
                 </div>
                 <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
                   Each column is a bookable schedule on your public page and in the dashboard. Edit a calendar to set
-                  name, services, classes, and linked resources. Set{' '}
+                  its{' '}
+                  {[
+                    'name',
+                    'services',
+                    ...(shows.classes ? ['classes'] : []),
+                    ...(shows.events ? ['events'] : []),
+                    ...(shows.resources ? ['linked resources'] : []),
+                  ]
+                    .join(', ')
+                    .replace(/, ([^,]*)$/, ' and $1')}
+                  . Set{' '}
                   <strong className="font-medium text-slate-800">weekly hours</strong> under the{' '}
                   <Link
                     href="/dashboard/calendar-availability?tab=availability"

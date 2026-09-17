@@ -101,7 +101,7 @@ export function CombinedPageScopeSwitch({
         <div
           role="tablist"
           aria-label="Which booking page to manage"
-          className="flex flex-wrap gap-1 border-b border-brand-200"
+          className="grid grid-cols-2 gap-1 border-b border-brand-200 sm:flex sm:flex-wrap"
           onKeyDown={(e) => {
             if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
             e.preventDefault();
@@ -122,7 +122,7 @@ export function CombinedPageScopeSwitch({
               aria-selected={scope === s.key}
               tabIndex={scope === s.key ? 0 : -1}
               onClick={() => onScopeChange(s.key)}
-              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition ${
+              className={`-mb-px border-b-2 px-2 py-2 text-center text-sm font-medium leading-snug transition sm:whitespace-nowrap sm:px-3 sm:text-left ${
                 scope === s.key
                   ? 'border-brand-600 text-brand-700'
                   : 'border-transparent text-slate-500 hover:text-slate-800'

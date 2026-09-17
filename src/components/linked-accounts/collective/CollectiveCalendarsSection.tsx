@@ -51,6 +51,18 @@ export interface CollectiveCalendarsSectionProps {
   /** One venue only, for the grid's cell popover. */
   scope?: string | null;
   loading?: boolean;
+  /**
+   * The service's own values, shown in the comparison where a calendar keeps them, so a row reads
+   * "30 min" rather than a bare "Standard". A calendar's own value is shown in bold.
+   */
+  defaults?: CompareDefaults;
+}
+
+export interface CompareDefaults {
+  durationMinutes: number | null;
+  bufferMinutes: number | null;
+  pricePence: number | null;
+  depositPence: number | null;
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -69,10 +81,22 @@ export function CollectiveCalendarsSection({
   hiddenReasons = [],
   scope = null,
   loading = false,
+  defaults,
 }: CollectiveCalendarsSectionProps) {
   const shown = useMemo(
     () => (scope ? groups.filter((g) => g.venue_id === scope) : groups),
     [groups, scope],
+  );
+  /** Every calendar that offers this service, for the comparison. */
+  const compareRows = useMemo(
+    () =>
+      shown.flatMap((group) =>
+        group.calendars.flatMap((calendar) => {
+          const assignment = calendar.assigned.find((a) => a.item_id === itemId);
+          return assignment ? [{ group, calendar, assignment }] : [];
+        }),
+      ),
+    [shown, itemId],
   );
   const reasonsByVenue = useMemo(() => {
     const map = new Map<string, CollectiveHiddenReason[]>();
@@ -195,7 +219,25 @@ export function CollectiveCalendarsSection({
           <summary className="cursor-pointer text-sm font-medium text-slate-700">
             {collectiveCopy('svc.cal.compare')}
           </summary>
-          <div className="mt-2 overflow-x-auto">
+          {/* Phones read one calendar at a time; wider screens get the side-by-side table. */}
+          <ul className="mt-2 space-y-2 sm:hidden">
+            {compareRows.map(({ group, calendar, assignment }) => (
+              <li key={`${group.venue_id}-${calendar.id}`} className="rounded-lg border border-slate-100 p-2 text-xs">
+                <p className="font-medium text-slate-800">
+                  {calendar.name} <span className="font-normal text-slate-500">({group.venue_name})</span>
+                </p>
+                <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1">
+                  {compareFields(assignment, defaults, currencySymbol).map((field) => (
+                    <div key={field.label} className="flex justify-between gap-2">
+                      <dt className="text-slate-500">{field.label}</dt>
+                      <dd className={field.own ? 'font-semibold text-slate-900' : 'text-slate-500'}>{field.text}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 hidden overflow-x-auto sm:block">
             <table className="w-full text-left text-xs">
               <thead className="text-slate-500">
                 <tr>
@@ -208,21 +250,22 @@ export function CollectiveCalendarsSection({
                 </tr>
               </thead>
               <tbody>
-                {shown.flatMap((group) =>
-                  group.calendars
-                    .map((calendar) => ({ group, calendar, assignment: calendar.assigned.find((a) => a.item_id === itemId) }))
-                    .filter((row) => row.assignment)
-                    .map(({ group, calendar, assignment }) => (
-                      <tr key={`${group.venue_id}-${calendar.id}`} className="border-t border-slate-100">
-                        <td className="py-1 pr-3 text-slate-800">{calendar.name}</td>
-                        <td className="py-1 pr-3 text-slate-600">{group.venue_name}</td>
-                        <td className="py-1 pr-3">{minutesCell(assignment!.values.custom_duration_minutes)}</td>
-                        <td className="py-1 pr-3">{minutesCell(assignment!.values.custom_buffer_minutes)}</td>
-                        <td className="py-1 pr-3">{moneyCell(assignment!.values.custom_price_pence, currencySymbol)}</td>
-                        <td className="py-1">{moneyCell(assignment!.values.custom_deposit_pence, currencySymbol)}</td>
-                      </tr>
-                    )),
-                )}
+                {compareRows.map(({ group, calendar, assignment }) => (
+                  <tr key={`${group.venue_id}-${calendar.id}`} className="border-t border-slate-100">
+                    <td className="py-1 pr-3 text-slate-800">{calendar.name}</td>
+                    <td className="py-1 pr-3 text-slate-600">{group.venue_name}</td>
+                    {compareFields(assignment, defaults, currencySymbol).map((field, i, all) => (
+                      <td
+                        key={field.label}
+                        className={`whitespace-nowrap py-1 ${i < all.length - 1 ? 'pr-3' : ''} ${
+                          field.own ? 'font-semibold text-slate-900' : 'text-slate-500'
+                        }`}
+                      >
+                        {field.text}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -311,10 +354,43 @@ export function valueChips(
 }
 
 const money = (pence: number, symbol: string) => `${symbol}${(pence / 100).toFixed(2)}`;
-const moneyCell = (pence: number | null, symbol: string) =>
-  pence == null ? collectiveCopy('svc.cal.compare.standard') : money(pence, symbol);
-const minutesCell = (minutes: number | null) =>
-  minutes == null ? collectiveCopy('svc.cal.compare.standard') : `${minutes} min`;
+/**
+ * Length, buffer, price and deposit for one calendar: its own value (`own`, shown in bold),
+ * otherwise the service's, or "Standard" when that is unknown.
+ */
+export function compareFields(
+  assignment: CollectiveCalendarAssignment,
+  defaults: CompareDefaults | undefined,
+  currencySymbol: string,
+): { label: string; text: string; own: boolean }[] {
+  const minutes = (m: number) => `${m} min`;
+  const price = (p: number) => money(p, currencySymbol);
+  const v = assignment.values;
+  const field = (
+    label: string,
+    own: number | null,
+    fallback: number | null | undefined,
+    format: (n: number) => string,
+  ) =>
+    own != null
+      ? { label, text: format(own), own: true }
+      : {
+          label,
+          text:
+            fallback === 0
+              ? 'None'
+              : fallback != null
+                ? format(fallback)
+                : collectiveCopy('svc.cal.compare.standard'),
+          own: false,
+        };
+  return [
+    field('Length', v.custom_duration_minutes, defaults?.durationMinutes, minutes),
+    field('Buffer', v.custom_buffer_minutes, defaults?.bufferMinutes, minutes),
+    field('Price', v.custom_price_pence, defaults?.pricePence, price),
+    field('Deposit', v.custom_deposit_pence, defaults?.depositPence, price),
+  ];
+}
 
 function formatDay(iso: string): string {
   const date = new Date(iso);

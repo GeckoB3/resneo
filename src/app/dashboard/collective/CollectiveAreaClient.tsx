@@ -57,6 +57,11 @@ interface ServiceRow {
   id: string;
   name: string;
   collective?: CollectiveServiceBlock | null;
+  duration_minutes?: number | null;
+  buffer_minutes?: number | null;
+  price_pence?: number | null;
+  deposit_pence?: number | null;
+  payment_requirement?: string | null;
 }
 
 export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }) {
@@ -325,10 +330,23 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
       {!collective.isHost ? (
         <MemberServicesList services={services} hostName={collective.hostVenueName} collectiveName={collective.name} />
       ) : (
-      <SectionCard elevated>
+      <SectionCard elevated className="!overflow-visible">
         <SectionCard.Body>
           <CollectiveServicesGrid
-            services={services.map((s) => ({ id: s.id, name: s.name, collective: s.collective ?? null }))}
+            services={services.map((s) => ({
+              id: s.id,
+              name: s.name,
+              collective: s.collective ?? null,
+              defaults: {
+                durationMinutes: s.duration_minutes ?? null,
+                bufferMinutes: s.buffer_minutes ?? null,
+                pricePence: s.price_pence ?? null,
+                depositPence:
+                  (s.payment_requirement ?? (s.deposit_pence ? 'deposit' : 'none')) === 'deposit'
+                    ? (s.deposit_pence ?? null)
+                    : 0,
+              },
+            }))}
             groups={groups}
             currencySymbol={currencySymbolFromCode(currency)}
             onCommit={commit}

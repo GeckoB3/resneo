@@ -1429,6 +1429,20 @@ describe('staff-first: any available', () => {
     expect(screen.getByRole('button', { name: /Plain Service/i })).toHaveTextContent('From £30.00');
   });
 
+  it('says "From" only where the price differs, across calendars or options', async () => {
+    installFetch(venueCatalog());
+    renderFlow({ venue: pooled });
+    await startStaffFirstBooking();
+
+    fireEvent.click(screen.getByRole('button', { name: /Any available/i }));
+    await waitForStep(STEP.service);
+
+    const benOnly = screen.getByRole('button', { name: /Ben Only Service/i });
+    expect(benOnly).toHaveTextContent('£20.00');
+    expect(benOnly).not.toHaveTextContent('From');
+    expect(screen.getByRole('button', { name: /Variants Service/i })).toHaveTextContent('From £30.00');
+  });
+
   it('hides the pool when only one person is bookable', async () => {
     installFetch(lockedCatalog());
     renderFlow({ venue: pooled });

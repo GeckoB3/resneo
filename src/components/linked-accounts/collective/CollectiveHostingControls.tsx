@@ -259,8 +259,18 @@ export function EndCollectiveSection({
   const matches = typed.trim().toLowerCase() === collectiveName.trim().toLowerCase();
 
   return (
-    <div className="border-t border-slate-100 pt-3">
-      <Button type="button" variant="ghost" size="sm" className="text-rose-700" onClick={() => setOpen(true)}>
+    <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-slate-900">{collectiveCopy('dissolve.sectionTitle')}</p>
+        <p className="mt-0.5 text-xs text-slate-600">{collectiveCopy('dissolve.hint')}</p>
+      </div>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className="shrink-0 !border-rose-200 !text-rose-700 hover:!bg-rose-50"
+        onClick={() => setOpen(true)}
+      >
         {collectiveCopy('dissolve.button', { collective: collectiveName })}
       </Button>
       <Dialog

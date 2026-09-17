@@ -15,7 +15,11 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/primitives/Button';
 import { Dialog } from '@/components/ui/primitives/Dialog';
-import { CollectiveCalendarsSection, type CollectiveCalendarsValue } from './CollectiveCalendarsSection';
+import {
+  CollectiveCalendarsSection,
+  type CollectiveCalendarsValue,
+  type CompareDefaults,
+} from './CollectiveCalendarsSection';
 import { collectiveCopy, formatVenueList } from '@/lib/linked-accounts/collective-copy';
 import { PREVIEW_REASON_WORDS, type PreviewVenue } from '@/lib/linked-accounts/replicas/bulk-preview';
 import type { CollectiveCalendarGroup } from '@/lib/linked-accounts/replicas/host-calendars';
@@ -26,6 +30,8 @@ export interface GridService {
   id: string;
   name: string;
   collective: CollectiveServiceBlock | null;
+  /** The service's own length, buffer, price and deposit, for the cell's comparison. */
+  defaults?: CompareDefaults;
 }
 
 export type GridFilter = 'all' | 'attention' | 'off_page';
@@ -246,7 +252,7 @@ export function CollectiveServicesGrid({
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
+        <div className="flex max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
           {(
             [
               ['all', collectiveCopy('ov.filter.all')],
@@ -259,29 +265,37 @@ export function CollectiveServicesGrid({
               type="button"
               onClick={() => setFilter(value)}
               aria-pressed={filter === value}
-              className={`rounded-md px-2.5 py-1 ${filter === value ? 'bg-brand-600 text-white' : 'text-slate-700'}`}
+              className={`shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-xs sm:px-2.5 sm:text-sm ${filter === value ? 'bg-brand-600 text-white' : 'text-slate-700'}`}
             >
               {label}
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <label className="flex w-full items-center gap-2 text-sm text-slate-600 sm:w-auto">
           <span className="sr-only">{collectiveCopy('ov.grid.search')}</span>
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={collectiveCopy('ov.grid.search')}
-            className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+            className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm sm:w-56"
           />
         </label>
       </div>
 
+      {/* Wide enough for every venue's column, narrow enough for a phone with two venues; the
+          service names stay in view while the venues scroll. */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] border-collapse text-sm">
+        <table
+          className="w-full table-fixed border-collapse text-sm"
+          style={{ minWidth: `${120 + groups.length * 88}px` }}
+        >
           <thead>
             <tr>
-              <th scope="col" className="w-64 border-b border-slate-200 px-2 py-2 text-left font-medium text-slate-600">
+              <th
+                scope="col"
+                className="sticky left-0 z-10 w-[7.5rem] border-b border-slate-200 bg-white px-1.5 py-2 text-left font-medium text-slate-600 sm:w-64 sm:px-2"
+              >
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -297,7 +311,7 @@ export function CollectiveServicesGrid({
                       })
                     }
                     aria-label="Select every service shown"
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600"
                   />
                   <span>Service</span>
                 </label>
@@ -317,7 +331,7 @@ export function CollectiveServicesGrid({
                         })
                       }
                       aria-label={`Select ${group.venue_name}`}
-                      className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600"
                     />
                     <span>{group.is_host ? collectiveCopy('svc.cal.venueYou', { venue: group.venue_name }) : group.venue_name}</span>
                   </label>
@@ -331,8 +345,8 @@ export function CollectiveServicesGrid({
               const onPage = service.collective?.role === 'master';
               return (
                 <tr key={service.id}>
-                  <th scope="row" className="border-b border-slate-100 px-2 py-2 text-left font-normal">
-                    <label className="flex items-center gap-2">
+                  <th scope="row" className="sticky left-0 z-10 border-b border-slate-100 bg-white px-1.5 py-2 text-left font-normal sm:px-2">
+                    <label className="flex items-start gap-2">
                       <input
                         type="checkbox"
                         checked={selectedServices.has(service.id)}
@@ -345,10 +359,14 @@ export function CollectiveServicesGrid({
                           })
                         }
                         aria-label={`Select ${service.name}`}
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600"
                       />
-                      <span className="text-slate-900">{service.name}</span>
-                      {!onPage ? <span className="text-xs text-slate-500">({collectiveCopy('common.pill.parked')})</span> : null}
+                      <span className="min-w-0 hyphens-auto break-words">
+                        <span className="text-slate-900">{service.name}</span>
+                        {!onPage ? (
+                          <span className="block text-xs text-slate-500 sm:ml-1 sm:inline">({collectiveCopy('common.pill.parked')})</span>
+                        ) : null}
+                      </span>
                     </label>
                   </th>
                   {groups.map((group) => {
@@ -387,7 +405,14 @@ export function CollectiveServicesGrid({
                           }`}
                           aria-label={`${service.name} at ${group.venue_name}: ${label}`}
                         >
-                          {label}
+                          {hiddenHere ? (
+                            <>
+                              <span className="block">{CELL_LABEL[state]}</span>
+                              <span className="block text-[11px] font-medium">{collectiveCopy('ov.grid.cell.hidden')}</span>
+                            </>
+                          ) : (
+                            label
+                          )}
                           {changes > 0 ? ` (${collectiveCopy('ov.grid.cell.staged', { count: changes })})` : ''}
                         </button>
                       </td>
@@ -403,36 +428,45 @@ export function CollectiveServicesGrid({
       {rows.length === 0 ? <p className="text-sm text-slate-500">{collectiveCopy('ov.grid.empty')}</p> : null}
 
       {selectedServices.size > 0 || selectedVenues.size > 0 || staged.length > 0 ? (
-        <div className="sticky bottom-2 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg">
-          <span className="text-sm text-slate-700">
-            {collectiveCopy('ov.bulk.selected', {
-              services: selectedServices.size || rows.length,
-              venues: selectedVenues.size || groups.length,
-            })}
+        <div className="sticky bottom-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg">
+          <span className="w-full text-sm font-medium text-slate-700 sm:w-auto">
+            {(() => {
+              const serviceCount = selectedServices.size || rows.length;
+              const venueCount = selectedVenues.size || groups.length;
+              return collectiveCopy('ov.bulk.selected', {
+                services: `${serviceCount} ${collectiveCopy(serviceCount === 1 ? 'ov.venue.service' : 'ov.venue.services')}`,
+                venues: `${venueCount} ${collectiveCopy(venueCount === 1 ? 'ov.bulk.venue' : 'ov.bulk.venues')}`,
+              });
+            })()}
           </span>
-          <Button type="button" variant="secondary" size="sm" onClick={() => bulk('offer')}>
-            {collectiveCopy('ov.bulk.offer')}
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => bulk('withdraw')}>
-            {collectiveCopy('ov.bulk.withdraw')}
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => bulk('assign')}>
-            {collectiveCopy('ov.bulk.addCalendars')}
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => bulk('unassign')}>
-            {collectiveCopy('ov.bulk.removeCalendars')}
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => bulk('retry')}>
-            {collectiveCopy('ov.bulk.retry')}
-          </Button>
-          <span className="ml-auto flex items-center gap-2">
+          {/* Two to a row on a phone, so the bar never covers half the list. */}
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+            <Button type="button" variant="secondary" size="sm" className="px-2 text-xs sm:px-3 sm:text-sm" onClick={() => bulk('offer')}>
+              {collectiveCopy('ov.bulk.offer')}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" className="px-2 text-xs sm:px-3 sm:text-sm" onClick={() => bulk('withdraw')}>
+              {collectiveCopy('ov.bulk.withdraw')}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" className="px-2 text-xs sm:px-3 sm:text-sm" onClick={() => bulk('assign')}>
+              {collectiveCopy('ov.bulk.addCalendars')}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" className="px-2 text-xs sm:px-3 sm:text-sm" onClick={() => bulk('unassign')}>
+              {collectiveCopy('ov.bulk.removeCalendars')}
+            </Button>
+            {failures.length > 0 || groups.some((g) => g.sync.failed.length > 0) ? (
+              <Button type="button" variant="secondary" size="sm" className="px-2 text-xs sm:px-3 sm:text-sm" onClick={() => bulk('retry')}>
+                {collectiveCopy('ov.bulk.retry')}
+              </Button>
+            ) : null}
+          </div>
+          <span className="grid w-full grid-cols-2 gap-2 empty:hidden sm:ml-auto sm:flex sm:w-auto sm:items-center">
             {staged.length > 0 ? (
               <>
                 <Button type="button" variant="ghost" size="sm" onClick={() => setStaged([])} disabled={saving}>
                   {collectiveCopy('ov.bulk.discard')}
                 </Button>
                 {onPreview ? (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => void openPreview()} disabled={saving}>
+                  <Button type="button" variant="secondary" size="sm" className="order-first col-span-2 sm:order-none" onClick={() => void openPreview()} disabled={saving}>
                     {collectiveCopy('ov.preview.button')}
                   </Button>
                 ) : null}
@@ -572,6 +606,7 @@ export function CollectiveServicesGrid({
             collectiveName={openService.collective?.collective_name ?? ''}
             currencySymbol={currencySymbol}
             hiddenReasons={openService.collective?.hidden_reasons ?? []}
+            defaults={openService.defaults}
             value={valueFromStaged(staged, openService.id, openGroup.venue_id)}
             onChange={(next) => replaceCellCalendars(openService.id, openGroup.venue_id, next)}
           />

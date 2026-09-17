@@ -1299,11 +1299,11 @@ function SharedServicesPointer() {
       <Link href="/dashboard/appointment-services" className="font-medium text-brand-700 underline underline-offset-2">
         Services
       </Link>{' '}
-      page. Venues, invitations and hosting are in the{' '}
+      page. Venues, invitations and hosting are in{' '}
       <Link href="/dashboard/collective" className="font-medium text-brand-700 underline underline-offset-2">
-        Collective
-      </Link>{' '}
-      area.
+        Manage Collective
+      </Link>
+      .
     </p>
   );
 }

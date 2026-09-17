@@ -401,7 +401,7 @@ function CollectiveRow({
               <>
                 {collective.serviceModel === 'replicas' && !dissolved ? (
                   <a href="/dashboard/collective" className={btnPrimary}>
-                    Open the Collective area
+                    Manage Collective
                   </a>
                 ) : null}
                 <button

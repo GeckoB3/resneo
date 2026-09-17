@@ -54,7 +54,7 @@ Open **Services**. Your services show a **Collective** badge when they are on th
 
 Then choose who offers each service. Under **Calendars that offer this service**, tick calendars at any venue in the collective. **Edit values** sets a price, length, buffer, deposit, colour or name for one calendar, where the service allows it.
 
-> **Tip:** the **Collective** area in the sidebar (shown under your collective's name) has a grid of every service against every venue, a **What needs you** list, a **Venues** tab and a **History** of every change. Use **See what each venue will show** before saving a batch of changes.
+> **Tip:** **Manage Collective** in the sidebar has a grid of every service against every venue, a **What needs you** list, a **Venues** tab and a **History** of every change. Use **See what each venue will show** before saving a batch of changes.
 
 ## Step 4: What members see and do
 
@@ -110,7 +110,7 @@ A collective needs at least two venues, so it ends when the last member leaves.
 | --- | --- | --- |
 | **Create venue collective** is greyed out | No link is fully open both ways | Open **Edit permissions** on the link and set both directions to full detail and **Create, edit and cancel bookings**, with no calendar limits |
 | A venue shows **Cannot join yet** | It is in another collective, uses a different timezone or currency, does not offer appointments, or its plan does not include collectives | Read the reason under its name |
-| A member's calendars are missing from the page | The venue has not connected Stripe for paid services, has forms switched off, is still being set up, or its subscription lapsed | The **What needs you** list in the **Collective** area says which |
+| A member's calendars are missing from the page | The venue has not connected Stripe for paid services, has forms switched off, is still being set up, or its subscription lapsed | The **What needs you** list in **Manage Collective** says which |
 | A client cannot book one of my services | It is parked because it is not on the collective page | Put it on the page, or as a member, suggest it to the host |
 | A booking will not move to another venue | It has a payment, forms, or is part of a visit or group | Move it within its own venue instead |
 | My own booking page still shows | The page is not live, none of your calendars offer a service on it, or your services are still being set up | The **Booking Page** tab says which |

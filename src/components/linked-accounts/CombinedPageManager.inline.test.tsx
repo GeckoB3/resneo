@@ -173,7 +173,7 @@ describe('on shared services', () => {
     expect(screen.queryByRole('tablist', { name: 'Combined page settings' })).toBeNull();
     expect(screen.queryByText('Services & calendars')).toBeNull();
     expect(screen.getByRole('link', { name: 'Services' })).toHaveAttribute('href', '/dashboard/appointment-services');
-    expect(screen.getByRole('link', { name: 'Collective' })).toHaveAttribute('href', '/dashboard/collective');
+    expect(screen.getByRole('link', { name: 'Manage Collective' })).toHaveAttribute('href', '/dashboard/collective');
     expect(screen.queryByText(/come from each member venue/)).toBeNull();
   });
 

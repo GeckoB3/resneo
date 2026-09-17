@@ -570,7 +570,7 @@ export function DashboardSidebar({
           {collectiveBookingLinks.length > 0 && (
             <NavLinkItem
               href="/dashboard/collective"
-              label={collectiveBookingLinks.length === 1 ? collectiveBookingLinks[0]!.name : 'Collective'}
+              label="Manage Collective"
               icon={UsersIcon}
               active={isActive('/dashboard/collective')}
               onNavigate={closeMobile}

@@ -221,7 +221,7 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
 
   return (
     <div className="space-y-4">
-      <PageHeader eyebrow="Collective" title={collective.name} subtitle={collectiveCopy('ov.subtitle')} />
+      <PageHeader eyebrow="Manage Collective" title={collective.name} subtitle={collectiveCopy('ov.subtitle')} />
 
       {entry?.pendingHost && entry.pendingHost.venueId === entry.myVenueId && !entry.pendingHost.transferAt ? (
         <HostingRequestBanner

@@ -219,6 +219,9 @@ export const COLLECTIVE_COPY = {
   'ov.venue.failed': 'An update did not go through.',
 
   // The Collective area's tabs
+  'ov.legacy.body':
+    '{collective} runs on the earlier set-up, where each venue keeps its own copy of a service, so there is nothing to run here yet. Its combined page, its services and its members are managed on the Booking Page tab of Settings.',
+  'ov.legacy.manage': 'Manage the combined page',
   'ov.tab.overview': 'Services',
   'ov.tab.venues': 'Venues',
   'ov.tab.history': 'History',

@@ -91,7 +91,7 @@ export interface DashboardSidebarProps {
   /** Venue has at least one accepted link — gates the notification bell in the footer. */
   hasLinkedAccounts?: boolean;
   /** Combined booking pages (venue collectives) this venue belongs to (plan §23). */
-  collectiveBookingLinks?: { id: string; name: string; url: string }[];
+  collectiveBookingLinks?: { id: string; name: string; url: string; serviceModel?: string }[];
 }
 
 const ADMIN_ONLY_HREFS = new Set(['/dashboard/settings']);
@@ -567,7 +567,7 @@ export function DashboardSidebar({
           {/* The Collective area: where a venue in a live collective runs it (UX spec §2 item 15).
               Shown to admins of any venue in one, members included; the page itself refuses
               anyone else. */}
-          {collectiveBookingLinks.length > 0 && (
+          {collectiveBookingLinks.some((link) => link.serviceModel === 'replicas') && (
             <NavLinkItem
               href="/dashboard/collective"
               label="Manage Collective"

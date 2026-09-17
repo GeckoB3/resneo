@@ -7,6 +7,7 @@
  * collective, and, for a host admin, every venue's calendars and what they offer. From that comes
  * the health strip, "What needs you" and the grid, with no second endpoint to keep in step.
  */
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
@@ -45,6 +46,7 @@ interface CollectiveMemberRow {
 
 interface CollectiveListEntry {
   id: string;
+  name?: string;
   hostVenueId: string;
   myVenueId: string;
   members: CollectiveMemberRow[];
@@ -208,12 +210,26 @@ export function CollectiveAreaClient({ currency = 'GBP' }: { currency?: string }
   }
 
   if (!collective) {
+    // A collective on the older model has no services of its own to run here, so the page says
+    // where its combined page is managed instead of claiming the venue is in no collective.
+    const legacy = collectiveList.find((c) => c.serviceModel !== 'replicas');
     return (
       <SectionCard elevated>
-        <SectionCard.Body className="py-10 text-center">
-          <p className="text-slate-600">
-            Your venue is not part of a collective yet. When it is, this is where you will run it.
-          </p>
+        <SectionCard.Body className="space-y-3 py-10 text-center">
+          {legacy ? (
+            <>
+              <p className="text-slate-700">
+                {collectiveCopy('ov.legacy.body', { collective: legacy.name ?? 'This collective' })}
+              </p>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/dashboard/settings?tab=booking-page">{collectiveCopy('ov.legacy.manage')}</Link>
+              </Button>
+            </>
+          ) : (
+            <p className="text-slate-600">
+              Your venue is not part of a collective yet. When it is, this is where you will run it.
+            </p>
+          )}
         </SectionCard.Body>
       </SectionCard>
     );

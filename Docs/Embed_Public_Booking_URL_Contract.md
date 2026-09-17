@@ -86,6 +86,17 @@ this page would otherwise conclude there is no way to link to one person.
   inactive slug.
 - There is deliberately no `?practitioner=` equivalent. One way to say a thing
   is enough, and the path form is the one already in the wild.
+- **Exception, collective hand-over only (2026-09-17).** While a venue's
+  appointments are served by a live venue collective page (the shared-services
+  model, `Docs/collective-one-venue-plan.md` §6.9), its own page and embed hand
+  over to `/book/c/<collective-slug>` (or `/embed/c/<collective-slug>`). The
+  collective page has no path segment per calendar, so the hand-over carries
+  the person as `?calendar=<unified_calendars.id>`, together with `date`,
+  `time`, `start` and the translated `service_id`. It is written only by the
+  hand-over (`handoverUrl` in `src/lib/linked-accounts/replicas/page-handover.ts`)
+  and read only by the collective page, which preselects that calendar when it
+  is on the page. It is not a partner-facing parameter: partners keep linking
+  to the venue's own address and path segment, and the hand-over does the rest.
 
 ## There is no duration parameter, on purpose
 

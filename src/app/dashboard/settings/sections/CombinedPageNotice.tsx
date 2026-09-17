@@ -81,11 +81,14 @@ export function CombinedPageScopeSwitch({
       <SectionCard.Header
         eyebrow="Venue collective"
         title={`This venue is part of ${collective.name}`}
-        description={
+        description={`${
           collective.isHost
-            ? `This venue shares one booking page with the other members of ${collective.name}, and hosts it. Guests who book with you use the combined page. This venue’s own page is separate.`
-            : `This venue shares one booking page with the other members of ${collective.name}. ${collective.hostVenueName} hosts it. Guests who book with you use the combined page. This venue’s own page is separate.`
-        }
+            ? `This venue shares one booking page with the other members of ${collective.name}, and hosts it.`
+            : `This venue shares one booking page with the other members of ${collective.name}. ${collective.hostVenueName} hosts it.`
+        } Guests who book with you use the combined page.${
+          // On shared services the status line below says what the own page does; it is not separate then.
+          collective.ownPage ? '' : ' This venue’s own page is separate.'
+        }`}
       />
       <SectionCard.Body className="space-y-3">
         <OwnPageStatusLine collective={collective} />

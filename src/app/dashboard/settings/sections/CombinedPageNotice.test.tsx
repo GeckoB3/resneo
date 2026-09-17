@@ -22,6 +22,7 @@ describe('CombinedPageScopeSwitch', () => {
     expect(screen.getByRole('tab', { name: 'Combined page (Plus 1 Staging)' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'This venue’s own page' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.queryByText(/served at this venue’s own address/)).toBeNull();
+    expect(screen.getByText(/own page is separate/)).toBeInTheDocument();
   });
 
   it('names the host for a member and notes an adopted address', () => {
@@ -50,6 +51,8 @@ describe('CombinedPageScopeSwitch', () => {
     );
     const status = screen.getByTestId('own-page-status');
     expect(status).toHaveTextContent('Guests who visit your own booking page are sent to the Plus 1 Staging page.');
+    // On shared services the own page is not separate, so the header does not say it is.
+    expect(screen.queryByText(/own page is separate/)).toBeNull();
     expect(status).toHaveTextContent(
       'Your own booking page now opens the Plus 1 Staging page. Your classes are still bookable at /book/plus-1.',
     );

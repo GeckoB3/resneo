@@ -13,6 +13,8 @@ A **collective** puts two or more linked venues on one public booking page, so y
 
 > **The one big idea:** the host runs the menu, and every venue runs its own diary. A client books a service from the host's menu with a person at one of the venues, and that booking, its payment and the client record belong to that venue.
 
+:::help-figure collective-model
+
 A collective sits on top of your account links. It does not change them, and leaving or ending a collective leaves every link exactly as it is. If you have not linked yet, start with [Link with another venue](/help/getting-started/linked-venues).
 
 ## Before you start

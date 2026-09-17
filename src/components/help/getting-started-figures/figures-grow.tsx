@@ -504,12 +504,60 @@ function ReferTrackingSvg() {
   );
 }
 
+function CollectiveModelSvg() {
+  const venue = (x: number, name: string, role: string, fill: string) => (
+    <g>
+      <rect x={x} y="150" width="200" height="150" rx="14" fill="#ffffff" stroke="#e2e8f0" />
+      <text x={x + 18} y="176" fill="#0f172a" fontSize="13" fontWeight="700">{name}</text>
+      <rect x={x + 130} y="163" width="54" height="18" rx="9" fill={fill} />
+      <text x={x + 157} y="176" fill="#00305C" fontSize="9" fontWeight="700" textAnchor="middle">{role}</text>
+      <text x={x + 18} y="200" fill="#64748b" fontSize="9" fontWeight="700" letterSpacing="0.08em">ITS OWN</text>
+      {['Calendars and hours', 'Clients and bookings', 'Payments (Stripe)'].map((label, i) => (
+        <g key={label}>
+          <circle cx={x + 24} cy={218 + i * 24} r="5" fill="#00A0A4" />
+          <text x={x + 36} y={222 + i * 24} fill="#0f172a" fontSize="11">{label}</text>
+        </g>
+      ))}
+    </g>
+  );
+  return (
+    <svg
+      viewBox="0 0 720 320"
+      className="h-auto w-full"
+      role="img"
+      aria-label="One collective booking page at the top shows the host's services. Below it, the host venue and a member venue each keep their own calendars and hours, clients and bookings, and payments."
+    >
+      {/* The page and the menu */}
+      <rect x="160" y="16" width="400" height="92" rx="14" fill="#00305C" />
+      <text x="180" y="42" fill="#C2F4F5" fontSize="9" fontWeight="700" letterSpacing="0.08em">ONE BOOKING PAGE</text>
+      <text x="180" y="62" fill="#ffffff" fontSize="14" fontWeight="700">Northside, /book/c/northside</text>
+      {['Haircut', 'Colour', 'Beard trim'].map((label, i) => (
+        <g key={label}>
+          <rect x={180 + i * 118} y="74" width="106" height="24" rx="12" fill="#003B6F" />
+          <text x={233 + i * 118} y="90" fill="#ffffff" fontSize="11" fontWeight="600" textAnchor="middle">{label}</text>
+        </g>
+      ))}
+      <text x="580" y="50" fill="#64748b" fontSize="11">Services set</text>
+      <text x="580" y="66" fill="#64748b" fontSize="11">by the host</text>
+
+      {/* Arrows down */}
+      <line x1="250" y1="112" x2="170" y2="144" stroke="#94a3b8" strokeWidth="2" />
+      <line x1="470" y1="112" x2="550" y2="144" stroke="#94a3b8" strokeWidth="2" />
+      <text x="360" y="136" fill="#64748b" fontSize="11" textAnchor="middle">Guests book a person at one venue</text>
+
+      {venue(60, 'Bright Cuts', 'HOST', '#C2F4F5')}
+      {venue(460, 'Light 3', 'MEMBER', '#E8EFF6')}
+    </svg>
+  );
+}
+
 export const GROW_FIGURES: Record<string, { title: string; caption: string; node: ReactNode }> = {
   "comms-lanes": { title: "Settings, Communications", caption: "Each guest message sits in its own card with an on/off switch, channel checkboxes, and a timing field where relevant.", node: <CommsLanesSvg /> },
   "comms-editor": { title: "Optional message editor and preview", caption: "Each active message has optional email and SMS text boxes with a character count and a Preview button.", node: <CommsEditorSvg /> },
   "reports-dashboard": { title: "Settings then Reports (Overview)", caption: "The Reports overview with a date range control, stat tiles, a chart, and per-report Export CSV buttons.", node: <ReportsDashboardSvg /> },
   "import-flow": { title: "The import wizard, step by step", caption: "The six wizard steps in order, with a note that the whole import can be undone for 24 hours.", node: <ImportFlowSvg /> },
   "import-mapping": { title: "Map columns", caption: "Your spreadsheet column headers on the left matched to ResNeo fields on the right.", node: <ImportMappingSvg /> },
+  "collective-model": { title: "How a collective works", caption: "The host sets the services on one booking page. Each venue keeps its own calendars, clients, bookings and payments. Names shown are examples.", node: <CollectiveModelSvg /> },
   "refer-flow": { title: "How the reward works", caption: "Sharing your code leads to bonus trial days for the new venue and a credit for you once they pay. Amounts shown are examples; your credit equals a free month of your own plan.", node: <ReferFlowSvg /> },
   "refer-tracking": { title: "Refer & Earn tracking", caption: "Three summary cards sit above the referrals table with coloured status pills. Amounts and venue names shown are examples.", node: <ReferTrackingSvg /> },
 };

@@ -63,6 +63,7 @@ import {
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { bookingRequiresSignIn } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
 import { resolveStaffBookingActor, type StaffOverrideActor } from '@/lib/booking/staff-availability-override';
 import { resolveCollectiveServiceAttribution } from '@/lib/linked-accounts/collective-booking-override';
@@ -275,8 +276,11 @@ export async function POST(request: NextRequest) {
     // request must not answer under two auth models (P0-12).
     const authClient = await createRouteHandlerClient(request);
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
-      requireAccountLogin: Boolean(
-        (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,
+      // D32: through a shared-services collective page, the host's setting decides.
+      requireAccountLogin: await bookingRequiresSignIn(
+        supabase,
+        collectiveId,
+        Boolean((venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings),
       ),
       authSupabase: authClient,
       bookingEmail: customerEmail,

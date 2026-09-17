@@ -32,6 +32,7 @@ import {
   MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
 import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { bookingRequiresSignIn } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import {
   ensureOverrideServiceInInput,
   isBookingDateInPast,
@@ -320,8 +321,11 @@ export async function POST(request: NextRequest) {
     // request must not answer under two auth models (P0-12).
     const authClient = await createRouteHandlerClient(request);
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
-      requireAccountLogin: Boolean(
-        (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,
+      // D32: through a shared-services collective page, the host's setting decides.
+      requireAccountLogin: await bookingRequiresSignIn(
+        supabase,
+        collectiveIdFromVenue,
+        Boolean((venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings),
       ),
       authSupabase: authClient,
       bookingEmail: customerEmail,

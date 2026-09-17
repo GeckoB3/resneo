@@ -6,6 +6,7 @@ import { parkedServiceRefusal } from '@/lib/linked-accounts/replicas/parking';
 import { isStaffBookingSource, loadStaffOnlyServiceIds } from '@/lib/booking/staff-only-services';
 import { apiError } from '@/lib/api/error-codes';
 import { collectiveDbError } from '@/lib/linked-accounts/replicas/db-errors';
+import { bookingRequiresSignIn } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import { notifyPageBooking } from '@/lib/linked-accounts/replicas/collective-notices';
 import type { RpcClient } from '@/lib/linked-accounts/replicas/crons';
 import {
@@ -216,6 +217,7 @@ export async function POST(request: NextRequest) {
     // and resolve the chosen (offering, calendar) to the real owning venue + source
     // service so the booking is created normally and the effective price/duration
     // override is applied via collective_service_item_id.
+    let viaCollectiveId: string | null = null;
     if (parsed.data.practitioner_id && parsed.data.appointment_service_id) {
       const adminForCollective = getSupabaseAdminClient();
       if (await isCollectiveId(adminForCollective, parsed.data.venue_id)) {
@@ -235,6 +237,7 @@ export async function POST(request: NextRequest) {
         // collective id). Without this, combined-page bookings carried no
         // collective_id/collective_service_item_id at all.
         parsed.data.collective_id = parsed.data.venue_id;
+        viaCollectiveId = parsed.data.venue_id;
         parsed.data.collective_service_item_id = parsed.data.appointment_service_id;
         parsed.data.venue_id = target.venueId;
         parsed.data.appointment_service_id = target.sourceServiceId;
@@ -300,8 +303,11 @@ export async function POST(request: NextRequest) {
     // request must not answer under two auth models (P0-12).
     const authClient = await createRouteHandlerClient(request);
     const loginDenied = await nextResponseIfVenueRequiresAccountLoginForBooking({
-      requireAccountLogin: Boolean(
-        (venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings,
+      // D32: through a shared-services collective page, the host's setting decides.
+      requireAccountLogin: await bookingRequiresSignIn(
+        supabase,
+        viaCollectiveId,
+        Boolean((venue as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings),
       ),
       authSupabase: authClient,
       bookingEmail: email,

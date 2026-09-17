@@ -13,6 +13,7 @@
  */
 
 import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
+import { hostSignInRequirement } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import type { PublicCatalogueProvider } from '@/lib/linked-accounts/catalogue';
 import type { ProviderExclusion } from '@/lib/linked-accounts/replicas/derived-catalogue';
 import { inheritCollectivePageConfigFromHost } from '@/lib/linked-accounts/collective-page-config';
@@ -132,14 +133,19 @@ export async function loadCollectiveVenuePublic(
   // enforces that venue's "require an account to book" setting. Surface the gate
   // on the page whenever any bookable member requires it, so customers sign in
   // up front instead of being refused at the final step.
-  let requireAccountLogin = false;
+  // D32: on shared services the host's setting alone decides; the older model keeps the rule above.
+  const hostSignIn = await hostSignInRequirement(admin, col.id);
+  let requireAccountLogin = hostSignIn ?? false;
   if (memberVenueIds.length > 0) {
     const { data: memberRows } = await admin
       .from('venues')
       .select('booking_page_config, require_account_login_for_bookings')
       .in('id', memberVenueIds);
     for (const row of memberRows ?? []) {
-      if ((row as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings) {
+      if (
+        hostSignIn === null &&
+        (row as { require_account_login_for_bookings?: boolean }).require_account_login_for_bookings
+      ) {
         requireAccountLogin = true;
       }
       const tp = ((row.booking_page_config as BookingPageConfig | null) ?? {}).team_profiles ?? {};

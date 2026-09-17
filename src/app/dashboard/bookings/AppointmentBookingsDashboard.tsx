@@ -1612,6 +1612,13 @@ export function AppointmentBookingsDashboard({
                   {durationBarLabel}
                 </span>
               ) : null}
+              {b.collective_id ? (
+                <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}>
+                  <Pill variant="neutral" size="sm">
+                    via {b.collective_name ?? 'collective'}
+                  </Pill>
+                </span>
+              ) : null}
               {(b.addons_count ?? 0) > 0 && (
                 <span className={expanded ? 'inline-flex shrink-0' : 'hidden shrink-0 sm:inline-flex'}>
                   <Pill variant="info" size="sm">

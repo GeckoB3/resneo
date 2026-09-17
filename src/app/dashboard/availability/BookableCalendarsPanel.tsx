@@ -98,6 +98,8 @@ export interface BookableCalendarsPanelProps {
   onCalendarReorderSaved?: (orderedIds: string[]) => void;
   onEditCalendar: (p: BookableCalendarRow) => void | Promise<void>;
   onAddCalendar: () => void;
+  /** Which booking models the venue has switched on; a section shows only for a model that is on. */
+  shows?: { classes: boolean; resources: boolean; events: boolean };
 }
 
 function sortCalendarsByOrder(rows: BookableCalendarRow[]): BookableCalendarRow[] {
@@ -182,6 +184,7 @@ export function BookableCalendarsPanel({
   onCalendarReorderSaved,
   onEditCalendar,
   onAddCalendar,
+  shows = { classes: true, resources: true, events: true },
 }: BookableCalendarsPanelProps) {
   const [calendarRenameSuccess, setCalendarRenameSuccess] = useState<string | null>(null);
   const [venueSlug, setVenueSlug] = useState<string | null>(null);
@@ -450,13 +453,13 @@ export function BookableCalendarsPanel({
                     Inactive
                   </span>
                 )}
-                {columnAlerts.length > 0 && (
+                {shows.resources && columnAlerts.length > 0 && (
                   <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 ring-1 ring-amber-200/80">
                     Conflict
                   </span>
                 )}
               </div>
-              {columnAlerts.length > 0 && (
+              {shows.resources && columnAlerts.length > 0 && (
                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-950">
                   <p className="font-semibold text-amber-950">Resource availability overlap</p>
                   <ul className="mt-1 list-inside list-disc space-y-0.5 text-amber-900/95">
@@ -492,6 +495,7 @@ export function BookableCalendarsPanel({
                     )}
                   </dd>
                 </div>
+                {shows.classes ? (
                 <div>
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <ClassIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -511,6 +515,8 @@ export function BookableCalendarsPanel({
                     )}
                   </dd>
                 </div>
+                ) : null}
+                {shows.resources ? (
                 <div>
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <ResourceIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -530,6 +536,8 @@ export function BookableCalendarsPanel({
                     )}
                   </dd>
                 </div>
+                ) : null}
+                {shows.events ? (
                 <div className="col-span-2 sm:col-span-1">
                   <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                     <EventsIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -597,6 +605,7 @@ export function BookableCalendarsPanel({
                     )}
                   </dd>
                 </div>
+                ) : null}
               </dl>
             </div>
           </div>

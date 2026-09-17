@@ -8,6 +8,7 @@
  * its solo-page behaviour (D2).
  */
 
+import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, btnPrimary, btnSecondary, btnDanger } from './linked-accounts-ui';
 import { collectivePublicPath, collectivePublicUrl } from '@/lib/linked-accounts/collective-public-url';
@@ -664,13 +665,16 @@ export function CombinedPageManagerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- settings/action are stable enough; rebuild on the data deps below
   }, [collective, isHost, busy, logoUrl, coverUrl, importSources, pageServices, pageTeam, patchCollective, uploadPageAsset, getPageConfig, savePageConfig]);
 
-  const tabs: { key: TabKey; label: string }[] = isHost
-    ? [
-        { key: 'page', label: 'Page' },
-        { key: 'services', label: 'Services & calendars' },
-        { key: 'members', label: 'Members' },
-      ]
-    : [];
+  const sharedServices = collective.serviceModel === 'replicas';
+  const tabs: { key: TabKey; label: string }[] = !isHost
+    ? []
+    : sharedServices
+      ? [{ key: 'page', label: 'Page' }]
+      : [
+          { key: 'page', label: 'Page' },
+          { key: 'services', label: 'Services & calendars' },
+          { key: 'members', label: 'Members' },
+        ];
 
     const pendingLabel =
     pendingCount > 0 ? `${pendingCount} unsaved calendar change${pendingCount === 1 ? '' : 's'}` : null;
@@ -722,11 +726,12 @@ export function CombinedPageManagerPanel({
                 <span className="text-rose-600">{pageSave.message ?? 'Save failed.'}</span>
               ) : null}
             </div>
+            {sharedServices ? <SharedServicesPointer /> : null}
             <BookingPageEditor adapter={pageAdapter} reporter={pageReporter} />
           </div>
         ) : null}
 
-        {tab === 'members' && isHost ? (
+        {tab === 'members' && isHost && !sharedServices ? (
           <MembersSection
             collective={collective}
             eligibleLinks={eligibleLinks}
@@ -736,7 +741,7 @@ export function CombinedPageManagerPanel({
           />
         ) : null}
 
-        {tab === 'services' && isHost ? (
+        {tab === 'services' && isHost && !sharedServices ? (
           loading ? (
             <div className="space-y-2" aria-busy="true">
               <span className="sr-only">Loading the catalogue…</span>
@@ -795,7 +800,9 @@ export function CombinedPageManagerPanel({
       title={`Combined booking page: ${collective.name}`}
       description={
         isHost
-          ? 'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.'
+          ? collective.serviceModel === 'replicas'
+            ? COMBINED_PAGE_DESCRIPTION_SHARED
+            : COMBINED_PAGE_DESCRIPTION_LEGACY
           : 'This combined page is managed by the host venue.'
       }
       footer={
@@ -934,9 +941,20 @@ export function CombinedPageMemberSummary({
   return (
     <div className="space-y-5" data-testid="combined-page-member-summary">
       <p className="text-sm text-slate-600">
-        {host} hosts {collective.name} and manages its combined booking page: the services on it, which
-        calendars are offered, its headings, photos and branding. Your services appear there with the
-        price, length and availability set under your own Services settings.
+        {collective.serviceModel === 'replicas' ? (
+          <>
+            {host} hosts {collective.name} and manages its booking page and the services on it, with their
+            prices, lengths, deposits, options and forms, for every venue. You choose which of your
+            calendars offer each one on your Services page, and your own hours and closures decide when
+            they are free.
+          </>
+        ) : (
+          <>
+            {host} hosts {collective.name} and manages its combined booking page: the services on it, which
+            calendars are offered, its headings, photos and branding. Your services appear there with the
+            price, length and availability set under your own Services settings.
+          </>
+        )}
       </p>
       <section className="space-y-2 rounded-xl border border-slate-200 p-4">
         <p className="text-sm font-bold text-slate-900">Combined page address</p>
@@ -1268,6 +1286,28 @@ function hostVenueName(collective: CollectiveView): string {
   );
 }
 
+export const COMBINED_PAGE_DESCRIPTION_LEGACY =
+  'Your combined page works like a single venue. Set it up here: design, services & calendars, and members.';
+export const COMBINED_PAGE_DESCRIPTION_SHARED =
+  'Your combined page works like a single venue. Set up how it looks here.';
+
+/** Shared services: where the services, calendars and venues of the page are managed now. */
+function SharedServicesPointer() {
+  return (
+    <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+      The services on the page and the calendars that offer them are chosen on your{' '}
+      <Link href="/dashboard/appointment-services" className="font-medium text-brand-700 underline underline-offset-2">
+        Services
+      </Link>{' '}
+      page. Venues, invitations and hosting are in the{' '}
+      <Link href="/dashboard/collective" className="font-medium text-brand-700 underline underline-offset-2">
+        Collective
+      </Link>{' '}
+      area.
+    </p>
+  );
+}
+
 /**
  * The combined page has no settings of its own for the things below: it works
  * like one venue and follows the HOST venue. Say so, because a host looking for
@@ -1292,11 +1332,20 @@ function HostInheritedSettingsNote({ collective }: { collective: CollectiveView 
         <li>Address, phone and website shown in the header: Settings, Profile. Opening hours: Settings, Business hours.</li>
         <li>Currency and wording (for example &ldquo;appointment&rdquo;): Settings, Profile.</li>
       </ul>
-      <p className="text-xs text-slate-600">
-        Prices, durations, deposits and cancellation notice come from each member venue&rsquo;s own
-        service, because every booking is made with that venue. If any member requires customers to
-        sign in to book, the combined page asks them to sign in too.
-      </p>
+      {collective.serviceModel === 'replicas' ? (
+        <p className="text-xs text-slate-600">
+          The services on the page, with their prices, lengths, deposits, options, add-ons and forms, are
+          {' '}{host}&rsquo;s, and apply at every venue. Guests are asked to sign in only when {host} asks for
+          it: Settings, Booking settings. Each booking, its payment and the client record belong to the
+          venue the guest books with.
+        </p>
+      ) : (
+        <p className="text-xs text-slate-600">
+          Prices, durations, deposits and cancellation notice come from each member venue&rsquo;s own
+          service, because every booking is made with that venue. If any member requires customers to
+          sign in to book, the combined page asks them to sign in too.
+        </p>
+      )}
     </section>
   );
 }

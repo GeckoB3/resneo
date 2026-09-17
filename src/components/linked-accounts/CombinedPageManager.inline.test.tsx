@@ -158,3 +158,29 @@ describe('member summary', () => {
     expect(await screen.findByText(/None of your calendars is offered/)).toBeInTheDocument();
   });
 });
+
+describe('on shared services', () => {
+  it('keeps only the page design here, and points to Services and the Collective area', () => {
+    installFetch();
+    render(
+      <CombinedPageManagerPanel
+        inline
+        collective={{ ...collectiveView(), serviceModel: 'replicas' }}
+        eligibleLinks={[]}
+        onChanged={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('tablist', { name: 'Combined page settings' })).toBeNull();
+    expect(screen.queryByText('Services & calendars')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Services' })).toHaveAttribute('href', '/dashboard/appointment-services');
+    expect(screen.getByRole('link', { name: 'Collective' })).toHaveAttribute('href', '/dashboard/collective');
+    expect(screen.queryByText(/come from each member venue/)).toBeNull();
+  });
+
+  it('tells a member the host sets the services, not its own settings', async () => {
+    installFetch();
+    render(<CombinedPageMemberSummary collective={{ ...collectiveView(), isHost: false, serviceModel: 'replicas' }} />);
+    expect(screen.getByTestId('combined-page-member-summary')).toHaveTextContent(/for every venue/);
+    expect(screen.queryByText(/set under your own Services settings/)).toBeNull();
+  });
+});

@@ -49,7 +49,11 @@ export default async function CalendarAvailabilitySettingsPage() {
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-4xl">
         <Suspense fallback={<AppointmentAvailabilitySkeleton />}>
-          <AppointmentAvailabilitySettings isAdmin={isAdmin} currentStaffId={staff.id} />
+          <AppointmentAvailabilitySettings
+            isAdmin={isAdmin}
+            currentStaffId={staff.id}
+            models={{ bookingModel, enabledModels }}
+          />
         </Suspense>
       </div>
     </div>

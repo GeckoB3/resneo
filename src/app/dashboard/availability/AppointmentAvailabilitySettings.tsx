@@ -8,7 +8,8 @@ import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
-import type { TimeRange, WorkingHours } from '@/types/booking-models';
+import type { BookingModel, TimeRange, WorkingHours } from '@/types/booking-models';
+import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { StaffLeaveCalendarPanel } from '@/app/dashboard/availability/StaffLeaveCalendarPanel';
 import { BookableCalendarsPanel } from '@/app/dashboard/availability/BookableCalendarsPanel';
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
@@ -217,11 +218,22 @@ export function AppointmentAvailabilitySettings({
   isAdmin,
   currentStaffId,
   embedded = null,
+  models = null,
 }: {
   isAdmin: boolean;
   currentStaffId: string | null;
   embedded?: AppointmentAvailabilityEmbedOptions | null;
+  /**
+   * The venue's booking models. Classes, resources and events appear here only while that model is
+   * switched on; a room left over from when resources were on is not a calendar. Null shows all.
+   */
+  models?: { bookingModel: BookingModel; enabledModels: BookingModel[] } | null;
 }) {
+  const modelOn = (model: BookingModel) =>
+    models ? venueExposesBookingModel(models.bookingModel, models.enabledModels, model) : true;
+  const resourcesOn = modelOn('resource_booking');
+  const classesOn = modelOn('class_session');
+  const eventsOn = modelOn('event_ticket');
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -345,8 +357,11 @@ export function AppointmentAvailabilitySettings({
    * calendar, one place to set its schedule, whatever type it is.
    */
   const scheduleCalendars = useMemo(
-    () => [...practitioners].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
-    [practitioners],
+    () =>
+      [...practitioners]
+        .filter((p) => resourcesOn || (p.calendar_type ?? 'practitioner') !== 'resource')
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [practitioners, resourcesOn],
   );
 
   /**
@@ -1234,9 +1249,10 @@ export function AppointmentAvailabilitySettings({
                 isAdmin={isAdmin}
                 services={services}
                 pLinks={pLinks}
-                classTypes={classTypes}
-                resources={resourceRows}
-                events={experienceEvents}
+                classTypes={classesOn ? classTypes : []}
+                resources={resourcesOn ? resourceRows : []}
+                events={eventsOn ? experienceEvents : []}
+                shows={{ classes: classesOn, resources: resourcesOn, events: eventsOn }}
                 calendarColumnAlerts={calendarColumnAlerts}
                 entitlement={entitlement}
                 onCalendarsChanged={() => {
@@ -1318,7 +1334,9 @@ export function AppointmentAvailabilitySettings({
                           <label className="mb-1.5 block text-sm font-medium text-slate-700">Appointment services</label>
                           <p className="mb-2 text-xs text-slate-500">
                             Which services can guests book on this column? The same service can appear on several columns.
-                            Leave empty if this column is only for classes or resources.
+                            {classesOn || resourcesOn
+                              ? `Leave empty if this column is only for ${[classesOn ? 'classes' : null, resourcesOn ? 'resources' : null].filter(Boolean).join(' or ')}.`
+                              : null}
                           </p>
                           <div className="max-h-36 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-3">
                             {services.map((svc) => (
@@ -1387,7 +1405,7 @@ export function AppointmentAvailabilitySettings({
                         </div>
                       )}
 
-                      {resourceRows.length > 0 && (
+                      {resourcesOn && resourceRows.length > 0 && (
                         <div>
                           <label className="mb-1.5 block text-sm font-medium text-slate-700">Resources on this column</label>
                           <p className="mb-2 text-xs text-slate-500">
@@ -1421,7 +1439,7 @@ export function AppointmentAvailabilitySettings({
                         </div>
                       )}
 
-                      {experienceEvents.some((e) => e.is_active) && (
+                      {eventsOn && experienceEvents.some((e) => e.is_active) && (
                         <div>
                           <label className="mb-1.5 block text-sm font-medium text-slate-700">Ticketed events</label>
                           <p className="mb-2 text-xs text-slate-500">

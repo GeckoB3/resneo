@@ -9047,6 +9047,7 @@ export function PractitionerCalendarView({
           currentStaffId={currentStaffId}
           date={activeDayDate}
           bookingModel={bookingModel}
+          enabledModels={enabledModels}
           onClose={() => {
             setHoursQuickEditOpen(false);
             // Hours may have changed: re-read venue hours and the calendar

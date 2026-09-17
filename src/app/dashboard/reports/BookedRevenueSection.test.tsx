@@ -133,7 +133,7 @@ describe('BookedRevenueSection', () => {
     expect(table).toHaveTextContent('Through High Street');
     expect(table).toHaveTextContent('£75.00');
     expect(table).toHaveTextContent('£80.00');
-    expect(screen.getByText(/members of High Street with you/)).toBeInTheDocument();
+    expect(screen.getByText(/part of High Street with you/)).toBeInTheDocument();
     expect(screen.queryByText(/shared with you through a linked account/)).not.toBeInTheDocument();
   });
 });

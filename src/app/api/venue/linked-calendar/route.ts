@@ -1,4 +1,4 @@
-import { normalizeEnabledModels, venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
 import { canonicalServiceShape, parseProcessingTimeBlocksFromDb } from '@/lib/appointments/processing-time';
 import { NextRequest, NextResponse, after } from 'next/server';
@@ -76,13 +76,16 @@ async function loadLinkedResourcesForCalendar(
   // Rooms and other resources show only while the owning venue has resources switched on.
   const { data: venueRow } = await admin
     .from('venues')
-    .select('booking_model, enabled_models')
+    .select('pricing_tier, booking_model, enabled_models, active_booking_models')
     .eq('id', venueId)
     .maybeSingle();
-  const primary = ((venueRow?.booking_model as BookingModel | null) ?? 'unified_scheduling') as BookingModel;
-  if (!venueExposesBookingModel(primary, normalizeEnabledModels(venueRow?.enabled_models, primary), 'resource_booking')) {
-    return [];
-  }
+  const activeModels = resolveActiveBookingModels({
+    pricingTier: venueRow?.pricing_tier as string | null | undefined,
+    bookingModel: venueRow?.booking_model as BookingModel | undefined,
+    enabledModels: venueRow?.enabled_models,
+    activeBookingModels: venueRow?.active_booking_models,
+  });
+  if (!activeModels.includes('resource_booking')) return [];
   const { data: rows } = await admin
     .from('unified_calendars')
     .select(

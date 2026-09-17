@@ -357,8 +357,8 @@ function CollectiveRow({
           </div>
           <p className="mt-1 text-xs text-slate-600">
             {collective.activeMemberCount} active{' '}
-            {collective.activeMemberCount === 1 ? 'member' : 'members'} ·{' '}
-            {collective.members.map((m) => m.venueName).join(', ')}
+            {collective.activeMemberCount === 1 ? 'member' : 'members'}
+            {collective.members.length > 0 ? ` · ${collective.members.map((m) => m.venueName).join(', ')}` : ''}
           </p>
           {!dissolved && collective.activeMemberCount >= 2 ? (
             <a
@@ -398,9 +398,21 @@ function CollectiveRow({
             ) : collective.isHost ? (
               // Only the host curates the combined page; members take part automatically
               // (their services use their own settings) and can View it or Leave below.
-              <button type="button" className={btnPrimary} disabled={busy} onClick={onManage}>
-                Manage combined page
-              </button>
+              <>
+                {collective.serviceModel === 'replicas' && !dissolved ? (
+                  <a href="/dashboard/collective" className={btnPrimary}>
+                    Open the Collective area
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  className={collective.serviceModel === 'replicas' ? btnSecondary : btnPrimary}
+                  disabled={busy}
+                  onClick={onManage}
+                >
+                  Manage combined page
+                </button>
+              </>
             ) : null}
             {isActiveMember && !collective.isHost ? (
               <button

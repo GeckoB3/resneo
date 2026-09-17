@@ -390,8 +390,9 @@ export function BookedRevenueSection({
               ) : null}
               {collective && collectiveVenueNames.length > 0 ? (
                 <p className="mb-2 text-sm text-slate-500">
-                  Includes {listNames(collectiveVenueNames)}, members of {collective.name} with you. Every member of a
-                  collective sees each member&apos;s booked revenue, venue by venue.
+                  Includes {listNames(collectiveVenueNames)}, {collectiveVenueNames.length === 1 ? 'which is' : 'which are'}{' '}
+                  part of {collective.name} with you. Every venue in a collective sees each venue&apos;s booked
+                  revenue, venue by venue.
                 </p>
               ) : null}
               {linkVenueNames.length > 0 ? (

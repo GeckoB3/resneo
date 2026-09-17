@@ -7,6 +7,7 @@ import { OpeningHoursSection } from '@/app/dashboard/settings/sections/OpeningHo
 import { BusinessClosuresSection } from '@/app/dashboard/settings/sections/BusinessClosuresSection';
 import type { VenueSettings } from '@/app/dashboard/settings/types';
 import { readResponseJson } from '@/lib/http/read-response-json';
+import type { BookingModel } from '@/types/booking-models';
 
 /**
  * The diary's clock button.
@@ -24,6 +25,7 @@ export function CalendarHoursQuickEdit({
   currentStaffId,
   date,
   bookingModel,
+  enabledModels,
   onClose,
 }: {
   isAdmin: boolean;
@@ -31,6 +33,8 @@ export function CalendarHoursQuickEdit({
   /** yyyy-mm-dd the diary is showing; the closures tabs open with it picked. */
   date: string;
   bookingModel: string;
+  /** The venue's other booking models, so a room shows here only while resources are on. */
+  enabledModels?: BookingModel[];
   onClose: () => void;
 }) {
   const [screen, setScreen] = useState<'choose' | 'calendar' | 'business'>(isAdmin ? 'choose' : 'calendar');
@@ -87,6 +91,7 @@ export function CalendarHoursQuickEdit({
           isAdmin={isAdmin}
           currentStaffId={currentStaffId}
           embedded={{ initialTab: 'daysoff', initialDate: date }}
+          models={enabledModels ? { bookingModel: bookingModel as BookingModel, enabledModels } : null}
         />
       </Dialog>
     );

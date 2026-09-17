@@ -26,7 +26,7 @@ import { createClient } from '@supabase/supabase-js';
 import { canonicalJson, fenceError, parseArgs, planBlocker, reportHash, summarisePlan } from './collective-replicas-migrate-lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-config({ path: join(__dirname, '..', '.env.local') });
+config({ path: join(__dirname, '..', '.env.local'), quiet: true });
 
 let args;
 try {

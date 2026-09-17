@@ -16,6 +16,7 @@ import type { ServiceCategoryRef } from '@/lib/booking/service-categories';
 import { hostSignInRequirement } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import type { PublicCatalogueProvider } from '@/lib/linked-accounts/catalogue';
 import type { ProviderExclusion } from '@/lib/linked-accounts/replicas/derived-catalogue';
+import { collectiveCopy } from '@/lib/linked-accounts/collective-copy';
 import { inheritCollectivePageConfigFromHost } from '@/lib/linked-accounts/collective-page-config';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenuePublic } from '@/components/booking/types';
@@ -257,6 +258,8 @@ export interface CollectiveCatalogService {
    * still book it. Absent on the public catalogue, which leaves those calendars out entirely.
    */
   staff_note?: string;
+  /** Staff only: the reason behind `staff_note`, for the create routes (D33 refuses `behind`). */
+  staff_exclusion?: ProviderExclusion;
 }
 
 export interface CollectiveCatalogPractitioner {
@@ -283,7 +286,7 @@ export function staffNoteForExclusion(reason: ProviderExclusion, venueName: stri
     case 'forms':
       return `Forms are switched off at ${venueName}, so its form cannot be collected there.`;
     case 'behind':
-      return `This service is still updating at ${venueName}. Guests cannot book it there until it catches up.`;
+      return collectiveCopy('staff.error.updating', { venue: venueName });
     case 'suspended':
       return `${venueName} is suspended in the collective, so guests cannot book it there.`;
     case 'staff_only':
@@ -506,11 +509,15 @@ async function loadCollectiveAppointmentCatalogUncached(
 
   for (const [itemIndex, item] of catalogue.items.entries()) {
     const excludedHere = options?.includeExcludedForStaff ? catalogue.excludedByItem?.[item.id] ?? [] : [];
-    const providersForBuild: { provider: PublicCatalogueProvider; note?: string }[] = [
+    const providersForBuild: { provider: PublicCatalogueProvider; note?: string; reason?: ProviderExclusion }[] = [
       ...item.providers.map((provider) => ({ provider })),
-      ...excludedHere.map(({ provider, reason }) => ({ provider, note: staffNoteForExclusion(reason, provider.venueName) })),
+      ...excludedHere.map(({ provider, reason }) => ({
+        provider,
+        reason,
+        note: staffNoteForExclusion(reason, provider.venueName),
+      })),
     ];
-    for (const { provider, note } of providersForBuild) {
+    for (const { provider, note, reason } of providersForBuild) {
       const data = venueData[provider.venueId];
       if (!data) continue;
       const calendarIds = provider.practitionerId
@@ -544,6 +551,7 @@ async function loadCollectiveAppointmentCatalogUncached(
         entry.services.push({
           ...(options?.everyCalendar ? { assigned: true } : {}),
           ...(note ? { staff_note: note } : {}),
+          ...(reason ? { staff_exclusion: reason } : {}),
           id: item.id,
           name: item.name,
           description: item.description,

@@ -81,9 +81,8 @@ import {
   overrideWarningsForInterval,
   PAST_DATE_OVERRIDE_ERROR,
   recordAvailabilityOverrideEvent,
-  resolveOverrideCollectiveTarget,
+  resolveCollectiveTargetForRequest,
 } from '@/lib/booking/staff-availability-override';
-import { resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { recordBookingWriteAudit } from '@/lib/linked-accounts/audit';
 import { notifyCrossVenueBookingWrite } from '@/lib/linked-accounts/notifications';
 
@@ -272,27 +271,25 @@ export async function POST(request: NextRequest) {
         if (!parsed.data.practitioner_id || !parsed.data.appointment_service_id) {
           return NextResponse.json({ error: 'Choose a calendar and a service.' }, { status: 400 });
         }
-        const target = staffOverride
-          ? await resolveOverrideCollectiveTarget(admin, {
-              collectiveId: collective.collectiveId,
-              offeringId: parsed.data.appointment_service_id,
-              calendarId: parsed.data.practitioner_id,
-            })
-          : await resolveCombinedBookingTarget(admin, {
-              collectiveId: collective.collectiveId,
-              offeringId: parsed.data.appointment_service_id,
-              calendarId: parsed.data.practitioner_id,
-            });
-        if (!target) {
+        const resolved = await resolveCollectiveTargetForRequest(
+          admin,
+          {
+            collectiveId: collective.collectiveId,
+            offeringId: parsed.data.appointment_service_id,
+            calendarId: parsed.data.practitioner_id,
+          },
+          staffOverride ? 'override' : 'staff',
+        );
+        if (!resolved.ok) {
           return NextResponse.json(
             {
-              error: staffOverride
-                ? 'That venue has no copy of this service, so it cannot be booked there.'
-                : 'That service is not currently bookable on this calendar.',
+              error: resolved.code || staffOverride ? resolved.error : 'That service is not currently bookable on this calendar.',
+              ...(resolved.code ? { code: resolved.code } : {}),
             },
-            { status: 400 },
+            { status: resolved.code ? 409 : 400 },
           );
         }
+        const target = resolved.target;
         collectiveAttribution = {
           collectiveId: collective.collectiveId,
           offeringId: parsed.data.appointment_service_id,

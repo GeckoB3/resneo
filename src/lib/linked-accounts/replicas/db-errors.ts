@@ -48,7 +48,6 @@ export const COLLECTIVE_PREFIXED_CODES = [
   'COLLECTIVE_MOVE_SERVICE',
   'COLLECTIVE_MOVE_NOT_ALLOWED',
   'COLLECTIVE_MIGRATION_REFUSED',
-  'COLLECTIVE_LINKS_BEHIND',
 ] as const satisfies readonly ApiErrorCode[];
 
 export type CollectiveDbErrorCode =
@@ -122,8 +121,6 @@ function prose(code: CollectiveDbErrorCode, names: CollectiveNames): string {
       return `This booking cannot be moved to that venue in ${collective}.`;
     case 'COLLECTIVE_MIGRATION_REFUSED':
       return `${collective} cannot be moved to shared services in its current state. Check the migration report.`;
-    case 'COLLECTIVE_LINKS_BEHIND':
-      return `Some venues' copies of the ${collective} services are still being set up. Try again once they are up to date.`;
   }
 }
 

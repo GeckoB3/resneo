@@ -31,7 +31,7 @@ import {
   MAX_APPOINTMENT_CORE_DURATION_MINUTES,
   MIN_APPOINTMENT_CORE_DURATION_MINUTES,
 } from '@/lib/availability/appointment-engine';
-import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { isCollectiveId } from '@/lib/linked-accounts/collective-booking-bridge';
 import { bookingRequiresSignIn } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import {
   ensureOverrideServiceInInput,
@@ -40,7 +40,7 @@ import {
   PAST_DATE_OVERRIDE_ERROR,
   prefixWarnings,
   recordAvailabilityOverrideEvent,
-  resolveOverrideCollectiveTarget,
+  resolveCollectiveTargetForRequest,
   resolveStaffBookingActor,
   resolveStaffOverrideActor,
   type StaffOverrideActor,
@@ -259,17 +259,16 @@ export async function POST(request: NextRequest) {
       const resolved: SegmentEntry[] = [];
       let owningVenueId: string | null = null;
       for (const s of rawServices) {
-        const target = staffOverride
-          ? await resolveOverrideCollectiveTarget(supabase, {
-              collectiveId: requestedVenueId,
-              offeringId: s.service_id,
-              calendarId: s.practitioner_id,
-            })
-          : await resolveCombinedBookingTarget(supabase, {
-              collectiveId: requestedVenueId,
-              offeringId: s.service_id,
-              calendarId: s.practitioner_id,
-            });
+        // Staff sources are checked below (the staff actor) before anything is written.
+        const found = await resolveCollectiveTargetForRequest(
+          supabase,
+          { collectiveId: requestedVenueId, offeringId: s.service_id, calendarId: s.practitioner_id },
+          staffOverride ? 'override' : source === 'phone' || source === 'walk-in' ? 'staff' : 'public',
+        );
+        if (!found.ok && found.code) {
+          return NextResponse.json({ error: found.error, code: found.code }, { status: 409 });
+        }
+        const target = found.ok ? found.target : null;
         if (!target || (owningVenueId && target.venueId !== owningVenueId)) {
           return NextResponse.json(
             { error: 'This booking option is no longer available.' },

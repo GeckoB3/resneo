@@ -23,7 +23,9 @@ import { getVenueStaff, type VenueStaff } from '@/lib/venue-auth';
 import { resolveStaffCollectiveScope } from '@/lib/linked-accounts/collective-staff-scope';
 import { resolveLinkedStaffCreateScope } from '@/lib/booking/staff-booking-access';
 import {
+  resolveCollectiveBookingTarget,
   resolveCombinedBookingTarget,
+  type CollectiveTargetResult,
   type CombinedBookingTarget,
 } from '@/lib/linked-accounts/collective-booking-bridge';
 import { loadCollectiveAppointmentCatalog } from '@/lib/linked-accounts/collective-venue';
@@ -130,6 +132,24 @@ export async function resolveOverrideCollectiveTarget(
     pricePence: service.price_pence,
     durationMinutes: service.duration_minutes,
   };
+}
+
+/**
+ * The target a request books on the collective, for its audience: the page's rules for guests and
+ * staff (a venue still catching up is refused either way, D33), and for the staff override any copy
+ * at the calendar's venue as well. Pass `staff` only once the caller is known to be staff.
+ */
+export async function resolveCollectiveTargetForRequest(
+  admin: SupabaseClient,
+  params: { collectiveId: string; offeringId: string; calendarId: string },
+  mode: 'public' | 'staff' | 'override',
+): Promise<CollectiveTargetResult> {
+  const result = await resolveCollectiveBookingTarget(admin, params, mode === 'public' ? 'public' : 'staff');
+  if (result.ok || result.code || mode !== 'override') return result;
+  const target = await resolveOverrideCollectiveTarget(admin, params);
+  return target
+    ? { ok: true, target }
+    : { ok: false, code: null, error: 'That venue has no copy of this service, so it cannot be booked there.' };
 }
 
 /** The one date rule the override keeps: nothing is booked into the past. */

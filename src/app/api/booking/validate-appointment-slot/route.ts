@@ -21,7 +21,7 @@ import {
   isBookingDateInPast,
   overrideWarningsForInterval,
   PAST_DATE_OVERRIDE_ERROR,
-  resolveOverrideCollectiveTarget,
+  resolveCollectiveTargetForRequest,
   resolveStaffOverrideActor,
 } from '@/lib/booking/staff-availability-override';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
@@ -31,10 +31,8 @@ import {
   loadActiveWaitlistOfferForGuestAccess,
   validateBookingAgainstWaitlistOffer,
 } from '@/lib/booking/validate-waitlist-offer-access';
-import {
-  isCollectiveId,
-  resolveCombinedBookingTarget,
-} from '@/lib/linked-accounts/collective-booking-bridge';
+import { isCollectiveId } from '@/lib/linked-accounts/collective-booking-bridge';
+import { resolveStaffCollectiveScopeFromRequest } from '@/lib/linked-accounts/collective-staff-request';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -108,23 +106,24 @@ export async function POST(request: NextRequest) {
      */
     const isCollective = await isCollectiveId(supabase, venue_id);
     if (isCollective) {
-      const target = staffOverride
-        ? await resolveOverrideCollectiveTarget(supabase, {
-            collectiveId: venue_id,
-            offeringId: service_id,
-            calendarId: practitioner_id,
-          })
-        : await resolveCombinedBookingTarget(supabase, {
-            collectiveId: venue_id,
-            offeringId: service_id,
-            calendarId: practitioner_id,
-          });
-      if (!target) {
+      // The staff form may validate the calendars it lists that a guest cannot book (§6.6), once
+      // the session is known to be a member's staff; the override is checked below.
+      const staffCaller =
+        !staffOverride && parsed.data.staff === true
+          ? Boolean(await resolveStaffCollectiveScopeFromRequest(supabase, request, venue_id))
+          : false;
+      const found = await resolveCollectiveTargetForRequest(
+        supabase,
+        { collectiveId: venue_id, offeringId: service_id, calendarId: practitioner_id },
+        staffOverride ? 'override' : staffCaller ? 'staff' : 'public',
+      );
+      if (!found.ok) {
         return NextResponse.json(
-          { ok: false, error: 'This booking option is no longer available.' },
+          { ok: false, error: found.error, ...(found.code ? { code: found.code } : {}) },
           { status: 409 },
         );
       }
+      const target = found.target;
       venue_id = target.venueId;
       service_id = target.sourceServiceId;
     }

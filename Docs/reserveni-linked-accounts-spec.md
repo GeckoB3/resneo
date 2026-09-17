@@ -1382,7 +1382,13 @@ Linked venue and collective review (2026-09-05, second pass):
 - **A replica that is updating.** While a member's replica of a service has not caught up with
   the host's latest save, that member's calendars are left out of the public page for that
   service (exclusion `behind`, `src/lib/linked-accounts/replicas/derived-catalogue.ts`); the
-  staff build keeps them with a note (D16).
+  staff build keeps them with a note (D16), and a booking on one is refused for staff with
+  "This service is being updated at {venue}. Please try again in a moment." and for guests with
+  "This service has just been updated. Please choose your time again." (409
+  `COLLECTIVE_SERVICE_UPDATING`, D33, built 2026-09-17: `resolveCollectiveBookingTarget` in
+  `collective-booking-bridge.ts`, used by every create route and `validate-appointment-slot`).
+  Staff may book the other calendars their form lists that guests cannot (payments not set up,
+  forms off, staff bookings only).
 - **Contact search across venues (D41).** While the collective is live, the staff form's contact
   picker searches every live member venue whose account link shares client details with the
   caller, and each result names the venue that owns the record

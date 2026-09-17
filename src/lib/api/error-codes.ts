@@ -140,6 +140,8 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_REPLICA_NOT_READY',
   /** A host transfer waits until every member's copy is up to date; retry in a few minutes. */
   'COLLECTIVE_LINKS_BEHIND',
+  /** The venue's copy of the service is still catching up with the host; retry in a moment (409, D33). */
+  'COLLECTIVE_SERVICE_UPDATING',
   /** Undo is only offered for a minute after a host's save (410). */
   'COLLECTIVE_UNDO_EXPIRED',
   /**
@@ -177,8 +179,6 @@ export const API_ERROR_CODES = [
   'COLLECTIVE_MOVE_NOT_ALLOWED',
   /** The migration to shared services cannot start, finish or roll back in this state (W9; script only). */
   'COLLECTIVE_MIGRATION_REFUSED',
-  /** The migration's switch waits for every venue's copy to converge (W9; script only). */
-  'COLLECTIVE_LINKS_BEHIND',
   /** The time is not free on the other venue's calendar (409, D46). */
   'COLLECTIVE_MOVE_TIME',
   /** An older manager action with no shared-services equivalent (MGR-01), each with its own reason (409). */

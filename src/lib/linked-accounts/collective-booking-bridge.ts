@@ -32,6 +32,7 @@ import {
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
 import type { ServiceChainSegmentParam } from '@/lib/booking/service-chain';
+import { collectiveCopy } from './collective-copy';
 import {
   loadCollectiveAppointmentCatalog,
   type CollectiveCatalogPractitioner,
@@ -82,6 +83,58 @@ export async function resolveCombinedBookingTarget(
     sourceServiceId: service.source_service_id,
     pricePence: service.price_pence,
     durationMinutes: service.duration_minutes,
+  };
+}
+
+export type CollectiveTargetResult =
+  | { ok: true; target: CombinedBookingTarget }
+  | { ok: false; code: 'COLLECTIVE_SERVICE_UPDATING'; error: string }
+  | { ok: false; code: null; error: string };
+
+/**
+ * `resolveCombinedBookingTarget` for a known audience, with the reason when it fails.
+ *
+ * Staff of a member venue may book every calendar their form lists, including the ones a guest
+ * cannot book right now (payments not set up, forms off, staff bookings only; §6.6), except a
+ * venue whose copy of the service is still catching up with the host, which is refused in words
+ * (D33). A guest who chose a calendar that has just fallen behind is asked to choose a time again.
+ * `audience: 'staff'` must only be passed once the caller is known to be a member's staff.
+ */
+export async function resolveCollectiveBookingTarget(
+  admin: SupabaseClient,
+  params: { collectiveId: string; offeringId: string; calendarId: string },
+  audience: 'public' | 'staff',
+): Promise<CollectiveTargetResult> {
+  const { practitioners } = await loadCollectiveAppointmentCatalog(admin, params.collectiveId, {
+    includeHiddenAddons: audience === 'staff',
+    includeExcludedForStaff: true,
+  });
+  const calendar = practitioners.find((p) => p.id === params.calendarId);
+  const service = calendar?.services.find((s) => s.id === params.offeringId);
+  if (!calendar || !service) {
+    return { ok: false, code: null, error: 'This booking option is no longer available.' };
+  }
+  if (service.staff_exclusion === 'behind') {
+    return {
+      ok: false,
+      code: 'COLLECTIVE_SERVICE_UPDATING',
+      error:
+        audience === 'staff'
+          ? collectiveCopy('staff.error.updating', { venue: calendar.owning_venue_name || 'that venue' })
+          : collectiveCopy('public.error.updating'),
+    };
+  }
+  if (service.staff_exclusion && audience === 'public') {
+    return { ok: false, code: null, error: 'This booking option is no longer available.' };
+  }
+  return {
+    ok: true,
+    target: {
+      venueId: calendar.owning_venue_id,
+      sourceServiceId: service.source_service_id,
+      pricePence: service.price_pence,
+      durationMinutes: service.duration_minutes,
+    },
   };
 }
 

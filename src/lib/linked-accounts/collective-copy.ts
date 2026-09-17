@@ -422,6 +422,9 @@ export const COLLECTIVE_COPY = {
 
   // The staff form's contact picker inside a live collective (collective-contact-search.ts)
   'staff.contact.ownerLine': "{venue}'s client",
+  // A booking on a venue's copy that is still catching up with the host (D33, UX spec 0.5).
+  'staff.error.updating': 'This service is being updated at {venue}. Please try again in a moment.',
+  'public.error.updating': 'This service has just been updated. Please choose your time again.',
 
   // Creating a collective (CreateCollectiveDialog.tsx, collective-candidates.ts; UX spec J1)
   'create.title': 'Create a collective',

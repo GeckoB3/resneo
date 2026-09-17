@@ -113,7 +113,7 @@ import { membershipUnlimitedCoversClassType } from '@/lib/class-commerce/members
 import { consumeMembershipAllowanceForBooking } from '@/lib/class-commerce/consume-membership-allowance';
 import { formatGuestDisplayName, normaliseGuestNamePart } from '@/lib/guests/name';
 import { resolveCollectiveServiceAttribution } from '@/lib/linked-accounts/collective-booking-override';
-import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { isCollectiveId, resolveCollectiveBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import {
   completeWaitlistEntryAfterGuestBooking,
   loadActiveWaitlistOfferForGuestAccess,
@@ -221,17 +221,22 @@ export async function POST(request: NextRequest) {
     if (parsed.data.practitioner_id && parsed.data.appointment_service_id) {
       const adminForCollective = getSupabaseAdminClient();
       if (await isCollectiveId(adminForCollective, parsed.data.venue_id)) {
-        const target = await resolveCombinedBookingTarget(adminForCollective, {
-          collectiveId: parsed.data.venue_id,
-          offeringId: parsed.data.appointment_service_id,
-          calendarId: parsed.data.practitioner_id,
-        });
-        if (!target) {
+        const resolved = await resolveCollectiveBookingTarget(
+          adminForCollective,
+          {
+            collectiveId: parsed.data.venue_id,
+            offeringId: parsed.data.appointment_service_id,
+            calendarId: parsed.data.practitioner_id,
+          },
+          'public',
+        );
+        if (!resolved.ok) {
           return NextResponse.json(
-            { error: 'This booking option is no longer available.' },
+            { error: resolved.error, ...(resolved.code ? { code: resolved.code } : {}) },
             { status: 409 },
           );
         }
+        const target = resolved.target;
         // §7.7 attribution: record which collective routed this booking BEFORE the
         // venue id is rewritten to the owning venue (the synthetic venue id IS the
         // collective id). Without this, combined-page bookings carried no

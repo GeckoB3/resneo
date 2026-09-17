@@ -62,7 +62,7 @@ import {
 } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { resolveStaffVisitChargeDiscretion } from '@/lib/booking/staff-visit-charge-discretion';
-import { isCollectiveId, resolveCombinedBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
+import { isCollectiveId, resolveCollectiveBookingTarget } from '@/lib/linked-accounts/collective-booking-bridge';
 import { bookingRequiresSignIn } from '@/lib/linked-accounts/replicas/collective-sign-in';
 import { recordStaffCollectiveCrossVenueCreate } from '@/lib/linked-accounts/collective-staff-audit';
 import { resolveStaffBookingActor, type StaffOverrideActor } from '@/lib/booking/staff-availability-override';
@@ -219,17 +219,19 @@ export async function POST(request: NextRequest) {
       let owningVenueId: string | null = null;
       for (let i = 0; i < people.length; i++) {
         const person = people[i]!;
-        const target = await resolveCombinedBookingTarget(supabase, {
-          collectiveId,
-          offeringId: person.appointment_service_id,
-          calendarId: person.practitioner_id,
-        });
-        if (!target) {
+        // A staff source is checked below (resolveStaffBookingActor) before anything is written.
+        const resolved = await resolveCollectiveBookingTarget(
+          supabase,
+          { collectiveId, offeringId: person.appointment_service_id, calendarId: person.practitioner_id },
+          source === 'phone' || source === 'walk-in' ? 'staff' : 'public',
+        );
+        if (!resolved.ok) {
           return NextResponse.json(
-            { error: 'This booking option is no longer available.' },
+            { error: resolved.error, ...(resolved.code ? { code: resolved.code } : {}) },
             { status: 409 },
           );
         }
+        const target = resolved.target;
         if (owningVenueId && owningVenueId !== target.venueId) {
           return NextResponse.json(
             {

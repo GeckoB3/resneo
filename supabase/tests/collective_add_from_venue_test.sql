@@ -11,7 +11,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(17);
+SELECT plan(19);
 
 INSERT INTO public.venues (id, name, slug, email, pricing_tier, plan_status, booking_model)
 VALUES
@@ -79,6 +79,12 @@ SELECT throws_like(
     (SELECT r->>'item_id' FROM added)),
   'COLLECTIVE_VENUE_NOT_MEMBER%', 'The host cannot answer for the member');
 
+-- The adopted service starts out following a legacy origin, as a service copied under the older
+-- model does (production, 2026-09-17).
+UPDATE public.service_items
+SET sync_state = 'linked', synced_from_service_id = '00000000-0000-0000-0000-0000004a05b1', synced_at = now()
+WHERE id = '00000000-0000-0000-0000-0000004a05a1';
+
 -- "Use mine": the member's service becomes the replica, options mapped.
 SELECT public.collective_answer_adoption('00000000-0000-0000-0000-0000004a0c01', (SELECT (r->>'item_id')::uuid FROM added),
   '00000000-0000-0000-0000-0000004a0f02', 'use_mine',
@@ -94,6 +100,13 @@ SELECT is(
 SELECT isnt(
   (SELECT replica_of_variant_id FROM public.service_variants WHERE id = '00000000-0000-0000-0000-0000004a0da1'),
   NULL, 'with its option mapped');
+-- I23: the engine owns it now, so the older model's bookkeeping goes with the adoption.
+SELECT is(
+  (SELECT sync_state FROM public.service_items WHERE id = '00000000-0000-0000-0000-0000004a05a1'),
+  'independent', 'and it no longer follows a legacy origin');
+SELECT is(
+  (SELECT synced_from_service_id FROM public.service_items WHERE id = '00000000-0000-0000-0000-0000004a05a1'),
+  NULL, 'with the origin cleared');
 SELECT is(
   public.collective_adoption_pending((SELECT (r->>'item_id')::uuid FROM added), '00000000-0000-0000-0000-0000004a0f02'),
   NULL, 'and the request is settled');

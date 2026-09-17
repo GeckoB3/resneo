@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: "Compliance: patch tests, consent and intake forms",
   description: "Set up patch tests, consent and intake forms so the right records are collected before each client sits down.",
   tags: ["compliance","patch test","consent","intake","forms","enforcement","expiry","services"],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `# Compliance: patch tests, consent and intake forms
 
 If some of your services need a patch test, a signed consent, or an intake form before a client sits down, ResNeo can collect those for you, attach them to the right services, and warn or block bookings when a record is missing or out of date.
@@ -140,6 +140,12 @@ Click **Compliance** in the sidebar, just below **Contacts**. A line at the top 
 - **Awaiting client submission**: links you have sent that are not completed yet, with the date sent and when the link expires.
 
 > **Make it a habit.** A two-minute glance before you open means nobody arrives for a service they cannot safely have.
+
+## In a venue collective
+
+If your venue is part of a [venue collective](/help/getting-started/venue-collectives) with shared services, the host's forms come with its services. Each venue gets its own copy of the form, and the records clients fill in stay with the venue they booked with. Only the host can change the form or which services ask for it.
+
+Each venue decides whether to switch compliance records on. Until it does, a service that asks for a form cannot be booked online on that venue's calendars, and the venue's **Services** page says so with a **Turn on** button.
 
 ## Common problems & fixes
 

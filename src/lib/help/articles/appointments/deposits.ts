@@ -6,7 +6,7 @@ export const article: HelpArticle = {
   title: 'Deposits, full payments, card holds, and refunds',
   description: 'Stripe Connect, the four online payment options, card holds and no-show fees, the guest pay page, and every money action on a booking.',
   tags: ['stripe', 'payments', 'deposits', 'refunds', 'card hold', 'no-show'],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # Get paid the way you promise
 
@@ -148,6 +148,12 @@ Five cards under **Settings**, then the **Communications** tab, do the talking:
 - **Card details request** and **Card details reminder**
 
 Turn each on or off, choose email, SMS or both, and add your own line where it helps. If you change a cancellation window, read these the same day so nobody quotes the old policy.
+
+## In a venue collective
+
+If your venue is part of a [venue collective](/help/getting-started/venue-collectives) with shared services, the host sets the payment rule, deposit and cancellation notice for each service on the collective page, for every venue. The money still goes to the venue the client books with, through that venue's own Stripe account, and refunds and no-show fees are taken there too.
+
+A venue that has not connected Stripe cannot take a service that asks for payment online, so its calendars are left off the collective page for that service until it connects. The venue's **Services** page says so on the service's card, with **Connect Stripe**.
 
 ## Common problems & fixes
 

@@ -7,7 +7,7 @@ export const article: HelpArticle = {
   description:
     'Add calendars on the Calendars tab, choose what can be booked on each one, give them their own booking link, set the column order, and stay inside your plan limit.',
   tags: ['calendars', 'columns', 'booking link', 'entitlements', 'admin'],
-  verified: '2026-09-12',
+  verified: '2026-09-17',
   content: `
 # Bookable calendars (your columns)
 
@@ -123,6 +123,10 @@ For what each tier costs and includes, see [Appointments Light, Plus, and Pro](/
 - The **Calendars** tab is hidden from anyone who is not an admin, so only you can add, edit, reorder or remove a calendar.
 - Team members open the same page on **Availability**, with a note at the top: only their own calendar can be changed here, and admins can adjust everyone. They can still look at anyone's hours for reference.
 - An admin decides which calendars a login can change under **Settings → Staff**, using **Calendars they manage** on that person's row. See [Team management](/help/appointments/team-management).
+
+## In a venue collective
+
+If your venue is part of a [venue collective](/help/getting-started/venue-collectives) with shared services, a calendar you add is still yours: its hours, closures and bookings belong to your venue. Choose which of the collective's services it offers under **Calendars that offer this service** on each service. Your own services that are not on the collective page are parked, so ticking them does not make them bookable while the collective is live.
 
 ## Common problems & fixes
 
